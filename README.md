@@ -1,6 +1,6 @@
-# Poly-S
+# MTTL
 
-Poly-S: Analyzing and Improving Polytropon for Data-Efficient Multi-Task Learning
+MTTL - Multi-Task Transfer Learning
 
 
 ## Contributing
