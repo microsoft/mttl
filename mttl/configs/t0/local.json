@@ -1,0 +1,11 @@
+{
+    "dataset": "t0",
+    "train_dir": "/datadrive2/t-few-data-cache/",
+    "precision": 32,
+    "weight_decay": 0,
+    "train_batch_size": 2,
+    "save_every": 5,
+    "total_steps": 10,
+    "model": "t5-small",
+    "predict_batch_size": 8
+}

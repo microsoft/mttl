@@ -1,3 +1,9 @@
+# Project related stuff
+dataloader/*_data/processed/
+wandb
+.amltconfig
+.amltignore
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

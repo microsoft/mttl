@@ -2,6 +2,34 @@
 
 MTTL - Multi-Task Transfer Learning
 
+## Setup
+
+Install Python packages:
+
+`pip install -r requirements.txt`
+
+_The package `promptsource` currently requires Python 3.7. Alternative versions require local installations (see their [documentation](https://github.com/bigscience-workshop/promptsource#setup))._
+
+Download the datasets:
+
+`bash scripts/create_datasets.sh`
+
+## Multi-task Pre-training
+
+The general command:
+
+`python pl_train.py -c $CONFIG_FILES -k $KWARGS`
+
+Multiple `CONFIG_FILES` can be concatenated as `file1+file2`. To modify defaults, `KWARGS` can be expressed as `key=value`.
+
+## Test Fine-Tuning
+
+To perform finetuning for a test task, use the script `pl_finetune.py`
+
+## Hyper-parameter Search for Test Fine-Tuning
+
+To perform an hyperparameter search for a test task, use the script `pl_finetune_tune.py`.
+The script will just call the functions in `pl_finetune.py` in a loop. The script itself defines hp ranges for different fine-tuning types.
 
 ## Contributing
 

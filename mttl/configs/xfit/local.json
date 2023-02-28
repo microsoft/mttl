@@ -1,0 +1,10 @@
+{
+    "dataset": "xfit",
+    "train_dir": "/datadrive2/crossfit/data/",
+    "custom_tasks_splits": "./dataloader/xfit_data/random.json",
+    "precision": 32,
+    "total_steps": 100,
+    "train_batch_size": 8,
+    "model": "t5-small",
+    "compute_strategy": ""
+}
