@@ -5,9 +5,11 @@ import torch.nn.functional as F
 from torch import nn
 from transformers import AutoModelForSeq2SeqLM
 
+from mttl.models.get_optimizer import get_optimizer
+from mttl.models.get_scheduler import get_scheduler
 from mttl.models.modify_model import modify_transformer
-from mttl.models.utils import EfficientCheckpointModule, RoutingInfo
-from mttl.utils import freeze_embeds
+from mttl.models.utils import EfficientCheckpointModule, RoutingInfo, get_global_batch_size
+from mttl.utils import freeze_embeds, label_smoothed_nll_loss
 
 
 class EncoderDecoder(EfficientCheckpointModule):
@@ -64,8 +66,6 @@ class EncoderDecoder(EfficientCheckpointModule):
             self.loss_plugins = nn.ModuleDict({plugin.name: plugin})
 
     def teacher_force_step(self, batch, reduction='mean'):
-        from utils import label_smoothed_nll_loss
-
         input_ids, target_ids = batch["input_ids"], batch["target_ids"]
 
         self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
@@ -119,10 +119,6 @@ class EncoderDecoder(EfficientCheckpointModule):
             f.write(json.dumps(task_losses) + "\n")
 
     def configure_optimizers(self):
-        from models.get_optimizer import get_optimizer
-        from models.get_scheduler import get_scheduler
-        from models.utils import get_global_batch_size
-
         args = self.args
         self.ml_optimizer = self.ml_scheduler = None
 
