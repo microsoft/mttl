@@ -4,7 +4,7 @@ import random
 from pytorch_lightning import LightningDataModule
 from transformers import AutoTokenizer
 
-from mttl.utils import hash_example
+from mttl.utils import hash_example, trim_batch
 from mttl.datamodule import IndexConcatDataset
 from mttl.dataloader.t0_dataset_readers import get_dataset_reader
 from mttl.dataloader.data_utils import ExampleInfo, MultiChoiceExampleInfo
@@ -426,8 +426,6 @@ class CollatePretrainFnWrapper:
         self.pad_token_id = pad_token_id
 
     def __call__(self, batch):
-        from utils import trim_batch
-
         pad_token_id = self.pad_token_id
         input_ids = [b.input_ids for b in batch]
         target_ids = [b.target_ids for b in batch]
