@@ -149,13 +149,13 @@ class Config(object):
                 print("Overwriting {} to {}".format(k, v))
 
             if k == 'finegrained':
-                self.poly_granularity == 'finegrained' if v else 'coarsegrained'
+                k = 'poly_granularity'
+                v = 'finegrained' if v else 'coarsegrained'
             elif k in ['train_dir', 'output_dir']:
                 # this raises an error if the env. var does not exist
                 v = Template(v).substitute(os.environ)
-            else:
-                setattr(self, k, v)
 
+            setattr(self, k, v)
             self._updated_kwargs.add(k)
 
     def __getitem__(self, item):
