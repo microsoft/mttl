@@ -5,6 +5,7 @@ from collections import defaultdict
 import click
 import numpy as np
 import pandas
+import pandas as pd
 import os
 
 
@@ -225,12 +226,23 @@ def main(files, dataset, latex, hps, nt):
         for m, r in zip(models, res):
             filtered_results = r.loc[r["task_name"].isin(all_tasks)]
             # median across tasks
-            agg_seed = filtered_results.groupby(["trial"]).agg(
-                "median" if dataset == "t0" else "mean"
+            agg_seed_mean = filtered_results.groupby(["trial"]).agg(
+                "mean" if dataset == "t0" else "mean"
             )
+            if dataset == "t0":
+                Q1 = agg_seed_mean.quantile(0.25)
+                Q3 = agg_seed_mean.quantile(0.75)
+                # calculate IQR
+                agg_seed_std = Q3 - Q1
+            else:
+                agg_seed_std = agg_seed_mean.agg("std")
+
             # mean of medians across seeds
-            val = agg_seed["val_perf"].agg("mean")
-            test = agg_seed["perf"].agg("mean")
+            val = agg_seed_mean["val_perf"].agg("mean")
+            val_std = agg_seed_std["val_perf"]
+
+            test = agg_seed_mean["perf"].agg("mean")
+            test_std = agg_seed_std["perf"]
 
             for task_name in all_tasks:
                 task_wise_res = r.loc[r["task_name"].isin([task_name])]
@@ -241,13 +253,16 @@ def main(files, dataset, latex, hps, nt):
                         "perf": task_wise_res["perf"].mean(),
                     }
                 )
-            overall.append({"model": m, "val": val, "test": test})
+
+            overall.append({"model": m, "val": val, "val_std": val_std, "test": test, "test_std": test_std})
+
             if "zs_perf" in filtered_results.columns:
                 zs_mean = filtered_results["zs_perf"].mean()
                 overall[-1].update({"zs": zs_mean})
 
+        pd.set_option('display.max_colwidth', None)
         print(pandas.DataFrame(per_task).pivot(index='model', columns='task', values='perf'))
-        print(pandas.DataFrame(overall).sort_values("val", ascending=True))
+        print(pandas.DataFrame(overall).sort_values("test", ascending=True))
 
 
 if __name__ == "__main__":

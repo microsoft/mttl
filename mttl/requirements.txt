@@ -11,3 +11,7 @@ higher==0.2.1
 promptsource
 deepspeed
 sentencepiece
+torch_kmeans
+sentence-transformers
+fsspec[adl]
+rich
