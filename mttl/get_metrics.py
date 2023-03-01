@@ -221,28 +221,32 @@ def main(files, dataset, latex, hps, nt):
     else:
         overall = []
         per_task = []
+
         for m, r in zip(models, res):
             filtered_results = r.loc[r["task_name"].isin(all_tasks)]
-
-            agg_seed = filtered_results.groupby(["task_name"]).agg(
+            # median across tasks
+            agg_seed = filtered_results.groupby(["trial"]).agg(
                 "median" if dataset == "t0" else "mean"
             )
+            # mean of medians across seeds
             val = agg_seed["val_perf"].agg("mean")
             test = agg_seed["perf"].agg("mean")
 
-            per_task.append(
-                {
-                    "model": m,
-                    "task_name": filtered_results["task_name"],
-                    "test": agg_seed["perf"],
-                }
-            )
+            for task_name in all_tasks:
+                task_wise_res = r.loc[r["task_name"].isin([task_name])]
+                per_task.append(
+                    {
+                        "model": m,
+                        "task": task_name,
+                        "perf": task_wise_res["perf"].mean(),
+                    }
+                )
             overall.append({"model": m, "val": val, "test": test})
             if "zs_perf" in filtered_results.columns:
                 zs_mean = filtered_results["zs_perf"].mean()
                 overall[-1].update({"zs": zs_mean})
 
-        print(pandas.DataFrame(per_task))
+        print(pandas.DataFrame(per_task).pivot(index='model', columns='task', values='perf'))
         print(pandas.DataFrame(overall).sort_values("val", ascending=True))
 
 
