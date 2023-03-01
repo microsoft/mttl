@@ -262,7 +262,7 @@ def finetune_t0(args, seeds=[42, 1024, 0], use_mlf=True, do_zs=True):
         results = finetune(
             args,
             use_mlf=use_mlf and i == 0,
-            do_zs=do_zs and i == 0,
+            do_zs=do_zs,
         )
         all_results.extend(results)
 

@@ -76,7 +76,8 @@ class RoutingInfo:
     def repeat_interleave(self, repeats):
         # useful for beam search
         self.task_ids = self.task_ids.repeat_interleave(repeats)
-        self.hashes = [h for h in self.hashes for _ in range(repeats)]
+        if self.hashes:
+            self.hashes = [h for h in self.hashes for _ in range(repeats)]
         self.example_ids = (
             self.example_ids.repeat_interleave(repeats)
             if self.example_ids is not None
