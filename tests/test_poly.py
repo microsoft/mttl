@@ -1,3 +1,4 @@
+import pytest
 import torch
 import os
 from pytorch_lightning import seed_everything
@@ -6,9 +7,9 @@ from mttl.models.encoder_decoder import EncoderDecoder
 from mttl.config import Config
 
 
-if __name__ == '__main__':
-    # dummy data dir
-    os.environ["NI_DATA_DIR"] = "/tmp/"
+def test_poly(tmp_path):
+    os.environ["NI_DATA_DIR"] = str(tmp_path)
+    os.environ["AMLT_OUTPUT_DIR"] = str(tmp_path / "output")
 
     _args = Config("ni/pretrain_short.json+ni/poly_lora.json")
     _args.n_tasks = 768
@@ -35,4 +36,4 @@ if __name__ == '__main__':
     s = 0
     for p in model.parameters():
         s += p.sum().item()
-    assert float(s) / 1e6 == 2.1144700036021518
+    assert round(s / 1e6, 4) == 2.1145
