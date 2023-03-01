@@ -1,12 +1,8 @@
 import glob
-import sys
 from collections import defaultdict
-
 import click
-import numpy as np
 import pandas
 import pandas as pd
-import os
 
 
 def get_task_name_from_file(result):

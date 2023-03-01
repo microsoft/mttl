@@ -1,9 +1,10 @@
 import torch
 import numpy as np
 import math
-from utils import average_dicts
 from torch.distributions import Bernoulli, Categorical
 from pytorch_lightning import Callback
+
+from mttl.utils import average_dicts
 
 
 def get_monitors(config):

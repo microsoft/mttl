@@ -1,6 +1,6 @@
 # Project related stuff
 dataloader/*_data/processed/
-mttl/amulet_*/
+amulet_*/
 wandb
 .amltconfig
 .amltignore
