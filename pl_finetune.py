@@ -172,6 +172,10 @@ def finetune(args, use_mlf=True, do_zs=True):
         if mlf_logger and use_mlf:
             loggers.append(mlf_logger)
 
+        loggers.append(pl.loggers.CSVLogger(
+            save_dir=args.output_dir, name="csv_metrics"
+        ))
+
         if args.finetune_skip_es:
             check_val_every_n_epoch = 10000
         else:
