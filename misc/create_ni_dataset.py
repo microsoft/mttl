@@ -90,7 +90,7 @@ def main(seed, num_examples, data_path, output_path):
         out_path = os.path.join(f"{output_path}", f"{s}-{num_examples}")
         os.makedirs(out_path, exist_ok=True)
 
-        with open(f"{data_path}/train_tasks.txt", "r") as r:
+        with open(f"{data_path}/splits/default/train_tasks.txt", "r") as r:
             train_tasks = [l.strip() for l in r.readlines()]
 
         i = 0
@@ -100,7 +100,7 @@ def main(seed, num_examples, data_path, output_path):
                 json.dump(data, f)
             i += 1
 
-        with open(f"{data_path}/test_tasks.txt", "r") as r:
+        with open(f"{data_path}/splits/default/test_tasks.txt", "r") as r:
             test_tasks = [l.strip() for l in r.readlines()]
 
         empty = 0.
@@ -113,7 +113,7 @@ def main(seed, num_examples, data_path, output_path):
             with open(f"{out_path}/{task}.json", "w") as f:
                 json.dump(data, f)
         
-        with open(f"{data_path}/excluded_tasks.txt", "r") as r:
+        with open(f"{data_path}/splits/default/excluded_tasks.txt", "r") as r:
             excluded_tasks = [l.strip() for l in r.readlines()]
 
         empty = 0.
