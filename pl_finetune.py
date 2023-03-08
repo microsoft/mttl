@@ -155,6 +155,7 @@ def finetune(args, use_mlf=True, do_zs=True):
                 save_weights_only=True,  #  try to save some HD space
             )
             callbacks.append(ckpt_callback)
+        callbacks.extend(get_monitors(args))
 
         # legit logging
         loggers = []
