@@ -15,6 +15,7 @@ from mttl.datamodule.ni_data_module import NIFinetuneDataModule
 from mttl.datamodule.xfit_data_module import XFitFinetuneDataModule
 from mttl.datamodule.t0_data_module import T0FinetuneDataModule
 from mttl.models.encoder_decoder import Finetuner
+from mttl.models.monitors import get_monitors
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.utils import CustomModelCheckpoint, get_checkpoint_path, get_mlf_logger
 
