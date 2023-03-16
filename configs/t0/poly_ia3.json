@@ -5,7 +5,8 @@
     "poly_granularity": "finegrained",
     "lora_modules": ".*SelfAttention|.*EncDecAttention|.*DenseReluDense",
     "lora_layers": "k|v|wi_1.*",
-    "trainable_param_names": ".*lora_[ab].*|.*module_logits.*", 
+    "trainable_param_names": ".*lora_[ab].*|.*module_logits.*",
     "module_logits_learning_rate": 0.1,
-    "use_t0_templates_as_tasks": true
+    "use_t0_templates_as_tasks": true,
+    "n_tasks": 5
 }
