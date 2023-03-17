@@ -326,9 +326,17 @@ class PolyLoRATensor(PolytroponAdapter):
                 self.embedding_dim_leaf,
             )
         )
-        # we create our construction for the 
-
+        # we create our construction for the tensor product
+        self.layerone_normalization = nn.LayerNorm(normalized_shape = [self.rank, self.embedding_dim_leaf**2])
+        self.layertwo_normalization = nn.LayerNorm(normalized_shape = [self.rank, self.embedding_dim_leaf**2])
         self.reset_parameters()
+
+        # self.lora_a = self.tensor_product_construct(self.weight_leafs_a, self.in_features).to("cuda")
+        # self.lora_b = self.tensor_product_construct(self.weight_leafs_b, self.out_features).to("cuda")
+        # self.lora_a = self.lora_a.transpose(2,1).unsqueeze(0)
+        # self.lora_b = self.lora_b.unsqueeze(0)
+
+
 
 
     def reset_parameters(self):
@@ -346,24 +354,27 @@ class PolyLoRATensor(PolytroponAdapter):
 
             with torch.no_grad():
                 self.weight_leafs_a.uniform_(-std, std)
-
-        # ensure that initially, adding the adapter does not change the output
-        if self.use_warmup or self.lora_randb_init:
+            
             with torch.no_grad():
                 self.weight_leafs_b.uniform_(-std, std)
-        else:
-            torch.nn.init.zeros_(self.weight_leafs_b)
+
+        # # ensure that initially, adding the adapter does not change the output
+        # if self.use_warmup or self.lora_randb_init:
+        #     with torch.no_grad():
+        #         self.weight_leafs_b.uniform_(-std, std)
+        # else:
+        #     torch.nn.init.zeros_(self.weight_leafs_b)
     def tensor_product_construct(self,weight_leafs, embedding_dim):
         if self.order == 4:
             w = weight_leafs
             w01 = w[0,:,:,:,None] * w[1,:,:,None,:]
             # print(w[:,:,:,:].size())
             w01 = w01.view(self.tensor_rank,  self.rank, -1)
-            # w01 = nn.LayerNorm(w01.shape[-2:]).cuda()(w01)
+            w01 = self.layerone_normalization(w01)
             # print(w01.size())
             w23 = (w[2,:,:,:,None] * w[3,:,:,None,:] )
             w23 = w23.view(self.tensor_rank,  self.rank, -1)
-            # w23 = nn.LayerNorm(w23.shape[-2:]).cuda()(w23)
+            w23 = self.layertwo_normalization(w23)
 
             w0123 = (w01[:,:,:,None] * w23[:,:,None,:] )
             w0123 = w0123.view(self.tensor_rank,  self.rank, -1)

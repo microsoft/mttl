@@ -143,7 +143,7 @@ def finetune(args, use_mlf=True, do_zs=True):
 
         if not args.finetune_skip_es:
             ckpt_callback = CustomModelCheckpoint(
-                dirpath="/tmp/",
+                dirpath="tmp/",
                 monitor=monitor,
                 filename=f"{args.model}"
                 + "-{epoch:02d}-"
@@ -213,7 +213,7 @@ def finetune(args, use_mlf=True, do_zs=True):
             trainer.validate(module, dm, ckpt_path=ckpt_path)
         else:
             ckpt_path = "best"
-        trainer.test(module, dm, ckpt_path=ckpt_path)
+        trainer.test(module, dm, ckpt_path=ckpt_path) # change by zhan 
 
         results = [module.best_val_result] + module.test_results
         return results
@@ -221,8 +221,8 @@ def finetune(args, use_mlf=True, do_zs=True):
     results = fit_and_test(zero_shot=do_zs)
 
     # remove all eventual checkpoints
-    os.system(f'find /tmp/ -name "*.ckpt" -type f -delete')
-    os.system(f'find /tmp/ -name "*.pt" -type f -delete')
+    os.system(f'find tmp/ -name "*.ckpt" -type f -delete')
+    os.system(f'find tmp/ -name "*.pt" -type f -delete')
     return results
 
 
