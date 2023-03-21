@@ -1,3 +1,4 @@
+import functools
 import pickle
 import os
 import torch
@@ -6,12 +7,13 @@ from tqdm import tqdm
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 from sentence_transformers import SentenceTransformer
 
+from torch.utils.data import DataLoader
 from mttl.config import parse_config
 from mttl.datamodule.ni_data_module import NIDataModule
 from mttl.datamodule.t0_data_module import T0PretrainDataModule, T0FinetuneDataModule
 from mttl.models.encoder_decoder import EncoderDecoder
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
-from mttl.utils import trim_batch, get_checkpoint_path
+from mttl.utils import trim_batch, get_checkpoint_path, hash_example
 
 
 @torch.no_grad()
@@ -37,8 +39,24 @@ def encode_batch(batch, model, tokenizer):
     return out.cpu().numpy().tolist()
 
 
+def collate(batch):
+    input_ids = [b.input_ids for b in batch]
+    input_text = [b.input_text for b in batch]
+    template_text = [b.template_text for b in batch]
+    hashes = [b.hash for b in batch]
+    task_ids = [b.task_id for b in batch]
+
+    return (
+        input_ids[0],
+        input_text[0],
+        hashes[0],
+        template_text[0],
+        task_ids[0]
+    )
+
+
 def convert_dataset(
-    dataset, tokenizer, model, start=0, stop=-1
+    dataset, tokenizer, model, past_hashes, use_template=False, start=0, stop=-1
 ):
     batch = []
     hash = []
@@ -53,15 +71,40 @@ def convert_dataset(
     sentence_encoding = isinstance(model, SentenceTransformer)
     encode_func = sentence_encode_batch if sentence_encoding else encode_batch
 
-    for example_num in tqdm(range(start, stop)):
-        example_info = dataset[example_num]
-        batch.append(
-            example_info.input_text if sentence_encoding else example_info.input_ids
-        )
-        hash.append(example_info.hash)
-        task_ids.append(example_info.task_id)
+    loader = DataLoader(
+        torch.utils.data.Subset(
+            dataset,
+            range(start, stop),
+        ),
+        num_workers=16,
+        batch_size=1,
+        collate_fn=collate,
+        pin_memory=True,
+        shuffle=False,
+    )
 
-        if len(batch) == 128:
+    for example_info in tqdm(loader, total=(stop - start)):
+        if sentence_encoding:
+            example_input = example_info[1]
+            example_hash = example_info[2]
+        elif use_template:
+            example_input = example_info[-2]
+            example_hash = hash_example(example_info[-2])
+        else:
+            example_input = example_info[0]
+            example_hash = example_info[2]
+        example_task_id = example_info[-1]
+
+        if example_hash in past_hashes:
+            continue
+        else:
+            batch.append(example_input)
+            hash.append(example_hash)
+            task_ids.append(example_task_id)
+            past_hashes.add(example_hash)
+
+        if len(batch) == 512:
+            print("Encoding batch:", hash[-1])
             encodings.extend(encode_func(batch, model, tokenizer))
             batch = []
 
@@ -73,12 +116,14 @@ def convert_dataset(
 
 if __name__ == "__main__":
     config = parse_config()
-    sentence_encoder = False
+
+    sentence_encoder = True
+    use_template = True
 
     if config.checkpoint:
         checkpoint = get_checkpoint_path(config.checkpoint)
         tokenizer = AutoTokenizer.from_pretrained(config.model)
-        
+
         if config.dataset == "ni":
             model = EncoderDecoder.load_from_checkpoint(
                 checkpoint, tokenizer=tokenizer
@@ -92,8 +137,12 @@ if __name__ == "__main__":
             model = SentenceTransformer(config.model, device="cuda")
             config.model = "t5-small"  # to avoid errors downstream for tokenization
         else:
-            model = AutoModelForSeq2SeqLM.from_pretrained(config.model, cache_dir="/tmp/cache").cuda()
+            model = AutoModelForSeq2SeqLM.from_pretrained(
+                config.model, cache_dir="/tmp/cache"
+            ).cuda()
             os.system("/bin/rm -rf /tmp/cache")  # free-up space
+
+    past_hashes = set()
 
     # instantiate T0 data
     if config.dataset == "ni":
@@ -117,7 +166,9 @@ if __name__ == "__main__":
         dm.setup("fit")
 
         for dataset in [dm.train_dataset, dm.val_dataset, dm.test_dataset]:
-            h, e, t = convert_dataset(dataset, dm.tokenizer, model)
+            h, e, t = convert_dataset(
+                dataset, dm.tokenizer, model, past_hashes, use_template=use_template
+            )
             tr_data[0].extend(h)
             tr_data[1].extend(e)
             tr_data[2].extend(t)
@@ -138,7 +189,6 @@ if __name__ == "__main__":
         num_processed = 0
         next_task = 0
 
-        
         while num_processed < len(dm.full_train_dataset):
             tr_data = [[], [], [], [], []]
 
@@ -150,6 +200,8 @@ if __name__ == "__main__":
                 dm.full_train_dataset,
                 dm.tokenizer,
                 model,
+                past_hashes,
+                use_template=use_template,
                 start=(chunk - 1) * 256_000,
                 stop=chunk * 256_000,
             )
@@ -188,8 +240,10 @@ if __name__ == "__main__":
             dm.setup("fit")
 
             dataset = dm.flattened_datasets()
+            h, e, _ = convert_dataset(
+                dataset, dm.tokenizer, model, past_hashes, use_template=use_template
+            )
 
-            h, e, _ = convert_dataset(dataset, dm.tokenizer, model)
             tr_data[0].extend(h)
             tr_data[1].extend(e)
             tr_data[2].extend([next_task for _ in range(len(h))])

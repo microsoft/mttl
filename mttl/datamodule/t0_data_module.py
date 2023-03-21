@@ -215,6 +215,7 @@ class T0FinetuneDatasetWithTemplate(torch.utils.data.dataset.Dataset):
             self.ds_id,
             hash,
             example_id,
+            template_text=template.jinja + " answer_choices: " + template.answer_choices,
         )
 
 
@@ -356,8 +357,15 @@ class T0PretrainDatasetWithTemplate(torch.utils.data.dataset.Dataset):
 
         # we need to be hash friendly here, template.apply is non-deterministic :-(
         hash = hash_example(apply_template(template, example, hash_friendly=True)[0])
+
         return ExampleInfo(
-            input_ids, target_ids, self.ds_id, hash, example_id, input_text=input_str
+            input_ids,
+            target_ids,
+            self.ds_id,
+            hash,
+            example_id,
+            input_text=input_str,
+            template_text=template.jinja + " answer_choices: " + template.answer_choices,
         )
 
 
