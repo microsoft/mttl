@@ -61,6 +61,7 @@ class Config(object):
         self.eval_every = None
         self.debug = False
         self.seed = 42
+        self.t0_online_eval = False   # zero-shot eval for t0
 
         # auxiliary losses
         self.ortho_loss = 0.          # orthogonality between skills

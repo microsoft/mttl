@@ -95,7 +95,12 @@ def run_multitask(args):
         )
         callbacks.append(checkpoint_callback)
     else:
-        # no need for checkpointing in t0 as we checkpoint manually in the module
+        # no need for checkpointing in t0 as we checkpoint manually in the module    
+        if args.t0_online_eval:
+            from mttl.online_eval import T0OnlineZeroShot
+
+            callbacks.append(T0OnlineZeroShot(args.eval_every))
+
         kwargs["enable_checkpointing"] = False
 
     trainer = Trainer(
