@@ -1,5 +1,5 @@
 {
     "exp_name": "base_t5_large",
-    "origin_model": "t5-large"
+    "model": "t5-large"
 }
 
