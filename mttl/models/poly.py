@@ -44,6 +44,15 @@ class SkilledModel:
                         name,
                         AverageSelector(inner_mod.n_skills, inner_mod.n_splits),
                     )
+    
+    @staticmethod
+    def set_Z_precision(object, Z_precision):
+        """Switches PolytroponSelector to AverageSelector.
+        """
+        for name, module in object.named_modules():
+            for name, inner_mod in module.named_children():
+                if isinstance(inner_mod, PolytroponSelector):
+                    inner_mod.Z_precision = Z_precision
 
     @staticmethod
     def get_adapters(object):
@@ -189,7 +198,21 @@ class PolytroponSelector(Selector):
                 module_logits = module_logits + (module_logits_disc - module_logits).detach()
             else:
                 module_logits = torch.sigmoid(module_logits)
-            
+
+            if not self.training: 
+                # maybe quantize / reduce precision of `module_logits` 
+                Z_bits = getattr(self, 'Z_precision', 32)
+                assert Z_bits in [1, 2, 3, 4, 8, 16, 32], 'keep it easy for now'
+                if Z_bits == 1: 
+                    module_logits = (module_logits + 0.5).floor()
+                elif 2 <= Z_bits < 32:
+                    bins = torch.arange(2 ** Z_bits).to(module_logits.device)
+                    values = (bins * 2 + 1) / (2 ** (Z_bits + 1))
+                    module_logits_idx = (module_logits * (2 ** Z_bits)).floor().long()
+                    module_logits = values[module_logits_idx]
+
+
+
             if self.dropout > 0.0:
                 module_logits = nn.Dropout(self.dropout)(module_logits)
 
