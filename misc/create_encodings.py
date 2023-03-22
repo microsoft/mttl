@@ -43,11 +43,10 @@ def encode_batch(batch, model, tokenizer):
 def collate(batch):
     input_ids = [b.input_ids for b in batch]
     input_text = [b.input_text for b in batch]
-    template_text = [getattr(b, 'template_text', None) for b in batch]
     hashes = [b.hash for b in batch]
     task_ids = [b.task_id for b in batch]
 
-    return (input_ids[0], input_text[0], hashes[0], template_text[0], task_ids[0])
+    return (input_ids[0], input_text[0], hashes[0], task_ids[0])
 
 
 def convert_dataset(
@@ -239,7 +238,7 @@ def encode_t0(config, model):
 
 
 if __name__ == "__main__":
-    config = parse_config(extra_kwargs={"encode_instruction": False}, raise_error=False)
+    config = parse_config(raise_error=False)
 
     if config.checkpoint:
         checkpoint = get_checkpoint_path(config.checkpoint)
@@ -263,9 +262,6 @@ if __name__ == "__main__":
             ).cuda()
             os.system("/bin/rm -rf /tmp/cache")  # free-up space
 
-    past_hashes = set()
-
-    # instantiate T0 data
     if config.dataset == "ni":
         encode_ni(config, model)
 
