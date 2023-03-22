@@ -89,7 +89,7 @@ def convert_dataset(
         # create an ad-hoc loader for the dataset
         loader = DataLoader(
             dataset,
-            num_workers=0, #16,
+            num_workers=16,
             batch_size=1,
             collate_fn=collate,
             pin_memory=True,
