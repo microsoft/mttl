@@ -228,6 +228,20 @@ class NIDatasetReader(object):
 
         self.data = self.load_data(self.data_path, self.tasks)
 
+    def read_all_instructions(self):
+        """Read all instructions from the dataset.
+        """
+        all_instructions = []
+        for data in self.data:
+            if isinstance(data["Definition"], list):
+                instruction = data["Definition"][0].strip()
+            else:
+                instruction = data["Definition"].strip()
+            if not instruction[-1] in string.punctuation:
+                instruction += "."
+            all_instructions.append(instruction)
+        return all_instructions
+
     def read_orig_datasets(self, split):
         datasets = []
 

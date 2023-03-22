@@ -39,6 +39,10 @@ class XFitDataModule(LightningDataModule):
             persistent_workers=True,
             collate_fn=CollateWrapperFn(self.pad_token_id),
         )
+        
+    @property
+    def all_instructions(self):
+        raise NotImplementedError()
 
     def __init__(self, config):
         super().__init__()

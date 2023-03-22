@@ -5,9 +5,10 @@ import pickle
 import numpy as np
 import glob as glob
 from os.path import join
+from pytorch_lightning import seed_everything
 
 from mttl.config import parse_config
-from pytorch_lightning import seed_everything
+from mttl.cluster_tuning.encodings import Encodings, ClusterInfos
 
 
 def balance_clusters(indices, distances, centroids, reprs):
@@ -76,7 +77,7 @@ def main(config):
     use_pca = -1
     use_normalization = False
     use_centering = False
-    use_constraints = True
+    use_constraints = False
     algo = "faiss"
 
     subsample = 500_000
@@ -88,22 +89,22 @@ def main(config):
         chunks = [list(glob.glob(config.embeddings_path))[0]]
 
     # load all chunks and concatenate to the above lists
-    all_hashes, all_embeds, all_task_ids, all_flags = [], [], [], []
+    data = Encodings()
+
     train_chunks = len(chunks) - 1 or 1
     subsample_chunk = subsample // train_chunks
 
     for chunk in chunks:
-        with open(chunk, "rb") as f:
-            print("Loading", chunk)
-            hashes, embeds, task_ids, _, flags = pickle.load(f)
-            indices = np.random.choice(
-                len(hashes), min(subsample_chunk, len(hashes)), replace=False
-            )
-            # pick indices from hashes, embeds, task_ids and flags
-            all_hashes.extend(np.asarray(hashes)[indices].tolist())
-            all_embeds.extend(np.asarray(embeds)[indices].tolist())
-            all_task_ids.extend(np.asarray(task_ids)[indices].tolist())
-            all_flags.extend(np.asarray(flags)[indices].tolist())
+        chunk_data = Encodings.load(chunk)
+        # subsample by num of chunks
+        indices = np.random.choice(
+            len(chunk_data.hashes), min(subsample_chunk, len(chunk_data.hashes)), replace=False
+        )
+        # pick indices from hashes, embeds, task_ids and flags
+        data.hashes.extend(np.asarray(chunk_data.hashes)[indices].tolist())
+        data.encodings.extend(np.asarray(chunk_data.encodings)[indices].tolist())
+        data.task_ids.extend(np.asarray(chunk_data.task_ids)[indices].tolist())
+        data.is_test.extend(np.asarray(chunk_data.is_test)[indices].tolist())
 
     # name of files
     def filename(n_clusters):
@@ -111,10 +112,9 @@ def main(config):
 
     cluster_dir = config.output_dir
 
-    all_embeds = np.asarray(all_embeds).astype("float32")
-    all_flags = np.asarray(all_flags)
-
-    training_embeds = all_embeds[(all_flags == 0)]
+    data.encodings = np.asarray(data.encodings).astype("float32")
+    data.is_test = np.asarray(data.is_test)
+    training_embeds = data.encodings[(data.is_test == 0)]
 
     if use_normalization:
         training_embeds = training_embeds / np.linalg.norm(
@@ -163,46 +163,40 @@ def main(config):
                 index.reset()
                 index.add(centroids.astype("float32"))
 
-            all_cluster_ids, all_cluster_distances, all_hashes, all_tasks, all_flags = (
-                [],
-                [],
-                [],
-                [],
-                [],
-            )
+            cluster_infos = ClusterInfos()
 
             # assignment
             for chunk in chunks:
-                with open(chunk, "rb") as f:
-                    hashes, embeds, task_ids, tasks, flags = pickle.load(f)
-                    embeds = np.asarray(embeds).astype("float32")
+                data = Encodings.load(chunk)
 
-                    if use_normalization:
-                        embeds = embeds / np.linalg.norm(embeds, axis=1, keepdims=True)
+                embeds = np.asarray(data.encodings).astype("float32")
 
-                    if use_centering:
-                        embeds = torch.from_numpy(embeds).T
-                        embeds = embeds - centering.mm(embeds)
-                        embeds = embeds.T.numpy().astype("float32")
+                if use_normalization:
+                    embeds = embeds / np.linalg.norm(embeds, axis=1, keepdims=True)
 
-                    if use_pca > 0:
-                        embeds = mat.apply(embeds)
+                if use_centering:
+                    embeds = torch.from_numpy(embeds).T
+                    embeds = embeds - centering.mm(embeds)
+                    embeds = embeds.T.numpy().astype("float32")
 
-                    D, I = index.search(embeds, int(n_clusters))
+                if use_pca > 0:
+                    embeds = mat.apply(embeds)
 
-                all_hashes.extend(hashes)
-                all_tasks.extend(tasks)
-                all_cluster_ids.extend(torch.from_numpy(I[:, 0]).flatten().tolist())
-                all_flags.extend(flags)
+                D, I = index.search(embeds, int(n_clusters))
+
+                cluster_infos.hashes.extend(data.hashes)
+                cluster_infos.task_names.extend(data.task_names)
+                cluster_infos.cluster_ids.extend(torch.from_numpy(I[:, 0]).flatten().tolist())
+                cluster_infos.is_test.extend(data.is_test)
 
                 distances = np.zeros((D.shape[0], D.shape[1]))
                 for i in range(D.shape[0]):
                     for j in range(D.shape[1]):
                         distances[i, I[i, j]] = D[i, j]
-                all_cluster_distances.extend(distances.tolist())
+                cluster_infos.cluster_dists.extend(distances.tolist())
 
-        assert len(all_hashes) == len(all_cluster_ids)
-        cluster_sizes = np.bincount(all_cluster_ids)
+        assert len(cluster_infos.hashes) == len(cluster_infos.cluster_ids)
+        cluster_sizes = np.bincount(cluster_infos.cluster_ids)
 
         print("Sorted cluster sizes:", sorted(cluster_sizes))
         print(
@@ -210,18 +204,7 @@ def main(config):
             np.max(cluster_sizes) / (np.min(cluster_sizes) + 0.1),
         )
 
-        with open(example_to_ids_path, "wb") as f:
-            pickle.dump(
-                {
-                    "hashes": all_hashes,
-                    "cluster_ids": all_cluster_ids,
-                    "cluster_distances": all_cluster_distances,
-                    "centroids": kmeans.centroids,
-                    "task_names": all_tasks,
-                    "flags": all_flags,
-                },
-                f,
-            )
+        cluster_infos.save(example_to_ids_path)
 
 
 if __name__ == "__main__":

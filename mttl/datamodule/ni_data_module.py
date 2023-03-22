@@ -93,6 +93,18 @@ class NIDataModule(LightningDataModule):
             self.task_embed_path = None
 
     @property
+    def full_dataset(self):
+        return torch.utils.data.dataset.ConcatDataset(
+            [self.train_dataset, self.val_dataset, self.test_dataset]
+        )
+
+    @property
+    def all_instructions(self):
+        """Return all task instructions used in the dataset.
+        """
+        return self.dataset_reader.read_all_instructions()
+
+    @property
     def dataset_name(self):
         return hash_example("-".join(self.tasks))
 
