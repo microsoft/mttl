@@ -405,6 +405,7 @@ class CollateMultiChoiceFnWrapper:
         target_ids = [b.target_ids for b in batch]
         task_ids = [b.task_id for b in batch]
         hashes = [b.hash for b in batch]
+        instruction_hashes = [b.instruction_hash for b in batch]
         answer_choices_ids = [b.answer_choices_ids for b in batch]
         labels = [b.label for b in batch]
         idx = [b.idx for b in batch]
@@ -442,6 +443,7 @@ class CollateMultiChoiceFnWrapper:
             "labels": labels,
             "idx": idx,
             "hashes": hashes,
+            "instruction_hashes": instruction_hashes,
         }
         return output_batch
 
