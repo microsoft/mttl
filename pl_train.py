@@ -33,7 +33,7 @@ def run_multitask(args):
     args.n_tasks = len(dm.task2id)
 
     if args.example_to_ids_path:
-        from models.cluster_reader import ClusterResult
+        from mttl.cluster_tuning.cluster_reader import ClusterResult
 
         cluster_result = ClusterResult(args.example_to_ids_path)
         args.n_tasks = cluster_result.n_clusters()
@@ -44,7 +44,7 @@ def run_multitask(args):
             raise NotImplementedError()
 
     if args.checkpoint is not None:
-        from utils import get_checkpoint_path
+        from mttl.utils import get_checkpoint_path
 
         checkpoint_path = get_checkpoint_path(args.checkpoint)
 

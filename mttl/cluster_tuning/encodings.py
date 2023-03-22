@@ -63,6 +63,26 @@ class ClusterInfos:
     cluster_dists: List = field(default_factory=list)
     task_names: List = field(default_factory=list)
     is_test: List = field(default_factory=list)
+    input_type: str = "input"
+
+    @staticmethod
+    def load(save_path):
+        """Load all fields from a pickle file
+        """
+        import pickle
+
+        with open(save_path, "rb") as f:
+            data = pickle.load(f)
+
+        return ClusterInfos(
+            hashes=data["hashes"],
+            cluster_ids=data["cluster_ids"],
+            cluster_dists=data["cluster_distances"],
+            centroids=data["centroids"],
+            task_names=data["task_names"],
+            is_test=data["is_test"],
+            input_type=data["input_type"]
+        )   
 
     def save(self, save_path):
         import pickle
@@ -76,6 +96,7 @@ class ClusterInfos:
                     "centroids": self.centroids,
                     "task_names": self.task_names,
                     "is_test": self.is_test,
+                    "input_type": self.input_type
                 },
                 f,
             )

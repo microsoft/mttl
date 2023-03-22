@@ -44,7 +44,7 @@ class NITaskDataset(torch.utils.data.dataset.Dataset):
             self._pretokenize()
 
     def _pretokenize(self):
-        inputs, outputs, input_hashes = zip(*self.examples)
+        inputs, outputs, instructions = zip(*self.examples)
 
         inputs_ids = self.tokenizer(
             list(inputs),
@@ -61,17 +61,24 @@ class NITaskDataset(torch.utils.data.dataset.Dataset):
             return_tensors="pt",
         ).input_ids
 
-        self.examples = list(zip(inputs_ids, outputs_ids, input_hashes))
+        input_hashes = [hash_example(i) for i in inputs]
+        instruction_hashes = [hash_example(i) for i in instructions]
+
+        self.examples = list(zip(
+            inputs_ids,
+            outputs_ids,
+            input_hashes,
+            instruction_hashes,
+        ))
 
     def __len__(self):
         return len(self.examples)
 
     def __getitem__(self, key):
-        input, output, input_hash = self.examples[key]
-
         if self.pretokenize:
-            tok_input, tok_output = input, output
+            tok_input, tok_output, input_hash, instruction_hash = self.examples[key]
         else:
+            input, output, instruction = self.examples[key]
             tok_input = self.tokenizer(
                 input,
                 truncation=True,
@@ -87,13 +94,17 @@ class NITaskDataset(torch.utils.data.dataset.Dataset):
                 return_tensors="pt",
             ).input_ids.squeeze(0)
 
+            input_hash = hash_example(input)
+            instruction_hash = hash_example(instruction)
+
         ex_info = ExampleInfo(
             tok_input,
             tok_output,
             self.task_id,
             input_hash,
             example_id=key,
-            input_text=input if not self.pretokenize else None
+            input_text=input if not self.pretokenize else None,
+            instruction_hash=instruction_hash,
         )
         return ex_info
 
@@ -192,7 +203,7 @@ class NIDatasetReader(object):
 
         # task information is the task name + definition + pos examples
         task_name_no_id = "_".join(task_name.split("_")[1:])
-        task_information = task_name_no_id + definition
+        task_information = definition
 
         # Select all references during training, this should only contain one reference during testing
         for output in instance["Instance"]["output"]:
@@ -234,12 +245,15 @@ class NIDatasetReader(object):
         all_instructions = []
         for data in self.data:
             if isinstance(data["Definition"], list):
-                instruction = data["Definition"][0].strip()
+                definition = (
+                    "Definition: " + data["Definition"][0].strip()
+                )
             else:
-                instruction = data["Definition"].strip()
-            if not instruction[-1] in string.punctuation:
-                instruction += "."
-            all_instructions.append(instruction)
+                definition = "Definition: " + data["Definition"].strip()
+            if not definition[-1] in string.punctuation:
+                definition += "."
+            definition += "\n\n"
+            all_instructions.append(definition)
         return all_instructions
 
     def read_orig_datasets(self, split):
@@ -263,9 +277,8 @@ class NIDatasetReader(object):
                     self.num_pos_examples,
                     self.max_input_length,
                 ):
-                    input, output, _ = formatted_example
-                    hash = hash_example(input)
-                    formatted_examples.append((input, output, hash))
+                    input, output, instruction = formatted_example
+                    formatted_examples.append((input, output, instruction))
 
             # pretokenization takes a bit of time for NI
             task_dataset = NITaskDataset(

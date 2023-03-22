@@ -6,7 +6,7 @@ import numpy as np
 from types import MethodType
 from torch.distributions.relaxed_bernoulli import RelaxedBernoulli
 from mttl.models.utils import RoutingInfo
-from mttl.models.cluster_reader import ClusterResult
+from mttl.cluster_tuning.cluster_reader import ClusterResult
 
 
 EPS = 1e-12
@@ -81,6 +81,8 @@ class PolytroponAdapter(nn.Module):
 
 
 def get_selector(config):
+    from mttl.cluster_tuning.cluster_selector import ClusterSelector
+
     if config.poly_selector == "poly":
         return PolytroponSelector(config)
     elif config.poly_selector == "private":
@@ -232,36 +234,6 @@ class PrivateSelector(Selector):
 
     def forward(self, routing_infos):
         return F.one_hot(routing_infos.task_ids, num_classes=self.n_skills).unsqueeze(1)
-
-
-class ClusterSelector(Selector):
-    def __init__(self, config, soft=False):
-        super().__init__()
-
-        self.soft = soft
-        self.n_skills = config.n_skills
-        self.cluster_result = ClusterResult(config.example_to_ids_path)
-        self.temperature = config.poly_selector_cluster_temp
-
-        # just to get the device and the working dtype
-        self.dummy_parameter = nn.Parameter(torch.zeros(1), requires_grad=False)
-
-    def forward(self, routing_infos):
-        # this should return a bs x n_clusters tensor that sums to 1
-        if self.soft:
-            distances = self.cluster_result.get_distances_batch(routing_infos.hashes)
-            distances = torch.tensor(
-                distances,
-                device=self.dummy_parameter.device,
-            )
-            routing = F.softmax(-distances / self.temperature, dim=-1).unsqueeze(1)
-        else:
-            cluster_ids = torch.tensor(
-                [self.cluster_result.get_cluster(h) for h in routing_infos.hashes],
-                device=self.dummy_parameter.device,
-            )
-            routing = F.one_hot(cluster_ids, num_classes=self.n_skills).unsqueeze(1)
-        return routing.to(dtype=self.dummy_parameter.dtype)
 
 
 class PolyLoRALinear(PolytroponAdapter):

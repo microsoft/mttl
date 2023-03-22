@@ -22,6 +22,7 @@ class CollateWrapperFn:
         target_ids = [b.target_ids for b in batch]
         hashes = [b.hash for b in batch]
         task_ids = [b.task_id for b in batch]
+        instruction_hashes = [b.instruction_hash for b in batch]
 
         task_ids = torch.LongTensor(task_ids)
         input_ids = trim_batch(torch.stack(input_ids, 0), self.pad_token_id)
@@ -32,6 +33,7 @@ class CollateWrapperFn:
             "target_ids": target_ids,
             "task_ids": task_ids,
             "hashes": hashes,
+            "instruction_hashes": instruction_hashes,
         }
         return output_batch
 

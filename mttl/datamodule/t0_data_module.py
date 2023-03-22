@@ -461,6 +461,7 @@ class CollatePretrainFnWrapper:
         task_ids = [b.task_id for b in batch]
         ex_ids = [b.example_id for b in batch]
         hashes = [b.hash for b in batch]
+        instruction_hashes = [b.instruction_hash for b in batch]
 
         task_ids = torch.tensor(task_ids, dtype=torch.long)
         ex_ids = torch.tensor(ex_ids, dtype=torch.long)
@@ -481,6 +482,7 @@ class CollatePretrainFnWrapper:
             "task_ids": task_ids,
             "ex_ids": ex_ids,
             "hashes": hashes,
+            "instruction_hashes": instruction_hashes,
         }
         return output_batch
 

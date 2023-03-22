@@ -45,7 +45,6 @@ def collate(batch):
     input_text = [b.input_text for b in batch]
     hashes = [b.hash for b in batch]
     task_ids = [b.task_id for b in batch]
-
     return (input_ids[0], input_text[0], hashes[0], task_ids[0])
 
 
