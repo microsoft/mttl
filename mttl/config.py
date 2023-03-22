@@ -86,11 +86,11 @@ class Config(object):
         self.lora_warmup = False
         self.lora_modules = self.patch_modules = None
         self.lora_layers = self.patch_layers = None
-        self.n_skills = 8
         self.n_tasks = None
 
         # Polytropon related hyper-parameters
         self.n_splits = 1                      # number of splits for poly-s
+        self.n_skills = 8                      # number of skills for poly
         self.poly_selector = "poly"            # poly, poly_cluster
         self.poly_selector_cluster_temp = 1.0  # temperature for the cluster selector
         self.poly_average_correction = False   # correct the poly average
