@@ -43,7 +43,7 @@ def encode_batch(batch, model, tokenizer):
 def collate(batch):
     input_ids = [b.input_ids for b in batch]
     input_text = [b.input_text for b in batch]
-    template_text = [b.template_text for b in batch]
+    template_text = [getattr(b, 'template_text', None) for b in batch]
     hashes = [b.hash for b in batch]
     task_ids = [b.task_id for b in batch]
 
@@ -75,7 +75,7 @@ def convert_dataset(
                 example_input = input
             else:
                 # need to tokenize the instruction
-                example_input = tokenizer(input, return_tensors="pt").input_ids
+                example_input = tokenizer(input, return_tensors="pt").input_ids.squeeze(0)
 
             task_id = 0
             batch.append(example_input)
@@ -90,7 +90,7 @@ def convert_dataset(
         # create an ad-hoc loader for the dataset
         loader = DataLoader(
             dataset,
-            num_workers=16,
+            num_workers=0, #16,
             batch_size=1,
             collate_fn=collate,
             pin_memory=True,
@@ -239,7 +239,7 @@ def encode_t0(config, model):
 
 
 if __name__ == "__main__":
-    config = parse_config(extra_kwargs={"encode_instruction": True}, raise_error=False)
+    config = parse_config(extra_kwargs={"encode_instruction": False}, raise_error=False)
 
     if config.checkpoint:
         checkpoint = get_checkpoint_path(config.checkpoint)
@@ -259,7 +259,7 @@ if __name__ == "__main__":
             config.model = "t5-small"  # to avoid errors downstream for tokenization
         else:
             model = AutoModelForSeq2SeqLM.from_pretrained(
-                config.model, cache_dir="/tmp/cache"
+                config.model, cache_dir=os.environ.get("TRANSFORMERS_CACHE", "/tmp/cache")
             ).cuda()
             os.system("/bin/rm -rf /tmp/cache")  # free-up space
 
