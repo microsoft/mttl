@@ -31,7 +31,9 @@ class T0EncoderDecoder(EfficientCheckpointModule):
         self.config = config = self.hparams
         self.tokenizer = kwargs["tokenizer"]
 
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(config.model, cache_dir="/tmp/hf-cache")
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(
+            config.model, cache_dir=os.environ.get("TRANSFORMERS_CACHE", "/tmp/hf-cache")
+        )
         # free up local space after loading in memory
         os.system("rm -rf /tmp/hf-cache")
         os.system("df")
