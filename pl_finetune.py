@@ -50,7 +50,7 @@ ARGS_TO_OVERWRITE = [
 ]
 
 
-def finetune(args, use_mlf=True, do_zs=True):
+def finetune(args, use_mlf=True, do_zs=True, Z_precision=32):
     seed_everything(args.seed, workers=True)
 
     # build the pretrained model
@@ -124,6 +124,8 @@ def finetune(args, use_mlf=True, do_zs=True):
     # economic checkpointing for finetuning, we don't need to save the full backbone, only parameters that we are training.
     kwargs["save_if_loaded"] = False
     module = finetuner_cls(**kwargs, tokenizer=dm.tokenizer)
+
+    module.model.set_Z_precision(Z_precision)
 
     if skip_load_skills or ckpt_path is None:
         print("Skipping loading from checkpoint...")
@@ -255,16 +257,24 @@ def finetune_ni(args, seeds=[13, 42, 58], use_mlf=True, do_zs=True):
 def finetune_t0(args, seeds=[42, 1024, 0], use_mlf=True, do_zs=True):
     all_results = []
 
-    for i, seed in enumerate(seeds):
-        args.seed = seed
+    is_poly = args.model_modifier is not None and 'poly' in args.model_modifier
+    for Z_precision in ([1, 2, 3, 16, 32] if is_poly else [32]):
+        for i, seed in enumerate(seeds):
+            args.seed = seed
 
-        # use mlf logger only for the first seed, otw it will complain for duplicated hps
-        results = finetune(
-            args,
-            use_mlf=use_mlf and i == 0,
-            do_zs=do_zs,
-        )
-        all_results.extend(results)
+            # use mlf logger only for the first seed, otw it will complain for duplicated hps
+            results = finetune(
+                args,
+                use_mlf=use_mlf and i == 0,
+                do_zs=do_zs,
+                Z_precision=Z_precision
+            )
+            for result in results:
+                result['Z_precision'] = Z_precision
+
+            all_results.extend(results)
+            breakpoint()
+            xx = 1
 
     for result in all_results:
         result["prefix"] = args.finetune_task_name
@@ -318,6 +328,9 @@ def finetune_xfit(args, use_mlf=True, do_zs=True):
 
 if __name__ == "__main__":
     args = parse_config()
+    
+    # TODO (Lucas) : check with AS if this is always ok 
+    args.n_tasks = 1
 
     if args.dataset == "xfit":
         finetune_xfit(args)
