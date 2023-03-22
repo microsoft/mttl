@@ -20,7 +20,17 @@ def hash_example(example):
     return hashlib.md5(example.encode("utf-8")).hexdigest()
 
 
-def label_smoothed_nll_loss(lprobs, target, epsilon=0.1, ignore_index=-100, reduction='mean'):
+def template_to_string(template):
+    return template.jinja + (
+        (" answer_choices: " + template.answer_choices)
+        if template.answer_choices
+        else ""
+    )
+
+
+def label_smoothed_nll_loss(
+    lprobs, target, epsilon=0.1, ignore_index=-100, reduction="mean"
+):
     """From fairseq"""
     if target.dim() == lprobs.dim() - 1:
         target = target.unsqueeze(-1)
@@ -35,7 +45,7 @@ def label_smoothed_nll_loss(lprobs, target, epsilon=0.1, ignore_index=-100, redu
         nll_loss = nll_loss.squeeze(-1)
         smooth_loss = smooth_loss.squeeze(-1)
 
-    if reduction == 'mean':
+    if reduction == "mean":
         nll_loss = nll_loss.sum()
         smooth_loss = smooth_loss.sum()
         eps_i = epsilon / lprobs.size(-1)
@@ -127,10 +137,12 @@ class CustomModelCheckpoint(pl.callbacks.ModelCheckpoint):
         self.last_model_score = None
 
     def _update_best_and_save(
-        self, current: Tensor, trainer: "pl.Trainer", monitor_candidates: Dict[str, Tensor]
+        self,
+        current: Tensor,
+        trainer: "pl.Trainer",
+        monitor_candidates: Dict[str, Tensor],
     ) -> None:
-        """First remove checkpoint, THEN save it.
-        """
+        """First remove checkpoint, THEN save it."""
         import os
 
         k = len(self.best_k_models) + 1 if self.save_top_k == -1 else self.save_top_k
@@ -142,9 +154,13 @@ class CustomModelCheckpoint(pl.callbacks.ModelCheckpoint):
 
         # do not save nan, replace with +/- inf
         if isinstance(current, Tensor) and torch.isnan(current):
-            current = torch.tensor(float("inf" if self.mode == "min" else "-inf"), device=current.device)
+            current = torch.tensor(
+                float("inf" if self.mode == "min" else "-inf"), device=current.device
+            )
 
-        filepath = self._get_metric_interpolated_filepath_name(monitor_candidates, trainer, del_filepath)
+        filepath = self._get_metric_interpolated_filepath_name(
+            monitor_candidates, trainer, del_filepath
+        )
 
         # save the current score
         self.current_score = current
@@ -248,7 +264,9 @@ def get_checkpoint_path(path, step=None):
                     break
             if not found and step is None:
                 # global_stepX.pt, take the one with the highest step
-                idx = np.argmax([float(x.split("step")[-1].split(".pt")[0]) for x in match])
+                idx = np.argmax(
+                    [float(x.split("step")[-1].split(".pt")[0]) for x in match]
+                )
                 path = match[idx]
         elif len(match) == 0:
             raise FileNotFoundError(f"{path} had no `.ckpt` nor `.pt` files")

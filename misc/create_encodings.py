@@ -9,6 +9,7 @@ from sentence_transformers import SentenceTransformer
 
 from torch.utils.data import DataLoader
 from mttl.config import parse_config
+from mttl.cluster_tuning.encodings import Encodings
 from mttl.datamodule.ni_data_module import NIDataModule
 from mttl.datamodule.t0_data_module import T0PretrainDataModule, T0FinetuneDataModule
 from mttl.models.encoder_decoder import EncoderDecoder
@@ -46,79 +47,199 @@ def collate(batch):
     hashes = [b.hash for b in batch]
     task_ids = [b.task_id for b in batch]
 
-    return (
-        input_ids[0],
-        input_text[0],
-        hashes[0],
-        template_text[0],
-        task_ids[0]
-    )
+    return (input_ids[0], input_text[0], hashes[0], template_text[0], task_ids[0])
 
 
 def convert_dataset(
-    dataset, tokenizer, model, past_hashes, use_template=False, start=0, stop=-1
+    datamodule,
+    tokenizer,
+    model,
+    batch_size=-1,
+    use_description=False,
 ):
-    batch = []
-    hash = []
-    encodings = []
-    task_ids = []
-
-    if stop == -1:
-        stop = len(dataset)
-    else:
-        stop = min(len(dataset), stop)
-
     sentence_encoding = isinstance(model, SentenceTransformer)
     encode_func = sentence_encode_batch if sentence_encoding else encode_batch
 
-    loader = DataLoader(
-        torch.utils.data.Subset(
+    task_ids = []
+    batch = []
+    hash = []
+    encodings = []
+
+    if use_description:
+        inputs = datamodule.all_instructions
+
+        # just encode it all at once (smaller number of them usually)
+        for input in inputs:
+            example_hash = hash_example(input)
+            if sentence_encoding:
+                example_input = input
+            else:
+                # need to tokenize the instruction
+                example_input = tokenizer(input, return_tensors="pt").input_ids
+
+            task_id = 0
+            batch.append(example_input)
+            hash.append(example_hash)
+            task_ids.append(task_id)
+
+        encodings = encode_func(batch, model, tokenizer)
+        yield hash, encodings, task_ids
+    else:
+        dataset = datamodule.full_dataset
+
+        # create an ad-hoc loader for the dataset
+        loader = DataLoader(
             dataset,
-            range(start, stop),
-        ),
-        num_workers=16,
-        batch_size=1,
-        collate_fn=collate,
-        pin_memory=True,
-        shuffle=False,
-    )
+            num_workers=16,
+            batch_size=1,
+            collate_fn=collate,
+            pin_memory=True,
+            shuffle=False,
+        )
 
-    for example_info in tqdm(loader, total=(stop - start)):
-        if sentence_encoding:
-            example_input = example_info[1]
-            example_hash = example_info[2]
-        elif use_template:
-            example_input = example_info[-2]
-            example_hash = hash_example(example_info[-2])
-        else:
-            example_input = example_info[0]
-            example_hash = example_info[2]
-        example_task_id = example_info[-1]
+        task_ids = []
+        batch = []
+        hash = []
 
-        if example_hash in past_hashes:
-            continue
-        else:
+        for example_info in loader:
+            if sentence_encoding:
+                example_input = example_info[1]
+                example_hash = example_info[2]
+            else:
+                example_input = example_info[0]
+                example_hash = example_info[2]
+            example_task_id = example_info[-1]
+
             batch.append(example_input)
             hash.append(example_hash)
             task_ids.append(example_task_id)
-            past_hashes.add(example_hash)
 
-        if len(batch) == 512:
-            print("Encoding batch:", hash[-1])
-            encodings.extend(encode_func(batch, model, tokenizer))
-            batch = []
+            if len(batch) == batch_size:
+                print("Encoding batch:", hash[-1])
+                encodings = encode_func(batch, model, tokenizer)
+                yield hash, encodings, task_ids
+                batch, hash, task_ids = [], [], []
 
-    if len(batch):
-        encodings.extend(encode_func(batch, model, tokenizer))
-        batch = []
-    return hash, encodings, task_ids
+        if len(batch):
+            encodings = encode_func(batch, model, tokenizer)
+            yield hash, encodings, task_ids
+            batch, hash, task_ids = [], [], []
+
+
+def encode_ni(config, model):
+    config.custom_tasks_splits = "./dataloader/ni_data/train_tasks.txt"
+
+    dm = NIDataModule(config)
+    dm.setup("fit")
+
+    data = Encodings(input_type="instruction" if config.encode_instruction else "input")
+    for h, e, t in convert_dataset(
+        dm, dm.tokenizer, model, batch_size=512, use_description=config.encode_instruction
+    ):
+        data.hashes.extend(h)
+        data.encodings.extend(e)
+        data.task_ids.extend(t)
+        data.task_names.extend([dm.id2task[tid] for tid in t])
+        data.is_test.extend(0 for _ in range(len(h)))
+
+    # for test tasks
+    config.custom_tasks_splits = "./dataloader/ni_data/test_tasks.txt"
+    dm = NIDataModule(config)
+    dm.setup("fit")
+
+    for h, e, t in convert_dataset(
+        dm, dm.tokenizer, model, batch_size=512, use_description=config.encode_instruction
+    ):
+        data.hashes.extend(h)
+        data.encodings.extend(e)
+        data.task_ids.extend(t)
+        data.task_names.extend([dm.id2task[tid] for tid in t])
+        data.is_test.extend(1 for _ in range(len(h)))
+
+    data.save(os.path.join(config.output_dir, f"encodings.pkl"))
+
+
+def encode_t0(config, model):
+    dm = T0PretrainDataModule(config)
+    dm.setup("fit")
+
+    print("Length of multi-task training set: ", len(dm.full_dataset))
+
+    data = Encodings(input_type="instruction" if config.encode_instruction else "input")
+    next_task = 0
+    chunk = 0
+
+    for h, e, t in convert_dataset(
+        dm, dm.tokenizer, model, batch_size=256, use_description=config.encode_instruction
+    ):
+        data.hashes.extend(h)
+        data.encodings.extend(e)
+        data.task_ids.extend(t)
+        data.task_names.extend([dm.id2task[tid] for tid in t])
+        data.is_test.extend(0 for _ in range(len(h)))
+
+        if len(data.encodings) == 256_000:
+            save_path = os.path.join(
+                config.output_dir,
+                f"encodings.pkl-chunk{chunk}",
+            )
+            next_task = np.max(data.task_ids + [next_task])
+            chunk += 1
+            data.save(save_path)
+            data.clear()
+
+    if len(data.encodings):
+        save_path = os.path.join(
+            config.output_dir,
+            f"encodings.pkl-chunk{chunk}",
+        )
+        next_task = np.max(data.task_ids + [next_task])
+        chunk += 1
+        data.save(save_path)
+        data.clear()
+
+    for finetune_task_name in [
+        "copa",
+        "h-swag",
+        "storycloze",
+        "winogrande",
+        "wsc",
+        "wic",
+        "rte",
+        "cb",
+        "anli-r1",
+        "anli-r2",
+        "anli-r3",
+    ]:
+        next_task += 1
+        config.finetune_task_name = finetune_task_name
+
+        dm = T0FinetuneDataModule(config)
+        dm.setup("fit")
+
+        for h, e, _ in convert_dataset(
+            dm,
+            dm.tokenizer,
+            model,
+            batch_size=256,
+            use_description=config.encode_instruction,
+        ):  
+            data.hashes.extend(h)
+            data.encodings.extend(e)
+            data.task_ids.extend([next_task for _ in range(len(h))])
+            data.task_names.extend([finetune_task_name for _ in h])
+            data.is_test.extend(1 for _ in range(len(h)))
+
+    # save last chunk
+    save_path = os.path.join(
+        config.output_dir,
+        f"encodings.pkl-chunk{chunk}",
+    )
+    data.save(save_path)
 
 
 if __name__ == "__main__":
-    config = parse_config()
-
-    sentence_encoder = True
-    use_template = True
+    config = parse_config(extra_kwargs={"encode_instruction": True}, raise_error=False)
 
     if config.checkpoint:
         checkpoint = get_checkpoint_path(config.checkpoint)
@@ -146,115 +267,7 @@ if __name__ == "__main__":
 
     # instantiate T0 data
     if config.dataset == "ni":
-        config.custom_tasks_splits = "./dataloader/ni_data/train_tasks.txt"
-        dm = NIDataModule(config)
-        id2task = dict((k, v) for v, k in dm.task2id.items())
-        dm.setup("fit")
-
-        tr_data = [[], [], [], [], []]
-        for dataset in [dm.train_dataset, dm.val_dataset, dm.test_dataset]:
-            h, e, t = convert_dataset(dataset, dm.tokenizer, model)
-            tr_data[0].extend(h)
-            tr_data[1].extend(e)
-            tr_data[2].extend(t)
-            tr_data[3].extend([id2task[tid] for tid in t])
-            tr_data[4].extend(0 for _ in range(len(h)))
-
-        # for test tasks
-        config.custom_tasks_splits = "./dataloader/ni_data/test_tasks.txt"
-        dm = NIDataModule(config)
-        dm.setup("fit")
-
-        for dataset in [dm.train_dataset, dm.val_dataset, dm.test_dataset]:
-            h, e, t = convert_dataset(
-                dataset, dm.tokenizer, model, past_hashes, use_template=use_template
-            )
-            tr_data[0].extend(h)
-            tr_data[1].extend(e)
-            tr_data[2].extend(t)
-            tr_data[3].extend([dm.id2task[tid] for tid in t])
-            tr_data[4].extend(1 for _ in range(len(h)))  # test data
-
-        save_path = os.path.join(config.output_dir, f"encodings.pkl")
-        with open(save_path, "wb") as f:
-            tr_data[1] = np.array(tr_data[1]).astype(np.float32)
-            pickle.dump(tr_data, f)
+        encode_ni(config, model)
 
     elif config.dataset == "t0":
-        dm = T0PretrainDataModule(config)
-        dm.setup("fit")
-
-        print("Length of training dataset: ", len(dm.full_train_dataset))
-        chunk = 0
-        num_processed = 0
-        next_task = 0
-
-        while num_processed < len(dm.full_train_dataset):
-            tr_data = [[], [], [], [], []]
-
-            save_path = os.path.join(
-                config.output_dir,
-                f"encodings.pkl-chunk{chunk}",
-            )
-            h, e, t = convert_dataset(
-                dm.full_train_dataset,
-                dm.tokenizer,
-                model,
-                past_hashes,
-                use_template=use_template,
-                start=(chunk - 1) * 256_000,
-                stop=chunk * 256_000,
-            )
-            tr_data[0].extend(h)
-            tr_data[1].extend(e)
-            tr_data[2].extend(t)
-            tr_data[3].extend([dm.id2task[tid] for tid in t])
-            tr_data[4].extend(0 for _ in range(len(h)))
-
-            with open(save_path, "wb") as f:
-                tr_data[1] = np.array(tr_data[1]).astype(np.float32)
-                pickle.dump(tr_data, f)
-
-            chunk += 1
-            next_task = np.max(tr_data[2] + [next_task])
-            num_processed += len(tr_data[0])
-            tr_data = [[], [], [], [], []]
-
-        for finetune_task_name in [
-            "copa",
-            "h-swag",
-            "storycloze",
-            "winogrande",
-            "wsc",
-            "wic",
-            "rte",
-            "cb",
-            "anli-r1",
-            "anli-r2",
-            "anli-r3",
-        ]:
-            next_task += 1
-            config.finetune_task_name = finetune_task_name
-
-            dm = T0FinetuneDataModule(config)
-            dm.setup("fit")
-
-            dataset = dm.flattened_datasets()
-            h, e, _ = convert_dataset(
-                dataset, dm.tokenizer, model, past_hashes, use_template=use_template
-            )
-
-            tr_data[0].extend(h)
-            tr_data[1].extend(e)
-            tr_data[2].extend([next_task for _ in range(len(h))])
-            tr_data[3].extend([finetune_task_name for _ in h])
-            tr_data[4].extend(1 for _ in range(len(h)))  # test data
-
-        # save last chunk
-        save_path = os.path.join(
-            config.output_dir,
-            f"encodings.pkl-chunk{chunk}",
-        )
-        with open(save_path, "wb") as f:
-            tr_data[1] = np.array(tr_data[1]).astype(np.float32)
-            pickle.dump(tr_data, f)
+        encode_t0(config, model)

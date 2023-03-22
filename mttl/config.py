@@ -6,7 +6,7 @@ from string import Template
 
 
 class Config(object):
-    def __init__(self, filenames=None, kwargs=None):
+    def __init__(self, filenames=None, kwargs=None, raise_error=True):
         # Stores personalization of the config file
         self._updated_kwargs = set()
 
@@ -120,10 +120,10 @@ class Config(object):
                 if not os.path.exists(filename):
                     filename = os.path.join(os.getenv("CONFIG_PATH", default="configs"), filename)
 
-                self.update_kwargs(json.load(open(filename)), eval=False)
+                self.update_kwargs(json.load(open(filename)), eval=False, raise_error=raise_error)
 
         if kwargs:
-            self.update_kwargs(kwargs)
+            self.update_kwargs(kwargs, raise_error=raise_error)
 
         self.save_config(self.output_dir)
 
@@ -133,7 +133,7 @@ class Config(object):
     def was_default(self, key):
         return key not in self._updated_kwargs
 
-    def update_kwargs(self, kwargs, eval=True):
+    def update_kwargs(self, kwargs, eval=True, raise_error=True):
         for (k, v) in kwargs.items():
             if eval:
                 try:
@@ -142,7 +142,8 @@ class Config(object):
                     v = v
             else:
                 v = v
-            if not hasattr(self, k):
+
+            if not hasattr(self, k) and raise_error:
                 raise ValueError(f"{k} is not in the config")
 
             if eval:
@@ -192,7 +193,7 @@ class ParseKwargs(argparse.Action):
             getattr(namespace, self.dest)[key] = value
 
 
-def parse_config():
+def parse_config(extra_kwargs=None, raise_error=True):
     import itertools
     
     parser = argparse.ArgumentParser()
@@ -206,9 +207,12 @@ def parse_config():
         for value in kwargs_opts:
             key, _, value = value.partition('=')
             kwargs[key] = value
-    args.kwargs = kwargs
 
-    config = Config(args.config_files, args.kwargs)
+    args.kwargs = kwargs
+    if extra_kwargs:
+        args.kwargs.update(extra_kwargs)
+
+    config = Config(args.config_files, args.kwargs, raise_error=raise_error)
 
     print(config.to_json())
     return config
