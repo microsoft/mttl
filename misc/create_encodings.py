@@ -43,7 +43,7 @@ def encode_batch(batch, model, tokenizer):
 def collate(batch):
     input_ids = [b.input_ids for b in batch]
     input_text = [b.input_text for b in batch]
-    template_text = [getattr(b, 'template_text', None) for b in batch]
+    template_text = [getattr(b, 'template_text') for b in batch]
     hashes = [b.hash for b in batch]
     task_ids = [b.task_id for b in batch]
 
@@ -90,7 +90,7 @@ def convert_dataset(
         # create an ad-hoc loader for the dataset
         loader = DataLoader(
             dataset,
-            num_workers=0, #16,
+            num_workers=16,
             batch_size=1,
             collate_fn=collate,
             pin_memory=True,
