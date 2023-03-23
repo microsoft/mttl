@@ -158,15 +158,14 @@ def encode_ni(config, model):
 
 
 def encode_t0(config, model):
+    next_task = 0
+    chunk = 0
+    data = Encodings(input_type="instruction" if config.encode_instruction else "input")
+
     dm = T0PretrainDataModule(config)
     dm.setup("fit")
 
     print("Length of multi-task training set: ", len(dm.full_dataset))
-
-    data = Encodings(input_type="instruction" if config.encode_instruction else "input")
-    next_task = 0
-    chunk = 0
-
     for h, e, t in convert_dataset(
         dm, dm.tokenizer, model, batch_size=256, use_description=config.encode_instruction
     ):
@@ -221,7 +220,7 @@ def encode_t0(config, model):
             model,
             batch_size=256,
             use_description=config.encode_instruction,
-        ):  
+        ):
             data.hashes.extend(h)
             data.encodings.extend(e)
             data.task_ids.extend([next_task for _ in range(len(h))])

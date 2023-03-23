@@ -11,7 +11,8 @@ from mttl.dataloader.data_utils import ExampleInfo, MultiChoiceExampleInfo
 
 
 def apply_template(template, example, hash_friendly=False, handle_edge_cases=True):
-    """Could be done with a context manager, but we're lazy."""
+    """Could be done with a context manager, but we're lazy.
+    """
     if hash_friendly:
         state = random.getstate()
         random.seed(42)
@@ -214,12 +215,9 @@ class T0FinetuneDatasetWithTemplate(torch.utils.data.dataset.Dataset):
         idx = torch.LongTensor([example["idx"]])
 
         input_str, _ = apply_template(
-            template, example, hash_friendly=True, handle_edge_cases=False
+            template, example, hash_friendly=True, handle_edge_cases=True
         )
-
-        hash = hash_example(
-            " ".join(input_str) if isinstance(input_str, list) else input_str
-        )
+        hash = hash_example(input_str)
         instruction_hash = hash_example(template_to_string(template))
 
         return MultiChoiceExampleInfo(
@@ -231,6 +229,7 @@ class T0FinetuneDatasetWithTemplate(torch.utils.data.dataset.Dataset):
             self.ds_id,
             hash,
             example_id,
+            input_text=input_str,
             instruction_hash=instruction_hash,
         )
 
