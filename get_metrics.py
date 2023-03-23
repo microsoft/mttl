@@ -146,7 +146,7 @@ def main(files, dataset, latex, hps, nt):
                 data = pandas.read_csv(result)
                 task_name = data["prefix"][0]
 
-                zero_shot = data.loc[data["step"] == 0]
+                zero_shot = data.loc[data["step"] == 0]["test/acc_0shot"].dropna().values * 100
                 data = data.loc[data["step"] != 0]
 
                 # take val/acc for both as they are equal up to some random sampling of prompts
@@ -164,6 +164,7 @@ def main(files, dataset, latex, hps, nt):
                             "trial": trial,
                             "perf": test_scores[trial],
                             "val_perf": val_scores[trial],
+                            "zs_perf": zero_shot[trial] if len(zero_shot) > 1 else zero_shot[0],
                         }
                     )
 
@@ -222,16 +223,8 @@ def main(files, dataset, latex, hps, nt):
         for m, r in zip(models, res):
             filtered_results = r.loc[r["task_name"].isin(all_tasks)]
             # median across tasks
-            agg_seed_mean = filtered_results.groupby(["trial"]).agg(
-                "mean" if dataset == "t0" else "mean"
-            )
-            if dataset == "t0":
-                Q1 = agg_seed_mean.quantile(0.25)
-                Q3 = agg_seed_mean.quantile(0.75)
-                # calculate IQR
-                agg_seed_std = Q3 - Q1
-            else:
-                agg_seed_std = agg_seed_mean.agg("std")
+            agg_seed_mean = filtered_results.groupby(["trial"]).agg("mean")
+            agg_seed_std = agg_seed_mean.agg("std")
 
             # mean of medians across seeds
             val = agg_seed_mean["val_perf"].agg("mean")

@@ -15,6 +15,7 @@ from mttl.datamodule.ni_data_module import NIFinetuneDataModule
 from mttl.datamodule.xfit_data_module import XFitFinetuneDataModule
 from mttl.datamodule.t0_data_module import T0FinetuneDataModule
 from mttl.models.encoder_decoder import Finetuner
+from mttl.models.monitors import get_monitors
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.utils import CustomModelCheckpoint, get_checkpoint_path, get_mlf_logger
 
@@ -155,6 +156,7 @@ def finetune(args, use_mlf=True, do_zs=True):
                 save_weights_only=True,  #  try to save some HD space
             )
             callbacks.append(ckpt_callback)
+        callbacks.extend(get_monitors(args))
 
         # legit logging
         loggers = []
@@ -171,6 +173,10 @@ def finetune(args, use_mlf=True, do_zs=True):
         mlf_logger = get_mlf_logger()
         if mlf_logger and use_mlf:
             loggers.append(mlf_logger)
+
+        loggers.append(pl.loggers.CSVLogger(
+            save_dir=args.output_dir, name="csv_metrics"
+        ))
 
         if args.finetune_skip_es:
             check_val_every_n_epoch = 10000
