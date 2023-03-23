@@ -31,7 +31,7 @@ class Config(object):
         self.freeze_embeds = False
 
         self.use_t0_templates_as_tasks = False     # if True, then t0 consists of 313 tasks, otherwise 38
-        self.use_t0_few_shot_training_set = False  # if True, then use 100 examples per task during training + 100 examples per validation task
+        self.use_t0_few_shot_training_set = True # if True, then use 100 examples per task during training + 100 examples per validation task
 
         # Training config
         self.compute_strategy = "ddp"
@@ -53,7 +53,7 @@ class Config(object):
         self.adafactor_scale_parameter = True
         self.adafactor_warmup_init = False
         self.adafactor_relative_step = False
-        self.num_train_epochs = 100
+        self.num_train_epochs = -1 
         self.warmup_steps = -1
         self.total_steps = -1
         self.num_tasks_per_batch = None

@@ -99,7 +99,7 @@ def run_multitask(args):
         kwargs["enable_checkpointing"] = False
 
     trainer = Trainer(
-        gpus=-1,
+        gpus=4,
         accelerator="gpu",
         logger=loggers,
         num_sanity_val_steps=5,
