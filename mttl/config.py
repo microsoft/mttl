@@ -5,10 +5,10 @@ import argparse
 from string import Template
 
 
-class Config(object):
+class Config(dict):
     def __init__(self, filenames=None, kwargs=None):
-        # Stores personalization of the config file
-        self._updated_kwargs = set()
+        # Stores personalization of the config file in a dict (json serializable)
+        self._updated_kwargs = {}
 
         self.cache_dir = os.getenv("CACHE_DIR", "./cache")
         self.free_up_space = False
@@ -129,6 +129,8 @@ class Config(object):
 
         self.save_config(self.output_dir)
 
+        super().__init__(self, **vars(self))
+
     def was_overridden(self, key):
         return key in self._updated_kwargs
 
@@ -158,7 +160,7 @@ class Config(object):
                 v = Template(v).substitute(os.environ)
 
             setattr(self, k, v)
-            self._updated_kwargs.add(k)
+            self._updated_kwargs[k] = v
 
     def __getitem__(self, item):
         return getattr(self, item, None)
