@@ -20,7 +20,7 @@ class ClusterSelector(Selector):
 
     def forward(self, routing_infos):
         # this should return a bs x n_clusters tensor that sums to 1
-        if self.cluster_result.infos.input_type == "inputs":
+        if self.cluster_result.infos.input_type == "input":
             hashes = routing_infos.hashes
         else:
             hashes = routing_infos.instruction_hashes
