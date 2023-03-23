@@ -73,9 +73,8 @@ def main(config):
     """
     Get cluster assignments
     """
-
     use_pca = -1
-    use_normalization = False
+    use_normalization = True
     use_centering = False
     use_constraints = False
     algo = "faiss"
@@ -203,7 +202,6 @@ def main(config):
             "Bigger to smaller ratio:",
             np.max(cluster_sizes) / (np.min(cluster_sizes) + 0.1),
         )
-
         cluster_infos.save(example_to_ids_path)
 
 
