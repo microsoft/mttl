@@ -162,7 +162,7 @@ def finetune(args, use_mlf=True, do_zs=True):
         loggers = []
         if os.environ.get("WANDB_API_KEY"):
             wandb_logger = pl.loggers.WandbLogger(
-                project="polytropon-ni",
+                project=args.wandb_project,
                 name=args.exp_name,
             )
             wandb_logger.experiment.save("*.py")

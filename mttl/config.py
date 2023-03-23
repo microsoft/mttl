@@ -10,6 +10,8 @@ class Config(object):
         # Stores personalization of the config file
         self._updated_kwargs = set()
 
+        self.cache_dir = os.getenv("CACHE_DIR", "./cache")
+        self.free_up_space = False
         # Data config
         self.dataset = None
         self.custom_tasks_splits = None
