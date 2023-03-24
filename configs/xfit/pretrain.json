@@ -2,7 +2,7 @@
     "dataset": "xfit",
     "optimizer": "adamw",
     "train_dir": "$XFIT_DATA_DIR",
-    "custom_tasks_splits": "./dataloader/xfit_data/random.json",
+    "custom_tasks_splits": "./mttl/dataloader/xfit_data/random.json",
     "warmup_proportion": 0.06,
     "num_train_epochs": 30,
     "learning_rate": 1e-3,

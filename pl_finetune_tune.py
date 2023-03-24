@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from mttl.pl_finetune import finetune_ni, finetune_xfit
+from pl_finetune import finetune_ni, finetune_xfit
 from mttl.config import parse_config
 
 

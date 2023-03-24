@@ -27,17 +27,20 @@ class T0EncoderDecoder(EfficientCheckpointModule):
         """
         super().__init__(**kwargs)
 
-        self.save_hyperparameters(ignore="tokenizer")
+        self.save_hyperparameters(ignore=["tokenizer", "model_object"])
         self.config = config = self.hparams
         self.tokenizer = kwargs["tokenizer"]
 
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(config.model, cache_dir=config.cache_dir)
+        if kwargs.get("model_object") is None:
+            self.model = AutoModelForSeq2SeqLM.from_pretrained(config.model, cache_dir=config.cache_dir)
 
-        # free up local space after loading in memory
-        if config.free_up_space:
-            os.system(f"rm -rf {config.cache_dir}")
+            # free up local space after loading in memory
+            if config.free_up_space:
+                os.system(f"rm -rf {config.cache_dir}")
 
-        self.model = modify_transformer(self.model, config)
+            self.model = modify_transformer(self.model, config)
+        else:
+            self.model = kwargs["model_object"]
 
         self.pad_token_id = self.tokenizer.pad_token_id
         self.use_deepspeed = self.config.compute_strategy.startswith("deepspeed")
