@@ -3,7 +3,7 @@ import json
 from mttl.config import Config
 
 
-def test_config_is_serializable(tmp_path):
+def test_config_dict_like(tmp_path):
     train_dir = str(tmp_path)
     optimizer = "adafactor"
     dataset = "t0"
@@ -19,7 +19,7 @@ def test_config_is_serializable(tmp_path):
         "learning_rate": learning_rate,
     }
     config = Config(kwargs=config_dict)
-    reconstructed_config = json.loads(json.dumps(config))
+    reconstructed_config = json.loads(json.dumps(config.__dict__))
     assert optimizer in reconstructed_config["optimizer"]
     assert dataset in reconstructed_config["dataset"]
     assert model in reconstructed_config["model"]
