@@ -82,7 +82,7 @@ def main(config):
     subsample = 500_000
     clusters = [1, 5, 10, 15, 20, 25, 30, 35, 50]
 
-    chunks = glob.glob(config.embeddings_path + "*-chunk*")
+    chunks = glob.glob(f'{config.embeddings_path}/*-chunk*')
     if not len(chunks):
         # we still expand to help a bit the user
         chunks = [list(glob.glob(config.embeddings_path))[0]]
@@ -93,7 +93,8 @@ def main(config):
     train_chunks = len(chunks) - 1 or 1
     subsample_chunk = subsample // train_chunks
 
-    for chunk in chunks:
+    for i, chunk in enumerate(chunks):
+        print(f'loading {i}/{len(chunks)} chunk', end='\r')
         chunk_data = Encodings.load(chunk)
         # subsample by num of chunks
         indices = np.random.choice(
