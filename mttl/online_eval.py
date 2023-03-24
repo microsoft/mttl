@@ -28,7 +28,7 @@ class T0OnlineZeroShot(Callback):
         # and restore backup at the end
         if trainer.global_step % self.every_steps == 0:            
             device = pl_module.device
-            result = torch.zeros(1).to(pl_module.device)
+            result = torch.zeros(len(self.data)).to(pl_module.device)
 
             ft_wrapper = T0EncoderDecoder(
                 **pl_module.hparams,
@@ -42,18 +42,16 @@ class T0OnlineZeroShot(Callback):
                 enable_checkpointing=False,
             )
 
-            all_results = []
-            for online_data in self.data:
+            for i, online_data in enumerate(self.data):
                 results = trainer.test(ft_wrapper, datamodule=online_data)[0]
-                result[0] = results["test/acc_0shot"]
-                all_results.append(result[0])
+                result[i] = results["test/acc_0shot"]
 
             del trainer
 
             pl_module.model = pl_module.model.to(device)
             pl_module.log(
                 "test/zero_shot_perf",
-                torch.tensor(all_results).mean(),
+                result.mean(),
                 prog_bar=True,
                 on_step=True,
                 on_epoch=False,
