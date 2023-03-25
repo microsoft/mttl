@@ -88,7 +88,7 @@ def main(config):
         chunks = [list(glob.glob(config.embeddings_path))[0]]
 
     # load all chunks and concatenate to the above lists
-    data = Encodings()
+    data = None
 
     train_chunks = len(chunks) - 1 or 1
     subsample_chunk = subsample // train_chunks
@@ -96,10 +96,15 @@ def main(config):
     for i, chunk in enumerate(chunks):
         print(f'loading {i}/{len(chunks)} chunk', end='\r')
         chunk_data = Encodings.load(chunk)
+
         # subsample by num of chunks
         indices = np.random.choice(
             len(chunk_data.hashes), min(subsample_chunk, len(chunk_data.hashes)), replace=False
         )
+        if data is None:
+            data = Encodings(input_type=chunk_data.input_type)
+        # the input type should be consistent across all chunks
+        assert data.input_type == chunk_data.input_type
         # pick indices from hashes, embeds, task_ids and flags
         data.hashes.extend(np.asarray(chunk_data.hashes)[indices].tolist())
         data.encodings.extend(np.asarray(chunk_data.encodings)[indices].tolist())
