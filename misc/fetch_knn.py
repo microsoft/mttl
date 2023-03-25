@@ -168,13 +168,12 @@ def main(config):
                 index.reset()
                 index.add(centroids.astype("float32"))
 
-            cluster_infos = ClusterInfos()
+            cluster_infos = ClusterInfos(input_type=data.input_type)
 
             # assignment
             for chunk in chunks:
-                data = Encodings.load(chunk)
-
-                embeds = np.asarray(data.encodings).astype("float32")
+                chunk_data = Encodings.load(chunk)
+                embeds = np.asarray(chunk_data.encodings).astype("float32")
 
                 if use_normalization:
                     embeds = embeds / np.linalg.norm(embeds, axis=1, keepdims=True)
@@ -189,10 +188,11 @@ def main(config):
 
                 D, I = index.search(embeds, int(n_clusters))
 
-                cluster_infos.hashes.extend(data.hashes)
-                cluster_infos.task_names.extend(data.task_names)
+                cluster_infos.hashes.extend(chunk_data.hashes)
+                cluster_infos.task_names.extend(chunk_data.task_names)
                 cluster_infos.cluster_ids.extend(torch.from_numpy(I[:, 0]).flatten().tolist())
-                cluster_infos.is_test.extend(data.is_test)
+                cluster_infos.is_test.extend(chunk_data.is_test)
+                assert chunk_data.input_type == cluster_infos.input_type
 
                 distances = np.zeros((D.shape[0], D.shape[1]))
                 for i in range(D.shape[0]):
