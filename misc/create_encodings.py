@@ -160,6 +160,7 @@ def encode_ni(config, model):
 def encode_t0(config, model):
     next_task = 0
     chunk = 0
+
     data = Encodings(input_type="instruction" if config.encode_instruction else "input")
 
     dm = T0PretrainDataModule(config)

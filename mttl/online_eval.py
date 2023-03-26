@@ -5,6 +5,26 @@ from pytorch_lightning import Trainer
 
 
 class T0OnlineZeroShot(Callback):
+    TASKS = [
+        "copa",
+        "h-swag",
+        "storycloze",
+        "winogrande",
+        "wsc",
+        "wic",
+        "rte",
+        "cb",
+        "anli-r1",
+        "anli-r2",
+        "anli-r3",
+    ]
+    
+    EARLY_STOP_TASKS = [
+        "copa",
+        "winogrande",
+        "anli-r1"
+    ]
+
     def __init__(self, every_steps):
         super().__init__()
 
@@ -14,7 +34,7 @@ class T0OnlineZeroShot(Callback):
         from mttl.datamodule.t0_data_module import T0FinetuneDataModule
 
         self.data = []
-        for task in ["copa", "winogrande", "anli-r1"]:
+        for task in self.TASKS:
             config = copy.deepcopy(pl_module.hparams)
             config.finetune_task_name = task
 
@@ -26,9 +46,11 @@ class T0OnlineZeroShot(Callback):
 
         # create backup of the current pl_module weights
         # and restore backup at the end
-        if trainer.global_step % self.every_steps == 0:            
+        if batch_idx % self.every_steps == 0:
             device = pl_module.device
+
             result = torch.zeros(len(self.data)).to(pl_module.device)
+            es_result = torch.zeros(len(self.EARLY_STOP_TASKS)).to(pl_module.device)
 
             ft_wrapper = T0EncoderDecoder(
                 **pl_module.hparams,
@@ -46,9 +68,20 @@ class T0OnlineZeroShot(Callback):
                 results = trainer.test(ft_wrapper, datamodule=online_data)[0]
                 result[i] = results["test/acc_0shot"]
 
+            for i, task in enumerate(self.EARLY_STOP_TASKS):
+                es_result[i] = result[self.TASKS.index(task)]
+
             del trainer
 
             pl_module.model = pl_module.model.to(device)
+            pl_module.log(
+                "test/es_zero_shot_perf",
+                es_result.mean(),
+                prog_bar=True,
+                on_step=True,
+                on_epoch=False,
+                sync_dist=False,
+            )
             pl_module.log(
                 "test/zero_shot_perf",
                 result.mean(),

@@ -82,13 +82,13 @@ def main(config):
     subsample = 500_000
     clusters = [1, 5, 10, 15, 20, 25, 30, 35, 50]
 
-    chunks = glob.glob(f'{config.embeddings_path}/*-chunk*')
+    chunks = glob.glob(f'{config.embeddings_path}*-chunk*')
     if not len(chunks):
         # we still expand to help a bit the user
         chunks = [list(glob.glob(config.embeddings_path))[0]]
 
     # load all chunks and concatenate to the above lists
-    data = Encodings()
+    data = None
 
     train_chunks = len(chunks) - 1 or 1
     subsample_chunk = subsample // train_chunks
@@ -96,10 +96,15 @@ def main(config):
     for i, chunk in enumerate(chunks):
         print(f'loading {i}/{len(chunks)} chunk', end='\r')
         chunk_data = Encodings.load(chunk)
+
         # subsample by num of chunks
         indices = np.random.choice(
             len(chunk_data.hashes), min(subsample_chunk, len(chunk_data.hashes)), replace=False
         )
+        if data is None:
+            data = Encodings(input_type=chunk_data.input_type)
+        # the input type should be consistent across all chunks
+        assert data.input_type == chunk_data.input_type
         # pick indices from hashes, embeds, task_ids and flags
         data.hashes.extend(np.asarray(chunk_data.hashes)[indices].tolist())
         data.encodings.extend(np.asarray(chunk_data.encodings)[indices].tolist())
@@ -163,13 +168,12 @@ def main(config):
                 index.reset()
                 index.add(centroids.astype("float32"))
 
-            cluster_infos = ClusterInfos()
+            cluster_infos = ClusterInfos(input_type=data.input_type)
 
             # assignment
             for chunk in chunks:
-                data = Encodings.load(chunk)
-
-                embeds = np.asarray(data.encodings).astype("float32")
+                chunk_data = Encodings.load(chunk)
+                embeds = np.asarray(chunk_data.encodings).astype("float32")
 
                 if use_normalization:
                     embeds = embeds / np.linalg.norm(embeds, axis=1, keepdims=True)
@@ -184,10 +188,11 @@ def main(config):
 
                 D, I = index.search(embeds, int(n_clusters))
 
-                cluster_infos.hashes.extend(data.hashes)
-                cluster_infos.task_names.extend(data.task_names)
+                cluster_infos.hashes.extend(chunk_data.hashes)
+                cluster_infos.task_names.extend(chunk_data.task_names)
                 cluster_infos.cluster_ids.extend(torch.from_numpy(I[:, 0]).flatten().tolist())
-                cluster_infos.is_test.extend(data.is_test)
+                cluster_infos.is_test.extend(chunk_data.is_test)
+                assert chunk_data.input_type == cluster_infos.input_type
 
                 distances = np.zeros((D.shape[0], D.shape[1]))
                 for i in range(D.shape[0]):
