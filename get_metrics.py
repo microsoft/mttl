@@ -25,10 +25,13 @@ def get_task_name_from_file(result):
 @click.option("--dataset")
 @click.option("--latex", is_flag=True)
 @click.option("--hps")
+@click.option("--tasks")
 @click.option("--nt")
-def main(files, dataset, latex, hps, nt):
+def main(files, dataset, latex, hps, tasks, nt):
     res = []
     models = []
+    if tasks:
+        tasks = tasks.split(",")
 
     if dataset == "ni":
         for arg in files:
@@ -151,9 +154,15 @@ def main(files, dataset, latex, hps, nt):
             print("Processing {:60s} {:02d} files".format(model, len(result_files)))
 
             results = []
+            tasks_found = []
             for result in result_files:
                 data = pandas.read_csv(result)
                 task_name = data["prefix"][0]
+                
+                if tasks and task_name not in tasks:
+                    continue
+                else:
+                    tasks_found.append(task_name)
 
                 zero_shot = data.loc[data["step"] == 0]["test/acc_0shot"].dropna().values * 100
                 data = data.loc[data["step"] != 0]
@@ -176,6 +185,9 @@ def main(files, dataset, latex, hps, nt):
                             "zs_perf": zero_shot[trial] if len(zero_shot) > 1 else zero_shot[0],
                         }
                     )
+
+            if tasks and len(tasks_found) != len(tasks):
+                continue
 
             if not results:
                 continue
