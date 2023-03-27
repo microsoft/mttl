@@ -1,6 +1,6 @@
 {
     "optimizer": "adafactor",
-    "train_dir": "$T0_DATA_DIR",
+    "train_dir": "tmp",
     "compute_strategy": "",
     "warmup_proportion": 0.06,
     "total_steps": 1000,
