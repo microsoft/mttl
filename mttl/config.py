@@ -5,16 +5,17 @@ import argparse
 from string import Template
 
 
-class Config(object):
+class Config:
     def __init__(self, filenames=None, kwargs=None):
-        # Stores personalization of the config file
-        self._updated_kwargs = set()
-
+        # Stores personalization of the config file in a dict (json serializable)
+        self._updated_kwargs = {}
+        self.cache_dir = os.getenv("CACHE_DIR", "./cache")
+        self.free_up_space = False
         # Data config
         self.dataset = None
         self.custom_tasks_splits = None
         self.train_dir = os.getenv("AMLT_DATA_DIR", "/tmp/")
-        self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "/datadrive/polytropon/checkpoints")
+        self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "./output")
         self.finetune_task_name = None
         self.example_to_ids_path = None  # path to clustering of data
         self.embeddings_path = None
@@ -156,7 +157,7 @@ class Config(object):
                 v = Template(v).substitute(os.environ)
 
             setattr(self, k, v)
-            self._updated_kwargs.add(k)
+            self._updated_kwargs[k] = v
 
     def __getitem__(self, item):
         return getattr(self, item, None)

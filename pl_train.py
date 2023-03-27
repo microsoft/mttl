@@ -60,8 +60,8 @@ def run_multitask(args):
     loggers = []
     if os.environ.get("WANDB_API_KEY"):
         wandb_logger = pl.loggers.WandbLogger(
-            project="polytropon-ni",
-            name=os.environ.get("AMLT_JOB_NAME", args.exp_name),
+            project=args.wandb_project,
+            name=args.exp_name,
         )
         wandb_logger.experiment.save("*.py")
         loggers.append(wandb_logger)
