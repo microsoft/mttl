@@ -6,5 +6,6 @@ do
     -k \
     checkpoint=${AMLT_MAP_INPUT_DIR} \
     output_dir=${AMLT_OUTPUT_DIR}/${dataset} \
-    finetune_type=A
+    finetune_type=A \
+    $*
 done

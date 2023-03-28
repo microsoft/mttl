@@ -5,8 +5,8 @@ import re
 import numpy as np
 from types import MethodType
 from torch.distributions.relaxed_bernoulli import RelaxedBernoulli
+
 from mttl.models.utils import RoutingInfo
-from mttl.cluster_tuning.cluster_reader import ClusterResult
 
 
 EPS = 1e-12
@@ -413,16 +413,13 @@ def modify_with_poly(transformer, config, PolyLayer):
         if re.fullmatch(config.lora_modules, m_name):
             for c_name, layer in dict(module.named_children()).items():
                 if re.fullmatch(config.lora_layers, c_name):
-                    assert isinstance(
-                        layer, nn.Linear
-                    ), f"LoRA can only be applied to torch.nn.Linear, but {layer} is {type(layer)}."
-
                     identifier = _extract_identifier(f'{m_name}.{c_name}', config.poly_granularity)
                     if identifier not in selectors.keys():
                         selectors[identifier] = get_selector(config)
                     selector = selectors[identifier]
                     total_layers += 1
 
+                    print(f"Patching {m_name}.{c_name}...")
                     setattr(
                         module,
                         c_name,
@@ -434,7 +431,7 @@ def modify_with_poly(transformer, config, PolyLayer):
                         ),
                     )
 
-    print(f'created {len(selectors)} for a total of {total_layers} adapted layers') 
+    print(f'created {len(selectors)} selectors for a total of {total_layers} adapted layers')
     return SkilledModel.register_functions(transformer)
 
 

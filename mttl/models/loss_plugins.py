@@ -2,30 +2,6 @@ import torch
 from torch import nn
 
 
-class AdvMaskPlugin(nn.Module):
-    name = "adv_l1"
-
-    def __init__(self, model, factor=1.):
-        super().__init__()
-        self.factor = factor
-
-    def compute_loss(self, model, batch, **kwargs):
-        # tasks have already been propagated
-        num = 0.
-        loss = 0.
-
-        for name, param in model.named_parameters():
-            if "adv_mask" in name:
-                # minimize l1 loss between parameter and 1
-                loss += (1. - param.mean()).detach() * (param - 1).abs().sum(-1)
-                num += 1.
-            if "adv_e_mask" in name:
-                # just make every score close to each other
-                loss += param.pow(2.).mean(-1)
-                num += 1.
-        return (loss / num) if num else 0.
-
-
 class TaskPredictionPlugin(nn.Module):
     name = "task_pred"
 
