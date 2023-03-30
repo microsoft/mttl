@@ -141,28 +141,13 @@ class NIDatasetReader(object):
         """Format the input and iterate over all outputs corresponding to that input."""
         task_name = instance["Task"] + ". "
 
-        task_input = ""
-        # add the input first.
-        task_input += "Now complete the following example -\n"
-        task_input += f"Input: {instance['Instance']['input'].strip()}"
-        if not task_input[-1] in string.punctuation:
-            task_input += "."
-        task_input += "\n"
-        task_input += "Output: "
+        task_input = cls._prepare_input(instance)
 
-        definition = ""
         if use_task_descriptions:
-            if isinstance(instance["Definition"], list):
-                definition = (
-                    "Definition: " + instance["Definition"][0].strip()
-                )  # TODO: should we use <Definition>?
-            else:
-                definition = "Definition: " + instance["Definition"].strip()
-            if not definition[-1] in string.punctuation:
-                definition += "."
-            definition += "\n\n"
+            definition = cls._prepare_definition(instance)
+        else:
+            definition = ""
 
-        # try to add positive examples.
         pos_examples = []
         if num_pos_examples > 0:
             for idx, pos_example in enumerate(
@@ -201,8 +186,6 @@ class NIDatasetReader(object):
                 tokenized_source[:max_input_length], skip_special_tokens=True
             )
 
-        # task information is the task name + definition + pos examples
-        task_name_no_id = "_".join(task_name.split("_")[1:])
         task_information = definition
 
         # Select all references during training, this should only contain one reference during testing
@@ -239,20 +222,43 @@ class NIDatasetReader(object):
 
         self.data = self.load_data(self.data_path, self.tasks)
 
+    @classmethod
+    def _prepare_input(cls, example):
+        task_input = ""
+        # add the input first.
+        task_input += "Now complete the following example -\n"
+        task_input += f"Input: {example['Instance']['input'].strip()}"
+        if not task_input[-1] in string.punctuation:
+            task_input += "."
+        task_input += "\n"
+        task_input += "Output: "
+        return task_input
+
+    @classmethod
+    def _prepare_definition(cls, example):
+        if isinstance(example["Definition"], list):
+            definition = (
+                "Definition: " + example["Definition"][0].strip()
+            )
+        else:
+            definition = "Definition: " + example["Definition"].strip()
+        if not definition[-1] in string.punctuation:
+            definition += "."
+        definition += "\n\n"
+        return definition
+
     def read_all_instructions(self):
         """Read all instructions from the dataset.
         """
         all_instructions = []
         for data in self.data:
-            if isinstance(data["Definition"], list):
-                definition = (
-                    "Definition: " + data["Definition"][0].strip()
-                )
-            else:
-                definition = "Definition: " + data["Definition"].strip()
-            if not definition[-1] in string.punctuation:
-                definition += "."
-            definition += "\n\n"
+            # TODO: a bit of a lame loop. Definition is repeated inside each example.
+            # yes I know it's a bit lame the preprocessing step should be changed in the future.
+            all_examples = data["train_examples"] + data["dev_examples"] + data["test_examples"]
+            if not all_examples:
+                continue
+
+            definition = self._prepare_definition(all_examples[0])
             all_instructions.append(definition)
         return all_instructions
 
