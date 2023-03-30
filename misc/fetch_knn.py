@@ -1,3 +1,5 @@
+import os
+import sys
 import glob
 import torch
 import faiss
@@ -11,64 +13,6 @@ from mttl.config import parse_config
 from mttl.cluster_tuning.encodings import Encodings, ClusterInfos
 
 
-def balance_clusters(indices, distances, centroids, reprs):
-    # distances
-    dists = np.zeros((distances.shape[0], distances.shape[1]))
-    for i in range(dists.shape[0]):
-        for j in range(dists.shape[1]):
-            dists[i, indices[i, j]] = distances[i, j]
-
-    size_of_clusters = np.bincount(indices[:, 0])
-    sorted_clusters = np.argsort(size_of_clusters)[::-1]
-
-    examples_by_cluster = [set() for _ in range(len(sorted_clusters))]
-    for example in range(len(indices)):
-        examples_by_cluster[indices[example, 0]].add(example)
-
-    K = len(indices) // len(sorted_clusters)
-
-    for i, donor_cluster in enumerate(sorted_clusters[:-1]):
-        # distances to all other clusters
-        donor_examples = list(examples_by_cluster[donor_cluster])
-        # Examples x Clusters
-        donor_dists = dists[np.asarray(donor_examples)]
-        # sort by minimal distance to other clusters
-        donor_dists[:, sorted_clusters[: i + 1]] = np.inf
-        # the min distance to any other cluster than the donor cluster
-        # (Examples,): Distance to the closest cluster
-        closest_clusters_dist = np.min(donor_dists, axis=-1)
-        # (Examples,): Id of the closest cluster
-        closest_clusters_idx = np.argmin(donor_dists, axis=-1)
-        # (Examples,): Closest examples to any cluster
-        sorted_closest_examples_idx = np.argsort(closest_clusters_dist)
-        # (Examples,): Examples sorted by closeness to any cluster
-
-        sorted_closest_examples = [
-            donor_examples[i] for i in sorted_closest_examples_idx
-        ]
-        sorted_closest_cluster = [
-            closest_clusters_idx[i] for i in sorted_closest_examples_idx
-        ]
-
-        for cand_ex, receiver_cluster in zip(
-            sorted_closest_examples, sorted_closest_cluster
-        ):
-            if len(examples_by_cluster[donor_cluster]) <= K:
-                break
-
-            # transfer the example to the receiver cluster
-            examples_by_cluster[receiver_cluster].add(cand_ex)
-            examples_by_cluster[donor_cluster].remove(cand_ex)
-
-    # recompute centroids now
-    centroids = np.zeros(centroids.shape)
-    for cluster in range(len(sorted_clusters)):
-        centroids[cluster, :] = reprs[
-            np.asarray(list(examples_by_cluster[cluster]))
-        ].mean(0)
-    return centroids
-
-
 def main(config):
     """
     Get cluster assignments
@@ -77,10 +21,10 @@ def main(config):
     use_normalization = True
     use_centering = False
     use_constraints = False
-    algo = "faiss"
+    algo = "kmeans_balanced"
 
     subsample = 500_000
-    clusters = [1, 5, 10, 15, 20, 25, 30, 35, 50]
+    clusters = [5, 10, 15, 20, 25, 30, 35, 50]
 
     chunks = glob.glob(f'{config.embeddings_path}*-chunk*')
     if not len(chunks):
@@ -110,6 +54,8 @@ def main(config):
         data.encodings.extend(np.asarray(chunk_data.encodings)[indices].tolist())
         data.task_ids.extend(np.asarray(chunk_data.task_ids)[indices].tolist())
         data.is_test.extend(np.asarray(chunk_data.is_test)[indices].tolist())
+
+        if i == 1 : break
 
     # name of files
     def filename(n_clusters):
@@ -147,26 +93,37 @@ def main(config):
         # check if the centroids have been computed without soft clustering
         print("computing cluster assignments")
 
-        if algo == "faiss":
-            kmeans = faiss.Kmeans(
-                training_embeds.shape[-1],
-                int(n_clusters),
-                niter=30,
-                verbose=True,
-                gpu=True,
-                nredo=2,
-                max_points_per_centroid=10_000_000,
-            )
-            kmeans.train(training_embeds)
-
-            index = kmeans.index
-
-            if use_constraints:
-                D, I = index.search(training_embeds, int(n_clusters))
-                centroids = balance_clusters(I, D, kmeans.centroids, training_embeds)
-                # recompute centroids
-                index.reset()
-                index.add(centroids.astype("float32"))
+        if 'kmeans' in algo:
+            if 'faiss' in algo:
+                kmeans = faiss.Kmeans(
+                    training_embeds.shape[-1],
+                    int(n_clusters),
+                    niter=30,
+                    verbose=True,
+                    gpu=True,
+                    nredo=2,
+                    max_points_per_centroid=10_000_000,
+                )
+                kmeans.train(training_embeds)
+                index = kmeans.index
+            elif 'balanced' in algo:
+                # https://github.com/pclucas14/balanced-kmeans
+                # sys.path += [join(os.environ.get("HOME"), 'balanced-kmeans')]
+                from kmeans_pytorch import KMeans
+                device = torch.device('cuda')
+                kmeans = KMeans(
+                    n_clusters=n_clusters, 
+                    device=device,
+                    balanced=True 
+                )
+                kmeans.fit(
+                    torch.from_numpy(training_embeds).cuda(), 
+                    distance='euclidean', 
+                    iter_limit=30, 
+                )
+                centroids = kmeans.cluster_centers
+                index = faiss.IndexFlatL2(centroids.size(-1))
+                index.add(centroids.cpu())
 
             cluster_infos = ClusterInfos(input_type=data.input_type)
 
