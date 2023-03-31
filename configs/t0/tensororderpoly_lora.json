@@ -1,0 +1,14 @@
+{
+    "n_skills": 8,
+    "n_splits": 4,
+    "n_tasks": 8,
+    "model_modifier": "tensororderpoly_lora",
+    "lora_rank": 16,
+    "poly_granularity": "finegrained",
+    "lora_modules": ".*SelfAttention|.*EncDecAttention|.*DenseReluDense",
+    "lora_layers": "q|k|v|o",
+    "trainable_param_names": ".*weight_leafs_[ab].*|.*module_logits.*",
+    "module_logits_learning_rate": 0.1,
+    "use_t0_templates_as_tasks": false,
+    "adafactor_scale_parameter": false
+}

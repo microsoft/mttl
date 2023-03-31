@@ -132,6 +132,7 @@ def main(files, dataset, latex, hps, nt):
             res.append(pandas.DataFrame(results))
     elif dataset == "t0":
         for arg in files:
+            print(arg)
             skipped = []
             model = arg.split("/")[-2]
             result_files = glob.glob(arg + "/**/result.csv", recursive=True)
