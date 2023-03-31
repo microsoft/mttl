@@ -1,5 +1,10 @@
 from mttl.models.lora import modify_with_lora, modify_with_ia3
-from mttl.models.poly import modify_with_poly_lora, modify_with_poly_ia3, modify_with_tensorpoly_lora,modify_with_tensororderpoly_lora
+from mttl.models.poly import (modify_with_poly_lora, 
+                              modify_with_poly_ia3, 
+                              modify_with_tensorpoly_lora,
+                              modify_with_tensororderpoly_lora,
+                              modify_with_tensorpoly_ia3,
+                              modify_with_tensororderpoly_ia3)
 
 
 modifier_dict = {
@@ -9,6 +14,8 @@ modifier_dict = {
     "poly_ia3": modify_with_poly_ia3,
     "tensorpoly_lora": modify_with_tensorpoly_lora,
     "tensororderpoly_lora": modify_with_tensororderpoly_lora,
+    "tensorpoly_ia3": modify_with_tensorpoly_ia3,
+    "tensororderpoly_ia3": modify_with_tensororderpoly_ia3,
 }
 
 
