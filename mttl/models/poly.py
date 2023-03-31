@@ -698,6 +698,91 @@ class PolyIA3Tensor(PolytroponAdapter):
         A = torch.einsum("bqs,sqd->bqd", (mixing_weights, weight))
         A = A.reshape(input.size(0), 1, -1)
         return F.linear(input, self.weight, self.bias) * A
+
+class PolyIA3TensorOrder(PolytroponAdapter):
+    """PolyIA3 
+
+    The rank is the number of skills and the splits is order of tensor. 
+
+    Args:
+        PolytroponAdapter (_type_): _description_
+    """
+    def __init__(self, config, task_id_ptr, linear_layer, selector=None):
+        super().__init__()
+
+        self.n_splits = config.n_splits
+        self.n_tasks = config.n_tasks
+        self.n_skills = config.n_skills
+        self.in_features = linear_layer.in_features
+        self.out_features = linear_layer.out_features
+        self.weight = linear_layer.weight
+        self.bias = linear_layer.bias
+        self.task_id_ptr = task_id_ptr
+
+        assert self.out_features % config.n_splits == 0
+
+        self.embedding_size = linear_layer.out_features
+        self.order = self.n_splits
+        self.tensor_rank = self.n_skills
+        self.embedding_dim_leaf = math.ceil(
+            (self.embedding_size) ** (1 / self.order)
+        )
+        print("leaf_dim", self.embedding_dim_leaf)
+        self.weight_leafs = nn.Parameter(
+            torch.ones( 
+                self.order,
+                self.tensor_rank,
+                1,
+                self.embedding_dim_leaf,
+            )
+        )
+        print("self.weight_leafs_size", self.weight_leafs.size())
+
+        if selector is None:
+            self.selector = get_selector(config)
+        else:
+            self.selector = selector
+    def tensor_product_construct(self, tensor_parameters, embedding_dim):
+
+        w = tensor_parameters
+        batch_size = tensor_parameters.size()[0]
+        w01 = w[:,0,:,:,:,None] * w[:,1,:,:,None,:]
+        # print(w[:,:,:,:].size())
+        w01 = w01.view(batch_size, self.tensor_rank, 1 , -1)
+        # w01 = self.layerone_normalization(w01)
+        
+        # print(w01.size())
+        w23 = (w[:,2,:,:,:,None] * w[:,3,:,:,None,:] )
+        w23 = w23.view(batch_size, self.tensor_rank,1, -1)
+        # w23 = self.layertwo_normalization(w23)
+
+        w0123 = (w01[:,:,:,:,None] * w23[:,:,:,None,:] )
+        w0123 = w0123.view(batch_size, self.tensor_rank, 1, -1)
+        # sum the rank
+        w0123 = w0123.sum(1)
+
+        return w0123[:, :, : embedding_dim]
+    def forward(self, input):
+        task_id = self.routing_infos.task_ids
+
+        repeat = input.size(0) // task_id.size(0)
+
+        # this repeat follows the patten in `model.predict()` line 152
+        if repeat:
+            self.routing_infos.repeat_interleave(repeat)
+
+        # bs, order, rank
+        mixing_weights = self.selector(self.routing_infos)
+        A = torch.einsum("bor,ored->bored", (mixing_weights, self.weight_leafs))
+
+        # construct the weight: tensor_rank, 1, embedding_size 
+        aggregation = self.tensor_product_construct(A, self.embedding_size)
+        # A = A.reshape(input.size(0), 1, -1)
+        return F.linear(input, self.weight, self.bias) * aggregation
+    def extra_repr(self):
+        return "n_skills={}, in_features={}, out_features={}, bias={}".format(
+            self.n_skills, self.in_features, self.out_features, self.bias is not None
+        )
 class PolyIA3Linear(PolytroponAdapter):
     def __init__(self, config, task_id_ptr, linear_layer, selector=None):
         super().__init__()
@@ -805,6 +890,9 @@ def modify_with_poly(transformer, config, PolyLayer):
 
     print(f'created {len(selectors)} for a total of {total_layers} adapted layers') 
     return SkilledModel.register_functions(transformer)
+
+def modify_with_tensororderpoly_ia3(transformer, config):
+    return modify_with_poly(transformer, config, PolyIA3TensorOrder)
 
 def modify_with_tensorpoly_ia3(transformer, config):
     return modify_with_poly(transformer, config, PolyIA3Tensor)
