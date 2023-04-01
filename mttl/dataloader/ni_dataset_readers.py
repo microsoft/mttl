@@ -114,7 +114,7 @@ class NIDatasetReader(object):
     metric = "rougeL"
 
     @classmethod
-    def load_data(cls, data_path, tasks=None):
+    def load_data(cls, data_path, tasks=None, val_examples_per_task=None, test_examples_per_task=None):
         data = []
         tasks = tasks or [
             os.path.basename(t[:-5]) for t in list(glob.glob(data_path + "/*.json"))
@@ -126,6 +126,10 @@ class NIDatasetReader(object):
                 # sanity check
                 for example in data_["dev_examples"] + data_["test_examples"]:
                     assert len(example["Instance"]["output"]) == 1
+                if val_examples_per_task:
+                    data_["dev_examples"] = data_["dev_examples"][:val_examples_per_task]
+                if test_examples_per_task:
+                    data_["test_examples"] = data_["test_examples"][:test_examples_per_task]
                 data.append(data_)
         return data
 
@@ -178,14 +182,6 @@ class NIDatasetReader(object):
                     break
 
         source = task_name + definition + "".join(pos_examples) + task_input
-        tokenized_source = tokenizer(source)["input_ids"]
-
-        # Trim input to max_input_length
-        if len(tokenized_source) > max_input_length:
-            source = tokenizer.decode(
-                tokenized_source[:max_input_length], skip_special_tokens=True
-            )
-
         task_information = definition
 
         # Select all references during training, this should only contain one reference during testing
@@ -204,6 +200,8 @@ class NIDatasetReader(object):
         max_output_length=128,
         num_positive_examples=0,
         use_task_descriptions=True,
+        val_examples_per_task=None,
+        test_examples_per_task=None,
     ):
         self.data_path = data_path
         self.tokenizer = tokenizer
@@ -215,12 +213,19 @@ class NIDatasetReader(object):
         self.max_output_length = max_output_length
         self.use_task_descriptions = use_task_descriptions
         self.num_pos_examples = num_positive_examples
+        self.val_examples_per_task = val_examples_per_task
+        self.test_examples_per_task = test_examples_per_task
 
         self.task2id = task2id
         self.example2id = example2id
         self.task_embed_path = task_embed_path
 
-        self.data = self.load_data(self.data_path, self.tasks)
+        self.data = self.load_data(
+            self.data_path,
+            self.tasks,
+            self.val_examples_per_task,
+            self.test_examples_per_task,
+        )
 
     @classmethod
     def _prepare_input(cls, example):
