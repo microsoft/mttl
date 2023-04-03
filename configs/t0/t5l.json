@@ -1,5 +1,5 @@
 {
     "exp_name": "base_t5_large",
-    "model": "t5-large"
+    "model": "google/t5-xl-lm-adapt"
 }
 
