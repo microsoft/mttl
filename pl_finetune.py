@@ -39,6 +39,7 @@ ARGS_TO_OVERWRITE = [
     "poly_use_shared_skill",
     "poly_average_correction",
     "poly_selector",
+    "poly_granularity",
     "lora_rank",
     "lora_modules",
     "lora_layers",
