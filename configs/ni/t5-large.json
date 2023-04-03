@@ -1,5 +1,4 @@
 {
     "model": "t5-large",
     "precision": "bf16",
-    "compute_strategy": "ddp"
 }

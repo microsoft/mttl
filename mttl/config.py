@@ -34,7 +34,7 @@ class Config(object):
         self.use_t0_few_shot_training_set = False  # if True, then use 100 examples per task during training + 100 examples per validation task
 
         # Training config
-        self.compute_strategy = "ddp"
+        self.compute_strategy = None
         self.scheduler = "linear_decay_with_warmup"
         self.checkpoint = None  # load from checkpoint
         self.checkpoint_step = None  # load from checkpoint in format of global_stepX.pt

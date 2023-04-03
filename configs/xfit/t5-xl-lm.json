@@ -3,6 +3,5 @@
     "train_batch_size": 1,
     "gradient_accumulation_steps": 8,
     "predict_batch_size": 8,
-    "precision": "bf16",
-    "compute_strategy": "ddp"
+    "precision": "bf16"
 }

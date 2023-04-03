@@ -3,6 +3,7 @@ import pytorch_lightning as pl
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 
+from mttl.online_eval import NIOnlineZeroShot, T0OnlineZeroShot
 from mttl.config import parse_config
 from mttl.callbacks import ProgressCallback
 from mttl.datamodule.ni_data_module import NIPretrainDataModule
@@ -84,6 +85,11 @@ def run_multitask(args):
     mode = "min"
 
     if args.dataset in ["ni", "xfit"]:
+        if args.ni_online_eval:
+            callbacks.append(NIOnlineZeroShot(args.eval_every))
+            monitor = "val/zero_shot_perf"
+            mode = "max"
+
         checkpoint_callback = ModelCheckpoint(
             dirpath=args.output_dir,
             monitor=monitor,
@@ -97,8 +103,6 @@ def run_multitask(args):
     else:
         # no need for checkpointing in t0 as we checkpoint manually in the module    
         if args.t0_online_eval:
-            from mttl.online_eval import T0OnlineZeroShot
-
             callbacks.append(T0OnlineZeroShot(args.eval_every))
 
         kwargs["enable_checkpointing"] = False
