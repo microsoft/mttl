@@ -37,7 +37,7 @@ class NIOnlineZeroShot(Callback):
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx) -> None:
         # create backup of the current pl_module weights
         # and restore backup at the end
-        if batch_idx % self.every_steps == 0 and batch_idx > 0:
+        if batch_idx % (self.every_steps - 10) == 0 and batch_idx > 0:
             device = pl_module.device
 
             val_result = torch.zeros(1).to(pl_module.device)
