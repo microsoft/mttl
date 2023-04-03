@@ -3,12 +3,12 @@ import pytorch_lightning as pl
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 
-from mttl.online_eval import NIOnlineZeroShot, T0OnlineZeroShot
 from mttl.config import parse_config
 from mttl.callbacks import ProgressCallback
 from mttl.datamodule.ni_data_module import NIPretrainDataModule
 from mttl.datamodule.xfit_data_module import XFitPretrainDataModule
 from mttl.datamodule.t0_data_module import T0PretrainDataModule
+from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.models.encoder_decoder import EncoderDecoder
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.models.monitors import get_monitors
@@ -28,6 +28,9 @@ def run_multitask(args):
     elif args.dataset == "t0":
         model_class = T0EncoderDecoder
         dm = T0PretrainDataModule(args)
+    elif args.dataset == "alpaca":
+        model_class = EncoderDecoder
+        dm = AlpacaDataModule(args)
     else:
         raise NotImplementedError()
 
@@ -84,12 +87,7 @@ def run_multitask(args):
     monitor = "val/loss"
     mode = "min"
 
-    if args.dataset in ["ni", "xfit"]:
-        if args.ni_online_eval:
-            callbacks.append(NIOnlineZeroShot(args.eval_every))
-            monitor = "val/zero_shot_perf"
-            mode = "max"
-
+    if args.dataset in ["ni", "xfit", "alpaca"]:
         checkpoint_callback = ModelCheckpoint(
             dirpath=args.output_dir,
             monitor=monitor,
@@ -103,7 +101,9 @@ def run_multitask(args):
     else:
         # no need for checkpointing in t0 as we checkpoint manually in the module    
         if args.t0_online_eval:
-            callbacks.append(T0OnlineZeroShot(args.eval_every))
+            from mttl.online_eval import T0OnlineZeroShot
+
+            callbacks.append(T0OnlineZeroShot(99_999))
 
         kwargs["enable_checkpointing"] = False
 
@@ -111,7 +111,7 @@ def run_multitask(args):
         gpus=-1,
         accelerator="gpu",
         logger=loggers,
-        num_sanity_val_steps=5,
+        num_sanity_val_steps=0,
         amp_backend="native",
         default_root_dir=args.output_dir,
         max_epochs=args.num_train_epochs,
