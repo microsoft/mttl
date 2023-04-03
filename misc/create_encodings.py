@@ -125,7 +125,7 @@ def convert_dataset(
 
 
 def encode_ni(config, model):
-    config.custom_tasks_splits = "./dataloader/ni_data/train_tasks.txt"
+    config.custom_tasks_splits = "./mttl/dataloader/ni_data/train_tasks.txt"
 
     dm = NIDataModule(config)
     dm.setup("fit")
@@ -141,7 +141,7 @@ def encode_ni(config, model):
         data.is_test.extend(0 for _ in range(len(h)))
 
     # for test tasks
-    config.custom_tasks_splits = "./dataloader/ni_data/test_tasks.txt"
+    config.custom_tasks_splits = "./mttl/dataloader/ni_data/test_tasks.txt"
     dm = NIDataModule(config)
     dm.setup("fit")
 

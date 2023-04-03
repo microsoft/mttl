@@ -6,5 +6,4 @@
     "total_steps": 100,
     "train_batch_size": 8,
     "model": "t5-small",
-    "compute_strategy": ""
 }
