@@ -5,7 +5,7 @@ pytorch-lightning==1.8.6
 wget==3.2
 rouge==1.0.0
 tqdm==4.64.0
-pandas==1.4.2
+pandas==2.0.0
 scikit-learn==1.1.0
 higher==0.2.1
 promptsource
