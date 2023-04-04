@@ -58,7 +58,7 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
             -1,
             input_hash,
             example_id=key,
-            input_text=enc_input,
+            input_text=(enc_input, dec_input),
             instruction_hash=instruction_hash,
         )
         return ex_info
