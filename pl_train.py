@@ -103,7 +103,8 @@ def run_multitask(args):
         if args.t0_online_eval:
             from mttl.online_eval import T0OnlineZeroShot
 
-            callbacks.append(T0OnlineZeroShot(99_999))
+            eval_every = args.eval_every * args.gradient_accumulation_steps 
+            callbacks.append(T0OnlineZeroShot(eval_every))
 
         kwargs["enable_checkpointing"] = False
 
