@@ -4,6 +4,7 @@ from datasets import load_dataset
 from mttl.dataloader.data_utils import ExampleInfo
 from mttl.utils import hash_example
 
+
 class AlpacaTemplate(object):
     @classmethod
     def apply(self, dict_values):

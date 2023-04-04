@@ -23,7 +23,7 @@ class AlpacaDataModule(LightningDataModule):
         return DataLoader(
             self.dev_dataset,
             batch_size=self.config.train_batch_size,
-            shuffle=True,
+            shuffle=False,
             num_workers=16,
             pin_memory=True,
             persistent_workers=True,
@@ -34,7 +34,7 @@ class AlpacaDataModule(LightningDataModule):
         return DataLoader(
             self.dev_dataset,
             batch_size=self.config.train_batch_size,
-            shuffle=True,
+            shuffle=False,
             num_workers=16,
             pin_memory=True,
             persistent_workers=True,
@@ -67,8 +67,7 @@ class AlpacaDataModule(LightningDataModule):
 
         n_tr_samples = int(len(dataset) * 0.925)
         self.train_dataset, self.dev_dataset = torch.utils.data.random_split(
-            dataset, 
-            [n_tr_samples, len(dataset) - n_tr_samples]
+            dataset, [n_tr_samples, len(dataset) - n_tr_samples]
         )
 
         print("Training steps:", len(self.train_dataloader()))
@@ -77,6 +76,7 @@ class AlpacaDataModule(LightningDataModule):
 
 class AlpacaPretrainDataModule(AlpacaDataModule):
     pass
+
 
 class AlpacaFinetuneDataModule(AlpacaDataModule):
     pass
