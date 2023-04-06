@@ -508,8 +508,12 @@ class PolyLoRATensorOrder(PolytroponAdapter):
             with torch.no_grad():
                 self.weight_leafs_a.uniform_(-std, std)
 
+        # ensure that initially, adding the adapter does not change the output
+        if self.use_warmup or self.lora_randb_init:
             with torch.no_grad():
                 self.weight_leafs_b.uniform_(-std, std)
+        else:
+            torch.nn.init.zeros_(self.weight_leafs_b)
 
     def tensor_product_construct(self, tensor_parameters, embedding_dim, flag):
 
@@ -520,10 +524,12 @@ class PolyLoRATensorOrder(PolytroponAdapter):
         w01 = w[:, 0, :, :, None] * w[:, 1, :, None, :]
         # print(w[:,:,:,:].size())
         w01 = w01.view(batch_size, self.rank, -1)
+        #w01 = self.layerone_normalization(w01)
         # print(w01.size())
         # print(w01.size())
         w23 = (w[:, 2, :, :, None] * w[:, 3, :, None, :])
         w23 = w23.view(batch_size, self.rank, -1)
+        #w23 = self.layertwo_normalization(w23)
         # print(w23.size())
         w0123 = (w01[:, :, :, None] * w23[:, :, None, :])
         w0123 = w0123.view(batch_size, self.rank, -1)
@@ -561,6 +567,7 @@ class PolyLoRATensorOrder(PolytroponAdapter):
             B, self.out_features, "down")  # [brd]
 
         adapter_out = input.bmm(A).bmm(B) / self.rank
+        print(adapter_out)
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
@@ -657,6 +664,7 @@ class PolyLoRALinear(PolytroponAdapter):
         B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
 
         adapter_out = input.bmm(A).bmm(B) / self.rank
+        print(adapter_out)
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
