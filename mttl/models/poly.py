@@ -462,16 +462,24 @@ class PolyLoRATensorOrder(PolytroponAdapter):
         else:
             self.selector = selector
 
-        self.embedding_dim_leaf = math.ceil(
+        self.embedding_dim_leaf_a = math.ceil(
+            (self.in_features) ** (1 / self.order)
+        )
+
+        self.embedding_dim_leaf_b = math.ceil(
             (self.out_features) ** (1 / self.order)
         )
+
+        # self.embedding_dim_leaf = math.ceil(
+        #     (self.out_features) ** (1 / self.order)
+        # )
 
         self.weight_leafs_a = nn.Parameter(
             self.weight.new_empty(
                 self.order,
                 self.tensor_rank,
                 self.rank,
-                self.embedding_dim_leaf,
+                self.embedding_dim_leaf_a,
             )
         )
 
@@ -480,14 +488,14 @@ class PolyLoRATensorOrder(PolytroponAdapter):
                 self.order,
                 self.tensor_rank,
                 self.rank,
-                self.embedding_dim_leaf,
+                self.embedding_dim_leaf_b,
             )
         )
 
-        self.layerone_normalization = nn.LayerNorm(
-            normalized_shape=[self.rank, self.embedding_dim_leaf**2])
-        self.layertwo_normalization = nn.LayerNorm(
-            normalized_shape=[self.rank, self.embedding_dim_leaf**2])
+        # self.layerone_normalization = nn.LayerNorm(
+        #     normalized_shape=[self.rank, self.embedding_dim_leaf**2])
+        # self.layertwo_normalization = nn.LayerNorm(
+        #     normalized_shape=[self.rank, self.embedding_dim_leaf**2])
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -516,25 +524,36 @@ class PolyLoRATensorOrder(PolytroponAdapter):
             torch.nn.init.zeros_(self.weight_leafs_b)
 
     def tensor_product_construct(self, tensor_parameters, embedding_dim, flag):
+        if self.order == 1:
+            w = tensor_parameters.squeeze(1)
+            return w
+        if self.order == 2:
+            w = tensor_parameters
+            batch_size = w.size()[0]
+            w01 = w[:, 0, :, :, None] * w[:, 1, :, None, :]
+            w01 = w01.view(batch_size, self.rank, -1)
+            w = w01[:, :, : embedding_dim]
+            #w = self.layerone_normalization(w)
+            return w
+        if self.order == 4:
+            w = tensor_parameters
+            batch_size = w.size()[0]
+            # print(w[:, 0, :, :, None].size())
+            # print(w[:, 1, :, None, :].size())
+            w01 = w[:, 0, :, :, None] * w[:, 1, :, None, :]
+            # print(w[:,:,:,:].size())
+            w01 = w01.view(batch_size, self.rank, -1)
+            #w01 = self.layerone_normalization(w01)
+            # print(w01.size())
+            # print(w01.size())
+            w23 = (w[:, 2, :, :, None] * w[:, 3, :, None, :])
+            w23 = w23.view(batch_size, self.rank, -1)
+            #w23 = self.layertwo_normalization(w23)
+            # print(w23.size())
+            w0123 = (w01[:, :, :, None] * w23[:, :, None, :])
+            w0123 = w0123.view(batch_size, self.rank, -1)
 
-        w = tensor_parameters
-        batch_size = w.size()[0]
-        # print(w[:, 0, :, :, None].size())
-        # print(w[:, 1, :, None, :].size())
-        w01 = w[:, 0, :, :, None] * w[:, 1, :, None, :]
-        # print(w[:,:,:,:].size())
-        w01 = w01.view(batch_size, self.rank, -1)
-        #w01 = self.layerone_normalization(w01)
-        # print(w01.size())
-        # print(w01.size())
-        w23 = (w[:, 2, :, :, None] * w[:, 3, :, None, :])
-        w23 = w23.view(batch_size, self.rank, -1)
-        #w23 = self.layertwo_normalization(w23)
-        # print(w23.size())
-        w0123 = (w01[:, :, :, None] * w23[:, :, None, :])
-        w0123 = w0123.view(batch_size, self.rank, -1)
-
-        return w0123[:, :, : embedding_dim]
+            return w0123[:, :, : embedding_dim]
 
     def forward(self, input):
         if self.training:
