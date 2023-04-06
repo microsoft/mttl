@@ -514,14 +514,16 @@ class PolyLoRATensorOrder(PolytroponAdapter):
             std = gain / math.sqrt(self.in_features)
 
             with torch.no_grad():
-                self.weight_leafs_a.uniform_(-std, std)
+                #self.weight_leafs_a.uniform_(-std, std)
+                torch.nn.init.xavier_uniform_(self.weight_leafs_a)
 
         # ensure that initially, adding the adapter does not change the output
         if self.use_warmup or self.lora_randb_init:
             with torch.no_grad():
                 self.weight_leafs_b.uniform_(-std, std)
         else:
-            torch.nn.init.zeros_(self.weight_leafs_b)
+            #torch.nn.init.zeros_(self.weight_leafs_b)
+            torch.nn.init.xavier_uniform_(self.weight_leafs_b)
 
     def tensor_product_construct(self, tensor_parameters, embedding_dim, flag):
         if self.order == 1:
@@ -530,7 +532,8 @@ class PolyLoRATensorOrder(PolytroponAdapter):
         if self.order == 2:
             w = tensor_parameters
             batch_size = w.size()[0]
-            w01 = w[:, 0, :, :, None] * w[:, 1, :, None, :]
+            w01 = torch.einsum("bri,brj->brij", w[:,0], w[:,1])
+            w01 = nn.LayerNorm(w01.shape[-2:]).cuda()(w01)
             w01 = w01.view(batch_size, self.rank, -1)
             w = w01[:, :, : embedding_dim]
             #w = self.layerone_normalization(w)
@@ -586,7 +589,7 @@ class PolyLoRATensorOrder(PolytroponAdapter):
             B, self.out_features, "down")  # [brd]
 
         adapter_out = input.bmm(A).bmm(B) / self.rank
-        print(adapter_out)
+        #print("self.weight_leafs_b", self.weight_leafs_b)
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
@@ -683,7 +686,6 @@ class PolyLoRALinear(PolytroponAdapter):
         B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
 
         adapter_out = input.bmm(A).bmm(B) / self.rank
-        print(adapter_out)
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
