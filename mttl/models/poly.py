@@ -514,16 +514,16 @@ class PolyLoRATensorOrder(PolytroponAdapter):
             std = gain / math.sqrt(self.in_features)
 
             with torch.no_grad():
-                #self.weight_leafs_a.uniform_(-std, std)
-                torch.nn.init.xavier_uniform_(self.weight_leafs_a)
+                self.weight_leafs_a.uniform_(-std, std)
+                # torch.nn.init.xavier_uniform_(self.weight_leafs_a)
 
         # ensure that initially, adding the adapter does not change the output
         if self.use_warmup or self.lora_randb_init:
             with torch.no_grad():
                 self.weight_leafs_b.uniform_(-std, std)
         else:
-            #torch.nn.init.zeros_(self.weight_leafs_b)
-            torch.nn.init.xavier_uniform_(self.weight_leafs_b)
+            torch.nn.init.zeros_(self.weight_leafs_b)
+            # torch.nn.init.xavier_uniform_(self.weight_leafs_b)
 
     def tensor_product_construct(self, tensor_parameters, embedding_dim, flag):
         if self.order == 1:
@@ -532,7 +532,7 @@ class PolyLoRATensorOrder(PolytroponAdapter):
         if self.order == 2:
             w = tensor_parameters
             batch_size = w.size()[0]
-            w01 = torch.einsum("bri,brj->brij", w[:,0], w[:,1])
+            w01 = torch.einsum("bri,brj->brij", w[:, 0], w[:, 1])
             w01 = nn.LayerNorm(w01.shape[-2:]).cuda()(w01)
             w01 = w01.view(batch_size, self.rank, -1)
             w = w01[:, :, : embedding_dim]
@@ -541,20 +541,21 @@ class PolyLoRATensorOrder(PolytroponAdapter):
         if self.order == 4:
             w = tensor_parameters
             batch_size = w.size()[0]
-            # print(w[:, 0, :, :, None].size())
-            # print(w[:, 1, :, None, :].size())
-            w01 = w[:, 0, :, :, None] * w[:, 1, :, None, :]
+            w01 = torch.einsum("bri,brj->brij", w[:, 0], w[:, 1])
+            # w01 = w[:, 0, :, :, None] * w[:, 1, :, None, :]
             # print(w[:,:,:,:].size())
+            w01 = nn.LayerNorm(w01.shape[-2:]).cuda()(w01)
             w01 = w01.view(batch_size, self.rank, -1)
             #w01 = self.layerone_normalization(w01)
-            # print(w01.size())
-            # print(w01.size())
-            w23 = (w[:, 2, :, :, None] * w[:, 3, :, None, :])
+
+            w23 = torch.einsum("bri,brj->brij", w[:, 2], w[:, 3])
             w23 = w23.view(batch_size, self.rank, -1)
+            w23 = nn.LayerNorm(w23.shape[-2:]).cuda()(w23)
             #w23 = self.layertwo_normalization(w23)
             # print(w23.size())
             w0123 = (w01[:, :, :, None] * w23[:, :, None, :])
             w0123 = w0123.view(batch_size, self.rank, -1)
+            w0123 = nn.LayerNorm(w0123.shape[-2:]).cuda()(w0123)
 
             return w0123[:, :, : embedding_dim]
 
@@ -814,24 +815,38 @@ class PolyIA3TensorOrder(PolytroponAdapter):
 
     def tensor_product_construct(self, tensor_parameters, embedding_dim):
 
-        w = tensor_parameters
-        batch_size = tensor_parameters.size()[0]
-        w01 = w[:, 0, :, :, :, None] * w[:, 1, :, :, None, :]
-        # print(w[:,:,:,:].size())
-        w01 = w01.view(batch_size, self.tensor_rank, 1, -1)
-        # w01 = self.layerone_normalization(w01)
+        if self.order == 1:
+            w = tensor_parameters.squeeze(1)
+            return w
+        if self.order == 2:
+            w = tensor_parameters
+            batch_size = w.size()[0]
+            w01 = torch.einsum("bri,brj->brij", w[:, 0], w[:, 1])
+            w01 = nn.LayerNorm(w01.shape[-2:]).cuda()(w01)
+            w01 = w01.view(batch_size, self.rank, -1)
+            w = w01[:, :, : embedding_dim]
+            #w = self.layerone_normalization(w)
+            return w
+        if self.order == 4:
+            w = tensor_parameters
+            batch_size = w.size()[0]
+            w01 = torch.einsum("bri,brj->brij", w[:, 0], w[:, 1])
+            # w01 = w[:, 0, :, :, None] * w[:, 1, :, None, :]
+            # print(w[:,:,:,:].size())
+            w01 = nn.LayerNorm(w01.shape[-2:]).cuda()(w01)
+            w01 = w01.view(batch_size, self.rank, -1)
+            #w01 = self.layerone_normalization(w01)
 
-        # print(w01.size())
-        w23 = (w[:, 2, :, :, :, None] * w[:, 3, :, :, None, :])
-        w23 = w23.view(batch_size, self.tensor_rank, 1, -1)
-        # w23 = self.layertwo_normalization(w23)
+            w23 = torch.einsum("bri,brj->brij", w[:, 2], w[:, 3])
+            w23 = w23.view(batch_size, self.rank, -1)
+            w23 = nn.LayerNorm(w23.shape[-2:]).cuda()(w23)
+            #w23 = self.layertwo_normalization(w23)
+            # print(w23.size())
+            w0123 = (w01[:, :, :, None] * w23[:, :, None, :])
+            w0123 = w0123.view(batch_size, self.rank, -1)
+            w0123 = nn.LayerNorm(w0123.shape[-2:]).cuda()(w0123)
 
-        w0123 = (w01[:, :, :, :, None] * w23[:, :, :, None, :])
-        w0123 = w0123.view(batch_size, self.tensor_rank, 1, -1)
-        # sum the rank
-        w0123 = w0123.sum(1)
-
-        return w0123[:, :, : embedding_dim]
+            return w0123[:, :, : embedding_dim]
 
     def forward(self, input):
         task_id = self.routing_infos.task_ids
