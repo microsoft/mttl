@@ -82,7 +82,7 @@ def evaluate_zeroshot(config):
         num_sanity_val_steps=0,
         default_root_dir=config.output_dir,
         log_every_n_steps=5 if config.debug else 50,
-        strategy=config.compute_strategy,
+        strategy=None if not config.compute_strategy else config.compute_strategy,
         limit_val_batches=0,
         limit_train_batches=0,
         callbacks=[ProgressCallback()],

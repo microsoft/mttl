@@ -85,10 +85,15 @@ def run_multitask(args):
     mode = "min"
 
     if args.dataset in ["ni", "xfit"]:
+        if args.early_stop_on_zero_shot and not args.ni_online_eval:
+            raise NotImplementedError("Specify online zero-shot if early stopping on zero shot.")
+
         if args.ni_online_eval:
             callbacks.append(NIOnlineZeroShot(args.eval_every))
-            monitor = "val/zero_shot_perf"
-            mode = "max"
+
+            if args.early_stop_on_zero_shot:
+                monitor = "val/zero_shot_perf"
+                mode = "max"
 
         checkpoint_callback = ModelCheckpoint(
             dirpath=args.output_dir,
@@ -104,6 +109,9 @@ def run_multitask(args):
         # no need for checkpointing in t0 as we checkpoint manually in the module    
         if args.t0_online_eval:
             callbacks.append(T0OnlineZeroShot(args.eval_every))
+
+            if args.early_stop_on_zero_shot:
+                raise NotImplementedError()
 
         kwargs["enable_checkpointing"] = False
 

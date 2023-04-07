@@ -17,12 +17,12 @@ class LoRALinear(nn.Module):
 
         self.in_features = linear_layer.in_features
         self.out_features = linear_layer.out_features
-        self.rank = config.rank
+        self.rank = config.lora_rank
         self.init_b_random = config.init_b_random
         self.weight = linear_layer.weight
         self.bias = linear_layer.bias
-        self.lora_a = nn.Parameter(torch.randn(config.rank, linear_layer.in_features))
-        self.lora_b = nn.Parameter(torch.zeros(linear_layer.out_features, config.rank))
+        self.lora_a = nn.Parameter(torch.randn(config.lora_rank, linear_layer.in_features))
+        self.lora_b = nn.Parameter(torch.zeros(linear_layer.out_features, config.lora_rank))
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -57,17 +57,21 @@ class GatorLinear(nn.Module):
         self.out_features = linear_layer.out_features
         self.weight = linear_layer.weight
         self.bias = linear_layer.bias
-        self.lora_b = nn.Parameter(torch.zeros(linear_layer.out_features,))
+
+        self.multi_lora_b_i = nn.Parameter(torch.zeros(linear_layer.in_features, 1))
+        self.multi_lora_b_o = nn.Parameter(torch.zeros(1, linear_layer.out_features))
+        self.multi_lora_b = nn.Parameter(torch.zeros(linear_layer.out_features,))
         self.reset_parameters()
 
     def reset_parameters(self):
-        torch.nn.init.zeros_(self.lora_b)
+        torch.nn.init.kaiming_uniform_(self.multi_lora_b_i, a=math.sqrt(5))
+        torch.nn.init.ones_(self.multi_lora_b)
 
     def forward(self, input):
         # general implementation for lora (adding and scaling)
-        output = F.linear(input, self.weight, self.bias)
-        gator = (self.lora_b.unsqueeze(0).unsqueeze(1) * input).sum(-1, keepdim=True) * self.lora_b.unsqueeze(0).unsqueeze(1)
-        return output + gator
+        hidden = F.linear(input, self.weight, self.bias)
+        hidden = hidden * self.multi_lora_b + torch.matmul(torch.matmul(input, self.multi_lora_b_i), self.multi_lora_b_o)
+        return hidden
 
 
 class LNAdapter(nn.Module):

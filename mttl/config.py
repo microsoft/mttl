@@ -64,6 +64,7 @@ class Config(object):
 
         self.ni_online_eval = False   # zero-shot online eval for ni
         self.t0_online_eval = False   # zero-shot eval for t0
+        self.early_stop_on_zero_shot = False  # zero-shot early stopping
 
         # auxiliary losses
         self.ortho_loss = 0.          # orthogonality between skills
@@ -76,6 +77,7 @@ class Config(object):
         self.poly_unlikely_loss = 0.  # poly unlikelihood loss
         self.finetune_type = None     # ["F", "A", "Z", "MuZ", "Poly", "PolyRand"]
         self.finetune_skip_es = False  # skip early stopping while fine-tuning
+        self.finetune_use_last_checkpoint = False  # use always the best valid_perf checkpoint if available
         self.model = None
         self.precision = "32"
         self.monitor_grad_alignment_on = None
