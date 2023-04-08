@@ -40,46 +40,6 @@ class CollateWrapperFn:
         return output_batch
 
 
-class CollateWrapperForCausalLMFn:
-    def __init__(
-        self,
-        pad_token_id,
-    ):
-        self.pad_token_id = pad_token_id
-
-    def __call__(self, batch: List[ExampleInfo]):
-        input_ids = [b.input_ids for b in batch]
-        target_ids = [b.target_ids for b in batch]
-        hashes = [b.hash for b in batch]
-        task_ids = [b.task_id for b in batch]
-        instruction_hashes = [b.instruction_hash for b in batch]
-
-        max_length = input_ids[0].shape[0] + target_ids[0].shape[0]
-        target_length = len(target_ids)
-
-        input_ids_ = torch.zeros(len(input_ids), max_length, dtype=torch.long) + self.pad_token_id
-        target_ids_ = torch.zeros(len(target_ids), max_length, dtype=torch.long) - 100
-
-        for n, (i_, t_) in enumerate(zip(input_ids, target_ids)):
-            len = i_.neq(self.pad_token_id).sum()
-            input_ids_[n, :len] = i_[:len]
-            input_ids_[n, len:len + target_length] = t_
-            target_ids_[n, len:len + target_length] = t_
-
-        task_ids = torch.LongTensor(task_ids)
-        input_ids = trim_batch(torch.stack(input_ids, 0), self.pad_token_id)
-        target_ids = trim_batch(torch.stack(target_ids, 0), self.pad_token_id)
-
-        output_batch = {
-            "input_ids": input_ids,
-            "target_ids": target_ids,
-            "task_ids": task_ids,
-            "hashes": hashes,
-            "instruction_hashes": instruction_hashes,
-        }
-        return output_batch
-
-
 class NIDataModule(LightningDataModule):
     def train_dataloader(self):
         return DataLoader(

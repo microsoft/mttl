@@ -18,7 +18,6 @@ class LoRALinear(nn.Module):
         self.in_features = linear_layer.in_features
         self.out_features = linear_layer.out_features
         self.rank = config.lora_rank
-        self.init_b_random = config.init_b_random
         self.weight = linear_layer.weight
         self.bias = linear_layer.bias
         self.lora_a = nn.Parameter(torch.randn(config.lora_rank, linear_layer.in_features))
@@ -31,12 +30,7 @@ class LoRALinear(nn.Module):
         with torch.no_grad():
             self.lora_a.uniform_(-std, std)
 
-        # ensure that initially, adding the adapter does not change the output
-        if self.init_b_random:
-            with torch.no_grad():
-                self.lora_b.uniform_(-std, std)
-        else:
-            torch.nn.init.zeros_(self.lora_b)
+        torch.nn.init.zeros_(self.lora_b)
 
     def forward(self, input):
         # general implementation for lora (adding and scaling)

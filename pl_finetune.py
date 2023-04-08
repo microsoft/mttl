@@ -57,7 +57,7 @@ def finetune(args, use_mlf=True, do_zs=True):
 
     # build the pretrained model
     if args.checkpoint:
-        ckpt_path = get_checkpoint_path(args.checkpoint, last=args.finetune_use_last_checkpoint)
+        ckpt_path = get_checkpoint_path(args.checkpoint, use_last=args.finetune_use_last_checkpoint)
 
         if ckpt_path.startswith("az://"):
             import fsspec
