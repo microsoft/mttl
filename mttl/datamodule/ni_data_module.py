@@ -75,6 +75,8 @@ class NIDataModule(LightningDataModule):
     def __init__(self, config):
         super().__init__()
 
+        assert config.mixed_task_batches, 'single task batches not supported yet'
+        
         self.config = config
 
         if not self.config.finetune_task_name:

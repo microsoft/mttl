@@ -10,7 +10,7 @@ from torch import Tensor
 from typing import Dict
 import hashlib
 from pytorch_lightning.utilities.rank_zero import rank_zero_info
-from torch.autograd.function import Function
+import torch.distributed as dist
 
 
 logger = logging.getLogger(__name__)
@@ -285,73 +285,20 @@ def get_checkpoint_path(path, step=None, use_last=False):
     print("Found checkpoint", path)
     return path
 
+# Taken from facebookresearch/dino
+def is_dist_avail_and_initialized():
+    if not dist.is_available():
+        return False
+    if not dist.is_initialized():
+        return False
+    return True
 
-class MemEfficientLoRA(Function):
-    @staticmethod
-    # bias is an optional argument
-    def forward(ctx, input, A, B, skills):
-        ctx.save_for_backward(input, A, B, skills)
+def get_world_size():
+    if not is_dist_avail_and_initialized():
+        return 1
+    return dist.get_world_size()
 
-        bs, L, I = input.size()
-        bs, n_skills = skills.size()
-        n_skills, I, R = A.size()
-        n_skills, R, O = B.size()
-
-        output = torch.einsum("BLI,BS,SIR,SRO->BLO", (input, skills, A, B))
-
-        return output
-
-    @staticmethod
-    def backward(ctx, O_grad):
-
-        bs, L, O = O_grad.size()
-
-        input, A, B, skills = ctx.saved_tensors
-
-        bs, S, I = input.size()
-        bs, n_skills = skills.size()
-        n_skills, I, R = A.size()
-        n_skills, R, O = B.size()
-
-        # option A)
-        W = torch.einsum("BS,SIR,SRO->BIO", (skills, A, B))
-        I_grad = torch.einsum("BLO,BIO->BLI", (O_grad, W))
-
-        # option B) [OOM]
-        # I_grad = torch.einsum('BLO,BS,SIR,SRO->BLI', (O_grad, skills, A, B))
-
-        W_grad = torch.einsum("BLO,BLI->BIO", (O_grad, input))
-
-        tmp = torch.einsum("BIO,BS->SIO", (W_grad, skills))
-        A_grad = torch.einsum("SIO,SRO->SIR", (tmp, B))
-        B_grad = torch.einsum("SIO,SIR->SRO", (tmp, A))
-        S_grad = torch.einsum("BIO,SIR,SRO->BS", (W_grad, A, B))
-
-        return I_grad, A_grad, B_grad, S_grad
-
-
-if __name__ == "__main__":
-    B, L, S, I, O, R = 3, 5, 8, 3, 12, 4
-    fn = MemEfficientLoRA.apply
-
-    for i in range(10):
-        input = torch.randn(B, L, I, dtype=torch.double).cuda()
-        Am = torch.randn(S, I, R, dtype=torch.double).cuda()
-        Bm = torch.randn(S, R, O, dtype=torch.double).cuda()
-        skill = torch.randn(B, S, dtype=torch.double).cuda()
-        idx1 = torch.multinomial(torch.ones(S, I * O).cuda(), num_samples=10)
-        idx2 = torch.arange(S).repeat_interleave(10).cuda()
-        idx = torch.stack([idx1.flatten(), idx2.flatten()])
-        val = torch.randn(size=idx.shape[1:]).cuda().double()
-        W = torch.sparse_coo_tensor(idx, val, (I * O, S)).coalesce()
-
-        # coll = [input, Am, Bm, skill]
-        coll = [input, W, skill]
-        for x in coll:
-            x.requires_grad = True
-
-        res = torch.autograd.gradcheck(fn, coll, check_sparse_nnz=True)
-        import pdb
-
-        pdb.set_trace()
-        print(res)
+def get_rank():
+    if not is_dist_avail_and_initialized():
+        return 0
+    return dist.get_rank()

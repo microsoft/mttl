@@ -1,18 +1,25 @@
 import torch
-import numpy as np
+import math
 import random
+import numpy as np
+from collections import defaultdict
 from pytorch_lightning import LightningDataModule
 from transformers import AutoTokenizer
 
-from mttl.utils import hash_example, template_to_string, trim_batch
+from mttl.utils import (
+    hash_example,
+    template_to_string,
+    trim_batch,
+    get_world_size,
+    get_rank,
+)
 from mttl.datamodule import IndexConcatDataset
 from mttl.dataloader.t0_dataset_readers import get_dataset_reader
 from mttl.dataloader.data_utils import ExampleInfo, MultiChoiceExampleInfo
 
 
 def apply_template(template, example, hash_friendly=False, handle_edge_cases=True):
-    """Could be done with a context manager, but we're lazy.
-    """
+    """Could be done with a context manager, but we're lazy."""
     if hash_friendly:
         state = random.getstate()
         random.seed(42)
@@ -321,14 +328,25 @@ class T0PretrainDataModule(LightningDataModule):
         self.template_names = [x.template_name for x in self.train_datasets]
 
     def train_dataloader(self):
+        if self.config.mixed_task_batches:
+            sampler = None
+        else:
+            effective_batch_size = (
+                self.config.train_batch_size * self.config.gradient_accumulation_steps
+            )
+            sampler = TaskStratifiedSampler(
+                self.train_dataset, effective_batch_size, self.config.seed
+            )
+
         return torch.utils.data.DataLoader(
             self.train_dataset,
             batch_size=self.config.train_batch_size,
-            shuffle=True,
+            shuffle=sampler is None,
             collate_fn=create_collate_fn(self.tokenizer.pad_token_id, pretrain=True),
             drop_last=True,
             num_workers=min([self.config.train_batch_size, 8]),
             persistent_workers=True,
+            sampler=sampler,
         )
 
     def val_dataloader(self):
@@ -492,3 +510,83 @@ def create_collate_fn(pad_token_id, pretrain):
     if pretrain:
         return CollatePretrainFnWrapper(pad_token_id)
     return CollateMultiChoiceFnWrapper(pad_token_id)
+
+
+class TaskStratifiedSampler(torch.utils.data.Sampler):
+    def __init__(self, concat_dataset, batch_size, seed, drop_last=True):
+        self.epoch = None
+        self.seed = seed
+        self.batch_size = batch_size
+        self.world_size, self.rank = get_world_size(), get_rank()
+
+        super().__init__(concat_dataset)
+
+        if drop_last and len(concat_dataset) % self.world_size != 0: 
+            self.num_samples = math.ceil(
+                (len(concat_dataset) - self.world_size) / self.world_size
+            )
+        else:
+            self.num_samples = math.ceil(
+                len(concat_dataset) / self.world_size
+            )
+
+        # we want a mapping from task_id --> list_of_sample_indices
+        per_task_indices = defaultdict(lambda: torch.LongTensor(0))
+
+        assert isinstance(concat_dataset, torch.utils.data.ConcatDataset)
+
+        current_idx = 0
+        for dataset in concat_dataset.datasets:
+            ds_len = len(dataset)
+            task_id = dataset.dataset.ds_id
+            per_task_indices[task_id] = torch.cat(
+                (
+                    per_task_indices[task_id],
+                    torch.arange(current_idx, current_idx + ds_len),
+                )
+            )
+
+            current_idx += ds_len
+
+        self.per_task_indices = per_task_indices
+        self.per_task_count = torch.Tensor(
+            [per_task_indices[key].size() for key in sorted(per_task_indices.keys())]
+        ).squeeze().long()
+        self.per_task_weight = self.per_task_count / self.per_task_count.sum()
+
+    def set_epoch(self, epoch):
+        self.epoch = epoch
+
+    def __iter__(self):
+        seed = self.epoch + self.seed
+
+        local_indices = {}
+        for task, task_indices in self.per_task_indices.items():
+
+            # shuffle the indices (same shuffling across all devices)
+            g = torch.Generator().manual_seed(seed)
+            task_indices = task_indices[torch.randperm(len(task_indices), generator=g)]
+
+            # subsample to get indices per rank
+            task_indices = task_indices[self.rank::self.world_size]
+
+            local_indices[task] = task_indices
+         
+        task_ptr = defaultdict(lambda : 0)
+        sample_idx = 0
+        g = torch.Generator().manual_seed(seed)
+
+        while True:
+            if sample_idx % self.batch_size == 0: 
+                # sample a task
+                task_id = torch.multinomial(self.per_task_weight, 1, generator=g).item()
+
+            yield local_indices[task_id][task_ptr[task_id]].item()
+
+            # increment
+            sample_idx += 1 
+            task_ptr[task_id] = (task_ptr[task_id] + 1) % self.per_task_count[task_id].item()
+
+
+    def __len__(self):
+        return self.num_samples

@@ -39,6 +39,7 @@ class Config(object):
         self.checkpoint = None  # load from checkpoint
         self.checkpoint_step = None  # load from checkpoint in format of global_stepX.pt
         self.backbone_checkpoint = None  # load the backbone from here
+        self.mixed_task_batches = True
         self.train_batch_size = 8
         self.predict_batch_size = 32
         self.learning_rate = 1e-3
