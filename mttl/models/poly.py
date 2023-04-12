@@ -119,7 +119,7 @@ class MoESelector(Selector):
                 -1e-3, 1e-3
             )
         )
-
+    
     def resize_module_logits(self, n_tasks):
         self.module_logits.data = torch.empty(
             (n_tasks, self.n_splits * self.n_skills)
@@ -167,14 +167,20 @@ class PolytroponSelector(Selector):
                 -1e-3, 1e-3
             )
         )
-
+    
     def resize_module_logits(self, n_tasks):
         self.module_logits.data = torch.empty(
             (n_tasks, self.n_splits * self.n_skills)
         ).uniform_(-1e-3, 1e-3)
 
     def forward(self, routing_infos):
-        module_logits = self.module_logits[routing_infos.task_ids]
+        # if minibatch comes from the same task, avoid duplicating work
+        if routing_infos.task_ids.unique().size(0) == 1: 
+            task_ids = routing_infos.task_ids[:1]
+        else:
+            task_ids = routing_infos.task_ids
+
+        module_logits = self.module_logits[task_ids]
         module_logits = module_logits.view(-1, self.n_splits, self.n_skills)
 
         if self.use_l2_norm:
@@ -223,7 +229,7 @@ class AverageSelector(Selector):
     def forward(self, routing_infos):
         bs = routing_infos.task_ids.size(0)
         module_logits = self.module_logits.view(1, self.n_splits, self.n_skills)
-        return module_logits.expand(bs, -1, -1)
+        return module_logits
 
 
 class PrivateSelector(Selector):
@@ -233,7 +239,13 @@ class PrivateSelector(Selector):
         self.n_skills = config.n_skills
 
     def forward(self, routing_infos):
-        return F.one_hot(routing_infos.task_ids, num_classes=self.n_skills).unsqueeze(1)
+        # if minibatch comes from the same task, avoid duplicating work
+        if routing_infos.task_ids.unique().size(0) == 1: 
+            task_ids = routing_infos.task_ids[:1]
+        else:
+            task_ids = routing_infos.task_ids
+        
+        return F.one_hot(task_ids, num_classes=self.n_skills).unsqueeze(1)
 
 
 class PolyLoRALinear(PolytroponAdapter):
@@ -311,8 +323,9 @@ class PolyLoRALinear(PolytroponAdapter):
         # this repeat follows the patten in `model.predict()` line 152
         if repeat:
             self.routing_infos.repeat_interleave(repeat)
-
-        mixing_weights = self.selector(self.routing_infos).to(dtype=input.dtype)
+        
+        mixing_weights = self.selector(self.routing_infos).to(dtype=input.dtype)    
+     
         bs, n_splits, n_skills = mixing_weights.size()
 
         # A is    n_splits, n_skills, D // n_splits, rank
@@ -321,8 +334,12 @@ class PolyLoRALinear(PolytroponAdapter):
         B = torch.einsum("bqs,qsrd->bqrd", (mixing_weights, self.lora_b))
         A = A.reshape(bs, self.in_features, self.rank)
         B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
+        
+        if bs == 1:
+            adapter_out = input.matmul(A).matmul(B) / self.rank
+        else:
+            adapter_out = input.bmm(A).bmm(B) / self.rank
 
-        adapter_out = input.bmm(A).bmm(B) / self.rank
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
@@ -371,7 +388,7 @@ class PolyIA3Linear(PolytroponAdapter):
         weight = self.lora_a
 
         A = torch.einsum("bqs,sqd->bqd", (mixing_weights, weight))
-        A = A.reshape(input.size(0), 1, -1)
+        A = A.reshape(mixing_weights.size(0), 1, -1)
         return F.linear(input, self.weight, self.bias) * A
 
     def extra_repr(self):
