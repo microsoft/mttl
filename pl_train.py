@@ -132,6 +132,7 @@ def run_multitask(args):
         precision=int(args.precision)
         if args.precision in ["16", "32"]
         else args.precision,
+        replace_sampler_ddp=args.mixed_task_batches,
         **kwargs,
     )
 
