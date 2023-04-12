@@ -241,8 +241,9 @@ class StoryClozeReader(BaseDatasetReader):
         else:
             dataset_stash = ("story_cloze", "2016")
             orig_data = load_dataset(
-                *dataset_stash, split=split, cache_dir=self.config.train_dir
+                *dataset_stash, split=split, data_dir='mttl/data/storycloze/SC', cache_dir=None,
             )
+            
         orig_data = [example for example in orig_data]
         for idx, example in enumerate(orig_data):
             example["label"] = example["answer_right_ending"] - 1
