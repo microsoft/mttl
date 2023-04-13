@@ -85,6 +85,8 @@ def get_selector(config):
 
     if config.poly_selector == "poly":
         return PolytroponSelector(config)
+    elif config.poly_selector == 'random':
+        return RandomSelector(config)
     elif config.poly_selector == "private":
         # back-compatibility
         if config.example_to_ids_path:
@@ -245,8 +247,26 @@ class PrivateSelector(Selector):
         else:
             task_ids = routing_infos.task_ids
         
-        return F.one_hot(task_ids, num_classes=self.n_skills).unsqueeze(1)
+        return F.one_hot(task_ids, num_classes=self.n_skills).unsqueeze(1).float()
 
+class RandomSelector(Selector):
+    def __init__(self, config):
+        super().__init__()
+
+        self.n_skills = config.n_skills
+        self.probs = torch.ones(self.n_skills)
+
+    def forward(self, routing_infos):
+        bs = routing_infos.task_ids.size(0)
+        probs =  self.probs.unsqueeze(0).expand(bs, -1)
+        active_modules = torch.multinomial(probs, self.n_skills // 2)
+
+        flat_active_modules = active_modules + (torch.arange(bs) * self.n_skills).unsqueeze(-1)
+        container = torch.zeros((bs * self.n_skills), device=routing_infos.task_ids.device)
+        container[flat_active_modules] = 1. / (self.n_skills // 2)
+        container = container.view(bs, 1, self.n_skills)
+
+        return container
 
 class PolyLoRALinear(PolytroponAdapter):
     def __init__(self, config, task_id_ptr, linear_layer, selector=None):
