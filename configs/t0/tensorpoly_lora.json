@@ -9,5 +9,6 @@
     "trainable_param_names": ".*weight_leafs_[ab].*|.*module_logits.*",
     "module_logits_learning_rate": 0.1,
     "use_t0_templates_as_tasks": true,
-    "adafactor_scale_parameter": false
+    "adafactor_scale_parameter": false,
+    "order": 2
 }

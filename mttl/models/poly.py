@@ -295,7 +295,7 @@ class PolyLoRATensor(PolytroponAdapter):
         self.task_id_ptr = task_id_ptr
         self.training_steps = 0.0
 
-        self.order = 4
+        self.order = 2
         self.tensor_rank = self.n_skills
         if selector is None:
             self.selector = get_selector(config)
@@ -381,6 +381,14 @@ class PolyLoRATensor(PolytroponAdapter):
         # else:
         #     torch.nn.init.zeros_(self.weight_leafs_b)
     def tensor_product_construct(self, weight_leafs, embedding_dim):
+        if self.order == 2:
+            w = weight_leafs
+            w01 = w[0, :, :, :, None] * w[1, :, :, None, :]
+            # print(w[:,:,:,:].size())
+            w01 = w01.view(self.tensor_rank,  self.rank, -1)
+            w01 = self.layerone_normalization(w01)
+            # print(w01.size())
+            return w01[:, :, : embedding_dim]
         if self.order == 4:
             w = weight_leafs
             w01 = w[0, :, :, :, None] * w[1, :, :, None, :]
@@ -824,7 +832,6 @@ class PolyIA3TensorOrder(PolytroponAdapter):
                 self.embedding_dim_leaf,
             )
         )
-       
 
         if selector is None:
             self.selector = get_selector(config)
@@ -865,7 +872,6 @@ class PolyIA3TensorOrder(PolytroponAdapter):
             # w0123 = nn.LayerNorm(w0123.shape[-2:]).cuda()(w0123)
 
             return w0123[:, :, : embedding_dim]
-
     def forward(self, input):
         task_id = self.routing_infos.task_ids
 

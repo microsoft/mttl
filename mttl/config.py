@@ -29,6 +29,7 @@ class Config(object):
         self.append_another_bos = False
         self.do_lowercase = False
         self.freeze_embeds = False
+        self.order = 2
 
         self.use_t0_templates_as_tasks = False     # if True, then t0 consists of 313 tasks, otherwise 38
         self.use_t0_few_shot_training_set = True # if True, then use 100 examples per task during training + 100 examples per validation task
