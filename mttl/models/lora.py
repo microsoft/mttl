@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import re
 import math
-
+import pennylane as qml
 
 class LoRALinear(nn.Module):
     def __init__(self, linear_layer, rank, init_b_random=False):
@@ -91,6 +91,36 @@ class KronA(nn.Module):
         weight = weight + self.kronecker_product_einsum(self.lora_b, self.lora_a)
         return F.linear(input, weight, self.bias)
 
+class quantumIA3Linear(nn.Module):
+    def __init__(self, config, linear_layer):
+        super().__init__()
+
+        self.in_features = linear_layer.in_features
+        self.out_features = linear_layer.out_features
+        self.weight = linear_layer.weight
+        self.bias = linear_layer.bias
+        self.qubits = nn.Parameter(torch.ones(11))
+        self.quantum_weights = nn.Parameter(torch.randn(2, 11))
+        self.num_qubits = 11
+        self.quantum_layer = self.get_circuit()
+        # self.multi_lora_b = nn.Parameter(torch.ones(linear_layer.out_features))
+
+    def get_circuit(self):
+        dev = qml.device('default.qubit', wires=self.num_qubits)
+        @qml.qnode(dev, interface='torch')
+        def quantum_model(x, w):
+            qml.templates.AngleEmbedding(x, wires=range(self.num_qubits))
+            qml.templates.BasicEntanglerLayers(w, wires=range(self.num_qubits))
+            return qml.probs(wires=range(self.num_qubits))
+        return quantum_model
+    def forward(self, input):
+        hidden = F.linear(input, self.weight, self.bias)
+        self.multi_lora_b = self.quantum_layer(self.qubits, self.quantum_weights)
+        # hidden = self.multi_lora_b
+        hidden = hidden * self.multi_lora_b.float()
+        return hidden
+    
+
 class IA3Linear(nn.Module):
     def __init__(self, config, linear_layer):
         super().__init__()
@@ -105,7 +135,21 @@ class IA3Linear(nn.Module):
         hidden = F.linear(input, self.weight, self.bias)
         hidden = hidden * self.multi_lora_b
         return hidden
-
+    
+def modify_with_quantumIA3Linear(transformer, config):
+    for m_name, module in dict(transformer.named_modules()).items():
+        if re.fullmatch(config.lora_modules, m_name):
+            for c_name, layer in dict(module.named_children()).items():
+                if re.fullmatch(config.lora_layers, c_name):
+                    assert isinstance(
+                        layer, nn.Linear
+                    ), f"kron can only be applied to torch.nn.Linear, but {layer} is {type(layer)}."
+                    setattr(
+                        module,
+                        c_name,
+                        quantumIA3Linear(config, layer),
+                    )
+    return transformer
 def modify_with_krona(transformer, config):
     for m_name, module in dict(transformer.named_modules()).items():
         if re.fullmatch(config.lora_modules, m_name):
