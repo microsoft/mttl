@@ -44,7 +44,7 @@ def run_multitask(args):
             raise NotImplementedError()
 
     if args.checkpoint is not None:
-        from utils import get_checkpoint_path
+        from mttl.utils import get_checkpoint_path
 
         checkpoint_path = get_checkpoint_path(args.checkpoint)
 
@@ -99,7 +99,7 @@ def run_multitask(args):
         kwargs["enable_checkpointing"] = False
 
     trainer = Trainer(
-        gpus=2,
+        gpus=1,
         accelerator="gpu",
         logger=loggers,
         num_sanity_val_steps=5,
