@@ -173,11 +173,12 @@ class XFitDatasetReader(object):
     ) -> Iterator[Tuple[str, str]]:
 
         input, outputs = instance
-        if use_task_descriptions:
-            description = DESCRIPTIONS[task_name]
-            input = description + ". " + input
+        description = DESCRIPTIONS[task_name]
+        if use_task_descriptions and description is not None:
+            input = description + "\n" + input
+        else:
+            input = " [{}] {}".format(task_name, input)
 
-        input = " [{}] {}".format(task_name, input)
         outputs = [" " + item for item in outputs]
 
         if do_lowercase:
