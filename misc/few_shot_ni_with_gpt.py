@@ -1,12 +1,12 @@
 import json
-import misc.gpt_utils as gpt_utils
-from mttl.dataloader import ni_metrics
 import os
-import gpt_utils
 import numpy as np
 import click
 import json
 import tqdm
+
+from mttl.dataloader import ni_metrics
+from mttl.models import gpt_utils
 
 
 test_tasks = [
