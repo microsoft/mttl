@@ -1,4 +1,0 @@
-{
-    "model": "t5-large",
-    "precision": "bf16",
-}
