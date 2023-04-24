@@ -75,7 +75,7 @@ def run_multitask(args):
 
     loggers.append(pl.loggers.CSVLogger(save_dir=args.output_dir, name="csv_metrics"))
 
-    kwargs = {"val_check_interval": args.eval_every} if args.eval_every else {}
+    kwargs = {"val_check_interval": args.eval_every * args.gradient_accumulation_steps} if args.eval_every else {}
 
     # get metric monitors for models
     callbacks = get_monitors(args)
