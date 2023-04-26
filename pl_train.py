@@ -1,4 +1,5 @@
 import os
+import torch
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -13,7 +14,7 @@ from mttl.models.encoder_decoder import EncoderDecoder
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.models.monitors import get_monitors
 from mttl.utils import get_mlf_logger
-
+from mttl.models.utils import set_grad_monitor_hooks
 
 def run_multitask(args):
     seed_everything(args.seed, workers=True)
@@ -114,6 +115,9 @@ def run_multitask(args):
                 raise NotImplementedError()
 
         kwargs["enable_checkpointing"] = False
+    
+    if args.monitor_grad_alignment_on:
+        set_grad_monitor_hooks(module, args)
 
     trainer = Trainer(
         gpus=-1,

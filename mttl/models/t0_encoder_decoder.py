@@ -204,7 +204,11 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             self.save_model()
 
         # reset task information
-        self.model.task_id_container["routing_infos"] = None
+        if self.config.monitor_grad_alignment_on is None:
+            self.model.task_id_container["routing_infos"] = None
+        else:
+            self.model.task_id_container['enc_attn_mask'] = attention_mask
+            self.model.task_id_container['dec_attn_mask'] = decoder_attention_mask
 
         self.log_dict(
             {f"{split}/{k}": v for (k, v) in tensorboard_logs.items()}, sync_dist=True
@@ -546,3 +550,30 @@ class T0EncoderDecoder(EfficientCheckpointModule):
 
     def on_before_optimizer_step(self, optimizer, optimizer_idx):
         pass
+
+    def on_after_backward(self) -> None:
+        if not self.config.monitor_grad_alignment_on or (self.global_step + 1) % 50 != 0:
+            return
+
+        for m_name, module in self.model.named_modules():
+            if hasattr(module, 'grad_container'):
+                for name, grad in module.grad_container.items():
+
+                    # go through model layers and computer alignment
+                    sim = torch.zeros(self.config.n_tasks, self.config.n_tasks, device='cuda')
+
+                    for task in torch.where(module.seen_tasks)[0]:
+                        sim[task] +=  F.cosine_similarity(grad[task], grad, dim=-1)
+
+                    seen_tasks = module.seen_tasks > 0
+                    is_diag = torch.eye(self.config.n_tasks, device='cuda').bool()
+                    valid = seen_tasks.unsqueeze(0) & seen_tasks.unsqueeze(1) & (~is_diag)
+
+                    avg_task_align = sim[valid].mean()
+                    self.log(f'grad_alignment/{m_name}_{name}', avg_task_align)
+
+                    ok = sim.masked_fill(~valid, -100)
+                    model_fname = os.path.join(
+                        self.config.output_dir, f"{m_name}_{name}_{self.global_step}.pt"
+                    )
+                    torch.save(ok, model_fname)
