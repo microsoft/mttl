@@ -10,5 +10,6 @@
     "module_logits_learning_rate": 0.1,
     "use_t0_templates_as_tasks": true,
     "adafactor_scale_parameter": false,
-    "order": 2
+    "order": 4,
+    "n_tasks": 5
 }
