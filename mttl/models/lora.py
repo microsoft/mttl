@@ -35,8 +35,9 @@ class LoRALinear(nn.Module):
     def forward(self, input):
         # general implementation for lora (adding and scaling)
         weight = self.weight
-        weight = weight + torch.matmul(self.lora_b, self.lora_a) / self.rank
-        return F.linear(input, weight, self.bias)
+        adapter_out = torch.matmul(input, self.lora_a.T)
+        adapter_out = torch.matmul(adapter_out, self.lora_b.T) / self.rank
+        return F.linear(input, self.weight, self.bias) + adapter_out
 
 
 class GatorLinear(nn.Module):
