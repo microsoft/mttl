@@ -319,9 +319,12 @@ class PolyLoRATensor(PolytroponAdapter):
         #         linear_layer.out_features // self.n_splits,
         #     )
         # )
-        self.embedding_size = linear_layer.out_features
-        self.embedding_dim_leaf = math.ceil(
-            (self.embedding_size) ** (1 / self.order)
+
+        self.embedding_dim_leaf_a = math.ceil(
+            (self.in_features) ** (1 / self.order)
+        )
+        self.embedding_dim_leaf_b = math.ceil(
+            (self.out_features) ** (1 / self.order)
         )
 
         self.weight_leafs_a = nn.Parameter(
@@ -329,7 +332,7 @@ class PolyLoRATensor(PolytroponAdapter):
                 self.order,
                 self.tensor_rank,
                 self.rank,
-                self.embedding_dim_leaf,
+                self.embedding_dim_leaf_a,
             )
         )
 
@@ -338,14 +341,18 @@ class PolyLoRATensor(PolytroponAdapter):
                 self.order,
                 self.tensor_rank,
                 self.rank,
-                self.embedding_dim_leaf,
+                self.embedding_dim_leaf_b,
             )
         )
-        # we create our construction for the tensor product
-        self.layerone_normalization = nn.LayerNorm(
-            normalized_shape=[self.rank, self.embedding_dim_leaf**2])
-        self.layertwo_normalization = nn.LayerNorm(
-            normalized_shape=[self.rank, self.embedding_dim_leaf**2])
+        # What if I just use one layer normalization
+        self.layerone_normalization_a = nn.LayerNorm(
+            normalized_shape=[self.rank, self.embedding_dim_leaf_a**2])
+        # self.layertwo_normalization_a = nn.LayerNorm(
+        #     normalized_shape=[self.rank, self.embedding_dim_leaf_a**2])
+        self.layerone_normalization_b = nn.LayerNorm(
+            normalized_shape=[self.rank, self.embedding_dim_leaf_b**2])
+        # self.layertwo_normalization_b = nn.LayerNorm(
+        #     normalized_shape=[self.rank, self.embedding_dim_leaf_b**2])
         self.reset_parameters()
 
         # self.lora_a = self.tensor_product_construct(self.weight_leafs_a, self.in_features).to("cuda")
@@ -380,13 +387,16 @@ class PolyLoRATensor(PolytroponAdapter):
         #         self.weight_leafs_b.uniform_(-std, std)
         # else:
         #     torch.nn.init.zeros_(self.weight_leafs_b)
-    def tensor_product_construct(self, weight_leafs, embedding_dim):
+    def tensor_product_construct(self, weight_leafs, embedding_dim, flag="up"):
         if self.order == 2:
             w = weight_leafs
             w01 = w[0, :, :, :, None] * w[1, :, :, None, :]
             # print(w[:,:,:,:].size())
             w01 = w01.view(self.tensor_rank,  self.rank, -1)
-            w01 = self.layerone_normalization(w01)
+            if flag == "up":
+                w01 = self.layerone_normalization_a(w01)
+            elif flag == "down":
+                w01 = self.layerone_normalization_b(w01)
             # print(w01.size())
             return w01[:, :, : embedding_dim]
         if self.order == 4:
@@ -394,11 +404,17 @@ class PolyLoRATensor(PolytroponAdapter):
             w01 = w[0, :, :, :, None] * w[1, :, :, None, :]
             # print(w[:,:,:,:].size())
             w01 = w01.view(self.tensor_rank,  self.rank, -1)
-            w01 = self.layerone_normalization(w01)
+            if flag == "up":
+                w01 = self.layerone_normalization_a(w01)
+            elif flag == "down":
+                w01 = self.layerone_normalization_b(w01)
             # print(w01.size())
             w23 = (w[2, :, :, :, None] * w[3, :, :, None, :])
             w23 = w23.view(self.tensor_rank,  self.rank, -1)
-            w23 = self.layertwo_normalization(w23)
+            if flag == "up":
+                w23 = self.layerone_normalization_a(w23)
+            elif flag == "down":
+                w23 = self.layerone_normalization_b(w23)
 
             w0123 = (w01[:, :, :, None] * w23[:, :, None, :])
             w0123 = w0123.view(self.tensor_rank,  self.rank, -1)
@@ -422,9 +438,9 @@ class PolyLoRATensor(PolytroponAdapter):
         bs, n_splits, n_skills = mixing_weights.size()
 
         self.lora_a = self.tensor_product_construct(
-            self.weight_leafs_a, self.in_features)  # [tensor rank, rank, D]
+            self.weight_leafs_a, self.in_features, flag= "up")  # [tensor rank, rank, D]
         self.lora_b = self.tensor_product_construct(
-            self.weight_leafs_b, self.out_features)
+            self.weight_leafs_b, self.out_features, flag = "down")
         self.lora_a = self.lora_a.transpose(2, 1).unsqueeze(0)
         self.lora_b = self.lora_b.unsqueeze(0)
 
