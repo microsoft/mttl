@@ -273,7 +273,7 @@ class SoupSelector(Selector):
 
         task_centroid = task_centroids[task_id]         
         train_centroids = torch.stack([
-            task_centroids[tr_task] for tr_task in range(38) #n_train_tasks)
+            task_centroids[tr_task] for tr_task in range(n_train_tasks)
         ])
 
         # compute similarity
@@ -288,7 +288,6 @@ class SoupSelector(Selector):
         )
 
         print('top K tasks : ', top_k_tasks)        
-        breakpoint()
 
     def forward(self, routing_infos):
         bs = routing_infos.task_ids.size(0)
