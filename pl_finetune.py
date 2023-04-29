@@ -81,6 +81,7 @@ def finetune(args, use_mlf=True, do_zs=True):
         ckpt_path = None
         ckpt_args = args
 
+    adapter_soup = False
     switch_to_avg_modules = False
     skip_load_skills = False
 
@@ -111,6 +112,9 @@ def finetune(args, use_mlf=True, do_zs=True):
     elif args.finetune_type == "PolyRand":
         # random polytropon
         skip_load_skills = True
+    elif args.finetune_type == "AdapterSoup":
+        adapter_soup = True
+
 
     # data
     monitor = "val/metric_perf"
@@ -136,9 +140,12 @@ def finetune(args, use_mlf=True, do_zs=True):
     if args.model_modifier and "poly" in args.model_modifier:
         if switch_to_avg_modules:
             module.model.switch_selector_to_average()
+        elif adapter_soup:
+            module.model.switch_selector_to_soup(args)
         else:
             # resize to accomodate for new task
             module.model.resize_module_logits(1)
+
 
     def fit_and_test(zero_shot=False):
         callbacks = [ProgressCallback()]

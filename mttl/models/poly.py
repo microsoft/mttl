@@ -44,6 +44,32 @@ class SkilledModel:
                         name,
                         AverageSelector(inner_mod.n_skills, inner_mod.n_splits),
                     )
+    
+    @staticmethod
+    def switch_selector_to_soup(object, config):
+        """Switches PrivateSelector to SoupSelector.
+        """
+        n_switches = 0
+        selector = None 
+        for name, module in object.named_modules():
+            for name, inner_mod in module.named_children():
+                if isinstance(inner_mod, PrivateSelector):
+                    n_switches += 1
+                    print(
+                        "Replacing with Soup Selector: ",
+                        name,
+                        "n_skills:",
+                        inner_mod.n_skills,
+                    )
+                    if selector is None: 
+                        selector = SoupSelector(config)
+                    setattr(
+                        module,
+                        name,
+                        selector
+                    )
+
+        assert n_switches > 0, 'no selectors were switched.'
 
     @staticmethod
     def get_adapters(object):
@@ -227,6 +253,42 @@ class AverageSelector(Selector):
         self.register_buffer(
             "module_logits", torch.empty(n_splits, n_skills).fill_(1.0 / n_skills)
         )
+
+    def forward(self, routing_infos):
+        bs = routing_infos.task_ids.size(0)
+        module_logits = self.module_logits.view(1, self.n_splits, self.n_skills)
+        return module_logits
+
+class SoupSelector(Selector):
+    def __init__(self, config):
+        super().__init__()
+
+        self.n_skills = n_train_tasks = config.n_skills
+        self.n_splits = config.n_splits 
+
+        # load similarities 
+        task_centroids = torch.load(config.path_to_task_centroids)
+        id_to_task = torch.load(config.path_id_to_task)
+        task_id = {v:k for k,v in id_to_task.items()}[config.finetune_task_name] 
+
+        task_centroid = task_centroids[task_id]         
+        train_centroids = torch.stack([
+            task_centroids[tr_task] for tr_task in range(38) #n_train_tasks)
+        ])
+
+        # compute similarity
+        sim = F.cosine_similarity(task_centroid, train_centroids)
+        top_k_tasks = sim.topk(config.adapter_soup_max_domains)[1]
+
+        # finally, treat as an average selector for the given tasks
+        module_logits = torch.zeros(config.n_splits, n_train_tasks)
+        module_logits[:, top_k_tasks] = 1. / config.adapter_soup_max_domains
+        self.register_buffer(
+            "module_logits", module_logits
+        )
+
+        print('top K tasks : ', top_k_tasks)        
+        breakpoint()
 
     def forward(self, routing_infos):
         bs = routing_infos.task_ids.size(0)

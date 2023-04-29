@@ -121,6 +121,11 @@ class Config(object):
         self.module_logits_l2_norm = False
         self.filenames = filenames
 
+        # adapter soup
+        self.adapter_soup_max_domains = 5
+        self.path_to_task_centroids = './t0_task_id_avg_encodings.pth'
+        self.path_id_to_task = './t0_id_to_task.pth'
+
         if filenames:
             for filename in filenames.split("+"):
                 if not os.path.exists(filename):
