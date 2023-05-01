@@ -134,8 +134,9 @@ def main(files, dataset, latex, hps, nt):
         for arg in files:
             print(arg)
             skipped = []
-            model = arg.split("/")[-2]
+            model = arg.split("_")[-1]
             result_files = glob.glob(arg + "/**/result.csv", recursive=True)
+            print()
             if not result_files:
                 result_files = glob.glob(arg + "/**/results.csv", recursive=True)
             if nt and len(result_files) != int(nt):
