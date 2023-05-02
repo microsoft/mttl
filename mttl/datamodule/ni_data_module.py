@@ -1,7 +1,9 @@
 import torch
+
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
+
 from typing import List
 
 from mttl.utils import get_ni_tasks_from_file, trim_batch, hash_example
@@ -22,6 +24,7 @@ class CollateWrapperFn:
         target_ids = [b.target_ids for b in batch]
         hashes = [b.hash for b in batch]
         task_ids = [b.task_id for b in batch]
+        instruction_hashes = [b.instruction_hash for b in batch]
 
         task_ids = torch.LongTensor(task_ids)
         input_ids = trim_batch(torch.stack(input_ids, 0), self.pad_token_id)
@@ -32,6 +35,7 @@ class CollateWrapperFn:
             "target_ids": target_ids,
             "task_ids": task_ids,
             "hashes": hashes,
+            "instruction_hashes": instruction_hashes,
         }
         return output_batch
 
@@ -82,6 +86,7 @@ class NIDataModule(LightningDataModule):
             self.task2id = {self.task_name: 0}
             self.tasks = [self.task_name]
 
+        self.dataset_reader: NIDatasetReader = None
         self.id2task = dict((k, v) for v, k in self.task2id.items())
         self.tokenizer = AutoTokenizer.from_pretrained(config.model)
         self.tokenizer.model_max_length = config.max_input_length
@@ -93,10 +98,22 @@ class NIDataModule(LightningDataModule):
             self.task_embed_path = None
 
     @property
+    def full_dataset(self):
+        return torch.utils.data.dataset.ConcatDataset(
+            [self.train_dataset, self.val_dataset, self.test_dataset]
+        )
+
+    @property
+    def all_instructions(self):
+        """Return all task instructions used in the dataset.
+        """
+        return self.dataset_reader.read_all_instructions()
+
+    @property
     def dataset_name(self):
         return hash_example("-".join(self.tasks))
 
-    def setup(self, stage=None):
+    def setup(self, stage="fit", val_examples_per_task=None, test_examples_per_task=None):
         self.dataset_reader = NIDatasetReader(
             self.config.train_dir,
             self.tokenizer,
@@ -107,14 +124,15 @@ class NIDataModule(LightningDataModule):
             max_output_length=self.config.max_output_length,
             use_task_descriptions=self.config.use_task_descriptions,
             num_positive_examples=self.config.num_pos_examples,
+            val_examples_per_task=val_examples_per_task,
+            test_examples_per_task=test_examples_per_task,
         )
 
         print("Training on the following tasks: {}".format(self.tasks))
 
-        train_dataset = IndexConcatDataset(
+        self.train_dataset = IndexConcatDataset(
             self.dataset_reader.read_orig_datasets("train")
         )
-        self.train_dataset = train_dataset
         self.val_dataset = IndexConcatDataset(
             self.dataset_reader.read_orig_datasets("dev")
         )
@@ -122,9 +140,9 @@ class NIDataModule(LightningDataModule):
             self.dataset_reader.read_orig_datasets("test")
         )
 
-        print("Training steps:", len(self.train_dataloader()))
-        print("Validation steps:", len(self.val_dataloader()))
-        print("Test steps:", len(self.test_dataloader()))
+        print("Training examples:", len(self.train_dataset))
+        print("Validation examples:", len(self.val_dataset))
+        print("Test examples:", len(self.test_dataset))
 
 
 class NIPretrainDataModule(NIDataModule):

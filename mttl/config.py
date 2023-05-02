@@ -6,7 +6,7 @@ from string import Template
 
 
 class Config:
-    def __init__(self, filenames=None, kwargs=None):
+    def __init__(self, filenames=None, kwargs=None, raise_error=True):
         # Stores personalization of the config file in a dict (json serializable)
         self._updated_kwargs = {}
         self.cache_dir = os.getenv("CACHE_DIR", "./cache")
@@ -35,7 +35,7 @@ class Config:
         self.use_t0_few_shot_training_set = False  # if True, then use 100 examples per task during training + 100 examples per validation task
 
         # Training config
-        self.compute_strategy = "ddp"
+        self.compute_strategy = None
         self.scheduler = "linear_decay_with_warmup"
         self.checkpoint = None  # load from checkpoint
         self.checkpoint_step = None  # load from checkpoint in format of global_stepX.pt
@@ -63,6 +63,10 @@ class Config:
         self.debug = False
         self.seed = 42
 
+        self.ni_online_eval = False   # zero-shot online eval for ni
+        self.t0_online_eval = False   # zero-shot eval for t0
+        self.early_stop_on_zero_shot = False  # zero-shot early stopping
+
         # auxiliary losses
         self.ortho_loss = 0.          # orthogonality between skills
         self.task_loss = 0.           # task prediction loss (mi between tasks and skills)
@@ -74,6 +78,7 @@ class Config:
         self.poly_unlikely_loss = 0.  # poly unlikelihood loss
         self.finetune_type = None     # ["F", "A", "Z", "MuZ", "Poly", "PolyRand"]
         self.finetune_skip_es = False  # skip early stopping while fine-tuning
+        self.finetune_use_last_checkpoint = False  # use always the best valid_perf checkpoint if available
         self.model = None
         self.precision = "32"
         self.monitor_grad_alignment_on = None
@@ -121,10 +126,10 @@ class Config:
                 if not os.path.exists(filename):
                     filename = os.path.join(os.getenv("CONFIG_PATH", default="configs"), filename)
 
-                self.update_kwargs(json.load(open(filename)), eval=False)
+                self.update_kwargs(json.load(open(filename)), eval=False, raise_error=raise_error)
 
         if kwargs:
-            self.update_kwargs(kwargs)
+            self.update_kwargs(kwargs, raise_error=raise_error)
 
         self.save_config(self.output_dir)
 
@@ -134,7 +139,7 @@ class Config:
     def was_default(self, key):
         return key not in self._updated_kwargs
 
-    def update_kwargs(self, kwargs, eval=True):
+    def update_kwargs(self, kwargs, eval=True, raise_error=True):
         for (k, v) in kwargs.items():
             if eval:
                 try:
@@ -143,7 +148,7 @@ class Config:
                     v = v
             else:
                 v = v
-            if not hasattr(self, k):
+            if not hasattr(self, k) and raise_error:
                 raise ValueError(f"{k} is not in the config")
 
             if eval:
@@ -193,7 +198,7 @@ class ParseKwargs(argparse.Action):
             getattr(namespace, self.dest)[key] = value
 
 
-def parse_config():
+def parse_config(extra_kwargs=None, raise_error=True):
     import itertools
     
     parser = argparse.ArgumentParser()
@@ -208,8 +213,10 @@ def parse_config():
             key, _, value = value.partition('=')
             kwargs[key] = value
     args.kwargs = kwargs
+    if extra_kwargs:
+        args.kwargs.update(extra_kwargs)
 
-    config = Config(args.config_files, args.kwargs)
+    config = Config(args.config_files, args.kwargs, raise_error=raise_error)
 
     print(config.to_json())
     return config

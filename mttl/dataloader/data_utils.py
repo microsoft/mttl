@@ -11,6 +11,7 @@ class ExampleInfo:
     hash: str
     example_id: int
     input_text: str = None
+    instruction_hash: str = None
 
 
 @dataclass
@@ -23,3 +24,5 @@ class MultiChoiceExampleInfo:
     task_id: int
     hash: str
     example_id: int
+    input_text: str = None
+    instruction_hash: str = None

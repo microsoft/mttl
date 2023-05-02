@@ -39,6 +39,7 @@ ARGS_TO_OVERWRITE = [
     "poly_use_shared_skill",
     "poly_average_correction",
     "poly_selector",
+    "poly_granularity",
     "lora_rank",
     "lora_modules",
     "lora_layers",
@@ -56,7 +57,7 @@ def finetune(args, use_mlf=True, do_zs=True):
 
     # build the pretrained model
     if args.checkpoint:
-        ckpt_path = get_checkpoint_path(args.checkpoint)
+        ckpt_path = get_checkpoint_path(args.checkpoint, use_last=args.finetune_use_last_checkpoint)
 
         if ckpt_path.startswith("az://"):
             import fsspec
