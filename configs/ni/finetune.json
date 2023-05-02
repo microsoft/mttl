@@ -1,4 +1,5 @@
 {
+    "model": "google/t5-large-lm-adapt",
     "dataset": "ni",
     "optimizer": "adamw",
     "train_dir": "$NI_DATA_DIR",

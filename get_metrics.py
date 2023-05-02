@@ -25,10 +25,13 @@ def get_task_name_from_file(result):
 @click.option("--dataset")
 @click.option("--latex", is_flag=True)
 @click.option("--hps")
+@click.option("--tasks")
 @click.option("--nt")
-def main(files, dataset, latex, hps, nt):
+def main(files, dataset, latex, hps, tasks, nt):
     res = []
     models = []
+    if tasks:
+        tasks = tasks.split(",")
 
     if dataset == "ni":
         for arg in files:
@@ -45,9 +48,19 @@ def main(files, dataset, latex, hps, nt):
                 else:
                     task_name = get_task_name_from_file(result)
 
-                zs_scores = data["zs_test_performance"]
-                test_scores = data["test_performance"]
-                val_scores = data["dev_performance"]
+                if "test_performance" in data.columns:
+                    test_scores = data["test_performance"]
+                # new version is assumed
+                else:
+                    test_scores = (
+                        data.loc[data["step"] != 0]["test/metric_perf"].dropna().values
+                    )
+                if "dev_performance" in data.columns:
+                    val_scores = data["dev_performance"]
+                else:
+                    val_scores = (
+                        data.loc[data["step"] != 0]["val/metric_perf"].dropna().values
+                    )
 
                 if len(test_scores) != 3:
                     skipped.append(task_name)
@@ -60,7 +73,6 @@ def main(files, dataset, latex, hps, nt):
                             "trial": trial,
                             "perf": test_scores[trial],
                             "val_perf": val_scores[trial],
-                            "zs_perf": zs_scores[trial],
                         }
                     )
 
@@ -137,14 +149,20 @@ def main(files, dataset, latex, hps, nt):
             result_files = glob.glob(arg + "/**/result.csv", recursive=True)
             if not result_files:
                 result_files = glob.glob(arg + "/**/results.csv", recursive=True)
-            if nt and len(result_files) != int(nt):
+            if nt and len(result_files) < int(nt):
                 continue
             print("Processing {:60s} {:02d} files".format(model, len(result_files)))
 
             results = []
+            tasks_found = []
             for result in result_files:
                 data = pandas.read_csv(result)
                 task_name = data["prefix"][0]
+                
+                if tasks and task_name not in tasks:
+                    continue
+                else:
+                    tasks_found.append(task_name)
 
                 zero_shot = data.loc[data["step"] == 0]["test/acc_0shot"].dropna().values * 100
                 data = data.loc[data["step"] != 0]
@@ -167,6 +185,9 @@ def main(files, dataset, latex, hps, nt):
                             "zs_perf": zero_shot[trial] if len(zero_shot) > 1 else zero_shot[0],
                         }
                     )
+
+            if tasks and len(tasks_found) != len(tasks):
+                continue
 
             if not results:
                 continue
@@ -250,6 +271,7 @@ def main(files, dataset, latex, hps, nt):
                 overall[-1].update({"zs": zs_mean})
 
         pd.set_option('display.max_colwidth', None)
+        pd.set_option('display.max_rows', None)
         print(pandas.DataFrame(per_task).pivot(index='model', columns='task', values='perf'))
         print(pandas.DataFrame(overall).sort_values("test", ascending=True))
 

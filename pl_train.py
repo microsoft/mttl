@@ -3,6 +3,7 @@ import pytorch_lightning as pl
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 
+from mttl.online_eval import NIOnlineZeroShot, T0OnlineZeroShot
 from mttl.config import parse_config
 from mttl.callbacks import ProgressCallback
 from mttl.datamodule.ni_data_module import NIPretrainDataModule
@@ -32,19 +33,8 @@ def run_multitask(args):
 
     args.n_tasks = len(dm.task2id)
 
-    if args.example_to_ids_path:
-        from models.cluster_reader import ClusterResult
-
-        cluster_result = ClusterResult(args.example_to_ids_path)
-        args.n_tasks = cluster_result.n_clusters()
-
-        if args.poly_selector in ["cluster_soft", "cluster_hard"]:
-            args.n_skills = cluster_result.n_clusters()
-        else:
-            raise NotImplementedError()
-
     if args.checkpoint is not None:
-        from utils import get_checkpoint_path
+        from mttl.utils import get_checkpoint_path
 
         checkpoint_path = get_checkpoint_path(args.checkpoint)
 
@@ -74,7 +64,7 @@ def run_multitask(args):
 
     loggers.append(pl.loggers.CSVLogger(save_dir=args.output_dir, name="csv_metrics"))
 
-    kwargs = {"val_check_interval": args.eval_every} if args.eval_every else {}
+    kwargs = {"val_check_interval": args.eval_every * args.gradient_accumulation_steps} if args.eval_every else {}
 
     # get metric monitors for models
     callbacks = get_monitors(args)
@@ -84,6 +74,16 @@ def run_multitask(args):
     mode = "min"
 
     if args.dataset in ["ni", "xfit"]:
+        if args.early_stop_on_zero_shot and not args.ni_online_eval:
+            raise NotImplementedError("Specify online zero-shot if early stopping on zero shot.")
+
+        if args.ni_online_eval:
+            callbacks.append(NIOnlineZeroShot(args.eval_every))
+
+            if args.early_stop_on_zero_shot:
+                monitor = "val/zero_shot_perf"
+                mode = "max"
+
         checkpoint_callback = ModelCheckpoint(
             dirpath=args.output_dir,
             monitor=monitor,
@@ -95,7 +95,13 @@ def run_multitask(args):
         )
         callbacks.append(checkpoint_callback)
     else:
-        # no need for checkpointing in t0 as we checkpoint manually in the module
+        # no need for checkpointing in t0 as we checkpoint manually in the module    
+        if args.t0_online_eval:
+            callbacks.append(T0OnlineZeroShot(args.eval_every))
+
+            if args.early_stop_on_zero_shot:
+                raise NotImplementedError()
+
         kwargs["enable_checkpointing"] = False
 
     trainer = Trainer(

@@ -1,8 +1,8 @@
 {
     "dataset": "ni",
     "model": "t5-large",
-    "train_dir": "/mnt/default/data/ni_processed/42-100",
-    "custom_tasks_splits": "./dataloader/ni_data/test_tasks.txt",
+    "train_dir": "$NI_DATA_DIR",
+    "custom_tasks_splits": "./mttl/dataloader/ni_data/test_tasks.txt",
     "predict_batch_size": 24,
     "max_input_length": 1024,
     "max_output_length": 128,

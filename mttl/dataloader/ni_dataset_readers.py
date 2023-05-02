@@ -44,7 +44,7 @@ class NITaskDataset(torch.utils.data.dataset.Dataset):
             self._pretokenize()
 
     def _pretokenize(self):
-        inputs, outputs, input_hashes = zip(*self.examples)
+        inputs, outputs, instructions = zip(*self.examples)
 
         inputs_ids = self.tokenizer(
             list(inputs),
@@ -61,17 +61,24 @@ class NITaskDataset(torch.utils.data.dataset.Dataset):
             return_tensors="pt",
         ).input_ids
 
-        self.examples = list(zip(inputs_ids, outputs_ids, input_hashes))
+        input_hashes = [hash_example(i) for i in inputs]
+        instruction_hashes = [hash_example(i) for i in instructions]
+
+        self.examples = list(zip(
+            inputs_ids,
+            outputs_ids,
+            input_hashes,
+            instruction_hashes,
+        ))
 
     def __len__(self):
         return len(self.examples)
 
     def __getitem__(self, key):
-        input, output, input_hash = self.examples[key]
-
         if self.pretokenize:
-            tok_input, tok_output = input, output
+            tok_input, tok_output, input_hash, instruction_hash = self.examples[key]
         else:
+            input, output, instruction = self.examples[key]
             tok_input = self.tokenizer(
                 input,
                 truncation=True,
@@ -87,13 +94,17 @@ class NITaskDataset(torch.utils.data.dataset.Dataset):
                 return_tensors="pt",
             ).input_ids.squeeze(0)
 
+            input_hash = hash_example(input)
+            instruction_hash = hash_example(instruction)
+
         ex_info = ExampleInfo(
             tok_input,
             tok_output,
             self.task_id,
             input_hash,
             example_id=key,
-            input_text=input if not self.pretokenize else None
+            input_text=input if not self.pretokenize else None,
+            instruction_hash=instruction_hash,
         )
         return ex_info
 
@@ -103,7 +114,7 @@ class NIDatasetReader(object):
     metric = "rougeL"
 
     @classmethod
-    def load_data(cls, data_path, tasks=None):
+    def load_data(cls, data_path, tasks=None, val_examples_per_task=None, test_examples_per_task=None):
         data = []
         tasks = tasks or [
             os.path.basename(t[:-5]) for t in list(glob.glob(data_path + "/*.json"))
@@ -115,6 +126,10 @@ class NIDatasetReader(object):
                 # sanity check
                 for example in data_["dev_examples"] + data_["test_examples"]:
                     assert len(example["Instance"]["output"]) == 1
+                if val_examples_per_task:
+                    data_["dev_examples"] = data_["dev_examples"][:val_examples_per_task]
+                if test_examples_per_task:
+                    data_["test_examples"] = data_["test_examples"][:test_examples_per_task]
                 data.append(data_)
         return data
 
@@ -129,29 +144,13 @@ class NIDatasetReader(object):
     ) -> Iterator[Tuple[str, str]]:
         """Format the input and iterate over all outputs corresponding to that input."""
         task_name = instance["Task"] + ". "
+        task_input = cls._prepare_input(instance)
 
-        task_input = ""
-        # add the input first.
-        task_input += "Now complete the following example -\n"
-        task_input += f"Input: {instance['Instance']['input'].strip()}"
-        if not task_input[-1] in string.punctuation:
-            task_input += "."
-        task_input += "\n"
-        task_input += "Output: "
-
-        definition = ""
         if use_task_descriptions:
-            if isinstance(instance["Definition"], list):
-                definition = (
-                    "Definition: " + instance["Definition"][0].strip()
-                )  # TODO: should we use <Definition>?
-            else:
-                definition = "Definition: " + instance["Definition"].strip()
-            if not definition[-1] in string.punctuation:
-                definition += "."
-            definition += "\n\n"
+            definition = cls._prepare_definition(instance)
+        else:
+            definition = ""
 
-        # try to add positive examples.
         pos_examples = []
         if num_pos_examples > 0:
             for idx, pos_example in enumerate(
@@ -182,17 +181,7 @@ class NIDatasetReader(object):
                     break
 
         source = task_name + definition + "".join(pos_examples) + task_input
-        tokenized_source = tokenizer(source)["input_ids"]
-
-        # Trim input to max_input_length
-        if len(tokenized_source) > max_input_length:
-            source = tokenizer.decode(
-                tokenized_source[:max_input_length], skip_special_tokens=True
-            )
-
-        # task information is the task name + definition + pos examples
-        task_name_no_id = "_".join(task_name.split("_")[1:])
-        task_information = task_name_no_id + definition
+        task_information = definition
 
         # Select all references during training, this should only contain one reference during testing
         for output in instance["Instance"]["output"]:
@@ -210,6 +199,8 @@ class NIDatasetReader(object):
         max_output_length=128,
         num_positive_examples=0,
         use_task_descriptions=True,
+        val_examples_per_task=None,
+        test_examples_per_task=None,
     ):
         self.data_path = data_path
         self.tokenizer = tokenizer
@@ -221,12 +212,59 @@ class NIDatasetReader(object):
         self.max_output_length = max_output_length
         self.use_task_descriptions = use_task_descriptions
         self.num_pos_examples = num_positive_examples
+        self.val_examples_per_task = val_examples_per_task
+        self.test_examples_per_task = test_examples_per_task
 
         self.task2id = task2id
         self.example2id = example2id
         self.task_embed_path = task_embed_path
 
-        self.data = self.load_data(self.data_path, self.tasks)
+        self.data = self.load_data(
+            self.data_path,
+            self.tasks,
+            self.val_examples_per_task,
+            self.test_examples_per_task,
+        )
+
+    @classmethod
+    def _prepare_input(cls, example):
+        task_input = ""
+        # add the input first.
+        task_input += "Now complete the following example -\n"
+        task_input += f"Input: {example['Instance']['input'].strip()}"
+        if not task_input[-1] in string.punctuation:
+            task_input += "."
+        task_input += "\n"
+        task_input += "Output: "
+        return task_input
+
+    @classmethod
+    def _prepare_definition(cls, example):
+        if isinstance(example["Definition"], list):
+            definition = (
+                "Definition: " + example["Definition"][0].strip()
+            )
+        else:
+            definition = "Definition: " + example["Definition"].strip()
+        if not definition[-1] in string.punctuation:
+            definition += "."
+        definition += "\n\n"
+        return definition
+
+    def read_all_instructions(self):
+        """Read all instructions from the dataset.
+        """
+        all_instructions = []
+        for data in self.data:
+            # TODO: a bit of a lame loop. Definition is repeated inside each example.
+            # yes I know it's a bit lame the preprocessing step should be changed in the future.
+            all_examples = data["train_examples"] + data["dev_examples"] + data["test_examples"]
+            if not all_examples:
+                continue
+
+            definition = self._prepare_definition(all_examples[0])
+            all_instructions.append(definition)
+        return all_instructions
 
     def read_orig_datasets(self, split):
         datasets = []
@@ -249,9 +287,8 @@ class NIDatasetReader(object):
                     self.num_pos_examples,
                     self.max_input_length,
                 ):
-                    input, output, _ = formatted_example
-                    hash = hash_example(input)
-                    formatted_examples.append((input, output, hash))
+                    input, output, instruction = formatted_example
+                    formatted_examples.append((input, output, instruction))
 
             # pretokenization takes a bit of time for NI
             task_dataset = NITaskDataset(

@@ -4,7 +4,7 @@ import random
 from pytorch_lightning import LightningDataModule
 from transformers import AutoTokenizer
 
-from mttl.utils import hash_example, trim_batch
+from mttl.utils import hash_example, template_to_string, trim_batch
 from mttl.datamodule import IndexConcatDataset
 from mttl.dataloader.t0_dataset_readers import get_dataset_reader
 from mttl.dataloader.data_utils import ExampleInfo, MultiChoiceExampleInfo
@@ -53,7 +53,18 @@ class T0FinetuneDataModule(LightningDataModule):
         # only called on 1 GPU/TPU in distributed
         _ = self.dataset_reader.read_few_shot_dataset()
 
-    def flattened_datasets(self):
+    @property
+    def all_instructions(self):
+        """Return all task instructions used in the dataset."""
+        instruction_list = []
+        for template in self.dataset_reader.get_train_template():
+            instruction_list.append(template_to_string(template))
+        for template in self.dataset_reader.get_eval_template():
+            instruction_list.append(template_to_string(template))
+        return instruction_list
+
+    @property
+    def full_dataset(self):
         assert self.train_dataset
 
         all_datasets_with_template = []
@@ -150,7 +161,9 @@ class T0FinetuneDatasetWithTemplate(torch.utils.data.dataset.Dataset):
             template = self.templates
         example = self.dataset[example_id]
 
-        input_str, target_str = apply_template(template, example, hash_friendly=False, handle_edge_cases=False)
+        input_str, target_str = apply_template(
+            template, example, hash_friendly=False, handle_edge_cases=False
+        )
         answer_choices = template.get_answer_choices_list(example)
 
         if isinstance(input_str, list):
@@ -201,11 +214,12 @@ class T0FinetuneDatasetWithTemplate(torch.utils.data.dataset.Dataset):
         label = torch.LongTensor([example["label"]])
         idx = torch.LongTensor([example["idx"]])
 
-        input_str, _ = apply_template(template, example, hash_friendly=True, handle_edge_cases=False)
-
-        hash = hash_example(
-            " ".join(input_str) if isinstance(input_str, list) else input_str
+        input_str, _ = apply_template(
+            template, example, hash_friendly=True, handle_edge_cases=True
         )
+        hash = hash_example(input_str)
+        instruction_hash = hash_example(template_to_string(template))
+
         return MultiChoiceExampleInfo(
             input_ids,
             target_ids,
@@ -215,6 +229,8 @@ class T0FinetuneDatasetWithTemplate(torch.utils.data.dataset.Dataset):
             self.ds_id,
             hash,
             example_id,
+            input_text=input_str,
+            instruction_hash=instruction_hash,
         )
 
 
@@ -233,7 +249,19 @@ class T0PretrainDataModule(LightningDataModule):
         self.id2task = dict((k, v) for v, k in self.task2id.items())
         self.flatten_templates = flatten_templates
 
-    def setup(self, stage='fit'):
+    @property
+    def full_dataset(self):
+        return self._full_dataset
+
+    @property
+    def all_instructions(self):
+        """Return all task instructions used in the dataset."""
+        instruction_list = []
+        for template in self.base_templates:
+            instruction_list.append(template_to_string(template))
+        return instruction_list
+
+    def setup(self, stage="fit"):
         self.train_datasets = self.dataset_reader.read_orig_dataset("train")
         self.train_datasets_withtemplate = []
         self.val_datasets_withtemplate = []
@@ -266,13 +294,9 @@ class T0PretrainDataModule(LightningDataModule):
                     100,
                 ],
                 generator=self.rng,
-            )                    
-            self.train_datasets_withtemplate.append(
-                tr_dataset_wt
             )
-            self.val_datasets_withtemplate.append(
-                val_dataset_wt
-            )
+            self.train_datasets_withtemplate.append(tr_dataset_wt)
+            self.val_datasets_withtemplate.append(val_dataset_wt)
             self.all_datasets_withtemplate.extend([tr_dataset_wt, val_dataset_wt])
 
         if self.config.use_t0_few_shot_training_set:
@@ -283,16 +307,12 @@ class T0PretrainDataModule(LightningDataModule):
                     [
                         len(self.train_datasets_withtemplate[i]) - 1000,
                         1000,
-                    ]
+                    ],
                 )[1]
 
-        self.full_train_dataset = IndexConcatDataset(self.all_datasets_withtemplate)
-        self.train_dataset = IndexConcatDataset(
-            self.train_datasets_withtemplate
-        )
-        self.val_dataset = IndexConcatDataset(
-            self.val_datasets_withtemplate
-        )
+        self._full_dataset = IndexConcatDataset(self.all_datasets_withtemplate)
+        self.train_dataset = IndexConcatDataset(self.train_datasets_withtemplate)
+        self.val_dataset = IndexConcatDataset(self.val_datasets_withtemplate)
 
         # store relevant information
         self.dataset_ids = [
@@ -356,8 +376,16 @@ class T0PretrainDatasetWithTemplate(torch.utils.data.dataset.Dataset):
 
         # we need to be hash friendly here, template.apply is non-deterministic :-(
         hash = hash_example(apply_template(template, example, hash_friendly=True)[0])
+        instruction_hash = hash_example(template_to_string(template))
+
         return ExampleInfo(
-            input_ids, target_ids, self.ds_id, hash, example_id, input_text=input_str
+            input_ids,
+            target_ids,
+            self.ds_id,
+            hash,
+            example_id,
+            input_text=input_str,
+            instruction_hash=instruction_hash,
         )
 
 
@@ -376,6 +404,7 @@ class CollateMultiChoiceFnWrapper:
         target_ids = [b.target_ids for b in batch]
         task_ids = [b.task_id for b in batch]
         hashes = [b.hash for b in batch]
+        instruction_hashes = [b.instruction_hash for b in batch]
         answer_choices_ids = [b.answer_choices_ids for b in batch]
         labels = [b.label for b in batch]
         idx = [b.idx for b in batch]
@@ -413,6 +442,7 @@ class CollateMultiChoiceFnWrapper:
             "labels": labels,
             "idx": idx,
             "hashes": hashes,
+            "instruction_hashes": instruction_hashes,
         }
         return output_batch
 
@@ -432,6 +462,7 @@ class CollatePretrainFnWrapper:
         task_ids = [b.task_id for b in batch]
         ex_ids = [b.example_id for b in batch]
         hashes = [b.hash for b in batch]
+        instruction_hashes = [b.instruction_hash for b in batch]
 
         task_ids = torch.tensor(task_ids, dtype=torch.long)
         ex_ids = torch.tensor(ex_ids, dtype=torch.long)
@@ -452,6 +483,7 @@ class CollatePretrainFnWrapper:
             "task_ids": task_ids,
             "ex_ids": ex_ids,
             "hashes": hashes,
+            "instruction_hashes": instruction_hashes,
         }
         return output_batch
 

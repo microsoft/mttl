@@ -5,8 +5,8 @@ import re
 import numpy as np
 from types import MethodType
 from torch.distributions.relaxed_bernoulli import RelaxedBernoulli
+
 from mttl.models.utils import RoutingInfo
-from mttl.models.cluster_reader import ClusterResult
 
 
 EPS = 1e-12
@@ -84,15 +84,7 @@ def get_selector(config):
     if config.poly_selector == "poly":
         return PolytroponSelector(config)
     elif config.poly_selector == "private":
-        # back-compatibility
-        if config.example_to_ids_path:
-            return ClusterSelector(config, soft=False)
-        else:
-            return PrivateSelector(config)
-    elif config.poly_selector == "cluster_soft":
-        return ClusterSelector(config, soft=True)
-    elif config.poly_selector == "cluster_hard":
-        return ClusterSelector(config, soft=False)
+        return PrivateSelector(config)
     elif config.poly_selector == "moe":
         return MoESelector(config)
     else:
@@ -234,36 +226,6 @@ class PrivateSelector(Selector):
         return F.one_hot(routing_infos.task_ids, num_classes=self.n_skills).unsqueeze(1)
 
 
-class ClusterSelector(Selector):
-    def __init__(self, config, soft=False):
-        super().__init__()
-
-        self.soft = soft
-        self.n_skills = config.n_skills
-        self.cluster_result = ClusterResult(config.example_to_ids_path)
-        self.temperature = config.poly_selector_cluster_temp
-
-        # just to get the device and the working dtype
-        self.dummy_parameter = nn.Parameter(torch.zeros(1), requires_grad=False)
-
-    def forward(self, routing_infos):
-        # this should return a bs x n_clusters tensor that sums to 1
-        if self.soft:
-            distances = self.cluster_result.get_distances_batch(routing_infos.hashes)
-            distances = torch.tensor(
-                distances,
-                device=self.dummy_parameter.device,
-            )
-            routing = F.softmax(-distances / self.temperature, dim=-1).unsqueeze(1)
-        else:
-            cluster_ids = torch.tensor(
-                [self.cluster_result.get_cluster(h) for h in routing_infos.hashes],
-                device=self.dummy_parameter.device,
-            )
-            routing = F.one_hot(cluster_ids, num_classes=self.n_skills).unsqueeze(1)
-        return routing.to(dtype=self.dummy_parameter.dtype)
-
-
 class PolyLoRALinear(PolytroponAdapter):
     def __init__(self, config, task_id_ptr, linear_layer, selector=None):
         super().__init__()
@@ -319,6 +281,7 @@ class PolyLoRALinear(PolytroponAdapter):
 
             with torch.no_grad():
                 self.lora_a.uniform_(-std, std)
+
 
         # ensure that initially, adding the adapter does not change the output
         if self.use_warmup or self.lora_randb_init:
@@ -441,16 +404,13 @@ def modify_with_poly(transformer, config, PolyLayer):
         if re.fullmatch(config.lora_modules, m_name):
             for c_name, layer in dict(module.named_children()).items():
                 if re.fullmatch(config.lora_layers, c_name):
-                    assert isinstance(
-                        layer, nn.Linear
-                    ), f"LoRA can only be applied to torch.nn.Linear, but {layer} is {type(layer)}."
-
                     identifier = _extract_identifier(f'{m_name}.{c_name}', config.poly_granularity)
                     if identifier not in selectors.keys():
                         selectors[identifier] = get_selector(config)
                     selector = selectors[identifier]
                     total_layers += 1
 
+                    print(f"Patching {m_name}.{c_name}...")
                     setattr(
                         module,
                         c_name,
@@ -462,7 +422,7 @@ def modify_with_poly(transformer, config, PolyLayer):
                         ),
                     )
 
-    print(f'created {len(selectors)} for a total of {total_layers} adapted layers') 
+    print(f'created {len(selectors)} selectors for a total of {total_layers} adapted layers')
     return SkilledModel.register_functions(transformer)
 
 
