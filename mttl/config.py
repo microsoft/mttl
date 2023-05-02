@@ -5,12 +5,12 @@ import argparse
 from string import Template
 
 
-
-class Config(object):
+class Config:
     def __init__(self, filenames=None, kwargs=None, raise_error=True):
-        # Stores personalization of the config file
-        self._updated_kwargs = set()
-
+        # Stores personalization of the config file in a dict (json serializable)
+        self._updated_kwargs = {}
+        self.cache_dir = os.getenv("CACHE_DIR", "./cache")
+        self.free_up_space = False
         # Data config
         self.dataset = None
         self.custom_tasks_splits = None
@@ -148,7 +148,6 @@ class Config(object):
                     v = v
             else:
                 v = v
-
             if not hasattr(self, k) and raise_error:
                 raise ValueError(f"{k} is not in the config")
 
@@ -213,7 +212,6 @@ def parse_config(extra_kwargs=None, raise_error=True):
         for value in kwargs_opts:
             key, _, value = value.partition('=')
             kwargs[key] = value
-
     args.kwargs = kwargs
     if extra_kwargs:
         args.kwargs.update(extra_kwargs)
