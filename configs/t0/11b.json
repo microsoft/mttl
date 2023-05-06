@@ -1,0 +1,8 @@
+{
+    "model": "bigscience/T0",
+    "compute_strategy": "deepspeed_stage_3_offload",
+    "precision":"bf16",
+    "gradient_accumulation_steps":1,
+    "train_batch_size":1,
+    "predict_batch_size":1
+}
