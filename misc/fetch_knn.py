@@ -76,11 +76,10 @@ def main(config):
     use_pca = -1
     use_normalization = True
     use_centering = False
-    use_constraints = False
-    algo = "faiss"
+    algo = "kmeans-balanced" if config.balanced else "kmeans-faiss"
 
     subsample = 500_000
-    clusters = [1, 5, 10, 15, 20, 25, 30, 35, 50]
+    clusters = [5, 10, 15, 20, 25, 30, 35, 50]
 
     chunks = glob.glob(f'{config.embeddings_path}*-chunk*')
     if not len(chunks):
@@ -101,10 +100,13 @@ def main(config):
         indices = np.random.choice(
             len(chunk_data.hashes), min(subsample_chunk, len(chunk_data.hashes)), replace=False
         )
+
         if data is None:
             data = Encodings(input_type=chunk_data.input_type)
+
         # the input type should be consistent across all chunks
         assert data.input_type == chunk_data.input_type
+
         # pick indices from hashes, embeds, task_ids and flags
         data.hashes.extend(np.asarray(chunk_data.hashes)[indices].tolist())
         data.encodings.extend(np.asarray(chunk_data.encodings)[indices].tolist())
@@ -147,26 +149,38 @@ def main(config):
         # check if the centroids have been computed without soft clustering
         print("computing cluster assignments")
 
-        if algo == "faiss":
-            kmeans = faiss.Kmeans(
-                training_embeds.shape[-1],
-                int(n_clusters),
-                niter=30,
-                verbose=True,
-                gpu=True,
-                nredo=2,
-                max_points_per_centroid=10_000_000,
-            )
-            kmeans.train(training_embeds)
+        if 'kmeans' in algo:
+            if 'faiss' in algo:
+                kmeans = faiss.Kmeans(
+                    training_embeds.shape[-1],
+                    int(n_clusters),
+                    niter=30,
+                    verbose=True,
+                    gpu=True,
+                    nredo=2,
+                    max_points_per_centroid=10_000_000,
+                )
+                kmeans.train(training_embeds)
+                index = kmeans.index
+            elif 'balanced' in algo:
+                # https://github.com/pclucas14/balanced-kmeans
+                # sys.path += [join(os.environ.get("HOME"), 'balanced-kmeans')]
+                from kmeans_pytorch import KMeans
 
-            index = kmeans.index
-
-            if use_constraints:
-                D, I = index.search(training_embeds, int(n_clusters))
-                centroids = balance_clusters(I, D, kmeans.centroids, training_embeds)
-                # recompute centroids
-                index.reset()
-                index.add(centroids.astype("float32"))
+                device = torch.device('cuda')
+                kmeans = KMeans(
+                    n_clusters=n_clusters, 
+                    device=device,
+                    balanced=True 
+                )
+                kmeans.fit(
+                    torch.from_numpy(training_embeds).cuda(), 
+                    distance='euclidean', 
+                    iter_limit=30, 
+                )
+                centroids = kmeans.cluster_centers
+                index = faiss.IndexFlatL2(centroids.size(-1))
+                index.add(centroids.cpu().numpy())
 
             cluster_infos = ClusterInfos(input_type=data.input_type)
 
@@ -212,7 +226,7 @@ def main(config):
 
 
 if __name__ == "__main__":
-    config = parse_config()
+    config = parse_config(raise_error=False)
 
     # Setup config
     seed_everything(config.seed)
