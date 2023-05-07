@@ -14,4 +14,8 @@ sentencepiece
 torch_kmeans
 sentence-transformers
 fsspec[adl]
+click
 rich
+azureml-mlflow
+numba
+# git+https://github.com/pclucas14/balanced-kmeans

@@ -45,13 +45,18 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             self.model = kwargs["model_object"]
 
         self.pad_token_id = self.tokenizer.pad_token_id
-        self.use_deepspeed = self.config.compute_strategy.startswith("deepspeed")
-        self.use_ddp = self.config.compute_strategy.startswith("ddp")
-        self._last_global_step_saved = -1
+
+        if self.config.compute_strategy:
+            self.use_deepspeed = self.config.compute_strategy.startswith("deepspeed")
+            self.use_ddp = self.config.compute_strategy.startswith("ddp")
+        else:
+            self.use_deepspeed = False
+            self.use_ddp = False
 
         self.best_val_result = None
         self.test_results = []
         self.loss_plugins = nn.ModuleDict({})
+        self._last_global_step_saved = -1
 
         print(self.model.encoder.block[0])
 

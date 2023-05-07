@@ -27,7 +27,8 @@ def get_task_name_from_file(result):
 @click.option("--hps")
 @click.option("--tasks")
 @click.option("--nt")
-def main(files, dataset, latex, hps, tasks, nt):
+@click.option("--save_df", is_flag=True)
+def main(files, dataset, latex, hps, tasks, nt, save_df=False):
     res = []
     models = []
     if tasks:
@@ -40,6 +41,9 @@ def main(files, dataset, latex, hps, tasks, nt):
 
             result_files = glob.glob(arg + "/**/result.csv", recursive=True)
             results = []
+
+            if nt and len(result_files) < int(nt):
+                continue
 
             for result in result_files:
                 data = pandas.read_csv(result)
@@ -93,10 +97,13 @@ def main(files, dataset, latex, hps, tasks, nt):
                 arg += "/"
             model = arg.split("/")[-2]
             result_files = glob.glob(arg + "/**/result.csv", recursive=True)
+
             if not result_files:
                 result_files = glob.glob(arg + "/**/results.csv", recursive=True)
+
             if nt and len(result_files) != int(nt):
                 continue
+
             print("Processing {:60s} {:02d} files".format(model, len(result_files)))
 
             for result in result_files:
@@ -272,8 +279,14 @@ def main(files, dataset, latex, hps, tasks, nt):
 
         pd.set_option('display.max_colwidth', None)
         pd.set_option('display.max_rows', None)
+
         print(pandas.DataFrame(per_task).pivot(index='model', columns='task', values='perf'))
         print(pandas.DataFrame(overall).sort_values("test", ascending=True))
+
+        if save_df:
+            pandas.DataFrame(per_task).pivot(index='model', columns='task', values='perf').to_csv("per_task.csv")
+            pandas.DataFrame(overall).sort_values("test", ascending=True).to_csv("overall.csv")
+
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 {
-    "model": "google/t5-xl-lm-adapt",
+    "model": "bigscience/T0_3B",
     "precision": "bf16",
     "compute_strategy": null,
     "train_batch_size": 8,
