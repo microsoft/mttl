@@ -1,8 +1,8 @@
 {
     "model": "bigscience/T0",
-    "compute_strategy": "deepspeed_stage_3_offload",
-    "precision":"bf16",
-    "gradient_accumulation_steps":1,
-    "train_batch_size":1,
-    "predict_batch_size":1
+    "precision": "bf16",
+    "compute_strategy":"null",
+    "train_batch_size": 2,
+    "predict_batch_size": 4,
+    "gradient_accumulation_steps":8 
 }

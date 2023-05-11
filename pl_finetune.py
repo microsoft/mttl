@@ -179,7 +179,7 @@ def finetune(args, use_mlf=True, do_zs=True):
         if args.finetune_skip_es:
             check_val_every_n_epoch = 10000
         else:
-            check_val_every_n_epoch = 10 if args.dataset in ["ni", "xfit"] else 4 
+            check_val_every_n_epoch = 10 if args.dataset in ["ni", "xfit"] else 50 
 
         trainer = Trainer(
             enable_checkpointing=not args.finetune_skip_es,

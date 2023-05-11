@@ -109,7 +109,7 @@ def run_multitask(args):
         max_steps=args.total_steps + 1 if args.total_steps != -1 else -1,
         gradient_clip_val=args.max_grad_norm,
         log_every_n_steps=50,
-        strategy=args.compute_strategy if args.compute_strategy else None,
+        strategy=args.compute_strategy if args.compute_strategy != "null" else None,
         callbacks=callbacks,
         accumulate_grad_batches=args.gradient_accumulation_steps,
         precision=int(args.precision)
