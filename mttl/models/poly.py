@@ -12,68 +12,6 @@ from mttl.models.utils import RoutingInfo
 EPS = 1e-12
 
 
-class SkilledModel:
-    @staticmethod
-    def register_functions(object):
-        methods = [
-            method
-            for method in dir(SkilledModel)
-            if not method.startswith("__") and not "register_functions" in method
-        ]
-
-        for method in methods:
-            print("Registering method: ", method)
-            setattr(object, method, MethodType(getattr(SkilledModel, method), object))
-        return object
-
-    @staticmethod
-    def switch_selector_to_average(object):
-        """Switches PolytroponSelector to AverageSelector.
-        """
-        for name, module in object.named_modules():
-            for name, inner_mod in module.named_children():
-                if isinstance(inner_mod, PolytroponSelector):
-                    print(
-                        "Replacing with average: ",
-                        name,
-                        "n_skills:",
-                        inner_mod.n_skills,
-                    )
-                    setattr(
-                        module,
-                        name,
-                        AverageSelector(inner_mod.n_skills, inner_mod.n_splits),
-                    )
-
-    @staticmethod
-    def get_adapters(object):
-        adapters = {}
-        for n, m in object.named_modules():
-            if isinstance(m, PolytroponAdapter):
-                adapters[n] = m
-        return adapters
-
-    @staticmethod
-    def get_selectors(object):
-        selectors = {}
-        added_selectors = set()
-
-        for name, adapter in object.get_adapters().items():
-            # selectors might be shared across adapters
-            if adapter.selector not in added_selectors:
-                added_selectors.add(adapter.selector)
-                selectors[name + ".selector"] = adapter.selector
-        return selectors
-
-    @staticmethod
-    def resize_module_logits(object, n_tasks):
-        """Resizes the vector routing, in case of fine-tuning.
-        """
-        for name, selector in object.get_selectors().items():
-            print("Resizing module_logits of selector", name, "with", n_tasks, "tasks.")
-            selector.resize_module_logits(n_tasks)
-
-
 class PolytroponAdapter(nn.Module):
     @property
     def routing_infos(self) -> RoutingInfo:
@@ -152,7 +90,7 @@ class PolytroponSelector(Selector):
         self.config = config
         self.n_splits = config.n_splits
         self.n_skills = config.n_skills
-        self.dropout = config.module_logits_dropout
+        self.dropout = config.module_logits_dropout   
         self.use_l2_norm = config.module_logits_l2_norm
         self.use_relaxed_bernoulli = config.module_logits_relaxed_bernoulli
         self.use_straight_through = config.module_logits_straight_through
@@ -173,8 +111,8 @@ class PolytroponSelector(Selector):
             (n_tasks, self.n_splits * self.n_skills)
         ).uniform_(-1e-3, 1e-3)
 
-    def forward(self, routing_infos):
-        module_logits = self.module_logits[routing_infos.task_ids]
+    def forward(self, routing_infos):  
+        module_logits = self.module_logits[routing_infos.task_ids]        
         module_logits = module_logits.view(-1, self.n_splits, self.n_skills)
 
         if self.use_l2_norm:
@@ -236,7 +174,7 @@ class PrivateSelector(Selector):
         return F.one_hot(routing_infos.task_ids, num_classes=self.n_skills).unsqueeze(1)
 
 
-class PolyLoRALinear(PolytroponAdapter):
+class PolyLoRALinear(PolytroponAdapter): 
     def __init__(self, config, task_id_ptr, linear_layer, selector=None):
         super().__init__()
         self.n_splits = config.n_splits
@@ -252,7 +190,8 @@ class PolyLoRALinear(PolytroponAdapter):
         self.lora_randb_init = config.lora_randb_init
         self.task_id_ptr = task_id_ptr
         self.training_steps = 0.0
-
+        self.lora_alpha = config.lora_alpha if hasattr(config, "lora_alpha") else 1.0
+        self.scaling = self.lora_alpha / self.rank
         if selector is None:
             self.selector = get_selector(config)
         else:
@@ -300,8 +239,9 @@ class PolyLoRALinear(PolytroponAdapter):
         else:
             torch.nn.init.zeros_(self.lora_b)
 
+
     def forward(self, input):
-        if self.training:
+        if self.training:   
             self.training_steps += 1
 
         task_id = self.routing_infos.task_ids
@@ -321,8 +261,8 @@ class PolyLoRALinear(PolytroponAdapter):
         B = torch.einsum("bqs,qsrd->bqrd", (mixing_weights, self.lora_b))
         A = A.reshape(bs, self.in_features, self.rank)
         B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
-
-        adapter_out = input.bmm(A).bmm(B) / self.rank
+             
+        adapter_out = input.bmm(A).bmm(B) * self.scaling # / self.rank
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
@@ -378,6 +318,80 @@ class PolyIA3Linear(PolytroponAdapter):
         return "n_skills={}, in_features={}, out_features={}, bias={}".format(
             self.n_skills, self.in_features, self.out_features, self.bias is not None
         )
+
+
+class SkilledModel:
+    @staticmethod
+    def register_functions(object):
+        methods = [
+            method
+            for method in dir(SkilledModel)
+            if not method.startswith("__") and not "register_functions" in method
+        ]
+
+        for method in methods:
+            print("Registering method: ", method)
+            setattr(object, method, MethodType(getattr(SkilledModel, method), object))
+        return object
+
+    @staticmethod 
+    def switch_selector_to_average(object, selector_to_replace=PolytroponSelector):
+        """Switches PolytroponSelector to AverageSelector.
+        """
+        for name, module in object.named_modules():
+            for name, inner_mod in module.named_children():
+                if isinstance(inner_mod, selector_to_replace):
+                    print(
+                        "Replacing with average: ",
+                        name,
+                        "n_skills:",
+                        inner_mod.n_skills,
+                    )
+                    n_splits = inner_mod.n_splits if hasattr(inner_mod, "n_splits") else 1
+                    setattr(
+                        module,
+                        name,
+                        AverageSelector(inner_mod.n_skills, n_splits),
+                    )
+
+    @staticmethod
+    def get_adapters(object):
+        adapters = {}
+        for n, m in object.named_modules():
+            if isinstance(m, PolytroponAdapter):
+                adapters[n] = m
+        return adapters
+
+    @staticmethod
+    def get_selectors(object):
+        selectors = {}
+        added_selectors = set()
+
+        for name, adapter in object.get_adapters().items():
+            # selectors might be shared across adapters
+            if adapter.selector not in added_selectors:
+                added_selectors.add(adapter.selector)
+                selectors[name + ".selector"] = adapter.selector
+        return selectors
+
+    @staticmethod
+    def resize_module_logits(object, n_tasks):
+        """Resizes the vector routing, in case of fine-tuning.
+        """
+        for name, selector in object.get_selectors().items():
+            print("Resizing module_logits of selector", name, "with", n_tasks, "tasks.")
+            selector.resize_module_logits(n_tasks)
+    
+    @staticmethod
+    def remove_skills(object, skill_ids_to_keep):
+        print("Removing skills, keeping", skill_ids_to_keep)
+        for name, adapter in object.get_adapters().items():
+            if isinstance(adapter, PolyLoRALinear):
+                adapter.lora_a= nn.Parameter(adapter.lora_a[:, skill_ids_to_keep, :, :])
+                adapter.lora_b= nn.Parameter(adapter.lora_b[:, skill_ids_to_keep, :, :])
+                adapter.n_skills = len(skill_ids_to_keep)
+                adapter.selector.n_skills = len(skill_ids_to_keep)
+
 
 
 def modify_with_poly(transformer, config, PolyLayer):

@@ -20,7 +20,7 @@ class ClusterResult:
         return cls._instance.example_to_ids[hash]
 
     @classmethod
-    def n_clusters(cls):
+    def n_clusters(cls):    
         return len(cls._instance.cluster_sizes)
 
     def __new__(cls, path):
@@ -43,6 +43,7 @@ class ClusterResult:
                 )
             )
             cluster_sizes = torch.from_numpy(np.bincount(cls._instance.infos.cluster_ids)).float()
+            assert len(np.bincount(cls._instance.infos.cluster_ids)) == len(cls._instance._example_to_distances[list(cls._instance._example_to_distances.keys())[0]])
 
             cls._instance.cluster_sizes = cluster_sizes
             cls._instance.avg_cluster_size = cluster_sizes.mean().item()

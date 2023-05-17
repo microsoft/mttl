@@ -1,0 +1,22 @@
+{       
+    "dataset": "alpaca",
+    "optimizer": "adamw", 
+    "learning_rate": 3e-4,
+    "micro_batch_size": 4,  
+    "exp_name": "alpaca_full",
+    "train_dir": "$AP_DATA_DIR",
+    "precision": "bf16",    
+    "train_batch_size": 128,
+    "model": "yahma/llama-7b-hf",
+    "lora_rank": 8,  
+    "rank": 8,      
+    "num_train_epochs": 3,
+    "n_skills": 1,
+    "lora_alpha": 16,
+    "eval_every": 400,
+    "warmup_steps": 100,
+    "lora_dropout": 0.05,
+    "weight_decay": 0,
+    "max_input_length": 256,   
+    "output_dir":"/home/v-oostapenko/logs/llama_alpaca/alpaca_full_e2e.ckpt"
+}

@@ -73,13 +73,13 @@ def load_instances(task, data_path, num_examples=100, is_test=False):
     return {
         "task_name": task,
         "task_prefix": task,
-        "train_examples": examples_dict["train"],
+        "c": examples_dict["train"],
         "dev_examples": examples_dict["dev"],
         "test_examples": examples_dict["test"],
     }
 
 
-@click.command
+@click.command()
 @click.argument('data_path', type=str)
 @click.option('--seed', type=lambda x: x.split(","), default="13,42,58")
 @click.option('--output_path', type=str)

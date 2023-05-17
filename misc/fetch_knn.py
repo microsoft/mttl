@@ -147,7 +147,7 @@ def main(config):
         # check if the centroids have been computed without soft clustering
         print("computing cluster assignments")
 
-        if algo == "faiss":
+        if algo == "faiss":  
             kmeans = faiss.Kmeans(
                 training_embeds.shape[-1],
                 int(n_clusters),

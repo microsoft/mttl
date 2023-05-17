@@ -67,13 +67,17 @@ class RoutingInfo:
     example_ids: List[int] = None
 
     @classmethod
-    def from_batch(cls, batch):
-        return RoutingInfo(
-            task_ids=batch["task_ids"],
+    def from_batch(cls, batch:dict):
+        ri = RoutingInfo(
+            task_ids=batch["task_ids"],   
             hashes=batch.get("hashes", None),
             example_ids=batch.get("example_ids", None),
             instruction_hashes=batch.get("instruction_hashes", None)
         )
+        if "distances" in batch:                           
+            #used for evaluation of soft clustering tuned models
+            setattr(ri, "distances", batch["distances"])
+        return ri
 
     def repeat_interleave(self, repeats):
         # useful for beam search

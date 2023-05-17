@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-import math
+import math                
 from torch.distributions import Bernoulli, Categorical
 from pytorch_lightning import Callback
 from mttl.utils import average_dicts
@@ -26,7 +26,7 @@ class PolytroponLog(Callback):
         ):
             return
 
-        def layer_stats(Z):
+        def layer_stats(Z):  
             prob = torch.sigmoid(Z)
             discreteness = (
                 Bernoulli(logits=Z).entropy().sum().item()
@@ -50,17 +50,18 @@ class PolytroponLog(Callback):
 
         seen = 0
         for coder in stats.keys():
-            mod = getattr(pl_module.model, coder)
-            for module in mod.modules():
-                if hasattr(module, "module_logits"):
-                    stats[coder] += [layer_stats(module.module_logits)]
-                    seen += 1
+            if hasattr(pl_module.model, coder):
+                mod = getattr(pl_module.model, coder)
+                for module in mod.modules():
+                    if hasattr(module, "module_logits"):
+                        stats[coder] += [layer_stats(module.module_logits)]
+                        seen += 1
 
-            # average over layers
-            if len(stats[coder]):
-                stats[coder] = average_dicts(stats[coder])
+                # average over layers
+                if len(stats[coder]):
+                    stats[coder] = average_dicts(stats[coder])
 
-                for k, v in stats[coder].items():
-                    pl_module.log(
-                        f"Z/{coder}.{k}", v, on_epoch=True, on_step=True, sync_dist=True
-                    )
+                    for k, v in stats[coder].items():
+                        pl_module.log(
+                            f"Z/{coder}.{k}", v, on_epoch=True, on_step=True, sync_dist=True
+                        )

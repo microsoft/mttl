@@ -47,7 +47,7 @@ class Config(object):
         self.non_trainable_param_names = None
         self.weight_decay = 0.01
         self.adam_epsilon = 1e-8
-        self.max_grad_norm = 0.1
+        self.max_grad_norm = None
         self.gradient_accumulation_steps = 1
         self.optimizer = "adamw"
         self.adafactor_scale_parameter = True
