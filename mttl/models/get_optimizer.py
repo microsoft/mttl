@@ -60,13 +60,13 @@ def get_optimizer(model, args, no_decay=None):
             param_groups[key]["lr"] = args.learning_rate
 
     param_groups = param_groups.values()
-    if optim_name.lower() == "adam":
+    if optim_name.lower() == "adam":   
         optimizer = optim.Adam(param_groups)
     elif optim_name.lower() == "sgd":
         optimizer = optim.SGD(param_groups)
     elif optim_name.lower() == "adamw":
-        from transformers import AdamW
-
+        # from transformers import AdamW # tloen uses adamw_torch
+        from torch.optim import AdamW
         optimizer = AdamW(param_groups, eps=args.adam_epsilon)
     elif optim_name.lower() == "adafactor":
         optimizer = Adafactor(
