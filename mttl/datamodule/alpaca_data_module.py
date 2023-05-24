@@ -58,7 +58,9 @@ class AlpacaDataModule(LightningDataModule):
         self.tokenizer = LlamaTokenizer.from_pretrained(tok_model, add_eos_token=True)
         # self.tokenizer.pad_token_id = 
         self.tokenizer.pad_token_id = 0 
-        # self.tokenizer.padding_side = "left"  # Allow batched inference
+        
+        if self.config.padding_side == "left":
+            self.tokenizer.padding_side = "left"  # Allow batched inference, used by tloen also in training
         self.pad_token_id = self.tokenizer.pad_token_id
 
         self.task2id = {'alpaca_full':0}
@@ -66,7 +68,7 @@ class AlpacaDataModule(LightningDataModule):
     def get_dataset(self):
         return AlpacaDataset(
             
-            self.tokenizer, self.config.max_input_length, self.config.max_output_length
+            self.tokenizer, self.config.max_input_length, self.config.max_output_length, self.config.train_dir
         )
     
     def setup(self, stage=None):
@@ -75,7 +77,7 @@ class AlpacaDataModule(LightningDataModule):
         # always use the same split for the dataset
         rng = torch.Generator().manual_seed(1234)
 
-        n_tr_samples = int(len(dataset) * 0.97)   
+        n_tr_samples = int(len(dataset) * 0.97)   #len(dataset) - 
         self.train_dataset, self.dev_dataset = torch.utils.data.random_split(
             dataset, [n_tr_samples, len(dataset) - n_tr_samples, ], generator=rng
         )

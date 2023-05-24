@@ -23,6 +23,12 @@ class ClusterResult:
     def n_clusters(cls):    
         return len(cls._instance.cluster_sizes)
 
+    @classmethod
+    def remove_skills(cls, skill_ids_to_keep):
+        # print(skill_ids_to_keep)
+        for key,v in cls._instance._example_to_distances.items():
+            cls._instance._example_to_distances[key] = np.array(v)[skill_ids_to_keep].tolist()
+    
     def __new__(cls, path):
         if cls._instance is None:
             cls._instance = super(ClusterResult, cls).__new__(cls)

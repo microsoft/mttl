@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import re
 import numpy as np
 from types import MethodType
+from torch.autograd import Function
 from torch.distributions.relaxed_bernoulli import RelaxedBernoulli
 
 from mttl.models.utils import RoutingInfo
@@ -174,6 +175,77 @@ class PrivateSelector(Selector):
         return F.one_hot(routing_infos.task_ids, num_classes=self.n_skills).unsqueeze(1)
 
 
+class LoraAveraging(Function):
+    @staticmethod             
+    def forward(ctx, inputs, module_weights):
+        output = torch.einsum("bqs,qsdr->bqdr", (module_weights, inputs))
+        ctx.save_for_backward(module_weights)
+        return output
+    @staticmethod       
+    def backward(ctx, grad_output):
+        module_weights, = ctx.saved_tensors
+
+        # Compute the gradients with respect to the inputs and module_weights   
+        grad_inputs = torch.einsum("bqdr,qsdr->bqs", (grad_output, module_weights))
+        # grad_module_weights = torch.einsum("bqs,bqdr->qsdr", (grad_output, inputs))
+
+        return grad_inputs#, None#, grad_module_weights
+        
+                         
+class EfficientBackwardbmm(Function):
+    @staticmethod
+    def forward(ctx, input, module_weights, lora_a, lora_b, in_features, rank, out_features):        
+        bs = module_weights.size(0)
+        ctx.rank = rank 
+        ctx.lora_a = lora_a
+        ctx.lora_b = lora_b        
+        ctx.in_features = in_features
+        ctx.out_features = out_features
+        # ctx.module_weights = module_weights
+        A = torch.einsum("bqs,qsdr->bqdr", (module_weights, lora_a))
+        B = torch.einsum("bqs,qsrd->bqrd", (module_weights, lora_b))
+        A = A.reshape(bs, in_features, rank)
+        B = B.transpose(1, 2).reshape(bs, rank, out_features)
+        ctx.save_for_backward(input, module_weights)#, A, B)
+        return torch.bmm(input, A).bmm(B)
+    
+    @staticmethod       
+    def backward(ctx, grad_output):              
+        input,module_weights = ctx.saved_tensors   
+        # retrieve saved pointers
+        lora_a, lora_b = ctx.lora_a, ctx.lora_b        
+        in_features, rank, out_features = ctx.in_features, ctx.rank, ctx.out_features
+        module_weights = module_weights.to(dtype=lora_a.dtype)
+        bs = module_weights.size(0)
+        # recalculate A and B (instead of storing them)  
+        A = torch.einsum("bqs,qsdr->bqdr", (module_weights, lora_a))
+        B = torch.einsum("bqs,qsrd->bqrd", (module_weights, lora_b))
+        A = A.reshape(bs, in_features, rank) 
+        B = B.transpose(1, 2).reshape(bs, rank, out_features)
+        # compute grads        
+        A = A.to(dtype=grad_output.dtype)
+        B = B.to(dtype=grad_output.dtype) 
+        # Compute gradients with respect to the input, module_weights, lora_a, lora_b
+        # grad_input is b x s x d
+        grad_input = grad_output.bmm(B.transpose(1, 2)).bmm(A.transpose(1, 2))
+        # grad w.r.t B, lora_b is q x s x 4 x d
+        grad_B = grad_output.transpose(1, 2).bmm(torch.bmm(input, A)).transpose(1, 2)
+        grad_lora_b = torch.einsum("bqs,qrd->qsrd", (module_weights, grad_B))
+        # grad w.r.t A, lora_a is q x s x d x r
+        grad_A = grad_output.bmm(B.transpose(1,2)).transpose(1,2).bmm(input)    
+        grad_lora_a = torch.einsum("bqs,qdr->qsdr", (module_weights, grad_A)).transpose(2,3)
+
+        return (   
+            grad_input,
+            None, # TODO: compute grads w.r.t. module_weights if needed.
+            grad_lora_a,
+            grad_lora_b,
+            None,
+            None,
+            None,
+        )   
+
+
 class PolyLoRALinear(PolytroponAdapter): 
     def __init__(self, config, task_id_ptr, linear_layer, selector=None):
         super().__init__()
@@ -213,7 +285,7 @@ class PolyLoRALinear(PolytroponAdapter):
                 linear_layer.out_features // self.n_splits,
             )
         )
-        self.reset_parameters()
+        self.reset_parameters() 
 
     def reset_parameters(self):
         import math
@@ -239,7 +311,6 @@ class PolyLoRALinear(PolytroponAdapter):
         else:
             torch.nn.init.zeros_(self.lora_b)
 
-
     def forward(self, input):
         if self.training:   
             self.training_steps += 1
@@ -256,12 +327,19 @@ class PolyLoRALinear(PolytroponAdapter):
         bs, n_splits, n_skills = mixing_weights.size()
 
         # A is    n_splits, n_skills, D // n_splits, rank
-        # we want bs,       n_splits, D // n_splits, rank
-        A = torch.einsum("bqs,qsdr->bqdr", (mixing_weights, self.lora_a))
-        B = torch.einsum("bqs,qsrd->bqrd", (mixing_weights, self.lora_b))
+        # we want bs,       n_splits, D // n_splits, rank             
+        A = torch.einsum("bqs,qsdr->bqdr", (mixing_weights.detach(), self.lora_a))
+        B = torch.einsum("bqs,qsrd->bqrd", (mixing_weights.detach(), self.lora_b))
         A = A.reshape(bs, self.in_features, self.rank)
         B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
-             
+        
+        # A = LoraAveraging.apply(self.lora_a, mixing_weights)
+        # B = LoraAveraging.apply(self.lora_b, mixing_weights)
+        
+        # A = A.reshape(bs, self.in_features, self.rank)
+        # B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features) 
+        # adapter_out = EfficientBackwardbmm.apply(input, mixing_weights.detach(), self.lora_a,    
+        #                                 self.lora_b, self.in_features, self.rank, self.out_features) * self.scaling # / self.rank
         adapter_out = input.bmm(A).bmm(B) * self.scaling # / self.rank
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:

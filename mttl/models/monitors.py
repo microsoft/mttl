@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-import math                
+import math
 from torch.distributions import Bernoulli, Categorical
 from pytorch_lightning import Callback
 from mttl.utils import average_dicts
@@ -26,7 +26,7 @@ class PolytroponLog(Callback):
         ):
             return
 
-        def layer_stats(Z):  
+        def layer_stats(Z):
             prob = torch.sigmoid(Z)
             discreteness = (
                 Bernoulli(logits=Z).entropy().sum().item()

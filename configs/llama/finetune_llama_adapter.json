@@ -1,7 +1,7 @@
 {
     "dataset": "alpaca",
-    "optimizer": "adamw", 
-    "learning_rate": 9e-3, 
+    "optimizer": "adamw",
+    "learning_rate": 9e-3,
     "micro_batch_size": 4, 
     "exp_name": "llama_adapter",
     "train_dir": "$AP_DATA_DIR",

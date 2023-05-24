@@ -11,10 +11,10 @@ class Config(object):
         self._updated_kwargs = set()
 
         # Data config
-        self.dataset = None
+        self.dataset = None    
         self.custom_tasks_splits = None
         self.train_dir = os.getenv("AMLT_DATA_DIR", "/tmp/")
-        self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "/datadrive/polytropon/checkpoints")
+        self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "/home/v-oostapenko/logs/")
         self.finetune_task_name = None
         self.example_to_ids_path = None  # path to clustering of data
         self.embeddings_path = None
@@ -127,7 +127,7 @@ class Config(object):
 
         if kwargs:
             self.update_kwargs(kwargs, raise_error=raise_error)
-
+        print("Config: ", self.to_json())
         self.save_config(self.output_dir)
 
     def was_overridden(self, key):

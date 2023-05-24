@@ -21,11 +21,11 @@ class AlpacaTemplate(object):
 
 
 class AlpacaDataset(torch.utils.data.dataset.Dataset):     
-    def __init__(self, tokenizer, max_input_length, max_output_length):
+    def __init__(self, tokenizer, max_input_length, max_output_length, data_dir):
         super().__init__()
-
+        
         # load the data 
-        self.dataset = load_dataset("yahma/alpaca-cleaned")["train"]
+        self.dataset = load_dataset("yahma/alpaca-cleaned", cache_dir=data_dir)["train"]
         # each entry is "instruction", "input", "output" dictionary
 
         self.tokenizer = tokenizer
