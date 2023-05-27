@@ -1,6 +1,6 @@
-{       
+{
     "dataset": "alpaca",
-    "optimizer": "adamw", 
+    "optimizer": "adamw",
     "learning_rate": 3e-4,
     "micro_batch_size": 4, 
     "exp_name": "alpaca_lora_full_r16_3e_ptopt_notrainonsource_eosTrue",
@@ -18,9 +18,9 @@
     "warmup_steps": 100,
     "lora_dropout": 0.05,
     "weight_decay": 0.00,
-    "max_input_length": 512,   
-    "model_modifier": "poly_lora",  
-    "lora_modules": ".*attn",  
+    "max_input_length": 512,
+    "model_modifier": "poly_lora",
+    "lora_modules": ".*attn",
     "lora_layers": "v_proj|q_proj|k_proj|o_proj",
     "trainable_param_names": ".*lora_[ab].*"
 }
