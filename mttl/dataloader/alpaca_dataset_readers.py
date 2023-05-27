@@ -1,8 +1,11 @@
+import copy
 import torch    
+import transformers
 from datasets import load_dataset
 
 from mttl.dataloader.data_utils import ExampleInfo
 from mttl.utils import hash_example
+from typing import List, Sequence, Dict
 
 
 class AlpacaTemplate(object):
@@ -19,6 +22,20 @@ class AlpacaTemplate(object):
             \n### Instruction: {instruction}\
             \n### Response: {output}"
 
+class AlpacaTemplateSource(object):
+    @classmethod
+    def apply(self, dict_values):
+        instruction, input, output = dict_values["instruction"], dict_values["input"], dict_values["output"]
+        if len(input)>0:
+            return f"Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.\
+            \n### Instruction: {instruction}\
+            \n### Input:{input}\
+            \n### Response:"
+        else:
+            return f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\
+            \n### Instruction: {instruction}\
+            \n### Response:"
+
 
 class AlpacaDataset(torch.utils.data.dataset.Dataset):     
     def __init__(self, tokenizer, max_input_length, max_output_length, data_dir):
@@ -32,9 +49,49 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
         self.max_input_length = max_input_length
         self.max_output_length = max_output_length
 
-    def __len__(self):
+    def __len__(self):     
         return len(self.dataset)
 
+    def _tokenize_fn(self, string: str) -> Dict:
+        """Tokenize a list of strings."""
+        tokenized =self.tokenizer(
+                string,     
+                truncation=True,
+                padding="max_length", 
+                max_length=self.max_input_length,
+                return_tensors="pt"
+            )
+        input_ids = labels = tokenized.input_ids[0] 
+        # input_ids_lens = labels_lens = tokenized.input_ids.ne(self.tokenizer.pad_token_id).sum().item()
+        # input_ids_lens = labels_lens = tokenized.input_ids.ne(self.tokenizer.pad_token_id).sum().item()
+        input_ids_lens = labels_lens = torch.logical_and(tokenized.input_ids.ne(self.tokenizer.pad_token_id),tokenized.input_ids.ne(self.tokenizer.eos_token_id)).sum().item()
+        return dict(
+            input_ids=input_ids,
+            labels=labels,
+            input_ids_lens=input_ids_lens,
+            labels_lens=labels_lens,
+        )
+    
+    def preprocess(self,
+        source: str,       
+        target: str) -> Dict:
+        IGNORE_INDEX=-100
+        """Preprocess the data by tokenizing."""    
+        # _tokenize_fn = lambda x: self.tokenizer(x,
+        #     truncation=True,
+        #     padding="max_length",
+        #     max_length=self.max_input_length,
+        #     return_tensors="pt"
+        #     )
+        example = source + target #[s + t for s, t in zip(sources, targets)]
+        example_tokenized = self._tokenize_fn(example)
+        sources_tokenized = self._tokenize_fn(source) #[_tokenize_fn(strings) for strings in (examples, sources)]
+        input_ids = example_tokenized["input_ids"]
+        label = copy.deepcopy(input_ids)
+        # for label, source_len in zip(label, sources_tokenized["input_ids_lens"]):
+        label[:sources_tokenized["input_ids_lens"]] = IGNORE_INDEX
+        return dict(input_ids=input_ids, labels=label)
+    
     def __getitem__(self, key):
         entry = self.dataset[key]
         # really basic template for now
@@ -43,19 +100,22 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
         # dec_input = entry["output"]
 
         # next we tokenize      
-        tok_input = self.tokenizer(
-            enc_input, 
-            truncation=True,
-            padding="max_length",
-            max_length=self.max_input_length,
-            return_tensors="pt",
-        ).input_ids.squeeze(0)
+        # tok_input = self.tokenizer(
+        #     enc_input, 
+        #     truncation=True,
+        #     padding="max_length",
+        #     max_length=self.max_input_length,
+        #     return_tensors="pt",
+        # ).input_ids.squeeze(0)
+        source = AlpacaTemplateSource.apply(entry)
+        tok_input = self.preprocess(source, entry["output"])
+        
         input_hash = hash_example(enc_input)
         instruction_hash = hash_example(entry["instruction"])
 
         ex_info = ExampleInfo(
-            tok_input,
-            tok_input,
+            tok_input["input_ids"],
+            tok_input["labels"],
             -1,
             input_hash,
             example_id=key,
