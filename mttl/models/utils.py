@@ -6,7 +6,7 @@ from typing import List
 
 class EfficientCheckpointModule(LightningModule):
     """Efficiently save and load checkpoints.
-    
+
     Only saves and loads parameters that are either in the trainable parameters
     or have been loaded from a previous checkpoint.
     """
@@ -67,25 +67,28 @@ class RoutingInfo:
     example_ids: List[int] = None
 
     @classmethod
-    def from_batch(cls, batch:dict):
+    def from_batch(cls, batch: dict):
         ri = RoutingInfo(
-            task_ids=batch["task_ids"],   
+            task_ids=batch["task_ids"],
             hashes=batch.get("hashes", None),
             example_ids=batch.get("example_ids", None),
-            instruction_hashes=batch.get("instruction_hashes", None)
+            instruction_hashes=batch.get("instruction_hashes", None),
         )
-        if "distances" in batch:                           
-            #used for evaluation of soft clustering tuned models
+        if "distances" in batch:
+            # used for evaluation of soft clustering tuned models
             setattr(ri, "distances", batch["distances"])
         return ri
 
     def repeat_interleave(self, repeats):
+        # print("Repeating routing info", repeats, "times")
         # useful for beam search
         self.task_ids = self.task_ids.repeat_interleave(repeats)
         if self.hashes:
             self.hashes = [h for h in self.hashes for _ in range(repeats)]
         if self.instruction_hashes:
-            self.instruction_hashes = [h for h in self.instruction_hashes for _ in range(repeats)]
+            self.instruction_hashes = [
+                h for h in self.instruction_hashes for _ in range(repeats)
+            ]
         self.example_ids = (
             self.example_ids.repeat_interleave(repeats)
             if self.example_ids is not None
