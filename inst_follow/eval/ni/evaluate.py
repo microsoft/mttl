@@ -122,10 +122,10 @@ def compute_grouped_metrics(predictions, references, groups, xlingual=False):
 
 def parse_args():          
     parser = argparse.ArgumentParser()
-    parser.add_argument(
+    parser.add_argument(               
         "--prediction_file", required=False,   
         help="Jsonl file with each line corresponding to a prediction. " 
-             "Each json object should have an `id` and a `prediction` key.", default="/home/v-oostapenko/dev/mttl/inst_follow/eval/ni/ni_pred_sc_topic_alpaca7b4r_atlas_[50]_yahma_llama-7b-hfni-nshot_canonical.jsonl")# ni_pred_alpacaloratloen_peft7b_yahma_llama-7b-hfni-nshot_canonical_corrected.jsonl")
+             "Each json object should have an `id` and a `prediction` key.", default="/home/v-oostapenko/dev/mttl/inst_follow/eval/ni/ni_pred_alpaca_full16r_notrainonsoure_addeos[full,ptopt](7ogye4hj)_yahma_llama-7b-hfni-nshot0.jsonl")
     parser.add_argument(
         "--reference_file", required=False,
         help="Jsonl file with each line corresponding to a reference. " 
@@ -134,7 +134,8 @@ def parse_args():
              "compute the per-task performance, per-category performance and the performance for default (english) / xlingual Tracks.", default="/home/v-oostapenko/dev/mttl/inst_follow/eval/ni/test_references.jsonl")
     parser.add_argument(
         "--output_file",
-        help="Jsonl file to write the results to.")
+        help="Jsonl file to write the results to.")  
+    parser.add_argument("--clean", type=int, default=0)
     return parser.parse_args()
 
 
@@ -188,11 +189,11 @@ if __name__ == "__main__":
             prediction = json.loads(line)   
             id = prediction["id"] 
             task = prediction["task_name"]
-            if task in tasks:
-                prediction=prediction["prediction"]
-                if "Input:" in prediction:
-                    prediction=prediction.split("Input:")[0]
-                all_predictions[id] = prediction.strip()
+            # if task in tasks:
+            prediction=prediction["prediction"]
+            if "Input:" in prediction and args.clean:
+                prediction=prediction.split("Input:")[0]
+            all_predictions[id] = prediction.strip()
 
     all_results = {}
     for track in ["default", "xlingual"]:

@@ -19,7 +19,7 @@ from inst_follow.models.clm import CLM
 from fastchat.utils import disable_torch_init 
 from mttl.models.modify_model import modify_transformer 
 from transformers import  LlamaForCausalLM, LlamaTokenizer
-from inst_follow.finetune_llama import Config, parse_config
+from finetune_llama import Config, parse_config
 
 MAX_API_RETRY = 10
 REQ_TIME_GAP = 10
@@ -74,7 +74,8 @@ def load_model(args, model_path=None, device='cuda', tokenizer_path=None):
     if tokenizer_path is None:
         tokenizer_path = args.model   
     tokenizer = LlamaTokenizer.from_pretrained(tokenizer_path)# for generation we do not aadd the EOS token!!!
-    tokenizer.pad_token_id = 0
+    tokenizer.pad_token_id = 0 
+
     model = LlamaForCausalLM.from_pretrained(args.model).to(device)
     state_dict = None  
     if model_path is not None:
@@ -82,17 +83,19 @@ def load_model(args, model_path=None, device='cuda', tokenizer_path=None):
         if isinstance(args, Config):    
             args.update_kwargs(state_dict["hyper_parameters"])  
     # I changed the folder name from compositional_adapters to inst_follow. Old name may still persist in old configs. Correct it in the loaded config.
+    # put state dictionary on the device
+    state_dict = {k: v.to(device) for k, v in state_dict["state_dict"].items()} if state_dict is not None else None
     for k,v in vars(args).items():
         if isinstance(v, str) and "/compositional_adapters/" in v:
             setattr(args, k, v.replace("compositional_adapters", "inst_follow"))
     #############################
     model = modify_transformer(model, args) 
-    model_class = CLM  
+    model_class = CLM    
     args.model_object = model 
     # tokenizer = dm.tokenizer if dm is not None else tokenizer
     module = model_class(**vars(args), tokenizer=tokenizer)
     if state_dict is not None:
-        module.load_state_dict(state_dict["state_dict"])#, strict=False)
+        module.load_state_dict(state_dict)#, strict=False)
     module.to(device)
     return module, tokenizer
 

@@ -4,14 +4,18 @@ import numpy as np
 import click
 import json
 import tqdm
+import copy
 import torch
 
+from inst_follow.models.clm import CLM  
 from mttl.dataloader import ni_metrics   
 from transformers import LlamaTokenizer 
-from mttl.models.poly import get_selector
-from inst_follow.finetune_llama import parse_config, Config
+from mttl.models.poly import get_selector     
+from mttl.models.modify_model import modify_transformer  
+from finetune_llama import parse_config, Config
 from inst_follow.utils import load_model, TopicRouter
 from mttl.cluster_tuning.cluster_reader import ClusterResult
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from fastchat.utils import disable_torch_init
 device = "cuda" if torch.cuda.is_available() else "cpu"
 def dict_to_dataclass(d):
@@ -188,15 +192,15 @@ def load_instructions(path, n_tasks=None):
 def generate_outputs(model, examples, tokenizer, temperature=0.7, max_output_length=128, topic_router=None, skill_selector="topic"):
     otuputs_list=[]               
     inputs = tokenizer(examples,
-            padding=True,
+            padding='longest',
             return_tensors="pt")    
     input={                         
         "input_ids": inputs.input_ids.to(device),
         "task_ids": torch.zeros(len(examples), dtype=torch.long).to(device)*-1,
     }           
-    if topic_router:        
+    if topic_router:      
         if skill_selector=="random":
-            # random binary matrix
+            # random binary matrix 
             raise NotImplementedError()
             input["distances"] = torch.randint(0,2,(len(examples), topic_router.n_skills)).cuda()
         else:
@@ -207,12 +211,24 @@ def generate_outputs(model, examples, tokenizer, temperature=0.7, max_output_len
     # eval with the best adapter for this cluster
     output_ids = model.generate(
         input,
+        # do_sample=True,
         temperature=temperature,      
         max_new_tokens=max_output_length,
+        # top_k=50,
+        return_dict_in_generate=True,
     )
-    outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)
-    output_cleaned = [out.split(ex)[1] for out,ex in zip(outputs, examples)]           
-    otuputs_list.extend(output_cleaned)
+    # for out,ex in zip(output_ids.sequences, examples):
+    #     # out = out[len(ex):] 
+    #     output_str = tokenizer.decode(out)
+    #     otuputs_list.append(output_str)
+    outputs = tokenizer.batch_decode(output_ids.sequences, skip_special_tokens=True)   
+    examples_in_decoded = tokenizer.batch_decode(inputs.input_ids, skip_special_tokens=True) # just in case, to make sure inputs are exactly the same as expected here when spliting the decodings
+    for out,ex in zip(outputs, examples_in_decoded):
+        o = out.split(ex)
+        assert len(o)>1 
+        otuputs_list.append(o[1])
+    # output_cleaned = [out.split(ex)[1] for out,ex in zip(outputs, examples)]           
+    # otuputs_list.extend(output_cleaned)
     del output_ids
     del input  
     return otuputs_list
@@ -243,39 +259,57 @@ def correct(data_path, model_name, batch_size, out_prefix, from_hf, model_path, 
         with open(out_file_name, "a") as f:
             for line in lines:
                 f.write(json.dumps(line)+"\n")
-                
-@click.command()       
+          
+@click.command()                  
 @click.option("--data_path", type=str, default="/home/v-oostapenko/dev/natural-instructions/tasks")   
+# @click.option("--dataset", )
 # @click.option("--config_path", type=str, default="/home/v-oostapenko/dev/mttl/configs/llama/finetune_full_lora.json")
-@click.option("--model_name", type=str, default="yahma/llama-7b-hf") #chavinlo/alpaca-native") yahma/llama-7b-hf chainyo/alpaca-lora-7b
+@click.option("--model_name", type=str, default="yahma/llama-7b-hf") #chavinlo/alpaca-native") yahma/llama-7b-hf chainyo/alpaca-lora-7b togethercomputer/RedPajama-INCITE-Base-7B-v0.1
 @click.option("--batch_size", type=int, default=3)
 @click.option("--out_prefix", type=str, default="test")     
-@click.option("--from_hf", type=int, default=1)
+@click.option("--from_hf", type=int, default=0)
 # @click.option("--nshot", type=int, default=1) # >0 means use canonical examples
-@click.option("--model_path", type=str, default="")#"/home/v-oostapenko/logs/llama_alpaca/lora_full/yahma_llama-7b-hf0r2kuwgx_alpaca_lora_full-val/loss=0.5943.ckpt") #"/home/v-oostapenko/logs/llama_alpaca/lora_atlas_cluster_instr/yahma_llama-7b-hfjab096vi_alpaca_lora_atlas_cluster_te_ada-val/loss=0.5989.ckpt") #"/home/v-oostapenko/logs/llama_alpaca/lora_full/yahma_llama-7b-hfopq9a3dw_alpaca_lora_full-val/loss=0.5940.ckpt")
+@click.option("--model_path", type=str, default="/home/v-oostapenko/logs/yahma_llama-7b-hffxsdo7h4_alpaca_lora_full_r16_3e_ptopt_noeos-val/loss=0.5094.ckpt")#"/home/v-oostapenko/logs/llama_alpaca/lora_full/yahma_llama-7b-hf0r2kuwgx_alpaca_lora_full-val/loss=0.5943.ckpt") #"/home/v-oostapenko/logs/llama_alpaca/lora_atlas_cluster_instr/yahma_llama-7b-hfjab096vi_alpaca_lora_atlas_cluster_te_ada-val/loss=0.5989.ckpt") #"/home/v-oostapenko/logs/llama_alpaca/lora_full/yahma_llama-7b-hfopq9a3dw_alpaca_lora_full-val/loss=0.5940.ckpt")
 @click.option("--example_to_ids_path", type=str, default="/home/v-oostapenko/dev/mttl/inst_follow/data/cluster_infos/atlas_by_instr_text-embedding-ada-002.pkl")
 @click.option("--skill_selector", type=str, default="random")
-@click.option("--nshot", type=int, default=1) # >0 means use canonical examples
+@click.option("--nshot", type=int, default=0) # >0 means use canonical examples
 @click.option("--reference_file", type=str, default="/home/v-oostapenko/dev/mttl/inst_follow/eval/ni/test_references.jsonl") # >0 means use canonical examples
 @click.option("--n_tasks", type=int, default=None) # if None, will use a subset of test tasks
-def main(data_path, model_name="gpt3", batch_size=4, out_prefix="", from_hf=0, model_path="", example_to_ids_path=None, skill_selector="topic", nshot=0, reference_file=None, n_tasks=None):
+@click.option("--usepijma_model_with_llama_adapter", type=int, default=0) # if None, will use a subset of test tasks
+def main(data_path, model_name="gpt3", batch_size=4, out_prefix="", from_hf=0, model_path="", example_to_ids_path=None, skill_selector="topic", nshot=0, reference_file=None, n_tasks=None, usepijma_model_with_llama_adapter=0):
     task_results = {} 
     topic_router = None
     disable_torch_init()
     
     # correct(data_path, model_name, batch_size, out_prefix, from_hf, model_path, example_to_ids_path, skill_selector, nshot, reference_file)
     if from_hf==1:             
-        config = {"model": model_name, "model_modifier":None} 
-        config = dict_to_dataclass(config)
-        model, _ = load_model(config, device=device) 
-        # tokenizer =  LlamaTokenizer.from_pretrained(model_name, padding_side='left')   
-        tokenizer =  LlamaTokenizer.from_pretrained("yahma/llama-7b-hf", padding_side='left')   
-        tokenizer.pad_token_id = 0 #tokenizer.eos_token_id
-        # tokenizer.padding_side='left'      
+        if "llama" in model_name:       
+            config = {"model": model_name, "model_modifier":None} 
+            config = dict_to_dataclass(config)
+            model, _ = load_model(config, device=device, tokenizer_path="yahma/llama-7b-hf") 
+            # tokenizer =  LlamaTokenizer.from_pretrained(model_name, padding_side='left')   
+            tokenizer =  LlamaTokenizer.from_pretrained("yahma/llama-7b-hf", padding_side='left')   
+            tokenizer.pad_token_id = 0 #tokenizer.eos_token_id
+            # tokenizer.padding_side='left'      
+            model.model.config.pad_token_id = tokenizer.pad_token_id #= 0  # unk
+            model.model.config.bos_token_id = tokenizer.bos_token_id
+            model.model.config.eos_token_id = tokenizer.eos_token_id 
+        else:    
+            pijama_model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16)#, device_map="cpu")
+            tokenizer = AutoTokenizer.from_pretrained(model_name)#.to(device)
+            tokenizer.pad_token_id = 0 #tokenizer.eos_token_id
+            tokenizer.padding_side='left'    
+            config = {"model": model_name, "model_modifier":None} 
+            config = dict_to_dataclass(config)
+            model_class = CLM 
+            config.model_object = pijama_model 
+            # tokenizer = dm.tokenizer if dm is not None else tokenizer
+            model = model_class(**vars(config), tokenizer=tokenizer)      
         
         model.model.config.pad_token_id = tokenizer.pad_token_id #= 0  # unk
         model.model.config.bos_token_id = tokenizer.bos_token_id
         model.model.config.eos_token_id = tokenizer.eos_token_id   
+        model.to(device)
     elif from_hf==0:           
         config = Config()       
         config.model = model_name
@@ -302,10 +336,11 @@ def main(data_path, model_name="gpt3", batch_size=4, out_prefix="", from_hf=0, m
         
         model.model.config.pad_token_id = tokenizer.pad_token_id #= 0  # unk
         model.model.config.bos_token_id = tokenizer.bos_token_id
-        model.model.config.eos_token_id = tokenizer.eos_token_id                  
-    elif from_hf==3: #use perf        
+        model.model.config.eos_token_id = tokenizer.eos_token_id        
+        model.to(device)          
+    elif from_hf==3: #use perf 
         from peft import PeftModel    
-        from inst_follow.models.clm import CLM  
+        # from inst_follow.models.clm import CLM  
         config = {"model": model_name, "model_modifier":None} 
         config = dict_to_dataclass(config)
         model, tokenizer = load_model(config, device=device) 
@@ -318,7 +353,7 @@ def main(data_path, model_name="gpt3", batch_size=4, out_prefix="", from_hf=0, m
         tokenizer.pad_token_id = 0 #tokenizer.eos_token_id
         tokenizer.padding_side='left'
         
-        model_class = CLM  
+        model_class = CLM 
         config.model_object = model 
         # tokenizer = dm.tokenizer if dm is not None else tokenizer
         model = model_class(**vars(config), tokenizer=tokenizer)
@@ -326,7 +361,45 @@ def main(data_path, model_name="gpt3", batch_size=4, out_prefix="", from_hf=0, m
         model.model.config.bos_token_id = tokenizer.bos_token_id
         model.model.config.eos_token_id = tokenizer.eos_token_id  
         model.to(device)
-        
+    
+    if usepijma_model_with_llama_adapter:    
+        model.to("cpu")          
+        pijama_model = AutoModelForCausalLM.from_pretrained("togethercomputer/RedPajama-INCITE-Base-7B-v0.1", torch_dtype=torch.float32)#, device_map="cpu")
+        tokenizer = AutoTokenizer.from_pretrained("togethercomputer/RedPajama-INCITE-Base-7B-v0.1")#.to(device)
+        tokenizer.pad_token_id = 0 #tokenizer.eos_token_id
+        tokenizer.padding_side='left'            
+        args = copy.deepcopy(config) #{"adapter_modules": "attention", "model_modifier":"llama_adapter"} 
+        args.model="togethercomputer/RedPajama-INCITE-Base-7B-v0.1"
+        # args = dict_to_dataclass(args) 
+        args.adapter_modules = "attention"
+        pijama_model = modify_transformer(pijama_model, args)
+        # pijama_model.to("cpu")
+        # args.lora_modules="v_proj|q_proj|k_proj|o_proj" #"attention"
+        state_dict = model.model.state_dict()
+        #load adaption_prompt and adaptation_gate weights into args.model_object
+        new_state_dict = {}       
+        for k,n in state_dict.items():   
+            if "adaption_prompt" in k or "adaption_gate" in k:
+                #rename key      
+                ad_layer = k.split(".")[-1]
+                layer = k.split("layers.")[1].split(".")[0]
+                # layers.2.attention.adaption_prompt
+                k = f"gpt_neox.layers.{layer}.attention.{ad_layer}"
+                new_state_dict[k] = n
+        pijama_model.load_state_dict(new_state_dict, strict=False)    
+        assert  int(sum([torch.sum(p) for n,p in model.model.named_parameters() if "adaption" in n]).item()) == int(sum([torch.sum(p) for n,p in pijama_model.named_parameters() if "adaption" in n]).item())
+        # pijama_model.to(device)
+        # model.to(device)     
+        model_class = CLM 
+        args.model_object = pijama_model 
+        # tokenizer = dm.tokenizer if dm is not None else tokenizer
+        model = model_class(**vars(args), tokenizer=tokenizer)
+        model.to(device)
+        model.model.config.pad_token_id = tokenizer.pad_token_id #= 0  # unk
+        model.model.config.bos_token_id = tokenizer.bos_token_id
+        model.model.config.eos_token_id = tokenizer.eos_token_id  
+    
+    
     print(config)
     print("Arguments:\n")
     print(data_path, "\n", model_name, "\n", batch_size, "\n", out_prefix, "\n", from_hf, "\n", model_path, "\n", example_to_ids_path, "\n", skill_selector)

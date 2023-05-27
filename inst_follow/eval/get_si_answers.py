@@ -2,6 +2,7 @@
 import os
 import sys
 import ray
+import copy
 import json 
 import time
 import torch
@@ -11,13 +12,16 @@ from tqdm import tqdm
 import numpy as np
 import argparse
 from typing import List      
+from inst_follow.models.clm import CLM  
+from mttl.models.modify_model import modify_transformer  
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.dataloader.data_utils import ExampleInfo
 from inst_follow.finetune_llama import parse_config, Config
 from fastchat.serve.inference import compute_skip_echo_len
 from mttl.cluster_tuning.cluster_reader import ClusterResult
 from inst_follow.utils import load_model,TopicRouter
-
+from transformers import AutoTokenizer, AutoModelForCausalLM
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def open_ai_request(prompt):
         try: 
             response = openai.ChatCompletion.create(
@@ -238,6 +242,8 @@ def main(args):
             hash_to_idx = json.load(f)
     else:
         hash_to_idx = {ex.hash: i for i, ex in tqdm(enumerate(dst))} # building a sample-hash to index in the dst map for more speed        
+        
+        
     if args.model_name=="openai":
         model, tokenizer = None, None
         print("Will ask openai for responses")
@@ -250,9 +256,51 @@ def main(args):
         if model.args.n_skills>1:
             assert cluster_result is not None, "For soft-clustering models, cluster_result must be provided"
             assert model.args.n_skills == len(all_topics) == cluster_result.n_clusters()   
+        
+            
+        if args.usepijma_model_with_llama_adapter:    
+            model.to("cpu")          
+            pijama_model = AutoModelForCausalLM.from_pretrained("togethercomputer/RedPajama-INCITE-Base-7B-v0.1", torch_dtype=torch.float32)#, device_map="cpu")
+            tokenizer = AutoTokenizer.from_pretrained("togethercomputer/RedPajama-INCITE-Base-7B-v0.1")#.to(device)
+            tokenizer.pad_token_id = 0 #tokenizer.eos_token_id
+            tokenizer.padding_side='left'            
+            args_pij = copy.deepcopy(config) #{"adapter_modules": "attention", "model_modifier":"llama_adapter"} 
+            args_pij.model="togethercomputer/RedPajama-INCITE-Base-7B-v0.1"
+            # args = dict_to_dataclass(args) 
+            args_pij.adapter_modules = "attention"
+            pijama_model = modify_transformer(pijama_model, args_pij)
+            # pijama_model.to("cpu")
+            # args.lora_modules="v_proj|q_proj|k_proj|o_proj" #"attention"
+            state_dict = model.model.state_dict()
+            #load adaption_prompt and adaptation_gate weights into args.model_object
+            new_state_dict = {}       
+            for k,n in state_dict.items():   
+                if "adaption_prompt" in k or "adaption_gate" in k:
+                    #rename key      
+                    ad_layer = k.split(".")[-1]
+                    layer = k.split("layers.")[1].split(".")[0]
+                    # layers.2.attention.adaption_prompt
+                    k = f"gpt_neox.layers.{layer}.attention.{ad_layer}"
+                    new_state_dict[k] = n
+            pijama_model.load_state_dict(new_state_dict, strict=False)    
+            assert  int(sum([torch.sum(p) for n,p in model.model.named_parameters() if "adaption" in n]).item()) == int(sum([torch.sum(p) for n,p in pijama_model.named_parameters() if "adaption" in n]).item())
+            # pijama_model.to(device)
+            # model.to(device)     
+            model_class = CLM   
+            args_pij.model_object = pijama_model 
+            # tokenizer = dm.tokenizer if dm is not None else tokenizer
+            model = model_class(**vars(args_pij), tokenizer=tokenizer)
+            model.to(device)
+            model.model.config.pad_token_id = tokenizer.pad_token_id #= 0  # unk
+            model.model.config.bos_token_id = tokenizer.bos_token_id
+            model.model.config.eos_token_id = tokenizer.eos_token_id  
+        
+            
+            
     
     topics_for_adapters = topics
-    assert tokenizer.add_eos_token == False
+    if hasattr(tokenizer, "add_eos_token"):
+        assert tokenizer.add_eos_token == False
     if args.batched:
         tokenizer.padding_side = "left" # to nebale atched generation  
     print("Starting generating the answers")  
@@ -302,7 +350,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(add_help=False)        
     # parser.add_argument("--model-id",type=str, default="alpaca")
     parser.add_argument("--model_name", type=str, default="yahma/llama-7b-hf") # for own alpaca yahma/llama-7b-hf + model-path, for openai "openai", for some other hf model, the name of the model and model-path None, alpaca_full chavinlo/alpaca-native and no model-path
-    parser.add_argument("--model-path", type=str, default="/home/v-oostapenko/logs/llama_alpaca/lora_atlas_cluster_instr/yahma_llama-7b-hfjab096vi_alpaca_lora_atlas_cluster_te_ada-val/loss=0.5989.ckpt")#"/home/v-oostapenko/logs/llama_alpaca/lora_atlas_cluster_instr/yahma_llama-7b-hfjab096vi_alpaca_lora_atlas_cluster_te_ada-val/loss=0.5989.ckpt")   
+    parser.add_argument("--model-path", type=str, default="/home/v-oostapenko/logs/llama_alpaca/llama_adapter/yahma_llama-7b-hfkrd9zi2k_llama_adapter-val/loss=0.6232.ckpt") #/home/v-oostapenko/logs/llama_alpaca/lora_atlas_cluster_instr/yahma_llama-7b-hfjab096vi_alpaca_lora_atlas_cluster_te_ada-val/loss=0.5989.ckpt")#"/home/v-oostapenko/logs/llama_alpaca/lora_atlas_cluster_instr/yahma_llama-7b-hfjab096vi_alpaca_lora_atlas_cluster_te_ada-val/loss=0.5989.ckpt")   
     parser.add_argument("--prompt_type", type=str, default="SI", choices=["SI", "custom"])
     parser.add_argument("--cluster_with", type=str, default="instruction", choices=["instruction", "response"])
     parser.add_argument("--embeddings_path", type=str, default="/home/v-oostapenko/dev/mttl/inst_follow/data/self_instruct_GPT3")
@@ -311,7 +359,8 @@ if __name__ == "__main__":
     parser.add_argument("--n_examples_per_topic", type=int, default=30)
     parser.add_argument("--n_topics", type=int, default=10)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--batched", type=int, default=1)       
+    parser.add_argument("--batched", type=int, default=0)     
+    parser.add_argument("--usepijma_model_with_llama_adapter", type=int, default=1) 
     parser.add_argument("--hash_to_idx_path", type=str, default="/home/v-oostapenko/dev/mttl/inst_follow/data/hash_to_idx_si.json") # only for debugging
     args = parser.parse_args()
     main(args)#, config)

@@ -98,7 +98,9 @@ class CLM(EfficientCheckpointModule):
             loss = loss.view((bs,-1)).mean(-1)
         return loss
 
-    def generate(self, batch, **kwargs):                                      
+    def generate(self, batch, **kwargs):            
+        if not hasattr(self.model, "task_id_container"):
+            self.model.task_id_container = {}                          
         self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
         return self.model.generate(
             inputs=batch["input_ids"],
