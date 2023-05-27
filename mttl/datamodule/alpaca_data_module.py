@@ -55,7 +55,7 @@ class AlpacaDataModule(LightningDataModule):
         # )     
              
         tok_model = config.model if config.model is not None else "yahma/llama-7b-hf"
-        self.tokenizer = LlamaTokenizer.from_pretrained(tok_model)#, add_eos_token=False) # tloen does not add eos token
+        self.tokenizer = LlamaTokenizer.from_pretrained(tok_model, add_eos_token=True) # tloen does not add eos token
         # self.tokenizer.pad_token_id = 
         self.tokenizer.pad_token_id = 0 
         
