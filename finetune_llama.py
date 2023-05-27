@@ -194,7 +194,7 @@ def run_multitask(args):
         max_epochs=args.num_train_epochs,
         max_steps=args.total_steps + 1 if args.total_steps != -1 else -1,
         gradient_clip_val=args.max_grad_norm,
-        log_every_n_steps=20,
+        log_every_n_steps=20,    
         strategy=args.compute_strategy if args.compute_strategy else None,
         callbacks=callbacks,
         accumulate_grad_batches=args.gradient_accumulation_steps,

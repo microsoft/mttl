@@ -11,7 +11,7 @@
     "lora_rank": 4, 
     "num_train_epochs": 3,
     "n_skills": 1,
-    "max_input_length": 256,  
+    "max_input_length": 512,  
     "eval_every": 400,
     "warmup_steps": 100,  
     "poly_selector":"cluster_soft",  

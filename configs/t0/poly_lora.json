@@ -1,6 +1,6 @@
 {
     "n_skills": 8,
-    "n_splits": 1,
+    "n_splits": 1, 
     "model_modifier": "poly_lora",
     "lora_rank": 1,
     "poly_granularity": "finegrained",

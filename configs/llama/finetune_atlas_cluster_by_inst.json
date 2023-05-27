@@ -2,13 +2,12 @@
     "dataset": "alpaca",
     "optimizer": "adamw", 
     "learning_rate": 3e-4, 
-    "micro_batch_size": 2, 
+    "micro_batch_size": 8, 
     "exp_name": "alpaca_lora_atlas_cluster_te_ada",
-    "train_dir": "$AMLT_DATA_DIR",
     "precision": "bf16",
-    "train_batch_size": 64,
+    "train_batch_size": 128,
     "model": "yahma/llama-7b-hf",
-    "lora_rank": 16,  
+    "lora_rank": 4,  
     "num_train_epochs": 3,
     "n_skills": 1,
     "max_input_length": 256,  
@@ -22,5 +21,5 @@
     "lora_modules": ".*attn",  
     "lora_layers": "v_proj|q_proj|k_proj|o_proj",
     "trainable_param_names": ".*lora_[ab].*",
-    "output_dir":"/home/v-oostapenko/logs/llama_alpaca/lora_atlas_cluster_instr"
+    "output_dir":"/home/v-oostapenko/logs/llama_alpaca/lora_atlas_cluster_instr(notrainonsource)"
 }
