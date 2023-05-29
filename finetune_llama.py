@@ -38,6 +38,7 @@ def remove_non_serializable(d):
 class Config(MTTLConfig):
     def __init__(self, **kwargs):
         self.rank = 1
+        self.prune_unused_loras = False
         self.init_b_random = False
         self.lora_dropout = 0
         self.lora_alpha = 16
@@ -144,7 +145,7 @@ def run_multitask(args):
         del args.model_object
 
     if args.poly_selector in ["cluster_soft", "cluster_hard"]:
-        if args.n_skills > 1:
+        if args.n_skills > 1 and args.prune_unused_loras:
             # prune unused loras
             counts = m = np.bincount(cluster_result._instance.infos.cluster_ids)
             skill_ids_to_keep = np.where(
