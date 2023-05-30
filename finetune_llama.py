@@ -20,7 +20,7 @@ from mttl.dataloader.data_utils import ExampleInfo
 from mttl.utils import get_ni_tasks_from_file, trim_batch, hash_example
 from typing import List
 
-from peft import prepare_model_for_int8_training
+# from peft import prepare_model_for_int8_training
 
 
 # os.environ["AP_DATA_DIR"] = "/home/v-oostapenko/data" # temp for gcr
