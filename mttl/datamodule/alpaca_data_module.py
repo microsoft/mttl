@@ -68,7 +68,7 @@ class AlpacaDataModule(LightningDataModule):
     def get_dataset(self):
         return AlpacaDataset(
             
-            self.tokenizer, self.config.max_input_length, self.config.max_output_length, self.config.train_dir
+            self.tokenizer, self.config.max_input_length, self.config.max_output_length, self.config.train_dir, self.config.train_on_inputs
         )
     
     def setup(self, stage=None):

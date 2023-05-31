@@ -44,6 +44,7 @@ class Config(MTTLConfig):
         self.lora_alpha = 16
         self.load_in_8bit = False
         self.micro_batch_size = 4
+        self.train_on_inputs = False
         self.padding_side = "right"
         self.adapter_modules = None
         self.poly_selector_use_distances = False

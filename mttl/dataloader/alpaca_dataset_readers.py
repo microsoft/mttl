@@ -38,9 +38,9 @@ class AlpacaTemplateSource(object):
 
 
 class AlpacaDataset(torch.utils.data.dataset.Dataset):     
-    def __init__(self, tokenizer, max_input_length, max_output_length, data_dir):
+    def __init__(self, tokenizer, max_input_length, max_output_length, data_dir, train_on_inputs=False):
         super().__init__()
-        
+        self.train_on_inputs = train_on_inputs
         # load the data 
         self.dataset = load_dataset("yahma/alpaca-cleaned", cache_dir=data_dir)["train"]
         # each entry is "instruction", "input", "output" dictionary
@@ -96,23 +96,30 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
         entry = self.dataset[key]
         # really basic template for now
         # TODO: check with AS if this is OOP approved
-        enc_input = AlpacaTemplate.apply(entry)
-        # dec_input = entry["output"]
-
-        # next we tokenize      
-        # tok_input = self.tokenizer(
-        #     enc_input, 
-        #     truncation=True,
-        #     padding="max_length",
-        #     max_length=self.max_input_length,
-        #     return_tensors="pt",
-        # ).input_ids.squeeze(0)
-        source = AlpacaTemplateSource.apply(entry)
-        tok_input = self.preprocess(source, entry["output"])
-        
+        enc_input = AlpacaTemplate.apply(entry)        
         input_hash = hash_example(enc_input)
         instruction_hash = hash_example(entry["instruction"])
-
+        source = AlpacaTemplateSource.apply(entry)
+        # dec_input = entry["output"]
+        if self.train_on_inputs:
+        # next we tokenize      
+            tok_input = self.tokenizer(
+                enc_input, 
+                truncation=True,
+                padding="max_length",
+                max_length=self.max_input_length,
+                return_tensors="pt",
+            ).input_ids.squeeze(0)
+            ex_info = ExampleInfo(
+            tok_input,
+            tok_input,
+            -1,
+            input_hash,
+            example_id=key,
+            input_text=(enc_input),
+            instruction_hash=instruction_hash)
+            return ex_info
+        tok_input = self.preprocess(source, entry["output"])        
         ex_info = ExampleInfo(
             tok_input["input_ids"],
             tok_input["labels"],
