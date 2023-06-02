@@ -108,7 +108,7 @@ def main(args, config):
         else:            
             raise Exception("Embeddings file not found, try running the script with --rebuild_embeddings flag set to True")
         # remove key from embeddings_file
-        
+        depth = 2
         emb_column_name = f"atlas_topics_by_{args.cluster_with}_l{depth}"
         if not emb_column_name in embeddings_file:
             embeddings_file[emb_column_name]=[]
