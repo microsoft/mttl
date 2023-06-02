@@ -7,7 +7,7 @@ import pickle
 import tqdm
 import os
 import time
-import torch
+import torch       
 from mttl.config import parse_config 
 from nomic import atlas, AtlasProject
 import numpy as np 
@@ -16,7 +16,7 @@ import openai
 from transformers import AutoTokenizer, AutoModel
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule, AlpacaDataset
 from mttl.cluster_tuning.encodings import ClusterInfos
-from inst_follow.finetune_llama import parse_config
+from finetune_llama import parse_config
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -96,7 +96,7 @@ def main(args, config):
     dm.setup()
     map = None
     # # load embeddings from GPT
-    global embeddings_path
+    global embeddings_path   
     embeddings_path = args.embeddings_path+f"/embeddings_of_{args.cluster_with}_2.pkl"        
     if args.use_atlas:   
         map = get_atlas_map(dm, args) if map is None else map
@@ -107,32 +107,33 @@ def main(args, config):
                 embeddings_file = pickle.load(f)
         else:            
             raise Exception("Embeddings file not found, try running the script with --rebuild_embeddings flag set to True")
+        # remove key from embeddings_file
         
-                     
-        if not f'atlas_topics_by_{args.cluster_with}' in embeddings_file:
-            embeddings_file[f"atlas_topics_by_{args.cluster_with}"]=[]
-            batch_size = 28 # lower this if needed
+        emb_column_name = f"atlas_topics_by_{args.cluster_with}_l{depth}"
+        if not emb_column_name in embeddings_file:
+            embeddings_file[emb_column_name]=[]
+            batch_size = 28 # lower this if needed   
             for r in tqdm.tqdm(range(0, len(embeddings_file["embeddings"]), batch_size)):
                 batch = embeddings_file["embeddings"][r:r+batch_size]
                 # q = np.expand_dims(r, axis=0)
-                topics = map.vector_search_topics(queries=batch)['topics']   
-                embeddings_file[f"atlas_topics_by_{args.cluster_with}"].extend(topics)
+                topics = map.vector_search_topics(queries=batch, depth=depth)['topics']     
+                embeddings_file[emb_column_name].extend(topics)
             #save responses as pkl 
             with open(embeddings_path, 'wb') as f:
                 pickle.dump(embeddings_file, f)
-             
+        
         cluster_infos = ClusterInfos() 
         indices_train = dm.train_dataset.indices  
         print("Getting cluster infos for train set")
         for i,example in tqdm.tqdm(enumerate(dm.train_dataset)):   
-            topics = embeddings_file[f"atlas_topics_by_{args.cluster_with}"][indices_train[i]]
+            topics = embeddings_file[emb_column_name][indices_train[i]]
             hash = example.hash
             probs = np.zeros((len(topics_all)))
             for i, k in enumerate(topics):
                 probs[int(k)-1]=topics[k] 
             assert sum(probs)==1
             main_t = np.argmax(probs)
-            cluster_infos.is_test.extend([0]) 
+            cluster_infos.is_test.extend([0])   
             cluster_infos.task_names.extend([topics_all[int(main_t)]["topic_short_description"]])
             cluster_infos.cluster_ids.extend([int(main_t)])    
             cluster_infos.hashes.extend([hash])
@@ -141,7 +142,7 @@ def main(args, config):
         print("Getting cluster infos for dev set")
         indices_dev = dm.dev_dataset.indices
         for i,example in tqdm.tqdm(enumerate(dm.dev_dataset)): 
-            topics = embeddings_file[f"atlas_topics_by_{args.cluster_with}"][indices_dev[i]]
+            topics = embeddings_file[emb_column_name][indices_dev[i]]
             hash = example.hash
             probs = np.zeros((len(topics_all)))
             for i, k in enumerate(topics):
@@ -154,7 +155,7 @@ def main(args, config):
             cluster_infos.hashes.extend([hash])
             cluster_infos.cluster_dists.extend([probs.tolist()])
             
-        cluster_infos.save(config.example_to_ids_path)
+        cluster_infos.save(args.example_to_ids_path)
     else:        
         raise NotImplementedError
         # TODO: double check this
@@ -234,8 +235,9 @@ if __name__ == "__main__":
     parser.add_argument("--n_clusters", type=int, default=20) 
     parser.add_argument("--use_atlas", type=bool, default=True)     
     parser.add_argument("--use_topic_modeling", type=bool, default=False)  # if True uses topic modeling for lcustering, if False uses OpenAI embeddings
-    parser.add_argument("--embeddings_path", type=str, default="/home/v-oostapenko/dev/mttl/compositional_adapters/data/self_instruct_GPT3")
+    parser.add_argument("--embeddings_path", type=str, default="/home/v-oostapenko/dev/mttl/inst_follow/data/self_instruct_GPT3_embeddings")
     parser.add_argument("-c", "--config", type=str, default="config/mttl/mttl.yaml")
+    parser.add_argument("--example_to_ids_path", type=str, default="/home/v-oostapenko/dev/mttl/inst_follow/data/cluster_infos/atlas_by_instr_text-embedding-ada-002_ldalayer2.pkl")
     parser.add_argument("--rebuild_embeddings",  type=bool, default=False) 
     parser.add_argument("--embedding_model",  type=str, default='open_ai') 
     args = parser.parse_args()
