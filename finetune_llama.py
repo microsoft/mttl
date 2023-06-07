@@ -3,12 +3,13 @@ import argparse
 import json
 import numpy as np
 import torch
-import pytorch_lightning as pl
+import pytorch_lightning as pl 
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 from inst_follow.models.clm import CLM
 from mttl.callbacks import ProgressCallback
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
+from mttl.datamodule.longform_data_module import LongFormDataModule
 from mttl.models.encoder_decoder import EncoderDecoder
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.config import Config as MTTLConfig
@@ -37,13 +38,14 @@ def remove_non_serializable(d):
 
 class Config(MTTLConfig):
     def __init__(self, **kwargs):
-        self.rank = 1
-        self.prune_unused_loras = False
+        self.rank = 1  
+        self.prune_unused_loras = True
         self.init_b_random = False
         self.lora_dropout = 0
         self.lora_alpha = 16
         self.load_in_8bit = False
         self.micro_batch_size = 4
+        self.train_on_inputs = False
         self.padding_side = "right"
         self.adapter_modules = None
         self.poly_selector_use_distances = False
@@ -84,7 +86,7 @@ def parse_config(
             kwargs[key] = value
 
     args.kwargs = kwargs
-    if extra_kwargs:
+    if extra_kwargs:  
         args.kwargs.update(extra_kwargs)
 
     config = Config(
@@ -99,7 +101,8 @@ def parse_config(
 
 def run_multitask(args):
     seed_everything(args.seed, workers=True)
-
+    # get directory of the current file
+    print(os.path.dirname(os.path.realpath(__file__)))
     if args.example_to_ids_path:
         from mttl.cluster_tuning.cluster_reader import ClusterResult
 
@@ -112,9 +115,11 @@ def run_multitask(args):
             raise NotImplementedError()
 
     # select dataloader
+    model_class = CLM 
     if args.dataset == "alpaca":
-        model_class = CLM
         dm = AlpacaDataModule(args)
+    elif args.dataset == "longform":        
+        dm = LongFormDataModule(args)
     else:
         raise NotImplementedError()
 
@@ -124,11 +129,12 @@ def run_multitask(args):
         # load_in_8bit=args.load_in_8bit, # this doesnt work right now with current implementatio of lora
         # torch_dtype=torch.float16,
         device_map="auto",
-    )  # , load_in_8bit=True, torch_dtype=torch.float16)
-
+    )  # , load_in_8bit=True, torch_dtype=torch.float16) 
+    if args.model_object.config.vocab_size != len(dm.tokenizer): #if adding [EOI] in LongForm dataset
+        args.model_object.resize_token_embeddings(len(dm.tokenizer))
     args.model_object = modify_transformer(args.model_object, args)
-    if args.load_in_8bit:
-        args.model_object = prepare_model_for_int8_training(args.model_object)
+    # if args.load_in_8bit:
+    #     args.model_object = prepare_model_for_int8_training(args.model_object)
 
     if args.checkpoint is not None:
         from mttl.utils import get_checkpoint_path
@@ -207,7 +213,7 @@ def run_multitask(args):
         num_sanity_val_steps=5,
         amp_backend="native",
         default_root_dir=args.output_dir,
-        max_epochs=args.num_train_epochs,
+        max_epochs=args.num_train_epochs,   
         max_steps=args.total_steps + 1 if args.total_steps != -1 else -1,
         gradient_clip_val=args.max_grad_norm,
         log_every_n_steps=20,    
@@ -226,7 +232,7 @@ def run_multitask(args):
     trainer.validate(module, dm)
     # except:
     #     pass
-    if args.dataset in ["ni", "xfit", "alpaca"]:
+    if args.dataset in ["ni", "xfit", "alpaca", "longform"]:
         best_model_path = trainer.checkpoint_callback.best_model_path
         print(f"Best model path: {best_model_path}")
         # Rename the file at best_model_path to 'best_model'
