@@ -125,7 +125,7 @@ def parse_args():
     parser.add_argument(               
         "--prediction_file", required=False,   
         help="Jsonl file with each line corresponding to a prediction. " 
-             "Each json object should have an `id` and a `prediction` key.", default="/home/v-oostapenko/dev/mttl/inst_follow/eval/ni/ni_pred_alpaca_full16r_notrainonsoure_addeos[full,ptopt](7ogye4hj)_yahma_llama-7b-hfni-nshot0.jsonl")
+             "Each json object should have an `id` and a `prediction` key.", default="/home/v-oostapenko/dev/mttl/inst_follow/eval/ni/[git_ignore]full/ni_pred_alpaca_full4r_atlaslda_notrainonsoure_addeos[full,ptopt,topic](pm9xjm67)_yahma_llama-7b-hfni-nshot0.jsonl")
     parser.add_argument(
         "--reference_file", required=False,
         help="Jsonl file with each line corresponding to a reference. " 
@@ -174,7 +174,7 @@ if __name__ == "__main__":
  "task520_aquamuse_answer_given_in_passage",
  "task1407_dart_question_generation",
     ]
-    eval_instances = {}
+    eval_instances = {} 
     with open(args.reference_file) as fin:
         for line in fin:
             instance = json.loads(line)
@@ -201,6 +201,7 @@ if __name__ == "__main__":
         instance_ids = [id for id, instance in eval_instances.items() if instance["track"] == track]
         references = [eval_instances[id]["references"] for id in instance_ids]
         predictions = []
+        instructions = []
         missing_predictions = []
         for id in instance_ids:
             if id in all_predictions:

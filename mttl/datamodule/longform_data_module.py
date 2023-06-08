@@ -83,8 +83,9 @@ class LongFormDataModule(LightningDataModule):
         self.dev_dataset = self.get_dataset(split="validation")
         self.test_dataset = self.get_dataset(split="test")
         # )      
-        # max sample length
-        # a=[len(s.input_text.split(" ")) for s in self.train_dataset]
+        # max sample length in words               input_ids
+        # a=[len(s.input_text.split(" ")) for s in self.train_dataset] 
+        # a=[len(s.input_ids for s in self.train_dataset] 
         print("Training steps:", len(self.train_dataloader()))
         print("Validation steps:", len(self.val_dataloader()))
 

@@ -15,11 +15,12 @@ from sklearn.decomposition import PCA
 from nomic import AtlasProject       
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-from inst_follow.models.clm import CLM        
+from inst_follow.models.clm import CLM         
 from fastchat.utils import disable_torch_init 
 from mttl.models.modify_model import modify_transformer 
 from transformers import  LlamaForCausalLM, LlamaTokenizer
 from finetune_llama import Config, parse_config
+from mttl.cluster_tuning.cluster_reader import ClusterResult
 
 MAX_API_RETRY = 10
 REQ_TIME_GAP = 10
@@ -29,12 +30,12 @@ def  get_openai_embedding(input, engine="text-embedding-ada-002"):
     for i in range(MAX_API_RETRY):
         try:
             response = openai.Embedding.create(       
-                            input=input,    
+                            input=input, 
                             engine=engine)
             example_embedding = np.array([r["embedding"] for r in response["data"]])
             return example_embedding
         except Exception as e:
-            delay *= exponential_base * (1 + random.random())
+            delay = exponential_base * (1 + random.random())
             time.sleep(delay)#5
     logger.error(f'Failed after {MAX_API_RETRY} retries.')
     return 'error'
@@ -59,10 +60,10 @@ class TopicRouter:
         # del embeddings
         
         
-    def __call__(self, examples):     
-        bs = len(examples)       
+    def __call__(self, examples, depth=3):     
+        bs = len(examples)                       
         example_embeddings = get_openai_embedding(examples, engine="text-embedding-ada-002")
-        topics = self.map.vector_search_topics(queries=example_embeddings)['topics']
+        topics = self.map.vector_search_topics(queries=example_embeddings, depth=depth)['topics']
         probs = np.zeros((bs,self.n_skills))
         for ex in range(bs):
             for k, v in topics[ex].items():
@@ -80,24 +81,34 @@ def load_model(args, model_path=None, device='cuda', tokenizer_path=None):
     state_dict = None  
     if model_path is not None:
         state_dict = torch.load(model_path)
-        if isinstance(args, Config):    
+        if isinstance(args, Config):                
             args.update_kwargs(state_dict["hyper_parameters"])  
     # I changed the folder name from compositional_adapters to inst_follow. Old name may still persist in old configs. Correct it in the loaded config.
     # put state dictionary on the device
     state_dict = {k: v.to(device) for k, v in state_dict["state_dict"].items()} if state_dict is not None else None
     for k,v in vars(args).items():
-        if isinstance(v, str) and "/compositional_adapters/" in v:
+        if isinstance(v, str) and "/compositional_adapters/" in v:  
             setattr(args, k, v.replace("compositional_adapters", "inst_follow"))
+        if isinstance(v, str) and "/mnt/amlt_code/inst_follow/cluster_infos/" in v:
+            setattr(args, k, v.replace("/mnt/amlt_code/inst_follow/cluster_infos/", "/home/v-oostapenko/dev/mttl/inst_follow/cluster_infos/"))
     #############################
     model = modify_transformer(model, args) 
     model_class = CLM    
     args.model_object = model 
     # tokenizer = dm.tokenizer if dm is not None else tokenizer
-    module = model_class(**vars(args), tokenizer=tokenizer)
+    module = model_class(**vars(args), tokenizer=tokenizer)    
+    if args.prune_unused_loras:               
+        if args.example_to_ids_path is not None:    
+            cluster_result = ClusterResult(args.example_to_ids_path)      
+        # prune unused loras       
+        skill_ids_to_keep = np.where(
+            np.bincount(cluster_result._instance.infos.cluster_ids) > 0
+        )[0]                    
+        module.model.remove_skills(skill_ids_to_keep)
     if state_dict is not None:
         module.load_state_dict(state_dict)#, strict=False)
     module.to(device)
-    return module, tokenizer
+    return module, tokenizer, args
 
 @ray.remote(num_cpus=4)            
 def  get_eval(sys_prompt, user_prompt: str, max_tokens: int):

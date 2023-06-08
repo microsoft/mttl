@@ -13,7 +13,7 @@ from transformers import LlamaTokenizer
 from mttl.models.poly import get_selector     
 from mttl.models.modify_model import modify_transformer  
 from finetune_llama import parse_config, Config
-from inst_follow.utils import load_model, TopicRouter
+from inst_follow.utils import load_model, TopicRouter 
 from mttl.cluster_tuning.cluster_reader import ClusterResult
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from fastchat.utils import disable_torch_init
@@ -203,10 +203,12 @@ def generate_outputs(model, examples, tokenizer, temperature=0.7, max_output_len
             # random binary matrix 
             raise NotImplementedError()
             input["distances"] = torch.randint(0,2,(len(examples), topic_router.n_skills)).cuda()
-        else:
-            probs = topic_router(examples)   
+        else: 
+            probs = topic_router(examples, depth=2)   
+            if hasattr(model, "skill_ids_to_keep"):
+                probs = probs[:,model.skill_ids_to_keep]
             input["distances"] = probs
-        
+                
         
     # eval with the best adapter for this cluster
     output_ids = model.generate(
@@ -265,13 +267,13 @@ def correct(data_path, model_name, batch_size, out_prefix, from_hf, model_path, 
 # @click.option("--dataset", )
 # @click.option("--config_path", type=str, default="/home/v-oostapenko/dev/mttl/configs/llama/finetune_full_lora.json")
 @click.option("--model_name", type=str, default="yahma/llama-7b-hf") #chavinlo/alpaca-native") yahma/llama-7b-hf chainyo/alpaca-lora-7b togethercomputer/RedPajama-INCITE-Base-7B-v0.1
-@click.option("--batch_size", type=int, default=3)
+@click.option("--batch_size", type=int, default=3) 
 @click.option("--out_prefix", type=str, default="test")     
 @click.option("--from_hf", type=int, default=0)
 # @click.option("--nshot", type=int, default=1) # >0 means use canonical examples
-@click.option("--model_path", type=str, default="/home/v-oostapenko/logs/yahma_llama-7b-hffxsdo7h4_alpaca_lora_full_r16_3e_ptopt_noeos-val/loss=0.5094.ckpt")#"/home/v-oostapenko/logs/llama_alpaca/lora_full/yahma_llama-7b-hf0r2kuwgx_alpaca_lora_full-val/loss=0.5943.ckpt") #"/home/v-oostapenko/logs/llama_alpaca/lora_atlas_cluster_instr/yahma_llama-7b-hfjab096vi_alpaca_lora_atlas_cluster_te_ada-val/loss=0.5989.ckpt") #"/home/v-oostapenko/logs/llama_alpaca/lora_full/yahma_llama-7b-hfopq9a3dw_alpaca_lora_full-val/loss=0.5940.ckpt")
-@click.option("--example_to_ids_path", type=str, default="/home/v-oostapenko/dev/mttl/inst_follow/data/cluster_infos/atlas_by_instr_text-embedding-ada-002.pkl")
-@click.option("--skill_selector", type=str, default="random")
+@click.option("--model_path", type=str, default="/home/v-oostapenko/logs/amlt_yahma_llama_atlas_cluster_l1/alpaca4r_topic_ldal1/alpaca-lora_l1/best_model_alpaca_lora_atlas_cluster_te_ada_l1/loss=0.4242.ckpt")#"/home/v-oostapenko/logs/llama_alpaca/lora_full/yahma_llama-7b-hf0r2kuwgx_alpaca_lora_full-val/loss=0.5943.ckpt") #"/home/v-oostapenko/logs/llama_alpaca/lora_atlas_cluster_instr/yahma_llama-7b-hfjab096vi_alpaca_lora_atlas_cluster_te_ada-val/loss=0.5989.ckpt") #"/home/v-oostapenko/logs/llama_alpaca/lora_full/yahma_llama-7b-hfopq9a3dw_alpaca_lora_full-val/loss=0.5940.ckpt")
+@click.option("--example_to_ids_path", type=str, default="/home/v-oostapenko/dev/mttl/inst_follow/data/cluster_infos/atlas_by_instr_text-embedding-ada-002.pkl") # depreciated
+@click.option("--skill_selector", type=str, default="topic")
 @click.option("--nshot", type=int, default=0) # >0 means use canonical examples
 @click.option("--reference_file", type=str, default="/home/v-oostapenko/dev/mttl/inst_follow/eval/ni/test_references.jsonl") # >0 means use canonical examples
 @click.option("--n_tasks", type=int, default=None) # if None, will use a subset of test tasks
@@ -314,25 +316,32 @@ def main(data_path, model_name="gpt3", batch_size=4, out_prefix="", from_hf=0, m
         config = Config()       
         config.model = model_name
         config.n_skills = 1 # by default, can be overwritten in load_model if a checkpoint is provided
-        model, tokenizer = load_model(config, model_path, device=device)  
-        tokenizer.padding_side='left'
+        model, tokenizer, config = load_model(config, model_path, device=device)  
+        tokenizer.padding_side='left'  
         print(f"Loaded model {model_name} from {model_path}\n")
         print("Loaded config", config.__dict__)
-        if example_to_ids_path is not None:
-            cluster_result = ClusterResult(example_to_ids_path)      
+        if config.example_to_ids_path is not None:    
+            cluster_result = ClusterResult(config.example_to_ids_path)      
         if model.args.n_skills>1:          
             topic_router = TopicRouter(cluster_with='instruction')
             all_topics=topic_router.map.get_topic_data()    
             assert cluster_result is not None, "For soft-clustering models, cluster_result must be provided"
-            assert model.args.n_skills == len(all_topics) == cluster_result.n_clusters() 
-             
+            assert model.args.n_skills == cluster_result.n_clusters() 
+            if config.prune_unused_loras:
+                # prune unused loras
+                # counts = m = np.bincount(cluster_result._instance.infos.cluster_ids)
+                skill_ids_to_keep = np.where(
+                    np.bincount(cluster_result._instance.infos.cluster_ids) > 0
+                )[0]               
+                model.skill_ids_to_keep = skill_ids_to_keep
+                # model.model.remove_skills(skill_ids_to_keep)
+                cluster_result.remove_skills(skill_ids_to_keep) 
             if skill_selector == "average":                  
                     topic_router = None
-                    skill_ids_to_keep = np.where(np.bincount(cluster_result._instance.infos.cluster_ids)>0)[0]
-                    model.model.remove_skills(skill_ids_to_keep)
+                    # skill_ids_to_keep = np.where(np.bincount(cluster_result._instance.infos.cluster_ids)>0)[0]
+                    # model.model.remove_skills(skill_ids_to_keep)
                     model.model.switch_selector_to_average(selector_to_replace=get_selector(config).__class__)
                     model.to(device)      
-        
         
         model.model.config.pad_token_id = tokenizer.pad_token_id #= 0  # unk
         model.model.config.bos_token_id = tokenizer.bos_token_id
@@ -402,7 +411,7 @@ def main(data_path, model_name="gpt3", batch_size=4, out_prefix="", from_hf=0, m
     
     print(config)
     print("Arguments:\n")
-    print(data_path, "\n", model_name, "\n", batch_size, "\n", out_prefix, "\n", from_hf, "\n", model_path, "\n", example_to_ids_path, "\n", skill_selector)
+    print(data_path, "\n", model_name, "\n", batch_size, "\n", out_prefix, "\n", from_hf, "\n", model_path, "\n", skill_selector)
     # nshot = 1
     
     for nshot in [nshot]:#, 5, 10, 15, 20]:      
