@@ -1,6 +1,6 @@
 wandb
 datasets==2.2.1
-transformers==4.19.2
+transformers==4.30.1
 pytorch-lightning==1.8.6
 wget==3.2
 rouge==1.0.0
