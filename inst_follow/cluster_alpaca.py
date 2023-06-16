@@ -16,7 +16,7 @@ from finetune_llama import parse_config
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-openai.api_key = "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"
+openai.api_key = ""
 
 
 def store_embeddings(embeddings, args):
