@@ -158,13 +158,15 @@ def main(files, dataset, latex, hps, tasks, nt):
             for result in result_files:
                 data = pandas.read_csv(result)
                 task_name = data["prefix"][0]
-                
+
                 if tasks and task_name not in tasks:
                     continue
                 else:
                     tasks_found.append(task_name)
 
-                zero_shot = data.loc[data["step"] == 0]["test/acc_0shot"].dropna().values * 100
+                zero_shot = (
+                    data.loc[data["step"] == 0]["test/acc_0shot"].dropna().values * 100
+                )
                 data = data.loc[data["step"] != 0]
 
                 # take val/acc for both as they are equal up to some random sampling of prompts
@@ -182,7 +184,9 @@ def main(files, dataset, latex, hps, tasks, nt):
                             "trial": trial,
                             "perf": test_scores[trial],
                             "val_perf": val_scores[trial],
-                            "zs_perf": zero_shot[trial] if len(zero_shot) > 1 else zero_shot[0],
+                            "zs_perf": zero_shot[trial]
+                            if len(zero_shot) > 1
+                            else zero_shot[0],
                         }
                     )
 
@@ -264,15 +268,27 @@ def main(files, dataset, latex, hps, tasks, nt):
                     }
                 )
 
-            overall.append({"model": m, "val": val, "val_std": val_std, "test": test, "test_std": test_std})
+            overall.append(
+                {
+                    "model": m,
+                    "val": val,
+                    "val_std": val_std,
+                    "test": test,
+                    "test_std": test_std,
+                }
+            )
 
             if "zs_perf" in filtered_results.columns:
                 zs_mean = filtered_results["zs_perf"].mean()
                 overall[-1].update({"zs": zs_mean})
 
-        pd.set_option('display.max_colwidth', None)
-        pd.set_option('display.max_rows', None)
-        print(pandas.DataFrame(per_task).pivot(index='model', columns='task', values='perf'))
+        pd.set_option("display.max_colwidth", None)
+        pd.set_option("display.max_rows", None)
+        print(
+            pandas.DataFrame(per_task).pivot(
+                index="model", columns="task", values="perf"
+            )
+        )
         print(pandas.DataFrame(overall).sort_values("test", ascending=True))
 
 
