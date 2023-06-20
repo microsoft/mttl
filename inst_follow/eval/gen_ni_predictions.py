@@ -13,10 +13,9 @@ from transformers import LlamaTokenizer
 from mttl.models.poly import get_selector     
 from mttl.models.modify_model import modify_transformer  
 from finetune_llama import parse_config, Config
-from inst_follow.utils import load_model, TopicRouter 
+from inst_follow.utils import load_model, TopicRouter,disable_torch_init
 from mttl.cluster_tuning.cluster_reader import ClusterResult
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from fastchat.utils import disable_torch_init
 device = "cuda" if torch.cuda.is_available() else "cpu"
 def dict_to_dataclass(d):
     from dataclasses import make_dataclass

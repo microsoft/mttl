@@ -16,7 +16,6 @@ from nomic import AtlasProject
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 from inst_follow.models.clm import CLM         
-from fastchat.utils import disable_torch_init 
 from mttl.models.modify_model import modify_transformer 
 from transformers import  LlamaForCausalLM, LlamaTokenizer
 from finetune_llama import Config, parse_config
@@ -24,6 +23,18 @@ from mttl.cluster_tuning.cluster_reader import ClusterResult
 
 MAX_API_RETRY = 10
 REQ_TIME_GAP = 10
+
+
+
+def disable_torch_init():
+    """
+    Disable the redundant torch default initialization to accelerate model creation.
+    """
+    import torch
+
+    setattr(torch.nn.Linear, "reset_parameters", lambda self: None)
+    setattr(torch.nn.LayerNorm, "reset_parameters", lambda self: None)
+
 
 def  get_openai_embedding(input, engine="text-embedding-ada-002"):
     exponential_base: float = 2
@@ -35,6 +46,7 @@ def  get_openai_embedding(input, engine="text-embedding-ada-002"):
             example_embedding = np.array([r["embedding"] for r in response["data"]])
             return example_embedding
         except Exception as e:
+            print(e)
             delay = exponential_base * (1 + random.random())
             time.sleep(delay)#5
     logger.error(f'Failed after {MAX_API_RETRY} retries.')
@@ -91,20 +103,22 @@ def load_model(args, model_path=None, device='cuda', tokenizer_path=None):
             setattr(args, k, v.replace("compositional_adapters", "inst_follow"))
         if isinstance(v, str) and "/mnt/amlt_code/inst_follow/cluster_infos/" in v:
             setattr(args, k, v.replace("/mnt/amlt_code/inst_follow/cluster_infos/", "/home/v-oostapenko/dev/mttl/inst_follow/cluster_infos/"))
+        if isinstance(v, str) and "/home/v-oostapenko/dev/mttl/inst_follow/data/cluster_infos/" in v:
+            setattr(args, k, v.replace("/home/v-oostapenko/dev/mttl/inst_follow/data/cluster_infos/", "/home/v-oostapenko/dev/mttl/inst_follow/cluster_infos/"))
     #############################
     model = modify_transformer(model, args) 
     model_class = CLM    
     args.model_object = model 
     # tokenizer = dm.tokenizer if dm is not None else tokenizer
-    module = model_class(**vars(args), tokenizer=tokenizer)    
-    if args.prune_unused_loras:               
+    module = model_class(**vars(args), tokenizer=tokenizer)        
+    if hasattr(args,"prune_unused_loras") and args.prune_unused_loras:               
         if args.example_to_ids_path is not None:    
             cluster_result = ClusterResult(args.example_to_ids_path)      
-        # prune unused loras       
-        skill_ids_to_keep = np.where(
-            np.bincount(cluster_result._instance.infos.cluster_ids) > 0
-        )[0]                    
-        module.model.remove_skills(skill_ids_to_keep)
+            # prune unused loras       
+            skill_ids_to_keep = np.where(
+                np.bincount(cluster_result._instance.infos.cluster_ids) > 0
+            )[0]                    
+            module.model.remove_skills(skill_ids_to_keep)
     if state_dict is not None:
         module.load_state_dict(state_dict)#, strict=False)
     module.to(device)
