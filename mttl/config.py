@@ -16,7 +16,9 @@ class Config(object):
         self.train_dir = os.getenv("AMLT_DATA_DIR", "tmp/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
         self.finetune_task_name = None
-        self.example_to_ids_path = os.getenv("AMLT_EXMPLTOIDS", None)# "/home/v-oostapenko/dev/mttl/inst_follow/data/cluster_infos/atlas_by_instr_text-embedding-ada-002.pkl")  # path to clustering of data
+        self.example_to_ids_path = os.getenv(
+            "AMLT_EXMPLTOIDS", None
+        )  # "/home/v-oostapenko/dev/mttl/inst_follow/data/cluster_infos/atlas_by_instr_text-embedding-ada-002.pkl")  # path to clustering of data
         self.embeddings_path = None
         self.use_task_descriptions = False  # Use task descriptions
         self.num_pos_examples = (
