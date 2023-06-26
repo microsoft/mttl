@@ -279,7 +279,6 @@ def main(files, dataset, latex, hps, tasks, nt, save_df=False):
 
         pd.set_option('display.max_colwidth', None)
         pd.set_option('display.max_rows', None)
-
         print(pandas.DataFrame(per_task).pivot(index='model', columns='task', values='perf'))
         print(pandas.DataFrame(overall).sort_values("test", ascending=True))
 

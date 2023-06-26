@@ -86,15 +86,7 @@ def get_selector(config):
     if config.poly_selector == "poly":
         return PolytroponSelector(config)
     elif config.poly_selector == "private":
-        # back-compatibility
-        if config.example_to_ids_path:
-            return ClusterSelector(config, soft=False)
-        else:
-            return PrivateSelector(config)
-    elif config.poly_selector == "cluster_soft":
-        return ClusterSelector(config, soft=True)
-    elif config.poly_selector == "cluster_hard":
-        return ClusterSelector(config, soft=False)
+        return PrivateSelector(config)
     elif config.poly_selector == "moe":
         return MoESelector(config)
     else:

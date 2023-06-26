@@ -11,7 +11,7 @@ def test_poly(tmp_path):
     os.environ["NI_DATA_DIR"] = str(tmp_path)
     os.environ["AMLT_OUTPUT_DIR"] = str(tmp_path / "output")
 
-    _args = Config("ni/pretrain_short.json+ni/poly_lora.json")
+    _args = Config("ni/pretrain.json+ni/poly_lora.json")
     _args.n_tasks = 768
     _args.model = "t5-small"
     _args.warmup_steps = 0

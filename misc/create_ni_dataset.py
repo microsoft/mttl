@@ -79,7 +79,7 @@ def load_instances(task, data_path, num_examples=100, is_test=False):
     }
 
 
-@click.command
+@click.command()
 @click.argument('data_path', type=str)
 @click.option('--seed', type=lambda x: x.split(","), default="13,42,58")
 @click.option('--output_path', type=str)
