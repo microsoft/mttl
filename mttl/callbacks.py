@@ -30,7 +30,6 @@ class ProgressCallback(cb.TQDMProgressBar):
         """Override this to customize the tqdm bar for training."""
         bar = Tqdm(
             desc="Training",
-            initial=self.train_batch_idx,
             position=(2 * self.process_position),
             disable=self.is_disabled,
             leave=True,
@@ -44,7 +43,6 @@ class ProgressCallback(cb.TQDMProgressBar):
         """Override this to customize the tqdm bar for predicting."""
         bar = Tqdm(
             desc="Predicting",
-            initial=self.train_batch_idx,
             position=(2 * self.process_position),
             disable=self.is_disabled,
             leave=True,
