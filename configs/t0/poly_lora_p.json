@@ -9,5 +9,7 @@
     "trainable_param_names": ".*lora_[ab].*|.*module_logits.*", 
     "adapters_learning_rate": 1e-3,
     "module_logits_learning_rate": 0.1,
-    "module_logits_relaxed_bernoulli": false
+    "module_logits_relaxed_bernoulli": false,
+    "use_t0_templates_as_tasks": true,
+    "adafactor_scale_parameter": false
 }
