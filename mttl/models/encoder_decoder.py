@@ -107,7 +107,7 @@ class EncoderDecoder(EfficientCheckpointModule):
         self.log("val/loss", mean_loss, on_epoch=True, prog_bar=True)
         return loss, batch['task_ids']
 
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self, outputs):
         losses = torch.cat([out[0].sum(-1) for out in outputs], 0)
         task_ids = torch.cat([out[1] for out in outputs], 0)
 
@@ -229,13 +229,13 @@ class Finetuner(EncoderDecoder):
     def test_step(self, batch, batch_idx):
         return self.inference_step(batch)
 
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self, outputs):
         return self.inference_end(outputs, self.trainer.datamodule.dataset_reader, "val")
 
-    def test_epoch_end(self, outputs):
+    def on_test_epoch_end(self, outputs):
         return self.inference_end(outputs, self.trainer.datamodule.dataset_reader, "test")
 
-    def training_epoch_end(self, losses):
+    def on_training_epoch_end(self, losses):
         avg_loss = (sum([x["loss"] for x in losses]) / len(losses)).item()
         lrs = [x["lr"] for x in self.optimizers().param_groups]
         print(f"loss : {avg_loss:.4f}\tlr {lrs}\n")

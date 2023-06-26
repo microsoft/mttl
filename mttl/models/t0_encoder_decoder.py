@@ -480,7 +480,7 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             metrics = {}
         return metrics
 
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self, outputs):
         try:
             # differentiate between fine-tuning phase / zero-shot phase and
             # validation phase during training. this will raise because
@@ -502,7 +502,7 @@ class T0EncoderDecoder(EfficientCheckpointModule):
                     )
                 f.write(json.dumps(task_losses) + "\n")
 
-    def test_epoch_end(self, outputs):
+    def on_test_epoch_end(self, outputs):
         return self.inference_epoch_end(outputs, split="test")
 
     def configure_optimizers(self):
