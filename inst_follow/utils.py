@@ -25,6 +25,8 @@ from mttl.cluster_tuning.cluster_reader import ClusterResult
 MAX_API_RETRY = 10
 REQ_TIME_GAP = 10
 
+openai.api_key_path = "api.openai"
+
 
 def disable_torch_init():
     """
