@@ -273,7 +273,7 @@ def correct(
     nshot,
     reference_file,
 ):
-    base = "mttl/inst_follow"
+    base = "inst_follow"
     for nshot in [nshot]:  # , 5, 10, 15, 20]:
         out_file_name = (
             f"ni_pred_{out_prefix}_{model_name}ni-nshot{0}.jsonl"
@@ -304,7 +304,7 @@ def correct(
     default="../natural-instructions/tasks",
 )
 # @click.option("--dataset", )
-# @click.option("--config_path", type=str, default="mttl/configs/llama/finetune_full_lora.json")
+# @click.option("--config_path", type=str, default="configs/llama/finetune_full_lora.json")
 @click.option(
     "--model_name", type=str, default="yahma/llama-7b-hf"
 )  # chavinlo/alpaca-native") yahma/llama-7b-hf chainyo/alpaca-lora-7b togethercomputer/RedPajama-INCITE-Base-7B-v0.1
@@ -320,14 +320,14 @@ def correct(
 @click.option(
     "--example_to_ids_path",
     type=str,
-    default="mttl/inst_follow/data/cluster_infos/atlas_by_instr_text-embedding-ada-002.pkl",
+    default="inst_follow/data/cluster_infos/atlas_by_instr_text-embedding-ada-002.pkl",
 )  # depreciated
 @click.option("--skill_selector", type=str, default="topic")
 @click.option("--nshot", type=int, default=0)  # >0 means use canonical examples
 @click.option(
     "--reference_file",
     type=str,
-    default="mttl/inst_follow/eval/ni/test_references.jsonl",
+    default="inst_follow/eval/ni/test_references.jsonl",
 )  # >0 means use canonical examples
 @click.option(
     "--n_tasks", type=int, default=None
@@ -537,7 +537,7 @@ def main(
             else f"ni_pred_{out_prefix}_{model_name}ni-nshot_canonical.jsonl"
         )
         out_file_name = out_file_name.replace("/", "_")
-        base = "mttl/inst_follow"
+        base = "inst_follow"
 
         task_results_existing = None
         if os.path.exists(f"{base}/eval/ni/{out_file_name}"):
