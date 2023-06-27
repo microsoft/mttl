@@ -10,22 +10,32 @@ and put them at the beginning of the `Instances` field.
 Here we will use these 100 instances for all the evaluation tasks and put them in this single reference file.
 """
 
-tasks_dir = "/home/v-oostapenko/dev/natural-instructions/tasks/"
+tasks_dir = "/projects/futhark1/data/wzm289/code/natural-instructions/tasks/"
 num_test_instances = 100
 
 with open("test_references.jsonl", "w") as fout:
     for track in ["default", "xlingual"]:
-        test_tasks = [l.strip() for l in open(f"/home/v-oostapenko/dev/natural-instructions/splits/{track}/test_tasks.txt")]
+        test_tasks = [
+            l.strip()
+            for l in open(
+                f"/projects/futhark1/data/wzm289/code/natural-instructions/splits/{track}/test_tasks.txt"
+            )
+        ]
         for task in test_tasks:
             file = os.path.join(tasks_dir, task + ".json")
             with open(file) as fin:
                 task_data = json.load(fin)
             test_instances = task_data["Instances"][:num_test_instances]
             for instance in test_instances:
-                fout.write(json.dumps({
-                    "id": instance["id"], 
-                    "references": instance["output"], 
-                    "task_id": task, 
-                    "task_category": task_data["Categories"][0], 
-                    "track": track},
-                ) + "\n")
+                fout.write(
+                    json.dumps(
+                        {
+                            "id": instance["id"],
+                            "references": instance["output"],
+                            "task_id": task,
+                            "task_category": task_data["Categories"][0],
+                            "track": track,
+                        },
+                    )
+                    + "\n"
+                )

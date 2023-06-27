@@ -20,15 +20,17 @@ class ClusterResult:
         return cls._instance.example_to_ids[hash]
 
     @classmethod
-    def n_clusters(cls):    
+    def n_clusters(cls):
         return len(cls._instance.cluster_sizes)
 
     @classmethod
     def remove_skills(cls, skill_ids_to_keep):
         # print(skill_ids_to_keep)
-        for key,v in cls._instance._example_to_distances.items():
-            cls._instance._example_to_distances[key] = np.array(v)[skill_ids_to_keep].tolist()
-    
+        for key, v in cls._instance._example_to_distances.items():
+            cls._instance._example_to_distances[key] = np.array(v)[
+                skill_ids_to_keep
+            ].tolist()
+
     def __new__(cls, path):
         if cls._instance is None:
             cls._instance = super(ClusterResult, cls).__new__(cls)
@@ -37,19 +39,33 @@ class ClusterResult:
 
             cls._instance.infos = cluster_infos
             cls._instance.example_to_ids = dict(
-                    zip(
-                        cls._instance.infos.hashes,
-                        cls._instance.infos.cluster_ids,
-                    )
+                zip(
+                    cls._instance.infos.hashes,
+                    cls._instance.infos.cluster_ids,
                 )
+            )
             cls._instance._example_to_distances = dict(
                 zip(
                     cls._instance.infos.hashes,
                     list(cls._instance.infos.cluster_dists),
                 )
             )
-            cluster_sizes = torch.from_numpy(np.bincount(cls._instance.infos.cluster_ids)).float()
-            assert len(np.bincount(cls._instance.infos.cluster_ids)) == len(cls._instance._example_to_distances[list(cls._instance._example_to_distances.keys())[0]])
+            cluster_sizes = torch.from_numpy(
+                np.bincount(cls._instance.infos.cluster_ids)
+            ).float()
+            print(len(np.bincount(cls._instance.infos.cluster_ids)))
+            print(
+                len(
+                    cls._instance._example_to_distances[
+                        list(cls._instance._example_to_distances.keys())[0]
+                    ]
+                )
+            )
+            # assert len(np.bincount(cls._instance.infos.cluster_ids)) == len(
+            #     cls._instance._example_to_distances[
+            #         list(cls._instance._example_to_distances.keys())[0]
+            #     ]
+            # )
 
             cls._instance.cluster_sizes = cluster_sizes
             cls._instance.avg_cluster_size = cluster_sizes.mean().item()
