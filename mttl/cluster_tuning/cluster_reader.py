@@ -53,13 +53,16 @@ class ClusterResult:
             cluster_sizes = torch.from_numpy(
                 np.bincount(cls._instance.infos.cluster_ids)
             ).float()
-            print(len(np.bincount(cls._instance.infos.cluster_ids)))
             print(
+                "******************", len(np.bincount(cls._instance.infos.cluster_ids))
+            )
+            print(
+                "******************",
                 len(
                     cls._instance._example_to_distances[
                         list(cls._instance._example_to_distances.keys())[0]
                     ]
-                )
+                ),
             )
             # assert len(np.bincount(cls._instance.infos.cluster_ids)) == len(
             #     cls._instance._example_to_distances[

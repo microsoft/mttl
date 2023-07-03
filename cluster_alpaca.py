@@ -132,7 +132,7 @@ def main(args, config):
                 "Embeddings file not found, try running the script with --rebuild_embeddings flag set to True"
             )
         # remove key from embeddings_file
-        depth = 2
+        depth = args.depth  # 2
         emb_column_name = f"atlas_topics_by_{args.cluster_with}_l{depth}"
         if not emb_column_name in embeddings_file:
             embeddings_file[emb_column_name] = []
@@ -285,9 +285,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--example_to_ids_path",
         type=str,
-        default="inst_follow/data/cluster_infos/atlas_by_instr_bert-base-uncased_ldalayer2.pkl",
+        default="inst_follow/cluster_infos/atlas_by_instr_bert-base-uncased_ldalayer2.pkl",
     )
-    parser.add_argument("--rebuild_embeddings", type=bool, default=False)
+    parser.add_argument("--rebuild_embeddings", type=bool, default=True)
     parser.add_argument("--embedding_model", type=str, default="bert-base-uncased")
+    parser.add_argument("--depth", type=int, default=3)
     args = parser.parse_args()
     main(args, config)
