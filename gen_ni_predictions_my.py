@@ -177,7 +177,7 @@ test_tasks = ["task102_commongen_sentence_generation"]
 
 def load_instructions(path, n_tasks=None):
     """
-    Read all .json files in the directory path and
+    Read all .json files in the directory path and§
     extract the field "Definition" from each file.
     """
     import glob
@@ -206,9 +206,11 @@ def generate_outputs(
     max_output_length=128,
     topic_router=None,
     skill_selector="topic",
+    cluster_depth=3,
 ):
     otuputs_list = []
     inputs = tokenizer(examples, padding="longest", return_tensors="pt")
+    # print("examples", examples[0])
     input = {
         "input_ids": inputs.input_ids.to(device),
         "task_ids": torch.zeros(len(examples), dtype=torch.long).to(device) * -1,
@@ -222,7 +224,7 @@ def generate_outputs(
                 0, 2, (len(examples), topic_router.n_skills)
             ).cuda()
         else:
-            probs = topic_router(examples, depth=2)
+            probs = topic_router(examples, depth=cluster_depth)
             if hasattr(model, "skill_ids_to_keep"):
                 probs = probs[:, model.skill_ids_to_keep]
             input["distances"] = probs
@@ -312,12 +314,13 @@ def correct(
 )  # chavinlo/alpaca-native") yahma/llama-7b-hf chainyo/alpaca-lora-7b togethercomputer/RedPajama-INCITE-Base-7B-v0.1
 @click.option("--batch_size", type=int, default=3)
 @click.option("--out_prefix", type=str, default="test")
-@click.option("--from_hf", type=int, default=0)
+@click.option("--from_hf", type=int, default=1)
 # @click.option("--nshot", type=int, default=1) # >0 means use canonical examples
 @click.option(
     "--model_path",
     type=str,
     default="/home/v-oostapenko/logs/amlt_yahma_llama_atlas_cluster_l1/alpaca4r_topic_ldal1/alpaca-lora_l1/best_model_alpaca_lora_atlas_cluster_te_ada_l1/loss=0.4242.ckpt",
+    # default=None,
 )  # "/home/v-oostapenko/logs/llama_alpaca/lora_full/yahma_llama-7b-hf0r2kuwgx_alpaca_lora_full-val/loss=0.5943.ckpt") #"/home/v-oostapenko/logs/llama_alpaca/lora_atlas_cluster_instr/yahma_llama-7b-hfjab096vi_alpaca_lora_atlas_cluster_te_ada-val/loss=0.5989.ckpt") #"/home/v-oostapenko/logs/llama_alpaca/lora_full/yahma_llama-7b-hfopq9a3dw_alpaca_lora_full-val/loss=0.5940.ckpt")
 @click.option(
     "--example_to_ids_path",
@@ -337,6 +340,7 @@ def correct(
 @click.option(
     "--usepijma_model_with_llama_adapter", type=int, default=0
 )  # if None, will use a subset of test tasks
+@click.option("--cluster_depth", type=int, default=3)
 def main(
     data_path,
     model_name="gpt3",
@@ -350,6 +354,7 @@ def main(
     reference_file=None,
     n_tasks=None,
     usepijma_model_with_llama_adapter=0,
+    cluster_depth=3,
 ):
     task_results = {}
     topic_router = None
@@ -360,7 +365,7 @@ def main(
         if "llama" in model_name:
             config = {"model": model_name, "model_modifier": None}
             config = dict_to_dataclass(config)
-            model, _ = load_model(
+            model, _, _ = load_model(
                 config, device=device, tokenizer_path="yahma/llama-7b-hf"
             )
             # tokenizer =  LlamaTokenizer.from_pretrained(model_name, padding_side='left')
@@ -435,7 +440,7 @@ def main(
         # from inst_follow.models.clm import CLM
         config = {"model": model_name, "model_modifier": None}
         config = dict_to_dataclass(config)
-        model, tokenizer = load_model(config, device=device)
+        model, tokenizer, _ = load_model(config, device=device)
         model = PeftModel.from_pretrained(
             model.model,
             "tloen/alpaca-lora-7b",
@@ -579,6 +584,7 @@ def main(
                         temperature=0.7,
                         topic_router=topic_router,
                         skill_selector=skill_selector,
+                        cluster_depth=cluster_depth,
                     )
                     for id, pred in zip(example_ids, gens):
                         task_results[task_name].append(

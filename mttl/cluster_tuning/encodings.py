@@ -67,8 +67,7 @@ class ClusterInfos:
 
     @staticmethod
     def load(save_path):
-        """Load all fields from a pickle file
-        """
+        """Load all fields from a pickle file"""
         import pickle
 
         with open(save_path, "rb") as f:
@@ -81,8 +80,8 @@ class ClusterInfos:
             centroids=data["centroids"],
             task_names=data["task_names"],
             is_test=data["is_test"],
-            input_type=data["input_type"]
-        )   
+            input_type=data["input_type"],
+        )
 
     def save(self, save_path):
         import pickle
@@ -96,7 +95,7 @@ class ClusterInfos:
                     "centroids": self.centroids,
                     "task_names": self.task_names,
                     "is_test": self.is_test,
-                    "input_type": self.input_type
+                    "input_type": self.input_type,
                 },
                 f,
             )

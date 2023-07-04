@@ -119,7 +119,9 @@ def main(args, config):
     map = None
     # # load embeddings from GPT
     global embeddings_path
-    embeddings_path = args.embeddings_path + f"/embeddings_of_{args.cluster_with}_2.pkl"
+    embeddings_path = (
+        args.embeddings_path + f"/embeddings_of_{args.cluster_with}_{args.depth}.pkl"
+    )
     if args.use_atlas:
         map = get_atlas_map(dm, args) if map is None else map
         topics_all = map.get_topic_data()

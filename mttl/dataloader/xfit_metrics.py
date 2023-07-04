@@ -188,17 +188,17 @@ def evaluate(predictions, data, metric):
 
     if metric == "EM":
         ems = []
-        for (prediction, dp) in zip(predictions, data):
+        for prediction, dp in zip(predictions, data):
             ems.append(get_exact_match_over_list(prediction, dp[1]))
         return np.mean(ems)
     elif metric == "ACC":
         accs = []
-        for (prediction, dp) in zip(predictions, data):
+        for prediction, dp in zip(predictions, data):
             accs.append(get_accruacy_over_list(prediction, dp[1]))
         return np.mean(accs)
     elif metric == "QA-F1":
         f1s = []
-        for (prediction, dp) in zip(predictions, data):
+        for prediction, dp in zip(predictions, data):
             f1s.append(get_f1_over_list(prediction, dp[1]))
         return np.mean(f1s)
     elif metric == "Classification-F1":
@@ -214,7 +214,7 @@ def evaluate(predictions, data, metric):
         return pearsonr([float(dp[1][0]) for dp in data], predictions)[0]
     elif metric == "Rouge-L":
         rouges = []
-        for (prediction, dp) in zip(predictions, data):
+        for prediction, dp in zip(predictions, data):
             rouges.append(get_rouge_over_list(prediction, dp[1]))
         return np.mean(rouges)
 
