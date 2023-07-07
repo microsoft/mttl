@@ -85,21 +85,26 @@ class AlpacaDataModule(LightningDataModule):
         # always use the same split for the dataset
         rng = torch.Generator().manual_seed(1234)
 
-        # n_tr_samples = int(len(dataset) * 0.97)   #len(dataset) -
-        # self.train_dataset, self.dev_dataset = torch.utils.data.random_split(
-        #     dataset, [n_tr_samples, len(dataset) - n_tr_samples, ], generator=rng
-        # )
+        n_tr_samples = int(len(dataset) * 0.97)  # len(dataset) -
+        self.train_dataset, self.dev_dataset = torch.utils.data.random_split(
+            dataset,
+            [
+                n_tr_samples,
+                len(dataset) - n_tr_samples,
+            ],
+            generator=rng,
+        )
 
-        (
-            self.train_dataset,
-            self.dev_dataset,
-            _,
-            _,
-            _,
-            _,
-            _,
-            _,
-        ) = torch.utils.data.random_split(dataset, [6470] * 8, generator=rng)
+        # (
+        #     self.train_dataset,
+        #     self.dev_dataset,
+        #     _,
+        #     _,
+        #     _,
+        #     _,
+        #     _,
+        #     _,
+        # ) = torch.utils.data.random_split(dataset, [6470] * 8, generator=rng)
 
         print("Training steps:", len(self.train_dataloader()))
         print("Validation steps:", len(self.val_dataloader()))

@@ -314,7 +314,7 @@ def correct(
 )  # chavinlo/alpaca-native") yahma/llama-7b-hf chainyo/alpaca-lora-7b togethercomputer/RedPajama-INCITE-Base-7B-v0.1
 @click.option("--batch_size", type=int, default=3)
 @click.option("--out_prefix", type=str, default="test")
-@click.option("--from_hf", type=int, default=1)
+@click.option("--from_hf", type=int, default=0)
 # @click.option("--nshot", type=int, default=1) # >0 means use canonical examples
 @click.option(
     "--model_path",
