@@ -3,7 +3,7 @@ import argparse
 import json
 import numpy as np
 import torch
-import pytorch_lightning as pl 
+import pytorch_lightning as pl
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 from inst_follow.models.clm import CLM
@@ -19,7 +19,8 @@ from mttl.models.modify_model import modify_transformer
 from transformers import LlamaForCausalLM, LlamaTokenizer
 from mttl.dataloader.data_utils import ExampleInfo
 from mttl.utils import get_ni_tasks_from_file, trim_batch, hash_example
-from typing import List
+
+from mttl.models.poly import get_selector
 
 # from peft import prepare_model_for_int8_training
 
@@ -38,7 +39,7 @@ def remove_non_serializable(d):
 
 class Config(MTTLConfig):
     def __init__(self, **kwargs):
-        self.rank = 1  
+        self.rank = 1
         self.prune_unused_loras = True
         self.init_b_random = False
         self.lora_dropout = 0
@@ -86,7 +87,7 @@ def parse_config(
             kwargs[key] = value
 
     args.kwargs = kwargs
-    if extra_kwargs:  
+    if extra_kwargs:
         args.kwargs.update(extra_kwargs)
 
     config = Config(
@@ -115,10 +116,10 @@ def run_multitask(args):
             raise NotImplementedError()
 
     # select dataloader
-    model_class = CLM 
+    model_class = CLM
     if args.dataset == "alpaca":
         dm = AlpacaDataModule(args)
-    elif args.dataset == "longform":        
+    elif args.dataset == "longform":
         dm = LongFormDataModule(args)
     else:
         raise NotImplementedError()
@@ -129,8 +130,10 @@ def run_multitask(args):
         # load_in_8bit=args.load_in_8bit, # this doesnt work right now with current implementatio of lora
         # torch_dtype=torch.float16,
         device_map="auto",
-    )  # , load_in_8bit=True, torch_dtype=torch.float16) 
-    if args.model_object.config.vocab_size != len(dm.tokenizer): #if adding [EOI] in LongForm dataset
+    )  # , load_in_8bit=True, torch_dtype=torch.float16)
+    if args.model_object.config.vocab_size != len(
+        dm.tokenizer
+    ):  # if adding [EOI] in LongForm dataset
         args.model_object.resize_token_embeddings(len(dm.tokenizer))
     args.model_object = modify_transformer(args.model_object, args)
     # if args.load_in_8bit:
@@ -159,6 +162,11 @@ def run_multitask(args):
             )[0]
             module.model.remove_skills(skill_ids_to_keep)
             cluster_result.remove_skills(skill_ids_to_keep)
+    # change selector to average
+    if args.switch_to_average > 0:
+        module.model.switch_selector_to_average(
+            selector_to_replace=get_selector(args).__class__
+        )
 
     # legit logging
     loggers = []
@@ -213,10 +221,10 @@ def run_multitask(args):
         num_sanity_val_steps=5,
         amp_backend="native",
         default_root_dir=args.output_dir,
-        max_epochs=args.num_train_epochs,   
+        max_epochs=args.num_train_epochs,
         max_steps=args.total_steps + 1 if args.total_steps != -1 else -1,
         gradient_clip_val=args.max_grad_norm,
-        log_every_n_steps=20,    
+        log_every_n_steps=20,
         strategy=args.compute_strategy if args.compute_strategy else None,
         callbacks=callbacks,
         accumulate_grad_batches=args.gradient_accumulation_steps,

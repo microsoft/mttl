@@ -74,9 +74,11 @@ class MoESelector(Selector):
 
         probs = F.softmax(module_logits, dim=-1)
 
-        top_probs, top_indices = probs.topk(self.topk, dim=-1)  # 2 active skills per task
-        top_k_probs = top_probs[:, :self.topk]
-        top_k_indices = top_indices[:, :self.topk]
+        top_probs, top_indices = probs.topk(
+            self.topk, dim=-1
+        )  # 2 active skills per task
+        top_k_probs = top_probs[:, : self.topk]
+        top_k_indices = top_indices[:, : self.topk]
         top_k_probs = top_k_probs / top_k_probs.sum(dim=1, keepdim=True)
 
         zeros = torch.zeros_like(probs, requires_grad=True)
@@ -91,7 +93,7 @@ class PolytroponSelector(Selector):
         self.config = config
         self.n_splits = config.n_splits
         self.n_skills = config.n_skills
-        self.dropout = config.module_logits_dropout   
+        self.dropout = config.module_logits_dropout
         self.use_l2_norm = config.module_logits_l2_norm
         self.use_relaxed_bernoulli = config.module_logits_relaxed_bernoulli
         self.use_straight_through = config.module_logits_straight_through
@@ -112,8 +114,8 @@ class PolytroponSelector(Selector):
             (n_tasks, self.n_splits * self.n_skills)
         ).uniform_(-1e-3, 1e-3)
 
-    def forward(self, routing_infos):  
-        module_logits = self.module_logits[routing_infos.task_ids]        
+    def forward(self, routing_infos):
+        module_logits = self.module_logits[routing_infos.task_ids]
         module_logits = module_logits.view(-1, self.n_splits, self.n_skills)
 
         if self.use_l2_norm:
@@ -127,21 +129,26 @@ class PolytroponSelector(Selector):
                 module_logits = torch.sigmoid(module_logits)
                 module_logits_disc = torch.round(module_logits)
                 # straight through estimator
-                module_logits = module_logits + (module_logits_disc - module_logits).detach()
+                module_logits = (
+                    module_logits + (module_logits_disc - module_logits).detach()
+                )
             else:
                 module_logits = torch.sigmoid(module_logits)
-            
+
             if self.dropout > 0.0:
                 module_logits = nn.Dropout(self.dropout)(module_logits)
 
             if self.poly_use_shared_skill:
                 # last skill is always active whatever the task that has been selected
-                module_logits = torch.cat((
-                    module_logits[:, :, :-1], module_logits[:, :, -1:] * 0.0 + 1.0
-                ), dim=-1)
+                module_logits = torch.cat(
+                    (module_logits[:, :, :-1], module_logits[:, :, -1:] * 0.0 + 1.0),
+                    dim=-1,
+                )
 
             if self.poly_average_correction:
-                module_weights = module_logits * (np.sqrt(self.n_splits) / np.sqrt(self.n_skills))
+                module_weights = module_logits * (
+                    np.sqrt(self.n_splits) / np.sqrt(self.n_skills)
+                )
             else:
                 module_weights = module_logits / (
                     module_logits.sum(dim=-1, keepdim=True) + EPS
@@ -176,29 +183,32 @@ class PrivateSelector(Selector):
 
 
 class LoraAveraging(Function):
-    @staticmethod             
+    @staticmethod
     def forward(ctx, inputs, module_weights):
         output = torch.einsum("bqs,qsdr->bqdr", (module_weights, inputs))
         ctx.save_for_backward(module_weights)
         return output
-    @staticmethod       
-    def backward(ctx, grad_output):
-        module_weights, = ctx.saved_tensors
 
-        # Compute the gradients with respect to the inputs and module_weights   
+    @staticmethod
+    def backward(ctx, grad_output):
+        (module_weights,) = ctx.saved_tensors
+
+        # Compute the gradients with respect to the inputs and module_weights
         grad_inputs = torch.einsum("bqdr,qsdr->bqs", (grad_output, module_weights))
         # grad_module_weights = torch.einsum("bqs,bqdr->qsdr", (grad_output, inputs))
 
-        return grad_inputs#, None#, grad_module_weights
-        
-                         
+        return grad_inputs  # , None#, grad_module_weights
+
+
 class EfficientBackwardbmm(Function):
     @staticmethod
-    def forward(ctx, input, module_weights, lora_a, lora_b, in_features, rank, out_features):        
+    def forward(
+        ctx, input, module_weights, lora_a, lora_b, in_features, rank, out_features
+    ):
         bs = module_weights.size(0)
-        ctx.rank = rank 
+        ctx.rank = rank
         ctx.lora_a = lora_a
-        ctx.lora_b = lora_b        
+        ctx.lora_b = lora_b
         ctx.in_features = in_features
         ctx.out_features = out_features
         # ctx.module_weights = module_weights
@@ -206,25 +216,25 @@ class EfficientBackwardbmm(Function):
         B = torch.einsum("bqs,qsrd->bqrd", (module_weights, lora_b))
         A = A.reshape(bs, in_features, rank)
         B = B.transpose(1, 2).reshape(bs, rank, out_features)
-        ctx.save_for_backward(input, module_weights)#, A, B)
+        ctx.save_for_backward(input, module_weights)  # , A, B)
         return torch.bmm(input, A).bmm(B)
-    
-    @staticmethod       
-    def backward(ctx, grad_output):              
-        input,module_weights = ctx.saved_tensors   
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        input, module_weights = ctx.saved_tensors
         # retrieve saved pointers
-        lora_a, lora_b = ctx.lora_a, ctx.lora_b        
+        lora_a, lora_b = ctx.lora_a, ctx.lora_b
         in_features, rank, out_features = ctx.in_features, ctx.rank, ctx.out_features
         module_weights = module_weights.to(dtype=lora_a.dtype)
         bs = module_weights.size(0)
-        # recalculate A and B (instead of storing them)  
+        # recalculate A and B (instead of storing them)
         A = torch.einsum("bqs,qsdr->bqdr", (module_weights, lora_a))
         B = torch.einsum("bqs,qsrd->bqrd", (module_weights, lora_b))
-        A = A.reshape(bs, in_features, rank) 
+        A = A.reshape(bs, in_features, rank)
         B = B.transpose(1, 2).reshape(bs, rank, out_features)
-        # compute grads        
+        # compute grads
         A = A.to(dtype=grad_output.dtype)
-        B = B.to(dtype=grad_output.dtype) 
+        B = B.to(dtype=grad_output.dtype)
         # Compute gradients with respect to the input, module_weights, lora_a, lora_b
         # grad_input is b x s x d
         grad_input = grad_output.bmm(B.transpose(1, 2)).bmm(A.transpose(1, 2))
@@ -232,21 +242,23 @@ class EfficientBackwardbmm(Function):
         grad_B = grad_output.transpose(1, 2).bmm(torch.bmm(input, A)).transpose(1, 2)
         grad_lora_b = torch.einsum("bqs,qrd->qsrd", (module_weights, grad_B))
         # grad w.r.t A, lora_a is q x s x d x r
-        grad_A = grad_output.bmm(B.transpose(1,2)).transpose(1,2).bmm(input)    
-        grad_lora_a = torch.einsum("bqs,qdr->qsdr", (module_weights, grad_A)).transpose(2,3)
+        grad_A = grad_output.bmm(B.transpose(1, 2)).transpose(1, 2).bmm(input)
+        grad_lora_a = torch.einsum("bqs,qdr->qsdr", (module_weights, grad_A)).transpose(
+            2, 3
+        )
 
-        return (   
+        return (
             grad_input,
-            None, # TODO: compute grads w.r.t. module_weights if needed.
+            None,  # TODO: compute grads w.r.t. module_weights if needed.
             grad_lora_a,
             grad_lora_b,
             None,
             None,
             None,
-        )   
+        )
 
 
-class PolyLoRALinear(PolytroponAdapter): 
+class PolyLoRALinear(PolytroponAdapter):
     def __init__(self, config, task_id_ptr, linear_layer, selector=None):
         super().__init__()
         self.n_splits = config.n_splits
@@ -285,7 +297,7 @@ class PolyLoRALinear(PolytroponAdapter):
                 linear_layer.out_features // self.n_splits,
             )
         )
-        self.reset_parameters() 
+        self.reset_parameters()
 
     def reset_parameters(self):
         import math
@@ -303,7 +315,6 @@ class PolyLoRALinear(PolytroponAdapter):
             with torch.no_grad():
                 self.lora_a.uniform_(-std, std)
 
-
         # ensure that initially, adding the adapter does not change the output
         if self.use_warmup or self.lora_randb_init:
             with torch.no_grad():
@@ -312,7 +323,7 @@ class PolyLoRALinear(PolytroponAdapter):
             torch.nn.init.zeros_(self.lora_b)
 
     def forward(self, input):
-        if self.training:   
+        if self.training:
             self.training_steps += 1
 
         task_id = self.routing_infos.task_ids
@@ -327,20 +338,20 @@ class PolyLoRALinear(PolytroponAdapter):
         bs, n_splits, n_skills = mixing_weights.size()
 
         # A is    n_splits, n_skills, D // n_splits, rank
-        # we want bs,       n_splits, D // n_splits, rank             
+        # we want bs,       n_splits, D // n_splits, rank
         A = torch.einsum("bqs,qsdr->bqdr", (mixing_weights.detach(), self.lora_a))
         B = torch.einsum("bqs,qsrd->bqrd", (mixing_weights.detach(), self.lora_b))
         A = A.reshape(bs, self.in_features, self.rank)
         B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
-        
+
         # A = LoraAveraging.apply(self.lora_a, mixing_weights)
         # B = LoraAveraging.apply(self.lora_b, mixing_weights)
-        
+
         # A = A.reshape(bs, self.in_features, self.rank)
-        # B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features) 
-        # adapter_out = EfficientBackwardbmm.apply(input, mixing_weights.detach(), self.lora_a,    
+        # B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
+        # adapter_out = EfficientBackwardbmm.apply(input, mixing_weights.detach(), self.lora_a,
         #                                 self.lora_b, self.in_features, self.rank, self.out_features) * self.scaling # / self.rank
-        adapter_out = input.bmm(A).bmm(B) * self.scaling # / self.rank
+        adapter_out = input.bmm(A).bmm(B) * self.scaling  # / self.rank
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
@@ -412,10 +423,9 @@ class SkilledModel:
             setattr(object, method, MethodType(getattr(SkilledModel, method), object))
         return object
 
-    @staticmethod 
+    @staticmethod
     def switch_selector_to_average(object, selector_to_replace=PolytroponSelector):
-        """Switches PolytroponSelector to AverageSelector.
-        """
+        """Switches PolytroponSelector to AverageSelector."""
         for name, module in object.named_modules():
             for name, inner_mod in module.named_children():
                 if isinstance(inner_mod, selector_to_replace):
@@ -425,7 +435,9 @@ class SkilledModel:
                         "n_skills:",
                         inner_mod.n_skills,
                     )
-                    n_splits = inner_mod.n_splits if hasattr(inner_mod, "n_splits") else 1
+                    n_splits = (
+                        inner_mod.n_splits if hasattr(inner_mod, "n_splits") else 1
+                    )
                     setattr(
                         module,
                         name,
@@ -454,51 +466,52 @@ class SkilledModel:
 
     @staticmethod
     def resize_module_logits(object, n_tasks):
-        """Resizes the vector routing, in case of fine-tuning.
-        """
+        """Resizes the vector routing, in case of fine-tuning."""
         for name, selector in object.get_selectors().items():
             print("Resizing module_logits of selector", name, "with", n_tasks, "tasks.")
             selector.resize_module_logits(n_tasks)
-    
+
     @staticmethod
     def remove_skills(object, skill_ids_to_keep):
         print("Removing skills, keeping", skill_ids_to_keep)
         for name, adapter in object.get_adapters().items():
             if isinstance(adapter, PolyLoRALinear):
-                adapter.lora_a= nn.Parameter(adapter.lora_a[:, skill_ids_to_keep, :, :])
-                adapter.lora_b= nn.Parameter(adapter.lora_b[:, skill_ids_to_keep, :, :])
+                adapter.lora_a = nn.Parameter(
+                    adapter.lora_a[:, skill_ids_to_keep, :, :]
+                )
+                adapter.lora_b = nn.Parameter(
+                    adapter.lora_b[:, skill_ids_to_keep, :, :]
+                )
                 adapter.n_skills = len(skill_ids_to_keep)
                 adapter.selector.n_skills = len(skill_ids_to_keep)
 
 
-
 def modify_with_poly(transformer, config, PolyLayer):
-    
     # How to "bin" different levels of selectors ?
-    def _extract_identifier(string, match_on='coder'):
-        """ Returns a unique identifier for the "chunk" of layers sharing the 
+    def _extract_identifier(string, match_on="coder"):
+        """Returns a unique identifier for the "chunk" of layers sharing the
         same underlying selector
         # e.g. 'block' : 'encoder.block.0.layer.0.SelfAttention' -> 'encoder.block.0'
         """
         pattern_map = {
-            'coarsegrained' : None, 
-            'finegrained' : None,
-            'layerwise' : 'layer',
-            'blockwise' : 'block',
-            'coderwise' : 'coder'
+            "coarsegrained": None,
+            "finegrained": None,
+            "layerwise": "layer",
+            "blockwise": "block",
+            "coderwise": "coder",
         }
         assert match_on in pattern_map.keys()
 
-        if match_on == 'finegrained':
+        if match_on == "finegrained":
             return string
-        if match_on == 'coarsegrained': 
-            return ''
+        if match_on == "coarsegrained":
+            return ""
 
         match_on = pattern_map[match_on]
-        left_idx = string.find(f'{match_on}.') + len(match_on) + 1
-        right_idx = string[left_idx:].find('.') 
-        return string[:left_idx + right_idx]
-    
+        left_idx = string.find(f"{match_on}.") + len(match_on) + 1
+        right_idx = string[left_idx:].find(".")
+        return string[: left_idx + right_idx]
+
     selectors = {}
     total_layers = 0
 
@@ -506,7 +519,9 @@ def modify_with_poly(transformer, config, PolyLayer):
         if re.fullmatch(config.lora_modules, m_name):
             for c_name, layer in dict(module.named_children()).items():
                 if re.fullmatch(config.lora_layers, c_name):
-                    identifier = _extract_identifier(f'{m_name}.{c_name}', config.poly_granularity)
+                    identifier = _extract_identifier(
+                        f"{m_name}.{c_name}", config.poly_granularity
+                    )
                     if identifier not in selectors.keys():
                         selectors[identifier] = get_selector(config)
                     selector = selectors[identifier]
@@ -524,7 +539,9 @@ def modify_with_poly(transformer, config, PolyLayer):
                         ),
                     )
 
-    print(f'created {len(selectors)} selectors for a total of {total_layers} adapted layers')
+    print(
+        f"created {len(selectors)} selectors for a total of {total_layers} adapted layers"
+    )
     return SkilledModel.register_functions(transformer)
 
 

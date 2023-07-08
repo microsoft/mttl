@@ -99,7 +99,7 @@ class Config(object):
         self.lora_layers = self.patch_layers = None
         self.n_skills = 8
         self.n_tasks = None
-
+        self.switch_to_average = 0
         # Polytropon related hyper-parameters
         self.n_splits = 1  # number of splits for poly-s
         self.poly_selector = "poly"  # poly, poly_cluster
