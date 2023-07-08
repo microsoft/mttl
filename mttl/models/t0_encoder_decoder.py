@@ -391,26 +391,27 @@ class T0EncoderDecoder(EfficientCheckpointModule):
         self.model.task_id_container["routing_infos"] = None
         return batch_output
 
-    def inference_step(self, batch):
+    def _inference_step(self, batch):
         # propagate task information
         self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
         batch_output = self.predict(batch)
 
         # reset task information
         self.model.task_id_container["routing_infos"] = None
-        self._inference_outputs += [batch_output]
+        return batch_output
 
     def validation_step(self, batch, batch_idx):
         if "answer_choices_ids" in batch:
-            out = self.inference_step(batch)
+            out = self._inference_step(batch)
         else:
             out = self.training_step(batch, batch_idx, split="val"), batch["task_ids"]
-
-        self._inference_outputs += [out]
+        self._inference_outputs.append(out)
         return out
 
     def test_step(self, batch, batch_idx):
-        return self.inference_step(batch)
+        output = self._inference_step(batch)
+        self._inference_outputs.append(output)
+        return output
 
     def inference_epoch_end(self, outputs, split="val"):
         # exchange outputs between processes
