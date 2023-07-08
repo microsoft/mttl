@@ -492,7 +492,7 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             # validation phase during training. this will raise because
             # training step does not return a dict
             if "prediction" in outputs[0]:
-                return self.inference_epoch_end(outputs, split="val")
+                outputs = self.inference_epoch_end(outputs, split="val")
         except:
             losses = torch.cat([out[0].sum(-1) for out in outputs], 0)
             task_ids = torch.cat([out[1] for out in outputs], 0)
@@ -507,10 +507,15 @@ class T0EncoderDecoder(EfficientCheckpointModule):
                         losses[task_ids == task_id].mean().item()
                     )
                 f.write(json.dumps(task_losses) + "\n")
+            outputs = None
+
+        self._inference_outputs.clear()
+        return outputs
 
     def on_test_epoch_end(self):
-        self.inference_epoch_end(self._inference_outputs, split="test")
-        self._inference_outputs = []
+        outputs = self.inference_epoch_end(self._inference_outputs, split="test")
+        self._inference_outputs.clear()
+        return outputs
 
     def configure_optimizers(self):
         config = self.config

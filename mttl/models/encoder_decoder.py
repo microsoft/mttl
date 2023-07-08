@@ -56,6 +56,7 @@ class EncoderDecoder(EfficientCheckpointModule):
             self.model = kwargs.get('model_object')
         self.loss_plugins = nn.ModuleDict({})
 
+        self._inference_outputs = []
         self.test_results = []
         self.best_val_result = None
 
@@ -105,9 +106,11 @@ class EncoderDecoder(EfficientCheckpointModule):
         loss = self.teacher_force_step(batch, reduction='none')
         mean_loss = loss.sum() / loss.size(0)
         self.log("val/loss", mean_loss, on_epoch=True, prog_bar=True)
+        self._inference_outputs.append((loss, batch["task_ids"]))
         return loss, batch['task_ids']
 
-    def on_validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
+        outputs = self._inference_outputs
         losses = torch.cat([out[0].sum(-1) for out in outputs], 0)
         task_ids = torch.cat([out[1] for out in outputs], 0)
 
@@ -117,6 +120,7 @@ class EncoderDecoder(EfficientCheckpointModule):
             for task_id in torch.unique(task_ids):
                 task_losses[task_id.item()] = losses[task_ids == task_id].mean().item()
             f.write(json.dumps(task_losses) + "\n")
+        self._inference_outputs.clear()
 
     def configure_optimizers(self):
         args = self.args
@@ -224,16 +228,24 @@ class Finetuner(EncoderDecoder):
         return metrics
 
     def validation_step(self, batch, batch_idx):
-        return self.inference_step(batch)
+        output = self.inference_step(batch)
+        self._inference_outputs.append(output)
+        return output
 
     def test_step(self, batch, batch_idx):
-        return self.inference_step(batch)
+        output = self.inference_step(batch)
+        self._inference_outputs.append(output)
+        return output
 
-    def on_validation_epoch_end(self, outputs):
-        return self.inference_end(outputs, self.trainer.datamodule.dataset_reader, "val")
+    def on_validation_epoch_end(self):
+        outputs = self.inference_end(self._validation_outputs, self.trainer.datamodule.dataset_reader, "val")
+        self._inference_outputs.clear()
+        return outputs
 
     def on_test_epoch_end(self, outputs):
-        return self.inference_end(outputs, self.trainer.datamodule.dataset_reader, "test")
+        outputs = self.inference_end(self._test_outputs, self.trainer.datamodule.dataset_reader, "test")
+        self._inference_outputs.clear()
+        return outputs
 
     def on_training_epoch_end(self, losses):
         avg_loss = (sum([x["loss"] for x in losses]) / len(losses)).item()
