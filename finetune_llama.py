@@ -104,16 +104,6 @@ def run_multitask(args):
     seed_everything(args.seed, workers=True)
     # get directory of the current file
     print(os.path.dirname(os.path.realpath(__file__)))
-    if args.example_to_ids_path:
-        from mttl.cluster_tuning.cluster_reader import ClusterResult
-
-        cluster_result = ClusterResult(args.example_to_ids_path)
-        args.n_tasks = cluster_result.n_clusters()
-
-        if args.poly_selector in ["cluster_soft", "cluster_hard"]:
-            args.n_skills = cluster_result.n_clusters()
-        else:
-            raise NotImplementedError()
 
     # select dataloader
     model_class = CLM
@@ -125,6 +115,21 @@ def run_multitask(args):
         raise NotImplementedError()
 
     args.n_tasks = len(dm.task2id)
+
+    if args.poly_selector == "poly":
+        args.n_tasks = args.n_skills
+
+    if args.example_to_ids_path:
+        from mttl.cluster_tuning.cluster_reader import ClusterResult
+
+        cluster_result = ClusterResult(args.example_to_ids_path)
+        args.n_tasks = cluster_result.n_clusters()
+
+        if args.poly_selector in ["cluster_soft", "cluster_hard"]:
+            args.n_skills = cluster_result.n_clusters()
+        else:
+            raise NotImplementedError()
+
     args.model_object = LlamaForCausalLM.from_pretrained(
         args.model,
         # load_in_8bit=args.load_in_8bit, # this doesnt work right now with current implementatio of lora

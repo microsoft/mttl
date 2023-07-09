@@ -15,3 +15,8 @@ torch_kmeans
 sentence-transformers
 fsspec[adl]
 rich
+openai
+ray
+shortuuid
+nomic
+rouge
