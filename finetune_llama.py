@@ -10,6 +10,7 @@ from inst_follow.models.clm import CLM
 from mttl.callbacks import ProgressCallback
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.longform_data_module import LongFormDataModule
+from mttl.datamodule.wizard_data_module import WizardDataModule
 from mttl.models.encoder_decoder import EncoderDecoder
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.config import Config as MTTLConfig
@@ -111,6 +112,8 @@ def run_multitask(args):
         dm = AlpacaDataModule(args)
     elif args.dataset == "longform":
         dm = LongFormDataModule(args)
+    elif args.dataset == "wizard":
+        dm = WizardDataModule(args)
     else:
         raise NotImplementedError()
 
@@ -245,7 +248,7 @@ def run_multitask(args):
     trainer.validate(module, dm)
     # except:
     #     pass
-    if args.dataset in ["ni", "xfit", "alpaca", "longform"]:
+    if args.dataset in ["ni", "xfit", "alpaca", "longform", "wizard"]:
         best_model_path = trainer.checkpoint_callback.best_model_path
         print(f"Best model path: {best_model_path}")
         # Rename the file at best_model_path to 'best_model'

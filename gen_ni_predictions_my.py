@@ -172,7 +172,7 @@ test_tasks = [
     "task102_commongen_sentence_generation",
 ]
 
-# test_tasks = ["task102_commongen_sentence_generation"]
+test_tasks = ["task102_commongen_sentence_generation"]
 
 
 def load_instructions(path, n_tasks=None):
