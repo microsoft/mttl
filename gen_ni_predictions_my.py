@@ -172,7 +172,7 @@ test_tasks = [
     "task102_commongen_sentence_generation",
 ]
 
-test_tasks = ["task102_commongen_sentence_generation"]
+# test_tasks = ["task102_commongen_sentence_generation"]
 
 
 def load_instructions(path, n_tasks=None):
@@ -405,7 +405,10 @@ def main(
         # print("Loaded config", config.__dict__)
         if config.example_to_ids_path is not None:
             cluster_result = ClusterResult(config.example_to_ids_path)
-        if model.args.n_skills > 1:
+        if skill_selector == "poly":
+            assert model.args.n_skills > 1
+            model.model.switch_selector_to_average()
+        elif model.args.n_skills > 1:
             topic_router = TopicRouter(cluster_with="instruction")
             all_topics = topic_router.map.get_topic_data()
             assert (
