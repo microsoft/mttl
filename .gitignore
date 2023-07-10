@@ -4,6 +4,8 @@ amulet_*/
 wandb
 .amltconfig
 .amltignore
+cache/
+output/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

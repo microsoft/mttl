@@ -1,6 +1,6 @@
 import json
 
-from projects.mhr.mhr_config import MHRConfig as Config
+from mttl.projects.mhr.mhr_config import MHRConfig as Config
 
 def test_config_dict_like(tmp_path):
     train_dir = str(tmp_path)
