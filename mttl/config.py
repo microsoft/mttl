@@ -209,23 +209,23 @@ class ParseKwargs(argparse.Action):
 
 
 def parse_config(extra_kwargs=None, raise_error=True):
-    # import itertools
+    import itertools
 
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument("-c", "--config_files", required=False)
-    # parser.add_argument("-k", "--kwargs", nargs="*", action="append")
-    # args = parser.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-c", "--config_files", required=False)
+    parser.add_argument("-k", "--kwargs", nargs="*", action="append")
+    args = parser.parse_args()
 
-    # kwargs = {}
-    # if args.kwargs:
-    #     kwargs_opts = list(itertools.chain(*args.kwargs))
-    #     for value in kwargs_opts:
-    #         key, _, value = value.partition("=")
-    #         kwargs[key] = value
+    kwargs = {}
+    if args.kwargs:
+        kwargs_opts = list(itertools.chain(*args.kwargs))
+        for value in kwargs_opts:
+            key, _, value = value.partition("=")
+            kwargs[key] = value
 
-    # args.kwargs = kwargs
-    # if extra_kwargs:
-    #     args.kwargs.update(extra_kwargs)
+    args.kwargs = kwargs
+    if extra_kwargs:
+        args.kwargs.update(extra_kwargs)
 
     config = Config(None, None, raise_error=raise_error)
 
