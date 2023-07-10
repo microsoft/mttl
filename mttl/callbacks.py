@@ -5,15 +5,6 @@ from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
 
 
 class ProgressCallback(cb.TQDMProgressBar):
-    @property
-    def main_progress_bar(self):
-        # fixes pl bug
-        return self._main_progress_bar
-
-    @main_progress_bar.setter
-    def main_progress_bar(self, bar) -> None:
-        self._main_progress_bar = bar
-
     def init_sanity_tqdm(self) -> Tqdm:
         """Override this to customize the tqdm bar for the validation sanity run."""
         bar = Tqdm(
@@ -30,7 +21,6 @@ class ProgressCallback(cb.TQDMProgressBar):
         """Override this to customize the tqdm bar for training."""
         bar = Tqdm(
             desc="Training",
-            initial=self.train_batch_idx,
             position=(2 * self.process_position),
             disable=self.is_disabled,
             leave=True,
@@ -44,7 +34,6 @@ class ProgressCallback(cb.TQDMProgressBar):
         """Override this to customize the tqdm bar for predicting."""
         bar = Tqdm(
             desc="Predicting",
-            initial=self.train_batch_idx,
             position=(2 * self.process_position),
             disable=self.is_disabled,
             leave=True,
@@ -57,7 +46,7 @@ class ProgressCallback(cb.TQDMProgressBar):
     def init_validation_tqdm(self) -> Tqdm:
         """Override this to customize the tqdm bar for validation."""
         # The main progress bar doesn't exist in `trainer.validate()`
-        has_main_bar = self.main_progress_bar is not None
+        has_main_bar = self.trainer.state.fn != "validate"
         bar = Tqdm(
             desc="Validating",
             position=(2 * self.process_position + has_main_bar),

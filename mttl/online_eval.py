@@ -1,6 +1,7 @@
 import copy
 import torch
-from pytorch_lightning.callbacks.base import Callback
+
+from pytorch_lightning.callbacks import Callback
 from pytorch_lightning import Trainer
 
 from mttl.datamodule.ni_data_module import NIDataModule

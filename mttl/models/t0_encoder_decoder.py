@@ -57,6 +57,7 @@ class T0EncoderDecoder(EfficientCheckpointModule):
         self.loss_plugins = nn.ModuleDict({})
 
         print(self.model.encoder.block[0])
+        self._inference_outputs = []
 
     def add_loss_plugin(self, plugin):
         if self.loss_plugins is not None:
@@ -94,6 +95,7 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             decoder_attention_mask = (decoder_input_ids == decoder_input_ids).float()
             lm_target = (
                 flat_choices_ids
+
                 - 100 * (flat_choices_ids == self.tokenizer.pad_token_id).long()
             )
 
@@ -394,7 +396,7 @@ class T0EncoderDecoder(EfficientCheckpointModule):
         self.model.task_id_container["routing_infos"] = None
         return batch_output
 
-    def inference_step(self, batch):
+    def _inference_step(self, batch):
         # propagate task information
         self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
         batch_output = self.predict(batch)
@@ -405,12 +407,16 @@ class T0EncoderDecoder(EfficientCheckpointModule):
 
     def validation_step(self, batch, batch_idx):
         if "answer_choices_ids" in batch:
-            return self.inference_step(batch)
+            out = self._inference_step(batch)
         else:
-            return self.training_step(batch, batch_idx, split="val"), batch["task_ids"]
+            out = self.training_step(batch, batch_idx, split="val"), batch["task_ids"]
+        self._inference_outputs.append(out)
+        return out
 
     def test_step(self, batch, batch_idx):
-        return self.inference_step(batch)
+        output = self._inference_step(batch)
+        self._inference_outputs.append(output)
+        return output
 
     def inference_epoch_end(self, outputs, split="val"):
         # exchange outputs between processes
@@ -485,13 +491,14 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             metrics = {}
         return metrics
 
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
+        outputs = self._inference_outputs
         try:
             # differentiate between fine-tuning phase / zero-shot phase and
             # validation phase during training. this will raise because
             # training step does not return a dict
             if "prediction" in outputs[0]:
-                return self.inference_epoch_end(outputs, split="val")
+                outputs = self.inference_epoch_end(outputs, split="val")
         except:
             losses = torch.cat([out[0].sum(-1) for out in outputs], 0)
             task_ids = torch.cat([out[1] for out in outputs], 0)
@@ -506,9 +513,15 @@ class T0EncoderDecoder(EfficientCheckpointModule):
                         losses[task_ids == task_id].mean().item()
                     )
                 f.write(json.dumps(task_losses) + "\n")
+            outputs = None
 
-    def test_epoch_end(self, outputs):
-        return self.inference_epoch_end(outputs, split="test")
+        self._inference_outputs.clear()
+        return outputs
+
+    def on_test_epoch_end(self):
+        outputs = self.inference_epoch_end(self._inference_outputs, split="test")
+        self._inference_outputs.clear()
+        return outputs
 
     def configure_optimizers(self):
         config = self.config
@@ -546,6 +559,3 @@ class T0EncoderDecoder(EfficientCheckpointModule):
                 "interval": "step",
             },
         }
-
-    def on_before_optimizer_step(self, optimizer, optimizer_idx):
-        pass
