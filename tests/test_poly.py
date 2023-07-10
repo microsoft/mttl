@@ -4,7 +4,7 @@ import os
 from pytorch_lightning import seed_everything
 from transformers import AutoTokenizer
 from mttl.models.encoder_decoder import EncoderDecoder
-from mttl.config import Config
+from projects.mhr.mhr_config import MHRConfig as Config
 
 
 def test_poly(tmp_path):
