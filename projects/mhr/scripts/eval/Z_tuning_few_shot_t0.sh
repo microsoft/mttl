@@ -8,6 +8,6 @@ do
     -k \
     checkpoint=$PATH_TO_CHECKPOINT \
     output_dir=${PATH_TO_OUTPUT_DIR}/${dataset} \
-    finetune_type=MuZ \
+    finetune_type=Z \
     $*
 done
