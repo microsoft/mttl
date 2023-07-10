@@ -4,15 +4,22 @@ MTTL - Multi-Task Transfer Learning
 
 ## Setup
 
-Install Python packages:
+MTTL supports `Python 3.8` and `Python 3.9`. It is recommended to create a virtual environment for MTTL using `virtualenv` or `conda`. For example, with `conda`:
 
-`pip install -r requirements.txt`
+    conda create -n mttl python=3.9
+    conda activate mttl
 
-_The package `promptsource` currently requires Python 3.7. Alternative versions require local installations (see their [documentation](https://github.com/bigscience-workshop/promptsource#setup))._
+Install the required Python packages:
 
-Download the datasets:
+    pip install -e .
 
-`bash scripts/create_datasets.sh`
+## Data Preparation
+
+Download and prepare the datasets for the experiments using the following script:
+
+    bash scripts/create_datasets.sh
+
+
 
 ## Multi-task Pre-training
 
@@ -30,6 +37,13 @@ To perform finetuning for a test task, use the script `pl_finetune.py`
 
 To perform an hyperparameter search for a test task, use the script `pl_finetune_tune.py`.
 The script will just call the functions in `pl_finetune.py` in a loop. The script itself defines hp ranges for different fine-tuning types.
+
+
+## Running Tests
+
+    pip install -e ".[test]"
+    pytest -vv tests
+
 
 ## Contributing
 
