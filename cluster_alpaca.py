@@ -16,7 +16,7 @@ from finetune_llama import parse_config
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-openai.api_key = "openai_api_key"
+openai.api_key_path = "api.openai"
 
 
 def store_embeddings(embeddings, args):
@@ -71,7 +71,15 @@ def get_atlas_map(dm: AlpacaDataModule, args):
         print("Creating new project and map")
         dataset: AlpacaDataset = dm.get_dataset()
         print(" Getting embeddings...")
-        embeddings = get_embeddings([d[args.cluster_with] for d in dataset.dataset])
+        if args.cluster_with == "instruction":
+            embeddings = get_embeddings([d["instruction"] for d in dataset.dataset])
+        elif args.cluster_with == "prompt":
+            embeddings = get_embeddings(
+                [
+                    f"Instruction: {d['instruction']} \n Input: {d['input']}"
+                    for d in dataset.dataset
+                ]
+            )
         # save embeddings to a file
         store_embeddings(embeddings, args)
         instructions_dicts = [
@@ -80,6 +88,7 @@ def get_atlas_map(dm: AlpacaDataModule, args):
                 "instruction": d["instruction"],
                 "input": d["input"],
                 "output": d["output"],
+                "prompt": f"Instruction: {d['instruction']} \n Input: {d['input']} \n Output:",
             }
             for d in dataset.dataset
         ]
@@ -265,13 +274,13 @@ def main(args, config):
 
 if __name__ == "__main__":
     # add params with default values
-    config = parse_config()
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--cluster_with",
         type=str,
-        default="instruction",
-        choices=["full", "instruction", "output"],
+        default="prompt",
+        choices=["full", "instruction", "output", "prompt"],
     )
     parser.add_argument("--n_clusters", type=int, default=20)
     parser.add_argument("--use_atlas", type=bool, default=True)
@@ -281,16 +290,18 @@ if __name__ == "__main__":
     parser.add_argument(
         "--embeddings_path",
         type=str,
-        default="inst_follow/data/self_instruct_bert_embeddings",
+        default="inst_follow/data/self_instruct_GPT3_embeddings",
     )
     parser.add_argument("-c", "--config", type=str, default="config/mttl/mttl.yaml")
     parser.add_argument(
         "--example_to_ids_path",
         type=str,
-        default="inst_follow/cluster_infos/atlas_by_instr_bert-base-uncased_ldalayer2.pkl",
+        default="inst_follow/cluster_infos/atlas_by_instr_text-embedding-ada-002_ldalayer1.pkl",
     )
     parser.add_argument("--rebuild_embeddings", type=bool, default=True)
-    parser.add_argument("--embedding_model", type=str, default="bert-base-uncased")
-    parser.add_argument("--depth", type=int, default=3)
+    parser.add_argument("--embedding_model", type=str, default="open_ai")
+    parser.add_argument("--depth", type=int, default=1)
     args = parser.parse_args()
+
+    config = parse_config()
     main(args, config)
