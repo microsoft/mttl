@@ -4,7 +4,6 @@ from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from mttl.online_eval import NIOnlineZeroShot, T0OnlineZeroShot
-from mttl.config import parse_config
 from mttl.callbacks import ProgressCallback
 from mttl.datamodule.ni_data_module import NIPretrainDataModule
 from mttl.datamodule.xfit_data_module import XFitPretrainDataModule
