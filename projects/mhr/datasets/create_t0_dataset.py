@@ -2,7 +2,7 @@ import os
 import click
 
 from mttl.datamodule.t0_data_module import T0PretrainDataModule
-from mttl.projects.mhr.mhr_config import MHRConfig as Config
+from mhr_config import MHRConfig as Config
 
 
 # T-Few github repo, to get original T0 splits

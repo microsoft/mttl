@@ -19,10 +19,8 @@ classifiers = [
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
 
-# https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
-[tool.setuptools.package-dir]
-mttl = "mttl"
-"mttl.projects" = "projects"
+[tool.setuptools]
+packages = ["mttl"]
 
 [project.optional-dependencies]
 dev = [

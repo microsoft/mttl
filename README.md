@@ -13,11 +13,17 @@ Install the required Python packages:
 
     pip install -e .
 
-## Data Preparation
+
+
+## Multi-Head Adapter Routing
+
+
+### Data Preparation
 
 Download and prepare the datasets for the experiments using the following script:
 
-    bash scripts/create_datasets.sh
+    cd projects/mhr
+    bash datasets/create_datasets.sh
 
 
 
@@ -37,6 +43,7 @@ To perform finetuning for a test task, use the script `pl_finetune.py`
 
 To perform an hyperparameter search for a test task, use the script `pl_finetune_tune.py`.
 The script will just call the functions in `pl_finetune.py` in a loop. The script itself defines hp ranges for different fine-tuning types.
+
 
 
 ## Running Tests

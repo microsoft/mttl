@@ -13,7 +13,7 @@ from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.models.monitors import get_monitors
 from mttl.utils import get_mlf_logger
 
-from mhr_config import MHRConfig
+from config import MHRConfig
 
 
 def run_multitask(args):

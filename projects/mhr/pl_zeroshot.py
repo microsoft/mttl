@@ -15,7 +15,7 @@ from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.utils import get_checkpoint_path, get_mlf_logger
 
 from pl_finetune import ARGS_TO_OVERWRITE
-from mhr_config import MHRConfig
+from config import MHRConfig
 
 
 def evaluate_zeroshot(config):
