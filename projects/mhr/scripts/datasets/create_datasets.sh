@@ -19,13 +19,10 @@ rm -rf /tmp/ni
 
 git clone https://github.com/INK-USC/CrossFit.git /tmp/xfit
 
-cd /tmp/xfit/tasks/
-python _build_gym.py --build --n_proc 20
-cd ..
-mkdir -p ../../dataloader/xfit_data/processed
-mv data ../../dataloader/xfit_data/processed
-cd ../..
+(cd /tmp/xfit/tasks/ && python _build_gym.py --build --n_proc 20)
 
+mkdir -p ./dataloader/xfit_data/processed
+mv /tmp/xfit/data ./dataloader/xfit_data/processed
 rm -rf /tmp/xfit
 
 ## T0 ##
