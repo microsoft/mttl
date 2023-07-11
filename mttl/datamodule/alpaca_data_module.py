@@ -3,7 +3,7 @@ from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 
 from mttl.datamodule.ni_data_module import CollateWrapperFn, CollateWrapperFnCLM
-from mttl.dataloader.alpaca_dataset_readers import AlpacaDataset
+from mttl.dataloader.alpaca_dataset_readers import AlpacaDataset, EnhancedAlpacaDataset
 from transformers import LlamaTokenizer
 
 
@@ -71,13 +71,22 @@ class AlpacaDataModule(LightningDataModule):
         self.task2id = {"alpaca_full": 0}
 
     def get_dataset(self):
-        return AlpacaDataset(
-            self.tokenizer,
-            self.config.max_input_length,
-            self.config.max_output_length,
-            self.config.train_dir,
-            self.config.train_on_inputs,
-        )
+        if self.config.enhanced_alpaca:
+            return EnhancedAlpacaDataset(
+                self.tokenizer,
+                self.config.max_input_length,
+                self.config.max_output_length,
+                self.config.train_dir,
+                self.config.train_on_inputs,
+            )
+        else:
+            return AlpacaDataset(
+                self.tokenizer,
+                self.config.max_input_length,
+                self.config.max_output_length,
+                self.config.train_dir,
+                self.config.train_on_inputs,
+            )
 
     def setup(self, stage=None):
         dataset = self.get_dataset()

@@ -100,6 +100,7 @@ class Config(object):
         self.n_skills = 8
         self.n_tasks = None
         self.switch_to_average = 0
+        self.enhanced_alpaca = False
         # Polytropon related hyper-parameters
         self.n_splits = 1  # number of splits for poly-s
         self.poly_selector = "poly"  # poly, poly_cluster
