@@ -20,6 +20,6 @@
     "model_modifier": "poly_lora",
     "lora_modules": ".*attn",
     "lora_layers": "v_proj|q_proj|k_proj|o_proj",
-    "trainable_param_names": ".*lora_[ab].*|.*module_logits.*",
-    "switch_to_average": 0
+    "trainable_param_names": ".*lora_[ab].*",
+    "switch_to_average": 1
 }
