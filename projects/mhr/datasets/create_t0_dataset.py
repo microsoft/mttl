@@ -1,8 +1,9 @@
 import os
+
 import click
 
 from mttl.datamodule.t0_data_module import T0PretrainDataModule
-from mhr_config import MHRConfig as Config
+from mttl.config import Config
 
 
 # T-Few github repo, to get original T0 splits
@@ -20,7 +21,7 @@ def main(output_path):
 
     # move few-shot test sets to data_path
     print("Moving few shot sets...")
-    os.system("cp -rf /tmp/t-few/data/few_shot/ " + output_path + "/few_shot/")
+    os.system("mv -f /tmp/t-few/data/few_shot/ " + output_path + "/few_shot/")
 
     t0_config = Config(
         filenames=[],

@@ -12,8 +12,7 @@ from mttl.models.encoder_decoder import EncoderDecoder
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.models.monitors import get_monitors
 from mttl.utils import get_mlf_logger
-
-from config import MHRConfig
+from mttl.config import Config
 
 
 def run_multitask(args):
@@ -133,5 +132,5 @@ def run_multitask(args):
 
 
 if __name__ == "__main__":
-    args = MHRConfig.parse()
+    args = Config.parse()
     run_multitask(args)

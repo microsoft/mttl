@@ -1,17 +1,18 @@
-import pytest
-import torch
 import os
+import torch
 from pytorch_lightning import seed_everything
 from transformers import AutoTokenizer
 from mttl.models.encoder_decoder import EncoderDecoder
-from mttl.projects.mhr.mhr_config import MHRConfig as Config
+from mttl.config import Config
 
 
 def test_poly(tmp_path):
     os.environ["NI_DATA_DIR"] = str(tmp_path)
     os.environ["AMLT_OUTPUT_DIR"] = str(tmp_path / "output")
 
-    _args = Config("projects/mhr/configs/ni/pretrain.json+projects/mhr/configs/ni/poly_lora.json")
+    _args = Config(
+        "projects/mhr/configs/ni/pretrain.json+projects/mhr/configs/ni/poly_lora.json",
+    )
     _args.n_tasks = 768
     _args.model = "t5-small"
     _args.warmup_steps = 0

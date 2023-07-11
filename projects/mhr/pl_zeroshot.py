@@ -13,9 +13,9 @@ from mttl.datamodule.xfit_data_module import XFitDataModule
 from mttl.models.encoder_decoder import Finetuner
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.utils import get_checkpoint_path, get_mlf_logger
+from mttl.config import Config
 
 from pl_finetune import ARGS_TO_OVERWRITE
-from config import MHRConfig
 
 
 def evaluate_zeroshot(config):
@@ -95,5 +95,5 @@ def evaluate_zeroshot(config):
 
 
 if __name__ == "__main__":
-    args = MHRConfig.parse()
+    args = Config.parse()
     evaluate_zeroshot(args)
