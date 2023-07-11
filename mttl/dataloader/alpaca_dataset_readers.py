@@ -70,6 +70,7 @@ class EnhancedAlpacaDataset(torch.utils.data.dataset.Dataset):
         self.tokenizer = tokenizer
         self.max_input_length = max_input_length
         self.max_output_length = max_output_length
+        self.remove_glance = True
 
     def __len__(self):
         return len(self.dataset)
@@ -129,6 +130,8 @@ class EnhancedAlpacaDataset(torch.utils.data.dataset.Dataset):
         instruction_hash = hash_example(entry["instruction"])
         source = AlpacaTemplateSource.apply(entry)
 
+        if self.remove_glance:
+            entry["output"] = entry["output"].split("At a glance:")[-1]
         tok_input = self.preprocess(source, entry["output"])
         ex_info = ExampleInfo(
             tok_input["input_ids"],
