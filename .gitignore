@@ -6,6 +6,7 @@ wandb
 .amltignore
 cache/
 output/
+**/output
 .vscode/
 
 # Byte-compiled / optimized / DLL files
