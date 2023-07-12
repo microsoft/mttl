@@ -4,8 +4,8 @@ do
     python -m pl_finetune -c \
     t0/finetune.json+t0/${dataset}.json \
     -k \
-    checkpoint=${PATH_TO_CHECKPOINT} \
-    output_dir=${PATH_TO_OUTPUT_DIR}/${dataset} \
+    checkpoint=${CHECKPOINT_DIR} \
+    output_dir=${OUTPUT_DIR}/${dataset} \
     -k model_modifier=poly_lora \
     -k poly_selector=poly
 done

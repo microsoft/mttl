@@ -29,14 +29,26 @@ Download and prepare the datasets for the experiments using the following script
     bash datasets/create_datasets.sh
 
 
+### Environment Variables
+
+Based on your experiments, you may need to export one or more of the following environment variables:
+
+    T0_DATA_DIR:  `data/t0_data/processed` if you ran the `create_datasets.sh`
+    NI_DATA_DIR: `data/ni_data/processed` if you ran the `create_datasets.sh`
+    XFIT_DATA_DIR: `data/ni_data/processed` if you ran the `create_datasets.sh`
+    CHECKPOINT_DIR
+    OUTPUT_DIR
+    CACHE_DIR
+
 
 ### Multi-task Pre-training
 
-The general command:
+The general command for pre-training a model is:
 
     python pl_train.py -c $CONFIG_FILES -k $KWARGS
 
 Multiple `CONFIG_FILES` can be concatenated as `file1+file2`. To modify defaults, `KWARGS` can be expressed as `key=value`.
+You can check [scripts/pretrain](scripts/pretrain) for examples.
 
 ### Test Fine-Tuning
 
@@ -49,9 +61,15 @@ The script will just call the functions in `pl_finetune.py` in a loop. The scrip
 
 
 ### Pre-Configured Scripts
+
 Alternatively, you can run the pre-configured scripts from the `scripts` folder. For example:
 
     bash scripts/mhr_pretrain.sh
+
+### Know Issues
+If you run into issues with protoc `TypeError: Descriptors cannot not be created directly.`, you can try to downgrade protobuf to 3.20.*:
+
+    pip install protobuf==3.20.*
 
 
 ## Running Tests

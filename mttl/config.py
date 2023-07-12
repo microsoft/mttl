@@ -111,8 +111,8 @@ class Config:
         # Data config
         self.dataset = None
         self.custom_tasks_splits = None
-        self.train_dir = os.getenv("AMLT_DATA_DIR", "/tmp/")
-        self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "./output")
+        self.train_dir = os.getenv("TRAIN_DIR", "/tmp/")
+        self.output_dir = os.getenv("OUTPUT_DIR", "./output")
         self.finetune_task_name = None
         self.example_to_ids_path = None  # path to clustering of data
         self.embeddings_path = None

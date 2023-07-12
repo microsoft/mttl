@@ -8,7 +8,7 @@ from mttl.config import Config
 
 def test_poly(tmp_path):
     os.environ["NI_DATA_DIR"] = str(tmp_path)
-    os.environ["AMLT_OUTPUT_DIR"] = str(tmp_path / "output")
+    os.environ["OUTPUT_DIR"] = str(tmp_path / "output")
 
     _args = Config(
         "projects/mhr/configs/ni/pretrain.json+projects/mhr/configs/ni/poly_lora.json",
