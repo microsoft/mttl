@@ -17,33 +17,41 @@ Install the required Python packages:
 
 ## Multi-Head Adapter Routing
 
+Please ensure that you have navigated to the `projects/mhr` directory before running the Multi-Head Adapter Routing scripts:
+
+    cd projects/mhr
+
 
 ### Data Preparation
 
 Download and prepare the datasets for the experiments using the following script:
 
-    cd projects/mhr
     bash datasets/create_datasets.sh
 
 
 
-## Multi-task Pre-training
+### Multi-task Pre-training
 
 The general command:
 
-`python pl_train.py -c $CONFIG_FILES -k $KWARGS`
+    python pl_train.py -c $CONFIG_FILES -k $KWARGS
 
 Multiple `CONFIG_FILES` can be concatenated as `file1+file2`. To modify defaults, `KWARGS` can be expressed as `key=value`.
 
-## Test Fine-Tuning
+### Test Fine-Tuning
 
 To perform finetuning for a test task, use the script `pl_finetune.py`
 
-## Hyper-parameter Search for Test Fine-Tuning
+### Hyper-parameter Search for Test Fine-Tuning
 
 To perform an hyperparameter search for a test task, use the script `pl_finetune_tune.py`.
 The script will just call the functions in `pl_finetune.py` in a loop. The script itself defines hp ranges for different fine-tuning types.
 
+
+### Pre-Configured Scripts
+Alternatively, you can run the pre-configured scripts from the `scripts` folder. For example:
+
+    bash scripts/mhr_pretrain.sh
 
 
 ## Running Tests

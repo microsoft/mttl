@@ -4,7 +4,7 @@ do
     python -m pl_finetune -c \
     t0/finetune.json+t0/${dataset}.json \
     -k \
-    checkpoint=${AMLT_MAP_INPUT_DIR} \
-    output_dir=${AMLT_OUTPUT_DIR}/${dataset} \
+    checkpoint=${PATH_TO_CHECKPOINT} \
+    output_dir=${PATH_TO_OUTPUT_DIR}/${dataset} \
     $*
 done
