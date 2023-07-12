@@ -20,7 +20,7 @@ classifiers = [
 dependencies = {file = ["requirements.txt"]}
 
 [tool.setuptools]
-packages = ["mttl"]
+packages = ["mttl", "mttl.dataloader", "mttl.datamodule", "mttl.models"]
 
 [project.optional-dependencies]
 dev = [
