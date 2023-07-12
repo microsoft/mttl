@@ -43,9 +43,6 @@ def evaluate_zeroshot(config):
     elif config.dataset == "ni":
         dm = NIDataModule(config)
         model_class = Finetuner
-    elif config.dataset == "bb":
-        dm = BBDataModule(config)
-        model_class = T0EncoderDecoder
     elif config.dataset == "t0":
         dm = T0FinetuneDataModule(config)
         model_class = T0EncoderDecoder
