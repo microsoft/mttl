@@ -1,0 +1,42 @@
+# generic stuff
+model: null
+exp_name: null
+seed: 1
+precision: 16
+eval_every: 1000
+save_every: 1000
+total_steps: 50000
+max_length: 512
+wandb_project: "alpaca"
+cache_dir: ${CACHE_DIR:./cache}
+train_dir: ${AMLT_DATA_DIR:/tmp/}
+output_dir: ${AMLT_OUTPUT_DIR:./output}
+num_beams: 4
+compute_strategy: "auto"
+checkpoint: null  # load from checkpoint
+checkpoint_step: null  # load from checkpoint in format of global_stepX.pt
+train_batch_size: 8
+predict_batch_size: 32
+trainable_param_names: ".*"
+non_trainable_param_names: null
+
+# optimizer
+optimizer: "adafactor"
+max_grad_norm: 1
+weight_decay: 0
+learning_rate: 3e-4
+warmup_proportion: 0.06
+scheduler: "linear_decay_with_warmup"
+adam_epsilon: 1e-8
+gradient_accumulation_steps: 1
+adafactor_scale_parameter: True
+adafactor_warmup_init: False
+adafactor_relative_step: False
+num_train_epochs: -1
+warmup_steps: -1
+
+# peft
+model_modifier: "lora"
+lora_modules: ".*Attention.*"
+lora_layers: "q|k|v|o"
+lora_rank: 1
