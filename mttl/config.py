@@ -20,9 +20,22 @@ class Config(ABC):
         if filenames:
             for filename in filenames.split("+"):
                 if not os.path.exists(filename):
-                    filename = os.path.join(os.getenv("CONFIG_PATH", default="configs"), filename)
+                    filename = os.path.join(
+                        os.getenv("CONFIG_PATH", default="configs"), filename
+                    )
 
-                self.update_kwargs(json.load(open(filename)), eval=False, raise_error=raise_error)
+                try:
+                    self.update_kwargs(
+                        json.load(open(filename)), eval=False, raise_error=raise_error
+                    )
+                except:
+                    import yaml
+
+                    self.update_kwargs(
+                        yaml.load(open(filename), yaml.SafeLoader),
+                        eval=False,
+                        raise_error=raise_error,
+                    )
 
         if kwargs:
             self.update_kwargs(kwargs, raise_error=raise_error)
@@ -50,12 +63,15 @@ class Config(ABC):
             if eval:
                 print("Overwriting {} to {}".format(k, v))
 
-            if k == 'finegrained':
-                k = 'poly_granularity'
-                v = 'finegrained' if v else 'coarsegrained'
-            elif k in ['train_dir', 'output_dir']:
-                # this raises an error if the env. var does not exist
-                v = Template(v).substitute(os.environ)
+            if k == "finegrained":
+                k = "poly_granularity"
+                v = "finegrained" if v else "coarsegrained"
+            if k in ['cache_dir', 'train_dir', 'output_dir']:
+                import re
+                matches = re.findall("\$\{([^:}]+)(?::([^}]+))?\}", v)
+                if len(matches):
+                    print(matches)
+                    v = os.getenv(matches[0][0], default=matches[0][1])
 
             setattr(self, k, v)
             self._updated_kwargs[k] = v
@@ -84,21 +100,21 @@ class Config(ABC):
         with open(os.path.join(output_dir, "config.json"), "w+") as fout:
             fout.write(self.to_json())
             fout.write("\n")
-        
-    @classmethod    
+
+    @classmethod
     def parse(cls, extra_kwargs=None, raise_error=True):
         import itertools
 
         parser = argparse.ArgumentParser()
         parser.add_argument("-c", "--config_files", required=False)
-        parser.add_argument("-k", "--kwargs", nargs="*", action='append')
+        parser.add_argument("-k", "--kwargs", nargs="*", action="append")
         args = parser.parse_args()
 
         kwargs = {}
         if args.kwargs:
             kwargs_opts = list(itertools.chain(*args.kwargs))
             for value in kwargs_opts:
-                key, _, value = value.partition('=')
+                key, _, value = value.partition("=")
                 kwargs[key] = value
         args.kwargs = kwargs
         if extra_kwargs:
@@ -114,5 +130,5 @@ class ParseKwargs(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         setattr(namespace, self.dest, dict())
         for value in values:
-            key, value = value.split('=')
+            key, value = value.split("=")
             getattr(namespace, self.dest)[key] = value

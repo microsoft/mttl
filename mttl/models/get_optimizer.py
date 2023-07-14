@@ -60,7 +60,11 @@ def get_optimizer(model, args, no_decay=None):
             param_groups[key]["lr"] = args.learning_rate
 
     param_groups = param_groups.values()
-    if optim_name.lower() == "adam":
+    if optim_name.lower() == "adam8b":
+        import bitsandbytes as bnb
+
+        optimizer = bnb.optim.Adam8bit(model.parameters(), param_groups)
+    elif optim_name.lower() == "adam":
         optimizer = optim.Adam(param_groups)
     elif optim_name.lower() == "sgd":
         optimizer = optim.SGD(param_groups)
