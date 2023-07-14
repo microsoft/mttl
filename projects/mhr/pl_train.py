@@ -4,7 +4,6 @@ from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from mttl.online_eval import NIOnlineZeroShot, T0OnlineZeroShot
-from mttl.config import parse_config
 from mttl.callbacks import ProgressCallback
 from mttl.datamodule.ni_data_module import NIPretrainDataModule
 from mttl.datamodule.xfit_data_module import XFitPretrainDataModule
@@ -13,8 +12,7 @@ from mttl.models.encoder_decoder import EncoderDecoder
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.models.monitors import get_monitors
 from mttl.utils import get_mlf_logger
-
-from mhr_config import MHRConfig
+from mttl.config import Config
 
 
 def run_multitask(args):
@@ -134,5 +132,5 @@ def run_multitask(args):
 
 
 if __name__ == "__main__":
-    args = MHRConfig.parse()
+    args = Config.parse()
     run_multitask(args)

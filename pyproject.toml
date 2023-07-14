@@ -7,7 +7,7 @@ name = "mttl"
 version = "0.0.1"
 description = "Multi-Task Transfer Learning with Adapters"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.8, <3.10"
 dynamic = ["dependencies"]
 
 classifiers = [
@@ -20,7 +20,7 @@ classifiers = [
 dependencies = {file = ["requirements.txt"]}
 
 [tool.setuptools]
-packages = ["mttl"]
+packages = ["mttl", "mttl.dataloader", "mttl.datamodule", "mttl.models"]
 
 [project.optional-dependencies]
 dev = [
