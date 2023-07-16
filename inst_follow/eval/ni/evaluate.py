@@ -190,6 +190,7 @@ if __name__ == "__main__":
             eval_instances[instance["id"]] = instance
 
     all_predictions = {}
+    count = 0
     with open(args.prediction_file) as fin:
         for line in fin:
             prediction = json.loads(line)
@@ -197,10 +198,15 @@ if __name__ == "__main__":
             task = prediction["task_name"]
             # if task in tasks:
             prediction = prediction["prediction"]
-            if "Input:" in prediction and args.clean:
-                prediction = prediction.split("Input:")[0]
+            # if "Explanation:" in prediction:
+            #     prediction = prediction.split("Explanation:")[0]
+            #     count += 1
+            if args.clean:
+                prediction = prediction.split("\n")[0]
+                # this part is for wizard
+                
             all_predictions[id] = prediction.strip()
-
+    print("how many explanation:", count)
     all_results = {}
     for track in ["default"]:
         print("Evaluating track:", track)

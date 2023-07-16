@@ -119,8 +119,8 @@ def run_multitask(args):
 
     args.n_tasks = len(dm.task2id)
 
-    if args.poly_selector == "poly":
-        args.n_tasks = args.n_skills
+    # if args.poly_selector == "poly":
+    #     args.n_tasks = args.n_skills
 
     if args.example_to_ids_path:
         from mttl.cluster_tuning.cluster_reader import ClusterResult

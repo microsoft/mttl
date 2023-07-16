@@ -3,7 +3,7 @@
     "optimizer": "adamw",
     "learning_rate": 3e-4,
     "micro_batch_size": 4,
-    "exp_name": "alpaca_lora_full_r16_3e_ptopt_notrainonsource_eosTrue",
+    "exp_name": "alpaca_lora_full_r16_enhanced_alpaca",
     "precision": "bf16",
     "train_batch_size": 128,
     "model": "yahma/llama-7b-hf",
