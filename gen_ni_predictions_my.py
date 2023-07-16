@@ -265,6 +265,14 @@ def format(task_definition, examples, input):
     return out
 
 
+def format_wizard(task_definition, examples, input):
+    out = f"Task definition: {task_definition}\n"
+    for example in examples:
+        out += f"Input: {example['input']}\nOutput: {example['output']}\n\n"
+    out += f"Input: {input}\n\n### Response:"
+    return out
+
+
 def correct(
     data_path,
     model_name,
@@ -576,7 +584,10 @@ def main(
                     examples = []
                 else:
                     examples = train_examples
-                msg = format(task_def, examples, input)
+                if "Wizard" in model_name:
+                    msg = format_wizard(task_def, examples, input)
+                else:
+                    msg = format(task_def, examples, input)
                 batch.append(msg)
                 outputs.append(example["output"])
                 if len(batch) == batch_size:

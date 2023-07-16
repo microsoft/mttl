@@ -18,5 +18,5 @@ rich
 openai
 ray
 shortuuid
-nomic
+nomic==1.1.6
 rouge
