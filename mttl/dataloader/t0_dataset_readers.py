@@ -145,7 +145,6 @@ class BaseDatasetReader(object):
         if template_idx >= 0:
             return self.templates[template_names[template_idx]]
         elif template_idx == -1:
-
             list_idx = []
             list_templates = []
             for idx, template_name in enumerate(template_names):
@@ -241,7 +240,11 @@ class StoryClozeReader(BaseDatasetReader):
         else:
             dataset_stash = ("story_cloze", "2016")
             orig_data = load_dataset(
-                *dataset_stash, split=split, cache_dir=self.config.train_dir
+                *dataset_stash,
+                split=split,
+                data_dir=os.environ.get(
+                "STORYCLOZE_DIR", self.config.train_dir
+                ),
             )
         orig_data = [example for example in orig_data]
         for idx, example in enumerate(orig_data):
@@ -411,7 +414,9 @@ class T0MixtureReader(object):
             "BIAS_FAIRNESS": [],
         }
         gsheet: Dict[datatset_subset_tuple, Dict] = {}
-        experiment_path = pkg_resources.resource_filename(__name__, "t0_data/datasets.csv")
+        experiment_path = pkg_resources.resource_filename(
+            __name__, "t0_data/datasets.csv"
+        )
 
         with open(experiment_path) as exp_file:
             reader = csv.DictReader(exp_file)
@@ -505,7 +510,7 @@ class T0MixtureReader(object):
         self.t0_base_tasks = []
         self.t0_base_templates = []
 
-        for (dataset_name, subset_name, template_name) in added_tasks:
+        for dataset_name, subset_name, template_name in added_tasks:
             task_name = get_task_name(dataset_name, subset_name, template_name)
 
             if task_name in t0_train_mixture["BASE"]:
@@ -544,7 +549,7 @@ class T0MixtureReader(object):
         :param split: split of data
         """
         orig_data = []
-        for (dataset_name, subset_name, template_name, cap) in self.t0_base_tasks:
+        for dataset_name, subset_name, template_name, cap in self.t0_base_tasks:
             if split == "train":
                 split_num = f"{split}[0:{cap}]"
             else:
