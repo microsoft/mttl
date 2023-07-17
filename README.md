@@ -39,6 +39,7 @@ Based on your experiments, you may need to export one or more of the following e
     CHECKPOINT_DIR
     OUTPUT_DIR
     CACHE_DIR
+    STORYCLOZE_DIR: path to your downloaded `.csv` files. See [the storycloze official website](https://cs.rochester.edu/nlp/rocstories/)
 
 
 ### Multi-task Pre-training
