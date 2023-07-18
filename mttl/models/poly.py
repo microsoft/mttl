@@ -248,22 +248,15 @@ class PolyLoRALinear(PolytroponAdapter):
         else:
             self.selector = selector
 
-        self.lora_a = nn.Parameter(
-            self.weight.new_empty(
-                self.n_splits,
-                self.n_skills,
-                linear_layer.in_features // self.n_splits,
-                self.rank,
-            )
-        )
-        self.lora_b = nn.Parameter(
-            self.weight.new_empty(
-                self.n_splits,
-                self.n_skills,
-                self.rank,
-                linear_layer.out_features // self.n_splits,
-            )
-        )
+        if self.rank > 1:
+            shape_a = (self.n_splits, self.n_skills, linear_layer.in_features // self.n_splits, self.rank)
+            shape_b = (self.n_splits, self.n_skills, self.rank, linear_layer.out_features // self.n_splits)
+        else:
+            shape_a = (self.n_splits, self.n_skills, linear_layer.in_features // self.n_splits)
+            shape_b = (self.n_splits, self.n_skills, linear_layer.out_features // self.n_splits)
+
+        self.lora_a = nn.Parameter(self.weight.new_empty(shape_a))
+        self.lora_b = nn.Parameter(self.weight.new_empty(shape_b))
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -274,14 +267,16 @@ class PolyLoRALinear(PolytroponAdapter):
                 for split in range(self.n_splits):
                     param = torch.empty((self.rank, self.in_features // self.n_splits))
                     torch.nn.init.kaiming_uniform_(param, a=math.sqrt(5))
-                    self.lora_a.data[split, skill, :, :] = param.T
+                    if self.rank > 1:
+                        self.lora_a.data[split, skill, :, :] = param.T
+                    else:
+                        self.lora_a.data[split, skill, :] = param.squeeze()
         else:
             gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
             std = gain / math.sqrt(self.in_features)
 
             with torch.no_grad():
                 self.lora_a.uniform_(-std, std)
-
 
         # ensure that initially, adding the adapter does not change the output
         if self.use_warmup or self.lora_randb_init:
@@ -305,14 +300,19 @@ class PolyLoRALinear(PolytroponAdapter):
         mixing_weights = self.selector(self.routing_infos).to(dtype=input.dtype)
         bs, n_splits, n_skills = mixing_weights.size()
 
-        # A is    n_splits, n_skills, D // n_splits, rank
-        # we want bs,       n_splits, D // n_splits, rank
-        A = torch.einsum("bqs,qsdr->bqdr", (mixing_weights, self.lora_a))
-        B = torch.einsum("bqs,qsrd->bqrd", (mixing_weights, self.lora_b))
-        A = A.reshape(bs, self.in_features, self.rank)
-        B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
+        if self.rank > 1: 
+            # A is    n_splits, n_skills, D // n_splits, rank
+            # we want bs,       n_splits, D // n_splits, rank
+            A = torch.einsum("bqs,qsdr->bqdr", (mixing_weights, self.lora_a))
+            B = torch.einsum("bqs,qsrd->bqrd", (mixing_weights, self.lora_b))
+            A = A.reshape(bs, self.in_features, self.rank)
+            B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
+            adapter_out = input.bmm(A).bmm(B) / self.rank
+        else:
+            A = (mixing_weights.view(bs, n_splits, n_skills, 1) * self.lora_a.view(1, n_splits, n_skills, -1)).sum(2).view(bs, -1, 1)
+            B = (mixing_weights.view(bs, n_splits, n_skills, 1) * self.lora_b.view(1, n_splits, n_skills, -1)).sum(2).view(bs, 1, -1)
+            adapter_out = input.bmm(A).bmm(B) 
 
-        adapter_out = input.bmm(A).bmm(B) / self.rank
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
