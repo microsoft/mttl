@@ -6,15 +6,19 @@ from mttl.models.poly import Selector
 from mttl.cluster_tuning.cluster_reader import ClusterResult
 
 
-class ClusterSelector(Selector):    
+class ClusterSelector(Selector):
     def __init__(self, config, soft=False):
         super().__init__()
 
-        self.soft = soft   
+        self.soft = soft
         self.n_skills = config.n_skills
         self.cluster_result = ClusterResult(config.example_to_ids_path)
         self.temperature = config.poly_selector_cluster_temp
-        self.use_distances = config.poly_selector_use_distances if hasattr(config, "poly_selector_use_distances") else True # if true, assume distances, otherwise assume probabilities
+        self.use_distances = (
+            config.poly_selector_use_distances
+            if hasattr(config, "poly_selector_use_distances")
+            else True
+        )  # if true, assume distances, otherwise assume probabilities
 
         # just to get the device and the working dtype
         self.dummy_parameter = nn.Parameter(torch.zeros(1), requires_grad=False)
@@ -26,16 +30,25 @@ class ClusterSelector(Selector):
         else:
             hashes = routing_infos.instruction_hashes
 
-        if self.soft:  
-            distances = self.cluster_result.get_distances_batch(hashes) if not hasattr(routing_infos, "distances") else routing_infos.distances
+        if self.soft:
+            distances = (
+                self.cluster_result.get_distances_batch(hashes)
+                if not hasattr(routing_infos, "distances")
+                else routing_infos.distances
+            )
+            # debug
+            distances = [[1 / 8] * len(distances[0])]
             distances = torch.tensor(
                 distances,
                 device=self.dummy_parameter.device,
             )
             if self.use_distances:
-                routing = F.softmax(-distances / self.temperature, dim=-1).unsqueeze(1) # smaller is better
+                routing = F.softmax(-distances / self.temperature, dim=-1).unsqueeze(
+                    1
+                )  # smaller is better
             else:
-                routing = distances.unsqueeze(1) # larger is better, already normalized
+                routing = distances.unsqueeze(1)  # larger is better, already normalized
+
         else:
             cluster_ids = torch.tensor(
                 [self.cluster_result.get_cluster(h) for h in hashes],
