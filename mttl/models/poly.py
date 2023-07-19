@@ -339,8 +339,8 @@ class PolyLoRALinear(PolytroponAdapter):
 
         # A is    n_splits, n_skills, D // n_splits, rank
         # we want bs,       n_splits, D // n_splits, rank
-        A = torch.einsum("bqs,qsdr->bqdr", (mixing_weights.detach(), self.lora_a))
-        B = torch.einsum("bqs,qsrd->bqrd", (mixing_weights.detach(), self.lora_b))
+        A = torch.einsum("bqs,qsdr->bqdr", (mixing_weights, self.lora_a))
+        B = torch.einsum("bqs,qsrd->bqrd", (mixing_weights, self.lora_b))
         A = A.reshape(bs, self.in_features, self.rank)
         B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
 
