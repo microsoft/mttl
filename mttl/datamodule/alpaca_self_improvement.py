@@ -1,6 +1,5 @@
 import torch      
 import numpy as np 
-from scipy.stats import entropy as calc_entropy
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 
@@ -9,7 +8,7 @@ from mttl.dataloader.alpaca_dataset_readers import AlpacaDataset
 from transformers import LlamaTokenizer
 from mttl.cluster_tuning.cluster_reader import ClusterResult
 
-class AlpacaDataModule(LightningDataModule):
+class AlpacaSelfImprovement(LightningDataModule):
     def train_dataloader(self):
         return DataLoader(
             self.train_dataset, 
@@ -69,8 +68,7 @@ class AlpacaDataModule(LightningDataModule):
         self.task2id = {'alpaca_full':0}
 
     def get_dataset(self, idxs=None, loss_for_keywords=True):
-        return AlpacaDataset(
-            
+        return AlpacaDataset(            
             self.tokenizer,          
             self.config.max_input_length, 
             self.config.max_output_length, 
@@ -80,75 +78,36 @@ class AlpacaDataModule(LightningDataModule):
         )
     
     def setup(self, stage=None): 
-        idxs_cluster=[]  
+        idxs_cluster=[]
         if self.config.train_only_cluster is not None:
             assert self.cluster_result is not None
-            if self.config.train_only_cluster>=0:
-                idxs_cluster = np.where(np.array(self.cluster_result._instance.infos.cluster_dists)[:,self.config.train_only_cluster]==1)[0]
-            else:
-                # only hard examples! Onlye ones containing 1
-                #entropy
-                cluster_probs=np.array(self.cluster_result._instance.infos.cluster_dists)    
-                cluster_probs=cluster_probs[:,cluster_probs.sum(0).nonzero()].squeeze()
-                entr = calc_entropy(cluster_probs, axis=-1)
-                max_entropy = np.log2(cluster_probs.shape[-1])
-                entr = entr / max_entropy
-                idxs_cluster = np.where(entr <= 0.1)[0]
+            idxs_cluster = np.where(np.array(self.cluster_result._instance.infos.cluster_dists)[:,self.config.train_only_cluster]==1)[0]
             # idxs_cluster = idxs_cluster.tolist()
-        dataset = self.get_dataset() 
+        dataset = self.get_dataset()  
         if not self.config.use_test_set: # default alpaca setting
             # always use the same split for the dataset
-            rng = torch.Generator().manual_seed(1234)        
-            if len(idxs_cluster)>0:
-                dataset.dataset = dataset.dataset.select(idxs_cluster)
+            rng = torch.Generator().manual_seed(1234)               
             n_tr_samples = int(len(dataset) * (1-self.config.validation_portion))   #len(dataset) - 
             self.train_dataset, self.dev_dataset = torch.utils.data.random_split(
                 dataset, [n_tr_samples, len(dataset) - n_tr_samples, ], generator=rng
             )
             self.test_set = self.dev_dataset    
-                
             print("Training steps:", len(self.train_dataloader()))
             print("Validation steps:", len(self.val_dataloader()))
         else:
             assert self.cluster_result is not None
             # use the is_test property to split the dataset 
-            training_idxs = np.where(-1*(np.array(self.cluster_result.infos.is_test)-1))[0] 
-            # if there are -1 in, this means only -1 should be used for training (by convention)
-            if len(np.where(np.array(self.cluster_result.infos.is_test)==-1)[0])>0:
-                training_idxs = np.where(np.array(self.cluster_result.infos.is_test)==-1)[0]
+            training_idxs = np.where(-1*(np.array(self.cluster_result.infos.is_test)-1))[0]
             #find overlap with idxs_cluster
             if len(idxs_cluster)>0:     
-                training_idxs = np.intersect1d(training_idxs, idxs_cluster)            
+                training_idxs = np.intersect1d(training_idxs, idxs_cluster)
+            training_idxs = training_idxs[:100]     
             test_idxs  = np.where(np.array(self.cluster_result.infos.is_test))[0] # test on all clusters togather
-                
+            
             self.test_set = self.get_dataset(test_idxs, loss_for_keywords=False)
             train_valid_set = self.get_dataset(training_idxs)
             rng = torch.Generator().manual_seed(1234)
-            n_tr_samples = int(len(train_valid_set) * (1-self.config.validation_portion))                  
+            n_tr_samples = int(len(train_valid_set) * (1-self.config.validation_portion))                    
             self.train_dataset, self.dev_dataset = torch.utils.data.random_split(train_valid_set, [n_tr_samples, len(train_valid_set) - n_tr_samples, ], generator=rng)
-            print("Training steps:", len(self.train_dataloader()))
-            print("Validation steps:", len(self.val_dataloader()))
-            print("Test steps:", len(self.test_dataloader()))
-    
-    def get_per_cluster_test_loaders(self):
-        pc_test_loaders=[]  
-        test_idxs  = np.where(np.array(self.cluster_result.infos.is_test))[0] # test on all clusters togather
-        for cluster_id in range(self.cluster_result.n_clusters()):
-                cluster_idxs = np.where(np.array(self.cluster_result._instance.infos.cluster_dists)[:,cluster_id]==1)[0]
-                cluster_idxs = np.intersect1d(cluster_idxs, test_idxs)
-                pc_test_loaders.append(DataLoader(self.get_dataset(cluster_idxs),
-                                                batch_size=self.config.train_batch_size,
-                                                shuffle=False,
-                                                num_workers=16,
-                                                pin_memory=True,
-                                                persistent_workers=True,
-                                                collate_fn=CollateWrapperFnCLM(self.pad_token_id)))
-        return pc_test_loaders
-
-
-class AlpacaPretrainDataModule(AlpacaDataModule):
-    pass
-
-
-class AlpacaFinetuneDataModule(AlpacaDataModule):
-    pass
+    def sample(self, n):
+        return [self.train_dataset.dataset.dataset[int(i)] for i in np.random.choice(len(self.train_dataset.dataset.dataset), n)]

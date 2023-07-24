@@ -29,7 +29,7 @@ class ClusterSelector(Selector):
         if self.soft:  
             distances = self.cluster_result.get_distances_batch(hashes) if not hasattr(routing_infos, "distances") else routing_infos.distances
             distances = torch.tensor(
-                distances,
+                distances,     
                 device=self.dummy_parameter.device,
             )
             if self.use_distances:
@@ -42,4 +42,5 @@ class ClusterSelector(Selector):
                 device=self.dummy_parameter.device,
             )
             routing = F.one_hot(cluster_ids, num_classes=self.n_skills).unsqueeze(1)
+         
         return routing.to(dtype=self.dummy_parameter.dtype)

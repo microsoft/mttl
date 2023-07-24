@@ -5,11 +5,11 @@ from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 
 from mttl.datamodule.ni_data_module import CollateWrapperFn, CollateWrapperFnCLM
-from mttl.dataloader.alpaca_dataset_readers import AlpacaDataset
+from mttl.dataloader.human_dataset_readers import HumanMixDataset
 from transformers import LlamaTokenizer
 from mttl.cluster_tuning.cluster_reader import ClusterResult
 
-class AlpacaDataModule(LightningDataModule):
+class FlanModule(LightningDataModule):
     def train_dataloader(self):
         return DataLoader(
             self.train_dataset, 
@@ -58,7 +58,7 @@ class AlpacaDataModule(LightningDataModule):
         # )     
              
         tok_model = config.model if config.model is not None else "yahma/llama-7b-hf"
-        self.tokenizer = LlamaTokenizer.from_pretrained(tok_model, add_eos_token=True) # tloen does not add eos token
+        self.tokenizer = LlamaTokenizer.from_pretrained(tok_model, add_eos_token=False) # tloen does not add eos token
         # self.tokenizer.pad_token_id = 
         self.tokenizer.pad_token_id = 0 
         
@@ -69,7 +69,7 @@ class AlpacaDataModule(LightningDataModule):
         self.task2id = {'alpaca_full':0}
 
     def get_dataset(self, idxs=None, loss_for_keywords=True):
-        return AlpacaDataset(
+        return HumanMixDataset(
             
             self.tokenizer,          
             self.config.max_input_length, 
@@ -141,14 +141,6 @@ class AlpacaDataModule(LightningDataModule):
                                                 shuffle=False,
                                                 num_workers=16,
                                                 pin_memory=True,
-                                                persistent_workers=True,
+                                                persistent_workers=True,  
                                                 collate_fn=CollateWrapperFnCLM(self.pad_token_id)))
         return pc_test_loaders
-
-
-class AlpacaPretrainDataModule(AlpacaDataModule):
-    pass
-
-
-class AlpacaFinetuneDataModule(AlpacaDataModule):
-    pass

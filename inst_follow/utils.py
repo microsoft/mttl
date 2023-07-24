@@ -11,7 +11,7 @@ import ray
 import shortuuid
 import logging     
 import numpy as np
-from sklearn.decomposition import PCA
+# from sklearn.decomposition import PCA
 from nomic import AtlasProject       
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -82,8 +82,14 @@ class TopicRouter:
                 probs[ex,int(k)-1]=v 
         return probs
 
+def dict_to_dataclass(d):
+    from dataclasses import make_dataclass
+    return make_dataclass("X", d.keys())(**d)
+
 def load_model(args, model_path=None, device='cuda', tokenizer_path=None):  
     disable_torch_init()
+    if isinstance(args, dict):
+        args = dict_to_dataclass(args)
     if tokenizer_path is None:
         tokenizer_path = args.model   
     tokenizer = LlamaTokenizer.from_pretrained(tokenizer_path)# for generation we do not aadd the EOS token!!!
@@ -105,6 +111,13 @@ def load_model(args, model_path=None, device='cuda', tokenizer_path=None):
             setattr(args, k, v.replace("/mnt/amlt_code/inst_follow/cluster_infos/", "/home/v-oostapenko/dev/mttl/inst_follow/cluster_infos/"))
         if isinstance(v, str) and "/home/v-oostapenko/dev/mttl/inst_follow/data/cluster_infos/" in v:
             setattr(args, k, v.replace("/home/v-oostapenko/dev/mttl/inst_follow/data/cluster_infos/", "/home/v-oostapenko/dev/mttl/inst_follow/cluster_infos/"))
+        v = getattr(args, k)
+        #if we are on amlt
+        # chec if env variable is set                   
+        if os.environ.get("AMLT_OUTPUT_DIR") is not None:
+            base = "/mnt/amlt_code/inst_follow/"
+            if isinstance(v, str) and "/home/v-oostapenko/dev/mttl/inst_follow/" in v:
+                setattr(args, k, v.replace("/home/v-oostapenko/dev/mttl/inst_follow/", "/mnt/amlt_code/inst_follow/"))
     #############################
     model = modify_transformer(model, args) 
     model_class = CLM    
@@ -115,9 +128,10 @@ def load_model(args, model_path=None, device='cuda', tokenizer_path=None):
         if args.example_to_ids_path is not None:    
             cluster_result = ClusterResult(args.example_to_ids_path)      
             # prune unused loras       
-            skill_ids_to_keep = np.where(
-                np.bincount(cluster_result._instance.infos.cluster_ids) > 0
-            )[0]                    
+            # skill_ids_to_keep = np.where(
+            #     np.bincount(cluster_result._instance.infos.cluster_ids) > 0
+            # )[0]            
+            skill_ids_to_keep = np.where((np.array(cluster_result._instance.infos.cluster_dists).sum(0))> 0)[0]                            
             module.model.remove_skills(skill_ids_to_keep)
     if state_dict is not None:
         module.load_state_dict(state_dict)#, strict=False)

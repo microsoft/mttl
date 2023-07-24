@@ -1,99 +1,154 @@
 import copy
 import json
 import torch   
-import numpy as np
 import transformers
 from datasets import load_dataset
-from scipy.stats import entropy as calc_entropy
 
 from mttl.dataloader.data_utils import ExampleInfo
 from mttl.utils import hash_example
 from typing import List, Sequence, Dict
 
-class AlpacaTemplateForHash(object): # dont change it to keep compatibility with old clusterings etc., previously generated hashes
-    @classmethod        
-    def apply(self, dict_values):   
-        instruction, input, output = dict_values["instruction"], dict_values["input"], dict_values["output"]
-        if len(input)>0:
-            return f"Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.\
-            \n### Instruction: {instruction}\
-            \n### Input:{input}\
-            \n### Response: {output}"
-        else:
-            return f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\
-            \n### Instruction: {instruction}\
-            \n### Response: {output}"
 
-class AlpacaTemplate(object):
-    @classmethod                            
-    def apply(self, dict_values, topics_str=None):      
-        instruction, input, output = dict_values["instruction"], dict_values["input"], dict_values["output"]
-        if len(input)>0:
-            instr = f"Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.\
-            \n### Instruction: {instruction}\
-            \n### Input: {input}"
-        else:
-            instr = f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\
-            \n### Instruction: {instruction}"
-        # if topics_str is not None:  
-        #         instr += f"\n###Response: [ {topics_str} ] {output}"
-        # else:
-        instr += f"\n### Response: {output}"
-        return instr
 
-class AlpacaTemplateSource(object):
+INTRO_BLURB = (
+    "Below is an instruction that describes a task. Write a response that appropriately completes the request."
+)
+INSTRUCTION_KEY = "### Instruction:"
+INPUT_KEY = "Input:"
+RESPONSE_KEY = "### Response:"
+END_KEY = "### End"
+RESPONSE_KEY_NL = f"{RESPONSE_KEY}\n"
+DEFAULT_SEED = 42
+
+# This is a training prompt that does not contain an input string.  The instruction by itself has enough information
+# to respond.  For example, the instruction might ask for the year a historic figure was born.
+PROMPT_NO_INPUT_FORMAT = """{intro}
+
+{instruction_key}
+{instruction}
+
+{response_key}
+{response}
+
+{end_key}""".format(
+    intro=INTRO_BLURB,
+    instruction_key=INSTRUCTION_KEY,
+    instruction="{instruction}",
+    response_key=RESPONSE_KEY,
+    response="{response}",
+    end_key=END_KEY,
+)
+
+# This is a training prompt that contains an input string that serves as context for the instruction.  For example,
+# the input might be a passage from Wikipedia and the intruction is to extract some information from it.
+PROMPT_WITH_INPUT_FORMAT = """{intro}
+
+{instruction_key}
+{instruction}
+
+{input_key}
+{input}
+
+{response_key}
+{response}
+
+{end_key}""".format(
+    intro=INTRO_BLURB,
+    instruction_key=INSTRUCTION_KEY,
+    instruction="{instruction}",
+    input_key=INPUT_KEY,
+    input="{input}",
+    response_key=RESPONSE_KEY,
+    response="{response}",
+    end_key=END_KEY,
+)
+
+# This is the prompt that is used for generating responses using an already trained model.  It ends with the response
+# key, where the job of the model is to provide the completion that follows it (i.e. the response itself).
+PROMPT_FOR_GENERATION_FORMAT = """{intro}
+
+{instruction_key}
+{instruction}
+
+{response_key}
+""".format(
+    intro=INTRO_BLURB,
+    instruction_key=INSTRUCTION_KEY,
+    instruction="{instruction}",
+    response_key=RESPONSE_KEY,
+)
+
+PROMPT_FOR_GENERATION_WITH_INPUT_FORMAT = """{intro}
+
+
+{instruction_key}
+{instruction}
+
+{input_key}
+{input}
+
+{response_key}
+""".format(
+    intro=INTRO_BLURB,  
+    instruction_key=INSTRUCTION_KEY,
+    instruction="{instruction}",
+    input_key=INPUT_KEY,
+    input="{input}",
+    response_key=RESPONSE_KEY,
+)
+
+
+
+class DollyTemplate:
     @classmethod
-    def apply(self, dict_values):
-        instruction, input, output = dict_values["instruction"], dict_values["input"], dict_values["output"]
-        if len(input)>0:
-            return f"Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.\
-            \n### Instruction: {instruction}\
-            \n### Input: {input}\
-            \n### Response:"
+    def apply(self, rec):       
+        instruction = rec["instruction"]
+        response = rec["response"]
+        context = rec.get("context")
+        if context:
+            rec["text"] = PROMPT_WITH_INPUT_FORMAT.format(instruction=instruction, response=response, input=context)
         else:
-            return f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\
-            \n### Instruction: {instruction}\
-            \n### Response:"
+            rec["text"] = PROMPT_NO_INPUT_FORMAT.format(instruction=instruction, response=response)
+        return rec["text"]
+
+class DollyTemplateSource:
+    @classmethod
+    def apply(self, rec):
+        
+        instruction = rec["instruction"]
+        response = rec["response"]
+        context = rec.get("context")
+        if context:
+            rec["text"] = PROMPT_FOR_GENERATION_FORMAT.format(instruction=instruction)
+        else:
+            rec["text"] = PROMPT_FOR_GENERATION_WITH_INPUT_FORMAT.format(instruction=instruction, input=context)
+        return rec["text"]
 
 
-class AlpacaDataset(torch.utils.data.dataset.Dataset):     
+class DB_DollyDataset(torch.utils.data.dataset.Dataset):     
     def __init__(self, tokenizer, max_input_length,            
                  max_output_length, data_dir,               
                  train_on_inputs=False, dst_path=None, idxs=None, cluster_info=None, predict_cluster=None, loss_for_keywords=True):
         super().__init__()
         self.dst_path=dst_path   
-        self.predict_cluster = predict_cluster
+        self.predict_cluster = predict_cluster  
         self.loss_for_keywords = loss_for_keywords
-        if predict_cluster is not None:
-            assert predict_cluster in ["topic_set", "skill_set"]
+        # if predict_cluster is not None:
+        #     assert predict_cluster in ["topic_set", "skill_set"]
         self.cluster_info = cluster_info
         self.train_on_inputs = train_on_inputs
         # load the data 
-        if dst_path is None:       
-            self.dataset = load_dataset("yahma/alpaca-cleaned", cache_dir=data_dir)["train"]
-            if idxs is not None:       
-                self.dataset = self.dataset.select(idxs)
-        else: 
-            import json     
-            from datasets import Dataset
-            import pandas as pd
-            with open(dst_path, "r") as f:
-                new_dataset = json.load(f)
-            for ex in new_dataset:
-                if "topic_set" in ex:
-                    ex["topic_set"] = str(ex["topic_set"])
-                if "skill_set" in ex:
-                    ex["skill_set"] = str(ex["skill_set"])
-            df = pd.DataFrame(new_dataset)
-            if idxs is not None:
-                df = df.iloc[idxs]
-            # transform into dataset
-            self.dataset = Dataset.from_pandas(df)
+        self.dataset = load_dataset("databricks/databricks-dolly-15k", cache_dir=data_dir)["train"] 
+        if idxs is not None:
+            self.dataset = self.dataset.select(idxs)
+        # ['brainstorming', 'classification', 'closed_qa', 'creative_writing', 'general_qa', 'information_extraction', 'open_qa', 'summarization']
         # each entry is "instruction", "input", "output" dictionary
-
         self.tokenizer = tokenizer
         self.max_input_length = max_input_length
         self.max_output_length = max_output_length
+    
+    def categories(self):
+        return self.dataset["categories"]
 
     def __len__(self):     
         return len(self.dataset)
@@ -143,20 +198,20 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
         # really basic template for now
         # TODO: check with AS if this is OOP approved
         
-        enc_input_for_hash = AlpacaTemplateForHash.apply(entry)
+        enc_input_for_hash = DollyTemplate.apply(entry)
         input_hash = hash_example(enc_input_for_hash) 
         instruction_hash = hash_example(entry["instruction"])
         topics_str = None    
         
-        enc_input = AlpacaTemplate.apply(entry)
-        source = AlpacaTemplateSource.apply(entry)
+        enc_input = DollyTemplate.apply(entry)
+        source = DollyTemplateSource.apply(entry)
         
         if self.predict_cluster is not None and self.predict_cluster in entry:
             str_dict = entry[self.predict_cluster].replace("'", "\"")
             topic_set = json.loads(str_dict)
             topics_str = " ".join([k for k,v in topic_set.items()])             
             if self.loss_for_keywords:
-                entry["output"] = f"[keywords: {topics_str} ] {entry['output']}"
+                entry["output"] = f"[keywords: {topics_str} ] {entry['response']}"
             else:
                 source += f" [keywords: {topics_str} ]"
         # assert source + entry["output"] == enc_input
@@ -164,13 +219,7 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
         task_id = -1
         if self.cluster_info is not None:
             task_id = self.cluster_info.get_distances(input_hash)
-            # for low entropy argmax
-            entr = calc_entropy(task_id, axis=-1)/ np.log2(len(task_id))
-            if entr>0.4: # what was used in gen_si_sets to generate datasets and clusterings
-                task_id = -2
-            else:
-                task_id = torch.tensor(task_id).argmax().item() # its probs actually, not distances TODO: deal with this ambiguity
-            # for high entropy -2
+            task_id = torch.tensor(task_id).argmax().item() # its probs actually, not distances TODO: deal with this ambiguity
         if self.train_on_inputs:
         # next we tokenize      
             tok_input = self.tokenizer(
@@ -187,9 +236,10 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
             input_hash,
             example_id=key,
             input_text=(enc_input),
-            instruction_hash=instruction_hash)
+            instruction_hash=instruction_hash,
+            category = entry["category"],)
             return ex_info
-        tok_input = self.preprocess(source, entry["output"])        
+        tok_input = self.preprocess(source, entry["response"])        
         ex_info = ExampleInfo(
             tok_input["input_ids"],
             tok_input["labels"],
@@ -198,6 +248,7 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
             example_id=key,
             input_text=(enc_input),
             instruction_hash=instruction_hash,
+            category = entry["category"]
         )
         return ex_info
 

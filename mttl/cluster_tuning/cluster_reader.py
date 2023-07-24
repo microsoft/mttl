@@ -15,8 +15,8 @@ class ClusterResult:
     def get_distances_batch(cls, hashes):
         return [cls.get_distances(h) for h in hashes]
 
-    @classmethod
-    def get_cluster(cls, hash):
+    @classmethod   
+    def get_cluster(cls, hash):  
         return cls._instance.example_to_ids[hash]
 
     @classmethod
@@ -44,12 +44,14 @@ class ClusterResult:
                 )
             cls._instance._example_to_distances = dict(
                 zip(
-                    cls._instance.infos.hashes,
+                    cls._instance.infos.hashes,     
                     list(cls._instance.infos.cluster_dists),
                 )
             )
-            cluster_sizes = torch.from_numpy(np.bincount(cls._instance.infos.cluster_ids)).float()
-            assert len(np.bincount(cls._instance.infos.cluster_ids)) == len(cls._instance._example_to_distances[list(cls._instance._example_to_distances.keys())[0]])
+            cluster_sizes = torch.from_numpy(np.array(cls._instance.infos.cluster_dists).sum(0)).float().flatten() 
+            #             cluster_sizes = torch.from_numpy(np.bincount(cls._instance.infos.cluster_ids)).float()     
+            # cluster_sizes = torch.from_numpy(np.array(cls._instance.infos.cluster_dists).sum(0)).float()[cluster_idxs]
+            # assert len(np.bincount(cls._instance.infos.cluster_ids)) == len(cls._instance._example_to_distances[list(cls._instance._example_to_distances.keys())[0]])
 
             cls._instance.cluster_sizes = cluster_sizes
             cls._instance.avg_cluster_size = cluster_sizes.mean().item()

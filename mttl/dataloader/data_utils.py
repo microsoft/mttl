@@ -12,6 +12,7 @@ class ExampleInfo:
     example_id: int
     input_text: str = None
     instruction_hash: str = None
+    category: str = None
 
 
 @dataclass

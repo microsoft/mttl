@@ -11,9 +11,9 @@ class Config(object):
         self._updated_kwargs = set()
 
         # Data config
-        self.dataset = None
+        self.dataset = None 
         self.custom_tasks_splits = None
-        self.train_dir = os.getenv("AMLT_DATA_DIR", "tmp/")
+        self.train_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
         self.finetune_task_name = None
         self.example_to_ids_path = os.getenv("AMLT_EXMPLTOIDS", None)# "/home/v-oostapenko/dev/mttl/inst_follow/data/cluster_infos/atlas_by_instr_text-embedding-ada-002.pkl")  # path to clustering of data

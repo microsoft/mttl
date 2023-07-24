@@ -53,7 +53,7 @@ def get_embeddings(documents):
         return embeddings
 
 def get_atlas_map(dm:AlpacaDataModule, args):
-    def create_new_proj():
+    def create_new_proj():    
         print("Creating new project and map")
         dataset:AlpacaDataset = dm.get_dataset()
         print(" Getting embeddings...")
@@ -77,7 +77,7 @@ def get_atlas_map(dm:AlpacaDataModule, args):
         while not project.is_accepting_data:
             time.sleep(5)
         
-        return project
+        return project           
     if not args.rebuild_embeddings:
         try:  
             project = AtlasProject(name=f'Alpaca_{args.cluster_with}')

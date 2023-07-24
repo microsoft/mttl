@@ -6,28 +6,86 @@ import torch
 #import partial
 from functools import partial
 import pytorch_lightning as pl 
-from mttl.models.poly import get_selector       
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 from inst_follow.models.clm import CLM
 from mttl.callbacks import ProgressCallback
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
-from mttl.datamodule.db_dolly_module    import DatBricksDollyModule
+from mttl.datamodule.alpaca_self_improvement import AlpacaSelfImprovement
 from mttl.datamodule.longform_data_module import LongFormDataModule
 from mttl.datamodule.wizzard_data_module import WizzardDataModule
-from mttl.datamodule.flan_module import FlanModule
 from mttl.models.encoder_decoder import EncoderDecoder
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
-from mttl.config import Config as MTTLConfig
+from finetune_llama import Config as MTTLConfig
+from finetune_llama import parse_config
 from mttl.models.monitors import get_monitors
 from mttl.utils import get_mlf_logger, from_pretrained
 from mttl.models.modify_model import modify_transformer
 from transformers import LlamaForCausalLM, LlamaTokenizer
 from mttl.dataloader.data_utils import ExampleInfo
+from mttl.datamodule.ni_data_module import CollateWrapperFn, CollateWrapperFnCLM
 from mttl.utils import get_ni_tasks_from_file, trim_batch, hash_example
 from typing import List
 
 # from peft import prepare_model_for_int8_training
+
+def format(examples):
+    out=""
+    for example in examples:
+        out+=f"\n###Input: {example['input']}\nOutput: {example['output']}\n"
+    out+="\n###Input:"
+    return out
+
+def general_context_understanding():
+    in_context_samples = [
+            {'input': "Given this context:Generate mathematical experssions like 2+2=4.", 'output': "2+2=4"},
+            {'input': "Calculate the result of the mathematical expression: 2+10.", 'output': "12"},
+            # {'input': "Which mathematical operations do you know?", 'output': "I know how to add, subtract, multiply and divide."},
+        ]
+    return format(in_context_samples)
+class Trainer(Trainer): 
+    def generate_new_samples(self,module:CLM, dm:AlpacaSelfImprovement): 
+        if not hasattr(dm, "train_dataset"):
+            dm.setup()
+        in_context_samples = dm.sample(2)
+        # in_context_samples = [
+        #     {'input': "Generate mathematical experssions like 2+2=4.", 'output': "2+2=4"},
+        #     {'input': "Calculate the result of the mathematical expression: 2+10.", 'output': "12"},
+        #     # {'input': "Which mathematical operations do you know?", 'output': "I know how to add, subtract, multiply and divide."},
+        # ]
+        # construct a batch, 
+        prompt = f"Generate 5 examples of instruction - response pairs in math domain. Here are some examples:\n"
+        for i, sample in enumerate(in_context_samples):
+            # prompt += "\n ###Start of a sample: \n"
+            prompt += f"\nInstruction: {sample['instruction']}\n"
+            if len(sample['input'])>0:
+                prompt += f"\nInput: {sample['input']}\n"
+            prompt += f" \nResponse: {sample['output']}\n"
+            # prompt += "\n ###End of a sample.\n"
+        # prompt += "\n ###Start of a sample: \n"
+        # prompt = format(in_context_samples)
+        
+        import copy        
+        tokenizer =  LlamaTokenizer.from_pretrained("yahma/llama-7b-hf", padding_side='left')   
+        tokenizer.pad_token_id = 0 #tokenizer.eos_token_id
+
+        input_ids = tokenizer(prompt, return_tensors="pt").input_ids
+        input_ids = input_ids.to(module.model.device)
+        labels = input_ids.clone()
+        task_ids = -1     
+        hashes = hash_example(prompt)
+        instruction_hashes = hashes
+        
+        collated_example = CollateWrapperFnCLM(tokenizer.pad_token_id)([ExampleInfo(input_ids, labels, task_ids, hashes, instruction_hashes)])
+        
+        response = module.generate(collated_example,
+                                    do_sample=True,
+                                    temperature=0.7, 
+                                    max_new_tokens=2000,     
+                                    return_dict_in_generate=True)
+        response_str = tokenizer.batch_decode(response.sequences, skip_special_tokens=True)
+     
+# Phase 1: generate general problems for model to undertand the context.
 
 
 # os.environ["AP_DATA_DIR"] = "/home/v-oostapenko/data" # temp for gcr
@@ -44,81 +102,7 @@ def remove_non_serializable(d):
 
 class Config(MTTLConfig):
     def __init__(self, **kwargs):
-        self.rank = 1  
-        self.prune_unused_loras = True
-        self.init_b_random = False
-        self.lora_dropout = 0
-        self.lora_alpha = 16 
-        self.same_lora_init = 0
-        self.load_in_8bit = False
-        self.micro_batch_size = 4  
-        self.share_lora_at_attn = 0
-        self.share_lora_a  = False   
-        self.merge_A_B_seperately = True
-        self.train_on_inputs = False
-        self.padding_side = "right"
-        self.adapter_modules = None
-        self.poly_selector_use_distances = False
-        self.adapter_layers = 0  # llama adapter
-        self.adapter_len = 0  # llama adapter
-        self.use_4_bit_backbone = False
-        self.wandb_project = None
-        self.switch_to_average = 0
-        # self.balanced = 0
-        
-        self.predict_cluster = None # topic or skill
-        self.dst_dir = None # dir of jsonl dataset
-        self.fast_dev_run = False
-        self.train_only_cluster = None
-        self.validation_portion = 0.03  
-        self.per_cluster_test = False
-        self.use_test_set = False # wether to use examples marked as is_test = 1 in ClusterInfo as test set
-        
         super().__init__(**kwargs)
-        # to reproduce setup in https://github.com/daanelson/alpaca-lora
-        self.gradient_accumulation_steps = (
-            self.train_batch_size // self.micro_batch_size
-        )
-        self.train_batch_size = self.micro_batch_size
-
-
-def parse_config(extra_kwargs=None, raise_error=True, parent=None, return_parser=False, c=None):
-    import itertools
-
-    # dont do it if called from jupyter notebook
-    if c is None:
-        parser = (
-            argparse.ArgumentParser(parents=[parent])
-            if parent
-            else argparse.ArgumentParser()
-        )
-        parser.add_argument("-c", "--config_files", required=False)
-        parser.add_argument("-k", "--kwargs", nargs="*", action="append")
-        args = parser.parse_args()
-    else:
-        args = argparse.Namespace()
-        args.kwargs = None
-        args.config_files = c
-    kwargs = {}
-    if args.kwargs:
-        kwargs_opts = list(itertools.chain(*args.kwargs))
-        for value in kwargs_opts:
-            key, _, value = value.partition("=")
-            kwargs[key] = value
-
-    args.kwargs = kwargs
-    if extra_kwargs:  
-        args.kwargs.update(extra_kwargs)
-
-    config = Config(
-        filenames=args.config_files, kwargs=args.kwargs, raise_error=raise_error
-    )
-
-    print(config.to_json())
-    if return_parser:
-        return config, args
-    return config
-
 
 def run_multitask(args):             
     seed_everything(args.seed, workers=True)
@@ -140,25 +124,12 @@ def run_multitask(args):
     
     if args.train_only_cluster is not None:
             # we only want to train on a single cluster, hence model qith a single skill
-            args.n_skills = 1          
-            skill_ids_to_keep = np.where((np.array(cluster_result._instance.infos.cluster_dists).sum(0))> 0)[0]     
-            cluster_result.remove_skills(skill_ids_to_keep)
+            args.n_skills = 1  
             
             
     # select dataloader
     model_class = CLM      
-    if args.dataset == "alpaca": 
-        dm = AlpacaDataModule(args, cluster_result=cluster_result)
-    elif args.dataset == "longform":        
-        dm = LongFormDataModule(args)
-    elif args.dataset == "wizzard":        
-        dm = WizzardDataModule(args)
-    elif args.dataset == "db_dolly":
-        dm = DatBricksDollyModule(args, cluster_result=cluster_result)
-    elif args.dataset == "flan_v2":
-        dm = FlanModule(args, cluster_result=cluster_result)
-    else:
-        raise NotImplementedError()
+    dm = AlpacaSelfImprovement(args, cluster_result=cluster_result)
 
     args.n_tasks = len(dm.task2id)  
     if args.use_4_bit_backbone:
@@ -207,9 +178,7 @@ def run_multitask(args):
             skill_ids_to_keep = np.where((np.array(cluster_result._instance.infos.cluster_dists).sum(0))> 0)[0]        
             module.model.remove_skills(skill_ids_to_keep)
             cluster_result.remove_skills(skill_ids_to_keep)
-                
-    if args.switch_to_average > 0:  
-        module.model.switch_selector_to_average(selector_to_replace=get_selector(args).__class__)
+
 
 
     # legit logging
@@ -257,7 +226,7 @@ def run_multitask(args):
         mode=mode,
     )
     callbacks.append(checkpoint_callback)
-
+            
     trainer = Trainer(
         gpus=1,
         accelerator="gpu",
@@ -270,7 +239,7 @@ def run_multitask(args):
         gradient_clip_val=args.max_grad_norm,
         log_every_n_steps=20,    
         strategy=args.compute_strategy if args.compute_strategy else None,
-        callbacks=callbacks,    
+        callbacks=callbacks,
         accumulate_grad_batches=args.gradient_accumulation_steps,
         precision=int(args.precision)
         if args.precision in ["16", "32"]
@@ -278,18 +247,31 @@ def run_multitask(args):
         fast_dev_run = args.fast_dev_run,
         **kwargs,
     )
-       
+    
+            
+    new_examples = trainer.generate_new_samples(module, dm)
+
     trainer.fit(module, dm)
 
     # try:    
     ckpt_path="best" if not args.fast_dev_run else None
-    trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
     if args.use_test_set:  
        module.model.checkpoint_tested="best"  
        trainer.test(dataloaders=dm, ckpt_path=ckpt_path)       
        module.model.checkpoint_tested="last"
        trainer.test(dataloaders=dm, ckpt_path="last")   
-    if args.dataset in ["ni", "xfit", "alpaca", "longform", "wizzerd", "db_dolly"]:
+    
+       
+       
+       
+       
+       
+       
+       
+       
+       
+       
+    if args.dataset in ["ni", "xfit", "alpaca", "longform", "wizzerd"]:
         best_model_path = trainer.checkpoint_callback.best_model_path
         last_model_path = trainer.checkpoint_callback.last_model_path
         # last_model_path = trainer.checkpoint_callback.bes

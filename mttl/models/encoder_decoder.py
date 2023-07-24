@@ -231,7 +231,7 @@ class Finetuner(EncoderDecoder):
     def test_step(self, batch, batch_idx):
         return self.inference_step(batch)
 
-    def validation_epoch_end(self, outputs):
+    def validation_epoch_end(self, outputs): 
         return self.inference_end(outputs, self.trainer.datamodule.dataset_reader, "val")
 
     def test_epoch_end(self, outputs):
