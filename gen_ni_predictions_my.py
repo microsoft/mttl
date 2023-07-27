@@ -348,7 +348,7 @@ def correct(
 @click.option(
     "--usepijma_model_with_llama_adapter", type=int, default=0
 )  # if None, will use a subset of test tasks
-@click.option("--cluster_depth", type=int, default=3)
+@click.option("--cluster_depth", type=int, default=1)
 def main(
     data_path,
     model_name="gpt3",

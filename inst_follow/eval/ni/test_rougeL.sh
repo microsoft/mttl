@@ -1,0 +1,1 @@
+python evaluate.py --prediction_file=ni_pred_debug_cluster1_yahma_llama-7b-hfni-nshot0.jsonl --reference_file=test_references.jsonl

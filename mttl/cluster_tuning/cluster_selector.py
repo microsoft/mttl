@@ -37,7 +37,7 @@ class ClusterSelector(Selector):
                 else routing_infos.distances
             )
             # debug
-            distances = [[1 / 8] * len(distances[0])]
+            # distances = [[1 / 8] * len(distances[0])]
             distances = torch.tensor(
                 distances,
                 device=self.dummy_parameter.device,
@@ -48,6 +48,7 @@ class ClusterSelector(Selector):
                 )  # smaller is better
             else:
                 routing = distances.unsqueeze(1)  # larger is better, already normalized
+            # print(routing)
 
         else:
             cluster_ids = torch.tensor(

@@ -14,8 +14,18 @@ EPS = 1e-12
 
 
 class PolytroponAdapter(nn.Module):
+    """
+    Adapter class for the PolytroponSelector. Returns the routing information for the current task.
+    """
+
     @property
     def routing_infos(self) -> RoutingInfo:
+        """
+        Returns the routing information for the current task.
+
+        Returns:
+            RoutingInfo: The routing information for the current task.
+        """
         return self.task_id_ptr["routing_infos"]
 
 
