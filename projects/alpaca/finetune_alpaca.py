@@ -10,7 +10,6 @@ from mttl.models.monitors import get_monitors
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from lm import LM
 from alpaca_config import AlpacaConfig
-from omegaconf import OmegaConf
 
 
 def remove_non_serializable(d):
