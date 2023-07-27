@@ -70,7 +70,7 @@ class EnhancedAlpacaDataset(torch.utils.data.dataset.Dataset):
         self.tokenizer = tokenizer
         self.max_input_length = max_input_length
         self.max_output_length = max_output_length
-        self.remove_glance = True
+        self.remove_glance = False
 
     def __len__(self):
         return len(self.dataset)
