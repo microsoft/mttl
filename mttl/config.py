@@ -62,9 +62,11 @@ class Config:
             if k == "finegrained":
                 k = "poly_granularity"
                 v = "finegrained" if v else "coarsegrained"
-            if k in ['cache_dir', 'train_dir', 'output_dir']:
+
+            if k in ['cache_dir', 'train_dir', 'output_dir', 'data_dir']:
                 import re
                 matches = re.findall("\$\{([^:}]+)(?::([^}]+))?\}", v)
+
                 if len(matches):
                     print(matches)
                     v = os.getenv(matches[0][0], default=matches[0][1])
