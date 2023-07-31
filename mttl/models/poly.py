@@ -344,7 +344,7 @@ class PolyLoRALinear(PolytroponAdapter):
         if repeat:
             self.routing_infos.repeat_interleave(repeat)
 
-        mixing_weights = self.selector(self.routing_infos).to(dtype=input.dtype)
+        mixing_weights = self.selector(self.routing_infos).type_as(self.lora_a)
         bs, n_splits, n_skills = mixing_weights.size()
 
         # A is    n_splits, n_skills, D // n_splits, rank

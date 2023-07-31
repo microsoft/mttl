@@ -25,6 +25,53 @@ Multiple `CONFIG_FILES` can be concatenated as `file1+file2`. To modify defaults
 ## Test Fine-Tuning
 
 To perform finetuning for a test task, use the script `pl_finetune.py`
+## Instruction Following Zero-Shot Evaluation
+
+### pretrain the model based on 52K Alpaca instructions
+
+```
+python -m finetune_llama -c llama/finetune_atlas_cluster_by_inst_16_my.json
+```
+
+
+### Zero-shot on SuperNI:
+
+1.  clone the SuperNI tasks at the parent dir:
+
+```
+git clone https://github.com/allenai/natural-instructions.git ../
+```
+
+2. preprocess the tasks as described in SuperNI repo:
+
+```
+python reorder_instances_for_testing.py 
+```
+
+3. Generate the outputs of SuperNI
+
+```
+python gen_ni_predictions_my.py --out_prefix=alpaca_dense --model_path=llama_alpaca_finetune/loss=0.3825.ckpt
+```
+
+The `loss=0.3825.ckpt` is our pretrained model checkpoint. 
+
+### zero-shot on MMLU:
+
+1. copy the processed dataset from the repo: https://github.com/allenai/open-instruct
+
+2. Evaluate the llama-7B on MMLU
+
+```
+python -m inst_follow.eval.mmlu.run_eval \
+    --ntrain 0 \
+    --data_dir data/eval/mmlu \
+    --save_dir results/mmlu/alpaca-lora-7B-0shot/ \
+    --eval_batch_size 2 \
+    --model_name_or_path tloen/alpaca-lora-7b \
+    --tokenizer_name_or_path yahma/llama-7b-hf
+```
+
 
 ## Hyper-parameter Search for Test Fine-Tuning
 
