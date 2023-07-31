@@ -14,7 +14,11 @@ from inst_follow.eval.utils import (
 )
 
 # model loading
-from inst_follow.eval.mmlu.run_eval import load_from_llama, load_from_peft
+from inst_follow.eval.model_loader import (
+    load_from_llama,
+    load_from_mttl,
+    load_from_peft,
+)
 
 exact_match = evaluate.load("exact_match")
 
@@ -193,17 +197,20 @@ def main(args):
     os.makedirs(args.save_dir, exist_ok=True)
     os.makedirs(os.path.join(args.save_dir, "predictions"), exist_ok=True)
 
-    if args.model_name_or_path:
-        # print("Loading model and tokenizer...")
-        # model, tokenizer = load_hf_lm_and_tokenizer(
-        #     model_name_or_path=args.model_name_or_path,
-        #     tokenizer_name_or_path=args.tokenizer_name_or_path,
-        #     load_in_8bit=args.load_in_8bit,
-        #     load_in_half=True,
-        #     gptq_model=args.gptq,
-        # )
+    load_from = args.load_from
 
+    print("Loading model and tokenizer... from {}".format(load_from))
+
+    if load_from == "llama":
+        ################# load model from llama  #############################
+        model, tokenizer = load_from_llama()
+    elif load_from == "mttl":
+        #################load model from clustering pretrain #############################
+        model, tokenizer, topic_router = load_from_mttl(args)
+    elif load_from == "peft":
+        ############ load peft ##############################################
         model, tokenizer = load_from_peft()
+
     performance = {}
     for task_name in tqdm.tqdm(all_tasks.keys(), desc="Evaluating"):
         task_examples = all_tasks[task_name]
@@ -289,6 +296,24 @@ if __name__ == "__main__":
         "--use_chat_format",
         action="store_true",
         help="If given, the prompt will be encoded as a chat format with the roles in prompt.",
+    )
+    parser.add_argument(
+        "--example_to_ids_path",
+        type=str,
+        default="inst_follow/cluster_infos/atlas_by_instr_bert-base-uncased_ldalayer1.pkl",
+        help="path to the example_to_ids file.",
+    )
+    parser.add_argument(
+        "--skill_selector",
+        type=str,
+        default="poly",
+        help="skill selector",
+    )
+    parser.add_argument(
+        "--load_from",
+        type=str,
+        default="mttl",
+        help="source to load the model from",
     )
     args = parser.parse_args()
 
