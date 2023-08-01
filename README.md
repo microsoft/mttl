@@ -4,32 +4,80 @@ MTTL - Multi-Task Transfer Learning
 
 ## Setup
 
-Install Python packages:
+MTTL supports `Python 3.8` and `Python 3.9`. It is recommended to create a virtual environment for MTTL using `virtualenv` or `conda`. For example, with `conda`:
 
-`pip install -r requirements.txt`
+    conda create -n mttl python=3.9
+    conda activate mttl
 
-_The package `promptsource` currently requires Python 3.7. Alternative versions require local installations (see their [documentation](https://github.com/bigscience-workshop/promptsource#setup))._
+Install the required Python packages:
 
-Download the datasets:
+    pip install -e .
 
-`bash scripts/create_datasets.sh`
 
-## Multi-task Pre-training
 
-The general command:
+## Multi-Head Adapter Routing
 
-`python pl_train.py -c $CONFIG_FILES -k $KWARGS`
+Please ensure that you have navigated to the `projects/mhr` directory before running the Multi-Head Adapter Routing scripts:
+
+    cd projects/mhr
+
+
+### Data Preparation
+
+Download and prepare the datasets for the experiments using the following script:
+
+    bash datasets/create_datasets.sh
+
+
+### Environment Variables
+
+Based on your experiments, you may need to export one or more of the following environment variables:
+
+    T0_DATA_DIR:  `data/t0_data/processed` if you ran the `create_datasets.sh`
+    NI_DATA_DIR: `data/ni_data/processed` if you ran the `create_datasets.sh`
+    XFIT_DATA_DIR: `data/ni_data/processed` if you ran the `create_datasets.sh`
+    CHECKPOINT_DIR
+    OUTPUT_DIR
+    CACHE_DIR
+    STORYCLOZE_DIR: path to your downloaded `.csv` files. See [the storycloze official website](https://cs.rochester.edu/nlp/rocstories/)
+
+
+### Multi-task Pre-training
+
+The general command for pre-training a model is:
+
+    python pl_train.py -c $CONFIG_FILES -k $KWARGS
 
 Multiple `CONFIG_FILES` can be concatenated as `file1+file2`. To modify defaults, `KWARGS` can be expressed as `key=value`.
+You can check [scripts/pretrain](scripts/pretrain) for examples.
 
-## Test Fine-Tuning
+### Test Fine-Tuning
 
 To perform finetuning for a test task, use the script `pl_finetune.py`
 
-## Hyper-parameter Search for Test Fine-Tuning
+### Hyper-parameter Search for Test Fine-Tuning
 
 To perform an hyperparameter search for a test task, use the script `pl_finetune_tune.py`.
 The script will just call the functions in `pl_finetune.py` in a loop. The script itself defines hp ranges for different fine-tuning types.
+
+
+### Pre-Configured Scripts
+
+Alternatively, you can run the pre-configured scripts from the `scripts` folder. For example:
+
+    bash scripts/mhr_pretrain.sh
+
+### Know Issues
+If you run into issues with protoc `TypeError: Descriptors cannot not be created directly.`, you can try to downgrade protobuf to 3.20.*:
+
+    pip install protobuf==3.20.*
+
+
+## Running Tests
+
+    pip install -e ".[test]"
+    pytest -vv tests
+
 
 ## Contributing
 

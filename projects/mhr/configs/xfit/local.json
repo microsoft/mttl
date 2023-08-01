@@ -1,6 +1,6 @@
 {
     "dataset": "xfit",
-    "train_dir": "/datadrive2/crossfit/data/",
+    "train_dir": "$XFIT_DATA_DIR",
     "custom_tasks_splits": "./dataloader/xfit_data/random.json",
     "precision": 32,
     "total_steps": 100,

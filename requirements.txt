@@ -1,10 +1,10 @@
-wandb
 datasets==2.2.1
 transformers==4.19.2
-pytorch-lightning==2.0.4
-wget==3.2
-rouge==1.0.0
-tqdm==4.64.0
+pytorch-lightning==2.0.5
+wandb
+rouge
+wget
+tqdm
 pandas
 scikit-learn
 higher
