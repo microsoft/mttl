@@ -7,6 +7,10 @@ import glob
 import torch
 import random
 import evaluate
+import sys
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
 from inst_follow.eval.utils import (
     load_hf_lm_and_tokenizer,
     generate_completions,
@@ -24,7 +28,17 @@ exact_match = evaluate.load("exact_match")
 
 
 @torch.no_grad()
-def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None):
+def eval_hf_model(
+    args,
+    model,
+    tokenizer,
+    examples,
+    task_prompt,
+    save_path=None,
+    topic_router=None,
+    skill_selector=None,
+    cluster_depth=1,
+):
     targets = [example["target"] for example in examples]
     if save_path:
         fout = open(save_path, "w")
@@ -59,6 +73,9 @@ def eval_hf_model(args, model, tokenizer, examples, task_prompt, save_path=None)
         max_new_tokens=512,
         batch_size=args.eval_batch_size if args.eval_batch_size else 1,
         stop_id_sequences=[[stop_sequnce]],
+        topic_router=topic_router,
+        skill_selector=skill_selector,
+        cluster_depth=cluster_depth,
     )
 
     predictions = []
@@ -216,16 +233,32 @@ def main(args):
         task_examples = all_tasks[task_name]
         prompt = all_prompts[task_name]
         if args.model_name_or_path:
-            task_perf = eval_hf_model(
-                args,
-                model,
-                tokenizer,
-                task_examples,
-                prompt,
-                save_path=os.path.join(
-                    args.save_dir, "predictions", f"{task_name}.jsonl"
-                ),
-            )
+            if args.skill_selector == "topic":
+                task_perf = eval_hf_model(
+                    args,
+                    model,
+                    tokenizer,
+                    task_examples,
+                    prompt,
+                    save_path=os.path.join(
+                        args.save_dir, "predictions", f"{task_name}.jsonl"
+                    ),
+                    topic_router=topic_router,
+                    skill_selector=args.skill_selector,
+                    cluster_depth=args.cluster_depth,
+                )
+            else:
+                task_perf = eval_hf_model(
+                    args,
+                    model,
+                    tokenizer,
+                    task_examples,
+                    prompt,
+                    save_path=os.path.join(
+                        args.save_dir, "predictions", f"{task_name}.jsonl"
+                    ),
+                    skill_selector=args.skill_selector,
+                )
         else:
             task_perf = eval_openai_chat_engine(
                 args,
@@ -306,7 +339,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--skill_selector",
         type=str,
-        default="poly",
+        default="topic",
         help="skill selector",
     )
     parser.add_argument(
@@ -314,6 +347,12 @@ if __name__ == "__main__":
         type=str,
         default="mttl",
         help="source to load the model from",
+    )
+    parser.add_argument(
+        "--cluster_depth",
+        type=int,
+        default=1,
+        help="cluster depth",
     )
     args = parser.parse_args()
 

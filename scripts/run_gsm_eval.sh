@@ -1,0 +1,11 @@
+python -m inst_follow.eval.gsm.run_eval \
+    --data_dir data/eval/gsm/ \
+    --max_num_examples 200 \
+    --save_dir results/gsm/llama-7B-8shot \
+    --model_name_or_path llama_alpaca_finetune/poly_mu_alpaca/loss=0.5422.ckpt \
+    --example_to_ids_path inst_follow/cluster_infos/atlas_by_instr_text-embedding-ada-002_ldalayer1.pkl \
+    --eval_batch_size 10 \
+    --tokenizer yahma/llama-7b-hf \
+    --eval_batch_size 20 \
+    --load_from mttl \
+    --n_shot 8

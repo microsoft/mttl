@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=1 nohup python -m inst_follow.eval.gen_alpaca_eval_predictions > test_alpaca_eval.log 2>&1 &
