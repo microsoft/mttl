@@ -22,7 +22,7 @@ def get_task_name_from_file(result):
 
 @click.command()
 @click.argument("files", nargs=-1)
-@click.option("--dataset")
+@click.option("--dataset", default='t0')
 @click.option("--latex", is_flag=True)
 @click.option("--hps")
 @click.option("--tasks")
