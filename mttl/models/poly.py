@@ -1,4 +1,5 @@
 import torch
+import copy
 import torch.nn as nn
 import torch.nn.functional as F
 import re
@@ -42,6 +43,9 @@ def get_selector(config):
             return PrivateSelector(config)
     elif config.poly_selector == "cluster_soft":
         return ClusterSelector(config, soft=True)
+    elif config.poly_selector == "none":
+        return None
+        # return ClusterSelector(config, soft=True)
     elif config.poly_selector == "cluster_hard":
         return ClusterSelector(config, soft=False)
     elif config.poly_selector == "moe":
@@ -271,14 +275,18 @@ class EfficientBackwardbmm(Function):
 class PolyLoRALinear(PolytroponAdapter):
     def __init__(self, config, task_id_ptr, linear_layer, selector=None):
         super().__init__()
+        self.same_lora_init = config.same_lora_init
+        self.share_a = config.share_lora_a
         self.n_splits = config.n_splits
         self.n_tasks = config.n_tasks
         self.n_skills = config.n_skills
+        self.share_lora_at_attn = config.share_lora_at_attn
         self.in_features = linear_layer.in_features
         self.out_features = linear_layer.out_features
         self.use_warmup = config.lora_warmup
         self.rank = config.lora_rank
         self.weight = linear_layer.weight
+        self.linear_layer = linear_layer
         self.bias = linear_layer.bias
         self.kaiming_init = config.lora_kaiming_init
         self.lora_randb_init = config.lora_randb_init
@@ -286,6 +294,11 @@ class PolyLoRALinear(PolytroponAdapter):
         self.training_steps = 0.0
         self.lora_alpha = config.lora_alpha if hasattr(config, "lora_alpha") else 1.0
         self.scaling = self.lora_alpha / self.rank
+        self.merge_A_B_seperately = (
+            config.merge_A_B_seperately
+            if hasattr(config, "merge_A_B_seperately")
+            else True
+        )
         if selector is None:
             self.selector = get_selector(config)
         else:
@@ -294,9 +307,10 @@ class PolyLoRALinear(PolytroponAdapter):
         self.lora_a = nn.Parameter(
             self.weight.new_empty(
                 self.n_splits,
-                self.n_skills,
+                self.n_skills if not self.share_a else 1,
                 linear_layer.in_features // self.n_splits,
                 self.rank,
+                dtype=torch.float32,
             )
         )
         self.lora_b = nn.Parameter(
@@ -305,6 +319,7 @@ class PolyLoRALinear(PolytroponAdapter):
                 self.n_skills,
                 self.rank,
                 linear_layer.out_features // self.n_splits,
+                dtype=torch.float32,
             )
         )
         self.reset_parameters()
@@ -312,8 +327,9 @@ class PolyLoRALinear(PolytroponAdapter):
     def reset_parameters(self):
         import math
 
+        n_skills_a = self.n_skills if not self.share_a else 1
         if self.kaiming_init:
-            for skill in range(self.n_skills):
+            for skill in range(n_skills_a):
                 for split in range(self.n_splits):
                     param = torch.empty((self.rank, self.in_features // self.n_splits))
                     torch.nn.init.kaiming_uniform_(param, a=math.sqrt(5))
@@ -324,6 +340,16 @@ class PolyLoRALinear(PolytroponAdapter):
 
             with torch.no_grad():
                 self.lora_a.uniform_(-std, std)
+                if self.same_lora_init:
+                    print(self.same_lora_init)
+                    # set all skills to have equal innit
+                    param = self.lora_a.data[:, 0, :, :]
+                    for skill in range(n_skills_a):
+                        self.lora_a.data[:, skill, :, :] = param
+                    if n_skills_a > 1:
+                        assert torch.allclose(
+                            self.lora_a.data[:, 0, :, :], self.lora_a.data[:, 1, :, :]
+                        )
 
         # ensure that initially, adding the adapter does not change the output
         if self.use_warmup or self.lora_randb_init:
@@ -344,15 +370,48 @@ class PolyLoRALinear(PolytroponAdapter):
         if repeat:
             self.routing_infos.repeat_interleave(repeat)
 
-        mixing_weights = self.selector(self.routing_infos).type_as(self.lora_a)
+        if self.selector is not None:
+            mixing_weights = self.selector(self.routing_infos).type_as(self.lora_a)
+        else:
+            bs = input.size(0)
+            mixing_weights = torch.ones(
+                bs, self.n_splits, self.n_skills, device=input.device, dtype=input.dtype
+            ).type_as(self.lora_a)
         bs, n_splits, n_skills = mixing_weights.size()
-
-        # A is    n_splits, n_skills, D // n_splits, rank
-        # we want bs,       n_splits, D // n_splits, rank
-        A = torch.einsum("bqs,qsdr->bqdr", (mixing_weights, self.lora_a))
-        B = torch.einsum("bqs,qsrd->bqrd", (mixing_weights, self.lora_b))
-        A = A.reshape(bs, self.in_features, self.rank)
-        B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
+        # rnadom probabilities
+        # print(mixing_weights[0])
+        if self.merge_A_B_seperately:
+            # A is    n_splits, n_skills, D // n_splits, rank
+            # we want bs,       n_splits, D // n_splits, rank
+            A = torch.einsum("bqs,qsdr->bqdr", (mixing_weights, self.lora_a))
+            B = torch.einsum("bqs,qsrd->bqrd", (mixing_weights, self.lora_b))
+            A = A.reshape(bs, self.in_features, self.rank)
+            B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
+            adapter_out = input.bmm(A).bmm(B) * self.scaling  # / self.rank
+        else:  # ignoring n_splikts here
+            # self.lora_a n_splits, n_skills, D // n_splits, rank
+            # x * A
+            adapter_out = torch.einsum(
+                "bsd,qkdr->bsqkr", (input, self.lora_a)
+            )  # bs x n_splits x n_skills x rank")
+            # x B
+            adapter_out = torch.einsum(
+                "bsqkr,qkrd->bsqkd", (adapter_out, self.lora_b)
+            )  # bs x seq x n_splits x n_skills x D
+            # x weights
+            if self.n_skills > 1:
+                adapter_out = torch.einsum(
+                    "bsqkd,bqk->bsd", (adapter_out, mixing_weights)
+                )  # bs x seq x n_splits x D
+            else:
+                adapter_out = adapter_out.squeeze(2).squeeze(2)  # bs x seq x D
+            adapter_out *= self.scaling  # / self.rank
+            # adapter_weight = torch.einsum("qsdr,qsrk->qsdk", (self.lora_a, self.lora_b)) # outer product
+            # adapter_weight = torch.einsum("bqs,qsrd->bqrd", (mixing_weights.detach(), adapter_weight)) # bs x n_splits x D x D
+            # adapter_weight = adapter_weight.reshape(bs, self.in_features, -1)
+            # adapter_out = input.bmm(adapter_weight) * self.scaling # / self.rank
+            # self.lora_b is n_splits, n_skills, rank, D // n_splits
+            # input is bs, sl, D // n_splits
 
         # A = LoraAveraging.apply(self.lora_a, mixing_weights)
         # B = LoraAveraging.apply(self.lora_b, mixing_weights)
@@ -361,12 +420,12 @@ class PolyLoRALinear(PolytroponAdapter):
         # B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
         # adapter_out = EfficientBackwardbmm.apply(input, mixing_weights.detach(), self.lora_a,
         #                                 self.lora_b, self.in_features, self.rank, self.out_features) * self.scaling # / self.rank
-        adapter_out = input.bmm(A).bmm(B) * self.scaling  # / self.rank
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
 
-        return F.linear(input, self.weight, self.bias) + adapter_out
+        return self.linear_layer(input) + adapter_out
+        # return F.linear(input, self.weight, self.bias) + adapter_out
 
 
 class PolyIA3Linear(PolytroponAdapter):
@@ -408,7 +467,6 @@ class PolyIA3Linear(PolytroponAdapter):
 
         # n_skills, n_splits, D // n_splits
         weight = self.lora_a
-
         A = torch.einsum("bqs,sqd->bqd", (mixing_weights, weight))
         A = A.reshape(input.size(0), 1, -1)
         return F.linear(input, self.weight, self.bias) * A
@@ -486,12 +544,14 @@ class SkilledModel:
         print("Removing skills, keeping", skill_ids_to_keep)
         for name, adapter in object.get_adapters().items():
             if isinstance(adapter, PolyLoRALinear):
-                adapter.lora_a = nn.Parameter(
-                    adapter.lora_a[:, skill_ids_to_keep, :, :]
-                )
-                adapter.lora_b = nn.Parameter(
-                    adapter.lora_b[:, skill_ids_to_keep, :, :]
-                )
+                if adapter.lora_a.shape[1] > 1:
+                    adapter.lora_a = nn.Parameter(
+                        adapter.lora_a[:, skill_ids_to_keep, :, :]
+                    )
+                if adapter.lora_b.shape[1] > 1:
+                    adapter.lora_b = nn.Parameter(
+                        adapter.lora_b[:, skill_ids_to_keep, :, :]
+                    )
                 adapter.n_skills = len(skill_ids_to_keep)
                 adapter.selector.n_skills = len(skill_ids_to_keep)
 
@@ -524,7 +584,7 @@ def modify_with_poly(transformer, config, PolyLayer):
 
     selectors = {}
     total_layers = 0
-
+    n_skills = copy.deepcopy(config.n_skills)
     for m_name, module in dict(transformer.named_modules()).items():
         if re.fullmatch(config.lora_modules, m_name):
             for c_name, layer in dict(module.named_children()).items():
@@ -536,8 +596,10 @@ def modify_with_poly(transformer, config, PolyLayer):
                         selectors[identifier] = get_selector(config)
                     selector = selectors[identifier]
                     total_layers += 1
-
+                    config.n_skills = n_skills
                     print(f"Patching {m_name}.{c_name}...")
+                    if "attn" in f"{m_name}.{c_name}" and config.share_lora_at_attn:
+                        config.n_skills = 1
                     setattr(
                         module,
                         c_name,

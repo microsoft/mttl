@@ -56,4 +56,5 @@ class ClusterSelector(Selector):
                 device=self.dummy_parameter.device,
             )
             routing = F.one_hot(cluster_ids, num_classes=self.n_skills).unsqueeze(1)
-        return routing.to(dtype=self.dummy_parameter.dtype)
+
+        return routing.type_as(self.dummy_parameter)

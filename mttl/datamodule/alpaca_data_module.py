@@ -3,8 +3,9 @@ from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 
 from mttl.datamodule.ni_data_module import CollateWrapperFn, CollateWrapperFnCLM
-from mttl.dataloader.alpaca_dataset_readers import AlpacaDataset, EnhancedAlpacaDataset
+from mttl.dataloader.alpaca_dataset_readers import AlpacaDataset
 from transformers import LlamaTokenizer
+from mttl.cluster_tuning.cluster_reader import ClusterResult
 
 
 class AlpacaDataModule(LightningDataModule):
@@ -32,7 +33,7 @@ class AlpacaDataModule(LightningDataModule):
 
     def test_dataloader(self):
         return DataLoader(
-            self.dev_dataset,
+            self.test_set,
             batch_size=self.config.train_batch_size,
             shuffle=False,
             num_workers=16,
@@ -45,11 +46,11 @@ class AlpacaDataModule(LightningDataModule):
     def all_instructions(self):
         return self.dataset.read_all_instructions()
 
-    def __init__(self, config):
+    def __init__(self, config, cluster_result: ClusterResult = None):
         super().__init__()
 
         self.config = config
-
+        self.cluster_result = cluster_result
         # self.tokenizer = AutoTokenizer.from_pretrained(
         #     "/home/v-oostapenko/llms/", #config.model,
         #     model_max_length=config.max_input_length
@@ -71,22 +72,13 @@ class AlpacaDataModule(LightningDataModule):
         self.task2id = {"alpaca_full": 0}
 
     def get_dataset(self):
-        if self.config.enhanced_alpaca:
-            return EnhancedAlpacaDataset(
-                self.tokenizer,
-                self.config.max_input_length,
-                self.config.max_output_length,
-                self.config.train_dir,
-                self.config.train_on_inputs,
-            )
-        else:
-            return AlpacaDataset(
-                self.tokenizer,
-                self.config.max_input_length,
-                self.config.max_output_length,
-                self.config.train_dir,
-                self.config.train_on_inputs,
-            )
+        return AlpacaDataset(
+            self.tokenizer,
+            self.config.max_input_length,
+            self.config.max_output_length,
+            self.config.train_dir,
+            self.config.train_on_inputs,
+        )
 
     def setup(self, stage=None):
         dataset = self.get_dataset()

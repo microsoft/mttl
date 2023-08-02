@@ -11,7 +11,8 @@ import ray
 import shortuuid
 import logging
 import numpy as np
-from sklearn.decomposition import PCA
+
+# from sklearn.decomposition import PCA
 from nomic import AtlasProject
 
 logging.basicConfig(level=logging.INFO)
@@ -86,8 +87,16 @@ class TopicRouter:
         return probs
 
 
+def dict_to_dataclass(d):
+    from dataclasses import make_dataclass
+
+    return make_dataclass("X", d.keys())(**d)
+
+
 def load_model(args, model_path=None, device="cuda", tokenizer_path=None):
     disable_torch_init()
+    if isinstance(args, dict):
+        args = dict_to_dataclass(args)
     if tokenizer_path is None:
         tokenizer_path = args.model
     tokenizer = LlamaTokenizer.from_pretrained(

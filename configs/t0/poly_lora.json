@@ -3,7 +3,7 @@
     "n_splits": 1, 
     "model_modifier": "poly_lora",
     "lora_rank": 1,
-    "poly_granularity": "finegrained",
+    "poly_granularity": "finegrained",  
     "lora_modules": ".*SelfAttention|.*EncDecAttention|.*DenseReluDense",
     "lora_layers": "q|k|v|o|wi_1.*|wi_0.*|wo", 
     "trainable_param_names": ".*lora_[ab].*|.*module_logits.*", 

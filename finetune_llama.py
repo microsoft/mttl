@@ -3,19 +3,25 @@ import argparse
 import json
 import numpy as np
 import torch
+
+# import partial
+from functools import partial
 import pytorch_lightning as pl
+from mttl.models.poly import get_selector
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 from inst_follow.models.clm import CLM
 from mttl.callbacks import ProgressCallback
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
+from mttl.datamodule.db_dolly_module import DatBricksDollyModule
 from mttl.datamodule.longform_data_module import LongFormDataModule
-from mttl.datamodule.wizard_data_module import WizardDataModule
+from mttl.datamodule.wizzard_data_module import WizzardDataModule
+from mttl.datamodule.flan_module import FlanModule
 from mttl.models.encoder_decoder import EncoderDecoder
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.config import Config as MTTLConfig
 from mttl.models.monitors import get_monitors
-from mttl.utils import get_mlf_logger
+from mttl.utils import get_mlf_logger, from_pretrained
 from mttl.models.modify_model import modify_transformer
 from transformers import LlamaForCausalLM, LlamaTokenizer
 from mttl.dataloader.data_utils import ExampleInfo
@@ -45,14 +51,31 @@ class Config(MTTLConfig):
         self.init_b_random = False
         self.lora_dropout = 0
         self.lora_alpha = 16
+        self.same_lora_init = 0
         self.load_in_8bit = False
         self.micro_batch_size = 4
+        self.share_lora_at_attn = 0
+        self.share_lora_a = False
+        self.merge_A_B_seperately = True
         self.train_on_inputs = False
         self.padding_side = "right"
         self.adapter_modules = None
         self.poly_selector_use_distances = False
         self.adapter_layers = 0  # llama adapter
         self.adapter_len = 0  # llama adapter
+        self.use_4_bit_backbone = False
+        self.wandb_project = None
+        self.switch_to_average = 0
+        # self.balanced = 0
+
+        self.predict_cluster = None  # topic or skill
+        self.dst_dir = None  # dir of jsonl dataset
+        self.fast_dev_run = False
+        self.train_only_cluster = None
+        self.validation_portion = 0.03
+        self.per_cluster_test = False
+        self.use_test_set = False  # wether to use examples marked as is_test = 1 in ClusterInfo as test set
+
         super().__init__(**kwargs)
         # to reproduce setup in https://github.com/daanelson/alpaca-lora
         self.gradient_accumulation_steps = (
@@ -105,23 +128,7 @@ def run_multitask(args):
     seed_everything(args.seed, workers=True)
     # get directory of the current file
     print(os.path.dirname(os.path.realpath(__file__)))
-
-    # select dataloader
-    model_class = CLM
-    if args.dataset == "alpaca":
-        dm = AlpacaDataModule(args)
-    elif args.dataset == "longform":
-        dm = LongFormDataModule(args)
-    elif args.dataset == "wizard":
-        dm = WizardDataModule(args)
-    else:
-        raise NotImplementedError()
-
-    args.n_tasks = len(dm.task2id)
-
-    # if args.poly_selector == "poly":
-    #     args.n_tasks = args.n_skills
-
+    cluster_result = None
     if args.example_to_ids_path:
         from mttl.cluster_tuning.cluster_reader import ClusterResult
 
@@ -131,14 +138,45 @@ def run_multitask(args):
         if args.poly_selector in ["cluster_soft", "cluster_hard"]:
             args.n_skills = cluster_result.n_clusters()
         else:
-            raise NotImplementedError()
+            # raise NotImplementedError()
+            args.n_skills = 1
 
-    args.model_object = LlamaForCausalLM.from_pretrained(
-        args.model,
-        # load_in_8bit=args.load_in_8bit, # this doesnt work right now with current implementatio of lora
-        # torch_dtype=torch.float16,
-        device_map="auto",
-    )  # , load_in_8bit=True, torch_dtype=torch.float16)
+    if args.train_only_cluster is not None:
+        # we only want to train on a single cluster, hence model qith a single skill
+        args.n_skills = 1
+        skill_ids_to_keep = np.where(
+            (np.array(cluster_result._instance.infos.cluster_dists).sum(0)) > 0
+        )[0]
+        cluster_result.remove_skills(skill_ids_to_keep)
+
+    # select dataloader
+    model_class = CLM
+    if args.dataset == "alpaca":
+        dm = AlpacaDataModule(args, cluster_result=cluster_result)
+    elif args.dataset == "longform":
+        dm = LongFormDataModule(args)
+    elif args.dataset == "wizzard":
+        dm = WizzardDataModule(args)
+    elif args.dataset == "db_dolly":
+        dm = DatBricksDollyModule(args, cluster_result=cluster_result)
+    elif args.dataset == "flan_v2":
+        dm = FlanModule(args, cluster_result=cluster_result)
+    else:
+        raise NotImplementedError()
+
+    args.n_tasks = len(dm.task2id)
+    if args.use_4_bit_backbone:
+        args.model_object = from_pretrained(args.model)
+        # max_memory_MB=80000,
+        # add_lora_f = partial(modify_transformer, config=args))
+    else:
+        args.model_object = LlamaForCausalLM.from_pretrained(
+            args.model,
+            # load_in_8bit=args.load_in_8bit, # this doesnt work right now with current implementatio of lora
+            # torch_dtype=torch.float16,
+            device_map="auto",
+        )  # , load_in_8bit=True, torch_dtype=torch.float16)
+
     if args.model_object.config.vocab_size != len(
         dm.tokenizer
     ):  # if adding [EOI] in LongForm dataset
@@ -149,14 +187,17 @@ def run_multitask(args):
 
     if args.checkpoint is not None:
         from mttl.utils import get_checkpoint_path
+        from inst_follow.utils import load_model
 
         checkpoint_path = get_checkpoint_path(args.checkpoint)
-
         kwargs = vars(args)
         kwargs.pop("checkpoint")
-        module = model_class.load_from_checkpoint(
-            checkpoint_path, **kwargs, tokenizer=dm.tokenizer
-        )
+        # module = model_class.load_from_checkpoint(
+        #     checkpoint_path, **kwargs, tokenizer=dm.tokenizer
+        # )
+        module, _, _ = load_model(kwargs, model_path=checkpoint_path)
+        del args.model_object
+
     else:
         module = model_class(**vars(args), tokenizer=dm.tokenizer)
         del args.model_object
@@ -165,12 +206,15 @@ def run_multitask(args):
         if args.n_skills > 1 and args.prune_unused_loras:
             # prune unused loras
             counts = m = np.bincount(cluster_result._instance.infos.cluster_ids)
+            # skill_ids_to_keep = np.where(
+            #     np.bincount(cluster_result._instance.infos.cluster_ids) > 0
+            # )[0]
             skill_ids_to_keep = np.where(
-                np.bincount(cluster_result._instance.infos.cluster_ids) > 0
+                (np.array(cluster_result._instance.infos.cluster_dists).sum(0)) > 0
             )[0]
             module.model.remove_skills(skill_ids_to_keep)
             cluster_result.remove_skills(skill_ids_to_keep)
-    # change selector to average
+
     if args.switch_to_average > 0:
         module.model.switch_selector_to_average(
             selector_to_replace=get_selector(args).__class__
@@ -182,7 +226,9 @@ def run_multitask(args):
         # args_=args.__dict__.copy()
         # remove_non_serializable(args_)
         wandb_logger = pl.loggers.WandbLogger(
-            project="alpaca_tuning",
+            project="alpaca_tuning"
+            if args.wandb_project is None
+            else args.wandb_project,
             name=os.environ.get("AMLT_JOB_NAME", args.exp_name),  # , config=args_
         )
         wandb_logger.experiment.save("*.py")
@@ -239,25 +285,45 @@ def run_multitask(args):
         precision=int(args.precision)
         if args.precision in ["16", "32"]
         else args.precision,
+        fast_dev_run=args.fast_dev_run,
         **kwargs,
     )
 
     trainer.fit(module, dm)
 
     # try:
-    trainer.validate(module, dm)
-    # except:
-    #     pass
-    if args.dataset in ["ni", "xfit", "alpaca", "longform", "wizard"]:
+    ckpt_path = "best" if not args.fast_dev_run else None
+    trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
+    if args.use_test_set:
+        module.model.checkpoint_tested = "best"
+        trainer.test(dataloaders=dm, ckpt_path=ckpt_path)
+        module.model.checkpoint_tested = "last"
+        trainer.test(dataloaders=dm, ckpt_path="last")
+    if args.dataset in ["ni", "xfit", "alpaca", "longform", "wizzerd", "db_dolly"]:
         best_model_path = trainer.checkpoint_callback.best_model_path
+        last_model_path = trainer.checkpoint_callback.last_model_path
+        # last_model_path = trainer.checkpoint_callback.bes
         print(f"Best model path: {best_model_path}")
         # Rename the file at best_model_path to 'best_model'
-        path_best_model = args.output_dir + f"/best_model_{args.exp_name}"
+        path_best_model = (
+            best_model_path.split("loss=")[0]
+            + f"best_model_{args.exp_name}_loss="
+            + best_model_path.split("loss=")[1]
+        )
+        path_last_model = (
+            last_model_path.split("last")[0]
+            + f"last_model_{args.exp_name}_v"
+            + last_model_path.split("last")[1]
+        )
+        # args.output_dir + f"/best_model_{args.exp_name}"
         # create dir if not exists
         if not os.path.exists(path_best_model):
             os.makedirs(path_best_model)
         # copy the best model to the best_model dir
-        os.system("cp " + best_model_path + " " + path_best_model + "/")
+        os.system("mv " + best_model_path + " " + path_best_model + "/")
+        os.system("mv " + last_model_path + " " + path_last_model + "/")
+        print(f"Best model path: {path_best_model}")
+        print(f"Last model path: {path_last_model}")
 
 
 if __name__ == "__main__":

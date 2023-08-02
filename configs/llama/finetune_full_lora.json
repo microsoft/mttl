@@ -11,7 +11,7 @@
     "rank": 4,
     "num_train_epochs": 3,
     "n_skills": 1,
-    "lora_alpha": 4,
+    "lora_alpha": 16,
     "eval_every": 400,
     "warmup_steps": 100,
     "lora_dropout": 0.05,

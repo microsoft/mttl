@@ -422,6 +422,8 @@ def main(
             assert (
                 cluster_result is not None
             ), "For soft-clustering models, cluster_result must be provided"
+            print("n_clusters", cluster_result.n_clusters())
+            print("n_skills", model.args.n_skills)
             assert model.args.n_skills == cluster_result.n_clusters()
             if config.prune_unused_loras:
                 # prune unused loras
