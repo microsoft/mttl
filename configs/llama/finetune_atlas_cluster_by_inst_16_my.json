@@ -17,7 +17,7 @@
     "poly_selector": "cluster_soft",
     "poly_selector_use_distances": 0,
     "poly_selector_cluster_temp": 0.1,
-    "example_to_ids_path": "inst_follow/cluster_infos/atlas_by_instr_text-embedding-ada-002_ldalayer2.pkl",
+    "example_to_ids_path": "inst_follow/cluster_infos/atlas_by_instr_text-embedding-ada-002_ldalayer1.pkl",
     "model_modifier": "poly_lora",
     "lora_modules": ".*attn",
     "lora_layers": "v_proj|q_proj|k_proj|o_proj",

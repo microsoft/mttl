@@ -9,7 +9,8 @@ from tqdm import tqdm
 import time
 import sys
 
-sys.path.append("/projects/futhark1/data/wzm289/code/mttl")
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
 
 from inst_follow.eval.mmlu.categories import subcategories, categories
 from inst_follow.utils import load_model, TopicRouter, disable_torch_init
@@ -253,7 +254,7 @@ def main(args):
                     args.eval_batch_size,
                     topic_router=topic_router,
                     skill_selector=args.skill_selector,
-                    cluster_depth=1,
+                    cluster_depth=args.cluster_depth,
                 )
             else:
                 cors, acc, probs = eval_hf_model(
@@ -382,6 +383,12 @@ if __name__ == "__main__":
         type=str,
         default="mttl",
         help="source to load the model from",
+    )
+    parser.add_argument(
+        "--cluster_depth",
+        type=int,
+        default=1,
+        help="cluster depth",
     )
     args = parser.parse_args()
 

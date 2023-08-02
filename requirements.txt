@@ -19,4 +19,4 @@ openai
 ray
 shortuuid
 nomic==1.1.6
-rouge
+evaluate

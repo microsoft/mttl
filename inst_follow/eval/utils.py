@@ -42,6 +42,9 @@ def generate_completions(
     batch_size=1,
     stop_id_sequences=None,
     disable_tqdm=False,
+    topic_router=None,
+    cluster_depth=1,
+    skill_selector="random",
     **generation_kwargs,
 ):
     generations = []
@@ -59,6 +62,30 @@ def generate_completions(
         )
         batch_input_ids = tokenized_prompts.input_ids
         attention_mask = tokenized_prompts.attention_mask
+
+        ###################  add routing info for clustering ###################
+
+        # add a dummy task id to the input
+        tokenized_prompts["task_ids"] = -1 * torch.zeros(
+            len(batch_prompts), dtype=torch.long
+        ).type_as(batch_input_ids)
+        # print(f"len tokenized_prompts..........{len(batch_prompts)}")
+
+        if topic_router:
+            if skill_selector == "random":
+                # random binary matrix
+                raise NotImplementedError()
+            else:
+                topic_probs = topic_router(batch_prompts, depth=cluster_depth)
+                if hasattr(model, "skill_ids_to_keep"):
+                    topic_probs = topic_probs[:, model.skill_ids_to_keep]
+                tokenized_prompts["distances"] = topic_probs
+
+        # initialize the task id container
+        model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
+            tokenized_prompts
+        )
+        ###################  add routing info for clustering  end ###################
 
         if model.device.type == "cuda":
             batch_input_ids = batch_input_ids.cuda()
@@ -119,6 +146,9 @@ def generate_completions(
             print("Use empty string as the completion.")
             batch_generations = [""] * len(batch_prompts) * num_return_sequences
 
+            # raise the exception
+            raise e
+
         generations += batch_generations
 
         # for prompt, generation in zip(batch_prompts, batch_generations):
@@ -164,6 +194,8 @@ def get_next_word_predictions(
         batch_input_ids = tokenized_prompts.input_ids
         attention_mask = tokenized_prompts.attention_mask
 
+        ###################  add routing info for clustering ###################
+
         # add a dummy task id to the input
         tokenized_prompts["task_ids"] = -1 * torch.zeros(
             len(batch_prompts), dtype=torch.long
@@ -180,13 +212,15 @@ def get_next_word_predictions(
                     topic_probs = topic_probs[:, model.skill_ids_to_keep]
                 tokenized_prompts["distances"] = topic_probs
 
-        if model.device.type == "cuda":
-            batch_input_ids = batch_input_ids.cuda()
-            attention_mask = attention_mask.cuda()
         # initialize the task id container
         model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
             tokenized_prompts
         )
+        ###################  add routing info for clustering  end ###################
+        if model.device.type == "cuda":
+            batch_input_ids = batch_input_ids.cuda()
+            attention_mask = attention_mask.cuda()
+
         batch_logits = model(batch_input_ids, attention_mask).logits[:, -1, :]
         if candidate_token_ids is not None:
             batch_logits = batch_logits[:, candidate_token_ids]

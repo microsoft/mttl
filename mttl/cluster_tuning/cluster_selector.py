@@ -37,7 +37,7 @@ class ClusterSelector(Selector):
                 else routing_infos.distances
             )
             # debug
-            # distances = [[1 / 8] * len(distances[0])]
+            # distances = [[d + 0.01 for d in distances[0]]]
             distances = torch.tensor(
                 distances,
                 device=self.dummy_parameter.device,
