@@ -32,7 +32,9 @@ class T0EncoderDecoder(EfficientCheckpointModule):
         self.tokenizer = kwargs["tokenizer"]
 
         if kwargs.get("model_object") is None:
-            self.model = AutoModelForSeq2SeqLM.from_pretrained(config.model, cache_dir=config.cache_dir)
+            self.model = AutoModelForSeq2SeqLM.from_pretrained(
+                config.model, cache_dir=config.cache_dir
+            )
 
             # free up local space after loading in memory
             if config.free_up_space:
@@ -95,7 +97,6 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             decoder_attention_mask = (decoder_input_ids == decoder_input_ids).float()
             lm_target = (
                 flat_choices_ids
-
                 - 100 * (flat_choices_ids == self.tokenizer.pad_token_id).long()
             )
 
@@ -493,6 +494,8 @@ class T0EncoderDecoder(EfficientCheckpointModule):
 
     def on_validation_epoch_end(self):
         outputs = self._inference_outputs
+        if self.config.save_predictions:
+            self.save_predictions(outputs, split="val")
         try:
             # differentiate between fine-tuning phase / zero-shot phase and
             # validation phase during training. this will raise because
@@ -519,9 +522,41 @@ class T0EncoderDecoder(EfficientCheckpointModule):
         return outputs
 
     def on_test_epoch_end(self):
+        if self.config.save_predictions:
+            self.save_predictions(self._inference_outputs, split="test")
         outputs = self.inference_epoch_end(self._inference_outputs, split="test")
         self._inference_outputs.clear()
         return outputs
+
+    def save_predictions(self, outputs, split="val"):
+        # accumulate predictions and labels
+        preds, labels = [], []
+        for output in outputs:
+            preds += output["prediction"]
+            labels += output["label"]
+
+        is_correct = [1 if p == l else 0 for p, l in zip(preds, labels)]
+        acc = sum(is_correct) / len(is_correct)
+        # save predictions
+        to_save = {
+            "preds": preds,
+            "labels": labels,
+            "step": self.global_step,
+            "seed": self.config.seed,
+            "is_correct": is_correct,
+            "acc": acc,
+        }
+        dump_dir = os.path.join(self.config.output_dir, f"seed_{self.config.seed}")
+        os.makedirs(dump_dir, exist_ok=True)
+        with open(
+            os.path.join(
+                dump_dir, f"preds_split{split}_step{self.global_step}_acc{int(acc * 1000)}.json"
+            ),
+            "w",
+        ) as fp:
+            json.dump(to_save, fp)
+
+        assert len(preds) == len(labels)
 
     def configure_optimizers(self):
         config = self.config

@@ -163,6 +163,7 @@ class Config:
         self.ni_online_eval = False   # zero-shot online eval for ni
         self.t0_online_eval = False   # zero-shot eval for t0
         self.early_stop_on_zero_shot = False  # zero-shot early stopping
+        self.save_predictions = True  # save preds to compute stat. significance
 
         # auxiliary losses
         self.ortho_loss = 0.          # orthogonality between skills
