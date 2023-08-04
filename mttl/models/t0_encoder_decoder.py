@@ -494,30 +494,30 @@ class T0EncoderDecoder(EfficientCheckpointModule):
 
     def on_validation_epoch_end(self):
         outputs = self._inference_outputs
-        if self.config.save_predictions:
-            self.save_predictions(outputs, split="val")
-        try:
-            # differentiate between fine-tuning phase / zero-shot phase and
-            # validation phase during training. this will raise because
-            # training step does not return a dict
-            if "prediction" in outputs[0]:
-                outputs = self.inference_epoch_end(outputs, split="val")
-        except:
-            losses = torch.cat([out[0].sum(-1) for out in outputs], 0)
-            task_ids = torch.cat([out[1] for out in outputs], 0)
+        # differentiate between fine-tuning phase / zero-shot phase and 
+        # validation phase during training. 
+        if "prediction" in outputs[0]:
+            self.inference_epoch_end(outputs, split="val")
+            if self.config.save_predictions:
+                self.save_predictions(self._inference_outputs, split="val")
+        else:
+            try:
+                losses = torch.cat([out[0].sum(-1) for out in outputs], 0)
+                task_ids = torch.cat([out[1] for out in outputs], 0)
 
-            # compute the loss per task id
-            with open(
-                os.path.join(self.config.output_dir, "val_loss_by_task.txt"), "a+"
-            ) as f:
-                task_losses = {}
-                for task_id in torch.unique(task_ids):
-                    task_losses[task_id.item()] = (
-                        losses[task_ids == task_id].mean().item()
-                    )
-                f.write(json.dumps(task_losses) + "\n")
-            outputs = None
-
+                # compute the loss per task id
+                with open(
+                    os.path.join(self.config.output_dir, "val_loss_by_task.txt"), "a+"
+                ) as f:
+                    task_losses = {}
+                    for task_id in torch.unique(task_ids):
+                        task_losses[task_id.item()] = (
+                            losses[task_ids == task_id].mean().item()
+                        )
+                    f.write(json.dumps(task_losses) + "\n")
+                outputs = None
+            except:
+                pass
         self._inference_outputs.clear()
         return outputs
 
