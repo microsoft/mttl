@@ -4,6 +4,12 @@ amulet_*/
 wandb
 .amltconfig
 .amltignore
+cache/
+output/
+**/output
+data/
+**/data
+.vscode/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

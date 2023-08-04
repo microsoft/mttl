@@ -234,12 +234,19 @@ def get_mlf_logger():
     return mlf_logger
 
 
-def get_checkpoint_path(path, step=None):
+def get_checkpoint_path(path, step=None, use_last=False):
     if path.endswith(".ckpt") or path.endswith(".pt"):
         return path
 
     # use glob to avoid explicitly writing out long paths
     match = glob.glob(f"{path}/*.ckpt", recursive=True)
+
+    if use_last:
+        # search for last.ckpt
+        match = [m for m in match if 'last.ckpt' in m]
+        if len(match) != 1:
+            raise ValueError("last.ckpt not found or found multiple (?) in the list of checkpoints!")
+        return match[0]
 
     if len(match) > 1:
         logger.warning(

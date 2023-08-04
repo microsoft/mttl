@@ -3,13 +3,9 @@ import os
 
 import pandas as pd
 import torch
-import math
-import numpy as np
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer, seed_everything
-from pytorch_lightning.callbacks import ModelCheckpoint
 
-from mttl.config import parse_config
 from mttl.callbacks import ProgressCallback
 from mttl.datamodule.ni_data_module import NIFinetuneDataModule
 from mttl.datamodule.xfit_data_module import XFitFinetuneDataModule
@@ -18,7 +14,7 @@ from mttl.models.encoder_decoder import Finetuner
 from mttl.models.monitors import get_monitors
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.utils import CustomModelCheckpoint, get_checkpoint_path, get_mlf_logger
-
+from mttl.config import Config
 
 # When loading a checkpoint for evaluation, which args from old checkpoint
 # should overwrite the incoming arguments ?
@@ -57,7 +53,7 @@ def finetune(args, use_mlf=True, do_zs=True):
 
     # build the pretrained model
     if args.checkpoint:
-        ckpt_path = get_checkpoint_path(args.checkpoint)
+        ckpt_path = get_checkpoint_path(args.checkpoint, use_last=args.finetune_use_last_checkpoint)
 
         if ckpt_path.startswith("az://"):
             import fsspec
@@ -163,7 +159,7 @@ def finetune(args, use_mlf=True, do_zs=True):
         loggers = []
         if os.environ.get("WANDB_API_KEY"):
             wandb_logger = pl.loggers.WandbLogger(
-                project="polytropon-ni",
+                project=args.wandb_project,
                 name=args.exp_name,
             )
             wandb_logger.experiment.save("*.py")
@@ -324,7 +320,7 @@ def finetune_xfit(args, use_mlf=True, do_zs=True):
 
 
 if __name__ == "__main__":
-    args = parse_config()
+    args = Config.parse()
 
     if args.dataset == "xfit":
         finetune_xfit(args)

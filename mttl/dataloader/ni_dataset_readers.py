@@ -144,7 +144,6 @@ class NIDatasetReader(object):
     ) -> Iterator[Tuple[str, str]]:
         """Format the input and iterate over all outputs corresponding to that input."""
         task_name = instance["Task"] + ". "
-
         task_input = cls._prepare_input(instance)
 
         if use_task_descriptions:

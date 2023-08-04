@@ -8,7 +8,11 @@ from transformers import AutoModelForSeq2SeqLM
 from mttl.models.get_optimizer import get_optimizer
 from mttl.models.get_scheduler import get_scheduler
 from mttl.models.modify_model import modify_transformer
-from mttl.models.utils import EfficientCheckpointModule, RoutingInfo, get_global_batch_size
+from mttl.models.utils import (
+    EfficientCheckpointModule,
+    RoutingInfo,
+    get_global_batch_size,
+)
 from mttl.utils import freeze_embeds, label_smoothed_nll_loss
 
 
@@ -23,13 +27,13 @@ class EncoderDecoder(EfficientCheckpointModule):
         self.tokenizer = kwargs["tokenizer"]
         self.pad_token_id = self.tokenizer.pad_token_id
 
-        if kwargs.get('model_object') is None:
+        if kwargs.get("model_object") is None:
             self.model = AutoModelForSeq2SeqLM.from_pretrained(
-                self.args.model, cache_dir=os.environ.get('TRANSFORMERS_CACHE', "/tmp/hf-cache")
+                self.args.model, cache_dir=self.args.cache_dir
             )
             # free-up temporary space
-            os.system("/bin/rm -rf /tmp/hf-cache")
-            os.system("df")
+            if self.args.free_up_space:
+                os.system(f"/bin/rm -rf {self.args.cache_dir}")
 
             if "t5" or "T0" in self.args.model:
                 self.pad_token_id = self.tokenizer.pad_token_id
@@ -55,9 +59,10 @@ class EncoderDecoder(EfficientCheckpointModule):
                 print("Freezing embeddings")
                 freeze_embeds(self.model)
         else:
-            self.model = kwargs.get('model_object')
+            self.model = kwargs.get("model_object")
         self.loss_plugins = nn.ModuleDict({})
 
+        self._inference_outputs = []
         self.test_results = []
         self.best_val_result = None
 
@@ -67,7 +72,7 @@ class EncoderDecoder(EfficientCheckpointModule):
         else:
             self.loss_plugins = nn.ModuleDict({plugin.name: plugin})
 
-    def teacher_force_step(self, batch, reduction='mean'):
+    def teacher_force_step(self, batch, reduction="mean"):
         input_ids, target_ids = batch["input_ids"], batch["target_ids"]
 
         self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
@@ -84,7 +89,7 @@ class EncoderDecoder(EfficientCheckpointModule):
             target_ids,
             epsilon=0.1,
             ignore_index=self.pad_token_id,
-            reduction=reduction
+            reduction=reduction,
         )
         return loss
 
@@ -104,21 +109,26 @@ class EncoderDecoder(EfficientCheckpointModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss = self.teacher_force_step(batch, reduction='none')
+        loss = self.teacher_force_step(batch, reduction="none")
         mean_loss = loss.sum() / loss.size(0)
         self.log("val/loss", mean_loss, on_epoch=True, prog_bar=True)
-        return loss, batch['task_ids']
+        self._inference_outputs.append((loss, batch["task_ids"]))
+        return loss, batch["task_ids"]
 
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
+        outputs = self._inference_outputs
         losses = torch.cat([out[0].sum(-1) for out in outputs], 0)
         task_ids = torch.cat([out[1] for out in outputs], 0)
 
         # compute the loss per task id
-        with open(os.path.join(self.args.output_dir, "val_loss_by_task.txt"), "a+") as f:
+        with open(
+            os.path.join(self.args.output_dir, "val_loss_by_task.txt"), "a+"
+        ) as f:
             task_losses = {}
             for task_id in torch.unique(task_ids):
                 task_losses[task_id.item()] = losses[task_ids == task_id].mean().item()
             f.write(json.dumps(task_losses) + "\n")
+        self._inference_outputs.clear()
 
     def configure_optimizers(self):
         args = self.args
@@ -127,7 +137,9 @@ class EncoderDecoder(EfficientCheckpointModule):
         optimizer, self.trainable_param_names = get_optimizer(
             self, args, no_decay=["bias", "LayerNorm.weight"]
         )
-        global_bs = get_global_batch_size(args.train_batch_size, args.gradient_accumulation_steps)
+        global_bs = get_global_batch_size(
+            args.train_batch_size, args.gradient_accumulation_steps
+        )
 
         if args.total_steps == -1:
             args.total_steps = (
@@ -151,7 +163,7 @@ class EncoderDecoder(EfficientCheckpointModule):
 
 class Finetuner(EncoderDecoder):
     def add_missing_args(self, args):
-        for (name, value) in args.items():
+        for name, value in args.items():
             if name not in self.hparams or self.hparams[name] in ["", None]:
                 self.hparams[name] = value
                 setattr(self.args, name, value)
@@ -226,18 +238,30 @@ class Finetuner(EncoderDecoder):
         return metrics
 
     def validation_step(self, batch, batch_idx):
-        return self.inference_step(batch)
+        output = self.inference_step(batch)
+        self._inference_outputs.append(output)
+        return output
 
     def test_step(self, batch, batch_idx):
-        return self.inference_step(batch)
+        output = self.inference_step(batch)
+        self._inference_outputs.append(output)
+        return output
 
-    def validation_epoch_end(self, outputs): 
-        return self.inference_end(outputs, self.trainer.datamodule.dataset_reader, "val")
+    def on_validation_epoch_end(self):
+        outputs = self.inference_end(
+            self._validation_outputs, self.trainer.datamodule.dataset_reader, "val"
+        )
+        self._inference_outputs.clear()
+        return outputs
 
-    def test_epoch_end(self, outputs):
-        return self.inference_end(outputs, self.trainer.datamodule.dataset_reader, "test")
+    def on_test_epoch_end(self, outputs):
+        outputs = self.inference_end(
+            self._test_outputs, self.trainer.datamodule.dataset_reader, "test"
+        )
+        self._inference_outputs.clear()
+        return outputs
 
-    def training_epoch_end(self, losses):
+    def on_training_epoch_end(self, losses):
         avg_loss = (sum([x["loss"] for x in losses]) / len(losses)).item()
         lrs = [x["lr"] for x in self.optimizers().param_groups]
         print(f"loss : {avg_loss:.4f}\tlr {lrs}\n")

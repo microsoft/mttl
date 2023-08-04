@@ -164,6 +164,11 @@ def main(files, dataset, latex, hps, tasks, nt):
                 else:
                     tasks_found.append(task_name)
 
+                if tasks and task_name not in tasks:
+                    continue
+                else:
+                    tasks_found.append(task_name)
+
                 zero_shot = (
                     data.loc[data["step"] == 0]["test/acc_0shot"].dropna().values * 100
                 )

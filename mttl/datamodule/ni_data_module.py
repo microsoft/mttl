@@ -39,9 +39,10 @@ class CollateWrapperFn:
         }
         return output_batch
 
+
 class CollateWrapperFnCLM:
     def __init__(
-        self,   
+        self,
         pad_token_id,
     ):
         self.pad_token_id = pad_token_id
@@ -85,14 +86,17 @@ class CollateWrapperForCausalLMFn:
         max_length = input_ids[0].shape[0] + target_ids[0].shape[0]
         target_length = len(target_ids)
 
-        input_ids_ = torch.zeros(len(input_ids), max_length, dtype=torch.long) + self.pad_token_id
+        input_ids_ = (
+            torch.zeros(len(input_ids), max_length, dtype=torch.long)
+            + self.pad_token_id
+        )
         target_ids_ = torch.zeros(len(target_ids), max_length, dtype=torch.long) - 100
 
         for n, (i_, t_) in enumerate(zip(input_ids, target_ids)):
             len = i_.neq(self.pad_token_id).sum()
             input_ids_[n, :len] = i_[:len]
-            input_ids_[n, len:len + target_length] = t_
-            target_ids_[n, len:len + target_length] = t_
+            input_ids_[n, len : len + target_length] = t_
+            target_ids_[n, len : len + target_length] = t_
 
         task_ids = torch.LongTensor(task_ids)
         input_ids = trim_batch(torch.stack(input_ids, 0), self.pad_token_id)
@@ -173,15 +177,16 @@ class NIDataModule(LightningDataModule):
 
     @property
     def all_instructions(self):
-        """Return all task instructions used in the dataset.
-        """
+        """Return all task instructions used in the dataset."""
         return self.dataset_reader.read_all_instructions()
 
     @property
     def dataset_name(self):
         return hash_example("-".join(self.tasks))
 
-    def setup(self, stage="fit", val_examples_per_task=None, test_examples_per_task=None):
+    def setup(
+        self, stage="fit", val_examples_per_task=None, test_examples_per_task=None
+    ):
         self.dataset_reader = NIDatasetReader(
             self.config.train_dir,
             self.tokenizer,

@@ -1,6 +1,7 @@
 import copy
 import torch
-from pytorch_lightning.callbacks.base import Callback
+
+from pytorch_lightning.callbacks import Callback
 from pytorch_lightning import Trainer
 
 from mttl.datamodule.ni_data_module import NIDataModule
@@ -37,7 +38,7 @@ class NIOnlineZeroShot(Callback):
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx) -> None:
         # create backup of the current pl_module weights
         # and restore backup at the end
-        if batch_idx % self.every_steps == 0 and batch_idx > 0:
+        if batch_idx % (self.every_steps - 10) == 0 and batch_idx > 0:
             device = pl_module.device
 
             val_result = torch.zeros(1).to(pl_module.device)
@@ -46,7 +47,7 @@ class NIOnlineZeroShot(Callback):
             ft_wrapper = Finetuner(
                 **pl_module.hparams,
                 tokenizer=pl_module.tokenizer,
-                model_object=pl_module.model
+                model_object=pl_module.model,
             )
 
             trainer = Trainer(
@@ -61,7 +62,9 @@ class NIOnlineZeroShot(Callback):
             del trainer
 
             result_str = json.dumps(val_metrics) + "\n"
-            with open(pl_module.hparams.output_dir + f"/val_split_tasks_scores.jsonl", "a+") as f:
+            with open(
+                pl_module.hparams.output_dir + f"/val_split_tasks_scores.jsonl", "a+"
+            ) as f:
                 f.write(result_str)
 
             pl_module.model = pl_module.model.to(device)
@@ -89,12 +92,8 @@ class T0OnlineZeroShot(Callback):
         "anli-r2",
         "anli-r3",
     ]
-    
-    EARLY_STOP_TASKS = [
-        "copa",
-        "winogrande",
-        "anli-r1"
-    ]
+
+    EARLY_STOP_TASKS = ["copa", "winogrande", "anli-r1"]
 
     def __init__(self, every_steps):
         super().__init__()
@@ -126,7 +125,7 @@ class T0OnlineZeroShot(Callback):
             ft_wrapper = T0EncoderDecoder(
                 **pl_module.hparams,
                 tokenizer=pl_module.tokenizer,
-                model_object=pl_module.model
+                model_object=pl_module.model,
             )
             trainer = Trainer(
                 gpus=-1,
@@ -149,7 +148,9 @@ class T0OnlineZeroShot(Callback):
             del trainer
 
             result_str = json.dumps(all_results) + "\n"
-            with open(pl_module.hparams.output_dir + f"/online_zero_shot_scores.jsonl", "a+") as f:
+            with open(
+                pl_module.hparams.output_dir + f"/online_zero_shot_scores.jsonl", "a+"
+            ) as f:
                 f.write(result_str)
 
             pl_module.model = pl_module.model.to(device)
