@@ -77,12 +77,15 @@ class SkilledModel:
 class PolytroponAdapter(nn.Module):
     @property
     def routing_infos(self) -> RoutingInfo:
-        return self.task_id_ptr["routing_infos"]
+        return self.info_container["routing_infos"]
+    @property
+    def attn_mask(self) -> RoutingInfo:
+        return self.info_container["enc_mask" if self.is_encoder else "dec_mask"]
 
 
-def get_selector(config):
+def get_selector(config, in_dim=None):
     if config.poly_selector == "poly":
-        return PolytroponSelector(config)
+        return PolytroponSelector(config, in_dim=in_dim)
     elif config.poly_selector == "private":
         return PrivateSelector(config)
     elif config.poly_selector == "moe":
@@ -136,7 +139,7 @@ class MoESelector(Selector):
 
 
 class PolytroponSelector(Selector):
-    def __init__(self, config):
+    def __init__(self, config, in_dim=None):
         super().__init__()
 
         self.config = config
@@ -149,6 +152,8 @@ class PolytroponSelector(Selector):
         self.poly_average_correction = config.poly_average_correction
         self.poly_use_shared_skill = config.poly_use_shared_skill
 
+        self.input_conditional_routing = self.config.input_conditional_routing
+
         if self.use_relaxed_bernoulli and self.use_straight_through:
             raise ValueError("Cannot use both relaxed and straight through.")
 
@@ -158,12 +163,15 @@ class PolytroponSelector(Selector):
             )
         )
 
+        if self.input_conditional_routing:
+            self.input_routing = nn.Linear(in_dim, config.n_splits * config.n_skills)
+
     def resize_module_logits(self, n_tasks):
         self.module_logits.data = torch.empty(
             (n_tasks, self.n_splits * self.n_skills)
         ).uniform_(-1e-3, 1e-3)
 
-    def forward(self, routing_infos):
+    def forward(self, routing_infos, input=None, attn_mask=None):
         module_logits = self.module_logits[routing_infos.task_ids]
         module_logits = module_logits.view(-1, self.n_splits, self.n_skills)
 
@@ -197,6 +205,32 @@ class PolytroponSelector(Selector):
                 module_weights = module_logits / (
                     module_logits.sum(dim=-1, keepdim=True) + EPS
                 )
+
+        if self.input_conditional_routing:
+            # need to process input, and aggregate according to masking.
+            repeat = input.size(0) // attn_mask.size(0)
+            inv_repeat = attn_mask.size(0) // input.size(0)
+
+            og_attn_mask = attn_mask
+            # this repeat follows the patten in `model.predict()` line 152
+            if repeat > 1:
+                attn_mask = attn_mask.repeat_interleave(repeat, dim=0)
+            if inv_repeat > 1:
+                # This occurs during `predict` in t0, as only decoder has repeats
+                attn_mask = attn_mask[::inv_repeat]
+                breakpoint()
+            try:
+                merged_inputs = (input * attn_mask.unsqueeze(-1)).sum(dim=1) / attn_mask.sum(dim=1, keepdim=True)
+                input_logits = self.input_routing(merged_inputs)
+                input_logits = input_logits.view(-1, self.n_splits, self.n_skills)
+                input_weights = torch.sigmoid(module_logits)
+                input_weights = input_weights / (input_weights.sum(dim=-1, keepdim=True) + EPS)
+
+                module_weights = (module_weights + input_weights) / 2.0
+            except:
+                breakpoint()
+                xx = 1
+
         return module_weights
 
 
@@ -227,7 +261,7 @@ class PrivateSelector(Selector):
 
 
 class PolyLoRALinear(PolytroponAdapter):
-    def __init__(self, config, task_id_ptr, linear_layer, selector=None):
+    def __init__(self, config, info_container, linear_layer, is_encoder, selector=None, name=''):
         super().__init__()
         self.n_splits = config.n_splits
         self.n_tasks = config.n_tasks
@@ -240,11 +274,13 @@ class PolyLoRALinear(PolytroponAdapter):
         self.bias = linear_layer.bias
         self.kaiming_init = config.lora_kaiming_init
         self.lora_randb_init = config.lora_randb_init
-        self.task_id_ptr = task_id_ptr
+        self.info_container = info_container
         self.training_steps = 0.0
+        self.is_encoder = is_encoder
+        self.name = name
 
         if selector is None:
-            self.selector = get_selector(config)
+            self.selector = get_selector(config, in_dim=linear_layer.in_features)
         else:
             self.selector = selector
 
@@ -294,15 +330,16 @@ class PolyLoRALinear(PolytroponAdapter):
         if self.training:
             self.training_steps += 1
 
+        # print(self.name, self.is_encoder)    
         task_id = self.routing_infos.task_ids
 
         repeat = input.size(0) // task_id.size(0)
 
         # this repeat follows the patten in `model.predict()` line 152
-        if repeat:
+        if repeat > 1:
             self.routing_infos.repeat_interleave(repeat)
 
-        mixing_weights = self.selector(self.routing_infos).to(dtype=input.dtype)
+        mixing_weights = self.selector(self.routing_infos, input=input, attn_mask=self.attn_mask).to(dtype=input.dtype)
         bs, n_splits, n_skills = mixing_weights.size()
 
         # A is    n_splits, n_skills, D // n_splits, rank
@@ -321,7 +358,7 @@ class PolyLoRALinear(PolytroponAdapter):
 
 
 class PolyIA3Linear(PolytroponAdapter):
-    def __init__(self, config, task_id_ptr, linear_layer, selector=None):
+    def __init__(self, config, info_container, linear_layer, is_encoder, selector=None):
         super().__init__()
 
         self.n_splits = config.n_splits
@@ -331,7 +368,8 @@ class PolyIA3Linear(PolytroponAdapter):
         self.out_features = linear_layer.out_features
         self.weight = linear_layer.weight
         self.bias = linear_layer.bias
-        self.task_id_ptr = task_id_ptr
+        self.info_container = info_container
+        self.is_encoder = is_encoder
 
         assert self.out_features % config.n_splits == 0
 
@@ -341,7 +379,7 @@ class PolyIA3Linear(PolytroponAdapter):
         self.lora_a = nn.Parameter(data)
 
         if selector is None:
-            self.selector = get_selector(config)
+            self.selector = get_selector(config, in_dim=linear_layer.in_features)
         else:
             self.selector = selector
 
@@ -355,7 +393,7 @@ class PolyIA3Linear(PolytroponAdapter):
             self.routing_infos.repeat_interleave(repeat)
 
         # bs, n_splits, n_skills
-        mixing_weights = self.selector(self.routing_infos)
+        mixing_weights = self.selector(self.routing_infos, input=input, attn_mask=self.attn_mask).to(dtype=input.dtype)
 
         # n_skills, n_splits, D // n_splits
         weight = self.lora_a
@@ -406,19 +444,22 @@ def modify_with_poly(transformer, config, PolyLayer):
                 if re.fullmatch(config.lora_layers, c_name):
                     identifier = _extract_identifier(f'{m_name}.{c_name}', config.poly_granularity)
                     if identifier not in selectors.keys():
-                        selectors[identifier] = get_selector(config)
+                        selectors[identifier] = get_selector(config, in_dim=layer.in_features)
                     selector = selectors[identifier]
                     total_layers += 1
-
-                    print(f"Patching {m_name}.{c_name}...")
+                    full_name = f'{m_name}.{c_name}'
+                    is_encoder = any(prefix in full_name for prefix in ['encoder', 'EncDecAttention.k', 'EncDecAttention.v'])
+                    print(f"Patching {full_name}...")
                     setattr(
                         module,
                         c_name,
                         PolyLayer(
                             config,
-                            transformer.task_id_container,
+                            transformer.info_container,
                             layer,
                             selector=selector,
+                            name=m_name + '.' + c_name, 
+                            is_encoder=is_encoder
                         ),
                     )
 

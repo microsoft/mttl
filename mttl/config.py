@@ -199,6 +199,7 @@ class Config:
         self.poly_selector_cluster_temp = 1.0  # temperature for the cluster selector
         self.poly_average_correction = False   # correct the poly average
         self.poly_use_shared_skill = False     # use one skill shared by all tasks
+        self.input_conditional_routing = False
 
         """
         poly_granularity : how granular is the module selection :

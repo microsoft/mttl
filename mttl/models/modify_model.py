@@ -14,7 +14,7 @@ modifier_dict = {
 
 def modify_transformer(transformer, config):
     # create a shared container for the task id 
-    transformer.task_id_container = {}
+    transformer.info_container = {}
 
     if config.model_modifier:
         if config.model_modifier in modifier_dict:

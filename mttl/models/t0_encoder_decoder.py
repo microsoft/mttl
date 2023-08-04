@@ -69,7 +69,7 @@ class T0EncoderDecoder(EfficientCheckpointModule):
 
     def training_step(self, batch, batch_idx, split="train"):
         # propagate task information
-        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
+        self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
 
         if self.config.mc_loss > 0 or self.config.unlikely_loss > 0:
             input_ids, choices_ids, labels = (
@@ -83,23 +83,30 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             attention_mask = (
                 input_ids != self.tokenizer.pad_token_id
             ).float()  # [bs, max_seq_len]
+            decoder_input_ids = torch.cat(
+                [torch.zeros_like(flat_choices_ids[:, :1]), flat_choices_ids[:, :-1]],
+                dim=1,
+            )
+            decoder_attention_mask = (decoder_input_ids == decoder_input_ids).float()
+        
+            self.model.info_container["enc_mask"] = attention_mask
+            self.model.info_container["dec_mask"] = decoder_attention_mask 
+
+            lm_target = (
+                flat_choices_ids
+                - 100 * (flat_choices_ids == self.tokenizer.pad_token_id).long()
+            )
+            
             encoder_hidden_states = self.model.encoder(
                 input_ids=input_ids, attention_mask=attention_mask
             )[0]
             encoder_hidden_states = encoder_hidden_states.repeat_interleave(
                 num_choices, dim=0
             )
-            attention_mask = attention_mask.repeat_interleave(num_choices, dim=0)
-            decoder_input_ids = torch.cat(
-                [torch.zeros_like(flat_choices_ids[:, :1]), flat_choices_ids[:, :-1]],
-                dim=1,
-            )
-            decoder_attention_mask = (decoder_input_ids == decoder_input_ids).float()
-            lm_target = (
-                flat_choices_ids
-                - 100 * (flat_choices_ids == self.tokenizer.pad_token_id).long()
-            )
 
+            attention_mask = attention_mask.repeat_interleave(num_choices, dim=0)
+            self.model.info_container["enc_mask"] = attention_mask
+            
             model_output = self.model(
                 attention_mask=attention_mask,
                 encoder_outputs=[encoder_hidden_states],
@@ -188,6 +195,9 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             )  # [bs, max_seq_len]
             decoder_attention_mask = (decoder_input_ids == decoder_input_ids).float()
 
+            self.model.info_container["enc_mask"] = attention_mask
+            self.model.info_container["dec_mask"] = decoder_attention_mask 
+
             model_output = self.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -210,7 +220,7 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             self.save_model()
 
         # reset task information
-        self.model.task_id_container["routing_infos"] = None
+        self.model.info_container["routing_infos"] = None
 
         self.log_dict(
             {f"{split}/{k}": v for (k, v) in tensorboard_logs.items()}, sync_dist=True
@@ -248,7 +258,7 @@ class T0EncoderDecoder(EfficientCheckpointModule):
         """
 
         # propagate task information
-        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
+        self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
 
         input_ids, choices_ids, labels = (
             batch["input_ids"],
@@ -264,6 +274,19 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             attention_mask = (
                 input_ids != self.tokenizer.pad_token_id
             ).float()  # [bs, max_seq_len]
+            decoder_input_ids = torch.cat(
+                [torch.zeros_like(flat_choices_ids[:, :1]), flat_choices_ids[:, :-1]],
+                dim=1,
+            )
+            decoder_attention_mask = (decoder_input_ids == decoder_input_ids).float()
+            lm_target = (
+                flat_choices_ids
+                - 100 * (flat_choices_ids == self.tokenizer.pad_token_id).long()
+            )
+            
+            self.model.info_container["enc_mask"] = attention_mask
+            self.model.info_container["dec_mask"] = decoder_attention_mask 
+
             encoder_hidden_states = self.model.encoder(
                 input_ids=input_ids, attention_mask=attention_mask
             )[0]
@@ -275,16 +298,6 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             attention_mask = (
                 attention_mask.unsqueeze(dim=1).repeat(1, num_choices, 1).flatten(0, 1)
             )
-            decoder_input_ids = torch.cat(
-                [torch.zeros_like(flat_choices_ids[:, :1]), flat_choices_ids[:, :-1]],
-                dim=1,
-            )
-            decoder_attention_mask = (decoder_input_ids == decoder_input_ids).float()
-            lm_target = (
-                flat_choices_ids
-                - 100 * (flat_choices_ids == self.tokenizer.pad_token_id).long()
-            )
-
             model_output = self.model(
                 attention_mask=attention_mask,
                 encoder_outputs=[encoder_hidden_states],
@@ -394,16 +407,16 @@ class T0EncoderDecoder(EfficientCheckpointModule):
         }
 
         # reset task information
-        self.model.task_id_container["routing_infos"] = None
+        self.model.info_container["routing_infos"] = None
         return batch_output
 
     def _inference_step(self, batch):
         # propagate task information
-        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
+        self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
         batch_output = self.predict(batch)
 
         # reset task information
-        self.model.task_id_container["routing_infos"] = None
+        self.model.info_container["routing_infos"] = None
         return batch_output
 
     def validation_step(self, batch, batch_idx):
