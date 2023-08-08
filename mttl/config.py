@@ -8,7 +8,7 @@ from string import Template
 class Config:
     def __init__(self, filenames=None, kwargs=None, raise_error=True):
         # Stores personalization of the config file in a dict (json serializable)
-        self._updated_kwargs = {}
+        self._updated_kwargs = set()
         self.filenames = filenames
         self._set_defaults()
 
@@ -57,7 +57,9 @@ class Config:
                 v = Template(v).substitute(os.environ)
 
             setattr(self, k, v)
-            self._updated_kwargs[k] = v
+            print(type(self._updated_kwargs))
+            # self._updated_kwargs[k] = v
+            self._updated_kwargs.add(k)
 
     def __getitem__(self, item):
         return getattr(self, item, None)
@@ -105,7 +107,7 @@ class Config:
 
         config = cls(args.config_files, args.kwargs, raise_error=raise_error)
 
-        print(config.to_json())
+        print("config", config.to_json())
         return config
 
     def _set_defaults(self):

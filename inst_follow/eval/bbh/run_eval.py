@@ -217,7 +217,7 @@ def main(args):
     load_from = args.load_from
 
     print("Loading model and tokenizer... from {}".format(load_from))
-
+    topic_router = None
     if load_from == "llama":
         ################# load model from llama  #############################
         model, tokenizer = load_from_llama()
