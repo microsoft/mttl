@@ -95,12 +95,13 @@ def load_model(args, model_path=None, device='cuda', tokenizer_path=None):
     tokenizer = LlamaTokenizer.from_pretrained(tokenizer_path)# for generation we do not aadd the EOS token!!!
     tokenizer.pad_token_id = 0 
 
-    model = LlamaForCausalLM.from_pretrained(args.model).to(device)
-    state_dict = None  
+    # model = LlamaForCausalLM.from_pretrained(args.model).to(device)
+    state_dict = None   
     if model_path is not None:
         state_dict = torch.load(model_path)
-        if isinstance(args, Config):                
-            args.update_kwargs(state_dict["hyper_parameters"])  
+        if hasattr(args, "update_kwargs"): #isinstance(args, Config):                
+            args.update_kwargs(state_dict["hyper_parameters"])   
+    # args.poly_selector = "x_router"
     # I changed the folder name from compositional_adapters to inst_follow. Old name may still persist in old configs. Correct it in the loaded config.
     # put state dictionary on the device
     state_dict = {k: v.to(device) for k, v in state_dict["state_dict"].items()} if state_dict is not None else None
@@ -113,13 +114,25 @@ def load_model(args, model_path=None, device='cuda', tokenizer_path=None):
             setattr(args, k, v.replace("/home/v-oostapenko/dev/mttl/inst_follow/data/cluster_infos/", "/home/v-oostapenko/dev/mttl/inst_follow/cluster_infos/"))
         v = getattr(args, k)
         #if we are on amlt
-        # chec if env variable is set                   
+        # chec if env variable is set                  
         if os.environ.get("AMLT_OUTPUT_DIR") is not None:
             base = "/mnt/amlt_code/inst_follow/"
-            if isinstance(v, str) and "/home/v-oostapenko/dev/mttl/inst_follow/" in v:
-                setattr(args, k, v.replace("/home/v-oostapenko/dev/mttl/inst_follow/", "/mnt/amlt_code/inst_follow/"))
-    #############################
+            if isinstance(v, str) and "/home/v-oostapenko/dev/mttl/inst_follow/" in v:   
+                setattr(args, k, v.replace("/home/v-oostapenko/dev/mttl/inst_follow/", base))
+            v = getattr(args, k)
+            if isinstance(v, str) and "/mnt/amlt_code/inst_follow/cluster_infos/" in v:  
+                setattr(args, k, v.replace("/mnt/amlt_code/inst_follow/cluster_infos/","/mnt/default/data/cluster_infos/"))
+            
+        else:
+            base = "/home/v-oostapenko/dev/mttl/inst_follow/"
+            if isinstance(v, str) and "/mnt/amlt_code/inst_follow/" in v:  
+                setattr(args, k, v.replace("/mnt/amlt_code/inst_follow/", base))
+    #############################   
+    model = LlamaForCausalLM.from_pretrained(args.model).to(device)
+    if args.example_to_ids_path is not None and "flv2" in args.example_to_ids_path: # files were renamed, make ut compatible with older models
+        args.example_to_ids_path = args.example_to_ids_path.replace("flv2", "flnv2")
     model = modify_transformer(model, args) 
+            
     model_class = CLM    
     args.model_object = model 
     # tokenizer = dm.tokenizer if dm is not None else tokenizer

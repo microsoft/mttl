@@ -140,3 +140,7 @@ dmypy.json
 
 inst_follow/sandbox/
 inst_follow/sandbox/*
+*env_vars.sh
+
+models_gcr/*
+*[ignore]*

@@ -19,8 +19,8 @@ class PolytroponAdapter(nn.Module):
     def routing_infos(self) -> RoutingInfo:
         return self.task_id_ptr["routing_infos"]
 
-
-def get_selector(config):
+              
+def get_selector(config):  
     from mttl.cluster_tuning.cluster_selector import ClusterSelector
 
     if config.poly_selector == "poly":
@@ -40,6 +40,8 @@ def get_selector(config):
         return ClusterSelector(config, soft=False)
     elif config.poly_selector == "moe":
         return MoESelector(config)
+    elif config.poly_selector == "x_router":
+        return XRouter(config)
     else:
         raise NotImplementedError()
 
@@ -48,6 +50,173 @@ class Selector(nn.Module):
     pass
 
 
+class XRouter(Selector):  
+    def __init__(self, config):
+        super().__init__()
+
+        self.config = config  
+        self.x_routing_option=config.x_routing_option
+        self.sim_metric = config.x_router_sim_metric
+        self.ff = nn.Linear(4096, config.n_skills)
+        #innit weights and biases with kaiming
+        if config.xrouter_kaiming:
+            self.ff.weight.data.normal_(mean=0.0, std=0.02)
+            self.ff.bias.data.fill_(0)
+        # if self.x_routing_option ==4:
+        #     self.ff_posterior = nn.Linear(4096, config.n_skills)
+        #     self.ff_posterior.weight.data.normal_(mean=0.0, std=0.02)
+        #     self.ff_posterior.bias.data.fill_(0)
+            
+                   
+    def forward(self,routing_infos):
+        # self.x_routing_option = 4
+        x = routing_infos.x 
+        gen_mode = 0
+        x_rout = None                            
+        padding_mask = routing_infos.pad_token_mask   
+        if hasattr(routing_infos, "gen_mode"):
+            gen_mode = routing_infos.gen_mode
+            
+        if self.x_routing_option>0:
+            if gen_mode:   
+                if self.x_routing_option==1:
+                    if x.shape[1]==1:
+                        x = self.prev_x # we do not add the generated token and always use instruction only 
+                if self.x_routing_option in [2,3]: 
+                    if x.shape[1]==1: #we need to add cahsed previous tokens to the instructions
+                        padding_mask = torch.cat((padding_mask, torch.ones(x.shape[0], (self.prev_x.shape[1]-padding_mask.shape[1])+1, device=x.device)), dim=1)
+                        x = torch.cat((self.prev_x, x), dim=1)
+                if self.x_routing_option == 4:
+                    if x.shape[1]==1:
+                        x = self.prev_x
+                
+                # chas previous tokens     
+                if self.x_routing_option in [1,4]:
+                    if not x.shape[1]==1:
+                        self.prev_x = copy.deepcopy(x.detach()) # use instruction for routing
+                if self.x_routing_option in [2,3]: 
+                    self.prev_x = copy.deepcopy(x.detach())
+            else:
+                self.prev_x = None
+            
+            if x_rout is None:     
+                if isinstance(padding_mask, torch.Tensor):
+                    if padding_mask.dim() == 2:           
+                        x_rout = x * padding_mask.unsqueeze(-1).to(x.device)
+                        non_zero_counts = (x_rout != 0).sum(dim=1)  
+                        x_rout = (x_rout.sum(dim=1) / non_zero_counts).unsqueeze(1) # same routing for each sample              
+                    elif padding_mask.dim() == 3: # different routing per token
+                        # seq = x.shape[1]          
+                        # # x = x.unsqueeze(1).repeat(1,seq,1,1)
+                        # x_rout = x.unsqueeze(1).repeat(1,seq,1,1) * padding_mask.unsqueeze(-1)#.to(x.device)
+                        # x_rout = x_rout.sum(dim=2)      
+                        # Element-wise multiplication with padding_mask using broadcasting
+                        x_rout = (x.unsqueeze(1) * padding_mask.unsqueeze(-1)).sum(dim=2)  
+                        # del padding_mask                                    
+                        # del x
+                        non_zero_counts = (padding_mask != 0).sum(dim=2)
+                        x_rout = (x_rout / non_zero_counts.unsqueeze(-1))
+                        del non_zero_counts, padding_mask
+                elif isinstance(padding_mask, tuple):
+                    assert self.x_routing_option == 4 
+                    posterior_padding_mask = padding_mask[0] # looks at instruction and output
+                    prior_padding_mask = padding_mask[1] # looks only on instruction
+                    
+                    x_rout_prior = x * prior_padding_mask.unsqueeze(-1).to(x.device)
+                    non_zero_counts = (x_rout_prior != 0).sum(dim=1)  
+                    x_rout_prior = (x_rout_prior.sum(dim=1) / non_zero_counts).unsqueeze(1) # same routing for each sample 
+                    
+                    
+                    x_rout_posterior = x * posterior_padding_mask.unsqueeze(-1).to(x.device)
+                    non_zero_counts = (x_rout_posterior != 0).sum(dim=1)   
+                    x_rout_posterior = (x_rout_posterior.sum(dim=1) / non_zero_counts).unsqueeze(1) # same routing for each sample 
+
+                    del non_zero_counts, prior_padding_mask, posterior_padding_mask
+                    
+                    adapter_logits_prior = self.ff(x_rout_prior)    
+                    adapter_dist_prior = F.softmax(adapter_logits_prior/self.config.poly_selector_cluster_temp, dim=-1)
+                    if gen_mode:
+                        return adapter_dist_prior, 0.0
+                    adapter_logits_posterior = self.ff(x_rout_posterior)
+                    adapter_dist = F.softmax(adapter_logits_posterior/self.config.poly_selector_cluster_temp, dim=-1)  
+                    aux_loss = 0.0  
+                    if self.sim_metric == "kl":# and not gen_mode:  
+                        # adapter_dist -- posterior, looks at inpiut + output. This should be P.
+                        # adapter_dist_prior -- q, looks only on instruction.
+                        if self.config.reverse_xrouter_kl:        
+                            # kl_divergence(p, q) -- surprise of using Q as model when true dist is P.                    
+                            aux_loss = torch.distributions.kl.kl_divergence(torch.distributions.Categorical(probs=adapter_dist), torch.distributions.Categorical(probs=adapter_dist_prior))  
+                        else:
+                            aux_loss = torch.distributions.kl.kl_divergence(torch.distributions.Categorical(probs=adapter_dist_prior), 
+                                                                        torch.distributions.Categorical(probs=adapter_dist))        
+                        aux_loss = aux_loss.mean()                             
+                    elif self.sim_metric == "cosine":# and not gen_mode:              
+                        aux_loss = 1-F.cosine_similarity(adapter_logits_prior, adapter_logits_posterior, dim=-1)
+                        aux_loss = aux_loss.mean()
+                    if gen_mode or not self.training: 
+                        adapter_dist = adapter_dist_prior
+                    
+                    return adapter_dist, aux_loss
+                    
+                else: 
+                    raise NotImplementedError()
+        else:  
+            x_rout = x # simple per token routing
+        # del x, padding_mask
+        adapter_logits = self.ff(x_rout)              
+        adapter_probs = F.softmax(adapter_logits/self.config.poly_selector_cluster_temp, dim=-1)
+        return adapter_probs, 0.
+    
+    # def forward(self, routing_infos):
+    #     x = routing_infos.x  
+    #     gen_mode=0
+    #     if hasattr(routing_infos, "gen_mode"):
+    #         gen_mode = routing_infos.gen_mode
+        
+    #     if self.x_routing_option > 0:
+    #         padding_mask = routing_infos.pad_token_mask
+    #         instruction_mask = (routing_infos.labels == -100).float()
+            
+    #         if self.x_routing_option == 1:
+    #             padding_mask *= instruction_mask
+    #         elif self.x_routing_option == 2 or self.x_routing_option == 3:
+    #             padding_mask *= instruction_mask
+                
+    #             last_ones_indices = padding_mask.sum(dim=1, keepdim=True).cpu()
+    #             bs, seq, d = x.shape
+    #             ar = torch.arange(seq)
+                
+    #             mask = last_ones_indices + (seq - last_ones_indices) - ar.unsqueeze(0)
+    #             mask = torch.clamp(mask, 0, seq - 1)
+                
+    #             padding_mask = (ar.unsqueeze(0) < mask).unsqueeze(-1).to(padding_mask.device)
+    #             x_rout = x.unsqueeze(1) * padding_mask.to(x.device)
+                
+    #             non_zero_counts = (x_rout != 0).sum(dim=2)
+    #             x_rout = (x_rout.sum(dim=2) / non_zero_counts)
+        
+    #     if gen_mode and x.shape[1] == 1:
+    #         if self.x_routing_option == 1:
+    #             x_rout = self.prev_x
+    #         else:
+    #             padding_mask = torch.cat((padding_mask, torch.ones(x.shape[0], self.prev_x.shape[1] - padding_mask.shape[1] + 1, device=x.device)), dim=1)
+    #             x_rout = torch.cat((self.prev_x, x_rout), dim=1)
+        
+    #     if gen_mode:
+    #         self.prev_x = copy.deepcopy(x.detach())
+    #     else:
+    #         self.prev_x = None
+        
+    #     if x_rout is None:
+    #         padding_mask = routing_infos.pad_token_mask
+    #         x_rout = x.unsqueeze(1) * padding_mask.unsqueeze(-1)
+    #         non_zero_counts = (x_rout != 0).sum(dim=1)
+    #         x_rout = (x_rout.sum(dim=1) / non_zero_counts).unsqueeze(1)
+        
+    #     adapter_logits = self.ff(x_rout)
+    #     adapter_probs = F.softmax(adapter_logits / self.config.poly_selector_cluster_temp, dim=-1)
+    #     return adapter_probs
+            
 class MoESelector(Selector):
     def __init__(self, config):
         super().__init__()
@@ -302,7 +471,7 @@ class PolyLoRALinear(PolytroponAdapter):
         import math
         n_skills_a = self.n_skills if not self.share_a else 1
         if self.kaiming_init:
-            for skill in range(n_skills_a):
+            for skill in range(n_skills_a): 
                 for split in range(self.n_splits):
                     param = torch.empty((self.rank, self.in_features // self.n_splits))
                     torch.nn.init.kaiming_uniform_(param, a=math.sqrt(5))
@@ -341,8 +510,14 @@ class PolyLoRALinear(PolytroponAdapter):
         if repeat:
             self.routing_infos.repeat_interleave(repeat)
 
-        if self.selector is not None:   
-            mixing_weights = self.selector(self.routing_infos).to(dtype=input.dtype)
+        if self.selector is not None:          
+            setattr(self.routing_infos, "x", input)       
+            mixing_weights = self.selector(self.routing_infos)
+            delattr(self.routing_infos, "x")
+            if isinstance(mixing_weights, tuple): 
+                mixing_weights, kl = mixing_weights
+                self.routing_infos.aux_loss.append(kl)
+            mixing_weights.to(input.device)
         else:
             bs = input.size(0)  
             mixing_weights = torch.ones(bs, self.n_splits, self.n_skills, device=input.device, dtype=input.dtype)
@@ -364,8 +539,15 @@ class PolyLoRALinear(PolytroponAdapter):
             # x B
             adapter_out = torch.einsum("bsqkr,qkrd->bsqkd", (adapter_out, self.lora_b)) # bs x seq x n_splits x n_skills x D
             # x weights
-            if self.n_skills>1:  
-                adapter_out = torch.einsum("bsqkd,bqk->bsd", (adapter_out, mixing_weights)) # bs x seq x n_splits x D
+            if self.n_skills>1:  # mixing_weights is bs x n_splits/seq x n_skills
+                if mixing_weights.shape[1]==self.n_splits:
+                    adapter_out = torch.einsum("bsqkd,bqk->bsd", (adapter_out, mixing_weights)) # bs x seq x n_splits x D
+                else:
+                    # a = adapter_out * mixing_weights.unsqueeze(2).unsqueeze(-1) # bs x seq x n_splits x n_skills x D
+                    # a = a.sum(dim=3).squeeze() # bs x seq x n_splits x D
+                    # mixing_weights is bs x seg x n_skills, seperate routing for each seq
+                    adapter_out = torch.einsum("bsqkd,bsk->bsd", (adapter_out, mixing_weights)) # bs x seq x n_splits x D
+                    # a == adapter_out should be all True.
             else: 
                 adapter_out = adapter_out.squeeze(2).squeeze(2) # bs x seq x D
             adapter_out *= self.scaling # / self.rank
@@ -386,8 +568,8 @@ class PolyLoRALinear(PolytroponAdapter):
         #                                 self.lora_b, self.in_features, self.rank, self.out_features) * self.scaling # / self.rank
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:   
-            adapter_out = adapter_out * warmup
-
+            adapter_out = adapter_out * warmup 
+        # print((self.linear_layer(input) + adapter_out).shape)
         return self.linear_layer(input) + adapter_out
         # return F.linear(input, self.weight, self.bias) + adapter_out
 
@@ -454,6 +636,26 @@ class SkilledModel:
             print("Registering method: ", method)
             setattr(object, method, MethodType(getattr(SkilledModel, method), object))
         return object
+    
+    @staticmethod 
+    def set_selector(object, config, selector_to_replace=PolytroponSelector, new_selector=AverageSelector):
+        """Switches PolytroponSelector to AverageSelector.
+        """
+        for name, module in object.named_modules():   
+            for name, inner_mod in module.named_children():
+                if isinstance(inner_mod, selector_to_replace):
+                    print(
+                        f"Replacing with {new_selector}: ",
+                        name,
+                        "n_skills:",
+                        inner_mod.n_skills,
+                    )
+                    n_splits = inner_mod.n_splits if hasattr(inner_mod, "n_splits") else 1
+                    setattr(
+                        module,
+                        name,
+                        new_selector(config),
+                    )
 
     @staticmethod 
     def switch_selector_to_average(object, selector_to_replace=PolytroponSelector):

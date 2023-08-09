@@ -7,11 +7,18 @@ import json
 import tqdm
 import copy
 import torch
+import pickle
 import datasets
 from types import SimpleNamespace
-sys.path.append("/home/v-oostapenko/dev/mttl")
+from sklearn.feature_extraction.text import TfidfVectorizer
+# sys.path.append("/home/v-oostapenko/dev/mttl")
+directory = os.getenv("CODE_DIR", "/home/v-oostapenko/dev/mttl")
+sys.path.append(directory)
+sys.path.append("../..") 
+sys.path.append("/mnt/amlt_code/")
 from inst_follow.models.clm import CLM  
 from transformers import LlamaTokenizer  
+from inst_follow.eval.gen_ni_predictions import load_model_for_generation
 from mttl.models.poly import get_selector     
 from mttl.models.modify_model import modify_transformer  
 from finetune_llama import parse_config, Config                  
@@ -59,14 +66,47 @@ def get_outputs(input, model, tokenizer, do_sample, temperature, max_output_leng
         return otuputs_list
 
 
+def example_in_cluster(text, vectorizer, kmeans, random_clusters=False, distances = False):
+    if distances:
+        from kmeans_pytorch import pairwise_distance
+        centers = kmeans.cluster_centers
+        distances_to_centers = pairwise_distance(torch.from_numpy(vectorizer.transform(text)).cuda(), centers)
+        return list(distances_to_centers)
+    if random_clusters:     
+        clusters = np.random.choice(range(kmeans.n_clusters), len(text))
+    else:
+        clusters = kmeans.predict(torch.from_numpy(vectorizer.transform(text)))
+    return list(clusters)
+
+def number_normalizer(tokens):
+    """Map all numeric tokens to a placeholder.
+
+    For many applications, tokens that begin with a number are not directly
+    useful, but the fact that such a token exists can be relevant.  By applying
+    this form of dimensionality reduction, some methods may perform better.
+    """
+    return ("#NUMBER" if token[0].isdigit() else token for token in tokens)
+
+   
+class NumberNormalizingVectorizer(TfidfVectorizer):
+    # this vectorizer replaces numbers with #NUMBER token
+    def build_tokenizer(self):
+        tokenize = super().build_tokenizer()   
+        return lambda doc: list(number_normalizer(tokenize(doc)))    
+
+def load_kmeans_model(path_to_model):
+    with open(path_to_model, 'rb') as f:
+        out = pickle.load(f)
+    return out
+
 @torch.no_grad() 
-def generate_outputs(model, 
-                     examples, tokenizer, 
+def generate_outputs(model,           
+                     examples, tokenizer,   
                      temperature=0.7, do_sample=False, 
                      max_output_length=512, top_p=1.0, 
                      topic_router=None, 
                      skill_selector="topic",
-                     lda_depth=1, prompt_before_lda=True, run_all_clusters=False):
+                     lda_depth=1, prompt_before_lda=True, run_all_clusters=False, kmeans=None, tfidf=None):
     # otuputs_list=[]               
     if isinstance(examples, str):
         examples = [examples]
@@ -92,6 +132,17 @@ def generate_outputs(model,
                 # just all eros 
                 probs = torch.ones(len(examples), topic_router.n_skills).cuda()
             # input["distances"] = probs
+    
+    elif kmeans is not None and tfidf is not None:   
+        flag=0
+        if len(examples)==1:
+            flag=1   
+            examples=[examples[0],examples[0]]
+        cluster = example_in_cluster(examples,  tfidf, kmeans, random_clusters=False, distances=True)
+        if flag:   
+            cluster=[cluster[0]]     
+        probs = torch.stack(cluster).cuda()   
+        
     if not prompt_before_lda:
         for i,ex in enumerate(examples):
             examples[i] = prompt(ex)
@@ -122,14 +173,10 @@ def generate_outputs(model,
 
           
 @click.command()                  
-@click.option("--data_path", type=str, default="/home/v-oostapenko/dev/natural-instructions/tasks")   
-# @click.option("--dataset", )
-# @click.option("--config_path", type=str, default="/home/v-oostapenko/dev/mttl/configs/llama/finetune_full_lora.json")
 @click.option("--llama_model", type=str, default="yahma/llama-7b-hf") #chavinlo/alpaca-native") yahma/llama-7b-hf chainyo/alpaca-lora-7b togethercomputer/RedPajama-INCITE-Base-7B-v0.1
-@click.option("--batch_size", type=int, default=1)           
-@click.option("--model_name", type=str, default="wizzard_alpaca_4r")     
+@click.option("--batch_size", type=int, default=1)         
+@click.option("--model_name", type=str, default="alpaca_smear_8_pe_long_kminit")     
 @click.option("--from_hf", type=int, default=3)
-# @click.option("--nshot", type=int, default=1) # >0 means use canonical examples
 @click.option("--model_path", type=str, default="/home/v-oostapenko/logs/model_from_1016/amlt_yahma_llama_atlas_cluster_l1/alpaca4r_topic_ldal1/alpaca-lora_l1/best_model_alpaca_lora_atlas_cluster_te_ada_l1/loss=0.4242.ckpt")#"/home/v-oostapenko/logs/llama_alpaca/lora_full/yahma_llama-7b-hf0r2kuwgx_alpaca_lora_full-val/loss=0.5943.ckpt") #"/home/v-oostapenko/logs/llama_alpaca/lora_atlas_cluster_instr/yahma_llama-7b-hfjab096vi_alpaca_lora_atlas_cluster_te_ada-val/loss=0.5989.ckpt") #"/home/v-oostapenko/logs/llama_alpaca/lora_full/yahma_llama-7b-hfopq9a3dw_alpaca_lora_full-val/loss=0.5940.ckpt")
 # l1 lda: /home/v-oostapenko/logs/model_from_1016/amlt_yahma_llama_atlas_cluster_l1/alpaca4r_topic_ldal1/alpaca-lora_l1/best_model_alpaca_lora_atlas_cluster_te_ada_l1/loss=0.4242.ckpt
 # @click.option("--example_to_ids_path", type=str, default="/home/v-oostapenko/dev/mttl/inst_follow/data/cluster_infos/atlas_by_instr_text-embedding-ada-002.pkl") # depreciated
@@ -137,11 +184,18 @@ def generate_outputs(model,
 @click.option("--prompt_before_lda", type=bool, default=False)
 @click.option("--run_all_clusters", type=bool, default=False)
 @click.option("--of_pref", type=str, default="")       
-# @click.option("--nshot", type=int, default=0) # >0 means use canonical examples
-def main(data_path, 
-         llama_model="gpt3",      
+@click.option("--cbtm_n_clusters", type=int, default=-1)
+def gen_alpaca_eval_command(llama_model="gpt3", batch_size=4, model_name="", from_hf=0, model_path="", skill_selector="topic", prompt_before_lda=True, of_pref="", run_all_clusters=True, cbtm_n_clusters=-1):
+    return gen_alpaca_evl(llama_model, batch_size, model_name, from_hf, model_path, skill_selector, prompt_before_lda, of_pref, run_all_clusters, cbtm_n_clusters)
+
+def gen_alpaca_evl(llama_model="gpt3",      
          batch_size=4, model_name="", 
-         from_hf=0, model_path="", skill_selector="topic", prompt_before_lda=True, of_pref="", run_all_clusters=True):
+         from_hf=0, model_path="", 
+         skill_selector="topic", 
+         prompt_before_lda=True, 
+         of_pref="",                          
+         run_all_clusters=True, cbtm_n_clusters=-1):
+    
     home=os.getenv("CONFIG_DIR","/home/v-oostapenko/dev/")
     model_dict = {
         "tloen_alpaca": {"from_hf":3, "model_name":"tloen_alpaca", "depth":0, "model_path":"none"},               
@@ -167,7 +221,9 @@ def main(data_path,
         "alpaca_4r_merge_after_same_init_wg0x7gi6": {"from_hf":0, "model_name":"alpaca_4r_merge_after_same_init_wg0x7gi6", "depth":1, "model_path":f"/home/v-oostapenko/dev/amlt/alpaca_merge_after/alpaca_lora_merge_after_same_innit/best_model_alpaca_lora_atlas_cluster_l1_merge_after_same_innit/loss=0.4254.ckpt"},
         "alpaca_4r_merge_after_same_init_wd01_aen0508m": {"from_hf":0, "model_name":"alpaca_4r_merge_after_same_init_wd01_aen0508m", "depth":1, "model_path":f"/home/v-oostapenko/dev/amlt/alpaca_merge_after/alpaca_lora_merge_after_same_innitwd/best_model_alpaca_lora_atlas_cluster_l1_merge_after_same_innit_wd01/loss=0.4253.ckpt"},
         "alpaca_4r_merge_after_shared_lora_a": {"from_hf":0, "model_name":"alpaca_4r_merge_after_shared_lora_a", "depth":1, "model_path":f"/home/v-oostapenko/logs/best_model_alpaca_lora_atlas_cluster_l1_shared_loraa/loss=0.4257.ckpt"},    
-    
+        "alpaca_cbtm_dist4_ms0_temp01": {"from_hf":0, "model_name":"alpaca_cbtm_dist4_ms0_temp01", "depth":0, "model_path":"/home/v-oostapenko/dev/amlt/alpaca_lora_cbtm_clustering/alpaca_cbtm_dist4_ms0_temp01/yahma_llama-7b-hfsx5tnvyw_alpaca_lora_cbtm_dist-val/best_model_alpaca_lora_cbtm_dist_loss=0.4238.ckpt/loss=0.4238.ckpt"},
+        "alpaca_smear_8_pe_long_kminit": {"from_hf":0, "model_name":"alpaca_smear_8_pe_long_kminit", "depth":0, "model_path":"/home/v-oostapenko/dev/amlt/alpaca_smear/alpaca_smear_8_pe_long_kminit/yahma_llama-7b-hfx39ys94j_alpaca_lora_cbtm_dense-val/loss=0.8162.ckpt"},        
+        
     
     }     
     shared_adapter=False
@@ -192,113 +248,44 @@ def main(data_path,
         
     task_results = {} 
     topic_router = None
-    disable_torch_init()
-    if from_hf==1:             
-        if "llama" in llama_model:    
-            config = {"model": llama_model, "model_modifier":None} 
-            config = dict_to_dataclass(config)
-            model, _, _ = load_model(config, device=device, tokenizer_path="yahma/llama-7b-hf") 
-            # tokenizer =  LlamaTokenizer.from_pretrained(llama_model, padding_side='left')   
-            tokenizer =  LlamaTokenizer.from_pretrained("yahma/llama-7b-hf", padding_side='left')   
-            tokenizer.pad_token_id = 0 #tokenizer.eos_token_id
-            # tokenizer.padding_side='left'      
-            model.model.config.pad_token_id = tokenizer.pad_token_id #= 0  # unk
-            model.model.config.bos_token_id = tokenizer.bos_token_id
-            model.model.config.eos_token_id = tokenizer.eos_token_id 
-        else:    
-            pijama_model = AutoModelForCausalLM.from_pretrained(llama_model, torch_dtype=torch.float16)#, device_map="cpu")
-            tokenizer = AutoTokenizer.from_pretrained(llama_model)#.to(device)
-            tokenizer.pad_token_id = 0 #tokenizer.eos_token_id
-            tokenizer.padding_side='left'     
-            config = {"model": llama_model, "model_modifier":None} 
-            config = dict_to_dataclass(config)
-            model_class = CLM 
-            config.model_object = pijama_model 
-            # tokenizer = dm.tokenizer if dm is not None else tokenizer
-            model = model_class(**vars(config), tokenizer=tokenizer)      
-        
-        model.model.config.pad_token_id = tokenizer.pad_token_id #= 0  # unk
-        model.model.config.bos_token_id = tokenizer.bos_token_id
-        model.model.config.eos_token_id = tokenizer.eos_token_id   
-        model.to(device)
-    elif from_hf==0:           
-        config = Config()       
-        config.model = llama_model
-        config.n_skills = 1 # by default, can be overwritten in load_model if a checkpoint is provided
-        model, tokenizer, config = load_model(config, model_path, device=device)  
-        tokenizer.padding_side='left'  
-        print(f"Loaded model {llama_model} from {model_path}\n")
-        print("Loaded config", config.__dict__)
-        if config.example_to_ids_path is not None:    
-            cluster_result = ClusterResult(config.example_to_ids_path)      
-        if model.args.n_skills>1:             
-            topic_router = TopicRouter(cluster_with='instruction') if not run_all_clusters else SimpleNamespace(n_skills=model.args.n_skills) # dont need topic router if we are running all clusters
-            # all_topics=topic_router.map.get_topic_data()    
-            assert cluster_result is not None, "For soft-clustering models, cluster_result must be provided"
-            assert model.args.n_skills == cluster_result.n_clusters() 
-            if config.prune_unused_loras:
-                # prune unused loras
-                # counts = m = np.bincount(cluster_result._instance.infos.cluster_ids)
-                skill_ids_to_keep = np.where((np.array(cluster_result._instance.infos.cluster_dists).sum(0))> 0)[0]               
-                model.skill_ids_to_keep = skill_ids_to_keep
-                if shared_adapter: 
-                    model.shared_adapter=-1
-                # model.model.remove_skills(skill_ids_to_keep)
-                cluster_result.remove_skills(skill_ids_to_keep) 
-            if skill_selector == "average":                  
-                    topic_router = None
-                    # skill_ids_to_keep = np.where(np.bincount(cluster_result._instance.infos.cluster_ids)>0)[0]
-                    # model.model.remove_skills(skill_ids_to_keep)
-                    model.model.switch_selector_to_average(selector_to_replace=get_selector(config).__class__)
-                    model.to(device)      
-        
-        model.model.config.pad_token_id = tokenizer.pad_token_id #= 0  # unk
-        model.model.config.bos_token_id = tokenizer.bos_token_id
-        model.model.config.eos_token_id = tokenizer.eos_token_id        
-        model.to(device)          
-    elif from_hf==3: #use perf 
-        from peft import PeftModel    
-        # from inst_follow.models.clm import CLM  
-        config = {"model": llama_model, "model_modifier":None} 
-        config = dict_to_dataclass(config)  
-        model, tokenizer, _ = load_model(config, device=device) 
-        model = PeftModel.from_pretrained(
-            model.model,
-            "tloen/alpaca-lora-7b",
-            device_map={"": device},
-        )
-        # tokenizer =  LlamaTokenizer.from_pretrained("yahma/llama-7b-hf", padding_side='left')   
-        tokenizer.pad_token_id = 0 #tokenizer.eos_token_id
-        tokenizer.padding_side='left'
-        
-        model_class = CLM 
-        config.model_object = model 
-        # tokenizer = dm.tokenizer if dm is not None else tokenizer
-        model = model_class(**vars(config), tokenizer=tokenizer)
-        model.model.config.pad_token_id = tokenizer.pad_token_id #= 0  # unk
-        model.model.config.bos_token_id = tokenizer.bos_token_id
-        model.model.config.eos_token_id = tokenizer.eos_token_id  
-        model.to(device)
-    elif from_hf==4: # load llama and apply weight differences
-        alpaca_model = AutoModelForCausalLM.from_pretrained(model_path)
-        tokenizer = AutoTokenizer.from_pretrained(model_path)
-        tokenizer.pad_token_id = 0 #tokenizer.eos_token_id
-        tokenizer.padding_side='left'     
-        config = {"model": llama_model, "model_modifier":None} 
-        config = dict_to_dataclass(config)
-        model_class = CLM 
-        config.model_object = alpaca_model 
-        # tokenizer = dm.tokenizer if dm is not None else tokenizer
-        model = model_class(**vars(config), tokenizer=tokenizer)
-        model.to(device)   
+    disable_torch_init()      
+    
+    model, tokenizer, config, topic_router = load_model_for_generation(from_hf, llama_model, model_path, skill_selector)
+    
+    
+    base = os.getenv("AMLT_OUTPUT_DIR", "/home/v-oostapenko/dev/mttl/inst_follow")
+    base_cluster_infos="/home/v-oostapenko/dev/mttl/inst_follow/"
+    if os.environ.get("AMLT_OUTPUT_DIR") is not None:
+        base_cluster_infos  = "/mnt/amlt_code/inst_follow/"
+    path_to_clusterer = f"{base_cluster_infos}/cluster_infos/cbtm/"
+    
+    ############
+    # configure router
+    tfidf, kmeans = None, None
+    # infer what clusterer we are using
+    if config.example_to_ids_path is not None:
+        if "kmeans" in config.example_to_ids_path:
+            cbtm_n_clusters = ClusterResult(config.example_to_ids_path).n_clusters()
+            dataset = config.dataset
+    
+    if cbtm_n_clusters>0:
+        tdifd = "tfidf"
+        clusterer=f"kmeans{cbtm_n_clusters}"      
+        if dataset=="flan_v2":
+            clusterer = f"kmeans_flan_v2{cbtm_n_clusters}"
+            tdifd = "tfidf_flv2"
+        tfidf = load_kmeans_model(path_to_clusterer+f"/{tdifd}.pkl")
+        kmeans = load_kmeans_model(path_to_clusterer+f"/{clusterer}.pkl")
+        topic_router = None
+    
     
     # print(config)
     print("Arguments:\n")         
-    print(data_path, "\n", llama_model, "\n", batch_size, "\n", model_name, "\n", from_hf, "\n", model_path, "\n", skill_selector)
+    print(llama_model, "\n", batch_size, "\n", model_name, "\n", from_hf, "\n", model_path, "\n", skill_selector)
     # nshot = 1    
     out_file_name = f"{of_pref}al_eval_pred_{model_name}_{llama_model}.json"
     out_file_name=out_file_name.replace("/", "_")
-    base = os.getenv("AMLT_OUTPUT_DIR","/home/v-oostapenko/dev/mttl/inst_follow")
+    print("Output file name:", out_file_name)
     eval_set = datasets.load_dataset("tatsu-lab/alpaca_eval", "alpaca_eval")["eval"]
     examples = [] 
     bs = batch_size
@@ -318,7 +305,7 @@ def main(data_path,
                                     max_output_length=max_output_length,  
                                     top_p=top_p, topic_router=topic_router, 
                                     skill_selector=skill_selector, 
-                                    lda_depth=depth, prompt_before_lda=prompt_before_lda, run_all_clusters=run_all_clusters)
+                                    lda_depth=depth, prompt_before_lda=prompt_before_lda, run_all_clusters=run_all_clusters, kmeans=kmeans, tfidf=tfidf)
             if isinstance(outs, dict):
                 keys = list(outs.keys())
                 _examples_batch= []
@@ -350,7 +337,7 @@ def main(data_path,
                                 max_output_length=max_output_length, 
                                 top_p=top_p, topic_router=topic_router, 
                                 skill_selector=skill_selector, 
-                                lda_depth=depth, prompt_before_lda=prompt_before_lda, run_all_clusters=run_all_clusters)        
+                                lda_depth=depth, prompt_before_lda=prompt_before_lda, run_all_clusters=run_all_clusters, kmeans=kmeans, tfidf=tfidf)        
         if isinstance(outs, dict):
             keys = list(outs.keys())
             _examples_batch= []
@@ -369,4 +356,4 @@ def main(data_path,
             json.dump(outptut_examples, file, indent=4)
             
 if __name__ == '__main__':
-    main()
+    gen_alpaca_eval_command()

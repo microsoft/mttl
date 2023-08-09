@@ -1,6 +1,7 @@
 import copy
 import json
 import torch   
+import os
 import numpy as np
 import transformers
 from datasets import load_dataset
@@ -69,6 +70,8 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
         self.cluster_info = cluster_info
         self.train_on_inputs = train_on_inputs
         # load the data 
+        if os.getenv("AP_DATA_DIR") is not None:
+            data_dir = os.getenv("AP_DATA_DIR")
         if dst_path is None:       
             self.dataset = load_dataset("yahma/alpaca-cleaned", cache_dir=data_dir)["train"]
             if idxs is not None:       
