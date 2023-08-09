@@ -1,21 +1,33 @@
-from mttl.models.lora import modify_with_gator, modify_with_lora, modify_with_ia3, modify_with_ln
-from mttl.models.poly import modify_with_poly_lora, modify_with_poly_ia3
+from mttl.models.lora import (
+    modify_with_gator,
+    modify_with_lora,
+    modify_with_ia3,
+    modify_with_ln,
+    modify_with_tlora,
+)
+from mttl.models.poly import (
+    modify_with_poly_lora,
+    modify_with_poly_ia3,
+    modify_with_tensorpoly_lora,
+)
 from mttl.models.llama_adapter import modify_with_llama_adapter
 
 
 modifier_dict = {
     "lora": modify_with_lora,
+    "tlora": modify_with_tlora,
     "ia3": modify_with_ia3,
     "gator": modify_with_gator,
     "ln": modify_with_ln,
     "poly_lora": modify_with_poly_lora,
+    "tensorpoly_lora": modify_with_tensorpoly_lora,
     "poly_ia3": modify_with_poly_ia3,
     "llama_adapter": modify_with_llama_adapter,
 }
 
 
 def modify_transformer(transformer, config):
-    # create a shared container for the task id 
+    # create a shared container for the task id
     transformer.task_id_container = {}
 
     if config.model_modifier:

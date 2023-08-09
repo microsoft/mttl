@@ -1,0 +1,21 @@
+{
+    "dataset": "alpaca",
+    "optimizer": "adamw",
+    "learning_rate": 3e-4,
+    "micro_batch_size": 1,
+    "exp_name": "alpaca_lora_my_pretrain_r4",
+    "train_dir": "tmp",
+    "precision": "bf16",
+    "train_batch_size": 32,
+    "model": "yahma/llama-7b-hf",
+    "lora_rank": 4,
+    "num_train_epochs": 3,
+    "n_skills": 1,
+    "max_input_length": 512,
+    "eval_every": 400,
+    "warmup_steps": 100,
+    "model_modifier": "tlora",
+    "lora_modules": ".*attn",
+    "lora_layers": "v_proj|q_proj|k_proj|o_proj",
+    "trainable_param_names": ".*weight_leafs_[ab].*"
+}

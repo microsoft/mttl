@@ -44,6 +44,135 @@ class LoRALinear(nn.Module):
         return F.linear(input, self.weight, self.bias) + adapter_out
 
 
+class LoRATensor(nn.Module):
+    def __init__(self, config, tensor_layer):
+        super().__init__()
+
+        assert isinstance(
+            tensor_layer, nn.Linear
+        ), f"LoRA can only be applied to torch.nn.Linear, but {tensor_layer} is {type(tensor_layer)}."
+
+        self.in_features = tensor_layer.in_features
+        self.out_features = tensor_layer.out_features
+        self.lora_rank = config.lora_rank
+        self.order = config.order
+        self.tensor_rank = config.tensor_rank
+        self.weight = tensor_layer.weight
+        self.bias = tensor_layer.bias
+
+        self.embedding_dim_leaf_a = math.ceil((self.in_features) ** (1 / self.order))
+        self.embedding_dim_leaf_b = math.ceil((self.out_features) ** (1 / self.order))
+
+        self.weight_leafs_a = nn.Parameter(
+            self.weight.new_empty(
+                self.order,
+                self.tensor_rank,
+                self.lora_rank,
+                self.embedding_dim_leaf_a,
+            )
+        )
+
+        self.weight_leafs_b = nn.Parameter(
+            self.weight.new_empty(
+                self.order,
+                self.tensor_rank,
+                self.lora_rank,
+                self.embedding_dim_leaf_b,
+            )
+        )
+
+        # What if I just use one layer normalization
+        self.layerone_normalization_a = nn.LayerNorm(
+            normalized_shape=[self.lora_rank, self.embedding_dim_leaf_a**2]
+        )
+        # self.layertwo_normalization_a = nn.LayerNorm(
+        #     normalized_shape=[self.lora_rank, self.embedding_dim_leaf_a**2])
+        self.layerone_normalization_b = nn.LayerNorm(
+            normalized_shape=[self.lora_rank, self.embedding_dim_leaf_b**2]
+        )
+        # self.layertwo_normalization_b = nn.LayerNorm(
+        #     normalized_shape=[self.lora_rank, self.embedding_dim_leaf_b**2])
+        self.reset_parameters()
+
+    def tensor_product_construct(self, weight_leafs, flag="up"):
+        w = weight_leafs
+        if self.order == 2:
+            w01 = w[0, :, :, :, None] * w[1, :, :, None, :]
+            # print(w[:,:,:,:].size())
+            w01 = w01.view(self.tensor_rank, self.lora_rank, -1)
+            if flag == "up":
+                w01 = self.layerone_normalization_a(w01)
+            elif flag == "down":
+                w01 = self.layerone_normalization_b(w01)
+            # print(w01.size())
+            w01 = w01.view(self.tensor_rank, self.lora_rank, -1)
+            weight = w01.sum(dim=0)
+        elif self.order == 4:
+            w01 = w[0, :, :, :, None] * w[1, :, :, None, :]
+            # print(w[:,:,:,:].size())
+            w01 = w01.view(self.tensor_rank, self.lora_rank, -1)
+            if flag == "up":
+                w01 = self.layerone_normalization_a(w01)
+            elif flag == "down":
+                w01 = self.layerone_normalization_b(w01)
+            # print(w01.size())
+            w23 = w[2, :, :, :, None] * w[3, :, :, None, :]
+            w23 = w23.view(self.tensor_rank, self.lora_rank, -1)
+            if flag == "up":
+                w23 = self.layerone_normalization_a(w23)
+            elif flag == "down":
+                w23 = self.layerone_normalization_b(w23)
+
+            w0123 = w01[:, :, :, None] * w23[:, :, None, :]
+            w0123 = w0123.view(self.tensor_rank, self.lora_rank, -1)
+            weight = w0123.sum(dim=0)
+        elif self.order == 8:
+            w01 = w[0, :, :, :, None] * w[1, :, :, None, :]
+            w01 = w01.view(self.tensor_rank, self.lora_rank, -1)
+            w23 = w[2, :, :, :, None] * w[3, :, :, None, :]
+            w23 = w23.view(self.tensor_rank, self.lora_rank, -1)
+            w45 = w[4, :, :, :, None] * w[5, :, :, None, :]
+            w45 = w45.view(self.tensor_rank, self.lora_rank, -1)
+            w67 = w[6, :, :, :, None] * w[7, :, :, None, :]
+            w67 = w67.view(self.tensor_rank, self.lora_rank, -1)
+            w0123 = w01[:, :, :, None] * w23[:, :, None, :]
+            w0123 = w0123.view(self.tensor_rank, self.lora_rank, -1)
+            w4567 = w45[:, :, :, None] * w67[:, :, None, :]
+            w4567 = w4567.view(self.tensor_rank, self.lora_rank, -1)
+            w01234567 = w0123[:, :, :, None] * w4567[:, :, None, :]
+            w01234567 = w01234567.view(self.tensor_rank, self.lora_rank, -1)
+            weight = w01234567.sum(0)
+        if flag == "down":
+            tpr = weight[:, : self.out_features]
+        elif flag == "up":
+            tpr = weight[:, : self.in_features]
+        else:
+            raise ValueError("signal must be i)input or ii)output")
+        return tpr
+
+    def reset_parameters(self):
+        gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
+        std = gain / math.sqrt(self.in_features)
+        with torch.no_grad():
+            self.weight_leafs_a.uniform_(-std, std)
+
+        torch.nn.init.zeros_(self.weight_leafs_b)
+
+    def forward(self, input):
+        # general implementation for lora (adding and scaling)
+        weight = self.weight
+
+        self.lora_a = self.tensor_product_construct(
+            self.weight_leafs_a, flag="up"
+        )  # [tensor rank, rank, D]
+        self.lora_b = self.tensor_product_construct(self.weight_leafs_b, flag="down")
+        self.lora_a = self.lora_a.transpose(1, 0)
+        weight = weight + torch.matmul(self.lora_a, self.lora_b) / self.lora_rank
+        # adapter_out = torch.matmul(input, self.lora_a.T)
+        # adapter_out = torch.matmul(adapter_out, self.lora_b.T) / self.rank
+        return F.linear(input, weight, self.bias)
+
+
 class GatorLinear(nn.Module):
     def __init__(self, config, linear_layer):
         super().__init__()
@@ -156,6 +285,10 @@ def modify_with_ia3(transformer, config):
 
 def modify_with_lora(transformer, config):
     return modify_with_adapter(transformer, config, LoRALinear)
+
+
+def modify_with_tlora(transformer, config):
+    return modify_with_adapter(transformer, config, LoRATensor)
 
 
 def modify_with_gator(transformer, config):

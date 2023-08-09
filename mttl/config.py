@@ -195,6 +195,10 @@ class Config:
         self.precision = "32"
         self.monitor_grad_alignment_on = None
 
+        # add config for tlora
+        self.tensor_rank = 3
+        self.order = 8
+
         self.model_modifier = None
         self.lora_randb_init = False
         self.lora_rank = 16
