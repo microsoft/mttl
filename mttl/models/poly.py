@@ -62,10 +62,10 @@ class XRouter(Selector):
         if config.xrouter_kaiming:
             self.ff.weight.data.normal_(mean=0.0, std=0.02)
             self.ff.bias.data.fill_(0)
-        # if self.x_routing_option ==4:
-        #     self.ff_posterior = nn.Linear(4096, config.n_skills)
-        #     self.ff_posterior.weight.data.normal_(mean=0.0, std=0.02)
-        #     self.ff_posterior.bias.data.fill_(0)
+        if self.x_routing_option ==4 and config.sep_teacher_student:
+            self.ff_student = nn.Linear(4096, config.n_skills)
+            self.ff_student.weight.data.normal_(mean=0.0, std=0.02)
+            self.ff_student.bias.data.fill_(0)
             
                    
     def forward(self,routing_infos):
@@ -133,7 +133,7 @@ class XRouter(Selector):
 
                     del non_zero_counts, prior_padding_mask, posterior_padding_mask
                     
-                    adapter_logits_prior = self.ff(x_rout_prior)    
+                    adapter_logits_prior = self.ff(x_rout_prior) if not self.config.sep_teacher_student else self.ff_student(x_rout_prior)
                     adapter_dist_prior = F.softmax(adapter_logits_prior/self.config.poly_selector_cluster_temp, dim=-1)
                     if gen_mode:
                         return adapter_dist_prior, 0.0
@@ -143,15 +143,16 @@ class XRouter(Selector):
                     if self.sim_metric == "kl":# and not gen_mode:  
                         # adapter_dist -- posterior, looks at inpiut + output. This should be P.
                         # adapter_dist_prior -- q, looks only on instruction.
-                        if self.config.reverse_xrouter_kl:        
+                        if self.config.reverse_xrouter_kl:                   
                             # kl_divergence(p, q) -- surprise of using Q as model when true dist is P.                    
-                            aux_loss = torch.distributions.kl.kl_divergence(torch.distributions.Categorical(probs=adapter_dist), torch.distributions.Categorical(probs=adapter_dist_prior))  
+                            aux_loss = torch.distributions.kl.kl_divergence(torch.distributions.Categorical(probs=adapter_dist), 
+                                                                            torch.distributions.Categorical(probs=adapter_dist_prior))  
                         else:
                             aux_loss = torch.distributions.kl.kl_divergence(torch.distributions.Categorical(probs=adapter_dist_prior), 
                                                                         torch.distributions.Categorical(probs=adapter_dist))        
                         aux_loss = aux_loss.mean()                             
                     elif self.sim_metric == "cosine":# and not gen_mode:              
-                        aux_loss = 1-F.cosine_similarity(adapter_logits_prior, adapter_logits_posterior, dim=-1)
+                        aux_loss = 1-F.cosine_similarity(adapter_logits_prior, adapter_logits_posterior.detach(), dim=-1)
                         aux_loss = aux_loss.mean()
                     if gen_mode or not self.training: 
                         adapter_dist = adapter_dist_prior

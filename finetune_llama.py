@@ -96,7 +96,8 @@ class Config(MTTLConfig):
         self.validation_portion = 0.03  
         self.per_cluster_test = False
         self.use_test_set = False # wether to use examples marked as is_test = 1 in ClusterInfo as test set
-                
+        
+        self.sep_teacher_student = False
         self.x_router_sim_metric = "kl"
         self.eval_superni = True    
         self.eval_superni_use_outputs = False
@@ -371,13 +372,13 @@ def run_multitask(args):
     # empty memory
     del module
     del dm
-    # empty cache
+    # empty cache 
     torch.cuda.empty_cache()
     if args.eval_superni:         
         print("Evaluating on super NI")     
         from inst_follow.eval.gen_ni_predictions import eval_superni
         rouge_L_super_ni = eval_superni(model_name="", 
-                     batch_size=5,   
+                     batch_size=2,   
                      out_prefix=f"{args.exp_name}",  
                      model_path=path_best_model,         
                      nshot=0, use_outputs=args.eval_superni_use_outputs)
