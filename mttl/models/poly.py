@@ -634,8 +634,9 @@ class PolyLoRATensor(PolytroponAdapter):
         self.task_id_ptr = task_id_ptr
         self.training_steps = 0.0
 
+        # poly tensor-lora config.
         self.order = config.order
-        self.tensor_rank = self.n_skills
+        self.tensor_rank = config.tensor_rank
         if selector is None:
             self.selector = get_selector(config)
         else:
@@ -699,8 +700,8 @@ class PolyLoRATensor(PolytroponAdapter):
         #     torch.nn.init.zeros_(self.weight_leafs_b)
 
     def tensor_product_construct(self, weight_leafs, embedding_dim, flag="up"):
+        w = weight_leafs
         if self.order == 2:
-            w = weight_leafs
             w01 = w[0, :, :, :, None] * w[1, :, :, None, :]
             # print(w[:,:,:,:].size())
             w01 = w01.view(self.tensor_rank, self.rank, -1)
@@ -710,8 +711,7 @@ class PolyLoRATensor(PolytroponAdapter):
                 w01 = self.layerone_normalization_b(w01)
             # print(w01.size())
             return w01[:, :, :embedding_dim]
-        if self.order == 4:
-            w = weight_leafs
+        elif self.order == 4:
             w01 = w[0, :, :, :, None] * w[1, :, :, None, :]
 
             w01 = w01.view(self.tensor_rank, self.rank, -1)
@@ -729,6 +729,22 @@ class PolyLoRATensor(PolytroponAdapter):
             w0123 = w01[:, :, :, None] * w23[:, :, None, :]
             w0123 = w0123.view(self.tensor_rank, self.rank, -1)
             return w0123[:, :, :embedding_dim]
+        elif self.order == 8:
+            w01 = w[0, :, :, :, None] * w[1, :, :, None, :]
+            w01 = w01.view(self.tensor_rank, self.rank, -1)
+            w23 = w[2, :, :, :, None] * w[3, :, :, None, :]
+            w23 = w23.view(self.tensor_rank, self.rank, -1)
+            w45 = w[4, :, :, :, None] * w[5, :, :, None, :]
+            w45 = w45.view(self.tensor_rank, self.rank, -1)
+            w67 = w[6, :, :, :, None] * w[7, :, :, None, :]
+            w67 = w67.view(self.tensor_rank, self.rank, -1)
+            w0123 = w01[:, :, :, None] * w23[:, :, None, :]
+            w0123 = w0123.view(self.tensor_rank, self.rank, -1)
+            w4567 = w45[:, :, :, None] * w67[:, :, None, :]
+            w4567 = w4567.view(self.tensor_rank, self.rank, -1)
+            w01234567 = w0123[:, :, :, None] * w4567[:, :, None, :]
+            w01234567 = w01234567.view(self.tensor_rank, self.rank, -1)
+            return w01234567[:, :, :embedding_dim]
 
     def forward(self, input):
         if self.training:
@@ -774,7 +790,7 @@ def modify_with_poly_ia3(transformer, config):
     return modify_with_poly(transformer, config, PolyIA3Linear)
 
 
-def modify_with_tensorpoly_lora(transformer, config):
+def modify_with_poly_tlora(transformer, config):
     return modify_with_poly(transformer, config, PolyLoRATensor)
 
 

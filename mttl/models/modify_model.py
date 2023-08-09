@@ -8,7 +8,7 @@ from mttl.models.lora import (
 from mttl.models.poly import (
     modify_with_poly_lora,
     modify_with_poly_ia3,
-    modify_with_tensorpoly_lora,
+    modify_with_poly_tlora,
 )
 from mttl.models.llama_adapter import modify_with_llama_adapter
 
@@ -20,7 +20,7 @@ modifier_dict = {
     "gator": modify_with_gator,
     "ln": modify_with_ln,
     "poly_lora": modify_with_poly_lora,
-    "tensorpoly_lora": modify_with_tensorpoly_lora,
+    "poly_tlora": modify_with_poly_tlora,
     "poly_ia3": modify_with_poly_ia3,
     "llama_adapter": modify_with_llama_adapter,
 }
