@@ -94,6 +94,8 @@ def compute_metrics(predictions, references, xlingual=False):
         rougeL += metric_max_over_ground_truths(
             rougeL_score, prediction=pred, ground_truths=gold, xlingual=xlingual
         )
+    if n_evaluated == 0:
+        return {"exact_match": 0, "rouge1": 0, "rougeL": 0}
     exact_match = 100.0 * exact_match / n_evaluated  # len(references)
     rouge1 = 100.0 * rouge1 / n_evaluated  # len(references)
     rougeL = 100.0 * rougeL / n_evaluated  # len(references)
@@ -129,6 +131,13 @@ def parse_args():
         required=False,
         help="Jsonl file with each line corresponding to a prediction. "
         "Each json object should have an `id` and a `prediction` key.",
+        default="/home/v-oostapenko/dev/amlt/ni_eval/smear_dense_alpaca/eval/ni/ni_pred_smear_dense_alpaca_yahma_llama-7b-hfni-nshot0.jsonl",
+    )
+    parser.add_argument(
+        "--prediction_file",
+        required=False,
+        help="Jsonl file with each line corresponding to a prediction. "
+        "Each json object should have an `id` and a `prediction` key.",
         default="/home/v-oostapenko/dev/mttl/inst_follow/eval/ni/ni_pred_alpaca_full16r_notrainonsoure_addeos[full,ptopt](7ogye4hj)_yahma_llama-7b-hfni-nshot0.jsonl",
     )
     parser.add_argument(
@@ -142,44 +151,11 @@ def parse_args():
     )
     parser.add_argument("--output_file", help="Jsonl file to write the results to.")
     parser.add_argument("--clean", type=int, default=0)
+
     return parser.parse_args()
 
 
-if __name__ == "__main__":
-    args = parse_args()
-    tasks = [
-        "task1640_aqa1.0_answerable_unanswerable_question_classification",
-        "task290_tellmewhy_question_answerability",
-        "task304_numeric_fused_head_resolution",
-        "task602_wikitext-103_answer_generation",
-        "task033_winogrande_answer_generation",
-        "task1161_coda19_title_generation",
-        "task391_causal_relationship",
-        "task242_tweetqa_classification",
-        "task1195_disflqa_disfluent_to_fluent_conversion",
-        "task890_gcwd_classification",
-        "task620_ohsumed_medical_subject_headings_answer_generation",
-        "task035_winogrande_question_modification_person",
-        "task1529_scitail1.1_classification",
-        "task402_grailqa_paraphrase_generation",
-        "task1409_dart_text_generation",
-        "task738_perspectrum_classification",
-        "task1344_glue_entailment_classification",
-        "task1152_bard_analogical_reasoning_causation",
-        "task619_ohsumed_abstract_title_generation",
-        "task892_gap_reverse_coreference_resolution",
-        "task233_iirc_link_exists_classification",
-        "task645_summarization",
-        "task569_recipe_nlg_text_generation",
-        "task1154_bard_analogical_reasoning_travel",
-        "task202_mnli_contradiction_classification",
-        "task891_gap_coreference_resolution",
-        "task893_gap_fill_the_blank_coreference_resolution",
-        "task1439_doqa_cooking_isanswerable",
-        "task1159_bard_analogical_reasoning_containers",
-        "task520_aquamuse_answer_given_in_passage",
-        "task1407_dart_question_generation",
-    ]
+def eval_instances(args):
     eval_instances = {}
     with open(args.reference_file) as fin:
         for line in fin:
@@ -204,11 +180,11 @@ if __name__ == "__main__":
             if args.clean:
                 prediction = prediction.split("\n")[0]
                 # this part is for wizard
-                
+
             all_predictions[id] = prediction.strip()
-    print("how many explanation:", count)
+
     all_results = {}
-    for track in ["default"]:
+    for track in ["default"]:  # , "xlingual"]:
         print("Evaluating track:", track)
         instance_ids = [
             id for id, instance in eval_instances.items() if instance["track"] == track
@@ -262,3 +238,23 @@ if __name__ == "__main__":
     if args.output_file:
         with open(args.output_file, "w") as fout:
             json.dump(all_results, fout, indent=2)
+    return all_results
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    all_results = eval_instances(args)
+
+    # import glob
+    # results_per_file={}
+    # path="/home/v-oostapenko/dev/amlt/alpaca_lora_cbtm_clustering/"
+    # # load every folder starting with eval_ in the current directory
+    # for file in glob.glob(path+"eval_*/eval/ni/ni_pred*"):
+    #     args.prediction_file=file
+    #     args.output_file=None #file.replace("eval_","eval_results_")
+    #     all_results=eval_instances(args)
+    #     print("#"*50)
+    #     print(file)
+    #     print(all_results)
+    #     results_per_file[file]=all_results["rougeL_default_track"]
+    # print(results_per_file)

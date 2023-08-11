@@ -19,10 +19,10 @@
     "warmup_steps": 100,    
     "same_lora_init": 0,    
     "lora_dropout": 0.05,
-    "weight_decay": 0.00,   
+    "weight_decay": 0.00,
     "poly_selector":"poly",
     "model_modifier": "poly_lora",  
     "lora_modules": ".*attn",  
     "lora_layers": "v_proj|q_proj|k_proj|o_proj",
-    "trainable_param_names": ".*lora.*"
+    "trainable_param_names": ".*lora_[ab].*"      
 }

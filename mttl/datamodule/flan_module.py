@@ -1,13 +1,15 @@
 import torch      
-import numpy as np 
+import numpy as np  
 from scipy.stats import entropy as calc_entropy
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 
 from mttl.datamodule.ni_data_module import CollateWrapperFn, CollateWrapperFnCLM
-from mttl.dataloader.human_dataset_readers import HumanMixDataset
+from mttl.dataloader.cammels_dataset_readers import FlanV2Reader, HumanMixDataset
 from transformers import LlamaTokenizer
 from mttl.cluster_tuning.cluster_reader import ClusterResult
+#AutoTokenizer
+from transformers import AutoTokenizer
 
 class FlanModule(LightningDataModule):
     def train_dataloader(self):
@@ -58,9 +60,12 @@ class FlanModule(LightningDataModule):
         # )     
              
         tok_model = config.model if config.model is not None else "yahma/llama-7b-hf"
-        self.tokenizer = LlamaTokenizer.from_pretrained(tok_model, add_eos_token=False) # tloen does not add eos token
-        # self.tokenizer.pad_token_id = 
-        self.tokenizer.pad_token_id = 0 
+        if "llama" in tok_model:     
+            self.tokenizer = LlamaTokenizer.from_pretrained(tok_model, add_eos_token=False) # tloen does not add eos token
+            # self.tokenizer.pad_token_id = 
+            self.tokenizer.pad_token_id = 0 
+        else:
+            self.tokenizer = AutoTokenizer.from_pretrained(tok_model, add_eos_token=False)
         
         if self.config.padding_side == "left":
             self.tokenizer.padding_side = "left"  # Allow batched inference, used by tloen also in training
@@ -69,16 +74,26 @@ class FlanModule(LightningDataModule):
         self.task2id = {'alpaca_full':0}
 
     def get_dataset(self, idxs=None, loss_for_keywords=True):
-        return HumanMixDataset(
-            
-            self.tokenizer,          
-            self.config.max_input_length, 
-            self.config.max_output_length, 
-            self.config.train_dir, 
-            self.config.train_on_inputs,  
-            self.config.dst_dir, idxs, self.cluster_result, self.config.predict_cluster, loss_for_keywords=loss_for_keywords,
-        )
-    
+        if self.config.dataset=="flan_v2":
+            return FlanV2Reader(
+                
+                self.tokenizer,          
+                self.config.max_input_length, 
+                self.config.max_output_length, 
+                self.config.train_dir, 
+                self.config.train_on_inputs,  
+                self.config.dst_dir, idxs, self.cluster_result, self.config.predict_cluster, loss_for_keywords=loss_for_keywords,
+            )
+        elif self.config.dataset=="human":
+            return HumanMixDataset(
+                self.tokenizer,          
+                self.config.max_input_length, 
+                self.config.max_output_length, 
+                self.config.train_dir, 
+                self.config.train_on_inputs,  
+                self.config.dst_dir, idxs, self.cluster_result, self.config.predict_cluster, loss_for_keywords=loss_for_keywords,
+            )
+        
     def setup(self, stage=None): 
         idxs_cluster=[]  
         if self.config.train_only_cluster is not None:

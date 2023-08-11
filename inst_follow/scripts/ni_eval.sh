@@ -45,6 +45,16 @@
     
 # python eval/gen_ni_predictions.py --batch_size 5 --out_prefix "alpaca_full4r_notrainonsoure_addeos[full,ptopt](oiia6ai8)" --from_hf 0 --nshot 0 --usepijma_model_with_llama_adapter 0 --model_name "yahma/llama-7b-hf" --model_path "/home/v-oostapenko/logs/llama_alpaca/lora_full_r4_3(notrainonsource)/yahma_llama-7b-hfoiia6ai8_alpaca_lora_full_r4-val/loss=0.4247.ckpt"
 # wait                
-python eval/gen_ni_predictions.py --batch_size 2 --skill_selector "topic" --out_prefix "alpaca_full4r_atlaslda_l1[full,ptopt,topic](9psyqia3)" --from_hf 0 --nshot 1 --usepijma_model_with_llama_adapter 0 --model_name "yahma/llama-7b-hf" --model_path "/home/v-oostapenko/logs/amlt_yahma_llama_atlas_9psyqia3_cluster_l2/alpaca4r_topic_ldal1/alpaca-lora_l2/best_model_alpaca_lora_atlas_cluster_te_ada_l2/loss=0.4305.ckpt"
+# python eval/gen_ni_predictions.py --batch_size 2 --skill_selector "topic" --out_prefix "alpaca_full4r_atlaslda_l1[full,ptopt,topic](9psyqia3)" --from_hf 0 --nshot 1 --usepijma_model_with_llama_adapter 0 --model_name "yahma/llama-7b-hf" --model_path "/home/v-oostapenko/logs/amlt_yahma_llama_atlas_9psyqia3_cluster_l2/alpaca4r_topic_ldal1/alpaca-lora_l2/best_model_alpaca_lora_atlas_cluster_te_ada_l2/loss=0.4305.ckpt"
 # wait               
 # python eval/gen_ni_predictions.py --batch_size 5 --skill_selector "average" --out_prefix "alpaca_full4r_atlaslda_l2[full,ptopt,average](9psyqia3)" --from_hf 0 --nshot 0 --usepijma_model_with_llama_adapter 0 --model_name "yahma/llama-7b-hf" --model_path "/home/v-oostapenko/logs/amlt_yahma_llama_atlas_9psyqia3_cluster_l2/alpaca4r_topic_ldal1/alpaca-lora_l2/best_model_alpaca_lora_atlas_cluster_te_ada_l2/loss=0.4305.ckpt"
+
+ 
+python eval/gen_ni_predictions.py --batch_size 5 --model_name alpaca_poly_1
+python eval/gen_ni_predictions.py --batch_size 5 --model_name alpaca_poly_2
+wait
+python eval/gen_ni_predictions.py --batch_size 5 --model_name alpaca_poly_3
+python eval/gen_ni_predictions.py --batch_size 5 --model_name alpaca_poly_4   
+wait
+python eval/gen_ni_predictions.py --batch_size 5 --model_name alpaca_poly_5
+python eval/gen_ni_predictions.py --batch_size 5 --model_name alpaca_poly_6

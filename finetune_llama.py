@@ -26,10 +26,33 @@ from mttl.models.modify_model import modify_transformer
 from transformers import LlamaForCausalLM, LlamaTokenizer
 from mttl.dataloader.data_utils import ExampleInfo
 from mttl.utils import get_ni_tasks_from_file, trim_batch, hash_example
-
-from mttl.models.poly import get_selector
+from typing import List
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 # from peft import prepare_model_for_int8_training
+
+
+##################################################
+# TODO: figure out what is the problem with this, why is it needed?Probably something with pickle and creating the clustering files.
+# this is due to ttributeError: Can't get attribute 'NumberNormalizingVectorizer' on <module '__main__' from '/home/v-oostapenko/dev/mttl/finetune_llama.py'> when evaluating tfidf models
+def number_normalizer(tokens):
+    """Map all numeric tokens to a placeholder.
+
+    For many applications, tokens that begin with a number are not directly
+    useful, but the fact that such a token exists can be relevant.  By applying
+    this form of dimensionality reduction, some methods may perform better.
+    """
+    return ("#NUMBER" if token[0].isdigit() else token for token in tokens)
+
+
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+
+class NumberNormalizingVectorizer(TfidfVectorizer):
+    # this vectorizer replaces numbers with #NUMBER token
+    def build_tokenizer(self):
+        tokenize = super().build_tokenizer()
+        return lambda doc: list(number_normalizer(tokenize(doc)))
 
 
 # os.environ["AP_DATA_DIR"] = "/home/v-oostapenko/data" # temp for gcr
@@ -68,6 +91,11 @@ class Config(MTTLConfig):
         self.switch_to_average = 0
         # self.balanced = 0
 
+        self.reverse_xrouter_kl = False
+        self.param_names_added_to_sd = ""  # define additional params that will be added to state dict additionally to the trainable ones.
+        self.xrouter_pad_token_mask = False
+        self.validate_before_start = False
+        self.xrouter_kaiming = False
         self.predict_cluster = None  # topic or skill
         self.dst_dir = None  # dir of jsonl dataset
         self.fast_dev_run = False
@@ -75,6 +103,14 @@ class Config(MTTLConfig):
         self.validation_portion = 0.03
         self.per_cluster_test = False
         self.use_test_set = False  # wether to use examples marked as is_test = 1 in ClusterInfo as test set
+
+        self.sep_teacher_student = False
+        self.x_router_sim_metric = "kl"
+        self.eval_superni = True
+        self.eval_superni_use_outputs = False
+        self.gen_alpaca_eval = False
+        self.per_token_routing = False  # only applies to x_router routing
+        self.x_routing_option = 0  # only applies to x_router routing, depreciated
 
         super().__init__(**kwargs)
         # to reproduce setup in https://github.com/daanelson/alpaca-lora
@@ -161,21 +197,28 @@ def run_multitask(args):
         dm = DatBricksDollyModule(args, cluster_result=cluster_result)
     elif args.dataset == "flan_v2":
         dm = FlanModule(args, cluster_result=cluster_result)
+    elif args.dataset == "human":
+        dm = FlanModule(args, cluster_result=cluster_result)
     else:
         raise NotImplementedError()
 
     args.n_tasks = len(dm.task2id)
-    if args.use_4_bit_backbone:
-        args.model_object = from_pretrained(args.model)
-        # max_memory_MB=80000,
-        # add_lora_f = partial(modify_transformer, config=args))
+    if "llama" in args.model:
+        if args.use_4_bit_backbone:
+            args.model_object = from_pretrained(args.model)
+            # max_memory_MB=80000,
+            # add_lora_f = partial(modify_transformer, config=args))
+        else:
+            args.model_object = LlamaForCausalLM.from_pretrained(
+                args.model,
+                # load_in_8bit=args.load_in_8bit, # this doesnt work right now with current implementatio of lora
+                # torch_dtype=torch.float16,
+                device_map="auto",
+            )  # , load_in_8bit=True, torch_dtype=torch.float16)
     else:
-        args.model_object = LlamaForCausalLM.from_pretrained(
-            args.model,
-            # load_in_8bit=args.load_in_8bit, # this doesnt work right now with current implementatio of lora
-            # torch_dtype=torch.float16,
-            device_map="auto",
-        )  # , load_in_8bit=True, torch_dtype=torch.float16)
+        args.model_object = AutoModelForCausalLM.from_pretrained(
+            args.model, device_map="auto"
+        )
 
     if args.model_object.config.vocab_size != len(
         dm.tokenizer
@@ -186,16 +229,33 @@ def run_multitask(args):
     #     args.model_object = prepare_model_for_int8_training(args.model_object)
 
     if args.checkpoint is not None:
+        import copy
         from mttl.utils import get_checkpoint_path
         from inst_follow.utils import load_model
 
         checkpoint_path = get_checkpoint_path(args.checkpoint)
-        kwargs = vars(args)
-        kwargs.pop("checkpoint")
+        kwargs = copy.deepcopy(args)
+        # kwargs.pop("checkpoint")
+        # remove attribute checkpoint from kwargs
+        # if hasattr(kwargs, "checkpoint"):
+        #     delattr(kwargs, "checkpoint")
         # module = model_class.load_from_checkpoint(
         #     checkpoint_path, **kwargs, tokenizer=dm.tokenizer
         # )
         module, _, _ = load_model(kwargs, model_path=checkpoint_path)
+        module.args.output_dir = args.output_dir
+        # add XRouter if needed
+        if args.poly_selector in ["x_router", "x_router_hard"]:
+            args.n_skills = module.args.n_skills
+            module.model.set_selector(
+                args,
+                selector_to_replace=get_selector(module.args).__class__,
+                new_selector=get_selector(args).__class__,
+            )
+            # freeze the experts
+            # args.trainable_param_names=".*selector.*"
+            module.args = args
+
         del args.model_object
 
     else:
@@ -222,7 +282,7 @@ def run_multitask(args):
 
     # legit logging
     loggers = []
-    if os.environ.get("WANDB_API_KEY"):
+    if os.environ.get("WANDB_API_KEY") or args.wandb_project:
         # args_=args.__dict__.copy()
         # remove_non_serializable(args_)
         wandb_logger = pl.loggers.WandbLogger(
@@ -289,6 +349,22 @@ def run_multitask(args):
         **kwargs,
     )
 
+    if args.validate_before_start:  # only for em smear exp
+        from mttl.cluster_tuning.cluster_reader import ClusterResult
+
+        checkpoint_path = get_checkpoint_path(args.checkpoint)
+        kwargs = copy.deepcopy(args)
+        model, _, _ = load_model(kwargs, model_path=checkpoint_path)
+        model.args.output_dir = args.output_dir
+        cluster_result = ClusterResult(model.args.example_to_ids_path)
+        skill_ids_to_keep = np.where(
+            (np.array(cluster_result._instance.infos.cluster_dists).sum(0)) > 0
+        )[0]
+        model.model.remove_skills(skill_ids_to_keep)
+        cluster_result.remove_skills(skill_ids_to_keep)
+        trainer.validate(dataloaders=dm, model=model)
+        del model, _, cluster_result
+
     trainer.fit(module, dm)
 
     # try:
@@ -299,31 +375,64 @@ def run_multitask(args):
         trainer.test(dataloaders=dm, ckpt_path=ckpt_path)
         module.model.checkpoint_tested = "last"
         trainer.test(dataloaders=dm, ckpt_path="last")
-    if args.dataset in ["ni", "xfit", "alpaca", "longform", "wizzerd", "db_dolly"]:
-        best_model_path = trainer.checkpoint_callback.best_model_path
-        last_model_path = trainer.checkpoint_callback.last_model_path
-        # last_model_path = trainer.checkpoint_callback.bes
-        print(f"Best model path: {best_model_path}")
-        # Rename the file at best_model_path to 'best_model'
-        path_best_model = (
-            best_model_path.split("loss=")[0]
-            + f"best_model_{args.exp_name}_loss="
-            + best_model_path.split("loss=")[1]
+    # if args.dataset in ["ni", "xfit", "alpaca", "longform", "wizzerd", "db_dolly"]:
+    path_best_model = trainer.checkpoint_callback.best_model_path
+    path_last_model = trainer.checkpoint_callback.last_model_path
+    #     # last_model_path = trainer.checkpoint_callback.bes
+    #     print(f"Best model path: {best_model_path}")
+    #     # Rename the file at best_model_path to 'best_model'
+    #     path_best_model = best_model_path.split("loss=")[0] + f"best_model_{args.exp_name}_loss=" + best_model_path.split("loss=")[1]
+    #     path_last_model = last_model_path.split("last")[0] + f"last_model_{args.exp_name}_v" + last_model_path.split("last")[1]
+    #     #args.output_dir + f"/best_model_{args.exp_name}"
+    #     # create dir if not exists
+    #     if not os.path.exists(path_best_model):
+    #         os.makedirs(path_best_model)
+    #     # copy the best model to the best_model dir
+    #     os.system("mv " + best_model_path + " " + path_best_model + "/")
+    #     os.system("mv " + last_model_path + " " + path_last_model + "/")
+    print(f"Best model path: {path_best_model}")
+    print(f"Last model path: {path_last_model}")
+    # empty memory
+    del module
+    del dm
+    # empty cache
+    torch.cuda.empty_cache()
+    if args.eval_superni:
+        print("Evaluating on super NI")
+        from inst_follow.eval.gen_ni_predictions import eval_superni
+
+        rouge_L_super_ni = eval_superni(
+            model_name="",
+            batch_size=2,
+            out_prefix=f"{args.exp_name}",
+            model_path=path_best_model,
+            nshot=0,
+            use_outputs=args.eval_superni_use_outputs,
         )
-        path_last_model = (
-            last_model_path.split("last")[0]
-            + f"last_model_{args.exp_name}_v"
-            + last_model_path.split("last")[1]
-        )
-        # args.output_dir + f"/best_model_{args.exp_name}"
-        # create dir if not exists
-        if not os.path.exists(path_best_model):
-            os.makedirs(path_best_model)
-        # copy the best model to the best_model dir
-        os.system("mv " + best_model_path + " " + path_best_model + "/")
-        os.system("mv " + last_model_path + " " + path_last_model + "/")
-        print(f"Best model path: {path_best_model}")
-        print(f"Last model path: {path_last_model}")
+        ##################################################
+        import wandb
+
+        # if wandb is innitalized
+        if wandb.run is not None:
+            wandb.log({"rouge_L_super_ni": rouge_L_super_ni})
+    del trainer
+    if args.gen_alpaca_eval:
+        print("Generting alpaca_eval")
+        from gen_alpaca_eval_predictions import gen_alpaca_evl
+
+        try:
+            gen_alpaca_evl(
+                llama_model=args.model,
+                batch_size=2,
+                model_name=args.exp_name,
+                model_path=path_best_model,
+                run_all_clusters=False,
+            )
+
+        except Exception as e:
+            # print e
+            print("Failed to generate alpaca eval")
+            print(e)
 
 
 if __name__ == "__main__":

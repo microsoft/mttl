@@ -36,8 +36,8 @@ class ClusterSelector(Selector):
                 if not hasattr(routing_infos, "distances")
                 else routing_infos.distances
             )
-            # debug
-            # distances = [[d + 0.01 for d in distances[0]]]
+            if isinstance(distances, torch.Tensor):
+                distances = distances.clone().detach().cpu().numpy()
             distances = torch.tensor(
                 distances,
                 device=self.dummy_parameter.device,

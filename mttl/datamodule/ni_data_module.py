@@ -50,7 +50,7 @@ class CollateWrapperFnCLM:
     def __call__(self, batch: List[ExampleInfo]):
         input_ids = [b.input_ids for b in batch]
         target_ids = [b.target_ids for b in batch]
-        hashes = [b.hash for b in batch]
+        hashes = [b.hash for b in batch]  
         task_ids = [b.task_id for b in batch]
         instruction_hashes = [b.instruction_hash for b in batch]
 
@@ -59,12 +59,13 @@ class CollateWrapperFnCLM:
         labels = trim_batch(torch.stack(target_ids, 0), self.pad_token_id)
         labels = torch.where(labels == self.pad_token_id, -100, labels)
 
-        output_batch = {
+        output_batch = {   
             "input_ids": input_ids,
             "labels": labels,
             "task_ids": task_ids,
-            "hashes": hashes,
-            "instruction_hashes": instruction_hashes,
+            "hashes": hashes,          
+            "instruction_hashes": instruction_hashes, 
+            "pad_token_mask": (input_ids != self.pad_token_id).float().to(input_ids.device),
         }
         return output_batch
 

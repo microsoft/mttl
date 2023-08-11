@@ -1,6 +1,7 @@
 from pytorch_lightning import LightningModule
 import torch
-from dataclasses import dataclass
+import re     
+from dataclasses import dataclass, field
 from typing import List
 
 
@@ -43,8 +44,8 @@ class EfficientCheckpointModule(LightningModule):
             # we can safely avoid dumping this parameter if it is both
             # not in the trainable parameters and was not loaded from checkpoint
             if (
-                not (key in self.trainable_param_names)
-                and not (key in self._params_from_checkpoint)
+                not (key in self.trainable_param_names)    
+                and not (key in self._params_from_checkpoint) and not re.fullmatch(self.args.param_names_added_to_sd, key)
             ) or key in plugin_param_keys:
                 del ckpt["state_dict"][key]
                 print("Deleting from state dict:", key)
@@ -60,19 +61,25 @@ class EfficientCheckpointModule(LightningModule):
 
 
 @dataclass
-class RoutingInfo:
+class RoutingInfo:   
     task_ids: torch.Tensor
     hashes: List[str]
     instruction_hashes: List[str] = None
     example_ids: List[int] = None
+    pad_token_mask: torch.Tensor = None
+    labels: torch.Tensor = None
+    # empty list
+    aux_loss: List[torch.Tensor] = field(default_factory=list)
 
-    @classmethod
+    @classmethod 
     def from_batch(cls, batch: dict):
         ri = RoutingInfo(
-            task_ids=batch["task_ids"],
+            task_ids=batch["task_ids"],   
             hashes=batch.get("hashes", None),
             example_ids=batch.get("example_ids", None),
             instruction_hashes=batch.get("instruction_hashes", None),
+            pad_token_mask = batch.get("pad_token_mask", None),
+            labels=batch.get("labels", None),
         )
         if "distances" in batch:
             # used for evaluation of soft clustering tuned models
