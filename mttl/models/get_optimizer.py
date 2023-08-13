@@ -25,10 +25,12 @@ def get_optimizer(model, args, no_decay=None):
         ):
             if any(nd in param_name for nd in no_decay):
                 param_groups["no_decay"]["params"].append(param)
-            elif "module_logits" in param_name:
+            elif "module_logits" in param_name:   
                 param_groups["module_logits"]["params"].append(param)
             elif "lora" in param_name:
                 param_groups["adapters"]["params"].append(param)
+            elif "selector" in param_name: 
+                param_groups["router"]["params"].append(param)
             else:
                 param_groups["others"]["params"].append(param)
             trainable_param_names.add(param_name)
@@ -48,12 +50,23 @@ def get_optimizer(model, args, no_decay=None):
                 if args.adapters_weight_decay is not None
                 else args.weight_decay
             )
-            param_groups[key]["lr"] = (
-                args.adapters_learning_rate
+            param_groups[key]["lr"] = ( 
+                args.adapters_learning_rate  
                 if key in ["adapters"] and args.adapters_learning_rate
                 else args.learning_rate
             )
-        else:
+        elif key in ["router"]:          
+            param_groups[key]["weight_decay"] = (
+                args.router_weight_decay
+                if args.router_weight_decay is not None
+                else args.weight_decay
+            )
+            param_groups[key]["lr"] = (
+                args.router_learning_rate  
+                if key in ["router"] and args.router_learning_rate
+                else args.learning_rate
+            )
+        else:  
             param_groups[key]["weight_decay"] = (
                 0.0 if key in ["module_logits", "no_decay"] else args.weight_decay
             )

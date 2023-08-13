@@ -62,7 +62,7 @@ def remove_non_serializable(d):
 
 class Config(MTTLConfig):
     def __init__(self, **kwargs):
-        self.rank = 1  
+        self.rank = 1              
         self.prune_unused_loras = True
         self.init_b_random = False
         self.lora_dropout = 0
@@ -72,6 +72,7 @@ class Config(MTTLConfig):
         self.micro_batch_size = 4  
         self.share_lora_at_attn = 0
         self.share_lora_a  = False   
+        self.x_router_init_scale = 0.02
         self.merge_A_B_seperately = True
         self.train_on_inputs = False
         self.padding_side = "right"
@@ -83,7 +84,10 @@ class Config(MTTLConfig):
         self.wandb_project = None
         self.switch_to_average = 0
         # self.balanced = 0
-        
+                 
+        self.router_weight_decay = None
+        self.normalize_xrouter_weights = False
+        self.normalize_xrouter_input = False
         self.reverse_xrouter_kl = False
         self.param_names_added_to_sd = "" # define additional params that will be added to state dict additionally to the trainable ones.
         self.xrouter_pad_token_mask = False
@@ -96,7 +100,9 @@ class Config(MTTLConfig):
         self.validation_portion = 0.03  
         self.per_cluster_test = False
         self.use_test_set = False # wether to use examples marked as is_test = 1 in ClusterInfo as test set
-        
+                        
+        self.superni_eval_batchsize = 2
+        self.router_learning_rate = None
         self.sep_teacher_student = False
         self.x_router_sim_metric = "kl"
         self.eval_superni = True    
@@ -377,8 +383,8 @@ def run_multitask(args):
     if args.eval_superni:         
         print("Evaluating on super NI")     
         from inst_follow.eval.gen_ni_predictions import eval_superni
-        rouge_L_super_ni = eval_superni(model_name="", 
-                     batch_size=2,   
+        rouge_L_super_ni = eval_superni(model_name="",    
+                     batch_size=args.superni_eval_batchsize,
                      out_prefix=f"{args.exp_name}",  
                      model_path=path_best_model,         
                      nshot=0, use_outputs=args.eval_superni_use_outputs)

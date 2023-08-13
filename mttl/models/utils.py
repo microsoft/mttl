@@ -1,6 +1,7 @@
 from pytorch_lightning import LightningModule
 import torch
 import re     
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import List
 
@@ -60,7 +61,7 @@ class EfficientCheckpointModule(LightningModule):
         ), f"Load model failed, unexpected keys {load_result.unexpected_keys.__str__()}"
 
 
-@dataclass
+@dataclass    
 class RoutingInfo:   
     task_ids: torch.Tensor
     hashes: List[str]
@@ -70,6 +71,8 @@ class RoutingInfo:
     labels: torch.Tensor = None
     # empty list
     aux_loss: List[torch.Tensor] = field(default_factory=list)
+    # dict
+    metrics:defaultdict(list) = field(default_factory= lambda: defaultdict(list))
 
     @classmethod 
     def from_batch(cls, batch: dict):

@@ -1,6 +1,6 @@
 import torch
 import copy
-import torch.nn as nn 
+import torch.nn as nn   
 import torch.nn.functional as F
 import re
 import numpy as np
@@ -20,7 +20,7 @@ class PolytroponAdapter(nn.Module):
         return self.task_id_ptr["routing_infos"]
 
               
-def get_selector(config):  
+def get_selector(config, in_d=4096):            
     from mttl.cluster_tuning.cluster_selector import ClusterSelector
 
     if config.poly_selector == "poly":
@@ -41,7 +41,7 @@ def get_selector(config):
     elif config.poly_selector == "moe":
         return MoESelector(config)
     elif config.poly_selector == "x_router":
-        return XRouter(config)
+        return XRouter(config, in_d=in_d)
     else:
         raise NotImplementedError()
 
@@ -51,34 +51,50 @@ class Selector(nn.Module):
 
 
 class XRouter(Selector):  
-    def __init__(self, config):
+    def __init__(self, config, in_d=4096):
         super().__init__()
 
-        self.config = config  
+        self.config = config           
+        self.in_d = in_d                        
+        self.router_init_scale = config.x_router_init_scale
         self.x_routing_option=config.x_routing_option
         self.sim_metric = config.x_router_sim_metric
-        self.ff = nn.Linear(4096, config.n_skills)
-        #innit weights and biases with kaiming
-        if config.xrouter_kaiming:
-            self.ff.weight.data.normal_(mean=0.0, std=0.02)
+        self.n_splits = config.n_splits
+        self.input_layer_norm = nn.LayerNorm(in_d)           
+        self.ff = nn.Linear(in_d, config.n_skills * self.n_splits)   
+        self.ff_router_layer_norm = nn.LayerNorm(in_d)
+        self.ff_router_layer_norm.weight = nn.Parameter(torch.ones(in_d)*self.router_init_scale)
+        #innit weights and biases with normal distribution
+        if config.xrouter_kaiming: # TODO: rename this parameter to normal
+            self.ff.weight.data.normal_(mean=0.0, std=self.router_init_scale)
             self.ff.bias.data.fill_(0)
         if self.x_routing_option ==4 and config.sep_teacher_student:
-            self.ff_student = nn.Linear(4096, config.n_skills)
-            self.ff_student.weight.data.normal_(mean=0.0, std=0.02)
+            self.ff_student = nn.Linear(in_d, config.n_skills * self.n_splits)   
+            self.ff_student.weight.data.normal_(mean=0.0, std=self.router_init_scale)
             self.ff_student.bias.data.fill_(0)
-            
-                   
+            self.ff_student_layer_norm = nn.LayerNorm(in_d)     
+            self.ff_student_layer_norm.weight = nn.Parameter(torch.ones(self.in_dim)*self.router_init_scale)
+        
+    def route(self, router: nn.Linear, layer_norm: nn.LayerNorm, x):
+        if self.config.normalize_xrouter_input:
+            x = self.input_layer_norm(x)
+        
+        if self.config.normalize_xrouter_weights:  
+            weights = layer_norm(router.weight)  
+            return F.linear(x, weights, router.bias)
+        return F.linear(x, router.weight, router.bias)
+                           
     def forward(self,routing_infos):
         # self.x_routing_option = 4
         x = routing_infos.x 
         gen_mode = 0
-        x_rout = None                            
+        x_rout = None                           
         padding_mask = routing_infos.pad_token_mask   
         if hasattr(routing_infos, "gen_mode"):
             gen_mode = routing_infos.gen_mode
             
         if self.x_routing_option>0:
-            if gen_mode:   
+            if gen_mode:                  
                 if self.x_routing_option==1:
                     if x.shape[1]==1:
                         x = self.prev_x # we do not add the generated token and always use instruction only 
@@ -126,19 +142,19 @@ class XRouter(Selector):
                     non_zero_counts = (x_rout_prior != 0).sum(dim=1)  
                     x_rout_prior = (x_rout_prior.sum(dim=1) / non_zero_counts).unsqueeze(1) # same routing for each sample 
                     
-                    
+                       
                     x_rout_posterior = x * posterior_padding_mask.unsqueeze(-1).to(x.device)
                     non_zero_counts = (x_rout_posterior != 0).sum(dim=1)   
                     x_rout_posterior = (x_rout_posterior.sum(dim=1) / non_zero_counts).unsqueeze(1) # same routing for each sample 
 
                     del non_zero_counts, prior_padding_mask, posterior_padding_mask
-                    
-                    adapter_logits_prior = self.ff(x_rout_prior) if not self.config.sep_teacher_student else self.ff_student(x_rout_prior)
-                    adapter_dist_prior = F.softmax(adapter_logits_prior/self.config.poly_selector_cluster_temp, dim=-1)
+                      
+                    adapter_logits_prior = self.route(self.ff, self.ff_router_layer_norm, x_rout_prior) if not self.config.sep_teacher_student else self.route(self.ff_student, self.ff_student_layer_norm, x_rout_prior)
+                    adapter_dist_prior = self.softmax(adapter_logits_prior/self.config.poly_selector_cluster_temp)
                     if gen_mode:
-                        return adapter_dist_prior, 0.0
-                    adapter_logits_posterior = self.ff(x_rout_posterior)
-                    adapter_dist = F.softmax(adapter_logits_posterior/self.config.poly_selector_cluster_temp, dim=-1)  
+                        return adapter_dist_prior, 0.0  
+                    adapter_logits_posterior = self.route(self.ff, self.ff_router_layer_norm, x_rout_posterior)
+                    adapter_dist = self.softmax(adapter_logits_posterior/self.config.poly_selector_cluster_temp)
                     aux_loss = 0.0  
                     if self.sim_metric == "kl":# and not gen_mode:  
                         # adapter_dist -- posterior, looks at inpiut + output. This should be P.
@@ -164,59 +180,17 @@ class XRouter(Selector):
         else:  
             x_rout = x # simple per token routing
         # del x, padding_mask
-        adapter_logits = self.ff(x_rout)              
-        adapter_probs = F.softmax(adapter_logits/self.config.poly_selector_cluster_temp, dim=-1)
+        adapter_logits = self.route(self.ff, self.ff_router_layer_norm, x_rout)          
+        adapter_probs = self.softmax(adapter_logits/self.config.poly_selector_cluster_temp)
         return adapter_probs, 0.
     
-    # def forward(self, routing_infos):
-    #     x = routing_infos.x  
-    #     gen_mode=0
-    #     if hasattr(routing_infos, "gen_mode"):
-    #         gen_mode = routing_infos.gen_mode
-        
-    #     if self.x_routing_option > 0:
-    #         padding_mask = routing_infos.pad_token_mask
-    #         instruction_mask = (routing_infos.labels == -100).float()
-            
-    #         if self.x_routing_option == 1:
-    #             padding_mask *= instruction_mask
-    #         elif self.x_routing_option == 2 or self.x_routing_option == 3:
-    #             padding_mask *= instruction_mask
-                
-    #             last_ones_indices = padding_mask.sum(dim=1, keepdim=True).cpu()
-    #             bs, seq, d = x.shape
-    #             ar = torch.arange(seq)
-                
-    #             mask = last_ones_indices + (seq - last_ones_indices) - ar.unsqueeze(0)
-    #             mask = torch.clamp(mask, 0, seq - 1)
-                
-    #             padding_mask = (ar.unsqueeze(0) < mask).unsqueeze(-1).to(padding_mask.device)
-    #             x_rout = x.unsqueeze(1) * padding_mask.to(x.device)
-                
-    #             non_zero_counts = (x_rout != 0).sum(dim=2)
-    #             x_rout = (x_rout.sum(dim=2) / non_zero_counts)
-        
-    #     if gen_mode and x.shape[1] == 1:
-    #         if self.x_routing_option == 1:
-    #             x_rout = self.prev_x
-    #         else:
-    #             padding_mask = torch.cat((padding_mask, torch.ones(x.shape[0], self.prev_x.shape[1] - padding_mask.shape[1] + 1, device=x.device)), dim=1)
-    #             x_rout = torch.cat((self.prev_x, x_rout), dim=1)
-        
-    #     if gen_mode:
-    #         self.prev_x = copy.deepcopy(x.detach())
-    #     else:
-    #         self.prev_x = None
-        
-    #     if x_rout is None:
-    #         padding_mask = routing_infos.pad_token_mask
-    #         x_rout = x.unsqueeze(1) * padding_mask.unsqueeze(-1)
-    #         non_zero_counts = (x_rout != 0).sum(dim=1)
-    #         x_rout = (x_rout.sum(dim=1) / non_zero_counts).unsqueeze(1)
-        
-    #     adapter_logits = self.ff(x_rout)
-    #     adapter_probs = F.softmax(adapter_logits / self.config.poly_selector_cluster_temp, dim=-1)
-    #     return adapter_probs
+    def softmax(self, logit):
+        if self.n_splits>1:     
+            logit = logit.reshape(*logit.shape[:-1], self.n_splits, self.config.n_skills)
+            out = F.softmax(logit, dim=-1)
+            out = out.reshape(*logit.shape[:-2], self.config.n_skills * self.n_splits)
+            return out
+        return F.softmax(logit, dim=-1)
             
 class MoESelector(Selector):
     def __init__(self, config):
@@ -444,7 +418,7 @@ class PolyLoRALinear(PolytroponAdapter):
         self.scaling = self.lora_alpha / self.rank
         self.merge_A_B_seperately = config.merge_A_B_seperately if hasattr(config, "merge_A_B_seperately") else True
         if selector is None:
-            self.selector = get_selector(config)
+            self.selector = get_selector(config, in_d = linear_layer.in_features)
         else:
             self.selector = selector
 
@@ -522,7 +496,15 @@ class PolyLoRALinear(PolytroponAdapter):
         else:
             bs = input.size(0)  
             mixing_weights = torch.ones(bs, self.n_splits, self.n_skills, device=input.device, dtype=input.dtype)
-        bs, n_splits, n_skills = mixing_weights.size()
+        if isinstance(self.selector, XRouter):          
+            bs, seq, n_skills_x_n_splits = mixing_weights.size()
+            # seq == 1 is per-example routing, or sdqwuence length is per-tokeb routing
+            if self.n_splits>1:   
+                mixing_weights = mixing_weights.reshape(bs, seq, self.n_splits, self.n_skills)
+            assert seq == 1, "per token routing is not implemented yet for n_splits > 1"
+        else:
+            bs, n_splits, n_skills = mixing_weights.size()
+        
         # rnadom probabilities
         # print(mixing_weights[0]) 
         if self.merge_A_B_seperately:
@@ -533,24 +515,39 @@ class PolyLoRALinear(PolytroponAdapter):
             A = A.reshape(bs, self.in_features, self.rank)              
             B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
             adapter_out = input.bmm(A).bmm(B) * self.scaling # / self.rank
-        else: # ignoring n_splikts here
-            # self.lora_a n_splits, n_skills, D // n_splits, rank
-            # x * A          
-            adapter_out = torch.einsum("bsd,qkdr->bsqkr", (input, self.lora_a)) # bs x n_splits x n_skills x rank")            
-            # x B
-            adapter_out = torch.einsum("bsqkr,qkrd->bsqkd", (adapter_out, self.lora_b)) # bs x seq x n_splits x n_skills x D
-            # x weights
-            if self.n_skills>1:  # mixing_weights is bs x n_splits/seq x n_skills
-                if mixing_weights.shape[1]==self.n_splits:
-                    adapter_out = torch.einsum("bsqkd,bqk->bsd", (adapter_out, mixing_weights)) # bs x seq x n_splits x D
-                else:
-                    # a = adapter_out * mixing_weights.unsqueeze(2).unsqueeze(-1) # bs x seq x n_splits x n_skills x D
-                    # a = a.sum(dim=3).squeeze() # bs x seq x n_splits x D
-                    # mixing_weights is bs x seg x n_skills, seperate routing for each seq
-                    adapter_out = torch.einsum("bsqkd,bsk->bsd", (adapter_out, mixing_weights)) # bs x seq x n_splits x D
-                    # a == adapter_out should be all True.
-            else: 
-                adapter_out = adapter_out.squeeze(2).squeeze(2) # bs x seq x D
+        else:              
+            if self.n_splits>1: # MHR TODO: double check this
+                s_l = input.shape[1]             
+                input = input.unsqueeze(2).reshape(bs, s_l, self.n_splits, self.in_features // self.n_splits)
+                adapter_out = torch.einsum("bsqd,qkdr->bsqkr", (input, self.lora_a))
+                adapter_out = torch.einsum("bsqkr,qkrd->bsqkd", (adapter_out, self.lora_b)) # bs x seq x n_splits x n_skills x D//n_splits
+                adapter_out = adapter_out.transpose(2,3) # bs x seq x n_skills x n_splits x D//n_splits
+                assert self.n_skills>1, "n_skills must be > 1 for n_splits > 1, other is not implemented yet"
+                mixing_weights = mixing_weights.squeeze(1)
+                adapter_out = torch.einsum("bskqd,bqk->bsqd", (adapter_out, mixing_weights)) # bs x seq x n_splits x D//n_splits
+                # stack into b x s x D: stack last dimention              
+                adapter_out = adapter_out.reshape(bs, s_l, self.out_features)
+                input = input.reshape(bs, s_l, self.in_features)
+                
+            else:
+                # x * A                   
+                adapter_out = torch.einsum("bsd,qkdr->bsqkr", (input, self.lora_a)) # bs x n_splits x n_skills x rank")            
+                # x B
+                adapter_out = torch.einsum("bsqkr,qkrd->bsqkd", (adapter_out, self.lora_b)) # bs x seq x n_splits x n_skills x D
+                # x weights
+                if self.n_skills>1:  # mixing_weights is bs x n_splits/seq x n_skills
+                        if mixing_weights.shape[1]==1:
+                            # per example routing
+                            adapter_out = torch.einsum("bsqkd,bqk->bsd", (adapter_out, mixing_weights)) # bs x seq x n_splits x D
+                        else:
+                            # a = adapter_out * mixing_weights.unsqueeze(2).unsqueeze(-1) # bs x seq x n_splits x n_skills x D
+                            # a = a.sum(dim=3).squeeze() # bs x seq x n_splits x D
+                            # mixing_weights is bs x seg x n_skills, seperate routing for each seq
+                            adapter_out = torch.einsum("bsqkd,bsk->bsd", (adapter_out, mixing_weights)) # bs x seq x n_splits x D
+                            # a == adapter_out should be all True.
+                        
+                else:    
+                    adapter_out = adapter_out.squeeze(2).squeeze(2) # bs x seq x D
             adapter_out *= self.scaling # / self.rank
             # adapter_weight = torch.einsum("qsdr,qsrk->qsdk", (self.lora_a, self.lora_b)) # outer product
             # adapter_weight = torch.einsum("bqs,qsrd->bqrd", (mixing_weights.detach(), adapter_weight)) # bs x n_splits x D x D
@@ -567,8 +564,19 @@ class PolyLoRALinear(PolytroponAdapter):
         # B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features) 
         # adapter_out = EfficientBackwardbmm.apply(input, mixing_weights.detach(), self.lora_a,    
         #                                 self.lora_b, self.in_features, self.rank, self.out_features) * self.scaling # / self.rank
+        
+        # track entropy of the routing distribution over last dim   
+        mixing_weights_ = mixing_weights.view(-1, self.n_skills).detach() # ex x n_skills        
+        average_normalized_entropy = torch.mean(-torch.sum(mixing_weights_ * torch.log(mixing_weights_ + EPS), dim=-1)/ np.log(self.n_skills)) if self.n_skills>1 else torch.tensor(1.0)      
+        # how different are the routinf for different examples? calculate MI, entropy of average - average entropy
+        mixing_weights_mean = mixing_weights_.mean(0) # n_skills       
+        entropy_of_av_normalized = torch.mean(-torch.sum(mixing_weights_mean * torch.log(mixing_weights_mean + EPS), dim=-1)/ np.log(self.n_skills)) if self.n_skills>1 else torch.tensor(0.0)   
+        div = entropy_of_av_normalized - average_normalized_entropy    
+               
+        self.routing_infos.metrics["div"].append(div.item())     
+        self.routing_infos.metrics["routing_entropy"].append(average_normalized_entropy.item())
         warmup = min(self.training_steps / 10_000, 1)
-        if self.use_warmup:   
+        if self.use_warmup:      
             adapter_out = adapter_out * warmup 
         # print((self.linear_layer(input) + adapter_out).shape)
         return self.linear_layer(input) + adapter_out
@@ -748,7 +756,7 @@ def modify_with_poly(transformer, config, PolyLayer):
         return string[:left_idx + right_idx]
     
     selectors = {}
-    total_layers = 0
+    total_layers = 0    
     n_skills = copy.deepcopy(config.n_skills) 
     for m_name, module in dict(transformer.named_modules()).items():
         if re.fullmatch(config.lora_modules, m_name):
@@ -756,7 +764,7 @@ def modify_with_poly(transformer, config, PolyLayer):
                 if re.fullmatch(config.lora_layers, c_name):
                     identifier = _extract_identifier(f'{m_name}.{c_name}', config.poly_granularity)
                     if identifier not in selectors.keys():
-                        selectors[identifier] = get_selector(config)
+                        selectors[identifier] = get_selector(config, in_d=layer.in_features)
                     selector = selectors[identifier]
                     total_layers += 1
                     config.n_skills = n_skills

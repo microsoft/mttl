@@ -2,8 +2,11 @@ import json
 import os
 import sys
 import torch     
-import copy       
-from torch import nn
+import copy
+from torch.optim.optimizer import Optimizer     
+import wandb          
+from collections import defaultdict
+from torch import Tensor, nn
 from transformers import AutoModelForSeq2SeqLM, AutoModelForCausalLM
 
 sys.path.append("/home/v-oostapenko/dev/mttl")
@@ -25,7 +28,7 @@ class CLM(EfficientCheckpointModule):
         self.tokenizer = kwargs["tokenizer"]
         self.pad_token_id = self.tokenizer.pad_token_id
         self.model: AutoModelForCausalLM = None
-
+        self.accumulate_metrics = defaultdict(list)
         if kwargs.get('model_object') is None:
             raise NotImplementedError()
             self.model = AutoModelForSeq2SeqLM.from_pretrained(
@@ -86,7 +89,7 @@ class CLM(EfficientCheckpointModule):
         bs = input_ids.size(0)
         logits = outputs.logits
         vocab_size = logits.size(-1)
-        labels = labels.squeeze(-1)             
+        labels = labels.squeeze(-1)              
         shift_logits = logits[..., :-1, :].contiguous()
         shift_labels = labels[..., 1:].contiguous()
         # Flatten the tokens  
@@ -105,6 +108,13 @@ class CLM(EfficientCheckpointModule):
             loss = loss.sum(dim=-1) / non_zero_loss
         del outputs, shift_logits, shift_labels
         aux_loss = torch.mean(torch.stack(self.model.task_id_container["routing_infos"].aux_loss)) if len(self.model.task_id_container["routing_infos"].aux_loss)>0 else 0
+        
+        
+        # log metrics if training
+        for k,v in self.model.task_id_container["routing_infos"].metrics.items():        
+                self.accumulate_metrics[k].append(torch.tensor(v).mean())
+        
+        
         return loss, aux_loss
     
     def calculate_routing_mask(self, x, routing_infos):  
@@ -190,14 +200,25 @@ class CLM(EfficientCheckpointModule):
             **kwargs
         )
     
+    def on_before_optimizer_step(self, optimizer: Optimizer, optimizer_idx: int) -> None:
+        # if wandb.run is not None:                
+            # pl logger logs every 50 steps, we want to log before every update
+        for k,v in self.accumulate_metrics.items():
+                # log to wandb directly                   
+                # wandb.log({f"train/{k}": torch.tensor(v).mean()})
+                self.log(f"train/{k}", torch.tensor(v).mean(), on_step=True)
+        self.accumulate_metrics = defaultdict(list)
+        return super().on_before_optimizer_step(optimizer, optimizer_idx)
+    
     def training_step(self, batch, _):   
         loss, aux_loss = self.forward(batch)
         total_loss = loss+aux_loss
         # outputs = self.model.forward(**batch)   
         # loss= outputs.loss
-        self.log("train/loss", loss, on_epoch=True, prog_bar=True)  
+        self.log("train/loss", loss, on_epoch=True, prog_bar=True)    
         self.log("train/aux_loss", aux_loss, on_epoch=True, prog_bar=True)
         self.log("train/total_loss", total_loss, on_epoch=True, prog_bar=True)
+        
 
         for plugin in self.loss_plugins.values():   
             plugin_loss = plugin.compute_loss(self.model, batch)
@@ -211,17 +232,22 @@ class CLM(EfficientCheckpointModule):
         return total_loss
 
     def validation_step(self, batch, batch_idx, log=True): 
+        self.accumulate_metrics = defaultdict(list)
         loss, aux_loss = self.forward(batch, reduction='none')
         total_loss = loss #+aux_loss 
         # outputs = self.model.forward(**batch, reduction='none')
-        # loss= outputs.loss
+        # loss= outputs.loss      
         mean_loss = total_loss.sum() / loss.size(0)
         if log:
-            self.log("val/loss", mean_loss, on_epoch=True, prog_bar=True) 
+            self.log("val/loss", mean_loss, on_epoch=True, prog_bar=True)  
             self.log("val/aux_loss", aux_loss, on_epoch=True, prog_bar=True)
+            for k,v in self.model.task_id_container["routing_infos"].metrics.items(): 
+                self.log(f"val/{k}", torch.tensor(v).mean(), on_epoch=True, prog_bar=True)
             # self.log("val/total_loss", total_loss, on_epoch=True, prog_bar=True)
         return loss, batch['task_ids']
 
+    def on_before_backward(self, loss: Tensor) -> None:
+        return super().on_before_backward(loss)
     
     def test_step(self, batch, batch_idx):    
         loss, aux_loss = self.forward(batch, reduction='none')
