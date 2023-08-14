@@ -90,6 +90,8 @@ def get_selector(config, in_dim=None):
         return PrivateSelector(config)
     elif config.poly_selector == "moe":
         return MoESelector(config)
+    elif config.poly_selector == 'smear':
+        return SMEARSelector(config, in_dim=in_dim)
     else:
         raise NotImplementedError()
 
@@ -232,6 +234,37 @@ class PolytroponSelector(Selector):
                 xx = 1
 
         return module_weights
+
+class SMEARSelector(PolytroponSelector):
+    def __init__(self, config, in_dim=None):
+        if not config.input_conditional_routing:
+            print('overwriting input_conditional_routing to True')
+            config.input_conditional_routing = True
+
+        super().__init__(config, in_dim=in_dim)
+    
+    def forward(self, routing_infos, input=None, attn_mask=None):
+
+        # need to process input, and aggregate according to masking.
+        repeat = input.size(0) // attn_mask.size(0)
+        inv_repeat = attn_mask.size(0) // input.size(0)
+
+        og_attn_mask = attn_mask
+        # this repeat follows the patten in `model.predict()` line 152
+        if repeat > 1:
+            attn_mask = attn_mask.repeat_interleave(repeat, dim=0)
+        if inv_repeat > 1:
+            # This occurs during `predict` in t0, as only decoder has repeats
+            attn_mask = attn_mask[::inv_repeat]
+            breakpoint()
+        merged_inputs = (input * attn_mask.unsqueeze(-1)).sum(dim=1) / attn_mask.sum(dim=1, keepdim=True)
+        input_logits = self.input_routing(merged_inputs)
+        breakpoint()
+        input_probs = F.softmax(input_logits, -1)
+    
+        return input_probs.unsqueeze(1)
+
+    
 
 
 class AverageSelector(Selector):
