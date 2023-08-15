@@ -205,7 +205,7 @@ class CustomModelCheckpoint(pl.callbacks.ModelCheckpoint):
         self.last_model_score = current
 
 
-def get_mlf_logger():
+def get_mlf_logger():   
     import pytorch_lightning as pl
     from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
@@ -220,10 +220,9 @@ def get_mlf_logger():
             except:
                 pass
 
-    try:
+    try:  
         from azureml.core.run import Run
-
-        run = Run.get_context()
+        run = Run.get_context() 
         mlflow_url = run.experiment.workspace.get_mlflow_tracking_uri()
         mlf_logger = MLFlowLoggerCustom(
             experiment_name=run.experiment.name, tracking_uri=mlflow_url

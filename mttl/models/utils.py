@@ -62,7 +62,7 @@ class EfficientCheckpointModule(LightningModule):
 
 
 @dataclass    
-class RoutingInfo:   
+class RoutingInfo:    
     task_ids: torch.Tensor
     hashes: List[str]
     instruction_hashes: List[str] = None
@@ -73,6 +73,9 @@ class RoutingInfo:
     aux_loss: List[torch.Tensor] = field(default_factory=list)
     # dict
     metrics:defaultdict(list) = field(default_factory= lambda: defaultdict(list))
+    save_oracle_routings: bool = False
+    oracle_routings: List[torch.Tensor] = field(default_factory=list)
+    routings: List[torch.Tensor] = None
 
     @classmethod 
     def from_batch(cls, batch: dict):

@@ -10,7 +10,7 @@ from torch.distributions.relaxed_bernoulli import RelaxedBernoulli
 
 from mttl.models.utils import RoutingInfo
 
-
+ 
 EPS = 1e-12
 
 
@@ -64,6 +64,11 @@ class XRouter(Selector):
         self.ff = nn.Linear(in_d, config.n_skills * self.n_splits)   
         self.ff_router_layer_norm = nn.LayerNorm(in_d)
         self.ff_router_layer_norm.weight = nn.Parameter(torch.ones(in_d)*self.router_init_scale)
+        self.loard_balancing = config.x_router_load_balancing
+        
+        if not config.x_router_x_cond: 
+            self.dummy_input = nn.Parameter(torch.ones(in_d))
+        
         #innit weights and biases with normal distribution
         if config.xrouter_kaiming: # TODO: rename this parameter to normal
             self.ff.weight.data.normal_(mean=0.0, std=self.router_init_scale)
@@ -86,7 +91,9 @@ class XRouter(Selector):
                            
     def forward(self,routing_infos):
         # self.x_routing_option = 4
-        x = routing_infos.x 
+        x = routing_infos.x   
+        if not self.config.x_router_x_cond:    
+            x = self.dummy_input.unsqueeze(0).repeat(x.shape[0],1).unsqueeze(1).repeat(1,x.shape[1],1) # dummy input
         gen_mode = 0
         x_rout = None                           
         padding_mask = routing_infos.pad_token_mask   
@@ -104,7 +111,7 @@ class XRouter(Selector):
                         x = torch.cat((self.prev_x, x), dim=1)
                 if self.x_routing_option == 4:
                     if x.shape[1]==1:
-                        x = self.prev_x
+                        x = self.prev_x # we do not add the generated token and always use instruction only 
                 
                 # chas previous tokens     
                 if self.x_routing_option in [1,4]:
@@ -114,6 +121,10 @@ class XRouter(Selector):
                     self.prev_x = copy.deepcopy(x.detach())
             else:
                 self.prev_x = None
+            
+            if routing_infos.routings:    
+                routings = routing_infos.routings.pop(0)
+                return routings, torch.zeros(1, device=x.device)
             
             if x_rout is None:     
                 if isinstance(padding_mask, torch.Tensor):
@@ -155,7 +166,7 @@ class XRouter(Selector):
                         return adapter_dist_prior, 0.0  
                     adapter_logits_posterior = self.route(self.ff, self.ff_router_layer_norm, x_rout_posterior)
                     adapter_dist = self.softmax(adapter_logits_posterior/self.config.poly_selector_cluster_temp)
-                    aux_loss = 0.0  
+                    aux_loss = torch.zeros(1, device=x.device)
                     if self.sim_metric == "kl":# and not gen_mode:  
                         # adapter_dist -- posterior, looks at inpiut + output. This should be P.
                         # adapter_dist_prior -- q, looks only on instruction.
@@ -167,11 +178,14 @@ class XRouter(Selector):
                             aux_loss = torch.distributions.kl.kl_divergence(torch.distributions.Categorical(probs=adapter_dist_prior), 
                                                                         torch.distributions.Categorical(probs=adapter_dist))        
                         aux_loss = aux_loss.mean()                             
-                    elif self.sim_metric == "cosine":# and not gen_mode:              
-                        aux_loss = 1-F.cosine_similarity(adapter_logits_prior, adapter_logits_posterior.detach(), dim=-1)
+                    elif self.sim_metric == "cosine":# and not gen_mode:                        
+                        aux_loss = 1-self.cosine_sim(adapter_logits_prior, adapter_logits_posterior.detach(), dim=-1)
                         aux_loss = aux_loss.mean()
                     if gen_mode or not self.training: 
                         adapter_dist = adapter_dist_prior
+                    
+                    if routing_infos.save_oracle_routings: 
+                        routing_infos.oracle_routings.append(adapter_logits_posterior.detach())
                     
                     return adapter_dist, aux_loss
                     
@@ -182,7 +196,15 @@ class XRouter(Selector):
         # del x, padding_mask
         adapter_logits = self.route(self.ff, self.ff_router_layer_norm, x_rout)          
         adapter_probs = self.softmax(adapter_logits/self.config.poly_selector_cluster_temp)
-        return adapter_probs, 0.
+        return adapter_probs, torch.zeros(1, device=x.device)
+    
+    def cosine_sim(self, x, y, dim=-1):
+        if self.n_splits>1:      
+            x = x.reshape(*x.shape[:-1], self.n_splits, self.config.n_skills)
+            y = y.reshape(*y.shape[:-1], self.n_splits, self.config.n_skills)
+            return F.cosine_similarity(x, y, dim=dim)        
+        return F.cosine_similarity(x, y, dim=dim)
+        
     
     def softmax(self, logit):
         if self.n_splits>1:     
@@ -358,7 +380,7 @@ class EfficientBackwardbmm(Function):
         return torch.bmm(input, A).bmm(B)
     
     @staticmethod       
-    def backward(ctx, grad_output):              
+    def backward(ctx, grad_output):            
         input,module_weights = ctx.saved_tensors   
         # retrieve saved pointers
         lora_a, lora_b = ctx.lora_a, ctx.lora_b        
@@ -396,12 +418,14 @@ class EfficientBackwardbmm(Function):
 
 class PolyLoRALinear(PolytroponAdapter):                          
     def __init__(self, config, task_id_ptr, linear_layer, selector=None):
-        super().__init__()              
-        self.same_lora_init = config.same_lora_init
+        super().__init__()         
+        self.layer_name = config.layer_name     
         self.share_a = config.share_lora_a
         self.n_splits = config.n_splits
         self.n_tasks = config.n_tasks
-        self.n_skills = config.n_skills
+        self.n_skills = config.n_skills                    
+        self.aux_mi_loss_factor = config.aux_mi_loss_factor
+        self.same_lora_init = config.same_lora_init
         self.share_lora_at_attn = config.share_lora_at_attn
         self.in_features = linear_layer.in_features
         self.out_features = linear_layer.out_features
@@ -411,7 +435,8 @@ class PolyLoRALinear(PolytroponAdapter):
         self.linear_layer = linear_layer
         self.bias = linear_layer.bias
         self.kaiming_init = config.lora_kaiming_init
-        self.lora_randb_init = config.lora_randb_init
+        self.lora_randb_init = config.lora_randb_init          
+        self.x_router_load_balancing=config.x_router_load_balancing
         self.task_id_ptr = task_id_ptr
         self.training_steps = 0.0
         self.lora_alpha = config.lora_alpha if hasattr(config, "lora_alpha") else 1.0
@@ -564,17 +589,28 @@ class PolyLoRALinear(PolytroponAdapter):
         # B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features) 
         # adapter_out = EfficientBackwardbmm.apply(input, mixing_weights.detach(), self.lora_a,    
         #                                 self.lora_b, self.in_features, self.rank, self.out_features) * self.scaling # / self.rank
+        ####### KEEP TRACK of routing ########
+        # track entropy of the routing distribution over last dim    
+        # mixing_weights_ = mixing_weights.view(-1, self.n_skills)#.detach() # ex x n_skills        
+        # mixing_weights_mean = mixing_weights.transpose(0,1).mean(dim=1) # n_splits x n_skills
         
-        # track entropy of the routing distribution over last dim   
-        mixing_weights_ = mixing_weights.view(-1, self.n_skills).detach() # ex x n_skills        
-        average_normalized_entropy = torch.mean(-torch.sum(mixing_weights_ * torch.log(mixing_weights_ + EPS), dim=-1)/ np.log(self.n_skills)) if self.n_skills>1 else torch.tensor(1.0)      
-        # how different are the routinf for different examples? calculate MI, entropy of average - average entropy
-        mixing_weights_mean = mixing_weights_.mean(0) # n_skills       
-        entropy_of_av_normalized = torch.mean(-torch.sum(mixing_weights_mean * torch.log(mixing_weights_mean + EPS), dim=-1)/ np.log(self.n_skills)) if self.n_skills>1 else torch.tensor(0.0)   
-        div = entropy_of_av_normalized - average_normalized_entropy    
-               
-        self.routing_infos.metrics["div"].append(div.item())     
-        self.routing_infos.metrics["routing_entropy"].append(average_normalized_entropy.item())
+        # average_normalized_entropy = -torch.sum(mixing_weights_ * torch.log(mixing_weights_ + EPS), dim=-1)/ np.log(self.n_skills) if self.n_skills>1 else torch.ones_like(mixing_weights_[:,0]) # ex 
+        # # solit in n_splits chunks     
+        # average_normalized_entropy = average_normalized_entropy.reshape(bs, self.n_splits).mean(dim=0) # bs    
+        # # how different are the routinf for different examples? calculate MI, entropy of average - average entropy
+        # mixing_weights_mean = mixing_weights.transpose(0,1).mean(dim=1) # n_splits x n_skills        
+        # entropy_of_av_normalized = -torch.sum(mixing_weights_mean * torch.log(mixing_weights_mean + EPS), dim=-1)/ np.log(self.n_skills) if self.n_skills>1 else torch.zeros_like(mixing_weights_mean[0]) # ex
+        # div = (entropy_of_av_normalized - average_normalized_entropy).mean() # mean over n_splits
+             
+        # if self.x_router_load_balancing:
+        #     # add MI maximization as aux loss
+        #     self.routing_infos.aux_loss.append(self.aux_mi_loss_factor*(1-div))       
+              
+        # self.routing_infos.metrics["div"].append(div.item())     
+        # self.routing_infos.metrics["routing_entropy"].append(average_normalized_entropy.mean().item())
+              
+        self.routing_infos.metrics[self.layer_name+"_routing"].append(mixing_weights.detach().cpu().numpy())
+        
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:      
             adapter_out = adapter_out * warmup 
@@ -771,6 +807,11 @@ def modify_with_poly(transformer, config, PolyLayer):
                     print(f"Patching {m_name}.{c_name}...")  
                     if "attn" in f"{m_name}.{c_name}" and config.share_lora_at_attn:
                         config.n_skills=1
+                    
+                    # keep track of layer information
+                    layer_name = f"{m_name}.{c_name}"
+                    config.layer_name = layer_name
+                        
                     setattr(
                         module,
                         c_name,
