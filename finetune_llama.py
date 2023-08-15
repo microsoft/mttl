@@ -15,6 +15,7 @@ from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.db_dolly_module    import DatBricksDollyModule
 from mttl.datamodule.longform_data_module import LongFormDataModule
 from mttl.datamodule.wizzard_data_module import WizzardDataModule
+from mttl.datamodule.platypus_module import PlatypusModule
 from mttl.datamodule.flan_module import FlanModule
 from mttl.models.encoder_decoder import EncoderDecoder
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
@@ -100,7 +101,10 @@ class Config(MTTLConfig):
         self.validation_portion = 0.03  
         self.per_cluster_test = False
         self.use_test_set = False # wether to use examples marked as is_test = 1 in ClusterInfo as test set
-                        
+        
+        self.aux_mi_loss_factor = 1
+        self.x_router_load_balancing = False
+        self.x_router_x_cond = True
         self.superni_eval_batchsize = 2
         self.router_learning_rate = None
         self.sep_teacher_student = False
@@ -196,6 +200,8 @@ def run_multitask(args):
         dm = FlanModule(args, cluster_result=cluster_result)
     elif args.dataset == "human":
         dm = FlanModule(args, cluster_result=cluster_result)
+    elif args.dataset == "platypus":
+        dm = PlatypusModule(args, cluster_result=cluster_result)
     else:
         raise NotImplementedError()
 

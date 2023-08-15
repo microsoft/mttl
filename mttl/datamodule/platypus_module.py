@@ -1,15 +1,15 @@
-import torch      
+import torch     
 import numpy as np 
 from scipy.stats import entropy as calc_entropy
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 
 from mttl.datamodule.ni_data_module import CollateWrapperFn, CollateWrapperFnCLM
-from mttl.dataloader.human_dataset_readers import HumanMixDataset
+from mttl.dataloader.platyplus_dataset_reader import PlatypusDataset
 from transformers import LlamaTokenizer
 from mttl.cluster_tuning.cluster_reader import ClusterResult
 
-class FlanModule(LightningDataModule):
+class PlatypusModule(LightningDataModule):
     def train_dataloader(self):
         return DataLoader(
             self.train_dataset,      
@@ -69,7 +69,7 @@ class FlanModule(LightningDataModule):
         self.task2id = {'alpaca_full':0}
 
     def get_dataset(self, idxs=None, loss_for_keywords=True):
-        return HumanMixDataset(
+        return PlatypusDataset(
             
             self.tokenizer,          
             self.config.max_input_length, 
