@@ -82,7 +82,7 @@ class TopicRouter:
                 probs[ex,int(k)-1]=v 
         return probs
 
-def dict_to_dataclass(d):
+def dict_to_dataclass(d): 
     from dataclasses import make_dataclass
     return make_dataclass("X", d.keys())(**d)
 
@@ -129,8 +129,9 @@ def load_model(args, model_path=None, device='cuda', tokenizer_path=None):
                 setattr(args, k, v.replace("/mnt/amlt_code/inst_follow/", base))
     #############################   
     model = LlamaForCausalLM.from_pretrained(args.model).to(device)
-    if args.example_to_ids_path is not None and "flv2" in args.example_to_ids_path: # files were renamed, make ut compatible with older models
-        args.example_to_ids_path = args.example_to_ids_path.replace("flv2", "flnv2")
+    if hasattr(args, "example_to_ids_path"): #isinstance(args, Config):
+        if args.example_to_ids_path and "flv2" in args.example_to_ids_path: # files were renamed, make ut compatible with older models
+            args.example_to_ids_path = args.example_to_ids_path.replace("flv2", "flnv2")
     model = modify_transformer(model, args) 
             
     model_class = CLM    

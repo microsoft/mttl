@@ -116,9 +116,10 @@ class CLM(EfficientCheckpointModule):
         aux_loss = torch.mean(torch.stack(self.model.task_id_container["routing_infos"].aux_loss)) if len(self.model.task_id_container["routing_infos"].aux_loss)>0 else 0
         
         
-        # we accumulate metrics over the microbatches
-        for k,v in self.model.task_id_container["routing_infos"].metrics.items():        
-                self.accumulate_metrics_batch[k].append(torch.tensor(v))
+        # we accumulate metrics over the microbatches  
+        for k,v in self.model.task_id_container["routing_infos"].metrics.items():
+            if "model.layers." in k:
+                self.accumulate_metrics_batch[k].append(v)
         
         
         return loss, aux_loss
@@ -255,7 +256,7 @@ class CLM(EfficientCheckpointModule):
     def log_routing_metrics(self, stage="train"):
         
         # we need to keep online mean ove rthe metrics over mictobatches (s.t. the metrics are calculated for the whole batch and not microbatches) 
-        divs, entropies = [], []
+        divs, entropies = [], []       
         for k,v in self.accumulate_metrics_batch.items():
                 # log to wandb directly                   
                 # wandb.log({f"train/{k}": torch.tensor(v).mean()})

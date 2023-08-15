@@ -279,8 +279,10 @@ def run_multitask(args):
     if os.environ.get("WANDB_API_KEY") or args.wandb_project:
         # args_=args.__dict__.copy()
         # remove_non_serializable(args_)
+        project = "alpaca_tuning" if args.wandb_project is None else args.wandb_project
+        project+=f"_{args.dataset}"
         wandb_logger = pl.loggers.WandbLogger(
-            project="alpaca_tuning" if args.wandb_project is None else args.wandb_project,
+            project=project,
             name=os.environ.get("AMLT_JOB_NAME", args.exp_name),  # , config=args_
         )
         wandb_logger.experiment.save("*.py")
@@ -384,8 +386,11 @@ def run_multitask(args):
     # empty memory
     del module
     del dm
+    del trainer
     # empty cache 
     torch.cuda.empty_cache()
+    # if args.eval.mmlu
+    
     if args.eval_superni:         
         print("Evaluating on super NI")     
         from inst_follow.eval.gen_ni_predictions import eval_superni
@@ -399,7 +404,6 @@ def run_multitask(args):
         #if wandb is innitalized
         if wandb.run is not None:           
             wandb.log({"rouge_L_super_ni": rouge_L_super_ni})
-    del trainer
     if args.gen_alpaca_eval:
         print("Generting alpaca_eval")
         from gen_alpaca_eval_predictions import gen_alpaca_evl

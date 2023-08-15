@@ -609,7 +609,7 @@ class PolyLoRALinear(PolytroponAdapter):
         # self.routing_infos.metrics["div"].append(div.item())     
         # self.routing_infos.metrics["routing_entropy"].append(average_normalized_entropy.mean().item())
               
-        self.routing_infos.metrics[self.layer_name+"_routing"].append(mixing_weights.detach().cpu().numpy())
+        self.routing_infos.metrics[self.layer_name+"_routing"]=mixing_weights.detach().cpu()
         
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:      
