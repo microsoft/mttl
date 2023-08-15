@@ -10,6 +10,8 @@ def get_monitors(config):
     monitors = []
     if config.model_modifier and "poly" in config.model_modifier and "poly" in config.poly_selector:
         monitors += [PolytroponLog()]
+    if config.model_modifier and "poly" in config.model_modifier and "smear" in config.poly_selector:
+        monitors += [SMEARLog()]
 
     return monitors
 
@@ -54,6 +56,38 @@ class PolytroponLog(Callback):
             for module in mod.modules():
                 if hasattr(module, "module_logits"):
                     stats[coder] += [layer_stats(module.module_logits)]
+                    seen += 1
+
+            # average over layers
+            if len(stats[coder]):
+                stats[coder] = average_dicts(stats[coder])
+
+                for k, v in stats[coder].items():
+                    pl_module.log(
+                        f"Z/{coder}.{k}", v, on_epoch=True, on_step=True, sync_dist=True
+                    )
+
+class SMEARLog(Callback):
+    """Log smear metrics of interest (entropy) """
+
+    LOG_EVERY = 500
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:
+        if (
+            trainer.global_step == 0
+            or trainer.global_step % self.LOG_EVERY > 0
+        ):
+            return
+
+        # iterate over encoder and decoder layers
+        stats = {"encoder": [], "decoder": []}
+
+        seen = 0
+        for coder in stats.keys():
+            mod = getattr(pl_module.model, coder)
+            for module in mod.modules():
+                if hasattr(module, "input_routing"):
+                    stats[coder] += [{'entropy': module._entropy}]
                     seen += 1
 
             # average over layers

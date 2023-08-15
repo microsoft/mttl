@@ -80,7 +80,7 @@ class PolytroponAdapter(nn.Module):
         return self.info_container["routing_infos"]
     @property
     def attn_mask(self) -> RoutingInfo:
-        return self.info_container["enc_mask" if self.is_encoder else "dec_mask"]
+        return self.info_container["enc_mask"]
 
 
 def get_selector(config, in_dim=None):
@@ -217,21 +217,13 @@ class PolytroponSelector(Selector):
             # this repeat follows the patten in `model.predict()` line 152
             if repeat > 1:
                 attn_mask = attn_mask.repeat_interleave(repeat, dim=0)
-            if inv_repeat > 1:
-                # This occurs during `predict` in t0, as only decoder has repeats
-                attn_mask = attn_mask[::inv_repeat]
-                breakpoint()
-            try:
-                merged_inputs = (input * attn_mask.unsqueeze(-1)).sum(dim=1) / attn_mask.sum(dim=1, keepdim=True)
-                input_logits = self.input_routing(merged_inputs)
-                input_logits = input_logits.view(-1, self.n_splits, self.n_skills)
-                input_weights = torch.sigmoid(module_logits)
-                input_weights = input_weights / (input_weights.sum(dim=-1, keepdim=True) + EPS)
 
-                module_weights = (module_weights + input_weights) / 2.0
-            except:
-                breakpoint()
-                xx = 1
+            merged_inputs = (input * attn_mask.unsqueeze(-1)).sum(dim=1) / attn_mask.sum(dim=1, keepdim=True)
+            input_logits = self.input_routing(merged_inputs)
+            input_logits = input_logits.view(-1, self.n_splits, self.n_skills)
+            input_weights = torch.sigmoid(module_logits)
+            input_weights = input_weights / (input_weights.sum(dim=-1, keepdim=True) + EPS)
+            module_weights = (module_weights + input_weights) / 2.0
 
         return module_weights
 
@@ -242,6 +234,7 @@ class SMEARSelector(PolytroponSelector):
             config.input_conditional_routing = True
 
         super().__init__(config, in_dim=in_dim)
+
     
     def forward(self, routing_infos, input=None, attn_mask=None):
 
@@ -253,15 +246,14 @@ class SMEARSelector(PolytroponSelector):
         # this repeat follows the patten in `model.predict()` line 152
         if repeat > 1:
             attn_mask = attn_mask.repeat_interleave(repeat, dim=0)
-        if inv_repeat > 1:
-            # This occurs during `predict` in t0, as only decoder has repeats
-            attn_mask = attn_mask[::inv_repeat]
-            breakpoint()
+        
         merged_inputs = (input * attn_mask.unsqueeze(-1)).sum(dim=1) / attn_mask.sum(dim=1, keepdim=True)
         input_logits = self.input_routing(merged_inputs)
-        breakpoint()
         input_probs = F.softmax(input_logits, -1)
-    
+
+        with torch.no_grad():
+            self._entropy = -(input_probs * torch.log(input_probs + EPS)).sum(dim=-1).mean().item()
+
         return input_probs.unsqueeze(1)
 
     
@@ -313,7 +305,8 @@ class PolyLoRALinear(PolytroponAdapter):
         self.name = name
 
         if selector is None:
-            self.selector = get_selector(config, in_dim=linear_layer.in_features)
+            in_dim = linear_layer.in_features if is_encoder else config.encoder_output_dim
+            self.selector = get_selector(config, in_dim=in_dim)
         else:
             self.selector = selector
 
@@ -363,7 +356,6 @@ class PolyLoRALinear(PolytroponAdapter):
         if self.training:
             self.training_steps += 1
 
-        # print(self.name, self.is_encoder)    
         task_id = self.routing_infos.task_ids
 
         repeat = input.size(0) // task_id.size(0)
@@ -372,7 +364,12 @@ class PolyLoRALinear(PolytroponAdapter):
         if repeat > 1:
             self.routing_infos.repeat_interleave(repeat)
 
-        mixing_weights = self.selector(self.routing_infos, input=input, attn_mask=self.attn_mask).to(dtype=input.dtype)
+        if not self.is_encoder: 
+            router_input = self.info_container['enc_out']
+        else:
+            router_input = input
+
+        mixing_weights = self.selector(self.routing_infos, input=router_input, attn_mask=self.attn_mask).to(dtype=input.dtype)
         bs, n_splits, n_skills = mixing_weights.size()
 
         # A is    n_splits, n_skills, D // n_splits, rank
@@ -412,7 +409,8 @@ class PolyIA3Linear(PolytroponAdapter):
         self.lora_a = nn.Parameter(data)
 
         if selector is None:
-            self.selector = get_selector(config, in_dim=linear_layer.in_features)
+            in_dim = linear_layer.in_features if is_encoder else config.encoder_output_dim
+            self.selector = get_selector(config, in_dim=in_dim)
         else:
             self.selector = selector
 
@@ -470,18 +468,20 @@ def modify_with_poly(transformer, config, PolyLayer):
     
     selectors = {}
     total_layers = 0
+    config.encoder_output_dim = transformer.encoder.final_layer_norm.weight.size(0)
 
     for m_name, module in dict(transformer.named_modules()).items():
         if re.fullmatch(config.lora_modules, m_name):
             for c_name, layer in dict(module.named_children()).items():
                 if re.fullmatch(config.lora_layers, c_name):
                     identifier = _extract_identifier(f'{m_name}.{c_name}', config.poly_granularity)
+                    full_name = f'{m_name}.{c_name}'
+                    is_encoder = any(prefix in full_name for prefix in ['encoder'])
                     if identifier not in selectors.keys():
-                        selectors[identifier] = get_selector(config, in_dim=layer.in_features)
+                        in_dim = layer.in_features if is_encoder else config.encoder_output_dim
+                        selectors[identifier] = get_selector(config, in_dim=in_dim)
                     selector = selectors[identifier]
                     total_layers += 1
-                    full_name = f'{m_name}.{c_name}'
-                    is_encoder = any(prefix in full_name for prefix in ['encoder', 'EncDecAttention.k', 'EncDecAttention.v'])
                     print(f"Patching {full_name}...")
                     setattr(
                         module,

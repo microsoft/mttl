@@ -88,15 +88,15 @@ class T0EncoderDecoder(EfficientCheckpointModule):
                 dim=1,
             )
             decoder_attention_mask = (decoder_input_ids == decoder_input_ids).float()
-        
+
             self.model.info_container["enc_mask"] = attention_mask
-            self.model.info_container["dec_mask"] = decoder_attention_mask 
+            self.model.info_container["dec_mask"] = decoder_attention_mask
 
             lm_target = (
                 flat_choices_ids
                 - 100 * (flat_choices_ids == self.tokenizer.pad_token_id).long()
             )
-            
+
             encoder_hidden_states = self.model.encoder(
                 input_ids=input_ids, attention_mask=attention_mask
             )[0]
@@ -106,7 +106,8 @@ class T0EncoderDecoder(EfficientCheckpointModule):
 
             attention_mask = attention_mask.repeat_interleave(num_choices, dim=0)
             self.model.info_container["enc_mask"] = attention_mask
-            
+            self.model.info_container["enc_out"] = encoder_hidden_states
+
             model_output = self.model(
                 attention_mask=attention_mask,
                 encoder_outputs=[encoder_hidden_states],
@@ -196,11 +197,15 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             decoder_attention_mask = (decoder_input_ids == decoder_input_ids).float()
 
             self.model.info_container["enc_mask"] = attention_mask
-            self.model.info_container["dec_mask"] = decoder_attention_mask 
+            self.model.info_container["dec_mask"] = decoder_attention_mask
 
+            encoder_hidden_states = self.model.encoder(
+                input_ids=input_ids, attention_mask=attention_mask
+            )[0]
+            self.model.info_container["enc_out"] = encoder_hidden_states
             model_output = self.model(
-                input_ids=input_ids,
                 attention_mask=attention_mask,
+                encoder_outputs=[encoder_hidden_states],
                 decoder_input_ids=decoder_input_ids,
                 decoder_attention_mask=decoder_attention_mask,
                 labels=lm_labels,
@@ -219,8 +224,8 @@ class T0EncoderDecoder(EfficientCheckpointModule):
         ) or self.global_step == 25_000:
             self.save_model()
 
-        # reset task information
-        self.model.info_container["routing_infos"] = None
+        # clear container
+        self.model.info_container.clear()
 
         self.log_dict(
             {f"{split}/{k}": v for (k, v) in tensorboard_logs.items()}, sync_dist=True
@@ -283,9 +288,9 @@ class T0EncoderDecoder(EfficientCheckpointModule):
                 flat_choices_ids
                 - 100 * (flat_choices_ids == self.tokenizer.pad_token_id).long()
             )
-            
+
             self.model.info_container["enc_mask"] = attention_mask
-            self.model.info_container["dec_mask"] = decoder_attention_mask 
+            self.model.info_container["dec_mask"] = decoder_attention_mask
 
             encoder_hidden_states = self.model.encoder(
                 input_ids=input_ids, attention_mask=attention_mask
@@ -298,6 +303,8 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             attention_mask = (
                 attention_mask.unsqueeze(dim=1).repeat(1, num_choices, 1).flatten(0, 1)
             )
+            self.model.info_container["enc_out"] = encoder_hidden_states
+            
             model_output = self.model(
                 attention_mask=attention_mask,
                 encoder_outputs=[encoder_hidden_states],
@@ -407,7 +414,7 @@ class T0EncoderDecoder(EfficientCheckpointModule):
         }
 
         # reset task information
-        self.model.info_container["routing_infos"] = None
+        self.model.info_container.clear()
         return batch_output
 
     def _inference_step(self, batch):
@@ -416,7 +423,7 @@ class T0EncoderDecoder(EfficientCheckpointModule):
         batch_output = self.predict(batch)
 
         # reset task information
-        self.model.info_container["routing_infos"] = None
+        self.model.info_container.clear()
         return batch_output
 
     def validation_step(self, batch, batch_idx):
@@ -507,8 +514,8 @@ class T0EncoderDecoder(EfficientCheckpointModule):
 
     def on_validation_epoch_end(self):
         outputs = self._inference_outputs
-        # differentiate between fine-tuning phase / zero-shot phase and 
-        # validation phase during training. 
+        # differentiate between fine-tuning phase / zero-shot phase and
+        # validation phase during training.
         if "prediction" in outputs[0]:
             self.inference_epoch_end(outputs, split="val")
             if self.config.save_predictions:
@@ -563,7 +570,8 @@ class T0EncoderDecoder(EfficientCheckpointModule):
         os.makedirs(dump_dir, exist_ok=True)
         with open(
             os.path.join(
-                dump_dir, f"preds_split{split}_step{self.global_step}_acc{int(acc * 1000)}.json"
+                dump_dir,
+                f"preds_split{split}_step{self.global_step}_acc{int(acc * 1000)}.json",
             ),
             "w",
         ) as fp:
