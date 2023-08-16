@@ -2,6 +2,11 @@ import os
 import torch
 from pytorch_lightning import seed_everything
 from transformers import AutoTokenizer
+import sys
+
+# add parent directory to path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from mttl.models.encoder_decoder import EncoderDecoder
 from mttl.config import Config
 
@@ -19,7 +24,9 @@ def test_poly(tmp_path):
     _args.learning_rate = 1e-3
 
     seed_everything(0)
-    model = EncoderDecoder(**vars(_args), tokenizer=AutoTokenizer.from_pretrained(_args.model))
+    model = EncoderDecoder(
+        **vars(_args), tokenizer=AutoTokenizer.from_pretrained(_args.model)
+    )
 
     seed_everything(0)
     batch = {
