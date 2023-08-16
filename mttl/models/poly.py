@@ -28,8 +28,7 @@ class SkilledModel:
 
     @staticmethod
     def switch_selector_to_average(object):
-        """Switches PolytroponSelector to AverageSelector.
-        """
+        """Switches PolytroponSelector to AverageSelector."""
         for name, module in object.named_modules():
             for name, inner_mod in module.named_children():
                 if isinstance(inner_mod, PolytroponSelector):
@@ -67,8 +66,7 @@ class SkilledModel:
 
     @staticmethod
     def resize_module_logits(object, n_tasks):
-        """Resizes the vector routing, in case of fine-tuning.
-        """
+        """Resizes the vector routing, in case of fine-tuning."""
         for name, selector in object.get_selectors().items():
             print("Resizing module_logits of selector", name, "with", n_tasks, "tasks.")
             selector.resize_module_logits(n_tasks)
@@ -78,6 +76,7 @@ class PolytroponAdapter(nn.Module):
     @property
     def routing_infos(self) -> RoutingInfo:
         return self.info_container["routing_infos"]
+
     @property
     def attn_mask(self) -> RoutingInfo:
         return self.info_container["enc_mask"]
@@ -90,7 +89,7 @@ def get_selector(config, in_dim=None):
         return PrivateSelector(config)
     elif config.poly_selector == "moe":
         return MoESelector(config)
-    elif config.poly_selector == 'smear':
+    elif config.poly_selector == "smear":
         return SMEARSelector(config, in_dim=in_dim)
     else:
         raise NotImplementedError()
@@ -130,9 +129,11 @@ class MoESelector(Selector):
 
         probs = F.softmax(module_logits, dim=-1)
 
-        top_probs, top_indices = probs.topk(self.topk, dim=-1)  # 2 active skills per task
-        top_k_probs = top_probs[:, :self.topk]
-        top_k_indices = top_indices[:, :self.topk]
+        top_probs, top_indices = probs.topk(
+            self.topk, dim=-1
+        )  # 2 active skills per task
+        top_k_probs = top_probs[:, : self.topk]
+        top_k_indices = top_indices[:, : self.topk]
         top_k_probs = top_k_probs / top_k_probs.sum(dim=1, keepdim=True)
 
         zeros = torch.zeros_like(probs, requires_grad=True)
@@ -188,21 +189,26 @@ class PolytroponSelector(Selector):
                 module_logits = torch.sigmoid(module_logits)
                 module_logits_disc = torch.round(module_logits)
                 # straight through estimator
-                module_logits = module_logits + (module_logits_disc - module_logits).detach()
+                module_logits = (
+                    module_logits + (module_logits_disc - module_logits).detach()
+                )
             else:
                 module_logits = torch.sigmoid(module_logits)
-            
+
             if self.dropout > 0.0:
                 module_logits = nn.Dropout(self.dropout)(module_logits)
 
             if self.poly_use_shared_skill:
                 # last skill is always active whatever the task that has been selected
-                module_logits = torch.cat((
-                    module_logits[:, :, :-1], module_logits[:, :, -1:] * 0.0 + 1.0
-                ), dim=-1)
+                module_logits = torch.cat(
+                    (module_logits[:, :, :-1], module_logits[:, :, -1:] * 0.0 + 1.0),
+                    dim=-1,
+                )
 
             if self.poly_average_correction:
-                module_weights = module_logits * (np.sqrt(self.n_splits) / np.sqrt(self.n_skills))
+                module_weights = module_logits * (
+                    np.sqrt(self.n_splits) / np.sqrt(self.n_skills)
+                )
             else:
                 module_weights = module_logits / (
                     module_logits.sum(dim=-1, keepdim=True) + EPS
@@ -218,45 +224,49 @@ class PolytroponSelector(Selector):
             if repeat > 1:
                 attn_mask = attn_mask.repeat_interleave(repeat, dim=0)
 
-            merged_inputs = (input * attn_mask.unsqueeze(-1)).sum(dim=1) / attn_mask.sum(dim=1, keepdim=True)
+            merged_inputs = (input * attn_mask.unsqueeze(-1)).sum(
+                dim=1
+            ) / attn_mask.sum(dim=1, keepdim=True)
             input_logits = self.input_routing(merged_inputs)
             input_logits = input_logits.view(-1, self.n_splits, self.n_skills)
             input_weights = torch.sigmoid(module_logits)
-            input_weights = input_weights / (input_weights.sum(dim=-1, keepdim=True) + EPS)
+            input_weights = input_weights / (
+                input_weights.sum(dim=-1, keepdim=True) + EPS
+            )
             module_weights = (module_weights + input_weights) / 2.0
 
         return module_weights
 
+
 class SMEARSelector(PolytroponSelector):
     def __init__(self, config, in_dim=None):
         if not config.input_conditional_routing:
-            print('overwriting input_conditional_routing to True')
+            print("overwriting input_conditional_routing to True")
             config.input_conditional_routing = True
 
         super().__init__(config, in_dim=in_dim)
 
-    
     def forward(self, routing_infos, input=None, attn_mask=None):
-
         # need to process input, and aggregate according to masking.
         repeat = input.size(0) // attn_mask.size(0)
-        inv_repeat = attn_mask.size(0) // input.size(0)
 
         og_attn_mask = attn_mask
         # this repeat follows the patten in `model.predict()` line 152
         if repeat > 1:
             attn_mask = attn_mask.repeat_interleave(repeat, dim=0)
-        
-        merged_inputs = (input * attn_mask.unsqueeze(-1)).sum(dim=1) / attn_mask.sum(dim=1, keepdim=True)
+
+        merged_inputs = (input * attn_mask.unsqueeze(-1)).sum(dim=1) / attn_mask.sum(
+            dim=1, keepdim=True
+        )
         input_logits = self.input_routing(merged_inputs)
         input_probs = F.softmax(input_logits, -1)
 
         with torch.no_grad():
-            self._entropy = -(input_probs * torch.log(input_probs + EPS)).sum(dim=-1).mean().item()
+            self._entropy = (
+                -(input_probs * torch.log(input_probs + EPS)).sum(dim=-1).mean().item()
+            )
 
         return input_probs.unsqueeze(1)
-
-    
 
 
 class AverageSelector(Selector):
@@ -286,7 +296,9 @@ class PrivateSelector(Selector):
 
 
 class PolyLoRALinear(PolytroponAdapter):
-    def __init__(self, config, info_container, linear_layer, is_encoder, selector=None, name=''):
+    def __init__(
+        self, config, info_container, linear_layer, is_encoder, selector=None, name=""
+    ):
         super().__init__()
         self.n_splits = config.n_splits
         self.n_tasks = config.n_tasks
@@ -305,7 +317,9 @@ class PolyLoRALinear(PolytroponAdapter):
         self.name = name
 
         if selector is None:
-            in_dim = linear_layer.in_features if is_encoder else config.encoder_output_dim
+            in_dim = (
+                linear_layer.in_features if is_encoder else config.encoder_output_dim
+            )
             self.selector = get_selector(config, in_dim=in_dim)
         else:
             self.selector = selector
@@ -344,7 +358,6 @@ class PolyLoRALinear(PolytroponAdapter):
             with torch.no_grad():
                 self.lora_a.uniform_(-std, std)
 
-
         # ensure that initially, adding the adapter does not change the output
         if self.use_warmup or self.lora_randb_init:
             with torch.no_grad():
@@ -364,12 +377,14 @@ class PolyLoRALinear(PolytroponAdapter):
         if repeat > 1:
             self.routing_infos.repeat_interleave(repeat)
 
-        if not self.is_encoder: 
-            router_input = self.info_container['enc_out']
+        if not self.is_encoder:
+            router_input = self.info_container["enc_out"]
         else:
             router_input = input
 
-        mixing_weights = self.selector(self.routing_infos, input=router_input, attn_mask=self.attn_mask).to(dtype=input.dtype)
+        mixing_weights = self.selector(
+            self.routing_infos, input=router_input, attn_mask=self.attn_mask
+        ).to(dtype=input.dtype)
         bs, n_splits, n_skills = mixing_weights.size()
 
         # A is    n_splits, n_skills, D // n_splits, rank
@@ -409,7 +424,9 @@ class PolyIA3Linear(PolytroponAdapter):
         self.lora_a = nn.Parameter(data)
 
         if selector is None:
-            in_dim = linear_layer.in_features if is_encoder else config.encoder_output_dim
+            in_dim = (
+                linear_layer.in_features if is_encoder else config.encoder_output_dim
+            )
             self.selector = get_selector(config, in_dim=in_dim)
         else:
             self.selector = selector
@@ -424,7 +441,9 @@ class PolyIA3Linear(PolytroponAdapter):
             self.routing_infos.repeat_interleave(repeat)
 
         # bs, n_splits, n_skills
-        mixing_weights = self.selector(self.routing_infos, input=input, attn_mask=self.attn_mask).to(dtype=input.dtype)
+        mixing_weights = self.selector(
+            self.routing_infos, input=input, attn_mask=self.attn_mask
+        ).to(dtype=input.dtype)
 
         # n_skills, n_splits, D // n_splits
         weight = self.lora_a
@@ -440,32 +459,31 @@ class PolyIA3Linear(PolytroponAdapter):
 
 
 def modify_with_poly(transformer, config, PolyLayer):
-    
     # How to "bin" different levels of selectors ?
-    def _extract_identifier(string, match_on='coder'):
-        """ Returns a unique identifier for the "chunk" of layers sharing the 
+    def _extract_identifier(string, match_on="coder"):
+        """Returns a unique identifier for the "chunk" of layers sharing the
         same underlying selector
         # e.g. 'block' : 'encoder.block.0.layer.0.SelfAttention' -> 'encoder.block.0'
         """
         pattern_map = {
-            'coarsegrained' : None, 
-            'finegrained' : None,
-            'layerwise' : 'layer',
-            'blockwise' : 'block',
-            'coderwise' : 'coder'
+            "coarsegrained": None,
+            "finegrained": None,
+            "layerwise": "layer",
+            "blockwise": "block",
+            "coderwise": "coder",
         }
         assert match_on in pattern_map.keys()
 
-        if match_on == 'finegrained':
+        if match_on == "finegrained":
             return string
-        if match_on == 'coarsegrained': 
-            return ''
+        if match_on == "coarsegrained":
+            return ""
 
         match_on = pattern_map[match_on]
-        left_idx = string.find(f'{match_on}.') + len(match_on) + 1
-        right_idx = string[left_idx:].find('.') 
-        return string[:left_idx + right_idx]
-    
+        left_idx = string.find(f"{match_on}.") + len(match_on) + 1
+        right_idx = string[left_idx:].find(".")
+        return string[: left_idx + right_idx]
+
     selectors = {}
     total_layers = 0
     config.encoder_output_dim = transformer.encoder.final_layer_norm.weight.size(0)
@@ -474,11 +492,17 @@ def modify_with_poly(transformer, config, PolyLayer):
         if re.fullmatch(config.lora_modules, m_name):
             for c_name, layer in dict(module.named_children()).items():
                 if re.fullmatch(config.lora_layers, c_name):
-                    identifier = _extract_identifier(f'{m_name}.{c_name}', config.poly_granularity)
-                    full_name = f'{m_name}.{c_name}'
-                    is_encoder = any(prefix in full_name for prefix in ['encoder'])
+                    identifier = _extract_identifier(
+                        f"{m_name}.{c_name}", config.poly_granularity
+                    )
+                    full_name = f"{m_name}.{c_name}"
+                    is_encoder = any(prefix in full_name for prefix in ["encoder"])
                     if identifier not in selectors.keys():
-                        in_dim = layer.in_features if is_encoder else config.encoder_output_dim
+                        in_dim = (
+                            layer.in_features
+                            if is_encoder
+                            else config.encoder_output_dim
+                        )
                         selectors[identifier] = get_selector(config, in_dim=in_dim)
                     selector = selectors[identifier]
                     total_layers += 1
@@ -491,12 +515,14 @@ def modify_with_poly(transformer, config, PolyLayer):
                             transformer.info_container,
                             layer,
                             selector=selector,
-                            name=m_name + '.' + c_name, 
-                            is_encoder=is_encoder
+                            name=m_name + "." + c_name,
+                            is_encoder=is_encoder,
                         ),
                     )
 
-    print(f'created {len(selectors)} selectors for a total of {total_layers} adapted layers')
+    print(
+        f"created {len(selectors)} selectors for a total of {total_layers} adapted layers"
+    )
     return SkilledModel.register_functions(transformer)
 
 
