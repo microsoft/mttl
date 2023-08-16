@@ -16,7 +16,8 @@ from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.db_dolly_module import DatBricksDollyModule
 from mttl.datamodule.longform_data_module import LongFormDataModule
 from mttl.datamodule.wizzard_data_module import WizzardDataModule
-from mttl.datamodule.flan_module import FlanModule
+
+# from mttl.datamodule.flan_module import FlanModule
 from mttl.models.encoder_decoder import EncoderDecoder
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.config import Config as MTTLConfig
@@ -79,6 +80,7 @@ class Config(MTTLConfig):
         self.micro_batch_size = 4
         self.share_lora_at_attn = 0
         self.share_lora_a = False
+        self.x_router_init_scale = 0.02
         self.merge_A_B_seperately = True
         self.train_on_inputs = False
         self.padding_side = "right"
@@ -91,6 +93,9 @@ class Config(MTTLConfig):
         self.switch_to_average = 0
         # self.balanced = 0
 
+        self.router_weight_decay = None
+        self.normalize_xrouter_weights = False
+        self.normalize_xrouter_input = False
         self.reverse_xrouter_kl = False
         self.param_names_added_to_sd = ""  # define additional params that will be added to state dict additionally to the trainable ones.
         self.xrouter_pad_token_mask = False
@@ -104,6 +109,8 @@ class Config(MTTLConfig):
         self.per_cluster_test = False
         self.use_test_set = False  # wether to use examples marked as is_test = 1 in ClusterInfo as test set
 
+        self.superni_eval_batchsize = 2
+        self.router_learning_rate = None
         self.sep_teacher_student = False
         self.x_router_sim_metric = "kl"
         self.eval_superni = True
@@ -403,7 +410,7 @@ def run_multitask(args):
 
         rouge_L_super_ni = eval_superni(
             model_name="",
-            batch_size=2,
+            batch_size=args.superni_eval_batchsize,
             out_prefix=f"{args.exp_name}",
             model_path=path_best_model,
             nshot=0,
