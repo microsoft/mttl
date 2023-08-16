@@ -29,8 +29,8 @@ from mttl.dataloader.data_utils import ExampleInfo
 from mttl.utils import get_ni_tasks_from_file, trim_batch, hash_example
 from typing import List                
 from transformers import AutoTokenizer, AutoModelForCausalLM
-
-# from peft import prepare_model_for_int8_training
+  
+from peft import prepare_model_for_int8_training
 
 ##################################################  
 # TODO: figure out what is the problem with this, why is it needed?Probably something with pickle and creating the clustering files.          
@@ -217,23 +217,24 @@ def run_multitask(args):
                 args.model)   
                 # max_memory_MB=80000,  
                 # add_lora_f = partial(modify_transformer, config=args))
-        else:
+        else:     
             args.model_object =LlamaForCausalLM.from_pretrained(
-                args.model,  
+                args.model,    
                 load_in_8bit=args.load_in_8bit, # this doesnt work right now with current implementatio of lora
-                # torch_dtype=torch.float16,
+                torch_dtype=torch.float16,
                 device_map="auto",
-            )  # , load_in_8bit=True, torch_dtype=torch.float16)  
-    else:
+            )  # , load_in_8bit=True, torch_dtype=torch.float16) 
+    else: 
         args.model_object = AutoModelForCausalLM.from_pretrained(
             args.model,
             device_map="auto") 
-    
+         
     if args.model_object.config.vocab_size != len(dm.tokenizer): #if adding [EOI] in LongForm dataset
         args.model_object.resize_token_embeddings(len(dm.tokenizer))
+    if args.load_in_8bit:
+        args.model_object = prepare_model_for_int8_training(args.model_object)
+      
     args.model_object = modify_transformer(args.model_object, args)
-    # if args.load_in_8bit:
-    #     args.model_object = prepare_model_for_int8_training(args.model_object)
 
     if args.checkpoint is not None:         
         import copy       
@@ -394,29 +395,29 @@ def run_multitask(args):
     del trainer
     # empty cache  
     torch.cuda.empty_cache()
-    # if args.eval_mmlu:
-    #     from inst_follow.eval.mmlu.run_mmlu_eval import eval_mlu     
-    #     print("#"*50)
-    #     print("Evaluating on MMLU")
-    #     acc=eval_mlu(model_name="",model_path=path_best_model, eval_batch_size=5)
-    #     if wandb.run is not None:           
-    #         wandb.log({"acc_mmlu": acc})
+    if args.eval_mmlu:
+        from inst_follow.eval.mmlu.run_mmlu_eval import eval_mlu     
+        print("#"*50)
+        print("Evaluating on MMLU")
+        acc=eval_mlu(model_name="",model_path=path_best_model, eval_batch_size=5)
+        if wandb.run is not None:           
+            wandb.log({"acc_mmlu": acc})
        
-    # TODO: add HellaSwag, ARC, TruthfulQA
+         
     if args.eval_hellaswag:
         from inst_follow.eval.lm_eval_harness.run_eval import eval_lm
         print("#"*50)
         print("Evaluating on HellaSwag")
-        results_dict=eval_lm(model_path=path_best_model, model_name="", tasks="hellaswag", batch_size=5, nshot=10)
+        results_dict=eval_lm(model_path=path_best_model, model_name="", task="hellaswag", batch_size=5, nshot=10)
         if wandb.run is not None:           
             wandb.log(results_dict)
     
-          
+         
     if args.eval_arc:
         from inst_follow.eval.lm_eval_harness.run_eval import eval_lm
         print("#"*50)   
         print("Evaluating on ARC")       
-        results_dict=eval_lm(model_path=path_best_model, model_name="", tasks="arc_challenge", batch_size=5, nshot=25)
+        results_dict=eval_lm(model_path=path_best_model, model_name="", task="arc_challenge", batch_size=5, nshot=25)
         if wandb.run is not None:           
             wandb.log(results_dict)
 
@@ -424,7 +425,7 @@ def run_multitask(args):
         from inst_follow.eval.lm_eval_harness.run_eval import eval_lm
         print("#"*50)         
         print("Evaluating on TruthfulQA")
-        results_dict=eval_lm(model_path=path_best_model, model_name="", tasks="truthfulqa_mc", batch_size=5, nshot=0)
+        results_dict=eval_lm(model_path=path_best_model, model_name="", task="truthfulqa_mc", batch_size=5, nshot=0)
         if wandb.run is not None:           
             wandb.log(results_dict)
     

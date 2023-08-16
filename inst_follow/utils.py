@@ -16,6 +16,7 @@ from nomic import AtlasProject
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 from inst_follow.models.clm import CLM         
+from peft import prepare_model_for_int8_training    
 from mttl.models.modify_model import modify_transformer 
 from transformers import  LlamaForCausalLM, LlamaTokenizer
 from finetune_llama import Config, parse_config
@@ -127,8 +128,10 @@ def load_model(args, model_path=None, device='cuda', tokenizer_path=None):
             base = "/home/v-oostapenko/dev/mttl/inst_follow/"
             if isinstance(v, str) and "/mnt/amlt_code/inst_follow/" in v:  
                 setattr(args, k, v.replace("/mnt/amlt_code/inst_follow/", base))
-    #############################   
-    model = LlamaForCausalLM.from_pretrained(args.model).to(device)
+    #############################    
+    model = LlamaForCausalLM.from_pretrained(args.model, load_in_8bit=args.load_in_8bit, torch_dtype=torch.float16, device_map="auto")
+    if args.load_in_8bit:
+        model = prepare_model_for_int8_training(model)
     if hasattr(args, "example_to_ids_path"): #isinstance(args, Config):
         if args.example_to_ids_path and "flv2" in args.example_to_ids_path: # files were renamed, make ut compatible with older models
             args.example_to_ids_path = args.example_to_ids_path.replace("flv2", "flnv2")

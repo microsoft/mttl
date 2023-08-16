@@ -80,8 +80,9 @@ class CLM(EfficientCheckpointModule):
             self.loss_plugins = nn.ModuleDict({plugin.name: plugin})
     
            
-    def forward(self, batch, reduction='mean'):  
+    def forward(self, batch, reduction='mean'):    
         input_ids, labels = batch["input_ids"], batch["labels"]       
+        # print("input_ids", input_ids.shape)
         self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch) # pad tokens also have -100
         padding_mask = self.calculate_routing_mask(batch["input_ids"], self.model.task_id_container["routing_infos"])
         setattr(self.model.task_id_container["routing_infos"], "pad_token_mask", padding_mask)
@@ -200,7 +201,10 @@ class CLM(EfficientCheckpointModule):
         oracle_routings = self.model.task_id_container["routing_infos"].oracle_routings
         return out, oracle_routings
        
-     
+    def on_before_zero_grad(self, optimizer: Optimizer) -> None:
+        self.model.zero_grad()      
+        return super().on_before_zero_grad(optimizer)
+        
     def generate(self, batch, **kwargs):        
         if not hasattr(self.model, "task_id_container"):
             self.model.task_id_container = {}                          
