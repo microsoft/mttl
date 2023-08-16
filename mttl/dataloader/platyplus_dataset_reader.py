@@ -41,10 +41,12 @@ class PlatypusDataset(torch.utils.data.dataset.Dataset):
         self.train_on_inputs = train_on_inputs
         # load the data 
         if os.getenv("AP_DATA_DIR") is not None:
-            data_dir = os.getenv("AP_DATA_DIR")                  
+            data_dir = os.getenv("AP_DATA_DIR")                     
         self.dataset = load_dataset("garage-bAInd/Open-Platypus", cache_dir=data_dir)["train"]
         if idxs is not None:       
             self.dataset = self.dataset.select(idxs)
+        # select subset of 100 examples
+        # self.dataset = self.dataset.select(range(100))
 
         self.tokenizer = tokenizer
         self.max_input_length = max_input_length

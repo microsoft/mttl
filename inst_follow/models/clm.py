@@ -282,8 +282,8 @@ class CLM(EfficientCheckpointModule):
                 div = (entropy_of_av_normalized - average_normalized_entropy).mean() # mean over n_splits
                 entropy = average_normalized_entropy.mean().item()      
                 # if not len(self.loggers)>0 or not isinstance(self.loggers[0], pl.loggers.wandb.WandbLogger):
-                self.log(f"{stage}/{k}_div", div)#, on_step=True)    
-                self.log(f"{stage}/{k}_entropy", entropy)#, on_step=True)                        
+                # self.log(f"{stage}/{k}_div", div)#, on_step=True)    
+                # self.log(f"{stage}/{k}_entropy", entropy)#, on_step=True)                        
                 divs.append(div)
                 entropies.append(entropy)
         # log mean over all layers divs and entropies
@@ -291,7 +291,16 @@ class CLM(EfficientCheckpointModule):
             self.log(f"{stage}/div_layers_mean", torch.tensor(divs).mean())#, on_step=True)     
             self.log(f"{stage}/entropy_layers_mean", torch.tensor(entropies).mean())#, on_step=True)  
             # log distribution
-            # if len(self.loggers)>0 and isinstance(self.loggers[0], pl.loggers.wandb.WandbLogger) and stage=="val":
+            if len(self.loggers)>0 and isinstance(self.loggers[0], pl.loggers.wandb.WandbLogger) and stage=="val":
+                wandb_logger = self.loggers[0]
+                # bar plot with reduced memory size 
+                _ = plt.plot(range(len(divs)), divs)      
+                wandb_logger.log_image(f"{stage}/div_layers_dist", [wandb.Image(plt)], step=self.global_step)#, commit=False)    
+                #reset plot
+                plt.clf()        
+                _ = plt.plot(range(len(entropies)), entropies)
+                wandb_logger.log_image(f"{stage}/entropy_layers_dist", [wandb.Image(plt)], step=self.global_step)#, commit=False)
+                plt.clf()        
             #     _ = plt.bar(range(len(divs)), divs)
             #     self.loggers[0].log_image(f"{stage}/div_layers_dist", [wandb.Image(plt)], step=self.global_step, commit=False)                
             #     _ = plt.bar(range(len(entropies)), entropies)

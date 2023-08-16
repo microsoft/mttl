@@ -3,6 +3,7 @@ import argparse
 import json
 import numpy as np
 import torch
+import wandb
 #import partial
 from functools import partial
 import pytorch_lightning as pl 
@@ -17,16 +18,16 @@ from mttl.datamodule.longform_data_module import LongFormDataModule
 from mttl.datamodule.wizzard_data_module import WizzardDataModule
 from mttl.datamodule.platypus_module import PlatypusModule
 from mttl.datamodule.flan_module import FlanModule
-from mttl.models.encoder_decoder import EncoderDecoder
-from mttl.models.t0_encoder_decoder import T0EncoderDecoder
+# from mttl.models.encoder_decoder import EncoderDecoder
+# from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.config import Config as MTTLConfig
 from mttl.models.monitors import get_monitors
-from mttl.utils import get_mlf_logger, from_pretrained
+from mttl.utils import get_mlf_logger, from_pretrained 
 from mttl.models.modify_model import modify_transformer
 from transformers import LlamaForCausalLM, LlamaTokenizer
 from mttl.dataloader.data_utils import ExampleInfo
 from mttl.utils import get_ni_tasks_from_file, trim_batch, hash_example
-from typing import List
+from typing import List                
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 # from peft import prepare_model_for_int8_training
@@ -109,7 +110,11 @@ class Config(MTTLConfig):
         self.router_learning_rate = None
         self.sep_teacher_student = False
         self.x_router_sim_metric = "kl"
+        self.eval_hellaswag = True
+        self.eval_arc = True
+        self.eval_truthfulqa = True
         self.eval_superni = True    
+        self.eval_mmlu = True
         self.eval_superni_use_outputs = False
         self.gen_alpaca_eval = False
         self.per_token_routing = False # only applies to x_router routing 
@@ -206,7 +211,7 @@ def run_multitask(args):
         raise NotImplementedError()
 
     args.n_tasks = len(dm.task2id)  
-    if "llama" in args.model:
+    if "llama" in args.model:    
         if args.use_4_bit_backbone:
             args.model_object = from_pretrained(
                 args.model)   
@@ -214,8 +219,8 @@ def run_multitask(args):
                 # add_lora_f = partial(modify_transformer, config=args))
         else:
             args.model_object =LlamaForCausalLM.from_pretrained(
-                args.model,
-                # load_in_8bit=args.load_in_8bit, # this doesnt work right now with current implementatio of lora
+                args.model,  
+                load_in_8bit=args.load_in_8bit, # this doesnt work right now with current implementatio of lora
                 # torch_dtype=torch.float16,
                 device_map="auto",
             )  # , load_in_8bit=True, torch_dtype=torch.float16)  
@@ -387,11 +392,46 @@ def run_multitask(args):
     del module
     del dm
     del trainer
-    # empty cache 
+    # empty cache  
     torch.cuda.empty_cache()
-    # if args.eval.mmlu
+    # if args.eval_mmlu:
+    #     from inst_follow.eval.mmlu.run_mmlu_eval import eval_mlu     
+    #     print("#"*50)
+    #     print("Evaluating on MMLU")
+    #     acc=eval_mlu(model_name="",model_path=path_best_model, eval_batch_size=5)
+    #     if wandb.run is not None:           
+    #         wandb.log({"acc_mmlu": acc})
+       
+    # TODO: add HellaSwag, ARC, TruthfulQA
+    if args.eval_hellaswag:
+        from inst_follow.eval.lm_eval_harness.run_eval import eval_lm
+        print("#"*50)
+        print("Evaluating on HellaSwag")
+        results_dict=eval_lm(model_path=path_best_model, model_name="", tasks="hellaswag", batch_size=5, nshot=10)
+        if wandb.run is not None:           
+            wandb.log(results_dict)
+    
+          
+    if args.eval_arc:
+        from inst_follow.eval.lm_eval_harness.run_eval import eval_lm
+        print("#"*50)   
+        print("Evaluating on ARC")       
+        results_dict=eval_lm(model_path=path_best_model, model_name="", tasks="arc_challenge", batch_size=5, nshot=25)
+        if wandb.run is not None:           
+            wandb.log(results_dict)
+
+    if args.eval_truthfulqa:
+        from inst_follow.eval.lm_eval_harness.run_eval import eval_lm
+        print("#"*50)         
+        print("Evaluating on TruthfulQA")
+        results_dict=eval_lm(model_path=path_best_model, model_name="", tasks="truthfulqa_mc", batch_size=5, nshot=0)
+        if wandb.run is not None:           
+            wandb.log(results_dict)
+    
+    
     
     if args.eval_superni:         
+        print("#"*50)
         print("Evaluating on super NI")     
         from inst_follow.eval.gen_ni_predictions import eval_superni
         rouge_L_super_ni = eval_superni(model_name="",    
@@ -400,7 +440,6 @@ def run_multitask(args):
                      model_path=path_best_model,         
                      nshot=0, use_outputs=args.eval_superni_use_outputs)
         ##################################################
-        import wandb
         #if wandb is innitalized
         if wandb.run is not None:           
             wandb.log({"rouge_L_super_ni": rouge_L_super_ni})

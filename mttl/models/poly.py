@@ -417,9 +417,9 @@ class EfficientBackwardbmm(Function):
 
 
 class PolyLoRALinear(PolytroponAdapter):                          
-    def __init__(self, config, task_id_ptr, linear_layer, selector=None):
+    def __init__(self, config, task_id_ptr, linear_layer, selector=None, **kwargs):
         super().__init__()         
-        self.layer_name = config.layer_name     
+        self.layer_name = kwargs.get("layer_name", None)
         self.share_a = config.share_lora_a
         self.n_splits = config.n_splits
         self.n_tasks = config.n_tasks
@@ -608,8 +608,8 @@ class PolyLoRALinear(PolytroponAdapter):
               
         # self.routing_infos.metrics["div"].append(div.item())     
         # self.routing_infos.metrics["routing_entropy"].append(average_normalized_entropy.mean().item())
-              
-        self.routing_infos.metrics[self.layer_name+"_routing"]=mixing_weights.detach().cpu()
+        if self.layer_name is not None:
+            self.routing_infos.metrics[self.layer_name+"_routing"]=mixing_weights.detach().cpu()
         
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:      
@@ -620,7 +620,7 @@ class PolyLoRALinear(PolytroponAdapter):
 
 
 class PolyIA3Linear(PolytroponAdapter):
-    def __init__(self, config, task_id_ptr, linear_layer, selector=None):
+    def __init__(self, config, task_id_ptr, linear_layer, selector=None, **kwargs):
         super().__init__()
 
         self.n_splits = config.n_splits
@@ -795,7 +795,7 @@ def modify_with_poly(transformer, config, PolyLayer):
     total_layers = 0    
     n_skills = copy.deepcopy(config.n_skills) 
     for m_name, module in dict(transformer.named_modules()).items():
-        if re.fullmatch(config.lora_modules, m_name):
+        if re.fullmatch(config.lora_modules, m_name):    
             for c_name, layer in dict(module.named_children()).items():
                 if re.fullmatch(config.lora_layers, c_name):
                     identifier = _extract_identifier(f'{m_name}.{c_name}', config.poly_granularity)
@@ -810,7 +810,7 @@ def modify_with_poly(transformer, config, PolyLayer):
                     
                     # keep track of layer information
                     layer_name = f"{m_name}.{c_name}"
-                    config.layer_name = layer_name
+                    # config.layer_name = layer_name
                         
                     setattr(
                         module,
@@ -820,6 +820,7 @@ def modify_with_poly(transformer, config, PolyLayer):
                             transformer.task_id_container,
                             layer,
                             selector=selector,
+                            layer_name = layer_name
                         ),
                     )
 

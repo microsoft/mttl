@@ -252,7 +252,7 @@ def generate_outputs(model, examples, tokenizer, instructions_batch,
         flag=0
         if len(instructions_batch_for_routing)==1:
             flag=1
-            instructions_batch_for_routing=[instructions_batch_for_routing[0],instructions_batch_for_routing[0]]
+            instructions_batch_for_routing=[instructions_batch_for_routing[0],instructions_batch_for_routing[0]]       
         cluster = example_in_cluster(instructions_batch_for_routing,  tfidf, kmeans, random_clusters=False, distances=True)
         if flag:   
             cluster=[cluster[0]]     
@@ -267,7 +267,26 @@ def generate_outputs(model, examples, tokenizer, instructions_batch,
         max_new_tokens=max_output_length,
         # top_k=50,
         return_dict_in_generate=True,
-    )
+    )   
+     
+    # out, routings = model.compute_routings( 
+    #     {"input_ids":output_ids.sequences, 
+    #      "task_ids":input["task_ids"],                    
+    #      "pad_token_mask":(output_ids.sequences != tokenizer.pad_token_id).float().to(device)},
+    #     temperature=temperature,      
+    #     max_new_tokens=0,   
+    #     return_dict_in_generate=True,)  
+    # assert all(output_ids.sequences[0]==out.sequences[0][:-1])
+    # output_ids = model.generate(
+    #     input,
+    #     # do_sample=True,
+    #     temperature=temperature,      
+    #     max_new_tokens=max_output_length,
+    #     # top_k=50,
+    #     return_dict_in_generate=True,
+    #     routings = routings
+    # )
+    
     # for out,ex in zip(output_ids.sequences, examples):
     #     # out = out[len(ex):] 
     #     output_str = tokenizer.decode(out)
@@ -364,7 +383,7 @@ def eval_rouge(prediction_file, reference_file="/home/v-oostapenko/dev/mttl/inst
         instructions = []
         missing_predictions = []
         for id in instance_ids:
-            if id in all_predictions:
+            if id in all_predictions:    
                 predictions.append(all_predictions[id])
             else:
                 missing_predictions.append(id)
@@ -399,7 +418,7 @@ def eval_rouge(prediction_file, reference_file="/home/v-oostapenko/dev/mttl/inst
 # @click.option("--data_path", type=str, default="/home/v-oostapenko/dev/natural-instructions/tasks")   
 # @click.option("--dataset", )
 # @click.option("--config_path", type=str, default="/home/v-oostapenko/dev/mttl/configs/llama/finetune_full_lora.json")
-@click.option("--model_name", type=str, default="alpaca_smear_8_xr1(pe_inst_only)_fln") #chavinlo/alpaca-native") yahma/llama-7b-hf chainyo/alpaca-lora-7b togethercomputer/RedPajama-INCITE-Base-7B-v0.1
+@click.option("--model_name", type=str, default="alpaca_smear_12_xr4_cos_noxcond") #chavinlo/alpaca-native") yahma/llama-7b-hf chainyo/alpaca-lora-7b togethercomputer/RedPajama-INCITE-Base-7B-v0.1
 @click.option("--batch_size", type=int, default=5)  
 @click.option("--out_prefix", type=str, default="test")    
 # @click.option("--cbtm_n_clusters", type=int, default=4)            
@@ -419,35 +438,35 @@ def eval_superni_command(model_name="gpt3", batch_size=4, out_prefix="", from_hf
                          skill_selector="topic", 
                          nshot=0, n_tasks=None, use_wandb=False, use_outputs=False, amlt_experiment_name="alpaca_smear"):
     return eval_superni(model_name, 
-                        batch_size, 
+                        batch_size,    
                         out_prefix, from_hf, model_path, skill_selector, nshot, n_tasks, use_wandb, use_outputs, amlt_experiment_name)
 
-def load_model_for_generation(from_hf, model_name, model_path, skill_selector):
+def load_model_for_generation(from_hf, base_model_name, model_name, model_path, skill_selector):
     topic_router=None
        # correct(data_path, model_name, batch_size, out_prefix, from_hf, model_path, example_to_ids_path, skill_selector, nshot, reference_file)
     if from_hf==1:             
-        if "llama" in model_name:       
-            config = {"model": model_name, "model_modifier":None} 
-            config = dict_to_dataclass(config)
-            model, _ = load_model(config, device=device, tokenizer_path="yahma/llama-7b-hf") 
-            # tokenizer =  LlamaTokenizer.from_pretrained(model_name, padding_side='left')   
-            tokenizer =  LlamaTokenizer.from_pretrained("yahma/llama-7b-hf", padding_side='left')   
-            tokenizer.pad_token_id = 0 #tokenizer.eos_token_id
-            # tokenizer.padding_side='left'          
-            model.model.config.pad_token_id = tokenizer.pad_token_id #= 0  # unk
-            model.model.config.bos_token_id = tokenizer.bos_token_id
-            model.model.config.eos_token_id = tokenizer.eos_token_id 
-        else:    
-            pijama_model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16)#, device_map="cpu")
-            tokenizer = AutoTokenizer.from_pretrained(model_name)#.to(device)
-            tokenizer.pad_token_id = 0 #tokenizer.eos_token_id
-            tokenizer.padding_side='left'    
-            config = {"model": model_name, "model_modifier":None} 
-            config = dict_to_dataclass(config)
-            model_class = CLM 
-            config.model_object = pijama_model 
-            # tokenizer = dm.tokenizer if dm is not None else tokenizer
-            model = model_class(**vars(config), tokenizer=tokenizer)      
+        # if "llama" in model_name:       
+        config = {"model": model_name, "model_modifier":None, "example_to_ids_path": None} 
+        config = dict_to_dataclass(config)
+        model, _, _ = load_model(config, device=device, tokenizer_path="yahma/llama-7b-hf") 
+        # tokenizer =  LlamaTokenizer.from_pretrained(model_name, padding_side='left')   
+        tokenizer =  LlamaTokenizer.from_pretrained("yahma/llama-7b-hf", padding_side='left')   
+        tokenizer.pad_token_id = 0 #tokenizer.eos_token_id
+        # tokenizer.padding_side='left'          
+        model.model.config.pad_token_id = tokenizer.pad_token_id #= 0  # unk
+        model.model.config.bos_token_id = tokenizer.bos_token_id
+        model.model.config.eos_token_id = tokenizer.eos_token_id 
+        # else:    
+        #     pijama_model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16)#, device_map="cpu")
+        #     tokenizer = AutoTokenizer.from_pretrained(model_name)#.to(device)
+        #     tokenizer.pad_token_id = 0 #tokenizer.eos_token_id
+        #     tokenizer.padding_side='left'    
+        #     config = {"model": model_name, "model_modifier":None} 
+        #     config = dict_to_dataclass(config)
+        #     model_class = CLM 
+        #     config.model_object = pijama_model 
+        #     # tokenizer = dm.tokenizer if dm is not None else tokenizer
+        #     model = model_class(**vars(config), tokenizer=tokenizer)      
         
         model.model.config.pad_token_id = tokenizer.pad_token_id #= 0  # unk
         model.model.config.bos_token_id = tokenizer.bos_token_id
@@ -455,11 +474,11 @@ def load_model_for_generation(from_hf, model_name, model_path, skill_selector):
         model.to(device)
     elif from_hf==0:           
         config = Config()       
-        config.model = model_name
+        config.model = base_model_name
         config.n_skills = 1 # by default, can be overwritten in load_model if a checkpoint is provided
         model, tokenizer, config = load_model(config, model_path, device=device)  
         tokenizer.padding_side='left'  
-        print(f"Loaded model {model_name} from {model_path}\n")
+        print(f"Loaded model {base_model_name} from {model_path}\n")
         print("Loaded config", config.__dict__)
         # if config.example_to_ids_path is not None:    
         #     cluster_result = ClusterResult(config.example_to_ids_path)      
@@ -554,7 +573,7 @@ def load_model_for_generation(from_hf, model_name, model_path, skill_selector):
 def eval_superni(model_name="gpt3",  
                  batch_size=4, 
                  out_prefix="", 
-                 from_hf=0, 
+                 from_hf=0,                   
                  model_path="", skill_selector="topic", 
                  nshot=0, n_tasks=None, use_wandb=0, use_outputs=1, amlt_experiment_name="alpaca_smear"):
     task_results = {} 
@@ -649,8 +668,8 @@ def eval_superni(model_name="gpt3",
     path_to_clusterer = f"{base_cluster_infos}/cluster_infos/cbtm/"
     # path_to_clusterer = Path(cmd_args.path_to_clusterer)
     # num_clusters=8 
-    
-    if model_path =="":
+        
+    if model_path =="" and from_hf==0:
         if model_name in model_dict:      
             from_hf = model_dict[model_name]["from_hf"]
             model_path = model_dict[model_name]["model_path"]
@@ -665,11 +684,10 @@ def eval_superni(model_name="gpt3",
           
     base_model_name = "yahma/llama-7b-hf"
                 
-    disable_torch_init()
-     
-    model, tokenizer, config, topic_router = load_model_for_generation(from_hf, base_model_name, model_path, skill_selector)
+    disable_torch_init()         
+    model, tokenizer, config, topic_router = load_model_for_generation(from_hf, base_model_name, model_name, model_path, skill_selector)
     
-    
+             
     tfidf, kmeans = None, None
     # infer what clusterer we are using
     cbtm_n_clusters=-1        
