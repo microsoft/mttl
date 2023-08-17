@@ -278,7 +278,7 @@ class CLM(EfficientCheckpointModule):
                 mixing_weights_mean = layer_routing_dist.transpose(0,1).mean(dim=1) # n_splits x n_skills
                 
                 average_normalized_entropy = -torch.sum(mixing_weights_ * torch.log(mixing_weights_ + EPS), dim=-1)/ np.log(n_skills) if n_skills>1 else torch.ones_like(mixing_weights_[:,0]) # ex 
-                # solit in n_splits chunks     
+                # solit in n_splits chunks       
                 average_normalized_entropy = average_normalized_entropy.reshape(bs, n_splits).mean(dim=0) # bs    
                 # how different are the routinf for different examples? calculate MI, entropy of average - average entropy
                 mixing_weights_mean = layer_routing_dist.transpose(0,1).mean(dim=1) # n_splits x n_skills        
@@ -314,7 +314,6 @@ class CLM(EfficientCheckpointModule):
                 
 
     def validation_step(self, batch, batch_idx, log=True): 
-        self.accumulate_metrics_batch = defaultdict(list)  
         loss, aux_loss = self.forward(batch, reduction='none')
         total_loss = loss #+aux_loss 
         # outputs = self.model.forward(**batch, reduction='none')
