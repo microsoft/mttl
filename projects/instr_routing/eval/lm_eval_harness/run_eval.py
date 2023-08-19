@@ -33,10 +33,10 @@ from projects.instr_routing.eval.ni.gen_ni_predictions import load_model_for_gen
     help="if specified, we will load the model to generate the predictions.",
 )   
 @click.option("--amlt_experiment_name", type=str, default="alpaca_smear")
-@click.option("--task", type=str, default="truthfulqa_mc")
-@click.option("--nshot", type=int, default=0)       
-@click.option("--batch_size", type=int, default=5)
-@click.option("--ds_limit", type=float, default=None)  
+@click.option("--task", type=str, default="mmlu")
+@click.option("--nshot", type=int, default=0)   
+@click.option("--batch_size", type=int, default=5)  
+@click.option("--ds_limit", type=float, default=0.05)      
 def main(save_dir="/home/v-oostapenko/results/mmlu/llama-7B/", 
          model_name="",
          model_path="",      
@@ -52,13 +52,73 @@ def eval_lm(save_dir="/home/v-oostapenko/results/mmlu/llama-7B/",
         batch_size=5,
         ds_limit=None):  
     
+    if task=="mmlu":  
+        task = ["hendrycksTest-abstract_algebra",
+                "hendrycksTest-anatomy",
+                "hendrycksTest-astronomy",
+                "hendrycksTest-business_ethics",
+                "hendrycksTest-clinical_knowledge",
+                "hendrycksTest-college_biology",
+                "hendrycksTest-college_chemistry",
+                "hendrycksTest-college_computer_science",
+                "hendrycksTest-college_mathematics",
+                "hendrycksTest-college_medicine",
+                "hendrycksTest-college_physics",
+                "hendrycksTest-computer_security",
+                "hendrycksTest-conceptual_physics",
+                "hendrycksTest-econometrics",
+                "hendrycksTest-electrical_engineering",
+                "hendrycksTest-elementary_mathematics",
+                "hendrycksTest-formal_logic",
+                "hendrycksTest-global_facts",
+                "hendrycksTest-high_school_biology",
+                "hendrycksTest-high_school_chemistry",
+                "hendrycksTest-high_school_computer_science",
+                "hendrycksTest-high_school_european_history",
+                "hendrycksTest-high_school_geography",
+                "hendrycksTest-high_school_government_and_politics",
+                "hendrycksTest-high_school_macroeconomics",
+                "hendrycksTest-high_school_mathematics",
+                "hendrycksTest-high_school_microeconomics",
+                "hendrycksTest-high_school_physics",
+                "hendrycksTest-high_school_psychology",
+                "hendrycksTest-high_school_statistics",
+                "hendrycksTest-high_school_us_history",
+                "hendrycksTest-high_school_world_history",
+                "hendrycksTest-human_aging",
+                "hendrycksTest-human_sexuality",
+                "hendrycksTest-international_law",
+                "hendrycksTest-jurisprudence",
+                "hendrycksTest-logical_fallacies",
+                "hendrycksTest-machine_learning",
+                "hendrycksTest-management",
+                "hendrycksTest-marketing",
+                "hendrycksTest-medical_genetics",
+                "hendrycksTest-miscellaneous",
+                "hendrycksTest-moral_disputes",
+                "hendrycksTest-moral_scenarios",
+                "hendrycksTest-nutrition",
+                "hendrycksTest-philosophy",
+                "hendrycksTest-prehistory",
+                "hendrycksTest-professional_accounting",
+                "hendrycksTest-professional_law",
+                "hendrycksTest-professional_medicine",
+                "hendrycksTest-professional_psychology",
+                "hendrycksTest-public_relations",
+                "hendrycksTest-security_studies",
+                "hendrycksTest-sociology",
+                "hendrycksTest-us_foreign_policy",
+                "hendrycksTest-virology",
+                "hendrycksTest-world_religions"]
+    if isinstance(task, str):
+        task = [task]
+    
     from_hf = 0  # TODO: make sure this can also eval model from hf
     ################################################################################################
     # set paths
     code_dir = os.path.join(os.path.dirname(__file__), "..", "..")
     save_dir = os.getenv("AMLT_OUTPUT_DIR", save_dir)
     if os.environ.get("AMLT_OUTPUT_DIR") is not None:  # on gcr
-        data_dir = "/mnt/default/data/mmlu/"
         base_model_path = "/mnt/default/data/models"
         base_cluster_infos = "/mnt/default/data/"  # /mnt/amlt_code/inst_follow/"
     else:
@@ -112,7 +172,7 @@ def eval_lm(save_dir="/home/v-oostapenko/results/mmlu/llama-7B/",
     results = evaluator.simple_evaluate(
         model=lm_eval_model, 
         model_args="",           
-        tasks=[task],  
+        tasks=task, 
         num_fewshot=nshot,  
         batch_size=batch_size,   
         max_batch_size=None,
@@ -134,7 +194,7 @@ def eval_lm(save_dir="/home/v-oostapenko/results/mmlu/llama-7B/",
         with open(save_dir, "w") as f:
             f.write(dumped)
 
-    batch_sizes = ",".join(map(str, results["config"]["batch_sizes"]))
+    # batch_sizes = ",".join(map(str, results["config"]["batch_sizes"]))
     # print(
     #     f"{args.model} ({args.model_args}), limit: {args.limit}, provide_description: {args.provide_description}, "
     #     f"num_fewshot: {args.num_fewshot}, batch_size: {args.batch_size}{f' ({batch_sizes})' if batch_sizes else ''}"

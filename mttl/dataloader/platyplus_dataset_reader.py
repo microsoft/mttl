@@ -30,7 +30,7 @@ class AlpacaTemplateSource(AlpacaTemplate):
 class PlatypusDataset(torch.utils.data.dataset.Dataset):     
     def __init__(self, tokenizer, max_input_length,            
                  max_output_length, data_dir,               
-                 train_on_inputs=False, dst_path=None, idxs=None, cluster_info=None, predict_cluster=None, loss_for_keywords=True):
+                 train_on_inputs=False, dst_path=None, idxs=None, cluster_info=None, predict_cluster=None, loss_for_keywords=True, subset=None):
         super().__init__()
         self.dst_path=dst_path   
         self.predict_cluster = predict_cluster  
@@ -45,6 +45,9 @@ class PlatypusDataset(torch.utils.data.dataset.Dataset):
         self.dataset = load_dataset("garage-bAInd/Open-Platypus", cache_dir=data_dir)["train"]
         if idxs is not None:       
             self.dataset = self.dataset.select(idxs)
+        if subset is not None:     
+            self.dataset = self.dataset.select(range(subset))    
+        
         # select subset of 100 examples
         # self.dataset = self.dataset.select(range(100))
 

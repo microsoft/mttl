@@ -8,7 +8,7 @@
     "wandb_project": "alpaca_tuning", 
     "exp_name": "platypus_dense",
     "precision": "bf16",  
-    "xrouter_kaiming": 1,
+    "xrouter_normal_innit": 1,
     "train_batch_size": 16,
     "merge_A_B_seperately": 0, 
     "model": "yahma/llama-7b-hf",

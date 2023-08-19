@@ -75,8 +75,8 @@ class PlatypusModule(LightningDataModule):
             self.config.max_input_length, 
             self.config.max_output_length, 
             self.config.train_dir, 
-            self.config.train_on_inputs,  
-            self.config.dst_dir, idxs, self.cluster_result, self.config.predict_cluster, loss_for_keywords=loss_for_keywords,
+            self.config.train_on_inputs,             
+            self.config.dst_dir, idxs, self.cluster_result, self.config.predict_cluster, loss_for_keywords=loss_for_keywords, subset = 100 if self.config.fast_debug_run else None
         )
     
     def setup(self, stage=None): 

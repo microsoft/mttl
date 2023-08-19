@@ -161,13 +161,13 @@ test_tasks = [
 ]
 
 
-def load_instructions(path, n_tasks=None):
+def load_instructions(path, n_tasks=None, ds_limit=None):
     """
     Read all .json files in the directory path and
     extract the field "Definition" from each file.
     """
     import glob
-    for file in glob.glob(path + "/*.json"):    
+    for i, file in enumerate(glob.glob(path + "/*.json")):   
             task_name = os.path.basename(file).replace(".json", "")
             test_tasks_selected = test_tasks[:n_tasks] if n_tasks else test_tasks
             if task_name in test_tasks_selected: 
@@ -177,6 +177,9 @@ def load_instructions(path, n_tasks=None):
                 task_indo =  task_name.split("_")
                 task_id = task_indo[0]
                 task_category = task_indo[-1]
+                if ds_limit is not None:  
+                    if i>len(glob.glob(path + "/*.json"))*ds_limit:
+                        return task_name, data["Definition"],data["Instances"][:100], data["Positive Examples"]
                 yield task_name, data["Definition"],data["Instances"][:100], data["Positive Examples"]
 
 
@@ -280,8 +283,8 @@ def load_kmeans_model(path_to_model):
     with open(path_to_model, 'rb') as f:
         out = pickle.load(f)
     return out
-          
-def eval_rouge(prediction_file, reference_file="~/dev/mttl/inst_follow/eval/ni/test_references.jsonl", clean=0):    
+             
+def eval_rouge(prediction_file, reference_file="/home/v-oostapenko/dev/mttl/inst_follow/eval/ni/test_references.jsonl", clean=0):    
     from projects.instr_routing.eval.ni.evaluate import compute_metrics, compute_grouped_metrics
     eval_instances = {} 
     with open(reference_file) as fin:
@@ -358,12 +361,13 @@ def eval_rouge(prediction_file, reference_file="~/dev/mttl/inst_follow/eval/ni/t
 @click.option("--use_wandb", type=int, default=0) # 
 @click.option("--use_outputs", type=int, default=0) #     
 @click.option("--amlt_experiment_name", type=str, default="alpaca_smear")   
+@click.option("--ds_limit", type=float, default=0.01)  
 def eval_superni_command(model_name="gpt3", batch_size=4, out_prefix="", from_hf=0, model_path="", 
                          skill_selector="topic", 
-                         nshot=0, n_tasks=None, use_wandb=False, use_outputs=False, amlt_experiment_name="alpaca_smear"):
+                         nshot=0, n_tasks=None, use_wandb=False, use_outputs=False, amlt_experiment_name="alpaca_smear", ds_limit=None):
     return eval_superni(model_name, 
                         batch_size,    
-                        out_prefix, from_hf, model_path, skill_selector, nshot, n_tasks, use_wandb, use_outputs, amlt_experiment_name)
+                        out_prefix, from_hf, model_path, skill_selector, nshot, n_tasks, use_wandb, use_outputs, amlt_experiment_name, ds_limit=ds_limit)
 
 
 def load_model_for_generation(from_hf, base_model_name, model_name, model_path, skill_selector, code_dir):
@@ -486,9 +490,9 @@ def eval_superni(model_name="gpt3",
                  model_path="", 
                  skill_selector="topic", # almost depreciated 
                  nshot=0, n_tasks=None, use_wandb=0, use_outputs=1, amlt_experiment_name="alpaca_smear",
-                 out_dir = "~/out/instr_routing",
-                 data_path = "~/dev/natural-instructions/tasks",
-                 base_model_path = "~/dev/amlt/"
+                 out_dir = "/home/v-oostapenko/out/instr_routing",
+                 data_path = "/home/v-oostapenko/dev/natural-instructions/tasks",
+                 base_model_path = "/home/v-oostapenko/dev/amlt/",ds_limit=None,
                  ):
     task_results = {}                 
     disable_torch_init()   
@@ -581,7 +585,7 @@ def eval_superni(model_name="gpt3",
             #unique task names
             task_results_existing = {l["task_name"] for l in lines}
                     
-        for inst in load_instructions(data_path, n_tasks): # iterate over tasks
+        for inst in load_instructions(data_path, n_tasks, ds_limit): # iterate over tasks
             task_name, definition, test_exs, train_exs = inst
             if task_results_existing is not None and task_name in task_results_existing:
                 print(f"Skipping {task_name}")
@@ -632,8 +636,8 @@ def eval_superni(model_name="gpt3",
                 for l in task_results[task_name]:
                     f.write(json.dumps(l) + "\n")
                  
-        #calculate rouge-L         
-        all_results_rouge = eval_rouge(f"{base_out}/eval/ni/{out_file_name}", reference_file=f"{code_dir}eval/ni/test_references.jsonl")
+        #calculate rouge-L        
+        all_results_rouge = eval_rouge(f"{base_out}/eval/ni/{out_file_name}", reference_file=f"{code_dir}/eval/ni/test_references.jsonl")
         print(all_results_rouge)
         out_file_name = "[rouge]"+out_file_name 
         with open(f"{base_out}/eval/ni/{out_file_name}", "a") as f:

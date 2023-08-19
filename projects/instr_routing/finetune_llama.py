@@ -83,7 +83,11 @@ class Config(MTTLConfig):
         # self.validate_before_start = False 
         self.predict_cluster = None # topic or skill
         self.dst_dir = None # dir of jsonl dataset
+        
         self.fast_dev_run = False
+        self.fast_debug_run = False
+        
+        self.eval_ds_limit = 1
         self.train_only_cluster = None
         self.validation_portion = 0.03  
         self.per_cluster_test = False
@@ -100,7 +104,7 @@ class Config(MTTLConfig):
         self.xrouter_reverse_kl = False
         self.xrouter_normal_innit = False
         self.xrouter_use_attn = False
-        self.xrouter_sim_metric = "kl"
+        self.xrouter_sim_metric = "kl"  
         self.xrouting_sep_teacher_student = False
         self.xrouter_init_scale = 0.02
         
@@ -145,8 +149,11 @@ class Config(MTTLConfig):
                 # this raises an error if the env. var does not exist
                 v = Template(v).substitute(os.environ)
 
-            setattr(self, k, v)
-            self._updated_kwargs.add(k)
+            setattr(self, k, v)   
+            if isinstance(self._updated_kwargs, set):
+                self._updated_kwargs.add(k)
+            else:
+                self._updated_kwargs[k]=v
 
 
 def parse_config(extra_kwargs=None, raise_error=True, parent=None, return_parser=False, c=None):
@@ -216,8 +223,8 @@ def run_multitask(args):
             
             
     # select dataloader
-    model_class = CLM 
-    if args.dataset == "alpaca": 
+    model_class = CLM      
+    if args.dataset == "alpaca":             
         dm = AlpacaDataModule(args, cluster_result=cluster_result)
     elif args.dataset == "flan_v2":
         dm = FlanModule(args, cluster_result=cluster_result)
@@ -382,22 +389,27 @@ def run_multitask(args):
     del dm
     del trainer
     # empty cache  
+
+          
+    ds_limit = args.eval_ds_limit if not args.fast_debug_run else 0.01
+    
     torch.cuda.empty_cache()
-    if args.eval_mmlu:
+    if args.eval_mmlu:  
         from projects.instr_routing.eval.mmlu.run_mmlu_eval import eval_mlu     
         print("#"*50)
         print("Evaluating on MMLU")
-        acc=eval_mlu(model_name="",model_path=path_best_model, eval_batch_size=5)
+        # acc=eval_mlu(model_name="",model_path=path_best_model, eval_batch_size=5)
+        results_dict=eval_lm(model_path=path_best_model, model_name="", task="mmlu", batch_size=5, nshot=0, ds_limit=ds_limit)
         if wandb.run is not None:           
-            wandb.log({"acc_mmlu": acc})
-       
+            wandb.log({"acc_mmlu": results_dict})
+    
 
          
     if args.eval_arc:       
         from projects.instr_routing.eval.lm_eval_harness.run_eval import eval_lm
         print("#"*50)   
         print("Evaluating on ARC")       
-        results_dict=eval_lm(model_path=path_best_model, model_name="", task="arc_challenge", batch_size=5, nshot=25)
+        results_dict=eval_lm(model_path=path_best_model, model_name="", task="arc_challenge", batch_size=5, nshot=25, ds_limit=ds_limit)
         if wandb.run is not None:           
             wandb.log(results_dict)
 
@@ -405,19 +417,19 @@ def run_multitask(args):
         from projects.instr_routing.eval.lm_eval_harness.run_eval import eval_lm
         print("#"*50)         
         print("Evaluating on TruthfulQA")
-        results_dict=eval_lm(model_path=path_best_model, model_name="", task="truthfulqa_mc", batch_size=5, nshot=0)
+        results_dict=eval_lm(model_path=path_best_model, model_name="", task="truthfulqa_mc", batch_size=5, nshot=0, ds_limit=ds_limit)
         if wandb.run is not None:           
             wandb.log(results_dict)             
     
     if args.eval_superni:         
-        print("#"*50)
-        print("Evaluating on super NI")          
-        from projects.instr_routing.eval.gen_ni_predictions import eval_superni
+        print("#"*50)           
+        print("Evaluating on super NI")              
+        from projects.instr_routing.eval.ni.gen_ni_predictions import eval_superni
         rouge_L_super_ni = eval_superni(model_name="",    
                      batch_size=args.superni_eval_batchsize,
                      out_prefix=f"{args.exp_name}",  
                      model_path=path_best_model,         
-                     nshot=0, use_outputs=args.eval_superni_use_outputs)
+                     nshot=0, use_outputs=args.eval_superni_use_outputs, ds_limit=ds_limit)
         ##################################################
         #if wandb is innitalized
         if wandb.run is not None:           
@@ -427,26 +439,28 @@ def run_multitask(args):
     if args.eval_hellaswag:
         from projects.instr_routing.eval.lm_eval_harness.run_eval import eval_lm
         print("#"*50)
-        print("Evaluating on HellaSwag")
-        results_dict=eval_lm(model_path=path_best_model, model_name="", task="hellaswag", batch_size=5, nshot=10)
+        print("Evaluating on HellaSwag")           
+        results_dict=eval_lm(model_path=path_best_model, 
+                             model_name="", task="hellaswag", 
+                             batch_size=5, nshot=10, ds_limit=ds_limit)
         if wandb.run is not None:           
             wandb.log(results_dict)
     
-    if args.gen_alpaca_eval:
-        print("Generting alpaca_eval")     
-        from projects.instr_routing.eval.alpaca_eval.gen_alpaca_eval_predictions import gen_alpaca_evl
-        try:       
-            gen_alpaca_evl(   
-                llama_model=args.model,
-                batch_size=2,           
-                model_name=args.exp_name, 
-                model_path=path_best_model, 
-                run_all_clusters=False)
+    # if args.gen_alpaca_eval:
+    #     print("Generting alpaca_eval")     
+    #     from projects.instr_routing.eval.alpaca_eval.gen_alpaca_eval_predictions import gen_alpaca_evl
+    #     try:       
+    #         gen_alpaca_evl(   
+    #             llama_model=args.model,
+    #             batch_size=2,           
+    #             model_name=args.exp_name, 
+    #             model_path=path_best_model, 
+    #             run_all_clusters=False)
             
-        except Exception as e:
-            # print e
-            print("Failed to generate alpaca eval")
-            print(e)
+    #     except Exception as e:
+    #         # print e
+    #         print("Failed to generate alpaca eval")
+    #         print(e)
 
         
 if __name__ == "__main__":

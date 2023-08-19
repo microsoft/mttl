@@ -60,7 +60,7 @@ class AlpacaTemplateSource(object):
 class AlpacaDataset(torch.utils.data.dataset.Dataset):     
     def __init__(self, tokenizer, max_input_length,            
                  max_output_length, data_dir,               
-                 train_on_inputs=False, dst_path=None, idxs=None, cluster_info=None, predict_cluster=None, loss_for_keywords=True):
+                 train_on_inputs=False, dst_path=None, idxs=None, cluster_info=None, predict_cluster=None, loss_for_keywords=True, subset=None):
         super().__init__()
         self.dst_path=dst_path   
         self.predict_cluster = predict_cluster
@@ -92,6 +92,9 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
                 df = df.iloc[idxs]
             # transform into dataset
             self.dataset = Dataset.from_pandas(df)
+        
+        if subset is not None:     
+            self.dataset = self.dataset.select(range(subset))
         # each entry is "instruction", "input", "output" dictionary
 
         self.tokenizer = tokenizer
