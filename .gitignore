@@ -142,4 +142,10 @@ venv.bak/
 dmypy.json
 
 # Pyre type checker
-.pyre/
+.pyre/     
+**/eval/alpaca_eval/*
+**/eval/alpaca_eval/**/*.csv
+**/eval/alpaca_eval/**/*.json
+**/eval/mmlu/**/*.csv
+results/
+lm_cache/

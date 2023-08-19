@@ -1,0 +1,23 @@
+{
+    "dataset": "alpaca",
+    "optimizer": "adamw",
+    "learning_rate": 9e-3,
+    "micro_batch_size": 4, 
+    "exp_name": "llama_adapter",
+    "train_dir": "$AP_DATA_DIR",
+    "precision": "bf16",
+    "train_batch_size": 128,
+    "model": "yahma/llama-7b-hf",
+    "num_train_epochs": 5,
+    "n_skills": 1,
+    "max_input_length": 256,  
+    "eval_every": 400,
+    "warmup_steps": 100,  
+    "weight_decay": 0.02,
+    "model_modifier": "llama_adapter",    
+    "adapter_modules": "self_attn",
+    "trainable_param_names": ".*adaption_.*", 
+    "output_dir":"/home/v-oostapenko/logs/llama_alpaca/llama_adapter",
+    "adapter_layers": 30,
+    "adapter_len": 10
+}

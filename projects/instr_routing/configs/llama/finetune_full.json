@@ -1,0 +1,20 @@
+{       
+    "dataset": "alpaca",
+    "optimizer": "adamw", 
+    "learning_rate": 3e-5,
+    "micro_batch_size": 4,
+    "exp_name": "alpaca_full",
+    "precision": "bf16",    
+    "train_batch_size": 128,
+    "model": "yahma/llama-7b-hf",
+    "lora_rank": 4,  
+    "rank": 4,         
+    "num_train_epochs": 3,
+    "n_skills": 1,
+    "eval_every": 400,
+    "warmup_steps": 100,
+    "lora_dropout": 0.05,
+    "weight_decay": 0.00,
+    "max_input_length": 256,      
+    "trainable_param_names": ".*v_proj.*|.*q_proj.*|.*k_proj.*|.*o_proj.*"  
+}

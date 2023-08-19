@@ -5,7 +5,7 @@ from scipy.stats import entropy as calc_entropy
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from mttl.utils import trim_batch 
-from mttl.dataloader.data_utils import ExampleInfo
+from mttl.dataloader.data_utils import ExampleInfo          
 from mttl.dataloader.alpaca_dataset_readers import AlpacaDataset
 from transformers import LlamaTokenizer
 from projects.instr_routing.cluster_tuning.cluster_reader import ClusterResult

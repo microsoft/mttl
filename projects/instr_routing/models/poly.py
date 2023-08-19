@@ -59,7 +59,7 @@ class XRouter(Selector):
         INST_ONLY = 1 # train and test time we only look at instruction part
         TOKEN_SOFAR = 2 # train and test time we only look at tokens sofar       
         ALL = 3 # this is per token, but we look at all tokens sofar to calculate token's router input
-        ALL_DISTILL_INST = 4
+        ALL_DISTILL_INST = 4 # mimic posterior teacher with prior student
     
     def __init__(self, config, in_d=4096):
         super().__init__() 
@@ -72,15 +72,15 @@ class XRouter(Selector):
         self.xrouter_x_cond = config.xrouter_x_cond    
         self.xrouter_normal_innit = config.xrouter_normal_innit
         self.xrouting_option = config.xrouting_option
-        self.xrouting_sep_teacher_student = config.sep_teacher_student
-        self.xrouter_loard_balancing = config.xrouter_loard_balancing
+        self.xrouting_sep_teacher_student = config.xrouting_sep_teacher_student
+        self.xrouter_load_balancing = config.xrouter_load_balancing
         
         
         self.n_splits = config.n_splits
         self.input_layer_norm = nn.LayerNorm(in_d, dtype=global_vars.PRECISION) 
         self.ff = nn.Linear(in_d, config.n_skills * self.n_splits)   
         self.ff_router_layer_norm = nn.LayerNorm(in_d, dtype=global_vars.PRECISION)          
-        self.ff_router_layer_norm.weight = nn.Parameter(torch.ones(in_d, dtype=global_vars.PRECISION)*self.router_init_scale)
+        self.ff_router_layer_norm.weight = nn.Parameter(torch.ones(in_d, dtype=global_vars.PRECISION)*self.xrouter_init_scale)
         
         if self.xrouter_use_attn:      
             from projects.instr_routing.models.attention import SelectAttention    
@@ -91,15 +91,15 @@ class XRouter(Selector):
             self.dummy_input = nn.Parameter(torch.ones(in_d, dtype=global_vars.PRECISION))
         #innit weights and biases with normal distribution
         if self.xrouter_normal_innit:    
-            self.ff.weight.data.normal_(mean=0.0, std=self.router_init_scale)
+            self.ff.weight.data.normal_(mean=0.0, std=self.xrouter_init_scale)
             self.ff.bias.data.fill_(0)
             
         if self.xrouting_option ==4 and self.xrouting_sep_teacher_student:
             self.ff_student = nn.Linear(in_d, config.n_skills * self.n_splits, dtype=global_vars.PRECISION)   
-            self.ff_student.weight.data.normal_(mean=0.0, std=self.router_init_scale)
+            self.ff_student.weight.data.normal_(mean=0.0, std=self.xrouter_init_scale)
             self.ff_student.bias.data.fill_(0)
             self.ff_student_layer_norm = nn.LayerNorm(in_d, dtype=global_vars.PRECISION)              
-            self.ff_student_layer_norm.weight = nn.Parameter(torch.ones(self.in_dim, dtype=global_vars.PRECISION)*self.router_init_scale)
+            self.ff_student_layer_norm.weight = nn.Parameter(torch.ones(self.in_dim, dtype=global_vars.PRECISION)*self.xrouter_init_scale)
         
     def route(self, router: nn.Linear, layer_norm: nn.LayerNorm, x):
         if self.config.xrouter_normalize_input:
@@ -130,7 +130,8 @@ class XRouter(Selector):
             gen_mode = routing_infos.gen_mode
             
         if self.xrouting_option>XRouter.ROUTING_OPTION.TOKEN.value:
-            if gen_mode:                  
+            if gen_mode:    
+                ####### GENERATION MODE #######              
                 if self.xrouting_option==XRouter.ROUTING_OPTION.INST_ONLY.value:
                     if x.shape[1]==1:
                         x = self.prev_x # we do not add the generated token and always use instruction only 
@@ -144,7 +145,7 @@ class XRouter(Selector):
                     if x.shape[1]==1:
                         x = self.prev_x # we do not add the generated token and always use instruction only 
                 
-                # chash previous tokens       
+                # chash previous tokens                 
                 if self.xrouting_option in [XRouter.ROUTING_OPTION.INST_ONLY.value,    
                                             XRouter.ROUTING_OPTION.ALL_DISTILL_INST.value]:
                     if not x.shape[1]==1:
@@ -152,18 +153,21 @@ class XRouter(Selector):
                 if self.xrouting_option in [XRouter.ROUTING_OPTION.TOKEN_SOFAR.value, 
                                             XRouter.ROUTING_OPTION.ALL.value]: 
                     self.prev_x = copy.deepcopy(x.detach())
+            ##########################################
             else:
                 self.prev_x = None
                 
             # if routings are given, use them
-            if routing_infos.routings: 
+            if routing_infos.routings:    
                 routings = routing_infos.routings.pop(0)
                 return routings, torch.zeros(1, device=x.device)
             
             if x_rout is None:                          
                 padding_mask = routing_infos.pad_token_mask # 1 if the token is not a pad token, so its either instruciton or output
-                inst_token_mask = routing_infos.inst_token_mask # 1 if the token is part of instruction or pad token (so outputs are 0s)
-                
+                inst_token_mask = routing_infos.inst_token_mask if routing_infos.inst_token_mask is not None else torch.ones_like(padding_mask) # 1 if the token is part of instruction or pad token (so outputs are 0s)
+                if routing_infos.inst_token_mask is None:
+                    assert gen_mode 
+                          
                 if self.xrouting_option == XRouter.ROUTING_OPTION.ALL_DISTILL_INST.value:
                     # TODO: these were mixed up in the old codebase :O
                     # (padding_mask * instruction_mask, padding_mask)            
@@ -174,7 +178,7 @@ class XRouter(Selector):
                     x_rout_prior = self.apply_mask_and_average(x, prior_padding_mask)
                     x_rout_posterior = self.apply_mask_and_average(x, posterior_padding_mask)
 
-                    del non_zero_counts, prior_padding_mask, posterior_padding_mask
+                    del prior_padding_mask, posterior_padding_mask
                       
                     adapter_logits_prior = self.route(self.ff, self.ff_router_layer_norm, x_rout_prior) if not self.xrouting_sep_teacher_student else self.route(self.ff_student, self.ff_student_layer_norm, x_rout_prior)
                     adapter_dist_prior = self.softmax(adapter_logits_prior/self.config.poly_selector_cluster_temp)
@@ -205,14 +209,44 @@ class XRouter(Selector):
                          
                     return adapter_dist, aux_loss
 
-                                  
+                                   
                 if self.xrouting_option == XRouter.ROUTING_OPTION.INST_ONLY.value: # train and test time we only look at instruction part
                     padding_mask = padding_mask * inst_token_mask
                 elif self.xrouting_option == XRouter.ROUTING_OPTION.TOKEN_SOFAR.value: # train and test time we only look at tokens sofar
+                    if hasattr(routing_infos, "token_sofar_mask"): # take from cache
+                        if routing_infos.token_sofar_mask is not None:
+                            padding_mask = routing_infos.token_sofar_mask
+                    else:        
+                        padding_mask = padding_mask * inst_token_mask # only the instruction
+                        # Find the indices of the last occurrence of 1 in tensor A along the last dimension
+                        last_ones_indices = padding_mask.sum(dim=1).unsqueeze(-1)#.cpu()                
+                        
+                        # Expand dimensions of last_ones_indices to match the shape of B
+                        expanded_indices = last_ones_indices
+                        expanded_indices = expanded_indices.repeat(1, seq)
+                        expanded_indices_inverse = seq - expanded_indices
+                        expanded_indices_inverse-= torch.arange(seq).unsqueeze(0).to(x.device)
+                        expanded_indices_inverse = torch.max(expanded_indices_inverse, torch.zeros_like(expanded_indices_inverse))
+                        expanded_indices_inverse = expanded_indices_inverse.flip(1)
+                        mask = expanded_indices + expanded_indices_inverse
+                        mask = mask.unsqueeze(-1).repeat(1,1,seq)
+                        # shape like mask
+                        ar = torch.arange(seq).to(x.device)
+                        ar = ar.unsqueeze(0).unsqueeze(0).repeat(bs, seq, 1)
+                        
+                        A = torch.zeros(bs, seq, seq).to(mask.device)
+                        B = torch.ones(bs, seq, seq).to(mask.device)
+                        padding_mask = torch.where(ar<mask, A,B)
+                        padding_mask = 1-padding_mask # per token mask, bs x seq x seq         
+                        del mask, ar, A, B, expanded_indices, expanded_indices_inverse, last_ones_indices                        
+                        # cache mask to prevent recalculation at each layer   
+                        setattr(routing_infos, "token_sofar_mask", padding_mask)
                     assert padding_mask.dim()==3  
                     assert padding_mask.shape[0]==bs
                     assert padding_mask.shape[1]==seq
-                    assert padding_mask.shape[2]==seq    
+                    assert padding_mask.shape[2]==seq
+                    
+                      
                 elif self.xrouting_option == XRouter.ROUTING_OPTION.ALL.value: # we look at all tokens, input and output (at training)
                     padding_mask = padding_mask  
                     assert padding_mask.shape[0]==bs
@@ -473,7 +507,9 @@ class PolyLoRALinear(PolytroponAdapter):
         self.bias = linear_layer.bias
         self.kaiming_init = config.lora_kaiming_init
         self.lora_randb_init = config.lora_randb_init          
-        self.x_router_load_balancing=config.x_router_load_balancing
+               
+        self.xrouter_load_balancing=config.xrouter_load_balancing
+        
         self.task_id_ptr = task_id_ptr
         self.training_steps = 0.0
         self.lora_alpha = config.lora_alpha if hasattr(config, "lora_alpha") else 1.0

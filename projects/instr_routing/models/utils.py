@@ -52,31 +52,3 @@ class RoutingInfo:
             if self.example_ids is not None
             else None
         )
-
-
-    task_ids: torch.Tensor
-    hashes: List[str]
-    instruction_hashes: List[str] = None
-    example_ids: List[int] = None
-
-    @classmethod
-    def from_batch(cls, batch):
-        return RoutingInfo(
-            task_ids=batch["task_ids"],
-            hashes=batch.get("hashes", None),
-            example_ids=batch.get("example_ids", None),
-            instruction_hashes=batch.get("instruction_hashes", None)
-        )
-
-    def repeat_interleave(self, repeats):
-        # useful for beam search
-        self.task_ids = self.task_ids.repeat_interleave(repeats)
-        if self.hashes:
-            self.hashes = [h for h in self.hashes for _ in range(repeats)]
-        if self.instruction_hashes:
-            self.instruction_hashes = [h for h in self.instruction_hashes for _ in range(repeats)]
-        self.example_ids = (
-            self.example_ids.repeat_interleave(repeats)
-            if self.example_ids is not None
-            else None
-        )

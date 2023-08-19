@@ -28,7 +28,7 @@ class Config:
     def was_overridden(self, key):
         return key in self._updated_kwargs
 
-    def was_default(self, key):
+    def was_default(self, key):   
         return key not in self._updated_kwargs
 
     def update_kwargs(self, kwargs, eval=True, raise_error=True):

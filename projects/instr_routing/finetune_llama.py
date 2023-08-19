@@ -1,10 +1,12 @@
 import os 
 import sys
+import ast
 import argparse
 import json
 import numpy as np
 import torch
-import wandb         
+import wandb        
+from string import Template
 import pytorch_lightning as pl 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -64,7 +66,6 @@ class Config(MTTLConfig):
         self.micro_batch_size = 4  
         self.share_lora_at_attn = 0
         self.share_lora_a  = False   
-        self.x_router_init_scale = 0.02
         self.merge_A_B_seperately = True
         self.train_on_inputs = False
         self.padding_side = "right"
@@ -91,9 +92,9 @@ class Config(MTTLConfig):
         self.aux_mi_loss_factor = 1
         
         # XRouter   
-        self.xrouter_loard_balancing = False
+        self.xrouter_load_balancing = False
         self.xrouter_x_cond = True 
-        self.x_routing_option = 0 # only applies to x_router routing, depreciated 
+        self.xrouting_option = 0 # only applies to x_router routing, depreciated 
         self.xrouter_normalize_weights = False
         self.xrouter_normalize_input = False
         self.xrouter_reverse_kl = False
@@ -101,6 +102,7 @@ class Config(MTTLConfig):
         self.xrouter_use_attn = False
         self.xrouter_sim_metric = "kl"
         self.xrouting_sep_teacher_student = False
+        self.xrouter_init_scale = 0.02
         
         
         self.superni_eval_batchsize = 2
@@ -109,17 +111,42 @@ class Config(MTTLConfig):
         self.eval_arc = True
         self.eval_truthfulqa = True
         self.eval_superni = True    
-        self.eval_mmlu = True
+        self.eval_mmlu = True    
         self.eval_superni_use_outputs = False
         self.gen_alpaca_eval = False
-        self.per_token_routing = False # only applies to x_router routing 
         
         super().__init__(**kwargs)
+        self._updated_kwargs = set()
         # to reproduce setup in https://github.com/daanelson/alpaca-lora
         self.gradient_accumulation_steps = (
             self.train_batch_size // self.micro_batch_size
         )
         self.train_batch_size = self.micro_batch_size
+    
+    def update_kwargs(self, kwargs, eval=True, raise_error=True):
+        for (k, v) in kwargs.items():
+            if eval:
+                try:
+                    v = ast.literal_eval(v)
+                except (ValueError, SyntaxError):
+                    v = v
+            else:
+                v = v
+            if not hasattr(self, k) and raise_error:
+                raise ValueError(f"{k} is not in the config")
+
+            if eval:
+                print("Overwriting {} to {}".format(k, v))
+
+            if k == 'finegrained':
+                k = 'poly_granularity'
+                v = 'finegrained' if v else 'coarsegrained'
+            elif k in ['train_dir', 'output_dir']:
+                # this raises an error if the env. var does not exist
+                v = Template(v).substitute(os.environ)
+
+            setattr(self, k, v)
+            self._updated_kwargs.add(k)
 
 
 def parse_config(extra_kwargs=None, raise_error=True, parent=None, return_parser=False, c=None):
@@ -158,6 +185,8 @@ def parse_config(extra_kwargs=None, raise_error=True, parent=None, return_parser
     if return_parser:
         return config, args
     return config
+
+
 
 
 def run_multitask(args):             

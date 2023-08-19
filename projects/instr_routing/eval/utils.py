@@ -4,14 +4,14 @@ import json
 import time
 import asyncio
 import os
-import sys    
+import sys      
 from transformers import StoppingCriteria
-from mttl.models.utils import RoutingInfo
+from projects.instr_routing.models.utils import RoutingInfo
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 # from open_instruct.finetune import encode_with_prompt_completion_format
 
-from inst_follow.eval.dispatch_openai_requests import (
+from projects.instr_routing.eval.dispatch_openai_requests import (
     dispatch_openai_chat_requesets,
     dispatch_openai_prompt_requesets,
 )
@@ -88,6 +88,7 @@ def generate_completions(
         model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
             tokenized_prompts
         )
+        setattr(model.task_id_container["routing_infos"], "gen_mode", 1)  
         ###################  add routing info for clustering  end ###################
 
         if model.device.type == "cuda":
@@ -216,11 +217,12 @@ def get_next_word_predictions(
                     topic_probs = topic_probs[:, model.skill_ids_to_keep]
                 tokenized_prompts["distances"] = topic_probs
 
-        # initialize the task id container
+        # initialize the task id container                             
         model.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
             tokenized_prompts
         )        
         padding_mask = (batch_input_ids != tokenizer.pad_token_id).float() 
+        setattr(model.model.task_id_container["routing_infos"], "gen_mode", 1)      
         ###################  add routing info for clustering  end ###################
         if model.device.type == "cuda":
             batch_input_ids = batch_input_ids.cuda()

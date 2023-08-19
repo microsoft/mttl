@@ -3,7 +3,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from mttl.models.poly import Selector
-from mttl.cluster_tuning.cluster_reader import ClusterResult
+from projects.instr_routing.cluster_tuning.cluster_reader import ClusterResult
 
 
 class ClusterSelector(Selector):    
