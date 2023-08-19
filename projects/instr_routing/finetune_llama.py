@@ -107,6 +107,8 @@ class Config(MTTLConfig):
         self.xrouter_sim_metric = "kl"  
         self.xrouting_sep_teacher_student = False
         self.xrouter_init_scale = 0.02
+          
+        self.xr4_option = "switch" #, "default", "teacher_output"
         
         
         self.superni_eval_batchsize = 2

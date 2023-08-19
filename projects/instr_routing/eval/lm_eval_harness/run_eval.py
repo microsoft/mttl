@@ -8,7 +8,8 @@ import json
 from tqdm import tqdm
 import time
 import sys 
-import click   
+import click
+from collections import defaultdict   
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 from projects.instr_routing.eval.model_dict import model_dict   
@@ -53,6 +54,7 @@ def eval_lm(save_dir="/home/v-oostapenko/results/mmlu/llama-7B/",
         ds_limit=None):  
     
     if task=="mmlu":  
+        task_name = "mmlu" 
         task = ["hendrycksTest-abstract_algebra",
                 "hendrycksTest-anatomy",
                 "hendrycksTest-astronomy",
@@ -111,6 +113,7 @@ def eval_lm(save_dir="/home/v-oostapenko/results/mmlu/llama-7B/",
                 "hendrycksTest-virology",
                 "hendrycksTest-world_religions"]
     if isinstance(task, str):
+        task_name = task
         task = [task]
     
     from_hf = 0  # TODO: make sure this can also eval model from hf
@@ -188,7 +191,7 @@ def eval_lm(save_dir="/home/v-oostapenko/results/mmlu/llama-7B/",
 
     dumped = json.dumps(results, indent=2)
     print(dumped)      
-    save_dir = save_dir + f"/{task}_{model_name}_{nshot}.json"
+    save_dir = save_dir + f"/{task_name}_{model_name}_{nshot}.json"
     if save_dir:  
         os.makedirs(os.path.dirname(save_dir), exist_ok=True)
         with open(save_dir, "w") as f:
@@ -200,14 +203,18 @@ def eval_lm(save_dir="/home/v-oostapenko/results/mmlu/llama-7B/",
     #     f"num_fewshot: {args.num_fewshot}, batch_size: {args.batch_size}{f' ({batch_sizes})' if batch_sizes else ''}"
     # )
     print(evaluator.make_table(results))
+    metrics = defaultdict(list)
     results_dict = {} 
-    r = results['results'][task]
-    for k, v in r.items():
-        k+=f"_{task}"    
-        results_dict[k] = v
+    for task, r in results['results'].items():
+        for k, v in r.items():
+            metrics[k].append(v)
+            k+=f"_{task}"    
+            results_dict[k] = v
     del lm_eval_model, model
     # clean cache
     torch.cuda.empty_cache()
+    for k, v in metrics.items():
+        results_dict[k+f"_mean_{task_name}"] = np.mean(v)
     return results_dict
     
 

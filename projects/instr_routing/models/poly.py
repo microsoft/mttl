@@ -173,6 +173,15 @@ class XRouter(Selector):
                     # (padding_mask * instruction_mask, padding_mask)            
                     posterior_padding_mask = padding_mask # looks at instruction and output
                     prior_padding_mask = padding_mask * inst_token_mask # looks only on instruction
+                    if hasattr(self.config.xr4_option):
+                        if self.config.xr4_option == 'switch':
+                            posterior_padding_mask = padding_mask * inst_token_mask
+                            prior_padding_mask = padding_mask
+                        elif self.config.xr4_option == 'teacher_output':
+                            posterior_padding_mask = ((padding_mask * inst_token_mask)-1)*-1    
+                            posterior_padding_mask = posterior_padding_mask * padding_mask # output only
+                            prior_padding_mask = padding_mask * inst_token_mask # instruction only
+                    
                     
                     # average over tokesn that are not masked oute 
                     x_rout_prior = self.apply_mask_and_average(x, prior_padding_mask)
