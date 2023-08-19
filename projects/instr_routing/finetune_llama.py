@@ -107,8 +107,8 @@ class Config(MTTLConfig):
         self.xrouter_sim_metric = "kl"  
         self.xrouting_sep_teacher_student = False
         self.xrouter_init_scale = 0.02
-          
-        self.xr4_option = "switch" #, "default", "teacher_output"
+               
+        self.xr4_option = None #"switch" #, "default", "teacher_output"
         
         
         self.superni_eval_batchsize = 2
@@ -306,7 +306,7 @@ def run_multitask(args):
     if os.environ.get("WANDB_API_KEY") or args.wandb_project:
         # args_=args.__dict__.copy()
         # remove_non_serializable(args_)
-        project = "alpaca_tuning" if args.wandb_project is None else args.wandb_project
+        project = "alpaca_tuning_ncb" if args.wandb_project is None else args.wandb_project
         project+=f"_{args.dataset}"
         wandb_logger = pl.loggers.WandbLogger(
             project=project,
@@ -396,15 +396,26 @@ def run_multitask(args):
     ds_limit = args.eval_ds_limit if not args.fast_debug_run else 0.05
     
     torch.cuda.empty_cache()
-    if args.eval_mmlu:  
-        from projects.instr_routing.eval.mmlu.run_mmlu_eval import eval_mlu     
+    if args.eval_mmlu:     
+        from projects.instr_routing.eval.lm_eval_harness.run_eval import eval_lm   
         print("#"*50)
         print("Evaluating on MMLU")
         # acc=eval_mlu(model_name="",model_path=path_best_model, eval_batch_size=5)
         results_dict=eval_lm(model_path=path_best_model, model_name="", task="mmlu", batch_size=5, nshot=0, ds_limit=ds_limit)
         if wandb.run is not None:           
-            wandb.log({"acc_mmlu": results_dict})
+            wandb.log(results_dict)
     
+    if args.eval_superni:         
+        print("#"*50)           
+        print("Evaluating on super NI")              
+        from projects.instr_routing.eval.ni.gen_ni_predictions import eval_superni
+        rouge_L_super_ni = eval_superni(model_name="",    
+                     batch_size=args.superni_eval_batchsize,
+                     out_prefix=f"{args.exp_name}",  
+                     model_path=path_best_model,          
+                     nshot=0, use_outputs=args.eval_superni_use_outputs, ds_limit=ds_limit)
+        if wandb.run is not None:           
+            wandb.log({"rouge_L_super_ni": rouge_L_super_ni})
 
          
     if args.eval_arc:       
@@ -415,27 +426,13 @@ def run_multitask(args):
         if wandb.run is not None:           
             wandb.log(results_dict)
 
-    if args.eval_truthfulqa:
+    if args.eval_truthfulqa: 
         from projects.instr_routing.eval.lm_eval_harness.run_eval import eval_lm
         print("#"*50)         
         print("Evaluating on TruthfulQA")
         results_dict=eval_lm(model_path=path_best_model, model_name="", task="truthfulqa_mc", batch_size=5, nshot=0, ds_limit=ds_limit)
-        if wandb.run is not None:           
-            wandb.log(results_dict)             
-    
-    if args.eval_superni:         
-        print("#"*50)           
-        print("Evaluating on super NI")              
-        from projects.instr_routing.eval.ni.gen_ni_predictions import eval_superni
-        rouge_L_super_ni = eval_superni(model_name="",    
-                     batch_size=args.superni_eval_batchsize,
-                     out_prefix=f"{args.exp_name}",  
-                     model_path=path_best_model,         
-                     nshot=0, use_outputs=args.eval_superni_use_outputs, ds_limit=ds_limit)
-        ##################################################
-        #if wandb is innitalized
-        if wandb.run is not None:           
-            wandb.log({"rouge_L_super_ni": rouge_L_super_ni})
+        if wandb.run is not None: 
+            wandb.log(results_dict)         
     
     
     if args.eval_hellaswag:
