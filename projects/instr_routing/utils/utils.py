@@ -162,7 +162,7 @@ def load_model(args, model_path=None, device="cuda",
             )  
                    
         v = getattr(args, k)
-        ############
+        ############ 
         # overwrite paths if needed       
         if isinstance(v, str) and "/mnt/amlt_code/inst_follow/" in v:
                 setattr(args, k, re.sub(r".*/inst_follow/", base_path, v))
@@ -170,10 +170,10 @@ def load_model(args, model_path=None, device="cuda",
                 setattr(args, k, re.sub(r".*/instr_routing/", base_path, v))
         v = getattr(args, k)
         # check if on gcr
-        if os.environ.get("AMLT_OUTPUT_DIR") is not None: # set cluster infos to point to the rith folder on gcr
-            if k=='example_to_ids_path':
-                setattr(args, k, re.sub(r".*/cluster_infos/", "/mnt/amlt_code/inst_follow/cluster_infos/", v))
-        v = getattr(args, k)
+        # if os.environ.get("AMLT_OUTPUT_DIR") is not None: # set cluster infos to point to the rith folder on gcr
+        #     if k=='example_to_ids_path':
+        #         setattr(args, k, re.sub(r".*/cluster_infos/", "/mnt/amlt_code/inst_follow/cluster_infos/", v))
+        # v = getattr(args, k)
     #############################
     if tokenizer_path is None: 
         tokenizer_path = args.model
