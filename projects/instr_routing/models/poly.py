@@ -100,7 +100,13 @@ class XRouter(Selector):
             self.ff_student.bias.data.fill_(0)
             self.ff_student_layer_norm = nn.LayerNorm(in_d, dtype=global_vars.PRECISION)              
             self.ff_student_layer_norm.weight = nn.Parameter(torch.ones(self.in_dim, dtype=global_vars.PRECISION)*self.xrouter_init_scale)
-        
+    
+    @property
+    def W_norm(self):   
+        W = self.ff.weight
+        norm = torch.norm(W, p=1, keepdim=True)
+        return norm.item() #/ torch.prod(torch.tensor(W.shape))
+    
     def route(self, router: nn.Linear, layer_norm: nn.LayerNorm, x):
         if self.config.xrouter_normalize_input:
             x = self.input_layer_norm(x)
@@ -169,11 +175,11 @@ class XRouter(Selector):
                     assert gen_mode 
                           
                 if self.xrouting_option == XRouter.ROUTING_OPTION.ALL_DISTILL_INST.value:
-                    # TODO: these were mixed up in the old codebase :O
-                    # (padding_mask * instruction_mask, padding_mask)            
+                    # These were mixed up in the old codebase :O 
+                    # (padding_mask * instruction_mask, padding_mask)                   
                     posterior_padding_mask = padding_mask # looks at instruction and output
                     prior_padding_mask = padding_mask * inst_token_mask # looks only on instruction
-                    if hasattr(self.config.xr4_option):
+                    if hasattr(self.config, "xr4_option"):
                         if self.config.xr4_option == 'switch':
                             posterior_padding_mask = padding_mask * inst_token_mask
                             prior_padding_mask = padding_mask

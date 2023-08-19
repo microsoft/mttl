@@ -34,8 +34,8 @@ from projects.instr_routing.eval.ni.gen_ni_predictions import load_model_for_gen
     help="if specified, we will load the model to generate the predictions.",
 )   
 @click.option("--amlt_experiment_name", type=str, default="alpaca_smear")
-@click.option("--task", type=str, default="mmlu")
-@click.option("--nshot", type=int, default=0)   
+@click.option("--task", type=str, default="arc_challenge")
+@click.option("--nshot", type=int, default=25)     
 @click.option("--batch_size", type=int, default=5)  
 @click.option("--ds_limit", type=float, default=0.05)      
 def main(save_dir="/home/v-oostapenko/results/mmlu/llama-7B/", 

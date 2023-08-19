@@ -127,13 +127,15 @@ class CLM(EfficientCheckpointModule):
             non_zero_loss[non_zero_loss == 0] = 1
             loss = loss.sum(dim=-1) / non_zero_loss
         del outputs, shift_logits, shift_labels
-        aux_loss = (
-            torch.mean(
-                torch.stack(self.model.task_id_container["routing_infos"].aux_loss)
-            )
-            if len(self.model.task_id_container["routing_infos"].aux_loss) > 0
-            else 0
-        )
+        aux_loss = self.model.task_id_container["routing_infos"].aux_loss
+        
+        # aux_loss = (
+        #     torch.mean(
+        #         torch.stack(self.model.task_id_container["routing_infos"].aux_loss)
+        #     )
+        #     if len(self.model.task_id_container["routing_infos"].aux_loss) > 0
+        #     else 0
+        # )
 
         # we accumulate metrics over the microbatches
         if not self.training:  # only plot this for validation
@@ -142,7 +144,7 @@ class CLM(EfficientCheckpointModule):
                     self.accumulate_metrics_batch[k].append(v)
 
         return loss, aux_loss
-
+                   
     def calculate_routing_mask(self, x, routing_infos):
         if not hasattr(self.args, "xrouting_option"):
             return None, None
@@ -225,11 +227,15 @@ class CLM(EfficientCheckpointModule):
 
     def training_step(self, batch, _):
         loss, aux_loss = self.forward(batch)
-        total_loss = loss + aux_loss
+        
+        aux_loss_mean = (torch.mean(torch.stack(aux_loss))if len(aux_loss) > 0 else 0
+        )
+        
+        total_loss = loss + aux_loss_mean
         # outputs = self.model.forward(**batch)
         # loss= outputs.loss
         self.log("train/loss", loss, on_epoch=True, prog_bar=True)
-        self.log("train/aux_loss", aux_loss, on_epoch=True, prog_bar=True)
+        self.log("train/aux_loss", aux_loss_mean, on_epoch=True, prog_bar=True)
         self.log("train/total_loss", total_loss, on_epoch=True, prog_bar=True)
 
         for plugin in self.loss_plugins.values():
@@ -412,21 +418,52 @@ class CLM(EfficientCheckpointModule):
         self.accumulate_metrics_batch = defaultdict(list)
         return super().on_validation_epoch_start()
 
+    def log_aux_loss_per_layer(self, aux_loss): 
+        if isinstance(self.loggers[0], pl.loggers.wandb.WandbLogger):
+            wandb_logger = self.loggers[0]
+            plt.clf()                 
+            aux_loss = [l.detach().item() for l in aux_loss]
+            _ = plt.plot(range(len(aux_loss)), aux_loss)    
+            wandb_logger.log_image("valid/aux_loss_per_layer",
+                        [wandb.Image(plt)],
+                        step=self.global_step,
+                    )  # , commit=False)
+            plt.clf()         
+     
+    def log_xrouter_W_norm(self):
+        if isinstance(self.loggers[0], pl.loggers.wandb.WandbLogger):
+            from .poly import XRouter
+            norms = []
+            for n,layer in self.model.named_modules():
+                if isinstance(layer, XRouter):
+                    norms.append(layer.W_norm)
+            if len(norms) > 0:
+                    wandb_logger = self.loggers[0]
+                    plt.clf()
+                    _ = plt.plot(range(len(norms)), norms)
+                    wandb_logger.log_image("valid/xrouter_W_norm",
+                                [wandb.Image(plt)],
+                                step=self.global_step,
+                            )
+                    plt.clf()
+            
+    
     def validation_step(self, batch, batch_idx, log=True):
         loss, aux_loss = self.forward(batch, reduction="none")
         total_loss = loss  # +aux_loss
         # outputs = self.model.forward(**batch, reduction='none')
         # loss= outputs.loss
+        
+                  
+        aux_loss_mean = (torch.mean(torch.stack(aux_loss))if len(aux_loss) > 0 else 0)
+        
+        
         mean_loss = total_loss.sum() / loss.size(0)
         if log:
-            self.log("val/loss", mean_loss, on_epoch=True, prog_bar=True)
-            self.log("val/aux_loss", aux_loss, on_epoch=True, prog_bar=True)
-            if (
-                batch_idx
-                % (self.args.gradient_accumulation_steps * self.args.micro_batch_size)
-                == 0
-                and batch_idx > 0
-            ):  # to accumulate over larger batch
+            self.log("val/loss", mean_loss, on_epoch=True, prog_bar=True)    
+            self.log("val/aux_loss", aux_loss_mean, on_epoch=True, prog_bar=True)
+            self.log_aux_loss_per_layer(aux_loss)
+            if (batch_idx % (self.args.gradient_accumulation_steps * self.args.micro_batch_size)== 0 and batch_idx > 0):  # to accumulate over larger batch
                 self.log_routing_metrics(stage="val")
         return loss, batch["task_ids"]
 
@@ -472,6 +509,7 @@ class CLM(EfficientCheckpointModule):
             f.write(json.dumps(task_losses) + "\n")
         self.accumulate_metrics_batch = defaultdict(list)
         self.log_routing_metrics(stage="val")
+        self.log_xrouter_W_norm()
 
     def configure_optimizers(self):
         args = self.args

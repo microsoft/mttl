@@ -393,7 +393,7 @@ def run_multitask(args):
     # empty cache  
 
           
-    ds_limit = args.eval_ds_limit if not args.fast_debug_run else 0.01
+    ds_limit = args.eval_ds_limit if not args.fast_debug_run else 0.05
     
     torch.cuda.empty_cache()
     if args.eval_mmlu:  
