@@ -191,7 +191,7 @@ class XRouter(Selector):
                       
                     adapter_logits_prior = self.route(self.ff, self.ff_router_layer_norm, x_rout_prior) if not self.xrouting_sep_teacher_student else self.route(self.ff_student, self.ff_student_layer_norm, x_rout_prior)
                     adapter_dist_prior = self.softmax(adapter_logits_prior/self.config.poly_selector_cluster_temp)
-                    if gen_mode:
+                    if gen_mode:              
                         return adapter_dist_prior, 0.0  
                     adapter_logits_posterior = self.route(self.ff, self.ff_router_layer_norm, x_rout_posterior)
                     adapter_dist_post = self.softmax(adapter_logits_posterior/self.config.poly_selector_cluster_temp)
@@ -236,7 +236,7 @@ class XRouter(Selector):
                     else:
                         raise NotImplementedError()
                 
-                '''
+                ''' 
                 x_prior = [X].mean(seq)
                 x _post = [X,Y].mean(seq)
                 logits_post = Router(x_post)
@@ -251,15 +251,14 @@ class XRouter(Selector):
                 
                 aux_loss = 1-cos_sim(logits_prior, logits_post)
                 return softmax(logits_post)
-                     
+                    
                 # option 3: target = prior, detach()       <- same as below?
                 aux_loss = 1-cos_sim(logits_post, logits_prior.detach())
                 return softmax(logits_prior)
-                     
+                    
                 # option 4: target = prior, no detach() <- alrady tried somewhere?
                 aux_loss = 1-cos_sim(logits_post, logits_prior)
-                return softmax(logits_prior)
-                
+                return softmax(logits_prior)                
                 '''
                 
                 # old version with bug
