@@ -189,14 +189,14 @@ def eval_openai_chat_engine(args, subject, engine, dev_df, test_df, batch_size=1
 @click.option("--save_dir", type=str, default="results/mmlu/llama-7B/")
 @click.option(
     "--model_name",
-    type=str,
-    default="alpaca_smear_12_xr4_cos",
+    type=str,         
+    default="alpaca_smear_8_xr4[rev]",
     help="if specified, we will load the model to generate the predictions.",
 )
-@click.option(
+@click.option(  
     "--model_path",
     type=str,
-    default="/home/v-oostapenko/dev/amlt//alpaca_smear/alpaca_smear_12_xr4_cos/yahma_llama-7b-hfnekcmtyy_alpaca_lora_cbtm_dense-val/loss=0.8796.ckpt",
+    default="", #/home/v-oostapenko/dev/amlt//alpaca_smear/alpaca_smear_12_xr4_cos/yahma_llama-7b-hfnekcmtyy_alpaca_lora_cbtm_dense-val/loss=0.8796.ckpt",
     help="if specified, we will load the model to generate the predictions.",
 )
 @click.option(
@@ -205,22 +205,22 @@ def eval_openai_chat_engine(args, subject, engine, dev_df, test_df, batch_size=1
     default=None,
     help="if specified, we will use the OpenAI API to generate the predictions.",
 )
-@click.option(
+@click.option(  
     "--n_instances",
     type=int,
     default=None,
     help="if specified, a maximum of n_instances per subject will be used for the evaluation.",
 )
 @click.option(
-    "--eval_batch_size", type=int, default=1, help="batch size for evaluation."
+    "--eval_batch_size", type=int, default=5, help="batch size for evaluation."
 )
 @click.option(
     "--skill_selector",
     type=str,
-    default="poly",
+    default="poly",     
     help="skill selector",
 )
-@click.option("--amlt_experiment_name", type=str, default="alpaca_smear")
+@click.option("--amlt_experiment_name", type=str, default="alpaca_smear_ncb")
 @click.option("--use_chat_format", is_flag=False)
 @click.option("--subjects", type=str, default="-1")
 def main(
@@ -275,11 +275,12 @@ def eval_mlu(
     code_dir = os.path.join(os.path.dirname(__file__), "..", "..")
     save_dir = os.getenv("AMLT_OUTPUT_DIR", save_dir)
     if os.environ.get("AMLT_OUTPUT_DIR") is not None:  # on gcr
-        data_dir = "/mnt/default/data/mmlu/"
+        data_dir = "/mnt/default/data/mmlu/"  
         base_model_path = "/mnt/default/data/models"
         base_cluster_infos = "/mnt/default/data/"  # /mnt/amlt_code/inst_follow/"
     else:
-        base_cluster_infos = code_dir
+        base_cluster_infos = code_dir  
+        base_model_path = "/home/v-oostapenko/dev/amlt/"
     path_to_clusterer = f"{base_cluster_infos}/cluster_infos/cbtm/"
     ################################################################################################
 
@@ -315,7 +316,7 @@ def eval_mlu(
     }
     args = dict_to_dataclass(args)
 
-    base_model = "yahma/llama-7b-hf"
+    base_model = "yahma/llama-7b-hf" 
     model, tokenizer, config, topic_router = load_model_for_generation(
         from_hf, base_model, model_name, model_path, skill_selector, code_dir=code_dir
     )

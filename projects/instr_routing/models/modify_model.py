@@ -1,4 +1,4 @@
-from projects.instr_routing.models.poly import modify_with_poly_lora, modify_with_poly_ia3
+from projects.instr_routing.models.routing import modify_with_poly_lora, modify_with_poly_ia3
 
 
 modifier_dict = { 

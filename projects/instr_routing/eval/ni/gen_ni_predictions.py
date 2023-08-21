@@ -655,10 +655,9 @@ def eval_superni(model_name="gpt3",
                     "from_hf": from_hf, "model_path": model_path, "skill_selector": skill_selector, "nshot": nshot, "use_outputs": use_outputs}
             wandb.init(project=wandb_project, name=os.environ.get("AMLT_JOB_NAME", out_file_name), config=args)
             wandb.log(all_results_rouge)
-        del model
+        del model, tokenizer, config
         # clean cash
         torch.cuda.empty_cache()
-        del tokenizer
         return all_results_rouge["rougeL_default_track"]
               
 if __name__ == '__main__':

@@ -149,21 +149,19 @@ class CLM(EfficientCheckpointModule):
         if not hasattr(self.args, "xrouting_option"):
             return None, None
         # bs, seq = x.shape
-        if self.args.xrouting_option > 0:
-            padding_mask = (
-                routing_infos.pad_token_mask
-            )  # 1 if the token is not a pad token, so its either instruciton or output
-            instruction_mask = torch.ones_like(
-                padding_mask
-            )  # 1 if the token is part of instruction or pad token (so outputs are 0s)
+        # if self.args.xrouting_option > 0:
+        padding_mask = (             
+            routing_infos.pad_token_mask
+        )  # 1 if the token is not a pad token, so its either instruciton or output
+        instruction_mask = torch.ones_like(
+            padding_mask
+        )  # 1 if the token is part of instruction or pad token (so outputs are 0s)
 
-            if routing_infos.labels is not None:
-                instruction_mask = (
-                    routing_infos.labels == -100
-                ).float()  # 1 if the token is part of instruction or pad token (so outputs are 0s)
-            return padding_mask, instruction_mask
-
-        return None, None
+        if routing_infos.labels is not None:
+            instruction_mask = (
+                routing_infos.labels == -100
+            ).float()  # 1 if the token is part of instruction or pad token (so outputs are 0s)
+        return padding_mask, instruction_mask
 
     def compute_routings(self, batch, **kwargs):
         out = self.generate(batch, save_oracle_routings=True, gen_mode=0, **kwargs)
@@ -433,7 +431,7 @@ class CLM(EfficientCheckpointModule):
      
     def log_xrouter_W_norm(self):
         if isinstance(self.loggers[0], pl.loggers.wandb.WandbLogger):
-            from .poly import XRouter
+            from .routing import XRouter
             norms = []
             for n,layer in self.model.named_modules():
                 if isinstance(layer, XRouter):

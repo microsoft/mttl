@@ -122,7 +122,10 @@ class Config(MTTLConfig):
         self.eval_superni_use_outputs = False
         self.gen_alpaca_eval = False
         
-        super().__init__(**kwargs)
+        super().__init__(**kwargs)        
+        self.train_dir = os.getenv("AMLT_DATA_DIR", "~/data/")   
+        self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
+        
         self._updated_kwargs = set()
         # to reproduce setup in https://github.com/daanelson/alpaca-lora
         self.gradient_accumulation_steps = (
@@ -346,10 +349,11 @@ def run_multitask(args):
         # get run id
         run_id = wandb_logger.experiment.id
         model_name += run_id
+    exp_name=os.environ.get("AMLT_JOB_NAME", args.exp_name)
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.output_dir,
         monitor=monitor,
-        filename=f"{model_name}" + f"_{args.exp_name}" + "-{" + monitor + ":.004f}",
+        filename=f"{model_name}" + f"_{exp_name}" + "-{" + monitor + ":.004f}",
         save_top_k=1,
         save_last=True,
         save_weights_only=True,  # make checkpoints smaller
@@ -377,7 +381,7 @@ def run_multitask(args):
         fast_dev_run = args.fast_dev_run,
         **kwargs,
     )
-    
+      
     trainer.fit(module, dm)
 
     # try:    
@@ -394,15 +398,9 @@ def run_multitask(args):
     
     print(f"Best model path: {path_best_model}")
     print(f"Last model path: {path_last_model}")
-    # empty memory
-    del module
-    del dm
-    del trainer
-    # empty cache  
-
-          
-    ds_limit = args.eval_ds_limit if not args.fast_debug_run else 0.05
-    
+    # empty memory    
+    del module, dm, trainer, loggers, callbacks, checkpoint_callback, wandb_logger, mlf_logger          
+    ds_limit = args.eval_ds_limit if not args.fast_debug_run else 0.05    
     torch.cuda.empty_cache()
 
     if args.eval_superni:         
@@ -422,7 +420,7 @@ def run_multitask(args):
         from projects.instr_routing.eval.mmlu.run_mmlu_eval import eval_mlu
         print("#"*50)
         print("Evaluating on MMLU")     
-        acc=eval_mlu(ntrain=5, model_name="",model_path=path_best_model, eval_batch_size=3)
+        acc=eval_mlu(ntrain=5, model_name="",model_path=path_best_model, eval_batch_size=2)
         # results_dict=eval_lm(model_path=path_best_model, model_name="", task="mmlu", batch_size=5, nshot=0, ds_limit=ds_limit)
         if wandb.run is not None:           
             # wandb.log(results_dict)
@@ -432,7 +430,7 @@ def run_multitask(args):
         from projects.instr_routing.eval.lm_eval_harness.run_eval import eval_lm
         print("#"*50)   
         print("Evaluating on ARC")       
-        results_dict=eval_lm(model_path=path_best_model, model_name="", task="arc_challenge", batch_size=5, nshot=25, ds_limit=ds_limit)
+        results_dict=eval_lm(model_path=path_best_model, model_name="", task="arc_challenge", batch_size=2, nshot=25, ds_limit=ds_limit)
         if wandb.run is not None:           
             wandb.log(results_dict)
 
@@ -440,7 +438,7 @@ def run_multitask(args):
         from projects.instr_routing.eval.lm_eval_harness.run_eval import eval_lm
         print("#"*50)         
         print("Evaluating on TruthfulQA")
-        results_dict=eval_lm(model_path=path_best_model, model_name="", task="truthfulqa_mc", batch_size=5, nshot=0, ds_limit=ds_limit)
+        results_dict=eval_lm(model_path=path_best_model, model_name="", task="truthfulqa_mc", batch_size=2, nshot=0, ds_limit=ds_limit)
         if wandb.run is not None: 
             wandb.log(results_dict)         
     
@@ -451,7 +449,7 @@ def run_multitask(args):
         print("Evaluating on HellaSwag")           
         results_dict=eval_lm(model_path=path_best_model, 
                              model_name="", task="hellaswag", 
-                             batch_size=5, nshot=10, ds_limit=ds_limit)
+                             batch_size=2, nshot=10, ds_limit=ds_limit)
         if wandb.run is not None:           
             wandb.log(results_dict)
     
