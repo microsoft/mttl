@@ -306,6 +306,9 @@ class XRouter(Selector):
     
 class AttnRouter(Selector): 
     def __init__(self, config, in_d=4096):
+        '''
+        Basic version of attention based router.
+        '''
         super().__init__() 
         self.kq_dim = 32         
         self.in_d = in_d            
@@ -316,13 +319,13 @@ class AttnRouter(Selector):
     def forward(self, routing_infos):       
         bs, seq, in_d = routing_infos.x.shape
         x = routing_infos.x     
-        expert_query = self.exp_query.unsqueeze(0).repeat(bs,1,1)
-        scores = self.xattn(expert_query, x).transpose(1,2) # bs x seq x n_skills
+        # expert_query = self.exp_query.unsqueeze(0).repeat(bs,1,1)
+        scores = self.xattn(self.exp_query, x).transpose(1,2) # bs x seq x n_skills
         assert all(scores[0].sum(dim=-1))
         # norm over experts
-        i_e = scores.sum(1)
-        i_e = i_e / i_e.sum(dim=-1, keepdim=True)
-        return i_e
+        i_e = scores.sum(1)    
+        i_e = i_e / i_e.sum(dim=-1, keepdim=True)      
+        return i_e.unsqueeze(1), torch.zeros(1, device=x.device)
             
 class MoESelector(Selector):
     def __init__(self, config):

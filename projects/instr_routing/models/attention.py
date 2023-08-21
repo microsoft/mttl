@@ -173,11 +173,13 @@ class NonSharedGroupLinearLayer(nn.Module):
         x_next = torch.sum(x_next, dim = 2)
 
         return x_next
-
+               
 class SelectAttention(nn.Module):
     """docstring for SelectAttention"""              
     def __init__(self, d_read, d_write, d_k = 16, num_read = 5, num_write = 5, share_query = False, share_key = False):
         super(SelectAttention, self).__init__()
+        self.share_query = share_query
+        self.share_key = share_key
         if not share_key:
             self.gll_write = GroupLinearLayer(d_write,d_k, num_write)
         else:
@@ -189,9 +191,17 @@ class SelectAttention(nn.Module):
             self.gll_read = nn.Linear(d_read, d_k)
 
         self.temperature = math.sqrt(d_k)
-
+           
     def forward(self, q, k):
-        read = self.gll_read(q)
+        if self.share_query: 
+            read = self.gll_read(q)
+            if q.dim() == 2:
+                read = read.unsqueeze(0).repeat(k.shape[0], 1, 1)
+        else:
+            if q.dim() == 2:
+                q = q.unsqueeze(0).repeat(k.shape[0], 1, 1)
+            read = self.gll_read(q)
+        assert read.dim() == 3
         write = self.gll_write(k)
         return torch.softmax(torch.bmm(read, write.permute(0, 2, 1)) / self.temperature, dim = 1)
 
