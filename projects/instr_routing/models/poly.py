@@ -311,13 +311,17 @@ class AttnRouter(Selector):
         '''
         super().__init__() 
         self.kq_dim = 32         
-        self.in_d = in_d            
+        self.in_d = in_d             
         self.exp_query = nn.Parameter(torch.ones(config.n_skills, self.kq_dim, dtype=global_vars.PRECISION))
+        # innit from nromal
+        self.exp_query.data.normal_(mean=0.0, std=0.2)
         self.xattn = SelectAttention(self.kq_dim, self.in_d, share_key=True, share_query=True)
         
     
     def forward(self, routing_infos):       
-        bs, seq, in_d = routing_infos.x.shape
+        bs, seq, in_d = routing_infos.x.shape   
+        # TODO: apply mask, only attend to nstruction, ignore padding?
+        padding_mask = routing_infos.pad_token_mask   
         x = routing_infos.x     
         # expert_query = self.exp_query.unsqueeze(0).repeat(bs,1,1)
         scores = self.xattn(self.exp_query, x).transpose(1,2) # bs x seq x n_skills
