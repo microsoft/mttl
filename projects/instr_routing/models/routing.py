@@ -78,6 +78,7 @@ class XRouter(Selector):
         self.xrouting_sep_teacher_student = config.xrouting_sep_teacher_student
         self.xrouter_load_balancing = config.xrouter_load_balancing
         self.xrouter_x4target_detach = config.xrouter_x4target_detach
+        self.xrouter_x4_target = config.xrouter_x4_target
         
         
         self.n_splits = config.n_splits
@@ -172,7 +173,7 @@ class XRouter(Selector):
                 routings = routing_infos.routings.pop(0)
                 return routings, torch.zeros(1, device=x.device)
             
-            if x_rout is None:                          
+            if x_rout is None:  
                 padding_mask = routing_infos.pad_token_mask # 1 if the token is not a pad token, so its either instruciton or output
                 inst_token_mask = routing_infos.inst_token_mask if routing_infos.inst_token_mask is not None else torch.ones_like(padding_mask) # 1 if the token is part of instruction or pad token (so outputs are 0s)
                 if routing_infos.inst_token_mask is None:
@@ -209,16 +210,15 @@ class XRouter(Selector):
                         
                     elif self.xrouter_sim_metric == "cosine":# and not gen_mode:       
                         if self.xrouter_x4_target=="posterior":
-                            target = adapter_logits_posterior
+                            target = adapter_logits_posterior  
                             student_logit = adapter_logits_prior
                         elif self.xrouter_x4_target=="prior":
                             target = adapter_logits_prior        
                             student_logit = adapter_logits_posterior
                         else:
                             raise NotImplementedError()
-                        
-                        target = target.detach() if self.xrouter_x4target_detach else target
-                        aux_loss = 1-self.cosine_sim(student_logit, target, dim=-1)
+                         
+                        aux_loss = 1-self.cosine_sim(student_logit, target.detach() if self.xrouter_x4target_detach else target, dim=-1)
                         aux_loss = aux_loss.mean()
                     
                     
@@ -405,8 +405,8 @@ class AttnRouter(Selector):
         self.exp_query.data.normal_(mean=0.0, std=0.2)
         self.xattn = SelectAttention(self.kq_dim, self.in_d, share_key=True, share_query=True)
         
-    
-    def forward(self, routing_infos):       
+           
+    def forward(self, routing_infos):      
         bs, seq, in_d = routing_infos.x.shape   
         # TODO: apply mask, only attend to nstruction, ignore padding?
         padding_mask = routing_infos.pad_token_mask   
