@@ -105,10 +105,10 @@ class Config(MTTLConfig):
         self.xrouter_reverse_kl = False
         self.xrouter_normal_innit = True
         self.xrouter_use_attn = False
-        self.xrouter_sim_metric = "kl"  
+        self.xrouter_sim_metric = "kl"       
         self.xrouting_sep_teacher_student = False
-        self.xrouter_init_scale = 0.02
-               
+        self.xrouter_init_scale = 0.02  
+        self.xrouter_x4target_detach = True
         self.xr4_option = None #"switch" #, "default", "teacher_output"
         
         

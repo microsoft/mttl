@@ -68,15 +68,16 @@ class XRouter(Selector):
         super().__init__() 
         self.config = config
         self.in_d = in_d                   
-               
+                                           
         self.xrouter_init_scale = config.xrouter_init_scale
         self.xrouter_sim_metric = config.xrouter_sim_metric
         self.xrouter_use_attn = config.xrouter_use_attn
-        self.xrouter_x_cond = config.xrouter_x_cond    
+        self.xrouter_x_cond = config.xrouter_x_cond          
         self.xrouter_normal_innit = config.xrouter_normal_innit
         self.xrouting_option = config.xrouting_option
         self.xrouting_sep_teacher_student = config.xrouting_sep_teacher_student
         self.xrouter_load_balancing = config.xrouter_load_balancing
+        self.xrouter_x4target_detach = config.xrouter_x4target_detach
         
         
         self.n_splits = config.n_splits
@@ -176,21 +177,11 @@ class XRouter(Selector):
                 inst_token_mask = routing_infos.inst_token_mask if routing_infos.inst_token_mask is not None else torch.ones_like(padding_mask) # 1 if the token is part of instruction or pad token (so outputs are 0s)
                 if routing_infos.inst_token_mask is None:
                     assert gen_mode 
-                          
-                if self.xrouting_option == XRouter.ROUTING_OPTION.ALL_DISTILL_INST.value:
-                    # These were mixed up in the old codebase :O 
-                    # (padding_mask * instruction_mask, padding_mask)                   
-                    posterior_padding_mask = padding_mask # looks at instruction and output
-                    prior_padding_mask = padding_mask * inst_token_mask # looks only on instruction
-                    if hasattr(self.config, "xr4_option"):
-                        if self.config.xr4_option == 'switch':
-                            posterior_padding_mask = padding_mask * inst_token_mask
-                            prior_padding_mask = padding_mask
-                        elif self.config.xr4_option == 'teacher_output':
-                            posterior_padding_mask = torch.abs(((padding_mask * inst_token_mask)-1))
-                            posterior_padding_mask = posterior_padding_mask * padding_mask # output only
-                            prior_padding_mask = padding_mask * inst_token_mask # instruction only
-                    
+                
+                
+                if self.xrouting_option == XRouter.ROUTING_OPTION.ALL_DISTILL_INST.value:       
+                    posterior_padding_mask = padding_mask # looks at instruction and output  
+                    prior_padding_mask = padding_mask * inst_token_mask # looks only on instruction                    
                     
                     # average over tokesn that are not masked oute 
                     x_rout_prior = self.apply_mask_and_average(x, prior_padding_mask)
@@ -203,29 +194,127 @@ class XRouter(Selector):
                     if gen_mode:
                         return adapter_dist_prior, 0.0  
                     adapter_logits_posterior = self.route(self.ff, self.ff_router_layer_norm, x_rout_posterior)
-                    adapter_dist = self.softmax(adapter_logits_posterior/self.config.poly_selector_cluster_temp)
+                    adapter_dist_post = self.softmax(adapter_logits_posterior/self.config.poly_selector_cluster_temp)
                     aux_loss = torch.zeros(1, device=x.device)
+                              
                     if self.xrouter_sim_metric == "kl":# and not gen_mode:  
-                        # adapter_dist -- posterior, looks at inpiut + output. This should be P.
-                        # adapter_dist_prior -- q, looks only on instruction.
                         if self.config.xrouter_reverse_kl:                   
-                            # kl_divergence(p, q) -- surprise of using Q as model when true dist is P.                    
-                            aux_loss = torch.distributions.kl.kl_divergence(torch.distributions.Categorical(probs=adapter_dist), 
+                            # kl_divergence(p, q) -- surprise of using Q as model when true dist is P.                          
+                            aux_loss = torch.distributions.kl.kl_divergence(torch.distributions.Categorical(probs=adapter_dist_post), 
                                                                             torch.distributions.Categorical(probs=adapter_dist_prior))  
                         else:
                             aux_loss = torch.distributions.kl.kl_divergence(torch.distributions.Categorical(probs=adapter_dist_prior), 
-                                                                        torch.distributions.Categorical(probs=adapter_dist))        
+                                                                        torch.distributions.Categorical(probs=adapter_dist_post))        
                         aux_loss = aux_loss.mean()                             
-                    elif self.xrouter_sim_metric == "cosine":# and not gen_mode:                        
-                        aux_loss = 1-self.cosine_sim(adapter_logits_prior, adapter_logits_posterior.detach(), dim=-1)
+                        
+                    elif self.xrouter_sim_metric == "cosine":# and not gen_mode:       
+                        if self.xrouter_x4_target=="posterior":
+                            target = adapter_logits_posterior
+                            student_logit = adapter_logits_prior
+                        elif self.xrouter_x4_target=="prior":
+                            target = adapter_logits_prior        
+                            student_logit = adapter_logits_posterior
+                        else:
+                            raise NotImplementedError()
+                        
+                        target = target.detach() if self.xrouter_x4target_detach else target
+                        aux_loss = 1-self.cosine_sim(student_logit, target, dim=-1)
                         aux_loss = aux_loss.mean()
-                    if gen_mode or not self.training: 
-                        adapter_dist = adapter_dist_prior
+                    
                     
                     if routing_infos.save_oracle_routings: 
-                        routing_infos.oracle_routings.append(adapter_logits_posterior.detach())
+                        routing_infos.oracle_routings.append(adapter_dist_post.detach())
+                        
+                    if gen_mode or not self.training:    
+                        # at validation time we use prior
+                        return adapter_dist_prior, aux_loss
+                    
+                    if self.xrouter_x4_target=="posterior":
+                        return adapter_dist_post, aux_loss
+                    elif self.xrouter_x4_target=="prior":
+                        return adapter_dist_prior, aux_loss
+                    else:
+                        raise NotImplementedError()
+                
+                '''
+                x_prior = [X].mean(seq)
+                x _post = [X,Y].mean(seq)
+                logits_post = Router(x_post)
+                logits_prior = Router(x_prior)
+                
+                # correct way (option 1): target = posterior, detach()
+                
+                aux_loss = 1-cos_sim(logits_prior, logits_post.detach())
+                return softmax(logits_post)
+                
+                # option 2: target = posterior, no detach()
+                
+                aux_loss = 1-cos_sim(logits_prior, logits_post)
+                return softmax(logits_post)
+                     
+                # option 3: target = prior, detach()       <- same as below?
+                aux_loss = 1-cos_sim(logits_post, logits_prior.detach())
+                return softmax(logits_prior)
+                     
+                # option 4: target = prior, no detach() <- alrady tried somewhere?
+                aux_loss = 1-cos_sim(logits_post, logits_prior)
+                return softmax(logits_prior)
+                
+                '''
+                
+                # old version with bug
+                # if self.xrouting_option == XRouter.ROUTING_OPTION.ALL_DISTILL_INST.value:
+                #     # These were mixed up in the old codebase :O 
+                #     # (padding_mask * instruction_mask, padding_mask)                   
+                #     # posterior_padding_mask = padding_mask # looks at instruction and output
+                #     # prior_padding_mask = padding_mask * inst_token_mask # looks only on instruction
+                    
+                #     posterior_padding_mask = padding_mask * inst_token_mask
+                #     prior_padding_mask = padding_mask  
+                #     # if hasattr(self.config, "xr4_option"):
+                #     #     if self.config.xr4_option == 'switch':
+                #     #         posterior_padding_mask = padding_mask * inst_token_mask
+                #     #         prior_padding_mask = padding_mask
+                #     #     elif self.config.xr4_option == 'teacher_output':
+                #     #         posterior_padding_mask = torch.abs(((padding_mask * inst_token_mask)-1))
+                #     #         posterior_padding_mask = posterior_padding_mask * padding_mask # output only
+                #     #         prior_padding_mask = padding_mask * inst_token_mask # instruction only
+                    
+                    
+                #     # average over tokesn that are not masked oute 
+                #     x_rout_prior = self.apply_mask_and_average(x, prior_padding_mask)
+                #     x_rout_posterior = self.apply_mask_and_average(x, posterior_padding_mask)
+
+                #     del prior_padding_mask, posterior_padding_mask
+                      
+                #     adapter_logits_prior = self.route(self.ff, self.ff_router_layer_norm, x_rout_prior) if not self.xrouting_sep_teacher_student else self.route(self.ff_student, self.ff_student_layer_norm, x_rout_prior)
+                #     adapter_dist_prior = self.softmax(adapter_logits_prior/self.config.poly_selector_cluster_temp)
+                #     if gen_mode:
+                #         return adapter_dist_prior, 0.0  
+                #     adapter_logits_posterior = self.route(self.ff, self.ff_router_layer_norm, x_rout_posterior)
+                #     adapter_dist = self.softmax(adapter_logits_posterior/self.config.poly_selector_cluster_temp)
+                #     aux_loss = torch.zeros(1, device=x.device)
+                #     if self.xrouter_sim_metric == "kl":# and not gen_mode:  
+                #         # adapter_dist -- posterior, looks at inpiut + output. This should be P.
+                #         # adapter_dist_prior -- q, looks only on instruction.
+                #         if self.config.xrouter_reverse_kl:                   
+                #             # kl_divergence(p, q) -- surprise of using Q as model when true dist is P.                    
+                #             aux_loss = torch.distributions.kl.kl_divergence(torch.distributions.Categorical(probs=adapter_dist), 
+                #                                                             torch.distributions.Categorical(probs=adapter_dist_prior))  
+                #         else:
+                #             aux_loss = torch.distributions.kl.kl_divergence(torch.distributions.Categorical(probs=adapter_dist_prior), 
+                #                                                         torch.distributions.Categorical(probs=adapter_dist))        
+                #         aux_loss = aux_loss.mean()                             
+                #     elif self.xrouter_sim_metric == "cosine":# and not gen_mode:                        
+                #         aux_loss = 1-self.cosine_sim(adapter_logits_prior, adapter_logits_posterior.detach(), dim=-1)
+                #         aux_loss = aux_loss.mean()
+                #     if gen_mode or not self.training: 
+                #         adapter_dist = adapter_dist_prior
+                    
+                #     if routing_infos.save_oracle_routings: 
+                #         routing_infos.oracle_routings.append(adapter_logits_posterior.detach())
                          
-                    return adapter_dist, aux_loss
+                #     return adapter_dist, aux_loss
 
                                    
                 if self.xrouting_option == XRouter.ROUTING_OPTION.INST_ONLY.value: # train and test time we only look at instruction part
@@ -303,7 +392,7 @@ class XRouter(Selector):
             return out
         return F.softmax(logit, dim=-1)
     
-    
+                
 class AttnRouter(Selector): 
     def __init__(self, config, in_d=4096):
         '''
@@ -311,7 +400,7 @@ class AttnRouter(Selector):
         '''
         super().__init__() 
         self.kq_dim = 32         
-        self.in_d = in_d             
+        self.in_d = in_d         
         self.exp_query = nn.Parameter(torch.ones(config.n_skills, self.kq_dim, dtype=global_vars.PRECISION))
         # innit from nromal
         self.exp_query.data.normal_(mean=0.0, std=0.2)
@@ -322,7 +411,15 @@ class AttnRouter(Selector):
         bs, seq, in_d = routing_infos.x.shape   
         # TODO: apply mask, only attend to nstruction, ignore padding?
         padding_mask = routing_infos.pad_token_mask   
+        inst_token_mask = routing_infos.inst_token_mask if routing_infos.inst_token_mask is not None else torch.ones_like(padding_mask)
         x = routing_infos.x     
+        
+        # basic version:     
+        # the router only attends over instruction
+        padding_mask = padding_mask * inst_token_mask
+        x = x * padding_mask.unsqueeze(-1)
+        
+        
         # expert_query = self.exp_query.unsqueeze(0).repeat(bs,1,1)
         scores = self.xattn(self.exp_query, x).transpose(1,2) # bs x seq x n_skills
         assert all(scores[0].sum(dim=-1))
