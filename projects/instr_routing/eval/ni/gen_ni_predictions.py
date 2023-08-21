@@ -658,6 +658,7 @@ def eval_superni(model_name="gpt3",
         del model
         # clean cash
         torch.cuda.empty_cache()
+        del tokenizer
         return all_results_rouge["rougeL_default_track"]
               
 if __name__ == '__main__':

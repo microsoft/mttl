@@ -12,6 +12,7 @@ from torch.distributions.relaxed_bernoulli import RelaxedBernoulli
 
 from .utils import RoutingInfo
 from projects.instr_routing import global_vars
+from projects.instr_routing.models.attention import SelectAttention    
 
  
 EPS = 1e-12
@@ -44,7 +45,9 @@ def get_selector(config, in_d=4096):
     elif config.poly_selector == "moe":
         return MoESelector(config)
     elif config.poly_selector == "x_router":
-        return XRouter(config, in_d=in_d)
+        return XRouter(config, in_d=in_d)    
+    elif config.poly_selector == "attn_router":
+        return AttnRouter(config, in_d=in_d)
     else:
         raise NotImplementedError()
 
@@ -82,7 +85,7 @@ class XRouter(Selector):
         self.ff_router_layer_norm = nn.LayerNorm(in_d, dtype=global_vars.PRECISION)          
         self.ff_router_layer_norm.weight = nn.Parameter(torch.ones(in_d, dtype=global_vars.PRECISION)*self.xrouter_init_scale)
         
-        if self.xrouter_use_attn:      
+        if self.xrouter_use_attn:        
             from projects.instr_routing.models.attention import SelectAttention    
             self.xattn = SelectAttention(self.in_d, self.in_d, share_key=True, share_query=True)
             self.layer_key = nn.Parameter(torch.ones(1,1,self.in_d, dtype=global_vars.PRECISION))
@@ -184,7 +187,7 @@ class XRouter(Selector):
                             posterior_padding_mask = padding_mask * inst_token_mask
                             prior_padding_mask = padding_mask
                         elif self.config.xr4_option == 'teacher_output':
-                            posterior_padding_mask = ((padding_mask * inst_token_mask)-1)*-1    
+                            posterior_padding_mask = torch.abs(((padding_mask * inst_token_mask)-1))
                             posterior_padding_mask = posterior_padding_mask * padding_mask # output only
                             prior_padding_mask = padding_mask * inst_token_mask # instruction only
                     
@@ -299,6 +302,27 @@ class XRouter(Selector):
             out = out.reshape(*logit.shape[:-2], self.config.n_skills * self.n_splits)
             return out
         return F.softmax(logit, dim=-1)
+    
+    
+class AttnRouter(Selector): 
+    def __init__(self, config, in_d=4096):
+        super().__init__() 
+        self.kq_dim = 32         
+        self.in_d = in_d            
+        self.exp_query = nn.Parameter(torch.ones(config.n_skills, self.kq_dim, dtype=global_vars.PRECISION))
+        self.xattn = SelectAttention(self.kq_dim, self.in_d, share_key=True, share_query=True)
+        
+    
+    def forward(self, routing_infos):       
+        bs, seq, in_d = routing_infos.x.shape
+        x = routing_infos.x     
+        expert_query = self.exp_query.unsqueeze(0).repeat(bs,1,1)
+        scores = self.xattn(expert_query, x).transpose(1,2) # bs x seq x n_skills
+        assert all(scores[0].sum(dim=-1))
+        # norm over experts
+        i_e = scores.sum(1)
+        i_e = i_e / i_e.sum(dim=-1, keepdim=True)
+        return i_e
             
 class MoESelector(Selector):
     def __init__(self, config):

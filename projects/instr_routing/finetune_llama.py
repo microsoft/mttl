@@ -56,7 +56,8 @@ def remove_non_serializable(d):
 
 class Config(MTTLConfig):
     def __init__(self, **kwargs):
-        self.rank = 1              
+        self.rank = 1                
+        self.load_dtype = "float32" 
         self.prune_unused_loras = True
         self.init_b_random = False
         self.lora_dropout = 0
@@ -95,14 +96,14 @@ class Config(MTTLConfig):
         
         self.aux_mi_loss_factor = 1
         
-        # XRouter   
+        # XRouter                 
         self.xrouter_load_balancing = False
         self.xrouter_x_cond = True 
         self.xrouting_option = 0 # only applies to x_router routing, depreciated 
         self.xrouter_normalize_weights = False
         self.xrouter_normalize_input = False
         self.xrouter_reverse_kl = False
-        self.xrouter_normal_innit = False
+        self.xrouter_normal_innit = True
         self.xrouter_use_attn = False
         self.xrouter_sim_metric = "kl"  
         self.xrouting_sep_teacher_student = False
@@ -226,7 +227,7 @@ def run_multitask(args):
             
     # select dataloader
     model_class = CLM      
-    if args.dataset == "alpaca":             
+    if args.dataset == "alpaca":                
         dm = AlpacaDataModule(args, cluster_result=cluster_result)
     elif args.dataset == "flan_v2":
         dm = FlanModule(args, cluster_result=cluster_result)
@@ -236,13 +237,19 @@ def run_multitask(args):
         dm = PlatypusModule(args, cluster_result=cluster_result)
     else:
         raise NotImplementedError()
-
+      
     args.n_tasks = len(dm.task2id)  
+    if args.load_dtype == "float32":
+        load_dtype = torch.float32
+    elif args.load_dtype == "float16":
+        load_dtype = torch.float16
+    else:
+        raise NotImplementedError()
     if "llama" in args.model:    
             args.model_object =LlamaForCausalLM.from_pretrained(
                 args.model,    
                 load_in_8bit=args.load_in_8bit, # this doesnt work right now with current implementatio of lora
-                torch_dtype=torch.float16,
+                torch_dtype=load_dtype,
                 device_map="auto",
             )
     else:     
@@ -302,11 +309,12 @@ def run_multitask(args):
 
 
     # legit logging
-    loggers = []
+    loggers = []    
     if os.environ.get("WANDB_API_KEY") or args.wandb_project:
         # args_=args.__dict__.copy()
-        # remove_non_serializable(args_)
+        # remove_non_serializable(args_)   
         project = "alpaca_tuning_ncb" if args.wandb_project is None else args.wandb_project
+        project = os.environ.get("WANDB_PROJECT", project)
         project+=f"_{args.dataset}"
         wandb_logger = pl.loggers.WandbLogger(
             project=project,
@@ -396,15 +404,7 @@ def run_multitask(args):
     ds_limit = args.eval_ds_limit if not args.fast_debug_run else 0.05
     
     torch.cuda.empty_cache()
-    if args.eval_mmlu:     
-        from projects.instr_routing.eval.lm_eval_harness.run_eval import eval_lm   
-        print("#"*50)
-        print("Evaluating on MMLU")
-        # acc=eval_mlu(model_name="",model_path=path_best_model, eval_batch_size=5)
-        results_dict=eval_lm(model_path=path_best_model, model_name="", task="mmlu", batch_size=5, nshot=0, ds_limit=ds_limit)
-        if wandb.run is not None:           
-            wandb.log(results_dict)
-    
+
     if args.eval_superni:         
         print("#"*50)           
         print("Evaluating on super NI")              
@@ -416,7 +416,17 @@ def run_multitask(args):
                      nshot=0, use_outputs=args.eval_superni_use_outputs, ds_limit=ds_limit)
         if wandb.run is not None:           
             wandb.log({"rouge_L_super_ni": rouge_L_super_ni})
-
+    
+    if args.eval_mmlu:       
+        # from projects.instr_routing.eval.lm_eval_harness.run_eval import eval_lm   
+        from projects.instr_routing.eval.mmlu.run_mmlu_eval import eval_mlu
+        print("#"*50)
+        print("Evaluating on MMLU")     
+        acc=eval_mlu(ntrain=5, model_name="",model_path=path_best_model, eval_batch_size=3)
+        # results_dict=eval_lm(model_path=path_best_model, model_name="", task="mmlu", batch_size=5, nshot=0, ds_limit=ds_limit)
+        if wandb.run is not None:           
+            # wandb.log(results_dict)
+            wandb.log({"mmlu_acc": acc})
          
     if args.eval_arc:       
         from projects.instr_routing.eval.lm_eval_harness.run_eval import eval_lm

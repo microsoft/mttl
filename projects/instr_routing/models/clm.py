@@ -335,6 +335,7 @@ class CLM(EfficientCheckpointModule):
             ):
                 wandb_logger = self.loggers[0]
                 # bar plot with reduced memory size
+                plt.clf()
                 _ = plt.plot(range(len(divs)), divs)
                 wandb_logger.log_image(
                     f"{stage}/div_layers_dist",
@@ -424,7 +425,7 @@ class CLM(EfficientCheckpointModule):
             plt.clf()                 
             aux_loss = [l.detach().item() for l in aux_loss]
             _ = plt.plot(range(len(aux_loss)), aux_loss)    
-            wandb_logger.log_image("valid/aux_loss_per_layer",
+            wandb_logger.log_image("val/aux_loss_per_layer",
                         [wandb.Image(plt)],
                         step=self.global_step,
                     )  # , commit=False)
@@ -440,8 +441,8 @@ class CLM(EfficientCheckpointModule):
             if len(norms) > 0:
                     wandb_logger = self.loggers[0]
                     plt.clf()
-                    _ = plt.plot(range(len(norms)), norms)
-                    wandb_logger.log_image("valid/xrouter_W_norm",
+                    _ = plt.plot(range(len(norms)), norms)   
+                    wandb_logger.log_image("val/xrouter_W_norm",
                                 [wandb.Image(plt)],
                                 step=self.global_step,
                             )

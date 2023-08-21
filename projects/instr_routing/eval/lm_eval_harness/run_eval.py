@@ -123,10 +123,10 @@ def eval_lm(save_dir="/home/v-oostapenko/results/mmlu/llama-7B/",
     save_dir = os.getenv("AMLT_OUTPUT_DIR", save_dir)
     if os.environ.get("AMLT_OUTPUT_DIR") is not None:  # on gcr
         base_model_path = "/mnt/default/data/models"
-        base_cluster_infos = "/mnt/default/data/"  # /mnt/amlt_code/inst_follow/"
-    else:
-        base_cluster_infos = code_dir
-    path_to_clusterer = f"{base_cluster_infos}/cluster_infos/cbtm/"
+        # base_cluster_infos = "/mnt/default/data/"  # /mnt/amlt_code/inst_follow/"
+    # else:
+    #     base_cluster_infos = code_dir
+    # path_to_clusterer = f"{base_cluster_infos}/cluster_infos/cbtm/"
     ################################################################################################
 
     if model_path == "" and from_hf == 0:
