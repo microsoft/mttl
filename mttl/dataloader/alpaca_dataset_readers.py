@@ -12,6 +12,9 @@ from mttl.utils import hash_example
 from typing import List, Sequence, Dict
 
 
+IGNORE_INDEX = -100
+
+
 class AlpacaTemplateForHash(
     object
 ):  # dont change it to keep compatibility with old clusterings etc., previously generated hashes
@@ -84,19 +87,14 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
         train_on_inputs=False,
         dst_path=None,
         idxs=None,
-        cluster_info=None,
-        predict_cluster=None,
         loss_for_keywords=True,
         subset=None,
     ):
         super().__init__()
         self.dst_path = dst_path
-        self.predict_cluster = predict_cluster
         self.loss_for_keywords = loss_for_keywords
-        if predict_cluster is not None:
-            assert predict_cluster in ["topic_set", "skill_set"]
-        self.cluster_info = cluster_info
         self.train_on_inputs = train_on_inputs
+
         # load the data
         if os.getenv("AP_DATA_DIR") is not None:
             data_dir = os.getenv("AP_DATA_DIR")
@@ -163,14 +161,7 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
         )
 
     def preprocess(self, source: str, target: str) -> Dict:
-        IGNORE_INDEX = -100
         """Preprocess the data by tokenizing."""
-        # _tokenize_fn = lambda x: self.tokenizer(x,
-        #     truncation=True,
-        #     padding="max_length",
-        #     max_length=self.max_input_length,
-        #     return_tensors="pt"
-        #     )
         example = source + target  # [s + t for s, t in zip(sources, targets)]
         example_tokenized = self._tokenize_fn(example)
         sources_tokenized = self._tokenize_fn(
@@ -195,30 +186,7 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
         enc_input = AlpacaTemplate.apply(entry)
         source = AlpacaTemplateSource.apply(entry)
 
-        if self.predict_cluster is not None and self.predict_cluster in entry:
-            str_dict = entry[self.predict_cluster].replace("'", '"')
-            topic_set = json.loads(str_dict)
-            topics_str = " ".join([k for k, v in topic_set.items()])
-            if self.loss_for_keywords:
-                entry["output"] = f"[keywords: {topics_str} ] {entry['output']}"
-            else:
-                source += f" [keywords: {topics_str} ]"
-        # assert source + entry["output"] == enc_input
-        # dec_input = entry["output"]
         task_id = -1
-        if self.cluster_info is not None:
-            task_id = self.cluster_info.get_distances(input_hash)
-            # for low entropy argmax
-            entr = calc_entropy(task_id, axis=-1) / np.log2(len(task_id))
-            if (
-                entr > 0.4
-            ):  # what was used in gen_si_sets to generate datasets and clusterings
-                task_id = -2
-            else:
-                task_id = (
-                    torch.tensor(task_id).argmax().item()
-                )  # its probs actually, not distances TODO: deal with this ambiguity
-            # for high entropy -2
         if self.train_on_inputs:
             # next we tokenize
             tok_input = self.tokenizer(

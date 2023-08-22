@@ -12,6 +12,9 @@ from mttl.utils import hash_example
 from typing import List, Sequence, Dict
 
 
+IGNORE_INDEX = -100
+
+
 class AlpacaTemplateForHash(
     object
 ):  # dont change it to keep compatibility with old clusterings etc., previously generated hashes
@@ -47,21 +50,14 @@ class PlatypusDataset(torch.utils.data.dataset.Dataset):
         train_on_inputs=False,
         dst_path=None,
         idxs=None,
-        cluster_info=None,
-        predict_cluster=None,
         loss_for_keywords=True,
         subset=None,
     ):
         super().__init__()
         self.dst_path = dst_path
-        self.predict_cluster = predict_cluster
         self.loss_for_keywords = loss_for_keywords
-
-        if predict_cluster is not None:
-            assert predict_cluster in ["topic_set", "skill_set"]
-
-        self.cluster_info = cluster_info
         self.train_on_inputs = train_on_inputs
+
         # load the data
         if os.getenv("AP_DATA_DIR") is not None:
             data_dir = os.getenv("AP_DATA_DIR")
@@ -93,8 +89,6 @@ class PlatypusDataset(torch.utils.data.dataset.Dataset):
             return_tensors="pt",
         )
         input_ids = labels = tokenized.input_ids[0]
-        # input_ids_lens = labels_lens = tokenized.input_ids.ne(self.tokenizer.pad_token_id).sum().item()
-        # input_ids_lens = labels_lens = tokenized.input_ids.ne(self.tokenizer.pad_token_id).sum().item()
         input_ids_lens = labels_lens = (
             torch.logical_and(
                 tokenized.input_ids.ne(self.tokenizer.pad_token_id),
@@ -111,8 +105,6 @@ class PlatypusDataset(torch.utils.data.dataset.Dataset):
         )
 
     def preprocess(self, source: str, target: str) -> Dict:
-        IGNORE_INDEX = -100
-
         example = source + target  # [s + t for s, t in zip(sources, targets)]
         example_tokenized = self._tokenize_fn(example)
         sources_tokenized = self._tokenize_fn(
@@ -121,7 +113,6 @@ class PlatypusDataset(torch.utils.data.dataset.Dataset):
 
         input_ids = example_tokenized["input_ids"]
         label = copy.deepcopy(input_ids)
-        # for label, source_len in zip(label, sources_tokenized["input_ids_lens"]):
         label[: sources_tokenized["input_ids_lens"]] = IGNORE_INDEX
         return dict(input_ids=input_ids, labels=label)
 
@@ -133,25 +124,11 @@ class PlatypusDataset(torch.utils.data.dataset.Dataset):
         enc_input_for_hash = AlpacaTemplateForHash.apply(entry)
         input_hash = hash_example(enc_input_for_hash)
         instruction_hash = hash_example(entry["instruction"])
-        # topics_str = None
 
         source = AlpacaTemplateSource.apply(entry)
         enc_input = f"{source}{entry['output']}"
-
         task_id = -1
-        if self.cluster_info is not None:
-            task_id = self.cluster_info.get_distances(input_hash)
-            # for low entropy argmax
-            entr = calc_entropy(task_id, axis=-1) / np.log2(len(task_id))
-            if (
-                entr > 0.4
-            ):  # what was used in gen_si_sets to generate datasets and clusterings
-                task_id = -2
-            else:
-                task_id = (
-                    torch.tensor(task_id).argmax().item()
-                )  # its probs actually, not distances TODO: deal with this ambiguity
-            # for high entropy -2
+
         if self.train_on_inputs:
             # next we tokenize
             tok_input = self.tokenizer(

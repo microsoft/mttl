@@ -300,12 +300,13 @@ def run_multitask(args):
         trainer.test(dataloaders=dm, ckpt_path=ckpt_path)
         module.model.checkpoint_tested = "last"
         trainer.test(dataloaders=dm, ckpt_path="last")
-    # if args.dataset in ["ni", "xfit", "alpaca", "longform", "wizzerd", "db_dolly"]:
+
     path_best_model = trainer.checkpoint_callback.best_model_path
     path_last_model = trainer.checkpoint_callback.last_model_path
 
     print(f"Best model path: {path_best_model}")
     print(f"Last model path: {path_last_model}")
+
     # empty memory
     del (
         module,
