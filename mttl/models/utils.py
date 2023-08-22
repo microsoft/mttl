@@ -72,7 +72,7 @@ class RoutingInfo:
 
     @classmethod 
     def from_batch(cls, batch: dict):
-        ri = RoutingInfo(
+        ri = cls(
             task_ids=batch["task_ids"],   
             hashes=batch.get("hashes", None),
             example_ids=batch.get("example_ids", None),
