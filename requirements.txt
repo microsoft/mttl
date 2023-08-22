@@ -1,5 +1,5 @@
 datasets==2.2.1
-transformers==4.19.2
+transformers==4.32.0
 pytorch-lightning==2.0.5
 wandb
 rouge
@@ -16,3 +16,6 @@ sentence-transformers
 fsspec[adl]
 click
 rich
+matplotlib
+accelerate
+peft

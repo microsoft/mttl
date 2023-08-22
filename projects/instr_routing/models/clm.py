@@ -55,6 +55,7 @@ class CLM(EfficientCheckpointModule):
 
         self.test_results = []
         self.best_val_result = None
+        self._inference_outputs = []
 
     def add_loss_plugin(self, plugin):
         if self.loss_plugins is not None:
@@ -183,11 +184,9 @@ class CLM(EfficientCheckpointModule):
 
         return self.model.generate(inputs=batch["input_ids"], **kwargs)
 
-    def on_before_optimizer_step(
-        self, optimizer: Optimizer, optimizer_idx: int
-    ) -> None:
+    def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
         # self.log_routing_metrics() .
-        return super().on_before_optimizer_step(optimizer, optimizer_idx)
+        return super().on_before_optimizer_step(optimizer)
 
     def training_step(self, batch, _):
         loss, aux_loss = self.forward(batch)
@@ -406,6 +405,9 @@ class CLM(EfficientCheckpointModule):
                 and batch_idx > 0
             ):  # to accumulate over larger batch
                 self.log_routing_metrics(stage="val")
+
+        self._inference_outputs += [(loss, batch["task_ids"])]
+
         return loss, batch["task_ids"]
 
     def on_before_backward(self, loss: Tensor) -> None:
@@ -413,9 +415,11 @@ class CLM(EfficientCheckpointModule):
 
     def test_step(self, batch, batch_idx):
         loss, aux_loss = self.forward(batch, reduction="none")
+        self._inference_outputs += [(loss, batch["task_ids"])]
         return loss, batch["task_ids"]
 
-    def test_epoch_end(self, outputs):
+    def on_test_epoch_end(self, outputs):
+        outputs = self._inference_outputs
         losses = torch.cat([out[0] for out in outputs], 0)
         task_ids = torch.cat([out[1] for out in outputs], 0)
         log_name = f"test/loss"
@@ -437,9 +441,11 @@ class CLM(EfficientCheckpointModule):
             )
 
         self.accumulate_metrics_batch = defaultdict(list)
+        self._inference_outputs.clear()
         return losses
 
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
+        outputs = self._inference_outputs
         losses = torch.cat([out[0] for out in outputs], 0)
         task_ids = torch.cat([out[1] for out in outputs], 0)
 
@@ -454,6 +460,7 @@ class CLM(EfficientCheckpointModule):
         self.accumulate_metrics_batch = defaultdict(list)
         self.log_routing_metrics(stage="val")
         self.log_xrouter_W_norm()
+        self._inference_outputs.clear()
 
     def configure_optimizers(self):
         args = self.args
