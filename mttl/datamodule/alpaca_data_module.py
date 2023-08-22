@@ -6,38 +6,32 @@ from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from mttl.utils import trim_batch
 from mttl.dataloader.data_utils import ExampleInfo
-from mttl.dataloader.alpaca_dataset_readers import AlpacaDataset
-from transformers import LlamaTokenizer
+from mttl.dataloader.alpaca_dataset_readers import AlpacaDataset, IGNORE_INDEX
+from transformers import LlamaTokenizer, DataCollatorForSeq2Seq, AutoTokenizer
+from dataclasses import dataclass
 
 
-class CollateWrapperFnCLM:
-    def __init__(
-        self,
-        pad_token_id,
-    ):
-        self.pad_token_id = pad_token_id
-
+@dataclass
+class CollateWrapperFn(DataCollatorForSeq2Seq):
     def __call__(self, batch: List[ExampleInfo]):
         input_ids = [b.input_ids for b in batch]
         target_ids = [b.target_ids for b in batch]
         hashes = [b.hash for b in batch]
         task_ids = [b.task_id for b in batch]
         instruction_hashes = [b.instruction_hash for b in batch]
-
         task_ids = torch.LongTensor(task_ids)
-        input_ids = trim_batch(torch.stack(input_ids, 0), self.pad_token_id)
-        labels = trim_batch(torch.stack(target_ids, 0), self.pad_token_id)
-        labels = torch.where(labels == self.pad_token_id, -100, labels)
-
+        collated_features = super().__call__(
+            [
+                {"input_ids": i, "labels": t}
+                for i, t in zip(input_ids, target_ids)
+            ]
+        )
         output_batch = {
-            "input_ids": input_ids,
-            "labels": labels,
+            "input_ids": collated_features["input_ids"],
+            "labels": collated_features["labels"],
             "task_ids": task_ids,
             "hashes": hashes,
             "instruction_hashes": instruction_hashes,
-            "pad_token_mask": (input_ids != self.pad_token_id)
-            .float()
-            .to(input_ids.device),
         }
         return output_batch
 
@@ -51,7 +45,7 @@ class AlpacaDataModule(LightningDataModule):
             num_workers=16,
             pin_memory=True,
             persistent_workers=True,
-            collate_fn=CollateWrapperFnCLM(self.pad_token_id),
+            collate_fn=self.collate_fn,
         )
 
     def val_dataloader(self):
@@ -62,7 +56,7 @@ class AlpacaDataModule(LightningDataModule):
             num_workers=16,
             pin_memory=True,
             persistent_workers=True,
-            collate_fn=CollateWrapperFnCLM(self.pad_token_id),
+            collate_fn=self.collate_fn,
         )
 
     def test_dataloader(self):
@@ -73,7 +67,7 @@ class AlpacaDataModule(LightningDataModule):
             num_workers=16,
             pin_memory=True,
             persistent_workers=True,
-            collate_fn=CollateWrapperFnCLM(self.pad_token_id),
+            collate_fn=self.collate_fn,
         )
 
     @property
@@ -87,19 +81,21 @@ class AlpacaDataModule(LightningDataModule):
         super().__init__()
 
         self.config = config
-        tok_model = config.model if config.model is not None else "yahma/llama-7b-hf"
 
-        self.tokenizer = LlamaTokenizer.from_pretrained(
-            tok_model, add_eos_token=True
-        )  # tloen does not add eos token
-        self.tokenizer.pad_token_id = 0
+        self.tokenizer = AutoTokenizer.from_pretrained(config.model, add_eos_token=False)
+        if not self.tokenizer.pad_token_id:
+            self.tokenizer.pad_token_id = self.pad_token_id = 0
 
         if self.config.padding_side == "left":
             self.tokenizer.padding_side = (
                 "left"  # Allow batched inference, used by tloen also in training
             )
-        self.pad_token_id = self.tokenizer.pad_token_id
 
+        self.collate_fn = CollateWrapperFn(
+            tokenizer=self.tokenizer,
+            pad_to_multiple_of=8,
+            return_tensors="pt",
+        )
         self.task2id = {"alpaca_full": 0}
 
     def get_dataset(self, idxs=None, loss_for_keywords=True):
