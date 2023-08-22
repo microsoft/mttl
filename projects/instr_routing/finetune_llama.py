@@ -362,11 +362,10 @@ def run_multitask(args):
     callbacks.append(checkpoint_callback)
 
     trainer = Trainer(
-        gpus=1,
+        devices=1,
         accelerator="gpu",
         logger=loggers,      
         num_sanity_val_steps=5,
-        amp_backend="native",    
         default_root_dir=args.output_dir,
         max_epochs=args.num_train_epochs,   
         max_steps=args.total_steps + 1 if args.total_steps != -1 else -1,
