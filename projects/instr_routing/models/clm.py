@@ -9,19 +9,29 @@ import pytorch_lightning as pl
 import matplotlib.pyplot as plt
 from torch.optim.optimizer import Optimizer
 import wandb
+from typing import List
 from collections import defaultdict
 from torch import Tensor, nn
-from transformers import AutoModelForSeq2SeqLM, AutoModelForCausalLM
+from transformers import AutoModelForCausalLM
 
-from .get_optimizer import get_optimizer
 from mttl.models.get_scheduler import get_scheduler
-from mttl.models.modify_model import modify_transformer
-from mttl.models.utils import EfficientCheckpointModule, get_global_batch_size
-from .utils import RoutingInfo
-from mttl.utils import freeze_embeds
+from mttl.models.utils import (
+    EfficientCheckpointModule,
+    get_global_batch_size,
+    RoutingInfo,
+)
+from mttl.models.get_optimizer import get_optimizer
+from mttl.global_vars import EPS
 from pytorch_lightning.utilities.parsing import AttributeDict
+from dataclasses import dataclass
 
-EPS = 1e-12
+
+@dataclass
+class AugmentedRoutingInfo(RoutingInfo):
+    save_oracle_routings: bool = False
+    gen_mode: bool = False
+    routings: List[torch.Tensor] = None
+    oracle_routings: List[torch.Tensor] = None
 
 
 class CLM(EfficientCheckpointModule):
@@ -36,39 +46,9 @@ class CLM(EfficientCheckpointModule):
         self.pad_token_id = self.tokenizer.pad_token_id
         self.model: AutoModelForCausalLM = None
         self.accumulate_metrics_batch = defaultdict(list)
+
         if kwargs.get("model_object") is None:
-            raise NotImplementedError()
-            self.model = AutoModelForSeq2SeqLM.from_pretrained(
-                self.args.model,
-                cache_dir=os.environ.get("TRANSFORMERS_CACHE", "/tmp/hf-cache"),
-            )
-            # free-up temporary space
-            os.system("/bin/rm -rf /tmp/hf-cache")
-            os.system("df")
-
-            if "t5" or "T0" in self.args.model:
-                self.pad_token_id = self.tokenizer.pad_token_id
-                if (
-                    hasattr(self.model.config, "max_position_embeddings")
-                    and self.model.config.max_position_embeddings
-                    < self.args.max_input_length
-                ):
-                    print(
-                        f"Increasing the model's number of position embedding vectors from {self.model.config.max_position_embeddings} "
-                        f"to {self.args.max_input_length}."
-                    )
-                    self.model.resize_position_embeddings(self.args.max_input_length)
-            elif "bart" in self.args.model:
-                self.pad_token_id = self.model.model.shared.padding_idx
-            else:
-                raise NotImplementedError()
-
-            self.model = modify_transformer(self.model, self.args)
-            print(self.args)
-
-            if self.args.freeze_embeds:
-                print("Freezing embeddings")
-                freeze_embeds(self.model)
+            raise NotImplementedError("Requires a model object to instantiate CLM.")
         else:
             self.model = kwargs.get("model_object")
         self.loss_plugins = nn.ModuleDict({})
@@ -84,27 +64,26 @@ class CLM(EfficientCheckpointModule):
 
     def forward(self, batch, reduction="mean"):
         input_ids, labels = batch["input_ids"], batch["labels"]
-        # print("input_ids", input_ids.shape)
-        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
+
+        self.model.task_id_container["routing_infos"] = AugmentedRoutingInfo.from_batch(
             batch
-        )  # pad tokens also have -100
+        )
+
+        # pad tokens also have -100
         padding_mask, instr_mask = self.calculate_routing_mask(
             batch["input_ids"], self.model.task_id_container["routing_infos"]
         )
-        setattr(
-            self.model.task_id_container["routing_infos"],
-            "pad_token_mask",
-            padding_mask,
-        )  # if 1 token is either instruction or output, i.e. not a pad token
-        setattr(
-            self.model.task_id_container["routing_infos"], "inst_token_mask", instr_mask
-        )  # 1 if the token is part of instruction or pad token (so outputs are 0s)
+
+        # if 1 token is either instruction or output, i.e. not a pad token
+        self.model.task_id_container["routing_infos"].pad_token_mask = padding_mask
+        # 1 if the token is part of instruction or pad token (so outputs are 0s)
+        self.model.task_id_container["routing_infos"].inst_token_mask = instr_mask
 
         outputs = self.model.forward(
             input_ids,
             attention_mask=(input_ids != self.pad_token_id).float(),
         )
-        # output_ids = outputs.logits.argmax(-1)
+
         # calculate loss, could also be done inside of the model
         bs = input_ids.size(0)
         logits = outputs.logits
@@ -119,6 +98,7 @@ class CLM(EfficientCheckpointModule):
         # Enable model parallelism
         shift_labels = shift_labels.to(shift_logits.device)
         loss = loss_fct(shift_logits, shift_labels)
+
         # reshape back
         if reduction == "none":
             loss = loss.view((bs, -1))
@@ -126,31 +106,30 @@ class CLM(EfficientCheckpointModule):
             non_zero_loss = (loss != 0).sum(dim=-1)
             non_zero_loss[non_zero_loss == 0] = 1
             loss = loss.sum(dim=-1) / non_zero_loss
+
         del outputs, shift_logits, shift_labels
-        aux_loss = self.model.task_id_container["routing_infos"].aux_loss
-        
-        # aux_loss = (
-        #     torch.mean(
-        #         torch.stack(self.model.task_id_container["routing_infos"].aux_loss)
-        #     )
-        #     if len(self.model.task_id_container["routing_infos"].aux_loss) > 0
-        #     else 0
-        # )
+
+        # get auxiliary losses from routing selectors
+        aux_loss = list(self.model.get_routing_losses().values())
 
         # we accumulate metrics over the microbatches
-        if not self.training:  # only plot this for validation
-            for k, v in self.model.task_id_container["routing_infos"].metrics.items():
+        if not self.training:
+            # only plot this for validation
+            for k, v in self.model.get_routing_metrics().items():
                 if "model.layers." in k:
                     self.accumulate_metrics_batch[k].append(v)
 
+        self.model.clear_routing_losses()
+        self.model.clear_routing_metrics()
+
         return loss, aux_loss
-                   
+
     def calculate_routing_mask(self, x, routing_infos):
         if not hasattr(self.args, "xrouting_option"):
             return None, None
+
         # bs, seq = x.shape
-        # if self.args.xrouting_option > 0:
-        padding_mask = (             
+        padding_mask = (
             routing_infos.pad_token_mask
         )  # 1 if the token is not a pad token, so its either instruciton or output
         instruction_mask = torch.ones_like(
@@ -175,45 +154,32 @@ class CLM(EfficientCheckpointModule):
     def generate(self, batch, **kwargs):
         if not hasattr(self.model, "task_id_container"):
             self.model.task_id_container = {}
-        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
-        setattr(self.model.task_id_container["routing_infos"], "gen_mode", 1)
+
+        self.model.task_id_container["routing_infos"] = AugmentedRoutingInfo.from_batch(
+            batch
+        )
+        self.model.task_id_container["routing_infos"].gen_mode = 1
+
         padding_mask, instr_mask = self.calculate_routing_mask(
             batch["input_ids"], self.model.task_id_container["routing_infos"]
         )
-        setattr(
-            self.model.task_id_container["routing_infos"],
-            "pad_token_mask",
-            padding_mask,
-        )  # if 1 token is either instruction or output, i.e. not a pad token
-        setattr(
-            self.model.task_id_container["routing_infos"], "inst_token_mask", instr_mask
-        )  # 1 if the token is part of instruction or pad token (so outputs are 0s)
+        self.model.task_id_container["routing_infos"].pad_token_mask = padding_mask
+        self.model.task_id_container["routing_infos"].inst_token_mask = instr_mask
 
         # if routings are given (should be oracle routings), we will use them for generation
         if "routings" in kwargs:
-            setattr(
-                self.model.task_id_container["routing_infos"],
-                "routings",
-                kwargs["routings"],
-            )
+            self.model.task_id_container["routing_infos"].routings = kwargs["routings"]
             kwargs.pop("routings")
 
         # if flag is set, we will store the oracle routings
         if "save_oracle_routings" in kwargs:
-            setattr(
-                self.model.task_id_container["routing_infos"],
-                "save_oracle_routings",
-                kwargs["save_oracle_routings"],
-            )
+            self.model.task_id_container["routing_infos"].save_oracle_routings = kwargs[
+                "save_oracle_routings"
+            ]
             kwargs.pop("save_oracle_routings")
 
         if "gen_mode" in kwargs:  # so that in xr4 we look at both nput and output
-            setattr(
-                self.model.task_id_container["routing_infos"],
-                "gen_mode",
-                kwargs["gen_mode"],
-            )
-            kwargs.pop("gen_mode")
+            self.model.task_id_container["routing_infos"].gen_mode = kwargs["gen_mode"]
 
         return self.model.generate(inputs=batch["input_ids"], **kwargs)
 
@@ -225,34 +191,24 @@ class CLM(EfficientCheckpointModule):
 
     def training_step(self, batch, _):
         loss, aux_loss = self.forward(batch)
-        
-        aux_loss_mean = (torch.mean(torch.stack(aux_loss))if len(aux_loss) > 0 else 0
-        )
-        
+
+        aux_loss_mean = torch.mean(torch.stack(aux_loss)) if len(aux_loss) > 0 else 0
         total_loss = loss + aux_loss_mean
-        # outputs = self.model.forward(**batch)
-        # loss= outputs.loss
+
         self.log("train/loss", loss, on_epoch=True, prog_bar=True)
         self.log("train/aux_loss", aux_loss_mean, on_epoch=True, prog_bar=True)
         self.log("train/total_loss", total_loss, on_epoch=True, prog_bar=True)
 
-        for plugin in self.loss_plugins.values():
-            plugin_loss = plugin.compute_loss(self.model, batch)
-            loss += plugin.factor * plugin_loss
-            self.log(
-                f"train/{plugin.name}_loss", plugin_loss, on_epoch=True, prog_bar=True
-            )
-
         for i, pg in enumerate(self.optimizers().optimizer.param_groups):
             self.log(f"train/lr_{i}", pg["lr"])
+
         return total_loss
 
     def log_routing_metrics(self, stage="train"):
         # we need to keep online mean ove rthe metrics over mictobatches (s.t. the metrics are calculated for the whole batch and not microbatches)
         divs, entropies, specializations, names = [], [], [], []
+
         for k, v in self.accumulate_metrics_batch.items():
-            # log to wandb directly
-            # wandb.log({f"train/{k}": torch.tensor(v).mean()})
             if (
                 not "model.layers." in k
             ):  # we dont want to log the metrics for each layer
@@ -313,6 +269,7 @@ class CLM(EfficientCheckpointModule):
                 divs.append(div.float().item())
                 entropies.append(entropy.float().item())
                 specializations.append(specialization.float().item())
+
         # log mean over all layers divs and entropies
         if len(divs) > 0:
             self.log(
@@ -392,77 +349,62 @@ class CLM(EfficientCheckpointModule):
                     writer = csv.writer(csv_file)
                     writer.writerow(specializations)
 
-                # if not hasattr(self, f"{stage}_div_layers_dist_table"):
-                #     setattr(self, f"{stage}_div_layers_dist_table", wandb.Table(columns=names))
-                # getattr(self, f"{stage}_div_layers_dist_table").add_data(*divs)
-                # if not hasattr(self, f"{stage}_entropy_layers_dist_table"):
-                #     setattr(self, f"{stage}_entropy_layers_dist_table", wandb.Table(columns=names))
-                # getattr(self, f"{stage}_entropy_layers_dist_table").add_data(*entropies)
-                # if not hasattr(self, f"{stage}_diversity(MI-H)_layers_dist_table"):
-                #     setattr(self, f"{stage}_diversity(MI-H)_layers_dist_table", wandb.Table(columns=names))
-                # getattr(self, f"{stage}_diversity(MI-H)_layers_dist_table").add_data(*specializations)
-
-                # wandb_logger.log_table(f"{stage}/div_layers_dist_table", columns=getattr(self, f"{stage}_div_layers_dist_table").columns, data = getattr(self, f"{stage}_div_layers_dist_table").data)
-                # wandb_logger.log_table(f"{stage}/entropy_layers_dist_table", columns=getattr(self, f"{stage}_entropy_layers_dist_table").columns, data = getattr(self, f"{stage}_entropy_layers_dist_table").data)
-                # wandb_logger.log_table(f"{stage}/diversity(MI-H)_layers_dist_table", columns=getattr(self, f"{stage}_diversity(MI-H)_layers_dist_table").columns, data = getattr(self, f"{stage}_diversity(MI-H)_layers_dist_table").data)
-
-            #     _ = plt.bar(range(len(divs)), divs)
-            #     self.loggers[0].log_image(f"{stage}/div_layers_dist", [wandb.Image(plt)], step=self.global_step, commit=False)
-            #     _ = plt.bar(range(len(entropies)), entropies)
-            #     self.loggers[0].log_image(f"{stage}/entropy_layers_dist", [wandb.Image(plt)], step=self.global_step, commit=False)
-
         self.accumulate_metrics_batch = defaultdict(list)
 
     def on_validation_epoch_start(self) -> None:
         self.accumulate_metrics_batch = defaultdict(list)
         return super().on_validation_epoch_start()
 
-    def log_aux_loss_per_layer(self, aux_loss): 
+    def log_aux_loss_per_layer(self, aux_loss):
         if isinstance(self.loggers[0], pl.loggers.wandb.WandbLogger):
             wandb_logger = self.loggers[0]
-            plt.clf()                 
+            plt.clf()
             aux_loss = [l.detach().item() for l in aux_loss]
-            _ = plt.plot(range(len(aux_loss)), aux_loss)    
-            wandb_logger.log_image("val/aux_loss_per_layer",
-                        [wandb.Image(plt)],
-                        step=self.global_step,
-                    )  # , commit=False)
-            plt.clf()         
-     
+            _ = plt.plot(range(len(aux_loss)), aux_loss)
+            wandb_logger.log_image(
+                "val/aux_loss_per_layer",
+                [wandb.Image(plt)],
+                step=self.global_step,
+            )  # , commit=False)
+            plt.clf()
+
     def log_xrouter_W_norm(self):
         if isinstance(self.loggers[0], pl.loggers.wandb.WandbLogger):
             from .routing import XRouter
+
             norms = []
-            for n,layer in self.model.named_modules():
+            for n, layer in self.model.named_modules():
                 if isinstance(layer, XRouter):
                     norms.append(layer.W_norm)
             if len(norms) > 0:
-                    wandb_logger = self.loggers[0]
-                    plt.clf()
-                    _ = plt.plot(range(len(norms)), norms)   
-                    wandb_logger.log_image("val/xrouter_W_norm",
-                                [wandb.Image(plt)],
-                                step=self.global_step,
-                            )
-                    plt.clf()
-            
-    
+                wandb_logger = self.loggers[0]
+                plt.clf()
+                _ = plt.plot(range(len(norms)), norms)
+                wandb_logger.log_image(
+                    "val/xrouter_W_norm",
+                    [wandb.Image(plt)],
+                    step=self.global_step,
+                )
+                plt.clf()
+
     def validation_step(self, batch, batch_idx, log=True):
         loss, aux_loss = self.forward(batch, reduction="none")
-        total_loss = loss  # +aux_loss
-        # outputs = self.model.forward(**batch, reduction='none')
-        # loss= outputs.loss
-        
-                  
-        aux_loss_mean = (torch.mean(torch.stack(aux_loss))if len(aux_loss) > 0 else 0)
-        
-        
+        total_loss = loss
+
+        aux_loss_mean = torch.mean(torch.stack(aux_loss)) if len(aux_loss) > 0 else 0
+
         mean_loss = total_loss.sum() / loss.size(0)
+
         if log:
-            self.log("val/loss", mean_loss, on_epoch=True, prog_bar=True)    
+            self.log("val/loss", mean_loss, on_epoch=True, prog_bar=True)
             self.log("val/aux_loss", aux_loss_mean, on_epoch=True, prog_bar=True)
             self.log_aux_loss_per_layer(aux_loss)
-            if (batch_idx % (self.args.gradient_accumulation_steps * self.args.micro_batch_size)== 0 and batch_idx > 0):  # to accumulate over larger batch
+            if (
+                batch_idx
+                % (self.args.gradient_accumulation_steps * self.args.micro_batch_size)
+                == 0
+                and batch_idx > 0
+            ):  # to accumulate over larger batch
                 self.log_routing_metrics(stage="val")
         return loss, batch["task_ids"]
 
@@ -477,8 +419,10 @@ class CLM(EfficientCheckpointModule):
         losses = torch.cat([out[0] for out in outputs], 0)
         task_ids = torch.cat([out[1] for out in outputs], 0)
         log_name = f"test/loss"
+
         if hasattr(self.model, "checkpoint_tested"):
             log_name = f"test/{self.model.checkpoint_tested}/loss"
+
         # log per task loss and overall loss
         self.log(log_name, losses.mean(), on_epoch=True, prog_bar=True)
         for task_id in torch.unique(task_ids):
@@ -491,6 +435,7 @@ class CLM(EfficientCheckpointModule):
                 on_epoch=True,
                 prog_bar=True,
             )
+
         self.accumulate_metrics_batch = defaultdict(list)
         return losses
 

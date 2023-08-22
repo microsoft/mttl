@@ -6,7 +6,6 @@ from string import Template
 
 
 class Config:
-
     def __init__(self, filenames=None, kwargs=None, raise_error=True):
         # Stores personalization of the config file in a dict (json serializable)
         self._updated_kwargs = {}
@@ -220,8 +219,8 @@ class Config:
 
         # Polytropon related hyper-parameters
         self.n_splits = 1                      # number of splits for poly-s
-        self.poly_selector = "poly"            # poly, poly_cluster
-        self.poly_selector_cluster_temp = 1.0  # temperature for the cluster selector
+        self.router_selector = "poly"            # poly, poly_cluster
+        self.router_selector_cluster_temp = 1.0  # temperature for the cluster selector
         self.poly_average_correction = False   # correct the poly average
         self.poly_use_shared_skill = False     # use one skill shared by all tasks
 

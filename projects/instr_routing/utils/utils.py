@@ -129,7 +129,7 @@ def load_model(args, model_path=None, device="cuda",
         if hasattr(args, "update_kwargs"):  # isinstance(args, Config):
             loaded_hps = remap_old_hp_names(state_dict["hyper_parameters"])
             args.update_kwargs(loaded_hps)
-    # args.poly_selector = "x_router"
+    # args.router_selector = "x_router"
     state_dict = (
         {k: v.to(device) for k, v in state_dict["state_dict"].items()}
         if state_dict is not None

@@ -6,97 +6,54 @@ import numpy as np
 from types import MethodType
 from torch.distributions.relaxed_bernoulli import RelaxedBernoulli
 
-from mttl.models.utils import RoutingInfo
+from mttl.global_vars import EPS
+from mttl.models.modify_model import patch_layers, register_modifier
+from mttl.models.routing import (
+    RoutingAdapter,
+    RouterWrapper,
+    RoutingSelector,
+    get_selector,
+    register_selector,
+    AverageSelector,
+)
 
 
-EPS = 1e-12
+class SkillWrapper(RouterWrapper):
+    @classmethod
+    def switch_selector_to_average(cls, object, selector_to_replace=None, **kwargs):
+        super(SkillWrapper, cls).switch_selector_to_average(object, PolytroponSelector, **kwargs)
 
-
-class SkilledModel:
-    @staticmethod
-    def register_functions(object):
-        methods = [
-            method
-            for method in dir(SkilledModel)
-            if not method.startswith("__") and not "register_functions" in method
-        ]
-
-        for method in methods:
-            print("Registering method: ", method)
-            setattr(object, method, MethodType(getattr(SkilledModel, method), object))
-        return object
-
-    @staticmethod
-    def switch_selector_to_average(object):
-        """Switches PolytroponSelector to AverageSelector.
-        """
-        for name, module in object.named_modules():
-            for name, inner_mod in module.named_children():
-                if isinstance(inner_mod, PolytroponSelector):
-                    print(
-                        "Replacing with average: ",
-                        name,
-                        "n_skills:",
-                        inner_mod.n_skills,
-                    )
-                    setattr(
-                        module,
-                        name,
-                        AverageSelector(inner_mod.n_skills, inner_mod.n_splits),
-                    )
-
-    @staticmethod
-    def get_adapters(object):
-        adapters = {}
-        for n, m in object.named_modules():
-            if isinstance(m, PolytroponAdapter):
-                adapters[n] = m
-        return adapters
-
-    @staticmethod
-    def get_selectors(object):
-        selectors = {}
-        added_selectors = set()
-
-        for name, adapter in object.get_adapters().items():
-            # selectors might be shared across adapters
-            if adapter.selector not in added_selectors:
-                added_selectors.add(adapter.selector)
-                selectors[name + ".selector"] = adapter.selector
-        return selectors
-
-    @staticmethod
-    def resize_module_logits(object, n_tasks):
-        """Resizes the vector routing, in case of fine-tuning.
-        """
+    @classmethod
+    def resize_module_logits(cls, object, n_tasks):
+        """Resizes the vector routing, in case of fine-tuning."""
         for name, selector in object.get_selectors().items():
             print("Resizing module_logits of selector", name, "with", n_tasks, "tasks.")
             selector.resize_module_logits(n_tasks)
 
+    @classmethod
+    def remove_skills(cls, object, skill_ids_to_keep):
+        print("Removing skills, keeping", skill_ids_to_keep)
+        for name, adapter in object.get_adapters().items():
+            if isinstance(adapter, PolyLoRALinear):
+                if adapter.lora_a.shape[1] > 1:
+                    adapter.lora_a = nn.Parameter(
+                        adapter.lora_a[:, skill_ids_to_keep, :, :]
+                    )
+                if adapter.lora_b.shape[1] > 1:
+                    adapter.lora_b = nn.Parameter(
+                        adapter.lora_b[:, skill_ids_to_keep, :, :]
+                    )
+                adapter.n_skills = len(skill_ids_to_keep)
+                adapter.selector.n_skills = len(skill_ids_to_keep)
 
-class PolytroponAdapter(nn.Module):
-    @property
-    def routing_infos(self) -> RoutingInfo:
-        return self.task_id_ptr["routing_infos"]
 
-
-def get_selector(config):
-    if config.poly_selector == "poly":
-        return PolytroponSelector(config)
-    elif config.poly_selector == "private":
-        return PrivateSelector(config)
-    elif config.poly_selector == "moe":
-        return MoESelector(config)
-    else:
-        raise NotImplementedError()
-
-
-class Selector(nn.Module):
+class PolytroponAdapter(RoutingAdapter):
     pass
 
 
-class MoESelector(Selector):
-    def __init__(self, config):
+@register_selector("moe")
+class MoESelector(RoutingSelector):
+    def __init__(self, config, **kwargs):
         super().__init__()
 
         self.config = config
@@ -125,9 +82,11 @@ class MoESelector(Selector):
 
         probs = F.softmax(module_logits, dim=-1)
 
-        top_probs, top_indices = probs.topk(self.topk, dim=-1)  # 2 active skills per task
-        top_k_probs = top_probs[:, :self.topk]
-        top_k_indices = top_indices[:, :self.topk]
+        top_probs, top_indices = probs.topk(
+            self.topk, dim=-1
+        )  # 2 active skills per task
+        top_k_probs = top_probs[:, : self.topk]
+        top_k_indices = top_indices[:, : self.topk]
         top_k_probs = top_k_probs / top_k_probs.sum(dim=1, keepdim=True)
 
         zeros = torch.zeros_like(probs, requires_grad=True)
@@ -135,8 +94,9 @@ class MoESelector(Selector):
         return module_weights
 
 
-class PolytroponSelector(Selector):
-    def __init__(self, config):
+@register_selector("poly")
+class PolytroponSelector(RoutingSelector):
+    def __init__(self, config, **kwargs):
         super().__init__()
 
         self.config = config
@@ -178,52 +138,31 @@ class PolytroponSelector(Selector):
                 module_logits = torch.sigmoid(module_logits)
                 module_logits_disc = torch.round(module_logits)
                 # straight through estimator
-                module_logits = module_logits + (module_logits_disc - module_logits).detach()
+                module_logits = (
+                    module_logits + (module_logits_disc - module_logits).detach()
+                )
             else:
                 module_logits = torch.sigmoid(module_logits)
-            
+
             if self.dropout > 0.0:
                 module_logits = nn.Dropout(self.dropout)(module_logits)
 
             if self.poly_use_shared_skill:
                 # last skill is always active whatever the task that has been selected
-                module_logits = torch.cat((
-                    module_logits[:, :, :-1], module_logits[:, :, -1:] * 0.0 + 1.0
-                ), dim=-1)
+                module_logits = torch.cat(
+                    (module_logits[:, :, :-1], module_logits[:, :, -1:] * 0.0 + 1.0),
+                    dim=-1,
+                )
 
             if self.poly_average_correction:
-                module_weights = module_logits * (np.sqrt(self.n_splits) / np.sqrt(self.n_skills))
+                module_weights = module_logits * (
+                    np.sqrt(self.n_splits) / np.sqrt(self.n_skills)
+                )
             else:
                 module_weights = module_logits / (
                     module_logits.sum(dim=-1, keepdim=True) + EPS
                 )
         return module_weights
-
-
-class AverageSelector(Selector):
-    def __init__(self, n_skills, n_splits):
-        super().__init__()
-
-        self.n_splits = n_splits
-        self.n_skills = n_skills
-        self.register_buffer(
-            "module_logits", torch.empty(n_splits, n_skills).fill_(1.0 / n_skills)
-        )
-
-    def forward(self, routing_infos):
-        bs = routing_infos.task_ids.size(0)
-        module_logits = self.module_logits.view(1, self.n_splits, self.n_skills)
-        return module_logits.expand(bs, -1, -1)
-
-
-class PrivateSelector(Selector):
-    def __init__(self, config):
-        super().__init__()
-
-        self.n_skills = config.n_skills
-
-    def forward(self, routing_infos):
-        return F.one_hot(routing_infos.task_ids, num_classes=self.n_skills).unsqueeze(1)
 
 
 class PolyLoRALinear(PolytroponAdapter):
@@ -281,7 +220,6 @@ class PolyLoRALinear(PolytroponAdapter):
 
             with torch.no_grad():
                 self.lora_a.uniform_(-std, std)
-
 
         # ensure that initially, adding the adapter does not change the output
         if self.use_warmup or self.lora_randb_init:
@@ -370,65 +308,11 @@ class PolyIA3Linear(PolytroponAdapter):
         )
 
 
-def modify_with_poly(transformer, config, PolyLayer):
-    
-    # How to "bin" different levels of selectors ?
-    def _extract_identifier(string, match_on='coder'):
-        """ Returns a unique identifier for the "chunk" of layers sharing the 
-        same underlying selector
-        # e.g. 'block' : 'encoder.block.0.layer.0.SelfAttention' -> 'encoder.block.0'
-        """
-        pattern_map = {
-            'coarsegrained' : None, 
-            'finegrained' : None,
-            'layerwise' : 'layer',
-            'blockwise' : 'block',
-            'coderwise' : 'coder'
-        }
-        assert match_on in pattern_map.keys()
-
-        if match_on == 'finegrained':
-            return string
-        if match_on == 'coarsegrained': 
-            return ''
-
-        match_on = pattern_map[match_on]
-        left_idx = string.find(f'{match_on}.') + len(match_on) + 1
-        right_idx = string[left_idx:].find('.') 
-        return string[:left_idx + right_idx]
-    
-    selectors = {}
-    total_layers = 0
-
-    for m_name, module in dict(transformer.named_modules()).items():
-        if re.fullmatch(config.lora_modules, m_name):
-            for c_name, layer in dict(module.named_children()).items():
-                if re.fullmatch(config.lora_layers, c_name):
-                    identifier = _extract_identifier(f'{m_name}.{c_name}', config.poly_granularity)
-                    if identifier not in selectors.keys():
-                        selectors[identifier] = get_selector(config)
-                    selector = selectors[identifier]
-                    total_layers += 1
-
-                    print(f"Patching {m_name}.{c_name}...")
-                    setattr(
-                        module,
-                        c_name,
-                        PolyLayer(
-                            config,
-                            transformer.task_id_container,
-                            layer,
-                            selector=selector,
-                        ),
-                    )
-
-    print(f'created {len(selectors)} selectors for a total of {total_layers} adapted layers')
-    return SkilledModel.register_functions(transformer)
-
-
+@register_modifier("poly_ia3")
 def modify_with_poly_ia3(transformer, config):
-    return modify_with_poly(transformer, config, PolyIA3Linear)
+    return patch_layers(transformer, config, PolyIA3Linear, SkillWrapper)
 
 
+@register_modifier("poly_lora")
 def modify_with_poly_lora(transformer, config):
-    return modify_with_poly(transformer, config, PolyLoRALinear)
+    return patch_layers(transformer, config, PolyLoRALinear, SkillWrapper)

@@ -8,7 +8,7 @@ from mttl.utils import average_dicts
 
 def get_monitors(config):
     monitors = []
-    if config.model_modifier and "poly" in config.model_modifier and "poly" in config.poly_selector:
+    if config.model_modifier and "poly" in config.model_modifier and "poly" in config.router_selector:
         monitors += [PolytroponLog()]
 
     return monitors

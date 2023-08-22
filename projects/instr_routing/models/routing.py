@@ -2,61 +2,19 @@ import torch
 import copy
 import torch.nn as nn   
 from enum import Enum
-from dataclasses import dataclass
 import torch.nn.functional as F
-import re 
-import numpy as np       
-from types import MethodType
 from torch.autograd import Function
-from torch.distributions.relaxed_bernoulli import RelaxedBernoulli
 
-from .utils import RoutingInfo
-from projects.instr_routing import global_vars
+from mttl import global_vars
+from mttl.global_vars import EPS
+from mttl.models.modify_model import patch_layers, register_modifier
+from mttl.models.routing import RouterWrapper, RoutingAdapter, RoutingSelector, get_selector, register_selector
+
 from projects.instr_routing.models.attention import SelectAttention    
 
- 
-EPS = 1e-12
 
-
-class PolytroponAdapter(nn.Module):
-    @property
-    def routing_infos(self) -> RoutingInfo:
-        return self.task_id_ptr["routing_infos"]
-
-              
-def get_selector(config, in_d=4096):                
-    from projects.instr_routing.cluster_tuning.cluster_selector import ClusterSelector
-
-    if config.poly_selector == "poly":
-        return PolytroponSelector(config)
-    elif config.poly_selector == "private":
-        # back-compatibility
-        if config.example_to_ids_path:
-            return ClusterSelector(config, soft=False)
-        else:
-            return PrivateSelector(config)
-    elif config.poly_selector == "cluster_soft":
-        return ClusterSelector(config, soft=True)
-    elif config.poly_selector == "none":
-        return None
-        # return ClusterSelector(config, soft=True)
-    elif config.poly_selector == "cluster_hard":
-        return ClusterSelector(config, soft=False)
-    elif config.poly_selector == "moe":
-        return MoESelector(config)
-    elif config.poly_selector == "x_router":
-        return XRouter(config, in_d=in_d)    
-    elif config.poly_selector == "attn_router":
-        return AttnRouter(config, in_d=in_d)
-    else:
-        raise NotImplementedError()
-
-
-class Selector(nn.Module):
-    pass
-
-           
-class XRouter(Selector):  
+@register_selector("x_router")
+class XRouter(RoutingSelector):
     class ROUTING_OPTION(Enum):
         TOKEN = 0  # route each token seperately, i.e. each token's representation is seperately passe to the router
         INST_ONLY = 1 # train and test time we only look at instruction part
@@ -191,11 +149,11 @@ class XRouter(Selector):
                     del prior_padding_mask, posterior_padding_mask
                       
                     adapter_logits_prior = self.route(self.ff, self.ff_router_layer_norm, x_rout_prior) if not self.xrouting_sep_teacher_student else self.route(self.ff_student, self.ff_student_layer_norm, x_rout_prior)
-                    adapter_dist_prior = self.softmax(adapter_logits_prior/self.config.poly_selector_cluster_temp)
+                    adapter_dist_prior = self.softmax(adapter_logits_prior/self.config.router_selector_cluster_temp)
                     if gen_mode:              
                         return adapter_dist_prior, 0.0  
                     adapter_logits_posterior = self.route(self.ff, self.ff_router_layer_norm, x_rout_posterior)
-                    adapter_dist_post = self.softmax(adapter_logits_posterior/self.config.poly_selector_cluster_temp)
+                    adapter_dist_post = self.softmax(adapter_logits_posterior/self.config.router_selector_cluster_temp)
                     aux_loss = torch.zeros(1, device=x.device)
                               
                     if self.xrouter_sim_metric == "kl":# and not gen_mode:  
@@ -287,11 +245,11 @@ class XRouter(Selector):
                 #     del prior_padding_mask, posterior_padding_mask
                       
                 #     adapter_logits_prior = self.route(self.ff, self.ff_router_layer_norm, x_rout_prior) if not self.xrouting_sep_teacher_student else self.route(self.ff_student, self.ff_student_layer_norm, x_rout_prior)
-                #     adapter_dist_prior = self.softmax(adapter_logits_prior/self.config.poly_selector_cluster_temp)
+                #     adapter_dist_prior = self.softmax(adapter_logits_prior/self.config.router_selector_cluster_temp)
                 #     if gen_mode:
                 #         return adapter_dist_prior, 0.0  
                 #     adapter_logits_posterior = self.route(self.ff, self.ff_router_layer_norm, x_rout_posterior)
-                #     adapter_dist = self.softmax(adapter_logits_posterior/self.config.poly_selector_cluster_temp)
+                #     adapter_dist = self.softmax(adapter_logits_posterior/self.config.router_selector_cluster_temp)
                 #     aux_loss = torch.zeros(1, device=x.device)
                 #     if self.xrouter_sim_metric == "kl":# and not gen_mode:  
                 #         # adapter_dist -- posterior, looks at inpiut + output. This should be P.
@@ -372,7 +330,7 @@ class XRouter(Selector):
         else:  
             x_rout = x # simple per token routing
         adapter_logits = self.route(self.ff, self.ff_router_layer_norm, x_rout)          
-        adapter_probs = self.softmax(adapter_logits/self.config.poly_selector_cluster_temp)
+        adapter_probs = self.softmax(adapter_logits/self.config.router_selector_cluster_temp)
         return adapter_probs, torch.zeros(1, device=x.device)
     
     def cosine_sim(self, x, y, dim=-1):
@@ -391,8 +349,9 @@ class XRouter(Selector):
             return out
         return F.softmax(logit, dim=-1)
     
-                
-class AttnRouter(Selector): 
+
+@register_selector("attn_router")                
+class AttnRouter(RoutingSelector): 
     def __init__(self, config, in_d=4096):
         '''
         Basic version of attention based router.
@@ -426,136 +385,6 @@ class AttnRouter(Selector):
         i_e = scores.sum(1)    
         i_e = i_e / i_e.sum(dim=-1, keepdim=True)      
         return i_e.unsqueeze(1), torch.zeros(1, device=x.device)
-            
-class MoESelector(Selector):
-    def __init__(self, config):
-        super().__init__()
-
-        self.config = config
-        self.n_splits = config.n_splits
-        self.n_skills = config.n_skills
-        self.topk = 3
-
-        self.module_logits = nn.Parameter(
-            torch.empty((config.n_tasks, config.n_splits * config.n_skills)).uniform_(
-                -1e-3, 1e-3
-            )
-        )
-
-    def resize_module_logits(self, n_tasks):
-        self.module_logits.data = torch.empty(
-            (n_tasks, self.n_splits * self.n_skills)
-        ).uniform_(-1e-3, 1e-3)
-
-    def forward(self, routing_infos):
-        module_logits = self.module_logits[routing_infos.task_ids]
-        module_logits = module_logits.view(-1, self.n_splits, self.n_skills)
-
-        if self.training:
-            noise = torch.randn_like(module_logits) / self.n_skills
-            module_logits = module_logits + noise
-
-        probs = F.softmax(module_logits, dim=-1)
-
-        top_probs, top_indices = probs.topk(self.topk, dim=-1)  # 2 active skills per task
-        top_k_probs = top_probs[:, :self.topk]
-        top_k_indices = top_indices[:, :self.topk]
-        top_k_probs = top_k_probs / top_k_probs.sum(dim=1, keepdim=True)
-
-        zeros = torch.zeros_like(probs, requires_grad=True)
-        module_weights = zeros.scatter(2, top_k_indices, top_k_probs)
-        return module_weights
-
-
-class PolytroponSelector(Selector):
-    def __init__(self, config):
-        super().__init__()
-
-        self.config = config
-        self.n_splits = config.n_splits
-        self.n_skills = config.n_skills 
-        self.dropout = config.module_logits_dropout   
-        self.use_l2_norm = config.module_logits_l2_norm
-        self.use_relaxed_bernoulli = config.module_logits_relaxed_bernoulli
-        self.use_straight_through = config.module_logits_straight_through
-        self.poly_average_correction = config.poly_average_correction
-        self.poly_use_shared_skill = config.poly_use_shared_skill
-
-        if self.use_relaxed_bernoulli and self.use_straight_through:
-            raise ValueError("Cannot use both relaxed and straight through.")
-
-        self.module_logits = nn.Parameter(
-            torch.empty((config.n_tasks, config.n_splits * config.n_skills)).uniform_(
-                -1e-3, 1e-3
-            )
-        )
-
-    def resize_module_logits(self, n_tasks):
-        self.module_logits.data = torch.empty(
-            (n_tasks, self.n_splits * self.n_skills)
-        ).uniform_(-1e-3, 1e-3)
-
-    def forward(self, routing_infos):  
-        module_logits = self.module_logits[routing_infos.task_ids]        
-        module_logits = module_logits.view(-1, self.n_splits, self.n_skills)
-
-        if self.use_l2_norm:
-            module_weights = F.normalize(module_logits, p=2, dim=-1)
-        else:
-            if self.training and self.use_relaxed_bernoulli:
-                module_logits = RelaxedBernoulli(
-                    temperature=1.0, logits=module_logits
-                ).rsample()
-            elif self.use_straight_through:
-                module_logits = torch.sigmoid(module_logits)
-                module_logits_disc = torch.round(module_logits)
-                # straight through estimator
-                module_logits = module_logits + (module_logits_disc - module_logits).detach()
-            else:
-                module_logits = torch.sigmoid(module_logits)
-            
-            if self.dropout > 0.0:
-                module_logits = nn.Dropout(self.dropout)(module_logits)
-
-            if self.poly_use_shared_skill:
-                # last skill is always active whatever the task that has been selected
-                module_logits = torch.cat((
-                    module_logits[:, :, :-1], module_logits[:, :, -1:] * 0.0 + 1.0
-                ), dim=-1)
-
-            if self.poly_average_correction:
-                module_weights = module_logits * (np.sqrt(self.n_splits) / np.sqrt(self.n_skills))
-            else:
-                module_weights = module_logits / (
-                    module_logits.sum(dim=-1, keepdim=True) + EPS
-                )
-        return module_weights
-
-
-class AverageSelector(Selector):
-    def __init__(self, n_skills, n_splits):
-        super().__init__()
-
-        self.n_splits = n_splits
-        self.n_skills = n_skills
-        self.register_buffer(
-            "module_logits", torch.empty(n_splits, n_skills).fill_(1.0 / n_skills)
-        )
-
-    def forward(self, routing_infos):
-        bs = routing_infos.task_ids.size(0)
-        module_logits = self.module_logits.view(1, self.n_splits, self.n_skills)
-        return module_logits.expand(bs, -1, -1)
-
-
-class PrivateSelector(Selector):
-    def __init__(self, config):
-        super().__init__()
-
-        self.n_skills = config.n_skills
-
-    def forward(self, routing_infos):
-        return F.one_hot(routing_infos.task_ids, num_classes=self.n_skills).unsqueeze(1)
 
 
 class LoraAveraging(Function):
@@ -629,10 +458,10 @@ class EfficientBackwardbmm(Function):
         )   
 
 
-class PolyLoRALinear(PolytroponAdapter):                          
+class RoutingLoRALinear(RoutingAdapter):                          
     def __init__(self, config, task_id_ptr, linear_layer, selector=None, **kwargs):
-        super().__init__()         
-        self.layer_name = kwargs.get("layer_name", None)
+        super().__init__()
+
         self.share_a = config.share_lora_a
         self.n_splits = config.n_splits
         self.n_tasks = config.n_tasks
@@ -657,8 +486,9 @@ class PolyLoRALinear(PolytroponAdapter):
         self.lora_alpha = config.lora_alpha if hasattr(config, "lora_alpha") else 1.0
         self.scaling = self.lora_alpha / self.rank
         self.merge_A_B_seperately = config.merge_A_B_seperately if hasattr(config, "merge_A_B_seperately") else True
+
         if selector is None:
-            self.selector = get_selector(config, in_d = linear_layer.in_features)
+            self.selector = get_selector(config, in_d=linear_layer.in_features)
         else:
             self.selector = selector
 
@@ -680,6 +510,11 @@ class PolyLoRALinear(PolytroponAdapter):
                 dtype=global_vars.PRECISION,
             )
         )
+        
+        # store losses and metrics
+        self.aux_loss = 0.
+        self.metrics = {}
+
         self.reset_parameters() 
 
     def reset_parameters(self):
@@ -729,9 +564,11 @@ class PolyLoRALinear(PolytroponAdapter):
             setattr(self.routing_infos, "x", input)       
             mixing_weights = self.selector(self.routing_infos)
             delattr(self.routing_infos, "x")
+
             if isinstance(mixing_weights, tuple): 
                 mixing_weights, kl = mixing_weights
-                self.routing_infos.aux_loss.append(kl)
+                self.losses.append(kl)
+
             mixing_weights.to(input.device)
         else:
             bs = input.size(0)  
@@ -821,231 +658,18 @@ class PolyLoRALinear(PolytroponAdapter):
         #     # add MI maximization as aux loss
         #     self.routing_infos.aux_loss.append(self.aux_mi_loss_factor*(1-div))       
               
-        # self.routing_infos.metrics["div"].append(div.item())     
-        # self.routing_infos.metrics["routing_entropy"].append(average_normalized_entropy.mean().item())
-        if self.layer_name is not None:
-            self.routing_infos.metrics[self.layer_name+"_routing"]=mixing_weights.detach().cpu().float()
-        
+        # self.metrics["div"].append(div.item())     
+        # self.metrics["routing_entropy"].append(average_normalized_entropy.mean().item())
+
+        self.metrics["routing"] = mixing_weights.detach().cpu().float()
+
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:      
             adapter_out = adapter_out * warmup 
-        # print((self.linear_layer(input) + adapter_out).shape)
+
         return self.linear_layer(input) + adapter_out
-        # return F.linear(input, self.weight, self.bias) + adapter_out
 
 
-class PolyIA3Linear(PolytroponAdapter):
-    def __init__(self, config, task_id_ptr, linear_layer, selector=None, **kwargs):
-        super().__init__()
-
-        self.n_splits = config.n_splits
-        self.n_tasks = config.n_tasks
-        self.n_skills = config.n_skills
-        self.in_features = linear_layer.in_features
-        self.out_features = linear_layer.out_features
-        self.weight = linear_layer.weight
-        self.bias = linear_layer.bias
-        self.task_id_ptr = task_id_ptr
-
-        assert self.out_features % config.n_splits == 0
-
-        data = torch.ones(
-            self.n_skills, self.n_splits, self.out_features // self.n_splits
-        )
-        self.lora_a = nn.Parameter(data)
-
-        if selector is None:
-            self.selector = get_selector(config)
-        else:
-            self.selector = selector
-
-    def forward(self, input):
-        task_id = self.routing_infos.task_ids
-
-        repeat = input.size(0) // task_id.size(0)
-
-        # this repeat follows the patten in `model.predict()` line 152
-        if repeat:
-            self.routing_infos.repeat_interleave(repeat)
-
-        # bs, n_splits, n_skills
-        mixing_weights = self.selector(self.routing_infos)
-
-        # n_skills, n_splits, D // n_splits
-        weight = self.lora_a
-        A = torch.einsum("bqs,sqd->bqd", (mixing_weights, weight))
-        A = A.reshape(input.size(0), 1, -1)
-        return F.linear(input, self.weight, self.bias) * A
-
-    def extra_repr(self):
-        return "n_skills={}, in_features={}, out_features={}, bias={}".format(
-            self.n_skills, self.in_features, self.out_features, self.bias is not None
-        )
-
-
-class SkilledModel:
-    @staticmethod
-    def register_functions(object):
-        methods = [
-            method
-            for method in dir(SkilledModel)
-            if not method.startswith("__") and not "register_functions" in method
-        ]
-
-        for method in methods:
-            print("Registering method: ", method)
-            setattr(object, method, MethodType(getattr(SkilledModel, method), object))
-        return object
-    
-    @staticmethod 
-    def set_selector(object, config, selector_to_replace=PolytroponSelector, new_selector=AverageSelector):
-        """Switches PolytroponSelector to AverageSelector.
-        """
-        for name, module in object.named_modules():   
-            for name, inner_mod in module.named_children():
-                if isinstance(inner_mod, selector_to_replace):
-                    print(
-                        f"Replacing with {new_selector}: ",
-                        name,
-                        "n_skills:",
-                        inner_mod.n_skills,
-                    )
-                    n_splits = inner_mod.n_splits if hasattr(inner_mod, "n_splits") else 1
-                    setattr(
-                        module,
-                        name,
-                        new_selector(config),
-                    )
-
-    @staticmethod 
-    def switch_selector_to_average(object, selector_to_replace=PolytroponSelector):
-        """Switches PolytroponSelector to AverageSelector.
-        """
-        for name, module in object.named_modules():
-            for name, inner_mod in module.named_children():
-                if isinstance(inner_mod, selector_to_replace):
-                    print(
-                        "Replacing with average: ",
-                        name,
-                        "n_skills:",
-                        inner_mod.n_skills,
-                    )
-                    n_splits = inner_mod.n_splits if hasattr(inner_mod, "n_splits") else 1
-                    setattr(
-                        module,
-                        name,
-                        AverageSelector(inner_mod.n_skills, n_splits),
-                    )
-
-    @staticmethod
-    def get_adapters(object):
-        adapters = {}
-        for n, m in object.named_modules():
-            if isinstance(m, PolytroponAdapter):
-                adapters[n] = m
-        return adapters
-
-    @staticmethod
-    def get_selectors(object):
-        selectors = {}
-        added_selectors = set()
-
-        for name, adapter in object.get_adapters().items():
-            # selectors might be shared across adapters
-            if adapter.selector not in added_selectors:
-                added_selectors.add(adapter.selector)
-                selectors[name + ".selector"] = adapter.selector
-        return selectors
-
-    @staticmethod
-    def resize_module_logits(object, n_tasks):
-        """Resizes the vector routing, in case of fine-tuning.
-        """
-        for name, selector in object.get_selectors().items():
-            print("Resizing module_logits of selector", name, "with", n_tasks, "tasks.")
-            selector.resize_module_logits(n_tasks)
-    
-    @staticmethod
-    def remove_skills(object, skill_ids_to_keep):
-        print("Removing skills, keeping", skill_ids_to_keep)
-        for name, adapter in object.get_adapters().items():
-            if isinstance(adapter, PolyLoRALinear):
-                if adapter.lora_a.shape[1]>1:
-                    adapter.lora_a= nn.Parameter(adapter.lora_a[:, skill_ids_to_keep, :, :])
-                if adapter.lora_b.shape[1]>1:
-                    adapter.lora_b= nn.Parameter(adapter.lora_b[:, skill_ids_to_keep, :, :])
-                adapter.n_skills = len(skill_ids_to_keep)
-                adapter.selector.n_skills = len(skill_ids_to_keep)
-
-
-
-def modify_with_poly(transformer, config, PolyLayer):
-    
-    # How to "bin" different levels of selectors ?
-    def _extract_identifier(string, match_on='coder'):
-        """ Returns a unique identifier for the "chunk" of layers sharing the 
-        same underlying selector
-        # e.g. 'block' : 'encoder.block.0.layer.0.SelfAttention' -> 'encoder.block.0'
-        """
-        pattern_map = {
-            'coarsegrained' : None, 
-            'finegrained' : None,
-            'layerwise' : 'layer',
-            'blockwise' : 'block',
-            'coderwise' : 'coder'
-        }
-        assert match_on in pattern_map.keys()
-
-        if match_on == 'finegrained':
-            return string
-        if match_on == 'coarsegrained': 
-            return ''
-
-        match_on = pattern_map[match_on] 
-        left_idx = string.find(f'{match_on}.') + len(match_on) + 1
-        right_idx = string[left_idx:].find('.') 
-        return string[:left_idx + right_idx]
-    
-    selectors = {}
-    total_layers = 0    
-    n_skills = copy.deepcopy(config.n_skills) 
-    for m_name, module in dict(transformer.named_modules()).items():
-        if re.fullmatch(config.lora_modules, m_name):    
-            for c_name, layer in dict(module.named_children()).items():
-                if re.fullmatch(config.lora_layers, c_name):
-                    identifier = _extract_identifier(f'{m_name}.{c_name}', config.poly_granularity)
-                    if identifier not in selectors.keys():
-                        selectors[identifier] = get_selector(config, in_d=layer.in_features)
-                    selector = selectors[identifier]
-                    total_layers += 1
-                    config.n_skills = n_skills
-                    print(f"Patching {m_name}.{c_name}...")  
-                    if "attn" in f"{m_name}.{c_name}" and config.share_lora_at_attn:
-                        config.n_skills=1
-                    
-                    # keep track of layer information
-                    layer_name = f"{m_name}.{c_name}"
-                    # config.layer_name = layer_name
-                        
-                    setattr(
-                        module,
-                        c_name,
-                        PolyLayer(
-                            config,
-                            transformer.task_id_container,
-                            layer,
-                            selector=selector,
-                            layer_name = layer_name
-                        ),
-                    )
-
-    print(f'created {len(selectors)} selectors for a total of {total_layers} adapted layers')
-    return SkilledModel.register_functions(transformer)
-
-
-def modify_with_poly_ia3(transformer, config):
-    return modify_with_poly(transformer, config, PolyIA3Linear)
-
-
-def modify_with_poly_lora(transformer, config):
-    return modify_with_poly(transformer, config, PolyLoRALinear)
+@register_modifier("routing_lora")
+def modify_with_routing_lora(transformer, config):
+    return patch_layers(transformer, config, RoutingLoRALinear, RouterWrapper)
