@@ -82,7 +82,6 @@ class PlatypusModule(LightningDataModule):
             self.config.train_on_inputs,
             self.config.dst_dir,
             idxs,
-            self.cluster_result,
             self.config.predict_cluster,
             loss_for_keywords=loss_for_keywords,
             subset=100 if self.config.fast_debug_run else None,
@@ -90,31 +89,9 @@ class PlatypusModule(LightningDataModule):
 
     def setup(self, stage=None):
         idxs_cluster = []
-        if self.config.train_only_cluster is not None:
-            assert self.cluster_result is not None
-            if self.config.train_only_cluster >= 0:
-                idxs_cluster = np.where(
-                    np.array(self.cluster_result._instance.infos.cluster_dists)[
-                        :, self.config.train_only_cluster
-                    ]
-                    == 1
-                )[0]
-            else:
-                # only hard examples! Onlye ones containing 1
-                # entropy
-                cluster_probs = np.array(
-                    self.cluster_result._instance.infos.cluster_dists
-                )
-                cluster_probs = cluster_probs[
-                    :, cluster_probs.sum(0).nonzero()
-                ].squeeze()
-                entr = calc_entropy(cluster_probs, axis=-1)
-                max_entropy = np.log2(cluster_probs.shape[-1])
-                entr = entr / max_entropy
-                idxs_cluster = np.where(entr <= 0.1)[0]
-            # idxs_cluster = idxs_cluster.tolist()
         dataset = self.get_dataset()
-        if not self.config.use_test_set:  # default alpaca setting
+
+        if not self.config.use_test_set:
             # always use the same split for the dataset
             rng = torch.Generator().manual_seed(1234)
             if len(idxs_cluster) > 0:
@@ -169,29 +146,3 @@ class PlatypusModule(LightningDataModule):
             print("Training steps:", len(self.train_dataloader()))
             print("Validation steps:", len(self.val_dataloader()))
             print("Test steps:", len(self.test_dataloader()))
-
-    def get_per_cluster_test_loaders(self):
-        pc_test_loaders = []
-        test_idxs = np.where(np.array(self.cluster_result.infos.is_test))[
-            0
-        ]  # test on all clusters togather
-        for cluster_id in range(self.cluster_result.n_clusters()):
-            cluster_idxs = np.where(
-                np.array(self.cluster_result._instance.infos.cluster_dists)[
-                    :, cluster_id
-                ]
-                == 1
-            )[0]
-            cluster_idxs = np.intersect1d(cluster_idxs, test_idxs)
-            pc_test_loaders.append(
-                DataLoader(
-                    self.get_dataset(cluster_idxs),
-                    batch_size=self.config.train_batch_size,
-                    shuffle=False,
-                    num_workers=16,
-                    pin_memory=True,
-                    persistent_workers=True,
-                    collate_fn=CollateWrapperFnCLM(self.pad_token_id),
-                )
-            )
-        return pc_test_loaders
