@@ -20,7 +20,7 @@
     "same_lora_init": 0,    
     "lora_dropout": 0.05,
     "weight_decay": 0.00,
-    "poly_selector":"x_router",    
+    "router_selector":"x_router",    
     "model_modifier": "poly_lora",  
     "lora_modules": ".*attn",  
     "lora_layers": "v_proj|q_proj|k_proj|o_proj",   

@@ -1,16 +1,11 @@
 import os
 import sys
-import ast
-import argparse
 import json
-import numpy as np
 import torch
 import wandb
-from string import Template
 import pytorch_lightning as pl
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
-
 
 from mttl.models.poly import get_selector
 from pytorch_lightning import Trainer, seed_everything
@@ -29,7 +24,7 @@ from transformers import AutoModelForCausalLM, LlamaForCausalLM
 from peft import prepare_model_for_int8_training
 
 # register models
-import models.routing
+import models.routing  # noqa: F401
 
 
 ##################################################

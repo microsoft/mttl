@@ -531,7 +531,7 @@ def eval_superni(model_name="gpt3",
     tfidf, kmeans = None, None
     # infer what clusterer we are using
     cbtm_n_clusters=-1        
-    if config.example_to_ids_path is not None and skill_selector!="average" and config.poly_selector!="x_router":
+    if config.example_to_ids_path is not None and skill_selector!="average" and config.router_selector!="x_router":
         if "kmeans" in config.example_to_ids_path:
             cbtm_n_clusters = ClusterResult(config.example_to_ids_path).n_clusters()
             dataset_name = config.dataset

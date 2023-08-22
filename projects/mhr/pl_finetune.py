@@ -34,7 +34,7 @@ ARGS_TO_OVERWRITE = [
     "module_logits_straight_through",
     "poly_use_shared_skill",
     "poly_average_correction",
-    "poly_selector",
+    "router_selector",
     "poly_granularity",
     "lora_rank",
     "lora_modules",
