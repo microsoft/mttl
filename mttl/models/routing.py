@@ -165,7 +165,7 @@ class AverageSelector(RoutingSelector):
             "module_logits", torch.empty(config.n_splits, config.n_skills).fill_(1.0 / config.n_skills)
         )
 
-    def forward(self, routing_infos):
+    def forward(self, routing_infos, **kwargs):
         bs = routing_infos.task_ids.size(0)
         module_logits = self.module_logits.view(1, self.n_splits, self.n_skills)
         return module_logits.expand(bs, -1, -1)
@@ -178,5 +178,5 @@ class PrivateSelector(RoutingSelector):
 
         self.n_skills = config.n_skills
 
-    def forward(self, routing_infos):
+    def forward(self, routing_infos, **kwargs):
         return F.one_hot(routing_infos.task_ids, num_classes=self.n_skills).unsqueeze(1)

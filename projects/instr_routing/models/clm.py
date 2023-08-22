@@ -65,25 +65,21 @@ class CLM(EfficientCheckpointModule):
 
     def forward(self, batch, reduction="mean"):
         input_ids, labels = batch["input_ids"], batch["labels"]
+        routing_infos = AugmentedRoutingInfo.from_batch(batch)
 
-        self.model.task_id_container["routing_infos"] = AugmentedRoutingInfo.from_batch(
-            batch
+        pad_mask, instruction_mask = self.calculate_routing_mask(
+            batch["input_ids"], batch["labels"]
+        )
+        routing_infos.pad_token_mask = pad_mask
+        routing_infos.inst_token_mask = instruction_mask
+
+        self.model.task_id_container["routing_infos"] = routing_infos
+        assert (
+            routing_infos.pad_token_mask.shape[1]
+            == routing_infos.inst_token_mask.shape[1]
         )
 
-        # pad tokens also have -100
-        padding_mask, instr_mask = self.calculate_routing_mask(
-            batch["input_ids"], self.model.task_id_container["routing_infos"]
-        )
-
-        # if 1 token is either instruction or output, i.e. not a pad token
-        self.model.task_id_container["routing_infos"].pad_token_mask = padding_mask
-        # 1 if the token is part of instruction or pad token (so outputs are 0s)
-        self.model.task_id_container["routing_infos"].inst_token_mask = instr_mask
-
-        outputs = self.model.forward(
-            input_ids,
-            attention_mask=(input_ids != self.pad_token_id).float(),
-        )
+        outputs = self.model.forward(input_ids, attention_mask=pad_mask)
 
         # calculate loss, could also be done inside of the model
         bs = input_ids.size(0)
@@ -113,7 +109,9 @@ class CLM(EfficientCheckpointModule):
         # get auxiliary losses from routing selectors
         import itertools
 
-        aux_loss = list(itertools.chain(*list(self.model.get_routing_losses().values())))
+        aux_loss = list(
+            itertools.chain(*list(self.model.get_routing_losses().values()))
+        )
 
         # we accumulate metrics over the microbatches
         if not self.training:
@@ -127,22 +125,17 @@ class CLM(EfficientCheckpointModule):
 
         return loss, aux_loss
 
-    def calculate_routing_mask(self, x, routing_infos):
+    def calculate_routing_mask(self, inputs, labels=None):
         if not hasattr(self.args, "xrouting_option"):
             return None, None
 
         # bs, seq = x.shape
-        padding_mask = (
-            routing_infos.pad_token_mask
-        )  # 1 if the token is not a pad token, so its either instruciton or output
-        instruction_mask = torch.ones_like(
-            padding_mask
-        )  # 1 if the token is part of instruction or pad token (so outputs are 0s)
-
-        if routing_infos.labels is not None:
-            instruction_mask = (
-                routing_infos.labels == -100
-            ).float()  # 1 if the token is part of instruction or pad token (so outputs are 0s)
+        padding_mask = (inputs != self.pad_token_id).float()
+        # 1 if the token is part of instruction or pad token (so outputs are 0s)
+        if labels is not None:
+            instruction_mask = (labels == -100).float()
+        else:
+            instruction_mask = padding_mask.clone()
         return padding_mask, instruction_mask
 
     def compute_routings(self, batch, **kwargs):
@@ -158,32 +151,27 @@ class CLM(EfficientCheckpointModule):
         if not hasattr(self.model, "task_id_container"):
             self.model.task_id_container = {}
 
-        self.model.task_id_container["routing_infos"] = AugmentedRoutingInfo.from_batch(
-            batch
-        )
-        self.model.task_id_container["routing_infos"].gen_mode = 1
+        routing_infos = AugmentedRoutingInfo.from_batch(batch)
+        routing_infos.gen_mode = 1
 
-        padding_mask, instr_mask = self.calculate_routing_mask(
-            batch["input_ids"], self.model.task_id_container["routing_infos"]
-        )
-        self.model.task_id_container["routing_infos"].pad_token_mask = padding_mask
-        self.model.task_id_container["routing_infos"].inst_token_mask = instr_mask
+        pad_mask, instruction_mask = self.calculate_routing_mask(batch["input_ids"])
+        routing_infos.pad_token_mask = pad_mask
+        routing_infos.inst_token_mask = instruction_mask
 
         # if routings are given (should be oracle routings), we will use them for generation
         if "routings" in kwargs:
-            self.model.task_id_container["routing_infos"].routings = kwargs["routings"]
+            routing_infos.routings = kwargs["routings"]
             kwargs.pop("routings")
 
         # if flag is set, we will store the oracle routings
         if "save_oracle_routings" in kwargs:
-            self.model.task_id_container["routing_infos"].save_oracle_routings = kwargs[
-                "save_oracle_routings"
-            ]
+            routing_infos.save_oracle_routings = kwargs["save_oracle_routings"]
             kwargs.pop("save_oracle_routings")
 
         if "gen_mode" in kwargs:  # so that in xr4 we look at both nput and output
-            self.model.task_id_container["routing_infos"].gen_mode = kwargs["gen_mode"]
+            routing_infos.gen_mode = kwargs["gen_mode"]
 
+        self.model.task_id_container["routing_infos"] = routing_infos
         return self.model.generate(inputs=batch["input_ids"], **kwargs)
 
     def on_before_optimizer_step(self, optimizer: Optimizer) -> None:

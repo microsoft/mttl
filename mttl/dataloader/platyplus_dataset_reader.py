@@ -61,6 +61,7 @@ class PlatypusDataset(torch.utils.data.dataset.Dataset):
         # load the data
         if os.getenv("AP_DATA_DIR") is not None:
             data_dir = os.getenv("AP_DATA_DIR")
+
         self.dataset = load_dataset("garage-bAInd/Open-Platypus", cache_dir=data_dir)[
             "train"
         ]
@@ -69,10 +70,8 @@ class PlatypusDataset(torch.utils.data.dataset.Dataset):
         if subset is not None:
             self.dataset = self.dataset.select(range(subset))
 
-        # select subset of 100 examples
-        # self.dataset = self.dataset.select(range(100))
-
         self.tokenizer = tokenizer
+        self.pad_token_id = tokenizer.pad_token_id
         self.max_input_length = max_input_length
         self.max_output_length = max_output_length
 
@@ -81,45 +80,43 @@ class PlatypusDataset(torch.utils.data.dataset.Dataset):
 
     def _tokenize_fn(self, string: str) -> Dict:
         """Tokenize a list of strings."""
-        tokenized = self.tokenizer(
+        return self.tokenizer.encode_plus(
             string,
             truncation=True,
-            padding="max_length",
+            padding="do_not_pad",
             max_length=self.max_input_length,
             return_tensors="pt",
-        )
-        input_ids = labels = tokenized.input_ids[0]
-        input_ids_lens = labels_lens = (
-            torch.logical_and(
-                tokenized.input_ids.ne(self.tokenizer.pad_token_id),
-                tokenized.input_ids.ne(self.tokenizer.eos_token_id),
-            )
-            .sum()
-            .item()
-        )
-        return dict(
-            input_ids=input_ids,
-            labels=labels,
-            input_ids_lens=input_ids_lens,
-            labels_lens=labels_lens,
-        )
+        ).input_ids.squeeze(0)
 
     def preprocess(self, source: str, target: str) -> Dict:
-        example = source + target  # [s + t for s, t in zip(sources, targets)]
-        example_tokenized = self._tokenize_fn(example)
-        sources_tokenized = self._tokenize_fn(
-            source
-        )  # [_tokenize_fn(strings) for strings in (examples, sources)]
+        full_prompt = source
+        full_prompt_and_response = source + target
+        encoded_full_prompt = self._tokenize_fn(full_prompt)
+        encoded_full_prompt_and_response = self._tokenize_fn(full_prompt_and_response)
 
-        input_ids = example_tokenized["input_ids"]
-        label = copy.deepcopy(input_ids)
-        label[: sources_tokenized["input_ids_lens"]] = IGNORE_INDEX
-        return dict(input_ids=input_ids, labels=label)
+        # Add EOS token id explicitly.
+        if encoded_full_prompt_and_response[-1].item() != self.tokenizer.eos_token_id:
+            encoded_full_prompt_and_response = torch.cat(
+                (
+                    encoded_full_prompt_and_response,
+                    torch.LongTensor([self.tokenizer.eos_token_id]),
+                ),
+                0,
+            )
+
+        # The labels are the full prompt with response, but with the prompt masked out
+        labels = encoded_full_prompt_and_response.clone()
+
+        if not self.train_on_inputs:
+            labels[: len(encoded_full_prompt)] = IGNORE_INDEX
+
+        return {
+            "input_ids": encoded_full_prompt_and_response,
+            "labels": labels,
+        }
 
     def __getitem__(self, key):
         entry = self.dataset[key]
-        # really basic template for now
-        # TODO: check with AS if this is OOP approved
 
         enc_input_for_hash = AlpacaTemplateForHash.apply(entry)
         input_hash = hash_example(enc_input_for_hash)
@@ -127,35 +124,16 @@ class PlatypusDataset(torch.utils.data.dataset.Dataset):
 
         source = AlpacaTemplateSource.apply(entry)
         enc_input = f"{source}{entry['output']}"
-        task_id = -1
-
-        if self.train_on_inputs:
-            # next we tokenize
-            tok_input = self.tokenizer(
-                enc_input,
-                truncation=True,
-                padding="max_length",
-                max_length=self.max_input_length,
-                return_tensors="pt",
-            ).input_ids.squeeze(0)
-            ex_info = ExampleInfo(
-                tok_input,
-                tok_input,
-                task_id,  # task id
-                input_hash,
-                example_id=key,
-                input_text=(enc_input),
-                instruction_hash=instruction_hash,
-            )
-            return ex_info
         tok_input = self.preprocess(source, entry["output"])
+        task_id = 0
+
         ex_info = ExampleInfo(
             tok_input["input_ids"],
             tok_input["labels"],
             task_id,
             input_hash,
             example_id=key,
-            input_text=(enc_input),
+            input_text=enc_input,
             instruction_hash=instruction_hash,
         )
         return ex_info

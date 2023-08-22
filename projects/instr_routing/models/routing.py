@@ -84,15 +84,17 @@ class XRouter(RoutingSelector):
         x_rout = (x_rout.sum(dim=1) / non_zero_counts).unsqueeze(1) # same routing for each sample        
         return x_rout
 
-    def forward(self, routing_infos):      
-        bs, seq, in_d = routing_infos.x.shape
-        x = routing_infos.x     
+    def forward(self, routing_infos, input):
+        bs, seq, in_d = input.shape
+        x = input   
+
         if not self.config.xrouter_x_cond:    
             x = self.dummy_input.unsqueeze(0).repeat(bs,1).unsqueeze(1).repeat(1,seq,1) # dummy input
             
         gen_mode = 0
         x_rout = None                           
-        padding_mask = routing_infos.pad_token_mask   
+        padding_mask = routing_infos.pad_token_mask
+
         if hasattr(routing_infos, "gen_mode"):
             gen_mode = routing_infos.gen_mode
             
@@ -134,8 +136,7 @@ class XRouter(RoutingSelector):
                 inst_token_mask = routing_infos.inst_token_mask if routing_infos.inst_token_mask is not None else torch.ones_like(padding_mask) # 1 if the token is part of instruction or pad token (so outputs are 0s)
                 if routing_infos.inst_token_mask is None:
                     assert gen_mode 
-                
-                
+
                 if self.xrouting_option == XRouter.ROUTING_OPTION.ALL_DISTILL_INST.value:       
                     posterior_padding_mask = padding_mask # looks at instruction and output  
                     prior_padding_mask = padding_mask * inst_token_mask # looks only on instruction                    
@@ -271,8 +272,9 @@ class XRouter(RoutingSelector):
                          
                 #     return adapter_dist, aux_loss
 
-                                   
                 if self.xrouting_option == XRouter.ROUTING_OPTION.INST_ONLY.value: # train and test time we only look at instruction part
+                    if padding_mask.shape[1] != inst_token_mask.shape[1]:
+                        breakpoint()
                     padding_mask = padding_mask * inst_token_mask
                 elif self.xrouting_option == XRouter.ROUTING_OPTION.TOKEN_SOFAR.value: # train and test time we only look at tokens sofar
                     if hasattr(routing_infos, "token_sofar_mask"): # take from cache
@@ -337,8 +339,7 @@ class XRouter(RoutingSelector):
             y = y.reshape(*y.shape[:-1], self.n_splits, self.config.n_skills)
             return F.cosine_similarity(x, y, dim=dim)        
         return F.cosine_similarity(x, y, dim=dim)
-        
-    
+
     def softmax(self, logit):
         if self.n_splits>1:     
             logit = logit.reshape(*logit.shape[:-1], self.n_splits, self.config.n_skills)
@@ -361,20 +362,18 @@ class AttnRouter(RoutingSelector):
         # innit from nromal
         self.exp_query.data.normal_(mean=0.0, std=0.2)
         self.xattn = SelectAttention(self.kq_dim, self.in_d, share_key=True, share_query=True)
-        
-           
-    def forward(self, routing_infos):      
-        bs, seq, in_d = routing_infos.x.shape   
-        # TODO: apply mask, only attend to nstruction, ignore padding?
-        padding_mask = routing_infos.pad_token_mask   
+
+    def forward(self, routing_infos, input):
+        bs, seq, in_d = input.shape
+        x = input
+
+        padding_mask = routing_infos.pad_token_mask
         inst_token_mask = routing_infos.inst_token_mask if routing_infos.inst_token_mask is not None else torch.ones_like(padding_mask)
-        x = routing_infos.x     
         
         # basic version:     
         # the router only attends over instruction
         padding_mask = padding_mask * inst_token_mask
         x = x * padding_mask.unsqueeze(-1)
-        
         
         # expert_query = self.exp_query.unsqueeze(0).repeat(bs,1,1)
         scores = self.xattn(self.exp_query, x).transpose(1,2) # bs x seq x n_skills
@@ -391,7 +390,8 @@ class LoraAveraging(Function):
         output = torch.einsum("bqs,qsdr->bqdr", (module_weights, inputs))
         ctx.save_for_backward(module_weights)
         return output
-    @staticmethod       
+
+    @staticmethod
     def backward(ctx, grad_output):
         module_weights, = ctx.saved_tensors
 
@@ -400,8 +400,8 @@ class LoraAveraging(Function):
         # grad_module_weights = torch.einsum("bqs,bqdr->qsdr", (grad_output, inputs))
 
         return grad_inputs#, None#, grad_module_weights
-        
-                         
+
+
 class EfficientBackwardbmm(Function):
     @staticmethod
     def forward(ctx, input, module_weights, lora_a, lora_b, in_features, rank, out_features):        
@@ -556,10 +556,8 @@ class RoutingLoRALinear(RoutingAdapter):
         if repeat:
             self.routing_infos.repeat_interleave(repeat)
 
-        if self.selector is not None:          
-            setattr(self.routing_infos, "x", input)       
-            mixing_weights = self.selector(self.routing_infos)
-            delattr(self.routing_infos, "x")
+        if self.selector is not None:
+            mixing_weights = self.selector(self.routing_infos, input=input)
 
             if isinstance(mixing_weights, tuple): 
                 mixing_weights, kl = mixing_weights

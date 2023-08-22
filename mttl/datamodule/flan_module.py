@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 
 from mttl.dataloader.flan100k_dataset_readers import Flan100kDataset
 from transformers import LlamaTokenizer
-from .alpaca_data_module import CollateWrapperFnCLM
+from .alpaca_data_module import CollateWrapperFn
 
 
 class FlanModule(LightningDataModule):
@@ -18,7 +18,7 @@ class FlanModule(LightningDataModule):
             num_workers=16,
             pin_memory=True,
             persistent_workers=True,
-            collate_fn=CollateWrapperFnCLM(self.pad_token_id),
+            collate_fn=self.collate_fn,
         )
 
     def val_dataloader(self):
@@ -29,7 +29,7 @@ class FlanModule(LightningDataModule):
             num_workers=16,
             pin_memory=True,
             persistent_workers=True,
-            collate_fn=CollateWrapperFnCLM(self.pad_token_id),
+            collate_fn=self.collate_fn,
         )
 
     def test_dataloader(self):
@@ -40,7 +40,7 @@ class FlanModule(LightningDataModule):
             num_workers=16,
             pin_memory=True,
             persistent_workers=True,
-            collate_fn=CollateWrapperFnCLM(self.pad_token_id),
+            collate_fn=self.collate_fn,
         )
 
     @property
@@ -52,16 +52,7 @@ class FlanModule(LightningDataModule):
 
         self.config = config
 
-        tok_model = config.model if config.model is not None else "yahma/llama-7b-hf"
-        if "llama" in tok_model:
-            self.tokenizer = LlamaTokenizer.from_pretrained(
-                tok_model, add_eos_token=False
-            )  # tloen does not add eos token
-        else:
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                tok_model, add_eos_token=False
-            )
-
+        self.tokenizer = AutoTokenizer.from_pretrained(config.model, add_eos_token=False)
         if self.tokenizer.pad_token_id is None:
             self.tokenizer.pad_token_id = 0
 
@@ -70,7 +61,11 @@ class FlanModule(LightningDataModule):
                 "left"  # Allow batched inference, used by tloen also in training
             )
         self.pad_token_id = self.tokenizer.pad_token_id
-
+        self.collate_fn = CollateWrapperFn(
+            tokenizer=self.tokenizer,
+            pad_to_multiple_of=8,
+            return_tensors="pt",
+        )
         self.task2id = {"alpaca_full": 0}
 
     def get_dataset(self, idxs=None, loss_for_keywords=True):
