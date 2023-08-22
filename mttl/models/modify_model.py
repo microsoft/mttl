@@ -54,7 +54,10 @@ def patch_layers(transformer, config, layer_type, optional_wrapper=None):
                         f"{m_name}.{c_name}", config.poly_granularity
                     )
                     if identifier not in selectors.keys():
-                        selectors[identifier] = get_selector(config)
+                        selectors[identifier] = get_selector(
+                            config,
+                            in_d=layer.in_features,
+                        )
 
                     selector = selectors[identifier]
                     total_layers += 1
