@@ -82,7 +82,6 @@ class PlatypusModule(LightningDataModule):
             self.config.train_on_inputs,
             self.config.dst_dir,
             idxs,
-            self.config.predict_cluster,
             loss_for_keywords=loss_for_keywords,
             subset=100 if self.config.fast_debug_run else None,
         )
