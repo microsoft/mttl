@@ -111,7 +111,9 @@ class CLM(EfficientCheckpointModule):
         del outputs, shift_logits, shift_labels
 
         # get auxiliary losses from routing selectors
-        aux_loss = list(self.model.get_routing_losses().values())
+        import itertools
+
+        aux_loss = list(itertools.chain(*list(self.model.get_routing_losses().values())))
 
         # we accumulate metrics over the microbatches
         if not self.training:

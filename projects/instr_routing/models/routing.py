@@ -21,8 +21,8 @@ class XRouter(RoutingSelector):
         TOKEN_SOFAR = 2 # train and test time we only look at tokens sofar       
         ALL = 3 # this is per token, but we look at all tokens sofar to calculate token's router input
         ALL_DISTILL_INST = 4 # mimic posterior teacher with prior student
-    
-    def __init__(self, config, in_d=4096):
+
+    def __init__(self, config, in_d):
         super().__init__() 
         self.config = config
         self.in_d = in_d                   
@@ -37,8 +37,7 @@ class XRouter(RoutingSelector):
         self.xrouter_load_balancing = config.xrouter_load_balancing
         self.xrouter_x4target_detach = config.xrouter_x4target_detach
         self.xrouter_x4_target = config.xrouter_x4_target
-        
-        
+
         self.n_splits = config.n_splits
         self.input_layer_norm = nn.LayerNorm(in_d, dtype=global_vars.PRECISION) 
         self.ff = nn.Linear(in_d, config.n_skills * self.n_splits)   
@@ -84,9 +83,8 @@ class XRouter(RoutingSelector):
         non_zero_counts = (x_rout != 0).sum(dim=1)  
         x_rout = (x_rout.sum(dim=1) / non_zero_counts).unsqueeze(1) # same routing for each sample        
         return x_rout
-               
-    def forward(self,routing_infos):
-        # self.xrouting_option = 4         
+
+    def forward(self, routing_infos):      
         bs, seq, in_d = routing_infos.x.shape
         x = routing_infos.x     
         if not self.config.xrouter_x_cond:    
@@ -477,10 +475,9 @@ class RoutingLoRALinear(RoutingAdapter):
         self.linear_layer = linear_layer
         self.bias = linear_layer.bias
         self.kaiming_init = config.lora_kaiming_init
-        self.lora_randb_init = config.lora_randb_init          
-               
-        self.xrouter_load_balancing=config.xrouter_load_balancing
-        
+        self.lora_randb_init = config.lora_randb_init
+        self.xrouter_load_balancing = config.xrouter_load_balancing
+
         self.task_id_ptr = task_id_ptr
         self.training_steps = 0.0
         self.lora_alpha = config.lora_alpha if hasattr(config, "lora_alpha") else 1.0
@@ -510,11 +507,10 @@ class RoutingLoRALinear(RoutingAdapter):
                 dtype=global_vars.PRECISION,
             )
         )
-        
-        # store losses and metrics
-        self.aux_loss = 0.
-        self.metrics = {}
 
+        # store losses and metrics
+        self.losses = []
+        self.metrics = {}
         self.reset_parameters() 
 
     def reset_parameters(self):
