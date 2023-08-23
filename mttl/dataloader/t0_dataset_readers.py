@@ -62,7 +62,7 @@ NUM_SHOTS_CONFIG = {
 class T0DatasetConfig:
     def __init__(self, dataset, train_dir, output_dir, use_t0_templates_as_tasks, seed):
         self.dataset = dataset
-        self.train_dir = train_dir
+        self.data_dir = train_dir
         self.num_shot = NUM_SHOTS_CONFIG.get(dataset, 32)
         self.few_shot_random_seed = seed
         self.train_template_idx = -1

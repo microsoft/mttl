@@ -128,7 +128,7 @@ class RoutingConfig(Config):
         self.eval_superni_use_outputs = False
         self.gen_alpaca_eval = False
 
-        self.train_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
+        self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
 
     def post_init(self):
@@ -171,28 +171,26 @@ def run_multitask(args):
         raise NotImplementedError()
 
     if "llama" in args.model:
-        args.model_object = LlamaForCausalLM.from_pretrained(
+        model_object = LlamaForCausalLM.from_pretrained(
             args.model,
             load_in_8bit=args.load_in_8bit,  # this doesnt work right now with current implementatio of lora
             torch_dtype=load_dtype,
             device_map="auto",
         )
     else:
-        args.model_object = AutoModelForCausalLM.from_pretrained(
+        model_object = AutoModelForCausalLM.from_pretrained(
             args.model, device_map="auto"
         )
 
-    if args.model_object.config.vocab_size != len(
+    if model_object.config.vocab_size != len(
         dm.tokenizer
     ):  # if adding [EOI] in LongForm dataset
-        args.model_object.resize_token_embeddings(len(dm.tokenizer))
+        model_object.resize_token_embeddings(len(dm.tokenizer))
     if args.load_in_8bit:
-        args.model_object = prepare_model_for_int8_training(args.model_object)
+        model_object = prepare_model_for_int8_training(model_object)
 
     model_object = modify_transformer(args.model_object, args)
-
     module = model_class(**vars(args), model_object=model_object, tokenizer=dm.tokenizer)
-    del args.model_object
 
     if args.switch_to_average > 0:
         module.model.switch_selector_to_average(

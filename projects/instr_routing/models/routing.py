@@ -6,7 +6,6 @@ import torch.nn.functional as F
 from torch.autograd import Function
 
 from mttl import global_vars
-from mttl.global_vars import EPS
 from mttl.models.modify_model import patch_layers, register_modifier
 from mttl.models.routing import RouterWrapper, RoutingAdapter, RoutingSelector, get_selector, register_selector
 

@@ -133,11 +133,14 @@ class Config:
     def _set_defaults(self):
         self.cache_dir = os.getenv("CACHE_DIR", "./cache")
         self.free_up_space = False
+
         # Data config
         self.dataset = None
         self.custom_tasks_splits = None
-        self.train_dir = os.getenv("TRAIN_DIR", "/tmp/")
+
+        self.data_dir = os.getenv("TRAIN_DIR", "/tmp/")
         self.output_dir = os.getenv("OUTPUT_DIR", "./output")
+
         self.finetune_task_name = None
         self.example_to_ids_path = None  # path to clustering of data
         self.embeddings_path = None
@@ -146,6 +149,7 @@ class Config:
         self.task_prefix = None    # xfit has task prefixes detailing # of shots, seed, etc; this is automatically filled in at fine-tuning time
         self.exp_name = None
         self.wandb_project = None
+        self.padding_side = "right"
         self.max_input_length = 512
         self.max_output_length = 64
         self.num_beams = 4
