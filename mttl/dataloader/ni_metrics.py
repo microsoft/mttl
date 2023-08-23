@@ -74,27 +74,29 @@ def metric_max_over_ground_truths(metric_fn, prediction, ground_truths, xlingual
     return max(scores_for_ground_truths)
 
 
-def compute_metrics(predictions, references, xlingual=False):
+def compute_metrics(predictions, references, xlingual=False, reduction="mean"):
     assert len(predictions) == len(
         references
     ), f"# of predictions {len(predictions)} doesn't match # of references {len(references)}."
-    exact_match, rouge1, rougeL = 0, 0, 0
+    exact_match, rouge1, rougeL = [], [], []
     for pred, gold in zip(predictions, references):
         assert isinstance(gold, list)
-        exact_match += metric_max_over_ground_truths(
+        exact_match.append(100. * metric_max_over_ground_truths(
             exact_match_score, prediction=pred, ground_truths=gold, xlingual=xlingual
-        )
-        rouge1 += metric_max_over_ground_truths(
+        ))
+        rouge1.append(100. * metric_max_over_ground_truths(
             rouge1_score, prediction=pred, ground_truths=gold, xlingual=xlingual
-        )
-        rougeL += metric_max_over_ground_truths(
+        ))
+        rougeL.append(100. * metric_max_over_ground_truths(
             rougeL_score, prediction=pred, ground_truths=gold, xlingual=xlingual
-        )
-    exact_match = 100.0 * exact_match / len(references)
-    rouge1 = 100.0 * rouge1 / len(references)
-    rougeL = 100.0 * rougeL / len(references)
+        ))
+
+    if reduction == "mean":
+        exact_match = sum(exact_match) / len(references)
+        rouge1 = sum(rouge1) / len(references)
+        rougeL = sum(rougeL) / len(references)
+
     metrics = {"exact_match": exact_match, "rouge1": rouge1, "rougeL": rougeL}
-    metrics = {k: round(v, 4) for k, v in metrics.items()}
     return metrics
 
 
