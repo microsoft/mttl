@@ -21,6 +21,7 @@ from mttl.utils import get_mlf_logger
 from mttl.models.modify_model import modify_transformer
 from transformers import AutoModelForCausalLM, LlamaForCausalLM
 
+from huggingface_hub import login
 from peft import prepare_model_for_int8_training
 
 # register models
@@ -93,6 +94,7 @@ class RoutingConfig(Config):
         self.fast_dev_run = False
         self.fast_debug_run = False
 
+        self.hf_token_hub = None
         self.eval_ds_limit = 1
         self.train_only_cluster = None
         self.validation_portion = 0.03
@@ -142,6 +144,9 @@ def run_multitask(args):
     # get directory of the current file
     print(os.path.dirname(os.path.realpath(__file__)))
 
+    if args.hf_token_hub:
+        login(token=args.hf_token_hub)
+
     if args.example_to_ids_path:
         raise NotImplementedError()
 
@@ -158,7 +163,6 @@ def run_multitask(args):
     else:
         raise NotImplementedError()
 
-    args.n_tasks = len(dm.task2id)
     if args.load_dtype == "float32":
         load_dtype = torch.float32
     elif args.load_dtype == "float16":
@@ -185,35 +189,10 @@ def run_multitask(args):
     if args.load_in_8bit:
         args.model_object = prepare_model_for_int8_training(args.model_object)
 
-    args.model_object = modify_transformer(args.model_object, args)
+    model_object = modify_transformer(args.model_object, args)
 
-    if args.checkpoint is not None:
-        import copy
-        from mttl.utils import get_checkpoint_path
-        from projects.instr_routing.utils import load_model
-
-        checkpoint_path = get_checkpoint_path(args.checkpoint)
-        kwargs = copy.deepcopy(args)
-        module, _, _ = load_model(kwargs, model_path=checkpoint_path)
-        module.args.output_dir = args.output_dir
-
-        # add XRouter if needed
-        if args.router_selector in ["x_router", "x_router_hard"]:
-            args.n_skills = module.args.n_skills
-            module.model.set_selector(
-                args,
-                selector_to_replace=get_selector(module.args).__class__,
-                new_selector=get_selector(args).__class__,
-            )
-            # freeze the experts
-            # args.trainable_param_names=".*selector.*"
-            module.args = args
-
-        del args.model_object
-
-    else:
-        module = model_class(**vars(args), tokenizer=dm.tokenizer)
-        del args.model_object
+    module = model_class(**vars(args), model_object=model_object, tokenizer=dm.tokenizer)
+    del args.model_object
 
     if args.switch_to_average > 0:
         module.model.switch_selector_to_average(
@@ -292,12 +271,13 @@ def run_multitask(args):
 
     trainer.fit(module, dm)
 
-    # try:
     ckpt_path = "best" if not args.fast_dev_run else None
     trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
-    if args.use_test_set:
+
+    if args.use_test_set and not args.fast_dev_run:
         module.model.checkpoint_tested = "best"
         trainer.test(dataloaders=dm, ckpt_path=ckpt_path)
+
         module.model.checkpoint_tested = "last"
         trainer.test(dataloaders=dm, ckpt_path="last")
 
@@ -337,9 +317,9 @@ def run_multitask(args):
         )
         if wandb.run is not None:
             wandb.log({"rouge_L_super_ni": rouge_L_super_ni})
+        print("SuperNI RougeL: {:.2f}".format(rouge_L_super_ni))
 
     if args.eval_mmlu:
-        # from projects.instr_routing.eval.lm_eval_harness.run_eval import eval_lm
         from projects.instr_routing.eval.mmlu.run_mmlu_eval import eval_mlu
 
         print("#" * 50)
@@ -347,10 +327,9 @@ def run_multitask(args):
         acc = eval_mlu(
             ntrain=5, model_name="", model_path=path_best_model, eval_batch_size=2
         )
-        # results_dict=eval_lm(model_path=path_best_model, model_name="", task="mmlu", batch_size=5, nshot=0, ds_limit=ds_limit)
         if wandb.run is not None:
-            # wandb.log(results_dict)
             wandb.log({"mmlu_acc": acc})
+        print("MMLU accuracy: {:.2f}".format(acc))
 
     if args.eval_arc:
         from projects.instr_routing.eval.lm_eval_harness.run_eval import eval_lm
@@ -368,6 +347,8 @@ def run_multitask(args):
         if wandb.run is not None:
             wandb.log(results_dict)
 
+        print("ARC results: {}".format(results_dict))
+
     if args.eval_truthfulqa:
         from projects.instr_routing.eval.lm_eval_harness.run_eval import eval_lm
 
@@ -383,6 +364,7 @@ def run_multitask(args):
         )
         if wandb.run is not None:
             wandb.log(results_dict)
+        print("TQA results: {}".format(results_dict))
 
     if args.eval_hellaswag:
         from projects.instr_routing.eval.lm_eval_harness.run_eval import eval_lm
@@ -399,22 +381,7 @@ def run_multitask(args):
         )
         if wandb.run is not None:
             wandb.log(results_dict)
-
-    # if args.gen_alpaca_eval:
-    #     print("Generting alpaca_eval")
-    #     from projects.instr_routing.eval.alpaca_eval.gen_alpaca_eval_predictions import gen_alpaca_evl
-    #     try:
-    #         gen_alpaca_evl(
-    #             llama_model=args.model,
-    #             batch_size=2,
-    #             model_name=args.exp_name,
-    #             model_path=path_best_model,
-    #             run_all_clusters=False)
-
-    #     except Exception as e:
-    #         # print e
-    #         print("Failed to generate alpaca eval")
-    #         print(e)
+        print("HSWAG results: {}".format(results_dict))
 
 
 if __name__ == "__main__":
