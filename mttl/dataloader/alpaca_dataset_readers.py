@@ -180,7 +180,7 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
 
         enc_input = AlpacaTemplate.apply(entry)
         source = AlpacaTemplateSource.apply(entry)
-        task_id = 0
+        task_id = -1
 
         tok_input = self.preprocess(source, entry["output"])
         ex_info = ExampleInfo(

@@ -1,12 +1,10 @@
 import torch
-import numpy as np
-from scipy.stats import entropy as calc_entropy
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 
-from .alpaca_data_module import CollateWrapperFn
+from mttl.datamodule.collators import DefaultCollator
 from mttl.dataloader.platyplus_dataset_reader import PlatypusDataset
-from transformers import LlamaTokenizer, AutoTokenizer
+from transformers import AutoTokenizer
 
 
 class PlatypusModule(LightningDataModule):
@@ -62,7 +60,7 @@ class PlatypusModule(LightningDataModule):
             )
 
         self.pad_token_id = self.tokenizer.pad_token_id
-        self.collate_fn = CollateWrapperFn(
+        self.collate_fn = DefaultCollator(
             tokenizer=self.tokenizer,
             pad_to_multiple_of=8,
             return_tensors="pt",

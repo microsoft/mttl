@@ -125,8 +125,8 @@ class PlatypusDataset(torch.utils.data.dataset.Dataset):
         source = AlpacaTemplateSource.apply(entry)
         enc_input = f"{source}{entry['output']}"
         tok_input = self.preprocess(source, entry["output"])
-        task_id = 0
-
+        
+        task_id = -1
         ex_info = ExampleInfo(
             tok_input["input_ids"],
             tok_input["labels"],

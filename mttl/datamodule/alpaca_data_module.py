@@ -1,39 +1,9 @@
 import torch
-import numpy as np
-from typing import List
-from scipy.stats import entropy as calc_entropy
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
-from mttl.utils import trim_batch
-from mttl.dataloader.data_utils import ExampleInfo
-from mttl.dataloader.alpaca_dataset_readers import AlpacaDataset, IGNORE_INDEX
-from transformers import LlamaTokenizer, DataCollatorForSeq2Seq, AutoTokenizer
-from dataclasses import dataclass
-
-
-@dataclass
-class CollateWrapperFn(DataCollatorForSeq2Seq):
-    def __call__(self, batch: List[ExampleInfo]):
-        input_ids = [b.input_ids for b in batch]
-        target_ids = [b.target_ids for b in batch]
-        hashes = [b.hash for b in batch]
-        task_ids = [b.task_id for b in batch]
-        instruction_hashes = [b.instruction_hash for b in batch]
-        task_ids = torch.LongTensor(task_ids)
-        collated_features = super().__call__(
-            [
-                {"input_ids": i, "labels": t}
-                for i, t in zip(input_ids, target_ids)
-            ]
-        )
-        output_batch = {
-            "input_ids": collated_features["input_ids"],
-            "labels": collated_features["labels"],
-            "task_ids": task_ids,
-            "hashes": hashes,
-            "instruction_hashes": instruction_hashes,
-        }
-        return output_batch
+from mttl.dataloader.alpaca_dataset_readers import AlpacaDataset
+from transformers import AutoTokenizer
+from mttl.datamodule.collators import DefaultCollator
 
 
 class AlpacaDataModule(LightningDataModule):
@@ -91,7 +61,7 @@ class AlpacaDataModule(LightningDataModule):
                 "left"  # Allow batched inference, used by tloen also in training
             )
 
-        self.collate_fn = CollateWrapperFn(
+        self.collate_fn = DefaultCollator(
             tokenizer=self.tokenizer,
             pad_to_multiple_of=8,
             return_tensors="pt",

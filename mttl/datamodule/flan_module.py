@@ -1,12 +1,10 @@
 import torch
-import numpy as np
-from scipy.stats import entropy as calc_entropy
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
+from transformers import AutoTokenizer
 
 from mttl.dataloader.flan100k_dataset_readers import Flan100kDataset
-from transformers import LlamaTokenizer
-from .alpaca_data_module import CollateWrapperFn
+from mttl.datamodule.collators import DefaultCollator
 
 
 class FlanModule(LightningDataModule):
@@ -61,7 +59,7 @@ class FlanModule(LightningDataModule):
                 "left"  # Allow batched inference, used by tloen also in training
             )
         self.pad_token_id = self.tokenizer.pad_token_id
-        self.collate_fn = CollateWrapperFn(
+        self.collate_fn = DefaultCollator(
             tokenizer=self.tokenizer,
             pad_to_multiple_of=8,
             return_tensors="pt",
@@ -81,15 +79,12 @@ class FlanModule(LightningDataModule):
         )
 
     def setup(self, stage=None):
-        idxs_cluster = []
-
         dataset = self.get_dataset()
         rng = torch.Generator().manual_seed(1234)
-        if len(idxs_cluster) > 0:
-            dataset.dataset = dataset.dataset.select(idxs_cluster)
+
         n_tr_samples = int(
             len(dataset) * (1 - self.config.validation_portion)
-        )  # len(dataset) -
+        )
         self.train_dataset, self.dev_dataset = torch.utils.data.random_split(
             dataset,
             [
