@@ -8,6 +8,8 @@ def get_tokenizer(config):
 
     if config.model_family == 'gpt':
         tokenizer.padding_side = 'left'
+
+    if tokenizer.pad_token_id is None:
         # no padding token, use EOS token instead!
         tokenizer.pad_token = tokenizer.eos_token
     return tokenizer
