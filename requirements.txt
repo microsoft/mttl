@@ -1,6 +1,6 @@
 datasets==2.2.1
 click
-transformers==4.32.0
+transformers==4.29.0
 pytorch-lightning==2.0.5
 wandb
 rouge
