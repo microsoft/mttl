@@ -1,7 +1,0 @@
-{
-    "model_modifier": "lora",
-    "lora_rank": 16,
-    "lora_modules": ".*SelfAttention|.*EncDecAttention|.*DenseReluDense",
-    "lora_layers": "q|k|v|o",
-    "trainable_param_names": ".*lora_[ab].*"
-}
