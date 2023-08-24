@@ -1,3 +1,4 @@
+from collections import defaultdict
 from copy import deepcopy
 from mttl.dataloader.ni_metrics import compute_metrics
 import tqdm
@@ -87,19 +88,19 @@ class NIEvaluator(object):
         )
         mean_metrics = {}
         for metric_name, metric_value in eval_metrics.items():
-            metric_value = sum(eval_metric[metric_name]) / len(eval_metric[metric_name])
+            metric_value = sum(eval_metrics[metric_name]) / len(eval_metrics[metric_name])
             mean_metrics[metric_name] = metric_value
 
         if metric_per_task:
-            for metric_name, metric_values in eval_metrics.items():
+            for metric_name in eval_metrics.keys():
                 metric_values = defaultdict(list)
-                for task_name, v in zip(task_names, eval_metric[metric_name]):
+                for task_name, v in zip(task_names, eval_metrics[metric_name]):
                     metric_values[task_name] += [v]
-                metric_values = {
-                    task_name: sum(vs) / len(vs)
-                    for task_name, vs in metric_values.items()
-                }
-                metric_values["all"] = mean_metrics[metric_name]
+            metric_values = {
+                task_name: sum(vs) / len(vs)
+                for task_name, vs in metric_values.items()
+            }
+            metric_values["all"] = mean_metrics[metric_name]
         else:
             metric_values = mean_metrics
         return metric_values
