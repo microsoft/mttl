@@ -146,7 +146,7 @@ class DataCollatorForNI:
                             + task_input
                         )["input_ids"]
                     )
-                    <= self.max_source_length
+                    <= self.max_input_length
                 ):
                     pos_examples.append(pos_example_str)
                 else:
@@ -184,7 +184,7 @@ class DataCollatorForNI:
                             + task_input
                         )["input_ids"]
                     )
-                    <= self.max_source_length
+                    <= self.max_input_length
                 ):
                     neg_examples.append(neg_example_str)
                 else:
@@ -258,7 +258,9 @@ class DataCollatorForNI:
 
         output_batch = {
             "input_ids": model_inputs["input_ids"],
-            "target_ids": model_inputs["labels"],
+            "labels": model_inputs["labels"],
+            "input_texts": model_inputs["inputs"],
+            "task_names": model_inputs["task_names"],
             "hashes": [
                 hash_example(i + o)
                 for i, o in zip(model_inputs["inputs"], model_inputs["labels_text"])
@@ -344,11 +346,13 @@ class NIOriginalDataModule(LightningDataModule):
 
     def setup(self, stage="fit"):
         self.dataset_reader = NIOriginalDatasetReader(self.config.data_dir)
-        self.train_dataset = self.dataset_reader.read_orig_datasets("train")
         self.val_dataset = self.dataset_reader.read_orig_datasets("valid")
         self.test_dataset = self.dataset_reader.read_orig_datasets("test")
 
-        print("Training examples:", len(self.train_dataset))
+        if stage == "fit":
+            self.train_dataset = self.dataset_reader.read_orig_datasets("train")
+            print("Training examples:", len(self.train_dataset))
+
         print("Validation examples:", len(self.val_dataset))
         print("Test examples:", len(self.test_dataset))
 
