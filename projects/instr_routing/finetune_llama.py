@@ -24,7 +24,7 @@ from huggingface_hub import login
 from peft import prepare_model_for_int8_training
 
 # register models
-import models.routing  # noqa: F401
+import projects.instr_routing.models.routing  # noqa: F401
 
 
 ##################################################

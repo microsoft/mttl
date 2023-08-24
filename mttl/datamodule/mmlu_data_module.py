@@ -92,7 +92,7 @@ class DataCollatorForMMLU:
         return model_inputs
 
 
-class MMLUModule(LightningDataModule):
+class MMLUDataModule(LightningDataModule):
     def train_dataloader(self):
         return DataLoader(
             self.train_dataset,
