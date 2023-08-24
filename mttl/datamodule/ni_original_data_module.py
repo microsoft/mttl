@@ -345,7 +345,10 @@ class NIOriginalDataModule(LightningDataModule):
         return hash_example("-".join(self.tasks))
 
     def setup(self, stage="fit"):
-        self.dataset_reader = NIOriginalDatasetReader(self.config.data_dir)
+        self.dataset_reader = NIOriginalDatasetReader(
+            self.config.data_dir,
+            max_num_instances_per_task=self.config.max_num_instances_per_task,
+        )
         self.val_dataset = self.dataset_reader.read_orig_datasets("valid")
         self.test_dataset = self.dataset_reader.read_orig_datasets("test")
 
@@ -357,8 +360,9 @@ class NIOriginalDataModule(LightningDataModule):
         print("Test examples:", len(self.test_dataset))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     from mttl.config import Config
+
     config = Config.parse()
     config.task_dir = "/datadrive2/sni/tasks"
     config.data_dir = "/datadrive2/sni/"

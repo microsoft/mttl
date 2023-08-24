@@ -1,6 +1,7 @@
 {
     "n_skills": 8,
     "n_splits": 1,
+    "router_selector": "poly",
     "model_modifier": "poly_ia3",
     "poly_granularity": "finegrained",
     "lora_modules": ".*SelfAttention|.*EncDecAttention|.*DenseReluDense",

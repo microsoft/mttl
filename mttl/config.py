@@ -144,8 +144,12 @@ class Config:
         self.finetune_task_name = None
         self.example_to_ids_path = None  # path to clustering of data
         self.embeddings_path = None
+        
+        # NI related configs
         self.use_task_descriptions = False  # Use task descriptions
+        self.max_num_instances_per_task = 100  # Max instances per training task (applies to NI)
         self.num_pos_examples = 0  # Use some few-shot examples if possible (applies to NI)
+
         self.task_prefix = None    # xfit has task prefixes detailing # of shots, seed, etc; this is automatically filled in at fine-tuning time
         self.exp_name = None
         self.wandb_project = None
@@ -157,6 +161,7 @@ class Config:
         self.do_lowercase = False
         self.freeze_embeds = False
 
+        # T0 related configs
         self.use_t0_templates_as_tasks = False     # if True, then t0 consists of 313 tasks, otherwise 38
         self.use_t0_few_shot_training_set = False  # if True, then use 100 examples per task during training + 100 examples per validation task
 

@@ -174,12 +174,14 @@ class T0EncoderDecoder(EfficientCheckpointModule):
         else:
             input_ids, target_ids = batch["input_ids"], batch["labels"]
             attention_mask = batch["attention_mask"].float()
-            lm_labels = (
-                target_ids + -100 * (target_ids == self.tokenizer.pad_token_id).long()
-            )  # [bs, max_seq_len]
+
             decoder_input_ids = torch.cat(
-                [torch.zeros_like(lm_labels[:, :1]), target_ids[:, :-1]], dim=1
+                [torch.zeros_like(target_ids[:, :1]), target_ids[:, :-1]], dim=1
             )  # [bs, max_seq_len]
+            
+            # need to transform -100 into padding tokens
+            decoder_input_ids[decoder_input_ids == -100] = self.tokenizer.pad_token_id
+
             decoder_attention_mask = (decoder_input_ids == decoder_input_ids).float()
 
             model_output = self.model(
@@ -187,7 +189,7 @@ class T0EncoderDecoder(EfficientCheckpointModule):
                 attention_mask=attention_mask,
                 decoder_input_ids=decoder_input_ids,
                 decoder_attention_mask=decoder_attention_mask,
-                labels=lm_labels,
+                labels=target_ids,
             )
             loss = model_output.loss
             tensorboard_logs = {"loss": loss.item()}
