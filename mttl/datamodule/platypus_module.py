@@ -24,7 +24,7 @@ class PlatypusModule(LightningDataModule):
     def val_dataloader(self):
         return DataLoader(
             self.dev_dataset,
-            batch_size=self.config.train_batch_size,
+            batch_size=self.config.predict_batch_size,
             shuffle=False,
             num_workers=16,
             pin_memory=True,
@@ -35,7 +35,7 @@ class PlatypusModule(LightningDataModule):
     def test_dataloader(self):
         return DataLoader(
             self.test_set,
-            batch_size=self.config.train_batch_size,
+            batch_size=self.config.predict_batch_size,
             shuffle=False,
             num_workers=16,
             pin_memory=True,

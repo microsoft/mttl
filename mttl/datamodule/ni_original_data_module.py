@@ -3,15 +3,17 @@ import torch
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
+from datasets import load_dataset
 
 import random
 import string
 from typing import Optional
 
-from mttl.dataloader.ni_original_dataset_readers import NIOriginalDatasetReader
+from mttl.dataloader.ni_original_dataset import NIOriginalDataset
 from mttl.datamodule.utils import get_tokenizer, prepare_inputs_for_gpt_family
 from mttl.datamodule.collators import DefaultCollator
 from mttl.utils import hash_example
+
 from dataclasses import dataclass
 
 
@@ -335,25 +337,30 @@ class NIOriginalDataModule(LightningDataModule):
             [self.train_dataset, self.val_dataset, self.test_dataset]
         )
 
-    @property
-    def all_instructions(self):
-        """Return all task instructions used in the dataset."""
-        return self.dataset_reader.read_all_instructions()
+    def get_dataset(self):
+        import pkg_resources
+
+        filename = pkg_resources.resource_filename(
+            __name__, "../dataloader/ni_original_dataset.py"
+        )
+        return load_dataset(
+            filename,
+            data_dir=self.config.data_dir,
+            max_num_instances_per_task=self.config.max_num_instances_per_task,
+        )
 
     @property
     def dataset_name(self):
         return hash_example("-".join(self.tasks))
 
     def setup(self, stage="fit"):
-        self.dataset_reader = NIOriginalDatasetReader(
-            self.config.data_dir,
-            max_num_instances_per_task=self.config.max_num_instances_per_task,
-        )
-        self.val_dataset = self.dataset_reader.read_orig_datasets("valid")
-        self.test_dataset = self.dataset_reader.read_orig_datasets("test")
+        dataset = self.get_dataset()
+
+        self.val_dataset = dataset["validation"]
+        self.test_dataset = dataset["test"]
 
         if stage == "fit":
-            self.train_dataset = self.dataset_reader.read_orig_datasets("train")
+            self.train_dataset = dataset["train"]
             print("Training examples:", len(self.train_dataset))
 
         print("Validation examples:", len(self.val_dataset))
