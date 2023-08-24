@@ -9,7 +9,7 @@ import string
 from typing import Optional
 
 from mttl.dataloader.ni_original_dataset_readers import NIOriginalDatasetReader
-from mttl.datamodule.utils import get_tokenizer
+from mttl.datamodule.utils import get_tokenizer, prepare_inputs_for_gpt_family
 from mttl.datamodule.collators import DefaultCollator
 from mttl.utils import hash_example
 from dataclasses import dataclass
@@ -31,6 +31,7 @@ class DataCollatorForNI:
     add_explanation: bool = False
     tk_instruct: bool = False
     text_only: bool = False
+    model_family: str = None
 
     def __call__(self, batch, return_tensors=None):
         if return_tensors is None:
@@ -272,6 +273,8 @@ class DataCollatorForNI:
             ],
             "instruction_hashes": [hash_example(i) for i in model_inputs["inputs"]],
         }
+        if self.model_family == "gpt":
+            output_batch = prepare_inputs_for_gpt_family(output_batch, self.tokenizer)
         return output_batch
 
 
@@ -307,7 +310,7 @@ class NIOriginalDataModule(LightningDataModule):
             collate_fn=self.collate_fn,
         )
 
-    def __init__(self, config):
+    def __init__(self, config, for_generation=False):
         super().__init__()
 
         self.config = config
@@ -316,13 +319,13 @@ class NIOriginalDataModule(LightningDataModule):
         self.dataset_reader = None
 
         self.tokenizer = get_tokenizer(config)
-        self.collate_fn = DefaultCollator(
+        self.collate_fn = DataCollatorForNI(
             tokenizer=self.tokenizer,
             max_input_length=config.max_input_length,
             max_output_length=config.max_output_length,
             pad_to_multiple_of=8,
             return_tensors="pt",
-            model_family=config.model_family,
+            model_family=config.model_family if not for_generation else "seq2seq",
         )
 
     @property

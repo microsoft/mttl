@@ -15,7 +15,7 @@ class NIEvaluator(object):
             data_dir = config.data_dir
 
         self.data_dir = data_dir
-        self.datamodule = NIOriginalDataModule(self.config)
+        self.datamodule = NIOriginalDataModule(self.config, for_generation=True)
         self.datamodule.setup("test")
 
     def evaluate(self, model, metric_per_task=True):
