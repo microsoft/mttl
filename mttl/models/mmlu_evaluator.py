@@ -113,7 +113,7 @@ class MMLUEvaluator(object):
             )
 
             all_EM.append(eval_metrics["exact_match"])
-            pbar.set_description(f"EM: {np.mean(exact_match):.4f}")
+            pbar.set_description(f"EM: {np.mean(all_EM):.4f}")
 
         eval_metrics = compute_metrics(
             all_predictions, [[r] for r in all_references], reduction="none"
