@@ -172,7 +172,7 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             )
             tensorboard_logs["loss"] = loss.item()
         else:
-            input_ids, target_ids = batch["input_ids"], batch["target_ids"]
+            input_ids, target_ids = batch["input_ids"], batch["labels"]
             attention_mask = batch["attention_mask"].float()
             lm_labels = (
                 target_ids + -100 * (target_ids == self.tokenizer.pad_token_id).long()

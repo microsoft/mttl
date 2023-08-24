@@ -10,7 +10,6 @@ import logging
 import hashlib
 import glob
 
-from transformers import AutoTokenizer
 from mttl.dataloader.ni_metrics import compute_ni_metrics
 from mttl.dataloader.data_utils import ExampleInfo
 from mttl.utils import hash_example
