@@ -2,6 +2,7 @@ from collections import defaultdict
 from copy import deepcopy
 from mttl.dataloader.ni_metrics import compute_metrics
 import tqdm
+import torch
 
 
 class NIEvaluator(object):
@@ -53,14 +54,16 @@ class NIEvaluator(object):
             max_length += batch["input_ids"].shape[-1]
 
             batch["input_ids"] = batch["input_ids"].to(self.device)
-            predictions = model.generate(
-                input_ids=batch["input_ids"],
-                attention_mask=batch["input_ids"].ne(tokenizer.pad_token_id),
-                max_length=max_length,
-                generation_config=model.generation_config,
-                return_dict_in_generate=True,
-                output_scores=True,
-            )
+            
+            with torch.no_grad():
+                predictions = model.generate(
+                    input_ids=batch["input_ids"],
+                    attention_mask=batch["input_ids"].ne(tokenizer.pad_token_id),
+                    max_length=max_length,
+                    generation_config=model.generation_config,
+                    return_dict_in_generate=True,
+                    output_scores=True,
+                )
             predictions = predictions.sequences
             predictions = predictions[:, batch["input_ids"].shape[-1] :]
             predictions = decode(predictions)

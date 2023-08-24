@@ -19,8 +19,8 @@ from dataclasses import dataclass
 class DataCollatorForNI:
     tokenizer: AutoTokenizer
     padding: bool = True
-    max_input_length: Optional[int] = None
-    max_output_length: Optional[int] = None
+    max_input_length: Optional[int] = 1024
+    max_output_length: Optional[int] = 128
     pad_to_multiple_of: Optional[int] = None
     label_pad_token_id: int = -100
     return_tensors: str = "pt"
