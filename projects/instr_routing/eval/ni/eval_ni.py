@@ -1,6 +1,23 @@
 from finetune_llama import RoutingConfig
 from transformers import AutoModelForCausalLM
-from eval.ni.gen_ni_predictions import eval_ni
+import torch
+
+
+def eval_ni(
+    config,
+    model,
+    nshot=2,
+):
+    from mttl.models.ni_evaluator import NIEvaluator
+
+    ni_evaluator = NIEvaluator(
+        config,
+        data_dir=config.data_dir,
+        num_pos_examples=nshot
+    )
+    metrics = ni_evaluator.evaluate(model, metric_per_task=True)
+    torch.cuda.empty_cache()
+    return metrics["rougeL"]["all"]
 
 
 if __name__ == "__main__":
@@ -9,6 +26,7 @@ if __name__ == "__main__":
     config.model = "uoe-nlp/gpt-neo-125m_instruction-tuned_sni"
     config.model_family = "gpt"
     config.data_dir = "/datadrive2/sni/"
+    config.predict_batch_size = 4
     config.max_input_length = 1024
     config.max_output_length = 128
 

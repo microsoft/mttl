@@ -295,6 +295,7 @@ class NIOriginalDataModule(LightningDataModule):
             batch_size=self.config.predict_batch_size,
             num_workers=16,
             pin_memory=True,
+            shuffle=True,
             persistent_workers=True,
             collate_fn=self.collate_fn,
         )
@@ -305,6 +306,7 @@ class NIOriginalDataModule(LightningDataModule):
             batch_size=self.config.predict_batch_size,
             num_workers=16,
             pin_memory=True,
+            shuffle=True,
             persistent_workers=True,
             collate_fn=self.collate_fn,
         )
@@ -318,8 +320,10 @@ class NIOriginalDataModule(LightningDataModule):
         self.tokenizer = get_tokenizer(config)
         self.collate_fn = DataCollatorForNI(
             tokenizer=self.tokenizer,
+            padding="longest",
             max_input_length=config.max_input_length,
             max_output_length=config.max_output_length,
+            num_pos_examples=config.num_pos_examples,
             pad_to_multiple_of=8,
             return_tensors="pt",
             model_family=config.model_family if not for_generation else "seq2seq",

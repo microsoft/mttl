@@ -1,5 +1,7 @@
 from collections import defaultdict
 from copy import deepcopy
+
+import numpy as np
 from mttl.dataloader.ni_metrics import compute_metrics
 import tqdm
 import torch
@@ -17,7 +19,10 @@ class NIEvaluator(object):
             data_dir = config.data_dir
 
         self.data_dir = data_dir
-        self.datamodule = NIOriginalDataModule(self.config, for_generation=True)
+        self.datamodule = NIOriginalDataModule(
+            self.config,
+            for_generation=True
+        )
         self.datamodule.setup("test")
 
     def evaluate(self, model, metric_per_task=True):
@@ -39,6 +44,7 @@ class NIEvaluator(object):
         all_predictions = []
         all_references = []
         task_names = []
+        all_rougeL = []
 
         dataloader = self.datamodule.test_dataloader()
         pbar = tqdm.tqdm(
@@ -50,11 +56,15 @@ class NIEvaluator(object):
             texts = batch.pop("input_texts", None)
             batch.pop("labels_texts", None)
 
+            extra_kwargs = {}
+
             max_length = self.config.max_output_length
-            max_length += batch["input_ids"].shape[-1]
+            if self.config.model_family == 'gpt':
+                max_length += batch['input_ids'].shape[-1]
+                extra_kwargs['pad_token_id'] = tokenizer.eos_token_id
 
             batch["input_ids"] = batch["input_ids"].to(self.device)
-            
+
             with torch.no_grad():
                 predictions = model.generate(
                     input_ids=batch["input_ids"],
@@ -63,6 +73,7 @@ class NIEvaluator(object):
                     generation_config=model.generation_config,
                     return_dict_in_generate=True,
                     output_scores=True,
+                    **extra_kwargs,
                 )
             predictions = predictions.sequences
             predictions = predictions[:, batch["input_ids"].shape[-1] :]
@@ -80,11 +91,12 @@ class NIEvaluator(object):
             all_predictions += predictions
             all_references += references
             task_names += task_name
-
+        
             eval_metrics = compute_metrics(
-                all_predictions, [[r] for r in all_references], reduction="mean"
+               predictions, [[r] for r in references], reduction="mean"
             )
-            pbar.set_description("rougeL: {:.4f}".format(eval_metrics["rougeL"]))
+            all_rougeL.append(eval_metrics["rougeL"])
+            pbar.set_description(f"rougeL: {np.mean(all_rougeL):.4f}")
 
         eval_metrics = compute_metrics(
             all_predictions, [[r] for r in all_references], reduction="none"

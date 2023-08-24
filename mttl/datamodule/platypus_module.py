@@ -55,6 +55,7 @@ class PlatypusModule(LightningDataModule):
         self.tokenizer = get_tokenizer(config)
         self.collate_fn = DefaultCollator(
             tokenizer=self.tokenizer,
+            padding="longest",
             max_input_length=config.max_input_length,
             max_output_length=config.max_output_length,
             pad_to_multiple_of=8,

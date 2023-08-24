@@ -1,6 +1,6 @@
 python finetune_llama.py -c configs/llama/platypus/config_small.json \
     -k output_dir=/tmp/ \
-    num_train_epochs=1 \
+    eval_superni=True \
     model=EleutherAI/gpt-neo-125m \
     dataset=platypus \
     eval_every=100 \
@@ -11,4 +11,5 @@ python finetune_llama.py -c configs/llama/platypus/config_small.json \
     micro_batch_size=1 \
     train_batch_size=16 \
     precision=16 \
-    predict_batch_size=32
+    predict_batch_size=32 \
+    model_family=gpt
