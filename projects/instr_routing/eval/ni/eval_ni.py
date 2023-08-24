@@ -1,5 +1,6 @@
 from finetune_llama import RoutingConfig
 from transformers import AutoModelForCausalLM
+import os
 import torch
 
 
@@ -25,7 +26,7 @@ if __name__ == "__main__":
 
     config.model = "uoe-nlp/gpt-neo-125m_instruction-tuned_sni"
     config.model_family = "gpt"
-    config.data_dir = "/datadrive2/sni/"
+    config.data_dir = os.environ["NI_DATA_DIR"]
     config.predict_batch_size = 4
     config.max_input_length = 1024
     config.max_output_length = 128
