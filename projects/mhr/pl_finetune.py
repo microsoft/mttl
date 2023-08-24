@@ -228,12 +228,12 @@ def finetune(args, use_mlf=True, do_zs=True):
 def finetune_ni(args, seeds=[13, 42, 58], use_mlf=True, do_zs=True):
     all_results = []
 
-    train_dir, spl = os.path.split(args.train_dir.rstrip("/"))
+    data_dir, spl = os.path.split(args.data_dir.rstrip("/"))
     seed, num_examples = spl.split("-")
 
     for seed in seeds:
         args.seed = seed
-        args.train_dir = os.path.join(train_dir, f"{seed}-{num_examples}")
+        args.data_dir = os.path.join(data_dir, f"{seed}-{num_examples}")
 
         # use mlf logger only for the first seed, otw it will complain for duplicated hps
         results = finetune(
@@ -282,7 +282,7 @@ def finetune_t0(args, seeds=[42, 1024, 0], use_mlf=True, do_zs=True):
 
 def finetune_xfit(args, use_mlf=True, do_zs=True):
     args.task_name = args.finetune_task_name
-    args.task_dir = os.path.join(args.train_dir, args.task_name)
+    args.task_dir = os.path.join(args.data_dir, args.task_name)
     files = sorted(os.listdir(args.task_dir))
 
     prefixes = []

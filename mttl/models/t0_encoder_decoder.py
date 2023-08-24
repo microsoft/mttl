@@ -78,9 +78,7 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             bs, num_choices = choices_ids.shape[:2]
 
             flat_choices_ids = choices_ids.flatten(0, 1)
-            attention_mask = (
-                input_ids != self.tokenizer.pad_token_id
-            ).float()  # [bs, max_seq_len]
+            attention_mask = batch['attention_mask'].float()
             encoder_hidden_states = self.model.encoder(
                 input_ids=input_ids, attention_mask=attention_mask
             )[0]
@@ -95,7 +93,6 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             decoder_attention_mask = (decoder_input_ids == decoder_input_ids).float()
             lm_target = (
                 flat_choices_ids
-
                 - 100 * (flat_choices_ids == self.tokenizer.pad_token_id).long()
             )
 
@@ -176,9 +173,7 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             tensorboard_logs["loss"] = loss.item()
         else:
             input_ids, target_ids = batch["input_ids"], batch["target_ids"]
-            attention_mask = (
-                input_ids != self.tokenizer.pad_token_id
-            ).float()  # [bs, max_seq_len]
+            attention_mask = batch["attention_mask"].float()
             lm_labels = (
                 target_ids + -100 * (target_ids == self.tokenizer.pad_token_id).long()
             )  # [bs, max_seq_len]

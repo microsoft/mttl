@@ -88,6 +88,10 @@ def patch_layers(transformer, config, layer_type, optional_wrapper=None):
 
 
 def modify_transformer(transformer, config):
+    import mttl.models.lora  # noqa: F401
+    import mttl.models.poly  # noqa: F401
+    import mttl.models.routing  # noqa: F401
+
     # create a shared container for the task id 
     transformer.task_id_container = {}
 

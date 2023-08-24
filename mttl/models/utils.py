@@ -59,6 +59,12 @@ class EfficientCheckpointModule(LightningModule):
             len(load_result.unexpected_keys) == 0
         ), f"Load model failed, unexpected keys {load_result.unexpected_keys.__str__()}"
 
+    def transfer_batch_to_device(self, batch, device, dataloader_idx):
+        for key in batch:
+            if isinstance(batch[key], torch.Tensor):
+                batch[key] = batch[key].to(device)
+        return batch
+
 
 @dataclass
 class RoutingInfo:

@@ -9,6 +9,8 @@ import string
 from typing import Optional
 
 from mttl.dataloader.ni_original_dataset_readers import NIOriginalDatasetReader
+from mttl.datamodule.utils import get_tokenizer
+from mttl.datamodule.collators import DefaultCollator
 from mttl.utils import hash_example
 from dataclasses import dataclass
 
@@ -235,9 +237,9 @@ class DataCollatorForNI:
             # Add space for auto-regressive model tokenization
             labels = [" " + l for l in labels]
             if self.text_only:
-                model_inputs["labels_text"] = labels
+                model_inputs["labels_texts"] = labels
             else:
-                model_inputs["labels_text"] = labels
+                model_inputs["labels_texts"] = labels
                 labels = self.tokenizer(
                     labels,
                     max_length=self.max_output_length,
@@ -259,11 +261,14 @@ class DataCollatorForNI:
         output_batch = {
             "input_ids": model_inputs["input_ids"],
             "labels": model_inputs["labels"],
+            "attention_mask": model_inputs["attention_mask"],
+            "labels_mask": model_inputs["labels_mask"],
             "input_texts": model_inputs["inputs"],
+            "labels_texts": model_inputs["labels_texts"],
             "task_names": model_inputs["task_names"],
             "hashes": [
                 hash_example(i + o)
-                for i, o in zip(model_inputs["inputs"], model_inputs["labels_text"])
+                for i, o in zip(model_inputs["inputs"], model_inputs["labels_texts"])
             ],
             "instruction_hashes": [hash_example(i) for i in model_inputs["inputs"]],
         }
@@ -306,27 +311,18 @@ class NIOriginalDataModule(LightningDataModule):
         super().__init__()
 
         self.config = config
-        self.tokenizer = AutoTokenizer.from_pretrained(config.model, add_eos_token=False)
-        if not self.tokenizer.pad_token_id:
-            self.tokenizer.pad_token_id = self.pad_token_id = 0
-
-        if self.config.padding_side == "left":
-            self.tokenizer.padding_side = (
-                "left"  # Allow batched inference, used by tloen also in training
-            )
-        self.tokenizer.model_max_length = config.max_input_length
+        self.tokenizer = get_tokenizer(config)
         self.pad_token_id = self.tokenizer.pad_token_id
         self.dataset_reader = None
 
-        self.collate_fn = DataCollatorForNI(
-            self.tokenizer,
-            max_input_length=self.config.max_input_length,
-            max_output_length=self.config.max_output_length,
+        self.tokenizer = get_tokenizer(config)
+        self.collate_fn = DefaultCollator(
+            tokenizer=self.tokenizer,
+            max_input_length=config.max_input_length,
+            max_output_length=config.max_output_length,
             pad_to_multiple_of=8,
-            add_task_name=True,
-            add_task_definition=True,
-            num_pos_examples=self.config.num_pos_examples,
-            num_neg_examples=0,
+            return_tensors="pt",
+            model_family=config.model_family,
         )
 
     @property

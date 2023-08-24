@@ -14,7 +14,6 @@ from projects.instr_routing.models.clm import CLM
 from mttl.callbacks import ProgressCallback
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.platypus_module import PlatypusModule
-from mttl.datamodule.flan_module import FlanModule
 from mttl.config import Config
 from mttl.models.monitors import get_monitors
 from mttl.utils import get_mlf_logger
@@ -154,10 +153,6 @@ def run_multitask(args):
     model_class = CLM
     if args.dataset == "alpaca":
         dm = AlpacaDataModule(args)
-    elif args.dataset == "flan_v2":
-        dm = FlanModule(args)
-    elif args.dataset == "human":
-        dm = FlanModule(args)
     elif args.dataset == "platypus":
         dm = PlatypusModule(args)
     else:
@@ -189,7 +184,7 @@ def run_multitask(args):
     if args.load_in_8bit:
         model_object = prepare_model_for_int8_training(model_object)
 
-    model_object = modify_transformer(args.model_object, args)
+    model_object = modify_transformer(model_object, args)
     module = model_class(**vars(args), model_object=model_object, tokenizer=dm.tokenizer)
 
     if args.switch_to_average > 0:

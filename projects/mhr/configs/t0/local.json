@@ -1,6 +1,6 @@
 {
     "dataset": "t0",
-    "train_dir": "$T0_DATA_DIR",
+    "data_dir": "$T0_DATA_DIR",
     "precision": 32,
     "weight_decay": 0,
     "train_batch_size": 2,

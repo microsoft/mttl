@@ -2,9 +2,10 @@ import torch
 import numpy as np
 import random
 from pytorch_lightning import LightningDataModule
-from transformers import AutoTokenizer
+from mttl.datamodule.collators import DefaultCollator
+from mttl.datamodule.utils import get_tokenizer
 
-from mttl.utils import hash_example, template_to_string, trim_batch
+from mttl.utils import hash_example, template_to_string
 from mttl.datamodule import IndexConcatDataset
 from mttl.dataloader.t0_dataset_readers import get_dataset_reader
 from mttl.dataloader.data_utils import ExampleInfo, MultiChoiceExampleInfo
@@ -41,9 +42,16 @@ class T0FinetuneDataModule(LightningDataModule):
         super().__init__()
 
         self.config = config
+        self.tokenizer = get_tokenizer(config)
 
-        self.tokenizer = AutoTokenizer.from_pretrained(config.model)
-        self.tokenizer.model_max_length = config.max_input_length
+        self.collate_fn = MultiChoiceCollator(
+            tokenizer=self.tokenizer,
+            max_input_length=config.max_input_length,
+            max_output_length=config.max_output_length,
+            pad_to_multiple_of=8,
+            return_tensors="pt",
+            model_family="seq2seq",
+        )
 
         self.dataset_reader = get_dataset_reader(config)
         self.task2id = {config.finetune_task_name: 0}
@@ -107,7 +115,7 @@ class T0FinetuneDataModule(LightningDataModule):
             self.train_dataset_wt,
             batch_size=self.config.train_batch_size,
             shuffle=True,
-            collate_fn=create_collate_fn(self.tokenizer.pad_token_id, pretrain=False),
+            collate_fn=self.collate_fn,
             drop_last=True,
             num_workers=min([self.config.train_batch_size, 8]),
             persistent_workers=True,
@@ -118,20 +126,13 @@ class T0FinetuneDataModule(LightningDataModule):
             self.dev_dataset_wt,
             batch_size=self.config.predict_batch_size,
             shuffle=False,
-            collate_fn=create_collate_fn(self.tokenizer.pad_token_id, pretrain=False),
+            collate_fn=self.collate_fn,
             num_workers=min([self.config.predict_batch_size, 8]),
             persistent_workers=True,
         )
 
     def test_dataloader(self):
-        return torch.utils.data.DataLoader(
-            self.dev_dataset_wt,
-            batch_size=self.config.predict_batch_size,
-            shuffle=False,
-            collate_fn=create_collate_fn(self.tokenizer.pad_token_id, pretrain=False),
-            num_workers=min([self.config.predict_batch_size, 8]),
-            persistent_workers=True,
-        )
+        return self.val_dataloader()
 
 
 class T0FinetuneDatasetWithTemplate(torch.utils.data.dataset.Dataset):
@@ -165,65 +166,18 @@ class T0FinetuneDatasetWithTemplate(torch.utils.data.dataset.Dataset):
             template, example, hash_friendly=False, handle_edge_cases=False
         )
         answer_choices = template.get_answer_choices_list(example)
-
-        if isinstance(input_str, list):
-            input_ids = torch.cat(
-                [
-                    self.tokenizer(
-                        input_field,
-                        return_tensors="pt",
-                        truncation=True,
-                        add_special_tokens=False,
-                    ).input_ids.squeeze(0)
-                    for input_field in input_str[:-1]
-                ]
-                + [
-                    self.tokenizer(
-                        input_str[-1],
-                        return_tensors="pt",
-                        truncation=True,
-                        add_special_tokens=self.add_special_tokens,
-                    ).input_ids.squeeze(0)
-                ]
-            )
-        else:
-            input_ids = self.tokenizer(
-                input_str,
-                return_tensors="pt",
-                truncation=True,
-                add_special_tokens=self.add_special_tokens,
-            ).input_ids.squeeze(0)
-
-        target_ids = self.tokenizer(
-            target_str,
-            return_tensors="pt",
-            truncation=True,
-            add_special_tokens=self.add_special_tokens,
-        ).input_ids.squeeze(0)
-
-        answer_choices_ids = [
-            self.tokenizer(
-                answer_choice,
-                return_tensors="pt",
-                truncation=True,
-                add_special_tokens=self.add_special_tokens,
-            ).input_ids.squeeze(0)
-            for answer_choice in answer_choices
-        ]
-
-        label = torch.LongTensor([example["label"]])
-        idx = torch.LongTensor([example["idx"]])
-
-        input_str, _ = apply_template(
+        label = example["label"]
+        idx = example["idx"]
+        input_str_hash, _ = apply_template(
             template, example, hash_friendly=True, handle_edge_cases=True
         )
-        hash = hash_example(input_str)
+        hash = hash_example(input_str_hash)
         instruction_hash = hash_example(template_to_string(template))
 
         return MultiChoiceExampleInfo(
-            input_ids,
-            target_ids,
-            answer_choices_ids,
+            input_str,
+            target_str,
+            answer_choices,
             label,
             idx,
             self.ds_id,
@@ -239,8 +193,15 @@ class T0PretrainDataModule(LightningDataModule):
         super().__init__()
 
         self.config = config
-        self.tokenizer = AutoTokenizer.from_pretrained(config.model)
-        self.tokenizer.model_max_length = config.max_input_length
+        self.tokenizer = get_tokenizer(config)
+        self.collate_fn = DefaultCollator(
+            tokenizer=self.tokenizer,
+            max_input_length=config.max_input_length,
+            max_output_length=config.max_output_length,
+            pad_to_multiple_of=8,
+            return_tensors="pt",
+            model_family="seq2seq",
+        )
 
         self.dataset_reader = get_dataset_reader(config)
         self.base_templates = self.dataset_reader.get_template()
@@ -325,7 +286,7 @@ class T0PretrainDataModule(LightningDataModule):
             self.train_dataset,
             batch_size=self.config.train_batch_size,
             shuffle=True,
-            collate_fn=create_collate_fn(self.tokenizer.pad_token_id, pretrain=True),
+            collate_fn=self.collate_fn,
             drop_last=True,
             num_workers=min([self.config.train_batch_size, 8]),
             persistent_workers=True,
@@ -339,7 +300,7 @@ class T0PretrainDataModule(LightningDataModule):
             self.val_dataset,
             batch_size=self.config.predict_batch_size,
             shuffle=False,
-            collate_fn=create_collate_fn(self.tokenizer.pad_token_id, pretrain=True),
+            collate_fn=self.collate_fn,
             drop_last=True,
             num_workers=min([self.config.predict_batch_size, 8]),
             persistent_workers=True,
@@ -366,129 +327,52 @@ class T0PretrainDatasetWithTemplate(torch.utils.data.dataset.Dataset):
 
         example = self.dataset[example_id]
 
-        input_str, target_str = apply_template(template, example, hash_friendly=False)
-        input_ids = self.tokenizer(
-            input_str, return_tensors="pt", truncation=True
-        ).input_ids.squeeze(0)
-        target_ids = self.tokenizer(
-            target_str, return_tensors="pt", truncation=True
-        ).input_ids.squeeze(0)
-
+        input, target = apply_template(template, example, hash_friendly=False)
         # we need to be hash friendly here, template.apply is non-deterministic :-(
         hash = hash_example(apply_template(template, example, hash_friendly=True)[0])
         instruction_hash = hash_example(template_to_string(template))
 
         return ExampleInfo(
-            input_ids,
-            target_ids,
+            input,
+            target,
             self.ds_id,
             hash,
             example_id,
-            input_text=input_str,
+            input_text=input,
             instruction_hash=instruction_hash,
         )
 
 
-class CollateMultiChoiceFnWrapper:
+class MultiChoiceCollator(DefaultCollator):
     """
     wrapper of `collate_fn` in `create_collate_fn` that is ddp compatible
     """
-
-    def __init__(self, pad_token_id):
-        self.pad_token_id = pad_token_id
-
     def __call__(self, batch: MultiChoiceExampleInfo):
-        pad_token_id = self.pad_token_id
+        output_batch = super().__call__(batch)
 
-        input_ids = [b.input_ids for b in batch]
-        target_ids = [b.target_ids for b in batch]
-        task_ids = [b.task_id for b in batch]
-        hashes = [b.hash for b in batch]
-        instruction_hashes = [b.instruction_hash for b in batch]
-        answer_choices_ids = [b.answer_choices_ids for b in batch]
-        labels = [b.label for b in batch]
-        idx = [b.idx for b in batch]
-
-        task_ids = torch.LongTensor(task_ids)
-        labels = torch.cat(labels)
-        idx = torch.cat(idx)
-
-        input_ids = torch.nn.utils.rnn.pad_sequence(
-            input_ids, batch_first=True, padding_value=pad_token_id
-        )
-        target_ids = torch.nn.utils.rnn.pad_sequence(
-            target_ids, batch_first=True, padding_value=pad_token_id
-        )
-        flat_answer_choice_ids = [
-            choice for list_choices in answer_choices_ids for choice in list_choices
+        answer_choices = [b.answer_choices for b in batch]
+        flat_answer_choice = [
+            choice for list_choices in answer_choices for choice in list_choices
         ]
-        num_choice = [len(list_choices) for list_choices in answer_choices_ids]
+        answer_choices_ = self.tokenizer(
+            flat_answer_choice,
+            max_length=self.max_output_length,
+            padding=self.padding,
+            return_tensors=self.return_tensors,
+            truncation=True,
+            pad_to_multiple_of=self.pad_to_multiple_of,
+        )
+
+        num_choice = [len(list_choices) for list_choices in answer_choices]
         if max(num_choice) != min(num_choice):
             raise NotImplementedError(
                 "The collate_fn is not implmented for variable number of choices"
             )
-        flat_answer_choices_ids = torch.nn.utils.rnn.pad_sequence(
-            flat_answer_choice_ids, batch_first=True, padding_value=pad_token_id
-        )
-        answer_choices_ids = flat_answer_choices_ids.view(
-            len(answer_choices_ids), max(num_choice), -1
+        answer_choices_ids = answer_choices_["input_ids"].view(
+            len(answer_choices), max(num_choice), -1
         ).contiguous()
 
-        output_batch = {
-            "input_ids": input_ids,
-            "target_ids": target_ids,
-            "task_ids": task_ids,
-            "answer_choices_ids": answer_choices_ids,
-            "labels": labels,
-            "idx": idx,
-            "hashes": hashes,
-            "instruction_hashes": instruction_hashes,
-        }
+        output_batch["idx"] = torch.LongTensor([b.idx for b in batch])
+        output_batch["labels"] = torch.LongTensor([b.label for b in batch])
+        output_batch["answer_choices_ids"] = answer_choices_ids
         return output_batch
-
-
-class CollatePretrainFnWrapper:
-    """
-    wrapper of `collate_fn` in `create_collate_fn` that is ddp compatible
-    """
-
-    def __init__(self, pad_token_id):
-        self.pad_token_id = pad_token_id
-
-    def __call__(self, batch):
-        pad_token_id = self.pad_token_id
-        input_ids = [b.input_ids for b in batch]
-        target_ids = [b.target_ids for b in batch]
-        task_ids = [b.task_id for b in batch]
-        ex_ids = [b.example_id for b in batch]
-        hashes = [b.hash for b in batch]
-        instruction_hashes = [b.instruction_hash for b in batch]
-
-        task_ids = torch.tensor(task_ids, dtype=torch.long)
-        ex_ids = torch.tensor(ex_ids, dtype=torch.long)
-
-        input_ids = torch.nn.utils.rnn.pad_sequence(
-            input_ids, batch_first=True, padding_value=pad_token_id
-        )
-        target_ids = torch.nn.utils.rnn.pad_sequence(
-            target_ids, batch_first=True, padding_value=pad_token_id
-        )
-        # trim batch, just in case
-        input_ids = trim_batch(input_ids, self.pad_token_id)
-        target_ids = trim_batch(target_ids, self.pad_token_id)
-
-        output_batch = {
-            "input_ids": input_ids,
-            "target_ids": target_ids,
-            "task_ids": task_ids,
-            "ex_ids": ex_ids,
-            "hashes": hashes,
-            "instruction_hashes": instruction_hashes,
-        }
-        return output_batch
-
-
-def create_collate_fn(pad_token_id, pretrain):
-    if pretrain:
-        return CollatePretrainFnWrapper(pad_token_id)
-    return CollateMultiChoiceFnWrapper(pad_token_id)

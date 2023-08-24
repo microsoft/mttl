@@ -5,6 +5,7 @@ import re
 import math
 
 from transformers.models.t5.modeling_t5 import T5LayerNorm
+from mttl.models.modify_model import register_modifier
 
 
 class LoRALinear(nn.Module):
@@ -132,17 +133,21 @@ def modify_with_adapter(transformer, config, adapter_klass):
     return transformer
 
 
+@register_modifier("ia3")
 def modify_with_ia3(transformer, config):
     return modify_with_adapter(transformer, config, IA3Linear)
 
 
+@register_modifier("lora")
 def modify_with_lora(transformer, config):
     return modify_with_adapter(transformer, config, LoRALinear)
 
 
+@register_modifier("gator")
 def modify_with_gator(transformer, config):
     return modify_with_adapter(transformer, config, GatorLinear)
 
 
+@register_modifier("ln")
 def modify_with_ln(transformer, config):
     return modify_with_adapter(transformer, config, LNAdapter)

@@ -52,7 +52,7 @@ class Config:
             if k == 'finegrained':
                 k = 'poly_granularity'
                 v = 'finegrained' if v else 'coarsegrained'
-            elif k in ['train_dir', 'output_dir']:
+            elif k in ['data_dir', 'output_dir']:
                 # this raises an error if the env. var does not exist
                 v = Template(v).substitute(os.environ)
 
@@ -205,7 +205,10 @@ class Config:
         self.finetune_type = None     # ["F", "A", "Z", "MuZ", "Poly", "PolyRand"]
         self.finetune_skip_es = False  # skip early stopping while fine-tuning
         self.finetune_use_last_checkpoint = False  # use always the best valid_perf checkpoint if available
+
         self.model = None
+        self.model_family = None      # model family, either "gpt" or "encdec"
+
         self.precision = "32"
         self.monitor_grad_alignment_on = None
 

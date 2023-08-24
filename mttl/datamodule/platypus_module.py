@@ -6,6 +6,8 @@ from mttl.datamodule.collators import DefaultCollator
 from mttl.dataloader.platyplus_dataset_reader import PlatypusDataset
 from transformers import AutoTokenizer
 
+from mttl.datamodule.utils import get_tokenizer
+
 
 class PlatypusModule(LightningDataModule):
     def train_dataloader(self):
@@ -50,30 +52,20 @@ class PlatypusModule(LightningDataModule):
 
         self.config = config
 
-        self.tokenizer = AutoTokenizer.from_pretrained(config.model, add_eos_token=False, use_fast=False)
-        if self.tokenizer.pad_token_id is None:
-            self.tokenizer.pad_token_id = self.pad_token_id = 0
-
-        if self.config.padding_side == "left":
-            self.tokenizer.padding_side = (
-                "left"  # Allow batched inference, used by tloen also in training
-            )
-
-        self.pad_token_id = self.tokenizer.pad_token_id
+        self.tokenizer = get_tokenizer(config)
         self.collate_fn = DefaultCollator(
             tokenizer=self.tokenizer,
+            max_input_length=config.max_input_length,
+            max_output_length=config.max_output_length,
             pad_to_multiple_of=8,
             return_tensors="pt",
+            model_family=config.model_family,
         )
         self.task2id = {"alpaca_full": 0}
 
     def get_dataset(self, idxs=None, loss_for_keywords=True):
         return PlatypusDataset(
-            self.tokenizer,
-            self.config.max_input_length,
-            self.config.max_output_length,
-            self.config.train_dir,
-            self.config.train_on_inputs,
+            self.config.data_dir,
             self.config.dst_dir,
             idxs,
             loss_for_keywords=loss_for_keywords,

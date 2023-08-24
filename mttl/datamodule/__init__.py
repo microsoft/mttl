@@ -3,11 +3,18 @@ import numpy as np
 
 
 class UniformSampler:
-    def __init__(self, dataset: ConcatDataset, task_size: int, batch_size: int, **kwargs) -> None:
-        if not isinstance(batch_size, int) or isinstance(batch_size, bool) or \
-                batch_size <= 0:
-            raise ValueError("batch_size should be a positive integer value, "
-                             "but got batch_size={}".format(batch_size))
+    def __init__(
+        self, dataset: ConcatDataset, task_size: int, batch_size: int, **kwargs
+    ) -> None:
+        if (
+            not isinstance(batch_size, int)
+            or isinstance(batch_size, bool)
+            or batch_size <= 0
+        ):
+            raise ValueError(
+                "batch_size should be a positive integer value, "
+                "but got batch_size={}".format(batch_size)
+            )
 
         self.dataset = dataset
         self.num_samples = len(dataset)
@@ -34,16 +41,17 @@ class UniformSampler:
 
         active_tasks = range(len(self.tasks_to_idx))
         indices_per_task = [
-            np.random.permutation(len(self.tasks_to_idx[task]))
-            for task in active_tasks
+            np.random.permutation(len(self.tasks_to_idx[task])) for task in active_tasks
         ]
         for _ in range(len(self)):
-            tasks = np.random.choice(active_tasks, self.task_size, p=self.weights).tolist()
+            tasks = np.random.choice(
+                active_tasks, self.task_size, p=self.weights
+            ).tolist()
             for task in tasks:
-                exs_idx = indices_per_task[task][:self.nex_per_task]
-                indices_per_task[task] = indices_per_task[task][self.nex_per_task:]
+                exs_idx = indices_per_task[task][: self.nex_per_task]
+                indices_per_task[task] = indices_per_task[task][self.nex_per_task :]
                 if len(indices_per_task[task]) < self.nex_per_task:
-                    self.weights[active_tasks] = 0.
+                    self.weights[active_tasks] = 0.0
                     self.weights /= self.weights.sum()
                 batch.extend([self.tasks_to_idx[task][x] for x in exs_idx])
             yield batch
@@ -55,14 +63,19 @@ class UniformSampler:
         return size // self.batch_size
 
 
-
-
 class TaskSampler:
-    def __init__(self, dataset: ConcatDataset, task_size: int, batch_size: int, **kwargs) -> None:
-        if not isinstance(batch_size, int) or isinstance(batch_size, bool) or \
-                batch_size <= 0:
-            raise ValueError("batch_size should be a positive integer value, "
-                             "but got batch_size={}".format(batch_size))
+    def __init__(
+        self, dataset: ConcatDataset, task_size: int, batch_size: int, **kwargs
+    ) -> None:
+        if (
+            not isinstance(batch_size, int)
+            or isinstance(batch_size, bool)
+            or batch_size <= 0
+        ):
+            raise ValueError(
+                "batch_size should be a positive integer value, "
+                "but got batch_size={}".format(batch_size)
+            )
 
         self.dataset = dataset
         self.num_samples = len(dataset)
@@ -90,19 +103,20 @@ class TaskSampler:
 
         active_tasks = range(len(self.tasks_to_idx))
         indices_per_task = [
-            np.random.permutation(len(self.tasks_to_idx[task]))
-            for task in active_tasks
+            np.random.permutation(len(self.tasks_to_idx[task])) for task in active_tasks
         ]
         for _ in range(len(self)):
             if len(active_tasks) < self.task_size:
                 break
 
-            tasks = np.random.choice(active_tasks, self.task_size, p=self.weights).tolist()
+            tasks = np.random.choice(
+                active_tasks, self.task_size, p=self.weights
+            ).tolist()
             for task in tasks:
-                exs_idx = indices_per_task[task][:self.nex_per_task]
-                indices_per_task[task] = indices_per_task[task][self.nex_per_task:]
+                exs_idx = indices_per_task[task][: self.nex_per_task]
+                indices_per_task[task] = indices_per_task[task][self.nex_per_task :]
                 if len(indices_per_task[task]) < self.nex_per_task:
-                    self.weights[active_tasks] = 0.
+                    self.weights[active_tasks] = 0.0
                     self.weights /= self.weights.sum()
                 batch.extend([self.tasks_to_idx[task][x] for x in exs_idx])
             yield batch

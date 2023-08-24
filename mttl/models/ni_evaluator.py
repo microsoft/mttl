@@ -4,10 +4,11 @@ import tqdm
 
 
 class NIEvaluator(object):
-    def __init__(self, config, data_dir=None, num_pos_examples=0):
+    def __init__(self, config, data_dir=None, num_pos_examples=0, device="cuda"):
         from mttl.datamodule.ni_original_data_module import NIOriginalDataModule
 
         self.config = deepcopy(config)
+        self.device = device
         self.config.num_pos_examples = num_pos_examples
 
         if data_dir is None:
@@ -37,20 +38,19 @@ class NIEvaluator(object):
         all_references = []
         task_names = []
 
+        dataloader = self.datamodule.test_dataloader()
         for step, batch in tqdm.tqdm(
-            enumerate(self.datamodule.test_dataloader()),
-            total=len(self.datamodule.test_dataloader()),
+            enumerate(dataloader),
+            total=len(dataloader),
         ):
             task_name = batch.pop("task_names", None)
             texts = batch.pop("input_texts", None)
-            batch.pop("labels_text", None)
+            labels_texts = batch.pop("labels_texts", None)
 
             max_length = self.config.max_output_length
             max_length += batch["input_ids"].shape[-1]
-            
-            extra_kwargs = {}
-            extra_kwargs["pad_token_id"] = tokenizer.eos_token_id
 
+            batch["input_ids"] = batch["input_ids"].to(self.device)
             predictions = model.generate(
                 input_ids=batch["input_ids"],
                 attention_mask=batch["input_ids"].ne(tokenizer.pad_token_id),
@@ -58,7 +58,6 @@ class NIEvaluator(object):
                 generation_config=model.generation_config,
                 return_dict_in_generate=True,
                 output_scores=True,
-                **extra_kwargs,
             )
             predictions = predictions.sequences
             predictions = predictions[:, batch["input_ids"].shape[-1] :]
@@ -76,9 +75,11 @@ class NIEvaluator(object):
             all_predictions += predictions
             all_references += references
             task_names += task_name
+            break
 
+        breakpoint()
         eval_metrics = compute_metrics(
-            all_predictions, all_references, reduction="none"
+            all_predictions, [[r] for r in all_references], reduction="none"
         )
         mean_metrics = {}
         for metric_name, metric_value in eval_metrics.items():

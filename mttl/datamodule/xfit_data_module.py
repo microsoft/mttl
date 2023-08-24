@@ -2,9 +2,10 @@ from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 
-from mttl.datamodule.ni_data_module import CollateWrapperFn
 from mttl.dataloader.xfit_dataset_readers import XFitDatasetReader
 from mttl.datamodule import IndexConcatDataset
+from mttl.datamodule.collators import DefaultCollator
+from mttl.datamodule.utils import get_tokenizer
 from mttl.utils import get_example_to_ids, get_tasks_list
 
 
@@ -17,7 +18,7 @@ class XFitDataModule(LightningDataModule):
             num_workers=16,
             pin_memory=True,
             persistent_workers=True,
-            collate_fn=CollateWrapperFn(self.pad_token_id),
+            collate_fn=self.collate_fn,
         )
 
     def val_dataloader(self):
@@ -27,7 +28,7 @@ class XFitDataModule(LightningDataModule):
             num_workers=16,
             pin_memory=True,
             persistent_workers=True,
-            collate_fn=CollateWrapperFn(self.pad_token_id),
+            collate_fn=self.collate_fn,
         )
 
     def test_dataloader(self):
@@ -37,7 +38,7 @@ class XFitDataModule(LightningDataModule):
             num_workers=16,
             pin_memory=True,
             persistent_workers=True,
-            collate_fn=CollateWrapperFn(self.pad_token_id),
+            collate_fn=self.collate_fn,
         )
         
     @property
@@ -66,19 +67,22 @@ class XFitDataModule(LightningDataModule):
         else:
             self.example2id = None
 
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            config.model, model_max_length=config.max_input_length
-        )
-        self.pad_token_id = self.tokenizer.pad_token_id
-
+        self.tokenizer = get_tokenizer(config)
         if config.embeddings_path:
             task_embed_path = config.embeddings_path
         else:
             task_embed_path = None
 
+        self.collate_fn = DefaultCollator(
+            tokenizer=self.tokenizer,
+            max_input_length=config.max_input_length,
+            max_output_length=config.max_output_length,
+            pad_to_multiple_of=8,
+            return_tensors="pt",
+            model_family=config.model_family,
+        )
         self.dataset_reader = XFitDatasetReader(
-            config.train_dir,
-            self.tokenizer,
+            config.data_dir,
             tasks=self.tasks,
             task_prefix=config.task_prefix,
             task2id=self.task2id,
@@ -88,7 +92,6 @@ class XFitDataModule(LightningDataModule):
             max_output_length=config.max_output_length,
             use_task_descriptions=config.use_task_descriptions,
         )
-
         print("Training on the following tasks: {}".format(self.tasks))
 
     def setup(self, stage=None):
