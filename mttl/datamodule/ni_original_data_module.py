@@ -263,7 +263,6 @@ class DataCollatorForNI:
             "input_ids": model_inputs["input_ids"],
             "labels": model_inputs["labels"],
             "attention_mask": model_inputs["attention_mask"],
-            "labels_mask": model_inputs["labels_mask"],
             "input_texts": model_inputs["inputs"],
             "labels_texts": model_inputs["labels_texts"],
             "task_names": model_inputs["task_names"],
@@ -314,8 +313,6 @@ class NIOriginalDataModule(LightningDataModule):
         super().__init__()
 
         self.config = config
-        self.tokenizer = get_tokenizer(config)
-        self.pad_token_id = self.tokenizer.pad_token_id
         self.dataset_reader = None
 
         self.tokenizer = get_tokenizer(config)

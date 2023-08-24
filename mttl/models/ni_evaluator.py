@@ -39,13 +39,14 @@ class NIEvaluator(object):
         task_names = []
 
         dataloader = self.datamodule.test_dataloader()
-        for step, batch in tqdm.tqdm(
+        pbar = tqdm.tqdm(
             enumerate(dataloader),
             total=len(dataloader),
-        ):
+        )
+        for step, batch in pbar:
             task_name = batch.pop("task_names", None)
             texts = batch.pop("input_texts", None)
-            labels_texts = batch.pop("labels_texts", None)
+            batch.pop("labels_texts", None)
 
             max_length = self.config.max_output_length
             max_length += batch["input_ids"].shape[-1]
@@ -75,9 +76,12 @@ class NIEvaluator(object):
             all_predictions += predictions
             all_references += references
             task_names += task_name
-            break
 
-        breakpoint()
+            eval_metrics = compute_metrics(
+                all_predictions, [[r] for r in all_references], reduction="mean"
+            )
+            pbar.set_description("rougeL: {:.4f}".format(eval_metrics["rougeL"]))
+
         eval_metrics = compute_metrics(
             all_predictions, [[r] for r in all_references], reduction="none"
         )
