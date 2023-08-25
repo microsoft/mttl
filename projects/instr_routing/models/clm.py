@@ -44,7 +44,6 @@ class CLM(EfficientCheckpointModule):
 
         # log hyperparameters
         self.save_hyperparameters(ignore=["tokenizer", "model_object"])
-        self.args = self.hparams
 
         self.tokenizer = kwargs["tokenizer"]
         self.pad_token_id = self.tokenizer.pad_token_id
@@ -55,14 +54,11 @@ class CLM(EfficientCheckpointModule):
             if "llama" in self.hparams.model:
                 model_object = LlamaForCausalLM.from_pretrained(
                     self.hparams.model,
-                    load_in_8bit=self.hparams.load_in_8bit,  # this doesnt work right now with current implementatio of lora
+                    load_in_8bit=self.hparams.load_in_8bit,
                     torch_dtype=self.hparams.load_dtype,
-                    device_map="auto",
                 )
             else:
-                model_object = AutoModelForCausalLM.from_pretrained(
-                    self.hparams.model, device_map="auto"
-                )
+                model_object = AutoModelForCausalLM.from_pretrained(self.hparams.model)
 
             if model_object.config.vocab_size != len(self.tokenizer):
                 model_object.resize_token_embeddings(len(self.tokenizer))
@@ -72,8 +68,8 @@ class CLM(EfficientCheckpointModule):
             self.model = modify_transformer(model_object, self.hparams)
         else:
             self.model = kwargs.get("model_object")
-        self.loss_plugins = nn.ModuleDict({})
 
+        self.loss_plugins = nn.ModuleDict({})
         self.test_results = []
         self.best_val_result = None
         self._inference_outputs = []
@@ -151,7 +147,7 @@ class CLM(EfficientCheckpointModule):
         return loss, aux_loss
 
     def calculate_routing_mask(self, inputs, labels=None):
-        if not hasattr(self.args, "xrouting_option"):
+        if not hasattr(self.hparams, "xrouting_option"):
             return None, None
 
         # bs, seq = x.shape
@@ -240,7 +236,7 @@ class CLM(EfficientCheckpointModule):
                     -1, layer_routing_dist.shape[-2], layer_routing_dist.shape[-1]
                 )
                 bs = layer_routing_dist.shape[0]
-                n_skills, n_splits = self.args.n_skills, self.args.n_splits
+                n_skills, n_splits = self.hparams.n_skills, self.hparams.n_splits
                 # calculate entropy and diversity over the full batch
                 mixing_weights_ = layer_routing_dist.view(
                     -1, n_skills
@@ -337,7 +333,7 @@ class CLM(EfficientCheckpointModule):
 
                 # create csv table if not exists
                 csv_filename = (
-                    f"{self.args.output_dir}/{stage}/div_layers_dist_table.csv"
+                    f"{self.hparams.output_dir}/{stage}/div_layers_dist_table.csv"
                 )
                 if not os.path.exists(csv_filename):
                     os.makedirs(os.path.dirname(csv_filename), exist_ok=True)
@@ -348,7 +344,7 @@ class CLM(EfficientCheckpointModule):
                     writer.writerow(divs)
 
                 csv_filename = (
-                    f"{self.args.output_dir}/{stage}/entropy_layers_dist_table.csv"
+                    f"{self.hparams.output_dir}/{stage}/entropy_layers_dist_table.csv"
                 )
                 if not os.path.exists(csv_filename):
                     os.makedirs(os.path.dirname(csv_filename), exist_ok=True)
@@ -358,7 +354,7 @@ class CLM(EfficientCheckpointModule):
                     writer = csv.writer(csv_file)
                     writer.writerow(entropies)
 
-                csv_filename = f"{self.args.output_dir}/{stage}/diversity(MI-H)_layers_dist_table.csv"
+                csv_filename = f"{self.hparams.output_dir}/{stage}/diversity(MI-H)_layers_dist_table.csv"
                 if not os.path.exists(csv_filename):
                     os.makedirs(os.path.dirname(csv_filename), exist_ok=True)
                     writer = csv.writer(open(csv_filename, "a"))
@@ -419,7 +415,7 @@ class CLM(EfficientCheckpointModule):
             self.log_aux_loss_per_layer(aux_loss)
             if (
                 batch_idx
-                % (self.args.gradient_accumulation_steps * self.args.micro_batch_size)
+                % (self.hparams.gradient_accumulation_steps * self.hparams.micro_batch_size)
                 == 0
                 and batch_idx > 0
             ):  # to accumulate over larger batch
@@ -470,7 +466,7 @@ class CLM(EfficientCheckpointModule):
 
         # compute the loss per task id
         with open(
-            os.path.join(self.args.output_dir, "val_loss_by_task.txt"), "a+"
+            os.path.join(self.hparams.output_dir, "val_loss_by_task.txt"), "a+"
         ) as f:
             task_losses = {}
             for task_id in torch.unique(task_ids):
@@ -482,7 +478,7 @@ class CLM(EfficientCheckpointModule):
         self._inference_outputs.clear()
 
     def configure_optimizers(self):
-        args = self.args
+        args = self.hparams
         self.ml_optimizer = self.ml_scheduler = None
 
         optimizer, self.trainable_param_names = get_optimizer(
