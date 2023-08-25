@@ -119,7 +119,9 @@ class MMLUDataset(datasets.GeneratorBasedBuilder):
                 for fn in os.listdir(os.path.join(data_dir, subset))
             ]
         )
+
         logger.info(f"Found subjects: {subjects}")
+
         for subject in subjects:
             if subset != "auxiliary_train":
                 dev_df = pd.read_csv(

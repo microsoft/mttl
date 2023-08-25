@@ -264,7 +264,7 @@ def run_multitask(args):
 
     trainer.fit(module, dm)
 
-    ckpt_path = "best" if not args.fast_dev_run else None
+    ckpt_path = "best" if not args.fast_dev_run else "last"
     trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
 
     if args.use_test_set and not args.fast_dev_run:
@@ -280,6 +280,16 @@ def run_multitask(args):
     print(f"Best model path: {path_best_model}")
     print(f"Last model path: {path_last_model}")
 
+    ds_limit = args.eval_ds_limit if not args.fast_debug_run else 0.05
+    torch.cuda.empty_cache()
+
+    # load best model
+    if path_best_model:
+        del module
+        best_model = CLM.load_from_checkpoint(path_best_model)
+    else:
+        best_model = module
+
     # empty memory
     del (
         module,
@@ -291,25 +301,16 @@ def run_multitask(args):
         wandb_logger,
         mlf_logger,
     )
-    ds_limit = args.eval_ds_limit if not args.fast_debug_run else 0.05
-    torch.cuda.empty_cache()
 
     if args.eval_superni:
         print("#" * 50)
         print("Evaluating on super NI")
-        from projects.instr_routing.eval.ni.gen_ni_predictions import eval_superni
+        from projects.instr_routing.eval.ni.eval_ni import eval_ni
 
-        rouge_L_super_ni = eval_superni(
-            model_name="",
-            batch_size=args.superni_eval_batchsize,
-            out_prefix=f"{args.exp_name}",
-            model_path=path_best_model,
-            nshot=0,
-            use_outputs=args.eval_superni_use_outputs,
-            ds_limit=ds_limit,
-        )
+        rouge_L_super_ni = eval_ni(args, best_model, nshot=2, data_dir=os.environ["NI_DATA_DIR"])
         if wandb.run is not None:
             wandb.log({"rouge_L_super_ni": rouge_L_super_ni})
+
         print("SuperNI RougeL: {:.2f}".format(rouge_L_super_ni))
 
     if args.eval_mmlu:

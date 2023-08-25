@@ -548,7 +548,6 @@ class RoutingLoRALinear(RoutingAdapter):
             self.training_steps += 1
 
         task_id = self.routing_infos.task_ids
-
         repeat = input.size(0) // task_id.size(0)
 
         # this repeat follows the patten in `model.predict()` line 152

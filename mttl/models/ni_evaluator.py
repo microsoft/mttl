@@ -1,10 +1,11 @@
 from collections import defaultdict
 from copy import deepcopy
-
-import numpy as np
-from mttl.dataloader.ni_metrics import compute_metrics
 import tqdm
 import torch
+import numpy as np
+
+from transformers import AutoModel
+from mttl.dataloader.ni_metrics import compute_metrics
 
 
 class NIEvaluator(object):
@@ -21,11 +22,15 @@ class NIEvaluator(object):
         self.data_dir = data_dir
         self.datamodule = NIOriginalDataModule(
             self.config,
-            for_generation=True
+            data_dir=data_dir,
+            for_generation=True,
         )
         self.datamodule.setup("test")
 
     def evaluate(self, model, metric_per_task=True):
+        model.eval()
+        model = model.to(self.device)
+
         tokenizer = self.datamodule.tokenizer
         samples_seen = 0
 
@@ -64,17 +69,28 @@ class NIEvaluator(object):
                 extra_kwargs['pad_token_id'] = tokenizer.eos_token_id
 
             batch["input_ids"] = batch["input_ids"].to(self.device)
+            batch["attention_mask"] = batch["attention_mask"].to(self.device)
 
             with torch.no_grad():
-                predictions = model.generate(
-                    input_ids=batch["input_ids"],
-                    attention_mask=batch["input_ids"].ne(tokenizer.pad_token_id),
-                    max_length=max_length,
-                    generation_config=model.generation_config,
-                    return_dict_in_generate=True,
-                    output_scores=True,
-                    **extra_kwargs,
-                )
+                if isinstance(model, AutoModel):
+                    predictions = model.generate(
+                        input_ids=batch["input_ids"],
+                        attention_mask=batch["attention_mask"],
+                        max_length=max_length,
+                        generation_config=model.generation_config,
+                        return_dict_in_generate=True,
+                        output_scores=True,
+                        **extra_kwargs,
+                    )
+                else:
+                    predictions = model.generate(
+                        batch,
+                        max_length=max_length,
+                        generation_config=model.generation_config,
+                        return_dict_in_generate=True,
+                        output_scores=True,
+                        **extra_kwargs,
+                    )
             predictions = predictions.sequences
             predictions = predictions[:, batch["input_ids"].shape[-1] :]
             predictions = decode(predictions)

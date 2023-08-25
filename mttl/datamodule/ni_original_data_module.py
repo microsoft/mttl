@@ -313,11 +313,12 @@ class NIOriginalDataModule(LightningDataModule):
             collate_fn=self.collate_fn,
         )
 
-    def __init__(self, config, for_generation=False):
+    def __init__(self, config, data_dir=None, for_generation=False):
         super().__init__()
 
         self.config = config
         self.dataset_reader = None
+        self.data_dir = data_dir or config.data_dir
 
         self.tokenizer = get_tokenizer(config)
         self.collate_fn = DataCollatorForNI(
@@ -345,7 +346,7 @@ class NIOriginalDataModule(LightningDataModule):
         )
         return load_dataset(
             filename,
-            data_dir=self.config.data_dir,
+            data_dir=self.data_dir,
             max_num_instances_per_task=self.config.max_num_instances_per_task,
         )
 

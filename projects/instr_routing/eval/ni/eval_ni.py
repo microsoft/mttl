@@ -8,12 +8,13 @@ def eval_ni(
     config,
     model,
     nshot=2,
+    data_dir=None,
 ):
     from mttl.models.ni_evaluator import NIEvaluator
 
     ni_evaluator = NIEvaluator(
         config,
-        data_dir=config.data_dir,
+        data_dir=data_dir or config.data_dir,
         num_pos_examples=nshot
     )
     metrics = ni_evaluator.evaluate(model, metric_per_task=True)

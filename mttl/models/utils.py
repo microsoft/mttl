@@ -68,28 +68,21 @@ class EfficientCheckpointModule(LightningModule):
 
 @dataclass
 class RoutingInfo:
-    task_ids: torch.Tensor
-    hashes: List[str]
+    task_ids: torch.Tensor = None
+    hashes: List[str] = None
     instruction_hashes: List[str] = None
     example_ids: List[int] = None
-    pad_token_mask: torch.Tensor = None
-    inst_token_mask: torch.Tensor = None
     labels: torch.Tensor = None
 
-    @classmethod 
+    @classmethod
     def from_batch(cls, batch: dict):
         ri = cls(
-            task_ids=batch["task_ids"],   
+            task_ids=batch.get("task_ids", None),
             hashes=batch.get("hashes", None),
             example_ids=batch.get("example_ids", None),
             instruction_hashes=batch.get("instruction_hashes", None),
-            pad_token_mask = batch.get("pad_token_mask", None),
-            inst_token_mask = batch.get("inst_token_mask", None),
             labels=batch.get("labels", None),
         )
-        if "distances" in batch:
-            # used for evaluation of soft clustering tuned models
-            setattr(ri, "distances", batch["distances"])
         return ri
 
     def repeat_interleave(self, repeats):

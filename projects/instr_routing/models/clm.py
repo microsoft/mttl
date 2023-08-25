@@ -32,6 +32,8 @@ class AugmentedRoutingInfo(RoutingInfo):
     gen_mode: bool = False
     routings: List[torch.Tensor] = None
     oracle_routings: List[torch.Tensor] = None
+    pad_token_mask: torch.Tensor = None
+    inst_token_mask: torch.Tensor = None
 
 
 class CLM(EfficientCheckpointModule):
@@ -56,6 +58,10 @@ class CLM(EfficientCheckpointModule):
         self.test_results = []
         self.best_val_result = None
         self._inference_outputs = []
+
+    @property
+    def generation_config(self):
+        return self.model.generation_config
 
     def add_loss_plugin(self, plugin):
         if self.loss_plugins is not None:
@@ -147,7 +153,11 @@ class CLM(EfficientCheckpointModule):
         self.model.zero_grad()
         return super().on_before_zero_grad(optimizer)
 
-    def generate(self, batch, **kwargs):
+    def generate(
+        self,
+        batch,
+        **kwargs,
+    ):
         if not hasattr(self.model, "task_id_container"):
             self.model.task_id_container = {}
 
