@@ -357,6 +357,7 @@ class NIOriginalDataModule(LightningDataModule):
             padding="longest",
             max_input_length=self.config.max_input_length,
             max_output_length=self.config.max_output_length,
+            num_pos_examples=self.config.num_pos_examples,
             pad_to_multiple_of=8,
             return_tensors="pt",
             model_family=config.model_family if not self.for_generation else "seq2seq",
