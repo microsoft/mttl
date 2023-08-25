@@ -4,7 +4,7 @@ import tqdm
 import torch
 import numpy as np
 
-from transformers import AutoModel
+from transformers import AutoModelForCausalLM
 from mttl.dataloader.ni_metrics import compute_metrics
 
 
@@ -72,7 +72,7 @@ class NIEvaluator(object):
             batch["attention_mask"] = batch["attention_mask"].to(self.device)
 
             with torch.no_grad():
-                if isinstance(model, AutoModel):
+                try:
                     predictions = model.generate(
                         input_ids=batch["input_ids"],
                         attention_mask=batch["attention_mask"],
@@ -82,7 +82,7 @@ class NIEvaluator(object):
                         output_scores=True,
                         **extra_kwargs,
                     )
-                else:
+                except:
                     predictions = model.generate(
                         batch,
                         max_length=max_length,

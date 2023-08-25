@@ -9,9 +9,7 @@ import random
 import string
 from typing import Optional
 
-from mttl.dataloader.ni_original_dataset import NIOriginalDataset
 from mttl.datamodule.utils import get_tokenizer, prepare_inputs_for_gpt_family
-from mttl.datamodule.collators import DefaultCollator
 from mttl.utils import hash_example
 
 from dataclasses import dataclass
@@ -321,18 +319,8 @@ class NIOriginalDataModule(LightningDataModule):
         self.config = config
         self.dataset_reader = None
         self.data_dir = data_dir or config.data_dir
-
+        self.for_generation = for_generation
         self.tokenizer = get_tokenizer(config)
-        self.collate_fn = DataCollatorForNI(
-            tokenizer=self.tokenizer,
-            padding="longest",
-            max_input_length=config.max_input_length,
-            max_output_length=config.max_output_length,
-            num_pos_examples=config.num_pos_examples,
-            pad_to_multiple_of=8,
-            return_tensors="pt",
-            model_family=config.model_family if not for_generation else "seq2seq",
-        )
 
     @property
     def full_dataset(self):
@@ -371,7 +359,7 @@ class NIOriginalDataModule(LightningDataModule):
             max_output_length=self.config.max_output_length,
             pad_to_multiple_of=8,
             return_tensors="pt",
-            model_family=self.config.model_family,
+            model_family=config.model_family if not self.for_generation else "seq2seq",
             task_to_id=task_to_id,
         )
 

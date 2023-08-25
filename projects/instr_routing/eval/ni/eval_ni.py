@@ -1,4 +1,4 @@
-from finetune_llama import RoutingConfig
+from projects.instr_routing.finetune_llama import RoutingConfig
 from transformers import AutoModelForCausalLM
 import os
 import torch
