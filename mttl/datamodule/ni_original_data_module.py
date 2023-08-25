@@ -34,6 +34,7 @@ class DataCollatorForNI:
     tk_instruct: bool = False
     text_only: bool = False
     model_family: str = None
+    task_to_id: dict = None
 
     def __call__(self, batch, return_tensors=None):
         if return_tensors is None:
@@ -268,6 +269,7 @@ class DataCollatorForNI:
             "input_texts": model_inputs["inputs"],
             "labels_texts": model_inputs["labels_texts"],
             "task_names": model_inputs["task_names"],
+            "task_ids": torch.LongTensor([self.task_to_id[task] for task in task_names]),
             "hashes": [
                 hash_example(i + o)
                 for i, o in zip(model_inputs["inputs"], model_inputs["labels_texts"])
@@ -356,6 +358,22 @@ class NIOriginalDataModule(LightningDataModule):
 
     def setup(self, stage="fit"):
         dataset = self.get_dataset()
+
+        task_to_id = set(dataset["train"]["Task"])
+        task_to_id = task_to_id.union(set(dataset["validation"]["Task"]))
+        task_to_id = task_to_id.union(set(dataset["test"]["Task"]))
+        task_to_id = {task: i for i, task in enumerate(task_to_id)}
+
+        self.collate_fn = DataCollatorForNI(
+            tokenizer=self.tokenizer,
+            padding="longest",
+            max_input_length=self.config.max_input_length,
+            max_output_length=self.config.max_output_length,
+            pad_to_multiple_of=8,
+            return_tensors="pt",
+            model_family=self.config.model_family,
+            task_to_id=task_to_id,
+        )
 
         self.val_dataset = dataset["validation"]
         self.test_dataset = dataset["test"]
