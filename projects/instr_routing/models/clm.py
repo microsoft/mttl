@@ -12,7 +12,8 @@ import wandb
 from typing import List
 from collections import defaultdict
 from torch import Tensor, nn
-from transformers import AutoModelForCausalLM
+from mttl.models.modify_model import modify_transformer
+from transformers import AutoModelForCausalLM, LlamaForCausalLM
 
 from mttl.models.get_scheduler import get_scheduler
 from mttl.models.utils import (
@@ -24,6 +25,7 @@ from mttl.models.get_optimizer import get_optimizer
 from mttl.global_vars import EPS
 from pytorch_lightning.utilities.parsing import AttributeDict
 from dataclasses import dataclass
+from peft import prepare_model_for_int8_training
 
 
 @dataclass
@@ -49,8 +51,25 @@ class CLM(EfficientCheckpointModule):
         self.model: AutoModelForCausalLM = None
         self.accumulate_metrics_batch = defaultdict(list)
 
-        if kwargs.get("model_object") is None:
-            raise NotImplementedError("Requires a model object to instantiate CLM.")
+        if kwargs.get("model_object") is None:        
+            if "llama" in self.hparams.model:
+                model_object = LlamaForCausalLM.from_pretrained(
+                    self.hparams.model,
+                    load_in_8bit=self.hparams.load_in_8bit,  # this doesnt work right now with current implementatio of lora
+                    torch_dtype=self.hparams.load_dtype,
+                    device_map="auto",
+                )
+            else:
+                model_object = AutoModelForCausalLM.from_pretrained(
+                    self.hparams.model, device_map="auto"
+                )
+
+            if model_object.config.vocab_size != len(self.tokenizer):
+                model_object.resize_token_embeddings(len(self.tokenizer))
+            if self.hparams.load_in_8bit:
+                model_object = prepare_model_for_int8_training(model_object)
+
+            self.model = modify_transformer(model_object, self.hparams)
         else:
             self.model = kwargs.get("model_object")
         self.loss_plugins = nn.ModuleDict({})

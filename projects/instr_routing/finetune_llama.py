@@ -165,27 +165,7 @@ def run_multitask(args):
     else:
         raise NotImplementedError()
 
-    if "llama" in args.model:
-        model_object = LlamaForCausalLM.from_pretrained(
-            args.model,
-            load_in_8bit=args.load_in_8bit,  # this doesnt work right now with current implementatio of lora
-            torch_dtype=load_dtype,
-            device_map="auto",
-        )
-    else:
-        model_object = AutoModelForCausalLM.from_pretrained(
-            args.model, device_map="auto"
-        )
-
-    if model_object.config.vocab_size != len(
-        dm.tokenizer
-    ):  # if adding [EOI] in LongForm dataset
-        model_object.resize_token_embeddings(len(dm.tokenizer))
-    if args.load_in_8bit:
-        model_object = prepare_model_for_int8_training(model_object)
-
-    model_object = modify_transformer(model_object, args)
-    module = model_class(**vars(args), model_object=model_object, tokenizer=dm.tokenizer)
+    module = model_class(**vars(args), tokenizer=dm.tokenizer)
 
     if args.switch_to_average > 0:
         module.model.switch_selector_to_average(
