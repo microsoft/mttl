@@ -286,7 +286,7 @@ def run_multitask(args):
     # load best model
     if path_best_model:
         del module
-        best_model = CLM.load_from_checkpoint(path_best_model)
+        best_model = CLM.load_from_checkpoint(path_best_model, tokenizer=dm.tokenizer)
     else:
         best_model = module
 
