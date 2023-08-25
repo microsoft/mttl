@@ -321,6 +321,7 @@ class NIOriginalDataModule(LightningDataModule):
         self.data_dir = data_dir or config.data_dir
         self.for_generation = for_generation
         self.tokenizer = get_tokenizer(config)
+        self.task_to_id = None
 
     @property
     def full_dataset(self):
@@ -351,6 +352,7 @@ class NIOriginalDataModule(LightningDataModule):
         task_to_id = task_to_id.union(set(dataset["validation"]["Task"]))
         task_to_id = task_to_id.union(set(dataset["test"]["Task"]))
         task_to_id = {task: i for i, task in enumerate(task_to_id)}
+        self.task_to_id = task_to_id
 
         self.collate_fn = DataCollatorForNI(
             tokenizer=self.tokenizer,

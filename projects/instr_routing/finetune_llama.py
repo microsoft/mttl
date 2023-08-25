@@ -27,27 +27,6 @@ from peft import prepare_model_for_int8_training
 import projects.instr_routing.models.routing  # noqa: F401
 
 
-##################################################
-def number_normalizer(tokens):
-    """Map all numeric tokens to a placeholder.
-
-    For many applications, tokens that begin with a number are not directly
-    useful, but the fact that such a token exists can be relevant.  By applying
-    this form of dimensionality reduction, some methods may perform better.
-    """
-    return ("#NUMBER" if token[0].isdigit() else token for token in tokens)
-
-
-from sklearn.feature_extraction.text import TfidfVectorizer
-
-
-class NumberNormalizingVectorizer(TfidfVectorizer):
-    # this vectorizer replaces numbers with #NUMBER token
-    def build_tokenizer(self):
-        tokenize = super().build_tokenizer()
-        return lambda doc: list(number_normalizer(tokenize(doc)))
-
-
 def remove_non_serializable(d):
     """
     Recursively remove non-JSON serializable values from a dictionary.
@@ -158,13 +137,7 @@ def run_multitask(args):
     else:
         raise NotImplementedError()
 
-    if args.load_dtype == "float32":
-        load_dtype = torch.float32
-    elif args.load_dtype == "float16":
-        load_dtype = torch.float16
-    else:
-        raise NotImplementedError()
-
+    args.n_tasks = len(dm.task_to_id)
     module = model_class(**vars(args), tokenizer=dm.tokenizer)
 
     if args.switch_to_average > 0:
@@ -210,6 +183,7 @@ def run_multitask(args):
         # get run id
         run_id = wandb_logger.experiment.id
         model_name += run_id
+
     exp_name = os.environ.get("AMLT_JOB_NAME", args.exp_name)
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.output_dir,
@@ -223,7 +197,7 @@ def run_multitask(args):
     callbacks.append(checkpoint_callback)
 
     trainer = Trainer(
-        devices=1,
+        devices=-1,
         accelerator="gpu",
         logger=loggers,
         num_sanity_val_steps=5,
@@ -272,7 +246,6 @@ def run_multitask(args):
 
     # empty memory
     del (
-        module,
         dm,
         trainer,
         loggers,

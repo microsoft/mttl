@@ -1,5 +1,7 @@
 {
     "dataset": "platypus",
+    "model": "meta-llama/Llama-2-13b-hf",
+    "model_family": "gpt",
     "fast_dev_run": 0,
     "optimizer": "adamw", 
     "learning_rate": 3e-4, 
@@ -11,7 +13,6 @@
     "xrouter_normal_innit": 1,
     "train_batch_size": 16,
     "merge_A_B_seperately": 0, 
-    "model": "yahma/llama-7b-hf",
     "lora_rank": 4,  
     "num_train_epochs": 1,
     "n_skills": 1,
