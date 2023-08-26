@@ -100,9 +100,7 @@ class CLM(EfficientCheckpointModule):
             if self.hparams.load_in_8bit:
                 model_object = prepare_model_for_kbit_training(model_object)
 
-            model_object = modify_transformer(model_object, self.hparams)
-
-            self.model = model_object
+            self.model = modify_transformer(model_object, self.hparams)
         else:
             self.model = kwargs.get("model_object")
 
