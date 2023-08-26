@@ -1,12 +1,11 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import re
 import numpy as np
-from types import MethodType
-from torch.distributions.relaxed_bernoulli import RelaxedBernoulli
 
+from torch.distributions.relaxed_bernoulli import RelaxedBernoulli
 from mttl.global_vars import EPS
+
 from mttl.models.modify_model import patch_layers, register_modifier
 from mttl.models.routing import (
     RoutingAdapter,
@@ -14,14 +13,15 @@ from mttl.models.routing import (
     RoutingSelector,
     get_selector,
     register_selector,
-    AverageSelector,
 )
 
 
 class SkillWrapper(RouterWrapper):
     @classmethod
     def switch_selector_to_average(cls, object, selector_to_replace=None, **kwargs):
-        super(SkillWrapper, cls).switch_selector_to_average(object, PolytroponSelector, **kwargs)
+        super(SkillWrapper, cls).switch_selector_to_average(
+            object, PolytroponSelector, **kwargs
+        )
 
     @classmethod
     def resize_module_logits(cls, object, n_tasks):
@@ -49,49 +49,6 @@ class SkillWrapper(RouterWrapper):
 
 class PolytroponAdapter(RoutingAdapter):
     pass
-
-
-@register_selector("moe")
-class MoESelector(RoutingSelector):
-    def __init__(self, config, **kwargs):
-        super().__init__()
-
-        self.config = config
-        self.n_splits = config.n_splits
-        self.n_skills = config.n_skills
-        self.topk = 3
-
-        self.module_logits = nn.Parameter(
-            torch.empty((config.n_tasks, config.n_splits * config.n_skills)).uniform_(
-                -1e-3, 1e-3
-            )
-        )
-
-    def resize_module_logits(self, n_tasks):
-        self.module_logits.data = torch.empty(
-            (n_tasks, self.n_splits * self.n_skills)
-        ).uniform_(-1e-3, 1e-3)
-
-    def forward(self, routing_infos):
-        module_logits = self.module_logits[routing_infos.task_ids]
-        module_logits = module_logits.view(-1, self.n_splits, self.n_skills)
-
-        if self.training:
-            noise = torch.randn_like(module_logits) / self.n_skills
-            module_logits = module_logits + noise
-
-        probs = F.softmax(module_logits, dim=-1)
-
-        top_probs, top_indices = probs.topk(
-            self.topk, dim=-1
-        )  # 2 active skills per task
-        top_k_probs = top_probs[:, : self.topk]
-        top_k_indices = top_indices[:, : self.topk]
-        top_k_probs = top_k_probs / top_k_probs.sum(dim=1, keepdim=True)
-
-        zeros = torch.zeros_like(probs, requires_grad=True)
-        module_weights = zeros.scatter(2, top_k_indices, top_k_probs)
-        return module_weights
 
 
 @register_selector("poly")
@@ -124,6 +81,14 @@ class PolytroponSelector(RoutingSelector):
         ).uniform_(-1e-3, 1e-3)
 
     def forward(self, routing_infos, **kwargs):
+        if torch.max(routing_infos.task_ids).item() >= self.module_logits.shape[0]:
+            raise ValueError(
+                "Poly selector encountered a larger number of tasks than provided at init. {} vs {}".format(
+                    torch.max(routing_infos.task_ids).item(),
+                    self.module_logits.shape[0],
+                )
+            )
+
         module_logits = self.module_logits[routing_infos.task_ids]
         module_logits = module_logits.view(-1, self.n_splits, self.n_skills)
 
@@ -196,7 +161,7 @@ class PolyLoRALinear(PolytroponAdapter):
                 self.n_skills,
                 linear_layer.in_features // self.n_splits,
                 self.rank,
-                dtype=self.weight.dtype if self.weight.dtype != torch.int8 else torch.float32
+                device=self.weight.device,
             )
         )
         self.lora_b = nn.Parameter(
@@ -206,7 +171,6 @@ class PolyLoRALinear(PolytroponAdapter):
                 self.rank,
                 linear_layer.out_features // self.n_splits,
                 device=self.weight.device,
-                dtype=self.weight.dtype if self.weight.dtype != torch.int8 else torch.float32
             )
         )
         self.reset_parameters()
@@ -239,7 +203,6 @@ class PolyLoRALinear(PolytroponAdapter):
             self.training_steps += 1
 
         task_id = self.routing_infos.task_ids
-
         repeat = input.size(0) // task_id.size(0)
 
         # this repeat follows the patten in `model.predict()` line 152
@@ -247,21 +210,19 @@ class PolyLoRALinear(PolytroponAdapter):
             self.routing_infos.repeat_interleave(repeat)
 
         mixing_weights = self.selector(self.routing_infos).to(dtype=input.dtype)
-        bs, n_splits, n_skills = mixing_weights.size()
 
-        # A is    n_splits, n_skills, D // n_splits, rank
-        # we want bs,       n_splits, D // n_splits, rank
+        bs, n_splits, n_skills = mixing_weights.size()
         A = torch.einsum("bqs,qsdr->bqdr", (mixing_weights, self.lora_a))
         B = torch.einsum("bqs,qsrd->bqrd", (mixing_weights, self.lora_b))
         A = A.reshape(bs, self.in_features, self.rank)
         B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
+        adapter_out = input.bmm(A).bmm(B) * self.scaling
 
-        adapter_out = input.bmm(A).bmm(B)
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
 
-        return self.linear_layer(input) + adapter_out * self.scaling
+        return self.linear_layer(input) + adapter_out
 
 
 class PolyIA3Linear(PolytroponAdapter):
@@ -283,7 +244,12 @@ class PolyIA3Linear(PolytroponAdapter):
         data = torch.ones(
             self.n_skills, self.n_splits, self.out_features // self.n_splits
         )
-        self.lora_a = nn.Parameter(data, dtype=self.weight.dtype if self.weight.dtype != torch.int8 else torch.float32)
+        self.lora_a = nn.Parameter(
+            data,
+            dtype=self.weight.dtype
+            if self.weight.dtype != torch.int8
+            else torch.float32,
+        )
 
         if selector is None:
             self.selector = get_selector(config)
