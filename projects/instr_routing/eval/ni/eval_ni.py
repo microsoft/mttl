@@ -9,6 +9,7 @@ def eval_ni(
     model,
     nshot=2,
     data_dir=None,
+    eval_batches=-1,
 ):
     from mttl.models.ni_evaluator import NIEvaluator
 
@@ -17,9 +18,9 @@ def eval_ni(
         data_dir=data_dir or config.data_dir,
         num_pos_examples=nshot
     )
-    metrics = ni_evaluator.evaluate(model, metric_per_task=True)
+    metrics = ni_evaluator.evaluate(model, metric_per_task=True, eval_batches=eval_batches)
     torch.cuda.empty_cache()
-    return metrics["rougeL"]["all"]
+    return metrics["all"]["rougeL"]
 
 
 if __name__ == "__main__":

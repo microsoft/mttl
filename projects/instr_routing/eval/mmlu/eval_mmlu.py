@@ -6,6 +6,7 @@ import torch
 def eval_mmlu(
     config,
     model,
+    eval_batches=-1,
 ):
     from mttl.models.mmlu_evaluator import MMLUEvaluator
 
@@ -13,9 +14,9 @@ def eval_mmlu(
         config,
         data_dir=config.data_dir,
     )
-    metrics = evaluator.evaluate(model, metric_per_task=True)
+    metrics = evaluator.evaluate(model, metric_per_task=True, eval_batches=eval_batches)
     torch.cuda.empty_cache()
-    return metrics["exact_match"]["all"]
+    return metrics["all"]["exact_match"]
 
 
 if __name__ == "__main__":
