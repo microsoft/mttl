@@ -231,7 +231,12 @@ class CLM(EfficientCheckpointModule):
             routing_infos.gen_mode = kwargs["gen_mode"]
 
         self.model.task_id_container["routing_infos"] = routing_infos
-        return self.model.generate(inputs=batch["input_ids"], **kwargs)
+
+        return self.model.generate(
+            inputs=batch["input_ids"],
+            attention_mask=batch["attention_mask"],
+            **kwargs
+        )
 
     def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
         # self.log_routing_metrics() .
@@ -467,7 +472,7 @@ class CLM(EfficientCheckpointModule):
         self._inference_outputs += [(loss, batch["task_ids"])]
         return loss, batch["task_ids"]
 
-    def on_test_epoch_end(self, outputs):
+    def on_test_epoch_end(self):
         outputs = self._inference_outputs
         losses = torch.cat([out[0] for out in outputs], 0)
         task_ids = torch.cat([out[1] for out in outputs], 0)
