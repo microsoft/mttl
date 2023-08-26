@@ -217,18 +217,18 @@ def run_multitask(args):
 
     trainer.fit(module, dm)
 
-    ckpt_path = "best" if not args.fast_dev_run else "last"
+    path_best_model = trainer.checkpoint_callback.best_model_path
+    path_last_model = trainer.checkpoint_callback.last_model_path
+
+    ckpt_path = "best" if not args.fast_dev_run and path_best_model else "last"
     trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
 
-    if args.use_test_set and not args.fast_dev_run:
+    if args.use_test_set and not args.fast_dev_run and path_best_model:
         module.model.checkpoint_tested = "best"
         trainer.test(dataloaders=dm, ckpt_path=ckpt_path)
 
-        module.model.checkpoint_tested = "last"
-        trainer.test(dataloaders=dm, ckpt_path="last")
-
-    path_best_model = trainer.checkpoint_callback.best_model_path
-    path_last_model = trainer.checkpoint_callback.last_model_path
+    module.model.checkpoint_tested = "last"
+    trainer.test(dataloaders=dm, ckpt_path="last")
 
     print(f"Best model path: {path_best_model}")
     print(f"Last model path: {path_last_model}")
