@@ -26,7 +26,7 @@ class MMLUEvaluator(object):
         self.datamodule = MMLUDataModule(self.config)
         self.datamodule.setup("test")
 
-    def evaluate(self, model, metric_per_task=True):
+    def evaluate(self, model, metric_per_task=True, eval_batches=-1):
         tokenizer = self.datamodule.tokenizer
         samples_seen = 0
 
@@ -114,6 +114,9 @@ class MMLUEvaluator(object):
 
             all_EM.append(eval_metrics["exact_match"])
             pbar.set_description(f"EM: {np.mean(all_EM):.4f}")
+
+            if step == eval_batches:
+                break
 
         eval_metrics = compute_metrics(
             all_predictions, [[r] for r in all_references], reduction="none"

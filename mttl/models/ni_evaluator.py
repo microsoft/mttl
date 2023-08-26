@@ -27,7 +27,7 @@ class NIEvaluator(object):
         )
         self.datamodule.setup("test")
 
-    def evaluate(self, model, metric_per_task=True):
+    def evaluate(self, model, metric_per_task=True, eval_batches=-1):
         model.eval()
         model = model.to(self.device)
 
@@ -113,6 +113,9 @@ class NIEvaluator(object):
             )
             all_rougeL.append(eval_metrics["rougeL"])
             pbar.set_description(f"rougeL: {np.mean(all_rougeL):.4f}")
+            
+            if step == eval_batches:
+                break
 
         eval_metrics = compute_metrics(
             all_predictions, [[r] for r in all_references], reduction="none"
