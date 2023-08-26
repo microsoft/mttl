@@ -8,12 +8,14 @@ from mttl.models.modify_model import patch_layers, register_modifier
 from mttl.models.poly import PolyLoRALinear
 from mttl.models.routing import (
     RouterWrapper,
+    RoutingAdapter,
     RoutingSelector,
+    get_selector,
     register_selector,
 )
 
 
-@register_selector("aux_var_router")
+@register_selector("vsmear")
 class VariationalRouter(RoutingSelector):
     def __init__(self, config, in_d):
         super().__init__()
@@ -78,15 +80,64 @@ class VariationalRouter(RoutingSelector):
         return routing_probs.unsqueeze(1), auxiliary_loss
 
 
-class AuxRoutingLoRALinear(PolyLoRALinear):
+class AuxRoutingLoRALinear(RoutingAdapter):
     def __init__(self, config, task_id_ptr, linear_layer, selector=None, **kwargs):
-        super().__init__(config, task_id_ptr, linear_layer, selector, **kwargs)
+        super().__init__()
+
+        self.n_splits = config.n_splits
+        self.n_tasks = config.n_tasks
+        self.n_skills = config.n_skills
+        self.in_features = linear_layer.in_features
+        self.out_features = linear_layer.out_features
+        self.use_warmup = config.lora_warmup
+        self.rank = config.lora_rank
+        self.lora_alpha = config.lora_alpha
+        self.scaling = self.lora_alpha / self.rank
+        self.linear_layer = linear_layer
+        self.weight = linear_layer.weight
+        self.bias = linear_layer.bias
+        self.task_id_ptr = task_id_ptr
+        self.training_steps = 0.0
+
+        if selector is None:
+            self.selector = get_selector(config, in_d=self.in_features)
+        else:
+            self.selector = selector
+
+        self.lora_a = nn.Parameter(
+            torch.empty(
+                self.n_skills,
+                linear_layer.in_features * self.rank,
+            )
+        )
+        self.lora_b = nn.Parameter(
+            torch.empty(
+                self.n_skills,
+                self.rank * linear_layer.out_features,
+            )
+        )
 
         # store losses and metrics
         self.losses = []
         self.metrics = {}
         self.training_steps = 0
         self.reset_parameters()
+
+    def reset_parameters(self):
+        import math
+
+        gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
+        std = gain / math.sqrt(self.in_features)
+
+        with torch.no_grad():
+            self.lora_a.uniform_(-std, std)
+
+        # ensure that initially, adding the adapter does not change the output
+        if self.use_warmup:
+            with torch.no_grad():
+                self.lora_b.uniform_(-std, std)
+        else:
+            torch.nn.init.zeros_(self.lora_b)
 
     def forward(self, input):
         if self.training:
@@ -109,14 +160,13 @@ class AuxRoutingLoRALinear(PolyLoRALinear):
             mixing_weights = torch.ones(
                 bs, self.n_splits, self.n_skills, device=input.device, dtype=input.dtype
             )
+
         self.metrics["routing"] = mixing_weights.detach().cpu().float()
 
-        bs, n_splits, n_skills = mixing_weights.size()
-        A = torch.einsum("bqs,qsdr->bqdr", (mixing_weights, self.lora_a))
-        B = torch.einsum("bqs,qsrd->bqrd", (mixing_weights, self.lora_b))
-        A = A.reshape(bs, self.in_features, self.rank)
-        B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
-        adapter_out = input.bmm(A).bmm(B) * self.scaling
+        mixing_weights = mixing_weights.squeeze()
+        mixed_a = torch.matmul(mixing_weights, self.lora_a).view(-1, self.in_features, self.rank)
+        mixed_b = torch.matmul(mixing_weights, self.lora_b).view(-1, self.rank, self.out_features)
+        adapter_out = input.bmm(mixed_a).bmm(mixed_b) * self.scaling
 
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
@@ -125,6 +175,11 @@ class AuxRoutingLoRALinear(PolyLoRALinear):
         return self.linear_layer(input) + adapter_out
 
 
-@register_modifier("aux_lora")
-def modify_with_variational_router(transformer, config):
-    return patch_layers(transformer, config, AuxRoutingLoRALinear, RouterWrapper)
+@register_modifier("vsmear")
+def modify_with_vsmear(transformer, config):
+    config.router_selector = config.router_selector or "vsmear"
+
+    if config.adapter_type in ["lora", None]:
+        return patch_layers(transformer, config, AuxRoutingLoRALinear, RouterWrapper)
+    else:
+        raise NotImplementedError(f"Adapter type {config.adapter_type} not implemented for vsmear modifier.")

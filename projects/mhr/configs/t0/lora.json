@@ -6,6 +6,7 @@
     "lora_kaiming_init": false,
     "lora_warmup": false,
     "lora_modules": ".*SelfAttention|.*EncDecAttention|.*DenseReluDense",
+    "model_modifier": "lora",
     "lora_layers": "q|k|v|o",
     "trainable_param_names": ".*lora_[ab].*",
     "adapters_learning_rate": 0.001

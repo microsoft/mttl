@@ -171,7 +171,6 @@ def run_multitask(args):
     # empty memory
     del (
         dm,
-        trainer,
         loggers,
         callbacks,
         checkpoint_callback,

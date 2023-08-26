@@ -218,11 +218,11 @@ class Config:
         self.monitor_grad_alignment_on = None
 
         self.model_modifier = None
-        self.lora_randb_init = False
+        self.adapter_type = None
+
         self.lora_rank = 16
         self.lora_init_scale = 0.01
         self.lora_alpha = 1.
-        self.lora_kaiming_init = False
         self.lora_warmup = False
         self.lora_modules = self.patch_modules = None
         self.lora_layers = self.patch_layers = None
@@ -230,11 +230,11 @@ class Config:
         self.n_tasks = None
 
         # Polytropon related hyper-parameters
-        self.n_splits = 1                      # number of splits for poly-s
-        self.router_selector = "poly"            # poly, poly_cluster
+        self.n_splits = 1                        # number of splits for poly-s
+        self.router_selector = None              # poly, poly_cluster
         self.router_selector_cluster_temp = 1.0  # temperature for the cluster selector
-        self.poly_average_correction = False   # correct the poly average
-        self.poly_use_shared_skill = False     # use one skill shared by all tasks
+        self.poly_average_correction = False     # correct the poly average
+        self.poly_use_shared_skill = False       # use one skill shared by all tasks
 
         """
         poly_granularity : how granular is the module selection :

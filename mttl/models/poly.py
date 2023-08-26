@@ -34,7 +34,7 @@ class SkillWrapper(RouterWrapper):
     def remove_skills(cls, object, skill_ids_to_keep):
         print("Removing skills, keeping", skill_ids_to_keep)
         for name, adapter in object.get_adapters().items():
-            if isinstance(adapter, PolyLoRALinear):
+            if isinstance(adapter, PolytroponAdapter):
                 if adapter.lora_a.shape[1] > 1:
                     adapter.lora_a = nn.Parameter(
                         adapter.lora_a[:, skill_ids_to_keep, :, :]
@@ -145,8 +145,6 @@ class PolyLoRALinear(PolytroponAdapter):
         self.linear_layer = linear_layer
         self.weight = linear_layer.weight
         self.bias = linear_layer.bias
-        self.kaiming_init = config.lora_kaiming_init
-        self.lora_randb_init = config.lora_randb_init
         self.task_id_ptr = task_id_ptr
         self.training_steps = 0.0
 
@@ -178,21 +176,14 @@ class PolyLoRALinear(PolytroponAdapter):
     def reset_parameters(self):
         import math
 
-        if self.kaiming_init:
-            for skill in range(self.n_skills):
-                for split in range(self.n_splits):
-                    param = torch.empty((self.rank, self.in_features // self.n_splits))
-                    torch.nn.init.kaiming_uniform_(param, a=math.sqrt(5))
-                    self.lora_a.data[split, skill, :, :] = param.T
-        else:
-            gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
-            std = gain / math.sqrt(self.in_features)
+        gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
+        std = gain / math.sqrt(self.in_features)
 
-            with torch.no_grad():
-                self.lora_a.uniform_(-std, std)
+        with torch.no_grad():
+            self.lora_a.uniform_(-std, std)
 
         # ensure that initially, adding the adapter does not change the output
-        if self.use_warmup or self.lora_randb_init:
+        if self.use_warmup:
             with torch.no_grad():
                 self.lora_b.uniform_(-std, std)
         else:
@@ -281,11 +272,10 @@ class PolyIA3Linear(PolytroponAdapter):
         )
 
 
-@register_modifier("poly_ia3")
+@register_modifier("poly")
 def modify_with_poly_ia3(transformer, config):
-    return patch_layers(transformer, config, PolyIA3Linear, SkillWrapper)
-
-
-@register_modifier("poly_lora")
-def modify_with_poly_lora(transformer, config):
-    return patch_layers(transformer, config, PolyLoRALinear, SkillWrapper)
+    config.router_selector = config.router_selector or "poly"
+    if config.adapter_type == "ia3":
+        return patch_layers(transformer, config, PolyIA3Linear, SkillWrapper)
+    else:
+        return patch_layers(transformer, config, PolyLoRALinear, SkillWrapper)

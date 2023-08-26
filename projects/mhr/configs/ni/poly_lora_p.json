@@ -1,7 +1,7 @@
 {
     "n_skills": 8,
     "n_splits": 1,
-    "model_modifier": "poly_lora",
+    "model_modifier": "poly",
     "lora_rank": 1,
     "lora_modules": ".*SelfAttention|.*EncDecAttention|.*DenseReluDense",
     "lora_layers": "k|v|wi_1.*",
