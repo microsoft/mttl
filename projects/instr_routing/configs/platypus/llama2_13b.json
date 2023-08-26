@@ -10,5 +10,6 @@
     "optimizer": "adamw",
     "eval_every": 400,
     "warmup_steps": 100,
-    "precision": "bf16"
+    "precision": "bf16",
+    "dataset": "platypus"
 }
