@@ -126,15 +126,19 @@ class NIEvaluator(object):
             mean_metrics[metric_name] = metric_value
 
         if metric_per_task:
+            metric_values_all = {}
+
             for metric_name in eval_metrics.keys():
                 metric_values = defaultdict(list)
                 for task_name, v in zip(task_names, eval_metrics[metric_name]):
                     metric_values[task_name] += [v]
-            metric_values = {
-                task_name: sum(vs) / len(vs)
-                for task_name, vs in metric_values.items()
-            }
-            metric_values["all"] = mean_metrics[metric_name]
+                metric_values["all"] = [mean_metrics[metric_name]]
+                metric_values = {
+                    task_name: sum(vs) / len(vs)
+                    for task_name, vs in metric_values.items()
+                }
+                metric_values_all[metric_name] = metric_values
+            metric_values = metric_values_all
         else:
             metric_values = mean_metrics
         return metric_values

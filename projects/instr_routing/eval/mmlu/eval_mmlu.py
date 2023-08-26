@@ -16,7 +16,7 @@ def eval_mmlu(
     )
     metrics = evaluator.evaluate(model, metric_per_task=True, eval_batches=eval_batches)
     torch.cuda.empty_cache()
-    return metrics["all"]["exact_match"]
+    return metrics["exact_match"]["all"]
 
 
 if __name__ == "__main__":

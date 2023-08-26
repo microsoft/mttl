@@ -21,7 +21,6 @@ from mttl.models.utils import (
     get_global_batch_size,
     RoutingInfo,
 )
-from mttl.models.routing import RouterWrapper
 from mttl.models.get_optimizer import get_optimizer
 from mttl.global_vars import EPS
 from pytorch_lightning.utilities.parsing import AttributeDict
@@ -164,7 +163,7 @@ class CLM(EfficientCheckpointModule):
         del outputs, shift_logits, shift_labels
 
         # get some losses from the model if it is a router
-        if type(self.model) == RouterWrapper:
+        if hasattr(self.model, 'get_routing_losses'):
             aux_loss = list(
                 itertools.chain(*list(self.model.get_routing_losses().values()))
             )

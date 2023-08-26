@@ -20,7 +20,7 @@ def eval_ni(
     )
     metrics = ni_evaluator.evaluate(model, metric_per_task=True, eval_batches=eval_batches)
     torch.cuda.empty_cache()
-    return metrics["all"]["rougeL"]
+    return metrics["rougeL"]["all"]
 
 
 if __name__ == "__main__":
