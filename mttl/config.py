@@ -221,7 +221,7 @@ class Config:
         self.lora_randb_init = False
         self.lora_rank = 16
         self.lora_init_scale = 0.01
-        self.lora_scaling_rank = 0
+        self.lora_alpha = 1.
         self.lora_kaiming_init = False
         self.lora_warmup = False
         self.lora_modules = self.patch_modules = None
