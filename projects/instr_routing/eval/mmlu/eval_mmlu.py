@@ -6,13 +6,14 @@ import torch
 def eval_mmlu(
     config,
     model,
+    data_dir=None,
     eval_batches=-1,
 ):
     from mttl.models.mmlu_evaluator import MMLUEvaluator
 
     evaluator = MMLUEvaluator(
         config,
-        data_dir=config.data_dir,
+        data_dir=data_dir or config.data_dir,
     )
     metrics = evaluator.evaluate(model, metric_per_task=True, eval_batches=eval_batches)
     torch.cuda.empty_cache()
