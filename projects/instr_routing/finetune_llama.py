@@ -21,10 +21,10 @@ from mttl.models.modify_model import modify_transformer
 from transformers import AutoModelForCausalLM, LlamaForCausalLM
 
 from huggingface_hub import login
-from peft import prepare_model_for_int8_training
 
 # register models
 import projects.instr_routing.models.routing  # noqa: F401
+import projects.instr_routing.models.aux_routing  # noqa: F401
 
 
 def remove_non_serializable(d):
