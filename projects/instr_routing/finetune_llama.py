@@ -102,7 +102,7 @@ class RoutingConfig(Config):
         self.eval_truthfulqa = True
         self.eval_superni = True
         self.eval_mmlu = True
-        self.eval_superni_use_outputs = False
+        self.eval_batches = 50
         self.gen_alpaca_eval = False
 
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
@@ -259,75 +259,32 @@ def run_multitask(args):
         print("Evaluating on super NI")
         from projects.instr_routing.eval.ni.eval_ni import eval_ni
 
-        rouge_L_super_ni = eval_ni(args, best_model, nshot=2, data_dir=os.environ["NI_DATA_DIR"])
+        rouge_L_super_ni = eval_ni(
+            args,
+            best_model,
+            nshot=2,
+            data_dir=os.environ["NI_DATA_DIR"],
+            eval_batches=args.eval_batches,
+        )
         if wandb.run is not None:
             wandb.log({"rouge_L_super_ni": rouge_L_super_ni})
 
         print("SuperNI RougeL: {:.2f}".format(rouge_L_super_ni))
 
     if args.eval_mmlu:
-        from projects.instr_routing.eval.mmlu.run_mmlu_eval import eval_mlu
+        from projects.instr_routing.eval.mmlu.eval_mmlu import eval_mmlu
 
         print("#" * 50)
         print("Evaluating on MMLU")
-        acc = eval_mlu(
-            ntrain=5, model_name="", model_path=path_best_model, eval_batch_size=2
+        acc = eval_mmlu(
+            args,
+            best_model,
+            data_dir=os.environ["MMLU_DATA_DIR"],
+            eval_batches=args.eval_batches,
         )
         if wandb.run is not None:
             wandb.log({"mmlu_acc": acc})
         print("MMLU accuracy: {:.2f}".format(acc))
-
-    if args.eval_arc:
-        from projects.instr_routing.eval.lm_eval_harness.run_eval import eval_lm
-
-        print("#" * 50)
-        print("Evaluating on ARC")
-        results_dict = eval_lm(
-            model_path=path_best_model,
-            model_name="",
-            task="arc_challenge",
-            batch_size=2,
-            nshot=25,
-            ds_limit=ds_limit,
-        )
-        if wandb.run is not None:
-            wandb.log(results_dict)
-
-        print("ARC results: {}".format(results_dict))
-
-    if args.eval_truthfulqa:
-        from projects.instr_routing.eval.lm_eval_harness.run_eval import eval_lm
-
-        print("#" * 50)
-        print("Evaluating on TruthfulQA")
-        results_dict = eval_lm(
-            model_path=path_best_model,
-            model_name="",
-            task="truthfulqa_mc",
-            batch_size=2,
-            nshot=0,
-            ds_limit=ds_limit,
-        )
-        if wandb.run is not None:
-            wandb.log(results_dict)
-        print("TQA results: {}".format(results_dict))
-
-    if args.eval_hellaswag:
-        from projects.instr_routing.eval.lm_eval_harness.run_eval import eval_lm
-
-        print("#" * 50)
-        print("Evaluating on HellaSwag")
-        results_dict = eval_lm(
-            model_path=path_best_model,
-            model_name="",
-            task="hellaswag",
-            batch_size=2,
-            nshot=10,
-            ds_limit=ds_limit,
-        )
-        if wandb.run is not None:
-            wandb.log(results_dict)
-        print("HSWAG results: {}".format(results_dict))
 
 
 if __name__ == "__main__":
