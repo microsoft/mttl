@@ -1,23 +1,8 @@
 import torch
-import copy
-import torch.nn as nn   
-from enum import Enum
-from dataclasses import dataclass
+import torch.nn as nn
 import torch.nn.functional as F
-import re 
-import numpy as np       
 from types import MethodType
-from torch.autograd import Function
-from torch.distributions.relaxed_bernoulli import RelaxedBernoulli
-
-from mttl.models.modify_model import patch_layers, register_modifier
-
 from .utils import RoutingInfo
-
-from mttl import global_vars
-from mttl.global_vars import EPS
-
-from projects.instr_routing.models.attention import SelectAttention    
 
 
 SELECTORS = {}
@@ -28,9 +13,7 @@ def register_selector(name):
         if name in SELECTORS:
             raise ValueError(f"Cannot register duplicate selector ({name})")
         if not issubclass(cls, RoutingSelector):
-            raise ValueError(
-                f"Selectors ({name}: {cls.__name__}) must extend Selector"
-            )
+            raise ValueError(f"Selectors ({name}: {cls.__name__}) must extend Selector")
         SELECTORS[name] = cls
         return cls
 
@@ -44,8 +27,8 @@ def get_selector(config, **kwargs):
 
 
 class RouterWrapper:
-    """Wrap transformer-based models with router-related functionalities.
-    """
+    """Wrap transformer-based models with router-related functionalities."""
+
     @classmethod
     def register_functions(cls, object):
         methods = [
@@ -97,20 +80,20 @@ class RouterWrapper:
         aux_losses = {}
 
         for name, adapter in object.get_adapters().items():
-            if getattr(adapter, 'losses', None):
+            if getattr(adapter, "losses", None):
                 aux_losses[name] = adapter.losses
         return aux_losses
 
     @classmethod
     def clear_routing_losses(cls, object):
         for _, adapter in object.get_adapters().items():
-            if getattr(adapter, 'losses', None):
+            if getattr(adapter, "losses", None):
                 adapter.losses = []
 
     @classmethod
     def clear_routing_metrics(cls, object):
         for _, adapter in object.get_adapters().items():
-            if getattr(adapter, 'metrics', None):
+            if getattr(adapter, "metrics", None):
                 adapter.metrics = {}
 
     @classmethod
@@ -118,7 +101,7 @@ class RouterWrapper:
         metrics = {}
 
         for name, adapter in object.get_adapters().items():
-            if getattr(adapter, 'metrics', None):
+            if getattr(adapter, "metrics", None):
                 for n, v in adapter.metrics.items():
                     metrics[name + "." + n] = v
         return metrics
@@ -154,7 +137,7 @@ class RoutingAdapter(nn.Module):
         return self.task_id_ptr["routing_infos"]
 
 
-@register_selector('average')
+@register_selector("average")
 class AverageSelector(RoutingSelector):
     def __init__(self, config, **kwargs):
         super().__init__()
@@ -162,7 +145,8 @@ class AverageSelector(RoutingSelector):
         self.n_splits = config.n_splits
         self.n_skills = config.n_skills
         self.register_buffer(
-            "module_logits", torch.empty(config.n_splits, config.n_skills).fill_(1.0 / config.n_skills)
+            "module_logits",
+            torch.empty(config.n_splits, config.n_skills).fill_(1.0 / config.n_skills),
         )
 
     def forward(self, routing_infos, **kwargs):
@@ -171,7 +155,7 @@ class AverageSelector(RoutingSelector):
         return module_logits.expand(bs, -1, -1)
 
 
-@register_selector('private')
+@register_selector("private")
 class PrivateSelector(RoutingSelector):
     def __init__(self, config, **kwargs):
         super().__init__()
