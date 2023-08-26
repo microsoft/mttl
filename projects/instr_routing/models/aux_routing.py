@@ -56,17 +56,23 @@ class VariationalRouter(RoutingSelector):
         inst_padding_mask = routing_infos.inst_token_mask
 
         prior_input = self.apply_mask_and_average(input, inst_padding_mask)
-        post_input = self.apply_mask_and_average(input, padding_mask)
-
         prior_routes = self.route(self.prior_router, self.prior_router_ln, prior_input)
-        post_routes = self.route(self.post_router, self.post_router_ln, post_input)
 
-        routing_probs = F.softmax(post_routes / 0.25, dim=-1)
-        auxiliary_loss = F.kl_div(
-            F.log_softmax(prior_routes / 0.25, dim=-1),
-            F.log_softmax(post_routes / 0.25, dim=-1),
-            log_target=True,
-        ).mean(0)
+        if self.training:
+            # during training :-)
+            post_input = self.apply_mask_and_average(input, padding_mask)
+            post_routes = self.route(self.post_router, self.post_router_ln, post_input)
+            routing_probs = F.softmax(post_routes / 0.5, dim=-1)
+            auxiliary_loss = F.kl_div(
+                F.log_softmax(prior_routes, dim=-1),
+                F.log_softmax(post_routes, dim=-1),
+                log_target=True,
+                reduction='batchmean',
+            )
+        else:
+            # during eval :-(
+            routing_probs = F.softmax(prior_routes / 0.25, dim=-1)
+            auxiliary_loss = routing_probs.sum().detach() * 0.
         return routing_probs.unsqueeze(1), auxiliary_loss
 
 
