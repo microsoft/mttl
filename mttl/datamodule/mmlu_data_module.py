@@ -161,7 +161,7 @@ class MMLUDataModule(LightningDataModule):
             pad_to_multiple_of=8,
             return_tensors="pt",
             model_family=self.config.model_family,
-            task_to_id=task_to_id,
+            task_to_id=self.task_to_id,
         )
 
         self.train_dataset = dataset["train"]
