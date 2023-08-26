@@ -134,7 +134,7 @@ class MMLUDataModule(LightningDataModule):
         self.data_dir = data_dir or config.data_dir
         self.config = config
         self.tokenizer = get_tokenizer(config)
-        self.collate_fn = None
+        self._setup()
 
     def get_dataset(self):
         import pkg_resources
@@ -143,12 +143,15 @@ class MMLUDataModule(LightningDataModule):
         return load_dataset(filename, data_dir=self.data_dir)
 
     def setup(self, stage=None):
+        pass
+
+    def _setup(self):
         dataset = self.get_dataset()
 
         task_to_id = set(dataset["train"]["Task"])
         task_to_id = task_to_id.union(set(dataset["validation"]["Task"]))
         task_to_id = task_to_id.union(set(dataset["test"]["Task"]))
-        task_to_id = {task: i for i, task in enumerate(task_to_id)}
+        self.task_to_id = {task: i for i, task in enumerate(task_to_id)}
 
         self.collate_fn = DataCollatorForMMLU(
             tokenizer=self.tokenizer,

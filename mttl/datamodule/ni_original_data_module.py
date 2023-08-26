@@ -321,7 +321,7 @@ class NIOriginalDataModule(LightningDataModule):
         self.data_dir = data_dir or config.data_dir
         self.for_generation = for_generation
         self.tokenizer = get_tokenizer(config)
-        self.task_to_id = None
+        self._setup()
 
     @property
     def full_dataset(self):
@@ -345,7 +345,10 @@ class NIOriginalDataModule(LightningDataModule):
     def dataset_name(self):
         return hash_example("-".join(self.tasks))
 
-    def setup(self, stage="fit"):
+    def setup(self, stage=None):
+        pass
+
+    def _setup(self, stage="fit"):
         dataset = self.get_dataset()
 
         task_to_id = set(dataset["train"]["Task"])
