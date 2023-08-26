@@ -128,9 +128,10 @@ class MMLUDataModule(LightningDataModule):
             collate_fn=self.collate_fn,
         )
 
-    def __init__(self, config):
+    def __init__(self, config, data_dir=None):
         super().__init__()
 
+        self.data_dir = data_dir or config.data_dir
         self.config = config
         self.tokenizer = get_tokenizer(config)
         self.collate_fn = None
@@ -139,7 +140,7 @@ class MMLUDataModule(LightningDataModule):
         import pkg_resources
 
         filename = pkg_resources.resource_filename(__name__, "../dataloader/mmlu_dataset.py")
-        return load_dataset(filename, data_dir=self.config.data_dir)
+        return load_dataset(filename, data_dir=self.data_dir)
 
     def setup(self, stage=None):
         dataset = self.get_dataset()
