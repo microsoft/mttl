@@ -99,12 +99,9 @@ class AuxRoutingLoRALinear(PolyLoRALinear):
 
         if self.selector is not None:
             mixing_weights = self.selector(self.routing_infos, input=input)
-
             if isinstance(mixing_weights, tuple):
                 mixing_weights, kl = mixing_weights
                 self.losses.append(kl)
-
-            mixing_weights.to(input.device)
         else:
             bs = input.size(0)
             mixing_weights = torch.ones(
@@ -122,6 +119,7 @@ class AuxRoutingLoRALinear(PolyLoRALinear):
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
+
         return self.linear_layer(input) + adapter_out
 
 

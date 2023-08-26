@@ -5,8 +5,7 @@
     "lora_dropout": 0.05,
     "weight_decay": 0.00,
     "n_skills": 1,
-    "router_selector": "poly",
-    "model_modifier": "poly_lora",
+    "model_modifier": "lora",
     "lora_modules": ".*",
     "lora_layers": "q_proj|v_proj|k_proj",
     "trainable_param_names": ".*lora_[ab].*"

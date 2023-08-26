@@ -1,9 +1,9 @@
 import json
 import os
-import sys
 import csv
 import torch
 import copy
+import itertools
 import numpy as np
 import pytorch_lightning as pl
 import matplotlib.pyplot as plt
@@ -21,6 +21,7 @@ from mttl.models.utils import (
     get_global_batch_size,
     RoutingInfo,
 )
+from mttl.models.routing import RouterWrapper
 from mttl.models.get_optimizer import get_optimizer
 from mttl.global_vars import EPS
 from pytorch_lightning.utilities.parsing import AttributeDict
@@ -162,22 +163,22 @@ class CLM(EfficientCheckpointModule):
 
         del outputs, shift_logits, shift_labels
 
-        # get auxiliary losses from routing selectors
-        import itertools
+        # get some losses from the model if it is a router
+        if type(self.model) == RouterWrapper:
+            aux_loss = list(
+                itertools.chain(*list(self.model.get_routing_losses().values()))
+            )
+            # we accumulate metrics over the microbatches
+            if not self.training:
+                # only plot this for validation
+                for k, v in self.model.get_routing_metrics().items():
+                    if "model.layers." in k:
+                        self.accumulate_metrics_batch[k].append(v)
 
-        aux_loss = list(
-            itertools.chain(*list(self.model.get_routing_losses().values()))
-        )
-
-        # we accumulate metrics over the microbatches
-        if not self.training:
-            # only plot this for validation
-            for k, v in self.model.get_routing_metrics().items():
-                if "model.layers." in k:
-                    self.accumulate_metrics_batch[k].append(v)
-
-        self.model.clear_routing_losses()
-        self.model.clear_routing_metrics()
+            self.model.clear_routing_losses()
+            self.model.clear_routing_metrics()
+        else:
+            aux_loss = []
         return loss, aux_loss
 
     def calculate_routing_mask(self, inputs, labels=None):
