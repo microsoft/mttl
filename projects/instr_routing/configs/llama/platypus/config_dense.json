@@ -24,7 +24,7 @@
     "same_lora_init": 0,
     "lora_dropout": 0.05,
     "weight_decay": 0.00,
-    "router_selector":"none",    
+    "router_selector": "poly",    
     "model_modifier": "poly_lora",  
     "lora_modules": ".*mlp",  
     "lora_layers": "gate_proj|down_proj|up_proj",

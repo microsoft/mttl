@@ -21,6 +21,9 @@ class LoRALinear(nn.Module):
         self.rank = config.lora_rank
         self.weight = linear_layer.weight
         self.bias = linear_layer.bias
+        self.linear_layer = linear_layer
+        self.lora_alpha = getattr(config, "lora_alpha", 1.0)
+        self.scaling = self.lora_alpha / self.rank
         self.lora_a = nn.Parameter(torch.randn(config.lora_rank, linear_layer.in_features))
         self.lora_b = nn.Parameter(torch.zeros(linear_layer.out_features, config.lora_rank))
         self.reset_parameters()
@@ -35,10 +38,9 @@ class LoRALinear(nn.Module):
 
     def forward(self, input):
         # general implementation for lora (adding and scaling)
-        weight = self.weight
-        adapter_out = torch.matmul(input, self.lora_a.T)
-        adapter_out = torch.matmul(adapter_out, self.lora_b.T) / self.rank
-        return F.linear(input, self.weight, self.bias) + adapter_out
+        adapter_out = (input @ self.lora_a.T)
+        adapter_out = (adapter_out @ self.lora_b.T)
+        return self.linear_layer(input) + adapter_out * self.scaling
 
 
 class GatorLinear(nn.Module):
@@ -110,14 +112,13 @@ class IA3Linear(nn.Module):
 
         self.in_features = linear_layer.in_features
         self.out_features = linear_layer.out_features
+        self.linear_layer = linear_layer
         self.weight = linear_layer.weight
         self.bias = linear_layer.bias
         self.multi_lora_b = nn.Parameter(torch.ones(linear_layer.out_features))
 
     def forward(self, input):
-        hidden = F.linear(input, self.weight, self.bias)
-        hidden = hidden * self.multi_lora_b
-        return hidden
+        return self.linear_layer(input) * self.multi_lora_b
 
 
 def modify_with_adapter(transformer, config, adapter_klass):

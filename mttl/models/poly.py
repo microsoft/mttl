@@ -123,7 +123,7 @@ class PolytroponSelector(RoutingSelector):
             (n_tasks, self.n_splits * self.n_skills)
         ).uniform_(-1e-3, 1e-3)
 
-    def forward(self, routing_infos):
+    def forward(self, routing_infos, **kwargs):
         module_logits = self.module_logits[routing_infos.task_ids]
         module_logits = module_logits.view(-1, self.n_splits, self.n_skills)
 
@@ -175,6 +175,7 @@ class PolyLoRALinear(PolytroponAdapter):
         self.out_features = linear_layer.out_features
         self.use_warmup = config.lora_warmup
         self.rank = config.lora_rank
+        self.linear_layer = linear_layer
         self.weight = linear_layer.weight
         self.bias = linear_layer.bias
         self.kaiming_init = config.lora_kaiming_init
@@ -187,20 +188,24 @@ class PolyLoRALinear(PolytroponAdapter):
         else:
             self.selector = selector
 
+        print(self.weight.dtype)
         self.lora_a = nn.Parameter(
-            self.weight.new_empty(
+            torch.empty(
                 self.n_splits,
                 self.n_skills,
                 linear_layer.in_features // self.n_splits,
                 self.rank,
+                dtype=self.weight.dtype if self.weight.dtype != torch.int8 else torch.float32
             )
         )
         self.lora_b = nn.Parameter(
-            self.weight.new_empty(
+            torch.empty(
                 self.n_splits,
                 self.n_skills,
                 self.rank,
                 linear_layer.out_features // self.n_splits,
+                device=self.weight.device,
+                dtype=self.weight.dtype if self.weight.dtype != torch.int8 else torch.float32
             )
         )
         self.reset_parameters()
@@ -255,7 +260,7 @@ class PolyLoRALinear(PolytroponAdapter):
         if self.use_warmup:
             adapter_out = adapter_out * warmup
 
-        return F.linear(input, self.weight, self.bias) + adapter_out
+        return self.linear_layer(input) + adapter_out
 
 
 class PolyIA3Linear(PolytroponAdapter):
@@ -265,6 +270,7 @@ class PolyIA3Linear(PolytroponAdapter):
         self.n_splits = config.n_splits
         self.n_tasks = config.n_tasks
         self.n_skills = config.n_skills
+        self.linear_layer = linear_layer
         self.in_features = linear_layer.in_features
         self.out_features = linear_layer.out_features
         self.weight = linear_layer.weight
@@ -276,7 +282,7 @@ class PolyIA3Linear(PolytroponAdapter):
         data = torch.ones(
             self.n_skills, self.n_splits, self.out_features // self.n_splits
         )
-        self.lora_a = nn.Parameter(data)
+        self.lora_a = nn.Parameter(data, dtype=self.weight.dtype if self.weight.dtype != torch.int8 else torch.float32)
 
         if selector is None:
             self.selector = get_selector(config)
@@ -300,7 +306,7 @@ class PolyIA3Linear(PolytroponAdapter):
 
         A = torch.einsum("bqs,sqd->bqd", (mixing_weights, weight))
         A = A.reshape(input.size(0), 1, -1)
-        return F.linear(input, self.weight, self.bias) * A
+        return self.linear_layer(input) * A
 
     def extra_repr(self):
         return "n_skills={}, in_features={}, out_features={}, bias={}".format(

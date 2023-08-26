@@ -96,7 +96,6 @@ class RoutingConfig(Config):
         self.xr4_option = None  # "switch" #, "default", "teacher_output"
         self.xrouter_x4_target = "posterior"  # , "prior" -- wich router logits to use for x4 at trainign time.
 
-        self.superni_eval_batchsize = 2
         self.router_learning_rate = None
         self.eval_hellaswag = True
         self.eval_arc = True

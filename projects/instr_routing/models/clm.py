@@ -97,10 +97,12 @@ class CLM(EfficientCheckpointModule):
             if model_object.config.vocab_size != len(self.tokenizer):
                 model_object.resize_token_embeddings(len(self.tokenizer))
 
-            model_object = modify_transformer(model_object, self.hparams)
-
             if self.hparams.load_in_8bit:
                 model_object = prepare_model_for_kbit_training(model_object)
+
+            model_object = modify_transformer(model_object, self.hparams)
+
+            self.model = model_object
         else:
             self.model = kwargs.get("model_object")
 

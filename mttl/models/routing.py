@@ -97,20 +97,20 @@ class RouterWrapper:
         aux_losses = {}
 
         for name, adapter in object.get_adapters().items():
-            if getattr(adapter, 'losses'):
+            if getattr(adapter, 'losses', None):
                 aux_losses[name] = adapter.losses
         return aux_losses
 
     @classmethod
     def clear_routing_losses(cls, object):
         for _, adapter in object.get_adapters().items():
-            if getattr(adapter, 'losses'):
+            if getattr(adapter, 'losses', None):
                 adapter.losses = []
 
     @classmethod
     def clear_routing_metrics(cls, object):
         for _, adapter in object.get_adapters().items():
-            if getattr(adapter, 'metrics'):
+            if getattr(adapter, 'metrics', None):
                 adapter.metrics = {}
 
     @classmethod
@@ -118,7 +118,7 @@ class RouterWrapper:
         metrics = {}
 
         for name, adapter in object.get_adapters().items():
-            if getattr(adapter, 'metrics'):
+            if getattr(adapter, 'metrics', None):
                 for n, v in adapter.metrics.items():
                     metrics[name + "." + n] = v
         return metrics
