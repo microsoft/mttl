@@ -175,6 +175,8 @@ class PolyLoRALinear(PolytroponAdapter):
         self.out_features = linear_layer.out_features
         self.use_warmup = config.lora_warmup
         self.rank = config.lora_rank
+        self.lora_alpha = config.lora_alpha
+        self.scaling = self.lora_alpha / self.rank
         self.linear_layer = linear_layer
         self.weight = linear_layer.weight
         self.bias = linear_layer.bias
@@ -188,7 +190,6 @@ class PolyLoRALinear(PolytroponAdapter):
         else:
             self.selector = selector
 
-        print(self.weight.dtype)
         self.lora_a = nn.Parameter(
             torch.empty(
                 self.n_splits,
@@ -255,12 +256,12 @@ class PolyLoRALinear(PolytroponAdapter):
         A = A.reshape(bs, self.in_features, self.rank)
         B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
 
-        adapter_out = input.bmm(A).bmm(B) / self.rank
+        adapter_out = input.bmm(A).bmm(B)
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
 
-        return self.linear_layer(input) + adapter_out
+        return self.linear_layer(input) + adapter_out * self.scaling
 
 
 class PolyIA3Linear(PolytroponAdapter):
