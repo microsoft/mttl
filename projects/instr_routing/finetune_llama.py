@@ -165,6 +165,7 @@ def run_multitask(args):
     if mlf_logger:
         loggers.append(mlf_logger)
 
+    loggers.append(pl.loggers.TensorBoardLogger(save_dir=args.output_dir))
     loggers.append(pl.loggers.CSVLogger(save_dir=args.output_dir, name="csv_metrics"))
 
     kwargs = {"val_check_interval": args.eval_every} if args.eval_every else {}

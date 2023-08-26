@@ -22,7 +22,6 @@ class VariationalRouter(RoutingSelector):
         self.in_d = in_d
         self.n_splits = config.n_splits
         assert self.n_splits == 1
-        self.input_ln = nn.LayerNorm(in_d)
 
         self.prior_router = nn.Linear(in_d, config.n_skills * self.n_splits)
         self.prior_router_ln = nn.LayerNorm(in_d)
@@ -39,15 +38,17 @@ class VariationalRouter(RoutingSelector):
         norm = torch.norm(W, p=1, keepdim=True)
         return norm.item()
 
-    def route(self, router: nn.Linear, layer_norm: nn.LayerNorm, x):
-        x = self.input_ln(x)
-        weights = layer_norm(router.weight)
+    def route(self, router: nn.Linear, layer_norm: nn.LayerNorm, x, ln=False):
+        if ln:
+            weights = layer_norm(router.weight)
+        else:
+            weights = router.weight
         return F.linear(x, weights, router.bias)
 
     def apply_mask_and_average(self, x, padding_mask):
         x_rout = x * padding_mask.unsqueeze(-1).to(x.device)
         lengths = x_rout.ne(0).sum(dim=1)
-        x_rout = (x_rout.sum(dim=1) / lengths)
+        x_rout = x_rout.sum(dim=1) / lengths
         return x_rout
 
     def forward(self, routing_infos, input: torch.Tensor):
@@ -62,17 +63,18 @@ class VariationalRouter(RoutingSelector):
             # during training :-)
             post_input = self.apply_mask_and_average(input, padding_mask)
             post_routes = self.route(self.post_router, self.post_router_ln, post_input)
-            routing_probs = F.softmax(post_routes / 0.5, dim=-1)
-            auxiliary_loss = F.kl_div(
-                F.log_softmax(prior_routes, dim=-1),
-                F.log_softmax(post_routes, dim=-1),
-                log_target=True,
-                reduction='batchmean',
-            )
+            routing_probs = F.softmax(post_routes, dim=-1)
+
+            # compute auxiliary loss (KL divergence)
+            auxiliary_loss = routing_probs * F.log_softmax(
+                post_routes, -1
+            ) - routing_probs * F.log_softmax(prior_routes, dim=-1)
+
+            auxiliary_loss = auxiliary_loss.sum(dim=-1).mean()
         else:
             # during eval :-(
-            routing_probs = F.softmax(prior_routes / 0.25, dim=-1)
-            auxiliary_loss = routing_probs.sum().detach() * 0.
+            routing_probs = F.softmax(prior_routes, dim=-1)
+            auxiliary_loss = routing_probs.sum().detach() * 0.0
         return routing_probs.unsqueeze(1), auxiliary_loss
 
 

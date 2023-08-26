@@ -245,7 +245,7 @@ class CLM(EfficientCheckpointModule):
     def training_step(self, batch, _):
         loss, aux_loss = self.forward(batch)
 
-        aux_loss_mean = torch.mean(torch.stack(aux_loss)) if len(aux_loss) > 0 else 0
+        aux_loss_mean = torch.sum(torch.stack(aux_loss)) if len(aux_loss) > 0 else 0
         total_loss = loss + aux_loss_mean
 
         self.log("train/loss", loss, on_epoch=True, prog_bar=True)
