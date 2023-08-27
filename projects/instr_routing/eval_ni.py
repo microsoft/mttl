@@ -11,7 +11,7 @@ def eval_ni(
     data_dir=None,
     eval_batches=-1,
 ):
-    from mttl.models.ni_evaluator import NIEvaluator
+    from mttl.evaluators import NIEvaluator
 
     ni_evaluator = NIEvaluator(
         config,

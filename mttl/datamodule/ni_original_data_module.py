@@ -366,7 +366,7 @@ class NIOriginalDataModule(LightningDataModule):
             pad_to_multiple_of=8,
             return_tensors="pt",
             model_family=config.model_family if not self.for_generation else "seq2seq",
-            task_to_id=task_to_id,
+            task_to_id=self.task_to_id,
         )
 
         self.val_dataset = dataset["validation"]

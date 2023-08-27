@@ -9,7 +9,7 @@ def eval_mmlu(
     data_dir=None,
     eval_batches=-1,
 ):
-    from mttl.models.mmlu_evaluator import MMLUEvaluator
+    from mttl.evaluators import MMLUEvaluator
 
     evaluator = MMLUEvaluator(
         config,

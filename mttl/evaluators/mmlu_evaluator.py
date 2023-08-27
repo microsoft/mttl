@@ -67,15 +67,25 @@ class MMLUEvaluator(object):
             batch["input_ids"] = batch["input_ids"].to(self.device)
 
             with torch.no_grad():
-                predictions = model.generate(
-                    input_ids=batch["input_ids"],
-                    attention_mask=batch["input_ids"].ne(tokenizer.pad_token_id),
-                    max_length=max_length,
-                    generation_config=model.generation_config,
-                    return_dict_in_generate=True,
-                    output_scores=True,
-                    **extra_kwargs,
-                )
+                try:
+                    predictions = model.generate(
+                        input_ids=batch["input_ids"],
+                        attention_mask=batch["attention_mask"],
+                        max_length=max_length,
+                        generation_config=model.generation_config,
+                        return_dict_in_generate=True,
+                        output_scores=True,
+                        **extra_kwargs,
+                    )
+                except:
+                    predictions = model.generate(
+                        batch,
+                        max_length=max_length,
+                        generation_config=model.generation_config,
+                        return_dict_in_generate=True,
+                        output_scores=True,
+                        **extra_kwargs,
+                    )
 
             logits = predictions.scores[0]
             probs = (
