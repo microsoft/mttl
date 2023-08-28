@@ -51,8 +51,8 @@ class PlatypusModule(LightningDataModule):
         super().__init__()
 
         self.config = config
-
         self.tokenizer = get_tokenizer(config)
+
         self.collate_fn = DefaultCollator(
             tokenizer=self.tokenizer,
             padding="longest",
@@ -67,10 +67,8 @@ class PlatypusModule(LightningDataModule):
     def get_dataset(self, idxs=None, loss_for_keywords=True):
         return PlatypusDataset(
             self.config.data_dir,
-            self.config.dst_dir,
             idxs,
             loss_for_keywords=loss_for_keywords,
-            subset=100 if self.config.fast_debug_run else None,
         )
 
     def setup(self, stage=None):

@@ -221,6 +221,10 @@ class Config:
         self.lora_init_scale = 0.01
         self.lora_alpha = 1.
         self.lora_warmup = False
+        self.lora_init_b_random = False
+        self.lora_dropout = 0.
+
+        # n-skills for router-based methods
         self.n_skills = 8
         self.n_tasks = None
 

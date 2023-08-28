@@ -47,7 +47,9 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
         model, (`transformers.PreTrainedModel`):
             The loaded model from `transformers`
     """
-    loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
+    loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(
+        model, "is_loaded_in_4bit", False
+    )
 
     # cast all non INT8 parameters to fp32
     for param in model.parameters():
@@ -83,7 +85,7 @@ class CLM(EfficientCheckpointModule):
         self.model: AutoModelForCausalLM = None
         self.accumulate_metrics_batch = defaultdict(list)
 
-        if kwargs.get("model_object") is None:        
+        if kwargs.get("model_object") is None:
             if "llama" in self.hparams.model:
                 model_object = LlamaForCausalLM.from_pretrained(
                     self.hparams.model,
@@ -163,16 +165,12 @@ class CLM(EfficientCheckpointModule):
         del outputs, shift_logits, shift_labels
 
         # get some losses from the model if it is a router
-        if hasattr(self.model, 'get_routing_losses'):
+        if hasattr(self.model, "get_routing_losses"):
             aux_loss = list(
                 itertools.chain(*list(self.model.get_routing_losses().values()))
             )
-            # we accumulate metrics over the microbatches
-            if not self.training:
-                # only plot this for validation
-                for k, v in self.model.get_routing_metrics().items():
-                    if "model.layers." in k:
-                        self.accumulate_metrics_batch[k].append(v)
+            for k, v in self.model.get_routing_metrics().items():
+                self.accumulate_metrics_batch[k].append(v)
 
             self.model.clear_routing_losses()
             self.model.clear_routing_metrics()
@@ -181,9 +179,6 @@ class CLM(EfficientCheckpointModule):
         return loss, aux_loss
 
     def calculate_routing_mask(self, inputs, labels=None):
-        if not hasattr(self.hparams, "xrouting_option"):
-            return None, None
-
         # bs, seq = x.shape
         padding_mask = (inputs != self.pad_token_id).float()
         # 1 if the token is part of instruction or pad token (so outputs are 0s)
@@ -233,9 +228,7 @@ class CLM(EfficientCheckpointModule):
         self.model.task_id_container["routing_infos"] = routing_infos
 
         return self.model.generate(
-            inputs=batch["input_ids"],
-            attention_mask=batch["attention_mask"],
-            **kwargs
+            inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
         )
 
     def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
@@ -255,6 +248,14 @@ class CLM(EfficientCheckpointModule):
         for i, pg in enumerate(self.optimizers().optimizer.param_groups):
             self.log(f"train/lr_{i}", pg["lr"])
 
+        if (
+            self.global_step
+            % (self.hparams.gradient_accumulation_steps * self.hparams.micro_batch_size)
+            == 0
+            and self.global_step > 0
+        ):  # to accumulate over larger batch
+            self.log_routing_metrics(stage="train")
+
         return total_loss
 
     def log_routing_metrics(self, stage="train"):
@@ -262,80 +263,71 @@ class CLM(EfficientCheckpointModule):
         divs, entropies, specializations, names = [], [], [], []
 
         for k, v in self.accumulate_metrics_batch.items():
-            if (
-                not "model.layers." in k
-            ):  # we dont want to log the metrics for each layer
-                # self.log(f"train/{k}", torch.tensor(v).mean(), on_step=True)
-                pass
-            else:
-                names.append(k)
-                # log per lyer metrics: -MI and entropy, calculated over minimatch
-                layer_routing_dist = torch.cat(v, dim=0)
-                layer_routing_dist = layer_routing_dist.view(
-                    -1, layer_routing_dist.shape[-2], layer_routing_dist.shape[-1]
+            names.append(k)
+            # log per lyer metrics: -MI and entropy, calculated over minimatch
+            layer_routing_dist = torch.cat(v, dim=0)
+            layer_routing_dist = layer_routing_dist.view(
+                -1, layer_routing_dist.shape[-2], layer_routing_dist.shape[-1]
+            )
+            bs = layer_routing_dist.shape[0]
+            n_skills, n_splits = self.hparams.n_skills, self.hparams.n_splits
+            # calculate entropy and diversity over the full batch
+            mixing_weights_ = layer_routing_dist.view(
+                -1, n_skills
+            )  # ex x n_skills
+            mixing_weights_mean = layer_routing_dist.transpose(0, 1).mean(
+                dim=1
+            )  # n_splits x n_skills
+            average_normalized_entropy = (
+                -torch.sum(mixing_weights_ * torch.log(mixing_weights_ + EPS), dim=-1)
+                / np.log(n_skills)
+                if n_skills > 1
+                else torch.ones_like(mixing_weights_[:, 0])
+            )  # ex
+            # solit in n_splits chunks
+            average_normalized_entropy = average_normalized_entropy.reshape(
+                bs, n_splits
+            ).mean(
+                dim=0
+            )  # bs
+            # how different are the routinf for different examples? calculate MI, entropy of average - average entropy
+            mixing_weights_mean = layer_routing_dist.transpose(0, 1).mean(
+                dim=1
+            )  # n_splits x n_skills
+            entropy_of_av_normalized = (
+                -torch.sum(
+                    mixing_weights_mean * torch.log(mixing_weights_mean + EPS),
+                    dim=-1,
                 )
-                bs = layer_routing_dist.shape[0]
-                n_skills, n_splits = self.hparams.n_skills, self.hparams.n_splits
-                # calculate entropy and diversity over the full batch
-                mixing_weights_ = layer_routing_dist.view(
-                    -1, n_skills
-                )  # .detach() # ex x n_skills
-                mixing_weights_mean = layer_routing_dist.transpose(0, 1).mean(
-                    dim=1
-                )  # n_splits x n_skills
-
-                average_normalized_entropy = (
-                    -torch.sum(
-                        mixing_weights_ * torch.log(mixing_weights_ + EPS), dim=-1
-                    )
-                    / np.log(n_skills)
-                    if n_skills > 1
-                    else torch.ones_like(mixing_weights_[:, 0])
-                )  # ex
-                # solit in n_splits chunks
-                average_normalized_entropy = average_normalized_entropy.reshape(
-                    bs, n_splits
-                ).mean(
-                    dim=0
-                )  # bs
-                # how different are the routinf for different examples? calculate MI, entropy of average - average entropy
-                mixing_weights_mean = layer_routing_dist.transpose(0, 1).mean(
-                    dim=1
-                )  # n_splits x n_skills
-                entropy_of_av_normalized = (
-                    -torch.sum(
-                        mixing_weights_mean * torch.log(mixing_weights_mean + EPS),
-                        dim=-1,
-                    )
-                    / np.log(n_skills)
-                    if n_skills > 1
-                    else torch.zeros_like(mixing_weights_mean[0])
-                )  # ex
-                div = (
-                    entropy_of_av_normalized - average_normalized_entropy
-                ).mean()  # mean over n_splits
-                entropy = average_normalized_entropy.mean()  # .item()
-                specialization = div - entropy
-                # if not len(self.loggers)>0 or not isinstance(self.loggers[0], pl.loggers.wandb.WandbLogger):
-                # self.log(f"{stage}/{k}_div", div)#, on_step=True)
-                # self.log(f"{stage}/{k}_entropy", entropy)#, on_step=True)
-                divs.append(div.float().item())
-                entropies.append(entropy.float().item())
-                specializations.append(specialization.float().item())
+                / np.log(n_skills)
+                if n_skills > 1
+                else torch.zeros_like(mixing_weights_mean[0])
+            )  # ex
+            div = (
+                entropy_of_av_normalized - average_normalized_entropy
+            ).mean()  # mean over n_splits
+            entropy = average_normalized_entropy.mean()  # .item()
+            specialization = div - entropy
+            divs.append(div.float().item())
+            entropies.append(entropy.float().item())
+            specializations.append(specialization.float().item())
 
         # log mean over all layers divs and entropies
         if len(divs) > 0:
             self.log(
-                f"{stage}/div_layers_mean", torch.tensor(divs).mean()
-            )  # , on_step=True)
+                f"{stage}/div_layers_mean", torch.tensor(divs).mean(), on_step=True
+            )
             self.log(
-                f"{stage}/entropy_layers_mean", torch.tensor(entropies).mean()
-            )  # , on_step=True)
+                f"{stage}/entropy_layers_mean",
+                torch.tensor(entropies).mean(),
+                on_step=True,
+            )
             self.log(
                 f"{stage}/diversity(H-MI)_layers_mean",
                 torch.tensor(specializations).mean(),
-            )  # , on_step=True)
-            # log distribution
+                on_step=True,
+            )
+
             if (
                 len(self.loggers) > 0
                 and isinstance(self.loggers[0], pl.loggers.wandb.WandbLogger)
@@ -349,25 +341,21 @@ class CLM(EfficientCheckpointModule):
                     f"{stage}/div_layers_dist",
                     [wandb.Image(plt)],
                     step=self.global_step,
-                )  # , commit=False)
-                # wandb_logger.log_table(f"{stage}/div_layers_dist_table", columns=names, data=torch.stack(divs).unsqueeze(0).tolist())
-                # reset plot
+                )
                 plt.clf()
                 _ = plt.plot(range(len(entropies)), entropies)
                 wandb_logger.log_image(
                     f"{stage}/entropy_layers_dist",
                     [wandb.Image(plt)],
                     step=self.global_step,
-                )  # , commit=False)
-                # wandb_logger.log_table(f"{stage}/entropy_layers_dist_table", columns=names, data=torch.stack(entropies).unsqueeze(0).tolist())
+                )
                 plt.clf()
                 _ = plt.plot(range(len(specializations)), specializations)
                 wandb_logger.log_image(
                     f"{stage}/diversity(MI-H)_layers_dist",
                     [wandb.Image(plt)],
                     step=self.global_step,
-                )  # , commit=False)
-                # wandb_logger.log_table(f"{stage}/diversity(H-MI)_layers_dist_table", columns=names, data=torch.stack(specializations).unsqueeze(0).tolist())
+                )
                 plt.clf()
 
                 # create csv table if not exists
@@ -423,7 +411,7 @@ class CLM(EfficientCheckpointModule):
 
     def log_xrouter_W_norm(self):
         if isinstance(self.loggers[0], pl.loggers.wandb.WandbLogger):
-            from .routing import XRouter
+            from .vsmear import XRouter
 
             norms = []
             for n, layer in self.model.named_modules():
@@ -454,14 +442,16 @@ class CLM(EfficientCheckpointModule):
             self.log_aux_loss_per_layer(aux_loss)
             if (
                 batch_idx
-                % (self.hparams.gradient_accumulation_steps * self.hparams.micro_batch_size)
+                % (
+                    self.hparams.gradient_accumulation_steps
+                    * self.hparams.micro_batch_size
+                )
                 == 0
                 and batch_idx > 0
             ):  # to accumulate over larger batch
                 self.log_routing_metrics(stage="val")
 
         self._inference_outputs += [(loss, batch["task_ids"])]
-
         return loss, batch["task_ids"]
 
     def on_before_backward(self, loss: Tensor) -> None:
@@ -511,6 +501,7 @@ class CLM(EfficientCheckpointModule):
             for task_id in torch.unique(task_ids):
                 task_losses[task_id.item()] = losses[task_ids == task_id].mean().item()
             f.write(json.dumps(task_losses) + "\n")
+
         self.accumulate_metrics_batch = defaultdict(list)
         self.log_routing_metrics(stage="val")
         self.log_xrouter_W_norm()

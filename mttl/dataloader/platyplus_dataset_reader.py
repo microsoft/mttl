@@ -44,13 +44,11 @@ class PlatypusDataset(torch.utils.data.dataset.Dataset):
     def __init__(
         self,
         data_dir,
-        dst_path=None,
         idxs=None,
         loss_for_keywords=True,
         subset=None,
     ):
         super().__init__()
-        self.dst_path = dst_path
         self.loss_for_keywords = loss_for_keywords
 
         # load the data

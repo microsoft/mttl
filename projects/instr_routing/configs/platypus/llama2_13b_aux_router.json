@@ -1,7 +1,5 @@
 {
     "lora_rank": 4,
-    "rank": 4,
-    "share_lora_a": 0,
     "lora_dropout": 0.05,
     "weight_decay": 0.00,
     "n_skills": 1,

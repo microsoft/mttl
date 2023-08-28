@@ -14,7 +14,6 @@ from mttl.models.modifiers.routing import (
     register_selector,
 )
 
-
 @register_selector("vsmear")
 class VariationalRouter(RoutingSelector):
     def __init__(self, config, in_d):
@@ -120,6 +119,10 @@ def modify_with_vsmear(transformer, config):
     config.adapter_type = config.adapter_type or "lora"
 
     if config.adapter_type in ["lora"]:
-        return modify_with_routing(transformer, config, AuxRoutingLoRALinear, RouterWrapper)
+        return modify_with_routing(
+            transformer, config, AuxRoutingLoRALinear, RouterWrapper
+        )
     else:
-        raise NotImplementedError(f"Adapter type {config.adapter_type} not implemented for vsmear modifier.")
+        raise NotImplementedError(
+            f"Adapter type {config.adapter_type} not implemented for vsmear modifier."
+        )
