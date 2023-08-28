@@ -4,28 +4,19 @@ import json
 import torch
 import wandb
 import pytorch_lightning as pl
-
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
-
-from mttl.models.poly import get_selector
+from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
-from projects.instr_routing.models.clm import CLM
+
 from mttl.callbacks import ProgressCallback
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.platypus_module import PlatypusModule
-from mttl.config import Config
-from mttl.models.monitors import get_monitors
 from mttl.utils import get_mlf_logger
-from mttl.models.modify_model import modify_transformer
-from transformers import AutoModelForCausalLM, LlamaForCausalLM
-from config import RoutingConfig
-
-from huggingface_hub import login
 
 # register models
-import projects.instr_routing.models.routing  # noqa: F401
-import projects.instr_routing.models.aux_routing  # noqa: F401
+import models.aux_routing  # noqa: F401
+from models.clm import CLM
+from config import RoutingConfig
 
 
 def remove_non_serializable(d):
@@ -61,11 +52,6 @@ def run_multitask(args):
 
     args.n_tasks = len(dm.task_to_id)
     module = model_class(**vars(args), tokenizer=dm.tokenizer)
-
-    if args.switch_to_average > 0:
-        module.model.switch_selector_to_average(
-            selector_to_replace=get_selector(args).__class__
-        )
 
     # legit logging
     loggers = []
@@ -181,7 +167,7 @@ def run_multitask(args):
     if args.eval_superni:
         print("#" * 50)
         print("Evaluating on super NI")
-        from projects.instr_routing.eval.ni.eval_ni import eval_ni
+        from eval_ni import eval_ni
 
         rouge_L_super_ni = eval_ni(
             args,
@@ -196,7 +182,7 @@ def run_multitask(args):
         print("SuperNI RougeL: {:.2f}".format(rouge_L_super_ni))
 
     if args.eval_mmlu:
-        from projects.instr_routing.eval.mmlu.eval_mmlu import eval_mmlu
+        from eval_mmlu import eval_mmlu
 
         print("#" * 50)
         print("Evaluating on MMLU")

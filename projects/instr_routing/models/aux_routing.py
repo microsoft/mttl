@@ -4,9 +4,8 @@ import torch.nn as nn
 from enum import Enum
 
 import torch.nn.functional as F
-from mttl.models.modify_model import patch_layers, register_modifier
-from mttl.models.poly import PolyLoRALinear
-from mttl.models.routing import (
+from mttl.models.modifiers import modify_with_routing, register_modifier
+from mttl.models.modifiers.routing import (
     RouterWrapper,
     RoutingAdapter,
     RoutingSelector,
@@ -179,6 +178,6 @@ def modify_with_vsmear(transformer, config):
     config.router_selector = config.router_selector or "vsmear"
 
     if config.adapter_type in ["lora", None]:
-        return patch_layers(transformer, config, AuxRoutingLoRALinear, RouterWrapper)
+        return modify_with_routing(transformer, config, AuxRoutingLoRALinear, RouterWrapper)
     else:
         raise NotImplementedError(f"Adapter type {config.adapter_type} not implemented for vsmear modifier.")

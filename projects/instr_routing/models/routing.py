@@ -6,8 +6,8 @@ import torch.nn.functional as F
 from torch.autograd import Function
 
 from mttl import global_vars
-from mttl.models.modify_model import patch_layers, register_modifier
-from mttl.models.routing import RouterWrapper, RoutingAdapter, RoutingSelector, get_selector, register_selector
+from mttl.models.modifiers import modify_with_routing, register_modifier
+from mttl.models.modifiers.routing import RouterWrapper, RoutingAdapter, RoutingSelector, register_selector
 
 from projects.instr_routing.models.attention import SelectAttention    
 
@@ -664,4 +664,4 @@ class RoutingLoRALinear(RoutingAdapter):
 
 @register_modifier("routing_lora")
 def modify_with_routing_lora(transformer, config):
-    return patch_layers(transformer, config, RoutingLoRALinear, RouterWrapper)
+    return patch_with_routing(transformer, config, RoutingLoRALinear, RouterWrapper)

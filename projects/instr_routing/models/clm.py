@@ -12,14 +12,14 @@ import wandb
 from typing import List
 from collections import defaultdict
 from torch import Tensor, nn
-from mttl.models.modify_model import modify_transformer
+from mttl.models.modifiers import modify_transformer
+from mttl.models.modifiers.routing import RoutingInfo
 from transformers import AutoModelForCausalLM, LlamaForCausalLM
 
 from mttl.models.get_scheduler import get_scheduler
 from mttl.models.utils import (
     EfficientCheckpointModule,
     get_global_batch_size,
-    RoutingInfo,
 )
 from mttl.models.get_optimizer import get_optimizer
 from mttl.global_vars import EPS

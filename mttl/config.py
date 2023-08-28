@@ -49,10 +49,7 @@ class Config:
             if eval:
                 print("Overwriting {} to {}".format(k, v))
 
-            if k == 'finegrained':
-                k = 'poly_granularity'
-                v = 'finegrained' if v else 'coarsegrained'
-            elif k in ['data_dir', 'output_dir']:
+            if k in ['data_dir', 'output_dir']:
                 # this raises an error if the env. var does not exist
                 v = Template(v).substitute(os.environ)
 
@@ -224,27 +221,29 @@ class Config:
         self.lora_init_scale = 0.01
         self.lora_alpha = 1.
         self.lora_warmup = False
-        self.lora_modules = self.patch_modules = None
-        self.lora_layers = self.patch_layers = None
         self.n_skills = 8
         self.n_tasks = None
 
-        # Polytropon related hyper-parameters
-        self.n_splits = 1                        # number of splits for poly-s
-        self.router_selector = None              # poly, poly_cluster
-        self.router_selector_cluster_temp = 1.0  # temperature for the cluster selector
-        self.poly_average_correction = False     # correct the poly average
-        self.poly_use_shared_skill = False       # use one skill shared by all tasks
+        # which modules to modify and which layers for adapters
+        self.modify_modules = None
+        self.modify_layers = None
 
         """
-        poly_granularity : how granular is the module selection :
+        router_granularity : how granular is the module selection
         coarsegrained : 1 single selector across all linear layers
         coderwise : 2 selectors (1 for encoder, 1 for decoder)
         blockwise : 1 selector for each block of K attention layers (and layernorm)
         layerwise : 1 selector for each attention layer (and layernorm)
         finegrained : 1 selector for every linear layer
         """
-        self.poly_granularity = 'finegrained'
+        self.router_granularity = 'finegrained'  # router granularity
+        self.router_selector = None              # router selector
+        
+        # Polytropon related hyper-parameters
+        self.n_splits = 1                        # number of splits for poly-s
+        self.router_selector_cluster_temp = 1.0  # temperature for the cluster selector
+        self.poly_average_correction = False     # correct the poly average
+        self.poly_use_shared_skill = False       # use one skill shared by all tasks
 
         self.module_logits_relaxed_bernoulli = True
         self.module_logits_straight_through = False

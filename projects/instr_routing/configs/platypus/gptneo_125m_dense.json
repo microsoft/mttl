@@ -6,7 +6,7 @@
     "weight_decay": 0.00,
     "n_skills": 1,
     "model_modifier": "lora",
-    "lora_modules": ".*",
-    "lora_layers": "q_proj|v_proj|k_proj",
+    "modify_modules": ".*",
+    "modify_layers": "q_proj|v_proj|k_proj",
     "trainable_param_names": ".*lora_[ab].*"
 }

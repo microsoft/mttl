@@ -5,7 +5,7 @@ import re
 import math
 
 from transformers.models.t5.modeling_t5 import T5LayerNorm
-from mttl.models.modify_model import register_modifier
+from mttl.models.modifiers import register_modifier
 
 
 class LoRALinear(nn.Module):
@@ -123,9 +123,9 @@ class IA3Linear(nn.Module):
 
 def modify_with_adapter(transformer, config, adapter_klass):
     for m_name, module in dict(transformer.named_modules()).items():
-        if re.fullmatch(config.lora_modules, m_name):
+        if re.fullmatch(config.modify_modules, m_name):
             for c_name, layer in dict(module.named_children()).items():
-                if re.fullmatch(config.lora_layers, c_name):
+                if re.fullmatch(config.modify_layers, c_name):
                     setattr(
                         module,
                         c_name,

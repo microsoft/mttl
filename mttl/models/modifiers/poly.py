@@ -6,13 +6,15 @@ import numpy as np
 from torch.distributions.relaxed_bernoulli import RelaxedBernoulli
 from mttl.global_vars import EPS
 
-from mttl.models.modify_model import patch_layers, register_modifier
-from mttl.models.routing import (
+from mttl.models.adapters import SkilledLoRA
+from mttl.models.modifiers.modify_model import register_modifier
+from mttl.models.modifiers.routing import (
     RoutingAdapter,
     RouterWrapper,
     RoutingSelector,
     get_selector,
     register_selector,
+    modify_with_routing,
 )
 
 
@@ -133,6 +135,7 @@ class PolytroponSelector(RoutingSelector):
 class PolyLoRALinear(PolytroponAdapter):
     def __init__(self, config, task_id_ptr, linear_layer, selector=None):
         super().__init__()
+
         self.n_splits = config.n_splits
         self.n_tasks = config.n_tasks
         self.n_skills = config.n_skills
@@ -275,7 +278,8 @@ class PolyIA3Linear(PolytroponAdapter):
 @register_modifier("poly")
 def modify_with_poly_ia3(transformer, config):
     config.router_selector = config.router_selector or "poly"
+
     if config.adapter_type == "ia3":
-        return patch_layers(transformer, config, PolyIA3Linear, SkillWrapper)
+        return modify_with_routing(transformer, config, PolyIA3Linear, SkillWrapper)
     else:
-        return patch_layers(transformer, config, PolyLoRALinear, SkillWrapper)
+        return modify_with_routing(transformer, config, PolyLoRALinear, SkillWrapper)

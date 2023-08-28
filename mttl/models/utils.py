@@ -66,39 +66,6 @@ class EfficientCheckpointModule(LightningModule):
         return batch
 
 
-@dataclass
-class RoutingInfo:
-    task_ids: torch.Tensor = None
-    hashes: List[str] = None
-    instruction_hashes: List[str] = None
-    example_ids: List[int] = None
-    labels: torch.Tensor = None
-
-    @classmethod
-    def from_batch(cls, batch: dict):
-        ri = cls(
-            task_ids=batch.get("task_ids", None),
-            hashes=batch.get("hashes", None),
-            example_ids=batch.get("example_ids", None),
-            instruction_hashes=batch.get("instruction_hashes", None),
-            labels=batch.get("labels", None),
-        )
-        return ri
-
-    def repeat_interleave(self, repeats):
-        # useful for beam search
-        self.task_ids = self.task_ids.repeat_interleave(repeats)
-        if self.hashes:
-            self.hashes = [h for h in self.hashes for _ in range(repeats)]
-        if self.instruction_hashes:
-            self.instruction_hashes = [h for h in self.instruction_hashes for _ in range(repeats)]
-        self.example_ids = (
-            self.example_ids.repeat_interleave(repeats)
-            if self.example_ids is not None
-            else None
-        )
-
-
 def get_global_batch_size(batch_size, accumulation_steps):
     """Computes the global batch size."""
     try:

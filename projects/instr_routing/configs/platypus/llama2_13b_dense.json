@@ -6,7 +6,7 @@
     "weight_decay": 0.00,
     "n_skills": 1,
     "model_modifier": "lora",
-    "lora_modules": ".*mlp.*",  
-    "lora_layers": "gate_proj|down_proj|up_proj",
+    "modify_modules": ".*mlp.*",  
+    "modify_layers": "gate_proj|down_proj|up_proj",
     "trainable_param_names": ".*lora_[ab].*"
 }
