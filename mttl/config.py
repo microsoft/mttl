@@ -218,6 +218,7 @@ class Config:
         self.adapter_type = None
 
         self.lora_rank = 16
+        self.lora_dropout = 0.
         self.lora_init_scale = 0.01
         self.lora_alpha = 1.
         self.lora_warmup = False
