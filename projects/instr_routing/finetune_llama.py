@@ -3,6 +3,7 @@ import sys
 import json
 import torch
 import wandb
+import logging
 import pytorch_lightning as pl
 from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
@@ -13,7 +14,7 @@ sys.path.append("../../mttl")
 from mttl.callbacks import ProgressCallback
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.platypus_module import PlatypusModule
-from mttl.utils import get_mlf_logger
+from mttl.utils import get_mlf_logger, setup_logging
 
 # register models
 import models.vsmear  # noqa: F401
@@ -34,8 +35,9 @@ def remove_non_serializable(d):
 
 def run_multitask(args):
     seed_everything(args.seed, workers=True)
+
     # get directory of the current file
-    print(os.path.dirname(os.path.realpath(__file__)))
+    setup_logging(logging.INFO, args.output_dir)
 
     if args.hf_token_hub:
         login(token=args.hf_token_hub)

@@ -3,6 +3,8 @@ import torch.optim as optim
 from collections import defaultdict
 from transformers import Adafactor
 
+import logging
+
 
 def get_optimizer(model, args, no_decay=None):
     """
@@ -29,13 +31,16 @@ def get_optimizer(model, args, no_decay=None):
                 param_groups["module_logits"]["params"].append(param)
             elif "lora" in param_name:
                 param_groups["adapters"]["params"].append(param)
-            elif "selector" in param_name: 
+            elif "router" in param_name:
                 param_groups["router"]["params"].append(param)
             else:
                 param_groups["others"]["params"].append(param)
             trainable_param_names.add(param_name)
         else:
             param.requires_grad = False
+
+    for name in sorted(trainable_param_names):
+        logging.info("Training parameter: ", name)
 
     for key in param_groups.keys():
         if key in ["module_logits"]:
@@ -44,6 +49,7 @@ def get_optimizer(model, args, no_decay=None):
                 if args.module_logits_learning_rate is not None
                 else args.learning_rate
             )
+            logging.info("Module logits learning rate: %s", param_groups[key]["lr"])
         elif key in ["adapters"]:
             param_groups[key]["weight_decay"] = (
                 args.adapters_weight_decay
@@ -55,6 +61,7 @@ def get_optimizer(model, args, no_decay=None):
                 if key in ["adapters"] and args.adapters_learning_rate
                 else args.learning_rate
             )
+            logging.info("Adapters learning rate: %s", param_groups[key]["lr"])
         elif key in ["router"]:          
             param_groups[key]["weight_decay"] = (
                 args.router_weight_decay
@@ -62,10 +69,11 @@ def get_optimizer(model, args, no_decay=None):
                 else args.weight_decay
             )
             param_groups[key]["lr"] = (
-                args.router_learning_rate  
+                args.router_learning_rate
                 if key in ["router"] and args.router_learning_rate
                 else args.learning_rate
             )
+            logging.info("Router learning rate: %s", param_groups[key]["lr"])
         else:  
             param_groups[key]["weight_decay"] = (
                 0.0 if key in ["module_logits", "no_decay"] else args.weight_decay
@@ -90,8 +98,5 @@ def get_optimizer(model, args, no_decay=None):
         )
     else:
         raise ValueError("Invalid Optimizer name %s" % optim_name)
-
-    for name in sorted(trainable_param_names):
-        print("Training parameter: ", name)
 
     return optimizer, trainable_param_names

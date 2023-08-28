@@ -1,7 +1,7 @@
 import glob
 import json
 import logging
-
+import os
 import numpy as np
 import torch
 import torch.nn as nn
@@ -11,9 +11,6 @@ from typing import Dict
 import hashlib
 from pytorch_lightning.utilities.rank_zero import rank_zero_info
 from torch.autograd.function import Function
-
-
-logger = logging.getLogger(__name__)
 
 
 def hash_example(example):
@@ -225,6 +222,25 @@ def get_mlf_logger():
     return mlf_logger
 
 
+def setup_logging(log_level, log_dir):
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+
+    logging.basicConfig(
+        level=log_level,
+        handlers=[
+            logging.FileHandler(os.path.join(log_dir, "log.txt")),
+            logging.StreamHandler(),
+        ],
+        format="%(asctime)-15s %(levelname)-8s %(message)s",
+    )
+    logging.getLogger("openai").setLevel(logging.WARNING)
+    logging.info(
+        "New experiment, log will be at %s",
+        os.path.join(log_dir, "log.txt"),
+    )
+
+
 def get_checkpoint_path(path, step=None, use_last=False):
     if path.endswith(".ckpt") or path.endswith(".pt"):
         return path
@@ -240,7 +256,7 @@ def get_checkpoint_path(path, step=None, use_last=False):
         return match[0]
 
     if len(match) > 1:
-        logger.warning(
+        logging.warning(
             f"{len(match)} checkpoints found. "
             + "taking the one with the lowest val loss"
         )
@@ -258,7 +274,7 @@ def get_checkpoint_path(path, step=None, use_last=False):
     elif len(match) == 0:
         match = glob.glob(f"{path}/*step*.pt", recursive=True)
         if len(match) > 1:
-            logger.warning(
+            logging.warning(
                 f"{len(match)} checkpoints found. "
                 + "taking the one with the lowest val loss"
             )
