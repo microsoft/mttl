@@ -10,7 +10,8 @@ from torch.distributions.bernoulli import Bernoulli
 from torch.distributions.categorical import Categorical
 from pytorch_lightning import LightningModule
 
-from mttl.models.modifiers.routing import RoutingInfo, modify_transformer
+from mttl.models.modifiers import modify_transformer
+from mttl.models.modifiers.routing import RoutingInfo
 from mttl.models.get_optimizer import get_optimizer
 from mttl.models.get_scheduler import get_scheduler
 from mttl.models.utils import EfficientCheckpointModule
