@@ -32,16 +32,16 @@ class LoRA(Adapter):
 
     def create_for_layer(self, layer):
         if isinstance(layer, nn.Linear):
-            self.lora_a = nn.Parameter(torch.empty(layer.in_features, self.lora_rank))
-            self.lora_b = nn.Parameter(torch.empty(self.lora_rank, layer.out_features))
+            self.lora_a = nn.Parameter(torch.empty(layer.in_features, self.rank))
+            self.lora_b = nn.Parameter(torch.empty(self.rank, layer.out_features))
             self.forward_fn = self.forward_linear_
         else:
             raise NotImplementedError("LoRA only supports nn.Linear layers.")
 
-    def forward_linear_(self, input):
+    def forward_linear_(self, input, **kwargs):
         if self.training:
             self.training_steps += 1
-        adapter_out = input.mm(self.lora_a).mm(self.lora_b) * self.scaling
+        adapter_out = torch.matmul(torch.matmul(input, self.lora_a), self.lora_b) * self.scaling
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
