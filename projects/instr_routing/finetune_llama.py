@@ -145,8 +145,8 @@ def run_multitask(args):
     module.model.checkpoint_tested = "last"
     trainer.test(dataloaders=dm, ckpt_path="last")
 
-    print(f"Best model path: {path_best_model}")
-    print(f"Last model path: {path_last_model}")
+    logging.info(f"Best model path: {path_best_model}")
+    logging.info(f"Last model path: {path_last_model}")
 
     torch.cuda.empty_cache()
 
@@ -168,8 +168,7 @@ def run_multitask(args):
     )
 
     if args.eval_superni:
-        print("#" * 50)
-        print("Evaluating on super NI")
+        logging.info("Evaluating on super NI")
         from eval_ni import eval_ni
 
         rouge_L_super_ni = eval_ni(
@@ -182,13 +181,12 @@ def run_multitask(args):
         if wandb.run is not None:
             wandb.log({"rouge_L_super_ni": rouge_L_super_ni})
         tb_logger.experiment.add_scalar("tasks/sni", rouge_L_super_ni, trainer.global_step)
-        print("SuperNI RougeL: {:.2f}".format(rouge_L_super_ni))
+        logging.info("SuperNI RougeL: {:.2f}".format(rouge_L_super_ni))
 
     if args.eval_mmlu:
         from eval_mmlu import eval_mmlu
 
-        print("#" * 50)
-        print("Evaluating on MMLU")
+        logging.info("Evaluating on MMLU")
         acc = eval_mmlu(
             args,
             best_model,
@@ -198,7 +196,7 @@ def run_multitask(args):
         if wandb.run is not None:
             wandb.log({"mmlu_acc": acc})
         tb_logger.experiment.add_scalar("tasks/mmlu", acc, trainer.global_step)
-        print("MMLU accuracy: {:.2f}".format(acc))
+        logging.info("MMLU accuracy: {:.2f}".format(acc))
 
 
 if __name__ == "__main__":
