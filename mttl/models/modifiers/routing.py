@@ -196,6 +196,10 @@ class RoutingInfo:
 
 
 class RoutingAdapter(nn.Module):
+    def __init__(self, task_id_ptr) -> None:
+        super().__init__()
+        self.task_id_ptr = task_id_ptr
+
     @property
     def routing_infos(self) -> RoutingInfo:
         return self.task_id_ptr["routing_infos"]

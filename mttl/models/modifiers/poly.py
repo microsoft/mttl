@@ -32,22 +32,6 @@ class SkillWrapper(RouterWrapper):
             print("Resizing module_logits of selector", name, "with", n_tasks, "tasks.")
             selector.resize_module_logits(n_tasks)
 
-    @classmethod
-    def remove_skills(cls, object, skill_ids_to_keep):
-        print("Removing skills, keeping", skill_ids_to_keep)
-        for name, adapter in object.get_adapters().items():
-            if isinstance(adapter, PolytroponAdapter):
-                if adapter.lora_a.shape[1] > 1:
-                    adapter.lora_a = nn.Parameter(
-                        adapter.lora_a[:, skill_ids_to_keep, :, :]
-                    )
-                if adapter.lora_b.shape[1] > 1:
-                    adapter.lora_b = nn.Parameter(
-                        adapter.lora_b[:, skill_ids_to_keep, :, :]
-                    )
-                adapter.n_skills = len(skill_ids_to_keep)
-                adapter.selector.n_skills = len(skill_ids_to_keep)
-
 
 class PolytroponAdapter(RoutingAdapter):
     pass
@@ -133,69 +117,15 @@ class PolytroponSelector(RoutingSelector):
 
 
 class PolyLoRALinear(PolytroponAdapter):
-    def __init__(self, config, task_id_ptr, linear_layer, selector=None):
-        super().__init__()
-
-        self.n_splits = config.n_splits
-        self.n_tasks = config.n_tasks
-        self.n_skills = config.n_skills
-        self.in_features = linear_layer.in_features
-        self.out_features = linear_layer.out_features
-        self.use_warmup = config.lora_warmup
-        self.rank = config.lora_rank
-        self.lora_alpha = config.lora_alpha
-        self.scaling = self.lora_alpha / self.rank
-        self.linear_layer = linear_layer
-        self.weight = linear_layer.weight
-        self.bias = linear_layer.bias
-        self.task_id_ptr = task_id_ptr
-        self.training_steps = 0.0
-
+    def __init__(self, config, task_id_ptr, layer, selector=None):
+        super().__init__(task_id_ptr)
         if selector is None:
             self.selector = get_selector(config)
         else:
             self.selector = selector
-
-        self.lora_a = nn.Parameter(
-            torch.empty(
-                self.n_splits,
-                self.n_skills,
-                linear_layer.in_features // self.n_splits,
-                self.rank,
-                device=self.weight.device,
-            )
-        )
-        self.lora_b = nn.Parameter(
-            torch.empty(
-                self.n_splits,
-                self.n_skills,
-                self.rank,
-                linear_layer.out_features // self.n_splits,
-                device=self.weight.device,
-            )
-        )
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        import math
-
-        gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
-        std = gain / math.sqrt(self.in_features)
-
-        with torch.no_grad():
-            self.lora_a.uniform_(-std, std)
-
-        # ensure that initially, adding the adapter does not change the output
-        if self.use_warmup:
-            with torch.no_grad():
-                self.lora_b.uniform_(-std, std)
-        else:
-            torch.nn.init.zeros_(self.lora_b)
+        self.adapter = SkilledLoRA(config, layer)
 
     def forward(self, input):
-        if self.training:
-            self.training_steps += 1
-
         task_id = self.routing_infos.task_ids
         repeat = input.size(0) // task_id.size(0)
 
@@ -204,82 +134,15 @@ class PolyLoRALinear(PolytroponAdapter):
             self.routing_infos.repeat_interleave(repeat)
 
         mixing_weights = self.selector(self.routing_infos).to(dtype=input.dtype)
-
-        bs, n_splits, n_skills = mixing_weights.size()
-        A = torch.einsum("bqs,qsdr->bqdr", (mixing_weights, self.lora_a))
-        B = torch.einsum("bqs,qsrd->bqrd", (mixing_weights, self.lora_b))
-        A = A.reshape(bs, self.in_features, self.rank)
-        B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
-        adapter_out = input.bmm(A).bmm(B) * self.scaling
-
-        warmup = min(self.training_steps / 10_000, 1)
-        if self.use_warmup:
-            adapter_out = adapter_out * warmup
-
-        return self.linear_layer(input) + adapter_out
-
-
-class PolyIA3Linear(PolytroponAdapter):
-    def __init__(self, config, task_id_ptr, linear_layer, selector=None):
-        super().__init__()
-
-        self.n_splits = config.n_splits
-        self.n_tasks = config.n_tasks
-        self.n_skills = config.n_skills
-        self.linear_layer = linear_layer
-        self.in_features = linear_layer.in_features
-        self.out_features = linear_layer.out_features
-        self.weight = linear_layer.weight
-        self.bias = linear_layer.bias
-        self.task_id_ptr = task_id_ptr
-
-        assert self.out_features % config.n_splits == 0
-
-        data = torch.ones(
-            self.n_skills, self.n_splits, self.out_features // self.n_splits
-        )
-        self.lora_a = nn.Parameter(
-            data,
-            dtype=self.weight.dtype
-            if self.weight.dtype != torch.int8
-            else torch.float32,
-        )
-
-        if selector is None:
-            self.selector = get_selector(config)
-        else:
-            self.selector = selector
-
-    def forward(self, input):
-        task_id = self.routing_infos.task_ids
-
-        repeat = input.size(0) // task_id.size(0)
-
-        # this repeat follows the patten in `model.predict()` line 152
-        if repeat:
-            self.routing_infos.repeat_interleave(repeat)
-
-        # bs, n_splits, n_skills
-        mixing_weights = self.selector(self.routing_infos)
-
-        # n_skills, n_splits, D // n_splits
-        weight = self.lora_a
-
-        A = torch.einsum("bqs,sqd->bqd", (mixing_weights, weight))
-        A = A.reshape(input.size(0), 1, -1)
-        return self.linear_layer(input) * A
-
-    def extra_repr(self):
-        return "n_skills={}, in_features={}, out_features={}, bias={}".format(
-            self.n_skills, self.in_features, self.out_features, self.bias is not None
-        )
+        return self.adapter(input, mixing_weights)
 
 
 @register_modifier("poly")
 def modify_with_poly_ia3(transformer, config):
     config.router_selector = config.router_selector or "poly"
+    config.adapter_type = config.adapter_type or "lora"
 
-    if config.adapter_type == "ia3":
-        return modify_with_routing(transformer, config, PolyIA3Linear, SkillWrapper)
-    else:
+    if config.adapter_type == "lora":
         return modify_with_routing(transformer, config, PolyLoRALinear, SkillWrapper)
+    else:
+        raise NotImplementedError(f"Poly modifier not implemented for adapter {config.adapter_type}.")

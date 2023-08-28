@@ -10,30 +10,42 @@ class Adapter(nn.Module):
 class LoRA(Adapter):
     def __init__(
         self,
-        in_features,
-        out_features,
-        lora_rank,
-        lora_alpha,
-        lora_warmup=0,
-        lora_dropout=0.0,
+        config,
+        layer,
     ):
         super().__init__()
 
         # assign self variables
-        self.in_features = in_features
-        self.out_features = out_features
-        self.lora_rank = lora_rank
-        self.lora_alpha = lora_alpha
-        self.lora_dropout = lora_dropout
-        self.use_warmup = lora_warmup
+        self.config = config
+        self.rank = config.lora_rank
+        self.alpha = config.lora_alpha
+        self.dropout = config.lora_dropout
+        self.use_warmup = config.lora_warmup
+        self.in_features = layer.in_features
+        self.out_features = layer.out_features
         self.training_steps = 0.0
-        self.scaling = self.lora_alpha / self.lora_rank
-
-        # define lora parameters
-        self.lora_a = nn.Parameter(torch.empty(self.in_features, self.lora_rank))
-        self.lora_b = nn.Parameter(torch.empty(self.lora_rank, self.out_features))
-
+        self.scaling = self.alpha / self.rank
+        self.forward_fn = None
+        self.layer = layer
+        self.create_for_layer(layer)
         self.reset_parameters()
+
+    def create_for_layer(self, layer):
+        if isinstance(layer, nn.Linear):
+            self.lora_a = nn.Parameter(torch.empty(layer.in_features, self.lora_rank))
+            self.lora_b = nn.Parameter(torch.empty(self.lora_rank, layer.out_features))
+            self.forward_fn = self.forward_linear_
+        else:
+            raise NotImplementedError("LoRA only supports nn.Linear layers.")
+
+    def forward_linear_(self, input):
+        if self.training:
+            self.training_steps += 1
+        adapter_out = input.mm(self.lora_a).mm(self.lora_b) * self.scaling
+        warmup = min(self.training_steps / 10_000, 1)
+        if self.use_warmup:
+            adapter_out = adapter_out * warmup
+        return self.layer(input) + adapter_out
 
     def reset_parameters(self):
         gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
@@ -48,51 +60,84 @@ class LoRA(Adapter):
         else:
             torch.nn.init.zeros_(self.lora_b)
 
+    def forward(self, *args, **kwargs):
+        return self.forward_fn(*args, **kwargs)
+
+
+class IA3(nn.Module):
+    def __init__(self, config, layer):
+        super().__init__()
+
+        assert isinstance(
+            layer, nn.Linear
+        ), f"IA3 can only be applied to torch.nn.Linear, but {layer} is {type(layer)}."
+
+        self.layer = layer
+        self.multi_lora_b = nn.Parameter(torch.ones(layer.out_features))
+
     def forward(self, input):
-        return input.mm(self.lora_a).mm(self.lora_b) * self.scaling
+        return self.layer(input) * self.multi_lora_b
+
+
+class LN(Adapter):
+    def __init__(self, config, layer):
+        super().__init__()
+        
+        self.out_features = layer.weight.size(0)
+        self.weight = layer.weight
+        self.variance_epsilon = layer.variance_epsilon
+
+        assert self.out_features % config.n_splits == 0
+
+        self.lora_b = nn.Parameter(self.weight.data)
+
+    def forward(self, input):
+        # layer norm should always be calculated in float32
+        variance = input.to(torch.float32).pow(2).mean(-1, keepdim=True)
+        input = input / torch.sqrt(variance + self.variance_epsilon)
+
+        if self.weight.dtype == torch.float16:
+            input = input.to(torch.float16)
+        return self.lora_b.unsqueeze(0) * input
 
 
 class SkilledLoRA(LoRA):
     def __init__(
         self,
-        in_features,
-        out_features,
-        n_skills,
-        lora_rank,
-        lora_alpha,
-        lora_warmup=0,
-        lora_dropout=0.0,
-        n_splits=1,
+        config,
+        layer,
     ):
-        super().__init__(in_features, out_features, lora_rank, lora_alpha, lora_warmup, lora_dropout)
+        self.n_splits = config.n_splits
+        self.n_skills = config.n_skills
+        super().__init__(config, layer)
 
-        self.n_splits = n_splits
-        self.n_skills = n_skills
-        
-        self.lora_a = nn.Parameter(
-            torch.empty(
-                self.n_splits,
-                self.n_skills,
-                in_features // self.n_splits,
-                self.rank,
+    def create_for_layer(self, layer):
+        if isinstance(layer, nn.Linear):
+            self.lora_a = nn.Parameter(
+                torch.empty(
+                    self.n_splits,
+                    self.n_skills,
+                    layer.in_features // self.n_splits,
+                    self.rank,
+                )
             )
-        )
-        self.lora_b = nn.Parameter(
-            torch.empty(
-                self.n_splits,
-                self.n_skills,
-                self.rank,
-                out_features // self.n_splits,
+            self.lora_b = nn.Parameter(
+                torch.empty(
+                    self.n_splits,
+                    self.n_skills,
+                    self.rank,
+                    layer.out_features // self.n_splits,
+                )
             )
-        )
-        self.training_steps += 1
-        self.reset_parameters()
+            self.forward_fn = self.forward_linear_
+        else:
+            raise NotImplementedError("SkilledLoRA only supports nn.Linear layers.")
 
-    def forward(self, input, weights):
+    def forward_linear_(self, input, weights):
         if self.training:
             self.training_steps += 1
 
-        bs, n_splits, n_skills = weights.size()
+        bs, _, _ = weights.size()
         A = torch.einsum("bqs,qsdr->bqdr", (weights, self.lora_a))
         B = torch.einsum("bqs,qsrd->bqrd", (weights, self.lora_b))
         A = A.reshape(bs, self.in_features, self.rank)
@@ -103,4 +148,4 @@ class SkilledLoRA(LoRA):
         if self.use_warmup:
             adapter_out = adapter_out * warmup
 
-        return adapter_out
+        return self.layer(input) + adapter_out

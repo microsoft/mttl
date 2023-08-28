@@ -4,6 +4,7 @@ import torch.nn as nn
 from enum import Enum
 
 import torch.nn.functional as F
+from mttl.models.adapters import SkilledLoRA
 from mttl.models.modifiers import modify_with_routing, register_modifier
 from mttl.models.modifiers.routing import (
     RouterWrapper,
@@ -79,68 +80,18 @@ class VariationalRouter(RoutingSelector):
 
 
 class AuxRoutingLoRALinear(RoutingAdapter):
-    def __init__(self, config, task_id_ptr, linear_layer, selector=None, **kwargs):
-        super().__init__()
-
-        self.n_splits = config.n_splits
-        self.n_tasks = config.n_tasks
-        self.n_skills = config.n_skills
-        self.in_features = linear_layer.in_features
-        self.out_features = linear_layer.out_features
-        self.use_warmup = config.lora_warmup
-        self.rank = config.lora_rank
-        self.lora_alpha = config.lora_alpha
-        self.scaling = self.lora_alpha / self.rank
-        self.linear_layer = linear_layer
-        self.weight = linear_layer.weight
-        self.bias = linear_layer.bias
-        self.task_id_ptr = task_id_ptr
-        self.training_steps = 0.0
-
+    def __init__(self, config, task_id_ptr, layer, selector=None, **kwargs):
+        super().__init__(task_id_ptr)
         if selector is None:
             self.selector = get_selector(config, in_d=self.in_features)
         else:
             self.selector = selector
-
-        self.lora_a = nn.Parameter(
-            torch.empty(
-                self.n_skills,
-                linear_layer.in_features * self.rank,
-            )
-        )
-        self.lora_b = nn.Parameter(
-            torch.empty(
-                self.n_skills,
-                self.rank * linear_layer.out_features,
-            )
-        )
-
         # store losses and metrics
         self.losses = []
         self.metrics = {}
-        self.training_steps = 0
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        import math
-
-        gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
-        std = gain / math.sqrt(self.in_features)
-
-        with torch.no_grad():
-            self.lora_a.uniform_(-std, std)
-
-        # ensure that initially, adding the adapter does not change the output
-        if self.use_warmup:
-            with torch.no_grad():
-                self.lora_b.uniform_(-std, std)
-        else:
-            torch.nn.init.zeros_(self.lora_b)
+        self.adapter = SkilledLoRA(config, layer)
 
     def forward(self, input):
-        if self.training:
-            self.training_steps += 1
-
         task_id = self.routing_infos.task_ids
         repeat = input.size(0) // task_id.size(0)
 
@@ -160,17 +111,7 @@ class AuxRoutingLoRALinear(RoutingAdapter):
             )
 
         self.metrics["routing"] = mixing_weights.detach().cpu().float()
-
-        mixing_weights = mixing_weights.squeeze()
-        mixed_a = torch.matmul(mixing_weights, self.lora_a).view(-1, self.in_features, self.rank)
-        mixed_b = torch.matmul(mixing_weights, self.lora_b).view(-1, self.rank, self.out_features)
-        adapter_out = input.bmm(mixed_a).bmm(mixed_b) * self.scaling
-
-        warmup = min(self.training_steps / 10_000, 1)
-        if self.use_warmup:
-            adapter_out = adapter_out * warmup
-
-        return self.linear_layer(input) + adapter_out
+        return self.adapter(input, mixing_weights)
 
 
 @register_modifier("vsmear")
