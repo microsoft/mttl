@@ -12,6 +12,9 @@ class RoutingConfig(Config):
         self.wandb_project = None
         self.switch_to_average = 0
 
+        # scale the output a bit
+        self.lora_alpha = 16
+
         self.router_weight_decay = None
         self.router_learning_rate = None
         self.router_temperature = 1.
