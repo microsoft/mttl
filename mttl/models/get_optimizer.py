@@ -40,7 +40,7 @@ def get_optimizer(model, args, no_decay=None):
             param.requires_grad = False
 
     for name in sorted(trainable_param_names):
-        logging.info("Training parameter: ", name)
+        logging.info("Training parameter: %s", name)
 
     for key in param_groups.keys():
         if key in ["module_logits"]:
