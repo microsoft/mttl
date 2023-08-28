@@ -61,7 +61,7 @@ class AlpacaDataModule(LightningDataModule):
             return_tensors="pt",
             model_family=config.model_family,
         )
-        self.task2id = {"alpaca_full": 0}
+        self.task_to_id = {"alpaca_full": 0}
 
     def get_dataset(self, idxs=None, loss_for_keywords=True):
         return AlpacaDataset(
