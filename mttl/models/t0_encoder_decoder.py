@@ -6,10 +6,6 @@ import torch.distributed as dist
 import torch.nn as nn
 from statistics import mean
 from transformers import AutoModelForSeq2SeqLM
-from torch.distributions.bernoulli import Bernoulli
-from torch.distributions.categorical import Categorical
-from pytorch_lightning import LightningModule
-
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.routing import RoutingInfo
 from mttl.models.get_optimizer import get_optimizer
