@@ -65,16 +65,16 @@ class VariationalRouter(RoutingSelector):
             # during training :-)
             post_input = self.apply_mask_and_average(input, padding_mask)
             post_routes = self.route(self.post_router, self.post_router_ln, post_input)
-            routing_probs = F.softmax(post_routes / 0.25, dim=-1)
+            routing_probs = F.softmax(post_routes, dim=-1)
 
             # compute auxiliary loss (KL divergence)
             auxiliary_loss = routing_probs.detach() * F.log_softmax(
-                post_routes.detach() / 0.25, -1
-            ) - routing_probs.detach() * F.log_softmax(prior_routes / 0.25, dim=-1)
+                post_routes.detach(), -1
+            ) - routing_probs.detach() * F.log_softmax(prior_routes, dim=-1)
             auxiliary_loss = auxiliary_loss.sum(dim=-1).mean()
         else:
             # during eval :-(
-            routing_probs = F.softmax(prior_routes / 0.25, dim=-1)
+            routing_probs = F.softmax(prior_routes, dim=-1)
             auxiliary_loss = routing_probs.sum().detach() * 0.0
         return routing_probs.unsqueeze(1), auxiliary_loss
 
