@@ -3,8 +3,8 @@
     "lora_dropout": 0.05,
     "weight_decay": 0.00,
     "n_skills": 1,
-    "model_modifier": "lora",
+    "model_modifier": "vsmear",
     "modify_modules": ".*",
     "modify_layers": "q_proj|v_proj|k_proj",
-    "trainable_param_names": ".*lora_[ab].*"
+    "trainable_param_names": ".*lora_[ab].*|.*router.*"
 }
