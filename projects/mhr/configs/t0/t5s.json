@@ -1,4 +1,4 @@
 {
     "exp_name": "t5_base",
-    "model": "google/t5-base"
+    "model": "t5-base"
 }

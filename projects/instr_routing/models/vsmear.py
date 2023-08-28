@@ -67,10 +67,10 @@ class VariationalRouter(RoutingSelector):
             post_routes = self.route(self.post_router, self.post_router_ln, post_input)
             routing_probs = F.softmax(post_routes, dim=-1)
 
-            # compute auxiliary loss (KL divergence)
-            auxiliary_loss = routing_probs.detach() * F.log_softmax(
-                post_routes.detach(), -1
-            ) - routing_probs.detach() * F.log_softmax(prior_routes, dim=-1)
+            # compute auxiliary loss (KL divergence), KL = - H(posterior) + Xent(posterior, prior)
+            auxiliary_loss = routing_probs * F.log_softmax(
+                post_routes, -1
+            ) - routing_probs * F.log_softmax(prior_routes, dim=-1)
             auxiliary_loss = auxiliary_loss.sum(dim=-1).mean()
         else:
             # during eval :-(
