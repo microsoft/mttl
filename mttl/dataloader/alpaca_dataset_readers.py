@@ -80,55 +80,27 @@ class AlpacaTemplateSource(object):
 class AlpacaDataset(torch.utils.data.dataset.Dataset):
     def __init__(
         self,
-        tokenizer,
-        max_input_length,
-        max_output_length,
         data_dir,
-        dst_path=None,
         idxs=None,
         loss_for_keywords=True,
         subset=None,
     ):
         super().__init__()
-        self.dst_path = dst_path
         self.loss_for_keywords = loss_for_keywords
 
         # load the data
-        if os.getenv("AP_DATA_DIR") is not None:
-            data_dir = os.getenv("AP_DATA_DIR")
-        if dst_path is None:
-            self.dataset = load_dataset("yahma/alpaca-cleaned", cache_dir=data_dir)[
-                "train"
-            ]
-            if idxs is not None:
-                self.dataset = self.dataset.select(idxs)
-        else:
-            import json
-            from datasets import Dataset
-            import pandas as pd
+        if os.getenv("ALPACA_DATA_DIR") is not None:
+            data_dir = os.getenv("ALPACA_DATA_DIR")
 
-            with open(dst_path, "r") as f:
-                new_dataset = json.load(f)
+        self.dataset = load_dataset("yahma/alpaca-cleaned", cache_dir=data_dir)[
+            "train"
+        ]
 
-            for ex in new_dataset:
-                if "topic_set" in ex:
-                    ex["topic_set"] = str(ex["topic_set"])
-                if "skill_set" in ex:
-                    ex["skill_set"] = str(ex["skill_set"])
-
-            df = pd.DataFrame(new_dataset)            
-            if idxs is not None:
-                df = df.iloc[idxs]
-            # transform into dataset
-            self.dataset = Dataset.from_pandas(df)
+        if idxs is not None:
+            self.dataset = self.dataset.select(idxs)
 
         if subset is not None:
             self.dataset = self.dataset.select(range(subset))
-        # each entry is "instruction", "input", "output" dictionary
-
-        self.tokenizer = tokenizer
-        self.max_input_length = max_input_length
-        self.max_output_length = max_output_length
 
     def __len__(self):
         return len(self.dataset)
