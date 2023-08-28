@@ -14,6 +14,7 @@ from mttl.models.modifiers.routing import (
     register_selector,
 )
 
+
 @register_selector("vsmear")
 class VariationalRouter(RoutingSelector):
     def __init__(self, config, in_d):
@@ -68,9 +69,9 @@ class VariationalRouter(RoutingSelector):
             routing_probs = F.softmax(post_routes, dim=-1)
 
             # compute auxiliary loss (KL divergence), KL = - H(posterior) + Xent(posterior, prior)
-            auxiliary_loss = routing_probs * F.log_softmax(
-                post_routes, -1
-            ) - routing_probs * F.log_softmax(prior_routes, dim=-1)
+            auxiliary_loss = routing_probs.detach() * F.log_softmax(
+                post_routes.detach(), -1
+            ) - routing_probs.detach() * F.log_softmax(prior_routes, dim=-1)
             auxiliary_loss = auxiliary_loss.sum(dim=-1).mean()
         else:
             # during eval :-(
@@ -113,7 +114,7 @@ class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
             )
 
         self.metrics["routing"] = mixing_weights.detach().cpu().float()
-        return SkilledLoRA.forward(input, mixing_weights)
+        return SkilledLoRA.forward(self, input, mixing_weights)
 
 
 @register_modifier("vsmear")
