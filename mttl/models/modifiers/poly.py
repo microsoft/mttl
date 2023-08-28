@@ -125,6 +125,9 @@ class PolyLoRALinear(PolytroponAdapter):
             self.selector = selector
         self.adapter = SkilledLoRA(config, layer)
 
+        # T5 model expects a pointer to `self.weight`
+        self.weight = layer.weight
+
     def forward(self, input):
         task_id = self.routing_infos.task_ids
         repeat = input.size(0) // task_id.size(0)
