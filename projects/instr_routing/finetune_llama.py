@@ -148,7 +148,6 @@ def run_multitask(args):
     print(f"Best model path: {path_best_model}")
     print(f"Last model path: {path_last_model}")
 
-    ds_limit = args.eval_ds_limit if not args.fast_debug_run else 0.05
     torch.cuda.empty_cache()
 
     # load best model
