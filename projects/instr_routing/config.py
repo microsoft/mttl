@@ -73,6 +73,12 @@ class RoutingConfig(Config):
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
 
     def post_init(self):
+        if self.eval_mmlu and "MMLU_DATA_DIR" not in os.environ:
+            raise ValueError("MMLU_DATA_DIR not set in env but eval_mmlu = True.")
+
+        if self.eval_superni and "NI_DATA_DIR" not in os.environ:
+            raise ValueError("NI_DATA_DIR not set in env but eval_superni = True.")
+
         # to reproduce setup in https://github.com/daanelson/alpaca-lora
         self.gradient_accumulation_steps = (
             self.train_batch_size // self.micro_batch_size
