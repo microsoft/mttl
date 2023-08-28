@@ -9,7 +9,7 @@ from mttl.datamodule.utils import prepare_inputs_for_gpt_family
 
 
 @dataclass
-class DefaultCollator():
+class DefaultCollator():  
     tokenizer: AutoTokenizer
     padding: Union[bool, str, PaddingStrategy] = True
     max_input_length: Optional[int] = None

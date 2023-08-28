@@ -2,22 +2,23 @@ import os
 import sys
 import json
 import torch
-import wandb
+import wandb 
 import logging
 import pytorch_lightning as pl
 from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 
-sys.path.append("../../")
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.callbacks import ProgressCallback
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.platypus_module import PlatypusModule
 from mttl.utils import get_mlf_logger, setup_logging
-
+   
 # register models
 import models.vsmear  # noqa: F401
+import models.softmoe
 from models.clm import CLM
 from config import RoutingConfig
 
@@ -78,8 +79,8 @@ def run_multitask(args):
     if mlf_logger:
         loggers.append(mlf_logger)
 
-    tb_logger = pl.loggers.TensorBoardLogger(save_dir=args.output_dir)
-    loggers.append(tb_logger)
+    # tb_logger = pl.loggers.TensorBoardLogger(save_dir=args.output_dir)
+    # loggers.append(tb_logger)
     loggers.append(pl.loggers.CSVLogger(save_dir=args.output_dir, name="csv_metrics"))
 
     kwargs = {"val_check_interval": args.eval_every} if args.eval_every else {}
@@ -111,7 +112,7 @@ def run_multitask(args):
     callbacks.append(checkpoint_callback)
 
     trainer = Trainer(
-        devices=-1,
+        devices=-1, 
         accelerator="gpu",
         logger=loggers,
         num_sanity_val_steps=5,

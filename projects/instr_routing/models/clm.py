@@ -175,7 +175,7 @@ class CLM(EfficientCheckpointModule):
             self.model.clear_routing_losses()
             self.model.clear_routing_metrics()
         else:
-            aux_loss = []
+            aux_loss = []  
         return loss, aux_loss
 
     def calculate_routing_mask(self, inputs, labels=None):

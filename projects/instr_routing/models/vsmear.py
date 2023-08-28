@@ -112,7 +112,7 @@ class AuxRoutingLoRALinear(RoutingAdapter):
 
         self.metrics["routing"] = mixing_weights.detach().cpu().float()
         return self.adapter(input, mixing_weights)
-
+    
 
 @register_modifier("vsmear")
 def modify_with_vsmear(transformer, config):
