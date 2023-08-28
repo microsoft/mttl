@@ -136,7 +136,7 @@ def run_multitask(args):
     ckpt_path = "best" if not args.fast_dev_run and path_best_model else "last"
     trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
 
-    if args.use_test_set and not args.fast_dev_run and path_best_model:
+    if not args.fast_dev_run and path_best_model:
         module.model.checkpoint_tested = "best"
         trainer.test(dataloaders=dm, ckpt_path=ckpt_path)
 
