@@ -14,7 +14,7 @@ from mttl.datamodule.platypus_module import PlatypusModule
 from mttl.utils import get_mlf_logger
 
 # register models
-import models.aux_routing  # noqa: F401
+import models.routing  # noqa: F401
 from models.clm import CLM
 from config import RoutingConfig
 
