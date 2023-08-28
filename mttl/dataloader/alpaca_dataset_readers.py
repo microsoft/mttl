@@ -92,9 +92,7 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
         if os.getenv("ALPACA_DATA_DIR") is not None:
             data_dir = os.getenv("ALPACA_DATA_DIR")
 
-        self.dataset = load_dataset("yahma/alpaca-cleaned", cache_dir=data_dir)[
-            "train"
-        ]
+        self.dataset = load_dataset("yahma/alpaca-cleaned", cache_dir=data_dir)["train"]
 
         if idxs is not None:
             self.dataset = self.dataset.select(idxs)
@@ -115,7 +113,7 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
         enc_input = AlpacaTemplate.apply(entry)
         input = AlpacaTemplateSource.apply(entry)
         target = entry["output"]
-        task_id = -1
+        task_id = 0
 
         ex_info = ExampleInfo(
             input,
