@@ -14,7 +14,6 @@ from mttl.models.modifiers.routing import (
     register_selector,
 )
 
-
 @register_selector("vsmear")
 class VariationalRouter(RoutingSelector):
     def __init__(self, config, in_d):
@@ -23,6 +22,7 @@ class VariationalRouter(RoutingSelector):
         self.config = config
         self.in_d = in_d
         self.n_splits = config.n_splits
+        self.temperature = config.router_temperature
         assert self.n_splits == 1
 
         self.prior_router = nn.Linear(in_d, config.n_skills * self.n_splits)
@@ -45,7 +45,7 @@ class VariationalRouter(RoutingSelector):
             weights = layer_norm(router.weight)
         else:
             weights = router.weight
-        return F.linear(x, weights, router.bias)
+        return F.linear(x, weights, router.bias) / self.temperature
 
     def apply_mask_and_average(self, x, padding_mask):
         x_rout = x * padding_mask.unsqueeze(-1).to(x.device)
@@ -120,6 +120,10 @@ def modify_with_vsmear(transformer, config):
     config.adapter_type = config.adapter_type or "lora"
 
     if config.adapter_type in ["lora"]:
-        return modify_with_routing(transformer, config, AuxRoutingLoRALinear, RouterWrapper)
+        return modify_with_routing(
+            transformer, config, AuxRoutingLoRALinear, RouterWrapper
+        )
     else:
-        raise NotImplementedError(f"Adapter type {config.adapter_type} not implemented for vsmear modifier.")
+        raise NotImplementedError(
+            f"Adapter type {config.adapter_type} not implemented for vsmear modifier."
+        )

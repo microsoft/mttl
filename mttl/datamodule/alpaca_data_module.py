@@ -61,31 +61,25 @@ class AlpacaDataModule(LightningDataModule):
             return_tensors="pt",
             model_family=config.model_family,
         )
-        self.task2id = {"alpaca_full": 0}
+        self.task_to_id = {"alpaca_full": 0}
 
     def get_dataset(self, idxs=None, loss_for_keywords=True):
         return AlpacaDataset(
-            self.tokenizer,
-            self.config.max_input_length,
-            self.config.max_output_length,
             self.config.data_dir,
-            self.config.dst_dir,
             idxs,
             loss_for_keywords=loss_for_keywords,
-            subset=100 if self.config.fast_debug_run else None,
         )
 
     def setup(self, stage=None):
-        idxs_cluster = []
         dataset = self.get_dataset()
 
         # always use the same split for the dataset
         rng = torch.Generator().manual_seed(1234)
-        if len(idxs_cluster) > 0:
-            dataset.dataset = dataset.dataset.select(idxs_cluster)
+
         n_tr_samples = int(
             len(dataset) * (1 - self.config.validation_portion)
         )  # len(dataset) -
+
         self.train_dataset, self.dev_dataset = torch.utils.data.random_split(
             dataset,
             [

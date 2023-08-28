@@ -23,6 +23,7 @@ class LoRA(Adapter):
         self.use_warmup = config.lora_warmup
         self.in_features = layer.in_features
         self.out_features = layer.out_features
+        self.init_b_random = config.lora_init_b_random
         self.training_steps = 0.0
         self.scaling = self.alpha / self.rank
         self.forward_fn = None
@@ -61,7 +62,7 @@ class LoRA(Adapter):
             self.lora_a.uniform_(-std, std)
 
         # ensure that initially, adding the adapter does not change the output
-        if self.use_warmup:
+        if self.use_warmup or self.init_b_random:
             with torch.no_grad():
                 self.lora_b.uniform_(-std, std)
         else:

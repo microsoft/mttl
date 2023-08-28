@@ -3,17 +3,18 @@ import sys
 import json
 import torch
 import wandb
+import logging
 import pytorch_lightning as pl
 from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 
-sys.path.append("../../mttl")
+sys.path.append("../../")
 
 from mttl.callbacks import ProgressCallback
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.platypus_module import PlatypusModule
-from mttl.utils import get_mlf_logger
+from mttl.utils import get_mlf_logger, setup_logging
 
 # register models
 import models.vsmear  # noqa: F401
@@ -34,8 +35,9 @@ def remove_non_serializable(d):
 
 def run_multitask(args):
     seed_everything(args.seed, workers=True)
+
     # get directory of the current file
-    print(os.path.dirname(os.path.realpath(__file__)))
+    setup_logging(logging.INFO, args.output_dir)
 
     if args.hf_token_hub:
         login(token=args.hf_token_hub)
@@ -136,17 +138,16 @@ def run_multitask(args):
     ckpt_path = "best" if not args.fast_dev_run and path_best_model else "last"
     trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
 
-    if args.use_test_set and not args.fast_dev_run and path_best_model:
+    if not args.fast_dev_run and path_best_model:
         module.model.checkpoint_tested = "best"
         trainer.test(dataloaders=dm, ckpt_path=ckpt_path)
 
     module.model.checkpoint_tested = "last"
     trainer.test(dataloaders=dm, ckpt_path="last")
 
-    print(f"Best model path: {path_best_model}")
-    print(f"Last model path: {path_last_model}")
+    logging.info(f"Best model path: {path_best_model}")
+    logging.info(f"Last model path: {path_last_model}")
 
-    ds_limit = args.eval_ds_limit if not args.fast_debug_run else 0.05
     torch.cuda.empty_cache()
 
     # load best model
@@ -167,8 +168,7 @@ def run_multitask(args):
     )
 
     if args.eval_superni:
-        print("#" * 50)
-        print("Evaluating on super NI")
+        logging.info("Evaluating on super NI")
         from eval_ni import eval_ni
 
         rouge_L_super_ni = eval_ni(
@@ -181,13 +181,12 @@ def run_multitask(args):
         if wandb.run is not None:
             wandb.log({"rouge_L_super_ni": rouge_L_super_ni})
         tb_logger.experiment.add_scalar("tasks/sni", rouge_L_super_ni, trainer.global_step)
-        print("SuperNI RougeL: {:.2f}".format(rouge_L_super_ni))
+        logging.info("SuperNI RougeL: {:.2f}".format(rouge_L_super_ni))
 
     if args.eval_mmlu:
         from eval_mmlu import eval_mmlu
 
-        print("#" * 50)
-        print("Evaluating on MMLU")
+        logging.info("Evaluating on MMLU")
         acc = eval_mmlu(
             args,
             best_model,
@@ -197,7 +196,7 @@ def run_multitask(args):
         if wandb.run is not None:
             wandb.log({"mmlu_acc": acc})
         tb_logger.experiment.add_scalar("tasks/mmlu", acc, trainer.global_step)
-        print("MMLU accuracy: {:.2f}".format(acc))
+        logging.info("MMLU accuracy: {:.2f}".format(acc))
 
 
 if __name__ == "__main__":

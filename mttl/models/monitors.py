@@ -8,7 +8,12 @@ from mttl.utils import average_dicts
 
 def get_monitors(config):
     monitors = []
-    if config.model_modifier and "poly" in config.model_modifier and "poly" in config.router_selector:
+    if (
+        config.model_modifier
+        and "poly" in config.model_modifier
+        and config.router_selector
+        and "poly" in config.router_selector
+    ):
         monitors += [PolytroponLog()]
 
     return monitors
@@ -20,10 +25,7 @@ class PolytroponLog(Callback):
     LOG_EVERY = 500
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:
-        if (
-            trainer.global_step == 0
-            or trainer.global_step % self.LOG_EVERY > 0
-        ):
+        if trainer.global_step == 0 or trainer.global_step % self.LOG_EVERY > 0:
             return
 
         def layer_stats(Z):
