@@ -8,7 +8,7 @@ from mttl.models.adapters import SkilledLoRA
 from mttl.models.modifiers import modify_with_routing, register_modifier
 from mttl.models.modifiers.routing import (
     RouterWrapper,
-    RoutingAdapter,
+    RoutingMixin,
     RoutingSelector,
     get_selector,
     register_selector,
@@ -79,17 +79,19 @@ class VariationalRouter(RoutingSelector):
         return routing_probs.unsqueeze(1), auxiliary_loss
 
 
-class AuxRoutingLoRALinear(RoutingAdapter):
+class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
     def __init__(self, config, task_id_ptr, layer, selector=None, **kwargs):
-        super().__init__(task_id_ptr)
+        RoutingMixin.__init__(self, task_id_ptr)
+        SkilledLoRA.__init__(self, config, layer, **kwargs)
+
         if selector is None:
             self.selector = get_selector(config, in_d=self.in_features)
         else:
             self.selector = selector
+
         # store losses and metrics
         self.losses = []
         self.metrics = {}
-        self.adapter = SkilledLoRA(config, layer)
 
     def forward(self, input):
         task_id = self.routing_infos.task_ids
@@ -111,7 +113,7 @@ class AuxRoutingLoRALinear(RoutingAdapter):
             )
 
         self.metrics["routing"] = mixing_weights.detach().cpu().float()
-        return self.adapter(input, mixing_weights)
+        return SkilledLoRA.forward(input, mixing_weights)
 
 
 @register_modifier("vsmear")
