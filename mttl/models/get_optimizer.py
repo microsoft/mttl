@@ -3,7 +3,7 @@ import torch.optim as optim
 from collections import defaultdict
 from transformers import Adafactor
 
-import logging
+from mttl.utils import logger
 
 
 def get_optimizer(model, args, no_decay=None):
@@ -40,7 +40,7 @@ def get_optimizer(model, args, no_decay=None):
             param.requires_grad = False
 
     for name in sorted(trainable_param_names):
-        logging.info("Training parameter: %s", name)
+        logger.info("Training parameter: %s", name)
 
     for key in param_groups.keys():
         if key in ["module_logits"]:
@@ -49,7 +49,7 @@ def get_optimizer(model, args, no_decay=None):
                 if args.module_logits_learning_rate is not None
                 else args.learning_rate
             )
-            logging.info("Module logits learning rate: %s", param_groups[key]["lr"])
+            logger.info("Module logits learning rate: %s", param_groups[key]["lr"])
         elif key in ["adapters"]:
             param_groups[key]["weight_decay"] = (
                 args.adapters_weight_decay
@@ -61,7 +61,7 @@ def get_optimizer(model, args, no_decay=None):
                 if key in ["adapters"] and args.adapters_learning_rate
                 else args.learning_rate
             )
-            logging.info("Adapters learning rate: %s", param_groups[key]["lr"])
+            logger.info("Adapters learning rate: %s", param_groups[key]["lr"])
         elif key in ["router"]:          
             param_groups[key]["weight_decay"] = (
                 args.router_weight_decay
@@ -73,7 +73,7 @@ def get_optimizer(model, args, no_decay=None):
                 if key in ["router"] and args.router_learning_rate
                 else args.learning_rate
             )
-            logging.info("Router learning rate: %s", param_groups[key]["lr"])
+            logger.info("Router learning rate: %s", param_groups[key]["lr"])
         else:  
             param_groups[key]["weight_decay"] = (
                 0.0 if key in ["module_logits", "no_decay"] else args.weight_decay

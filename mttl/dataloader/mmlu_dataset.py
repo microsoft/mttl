@@ -4,7 +4,7 @@ import pandas as pd
 import os
 import datasets
 
-logger = datasets.logging.get_logger(__name__)
+from mttl.utils import logger
 
 
 _CITATION = """\

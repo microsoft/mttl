@@ -7,8 +7,7 @@ import string
 import numpy as np
 from torchmetrics.text.rouge import ROUGEScore
 from transformers import AutoTokenizer
-
-logger = logging.getLogger(__name__)
+from mttl.utils import logger
 
 
 class GPTTokenizer:

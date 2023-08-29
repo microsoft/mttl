@@ -14,11 +14,11 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from mttl.callbacks import ProgressCallback
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.platypus_module import PlatypusModule
-from mttl.utils import get_mlf_logger, setup_logging
-   
+from mttl.utils import get_mlf_logger, setup_logging, logger
+
 # register models
 import models.vsmear  # noqa: F401
-import models.softmoe
+import models.softmoe # noqa: F401
 from models.clm import CLM
 from config import RoutingConfig
 
@@ -146,8 +146,8 @@ def run_multitask(args):
     module.model.checkpoint_tested = "last"
     trainer.test(dataloaders=dm, ckpt_path="last")
 
-    logging.info(f"Best model path: {path_best_model}")
-    logging.info(f"Last model path: {path_last_model}")
+    logger.info(f"Best model path: {path_best_model}")
+    logger.info(f"Last model path: {path_last_model}")
 
     torch.cuda.empty_cache()
 
@@ -169,7 +169,7 @@ def run_multitask(args):
     )
 
     if args.eval_superni:
-        logging.info("Evaluating on super NI")
+        logger.info("Evaluating on super NI")
         from eval_ni import eval_ni
 
         rouge_L_super_ni = eval_ni(
@@ -182,12 +182,12 @@ def run_multitask(args):
         if wandb.run is not None:
             wandb.log({"rouge_L_super_ni": rouge_L_super_ni})
         tb_logger.experiment.add_scalar("tasks/sni", rouge_L_super_ni, trainer.global_step)
-        logging.info("SuperNI RougeL: {:.2f}".format(rouge_L_super_ni))
+        logger.info("SuperNI RougeL: {:.2f}".format(rouge_L_super_ni))
 
     if args.eval_mmlu:
         from eval_mmlu import eval_mmlu
 
-        logging.info("Evaluating on MMLU")
+        logger.info("Evaluating on MMLU")
         acc = eval_mmlu(
             args,
             best_model,
@@ -197,7 +197,7 @@ def run_multitask(args):
         if wandb.run is not None:
             wandb.log({"mmlu_acc": acc})
         tb_logger.experiment.add_scalar("tasks/mmlu", acc, trainer.global_step)
-        logging.info("MMLU accuracy: {:.2f}".format(acc))
+        logger.info("MMLU accuracy: {:.2f}".format(acc))
 
 
 if __name__ == "__main__":

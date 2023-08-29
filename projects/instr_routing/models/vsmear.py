@@ -45,7 +45,7 @@ class SMEARRouter(RoutingSelector):
 
     def apply_mask_and_average(self, x, padding_mask):
         x_rout = x * padding_mask.unsqueeze(-1).to(x.device)
-        lengths = x_rout.ne(0).sum(dim=1)
+        lengths = x_rout.ne(0).sum(dim=1) + 1e-5
         x_rout = x_rout.sum(dim=1) / lengths
         return x_rout
 
