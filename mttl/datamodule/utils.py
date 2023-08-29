@@ -12,4 +12,6 @@ def get_tokenizer(config):
     if tokenizer.pad_token_id is None:
         # no padding token, use EOS token instead!
         tokenizer.pad_token = tokenizer.eos_token
+
+    tokenizer.add_eos_token = False
     return tokenizer
