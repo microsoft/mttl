@@ -1,6 +1,6 @@
+from transformers import AutoTokenizer, LlamaTokenizerFast
 
-import logging
-from transformers import AutoTokenizer, LlamaTokenizer, LlamaTokenizerFast
+from mttl.utils import logger
 
 
 def get_tokenizer(config):
