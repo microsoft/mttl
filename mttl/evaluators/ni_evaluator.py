@@ -114,7 +114,7 @@ class NIEvaluator(object):
                predictions, [[r] for r in references], reduction="mean"
             )
             all_rougeL.append(eval_metrics["rougeL"])
-            pbar.set_description(f"rougeL: {np.mean(all_rougeL):.4f}")
+            pbar.set_description(f"Task: {task_name[0] if task_name else None}, rougeL: {np.mean(all_rougeL):.4f}")
             
             if step == eval_batches:
                 break
