@@ -11,10 +11,7 @@ import hashlib
 from mttl.dataloader.xfit_task_descriptions import DESCRIPTIONS
 from mttl.dataloader.xfit_metrics import METRICS
 from mttl.dataloader.data_utils import ExampleInfo
-from mttl.utils import hash_example
-
-
-logger = logging.getLogger(__name__)
+from mttl.utils import hash_example, logger
 
 
 class XFitTaskDataset(torch.utils.data.dataset.Dataset):

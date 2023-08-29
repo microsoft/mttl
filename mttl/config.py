@@ -3,7 +3,7 @@ import os
 import ast
 import argparse
 from string import Template
-import logging
+from mttl.utils import logger
 
 
 class Config:
@@ -44,11 +44,12 @@ class Config:
                     v = v
             else:
                 v = v
+
             if not hasattr(self, k) and raise_error:
                 raise ValueError(f"{k} is not in the config")
 
             if eval:
-                logging.info("Overwriting {} to {}".format(k, v))
+                logger.warn("Overwriting {} to {}".format(k, v))
 
             if k in ['data_dir', 'output_dir']:
                 # this raises an error if the env. var does not exist
@@ -121,8 +122,6 @@ class Config:
         config = cls(
             filenames=args.config_files, kwargs=args.kwargs, raise_error=raise_error
         )
-
-        logging.info("Config arguments: %s", config.to_json())
 
         if return_parser:
             return config, args

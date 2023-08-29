@@ -13,6 +13,9 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_info
 from torch.autograd.function import Function
 
 
+logger = logging.getLogger("mttl")
+
+
 def hash_example(example):
     return hashlib.md5(example.encode("utf-8")).hexdigest()
 
@@ -222,25 +225,6 @@ def get_mlf_logger():
     return mlf_logger
 
 
-def setup_logging(log_level, log_dir):
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-
-    logging.basicConfig(
-        level=log_level,
-        handlers=[
-            logging.FileHandler(os.path.join(log_dir, "log.txt")),
-            logging.StreamHandler(),
-        ],
-        format="%(asctime)-15s %(levelname)-8s %(message)s",
-    )
-    logging.getLogger("openai").setLevel(logging.WARNING)
-    logging.info(
-        "New experiment, log will be at %s",
-        os.path.join(log_dir, "log.txt"),
-    )
-
-
 def get_checkpoint_path(path, step=None, use_last=False):
     if path.endswith(".ckpt") or path.endswith(".pt"):
         return path
@@ -256,7 +240,7 @@ def get_checkpoint_path(path, step=None, use_last=False):
         return match[0]
 
     if len(match) > 1:
-        logging.warning(
+        logger.warning(
             f"{len(match)} checkpoints found. "
             + "taking the one with the lowest val loss"
         )
@@ -274,7 +258,7 @@ def get_checkpoint_path(path, step=None, use_last=False):
     elif len(match) == 0:
         match = glob.glob(f"{path}/*step*.pt", recursive=True)
         if len(match) > 1:
-            logging.warning(
+            logger.warning(
                 f"{len(match)} checkpoints found. "
                 + "taking the one with the lowest val loss"
             )
@@ -300,6 +284,28 @@ def get_checkpoint_path(path, step=None, use_last=False):
 
     print("Found checkpoint", path)
     return path
+
+
+def setup_logging(log_level, log_dir):
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+
+    logger = logging.getLogger("mttl")
+    logger.setLevel(logging.INFO)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)-15s %(levelname)-8s %(message)s")
+    stream_handler.setFormatter(formatter)
+
+    logger.addHandler(logging.FileHandler(os.path.join(log_dir, "log.txt")))
+    logger.addHandler(stream_handler)
+
+    logging.getLogger("openai").setLevel(logging.WARNING)
+    logger.info(
+        "New experiment, log will be at %s",
+        os.path.join(log_dir, "log.txt"),
+    )
 
 
 class MemEfficientLoRA(Function):

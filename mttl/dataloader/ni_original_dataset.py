@@ -22,7 +22,8 @@ import os
 import random
 import datasets
 
-logger = datasets.logging.get_logger(__name__)
+from mttl.utils import logger
+
 
 _CITATION = """
 @article{wang2022benchmarking,
