@@ -21,7 +21,6 @@ class DataCollatorForMMLU:
     pad_to_multiple_of: Optional[int] = None
     label_pad_token_id: int = -100
     return_tensors: str = "pt"
-    text_only: bool = False
     model_family: str = "seq2seq"
     task_to_id: dict = None
 
@@ -54,39 +53,29 @@ class DataCollatorForMMLU:
 
         # Remove multiple spaces, which mess with tiktoken
         sources = [" ".join(s.split()) for s in sources]
-        if self.text_only:
-            model_inputs = {"inputs": sources}
-        else:
-            model_inputs = self.tokenizer(
-                sources,
-                max_length=self.max_input_length,
-                padding=self.padding,
-                return_tensors=self.return_tensors,
-                truncation=True,
-                pad_to_multiple_of=self.pad_to_multiple_of,
-            )
-            model_inputs["inputs"] = sources
-
-        labels = [instance["Instance"]["Output"] for instance in batch]
-        # Add space for auto-regressive model tokenization
         labels = [" " + l for l in labels]
 
-        if self.text_only:
-            model_inputs["labels"] = labels
-        else:
-            model_inputs["labels_text"] = labels
-            labels = self.tokenizer(
-                labels,
-                max_length=self.max_output_length,
-                padding=self.padding,
-                return_tensors=self.return_tensors,
-                truncation=True,
-            )
-            label_mask = labels["attention_mask"].bool()
-            model_inputs["labels"] = labels["input_ids"].masked_fill(
-                ~label_mask, self.label_pad_token_id
-            )
-
+        model_inputs = self.tokenizer(
+            sources,
+            max_length=self.max_input_length,
+            padding=self.padding,
+            return_tensors=self.return_tensors,
+            truncation=True,
+            pad_to_multiple_of=self.pad_to_multiple_of,
+        )
+        labels = [instance["Instance"]["Output"] for instance in batch]
+        # Add space for auto-regressive model tokenization
+        labels = self.tokenizer(
+            labels,
+            max_length=self.max_output_length,
+            padding=self.padding,
+            return_tensors=self.return_tensors,
+            truncation=True,
+        )
+        label_mask = labels["attention_mask"].bool()
+        model_inputs["labels"] = labels["input_ids"].masked_fill(
+            ~label_mask, self.label_pad_token_id
+        )
         task_names = [instance["Task"] for instance in batch]
         model_inputs["task_names"] = task_names
         if self.task_to_id is not None:
