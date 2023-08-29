@@ -149,3 +149,4 @@ dmypy.json
 **/eval/mmlu/**/*.csv
 results/
 lm_cache/
+/tmp/
