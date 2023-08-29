@@ -54,15 +54,15 @@ class MMLUEvaluator(object):
         )
         for step, batch in pbar:
             task_name = batch.pop("task_names", None)
-            texts = batch.pop("input_texts", None)
-            batch.pop("labels_texts", None)
+            batch.pop("input_texts", None)
+            labels_text = batch.pop("labels_texts", None)
 
             extra_kwargs = {}
 
             max_length = self.config.max_output_length
             if self.config.model_family == "gpt":
                 max_length += batch["input_ids"].shape[-1]
-                extra_kwargs["pad_token_id"] = tokenizer.eos_token_id
+                extra_kwargs["pad_token_id"] = tokenizer.pad_token_id
 
             with torch.no_grad():
                 try:
@@ -105,7 +105,7 @@ class MMLUEvaluator(object):
                 .numpy()
             )
             predictions = [{0: "A", 1: "B", 2: "C", 3: "D"}[p] for p in probs]
-            references = decode(batch["labels"])
+            references = labels_text
 
             # If we are in a multiprocess environment, the last batch has duplicates
             if step == len(dataloader) - 1:

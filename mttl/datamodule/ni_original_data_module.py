@@ -234,6 +234,7 @@ class DataCollatorForNI(DefaultCollator):
         task_names = [ex["Task"] for ex in batch]
         output_batch["task_names"] = task_names
         output_batch["task_ids"] = torch.LongTensor([self.task_to_id[task] for task in task_names])
+        output_batch["labels_texts"] = labels
         output_batch["hashes"] = [hash_example(i + o) for i, o in zip(sources, labels)]
         output_batch["instruction_hashes"] = [hash_example(i) for i in sources]
         return output_batch

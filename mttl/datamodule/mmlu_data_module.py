@@ -53,9 +53,10 @@ class DataCollatorForMMLU:
 
         # Remove multiple spaces, which mess with tiktoken
         sources = [" ".join(s.split()) for s in sources]
+        labels = [instance["Instance"]["Output"] for instance in batch]
         labels = [" " + l for l in labels]
 
-        model_inputs = self.tokenizer(
+        tokenized_inputs = self.tokenizer(
             sources,
             max_length=self.max_input_length,
             padding=self.padding,
@@ -63,24 +64,24 @@ class DataCollatorForMMLU:
             truncation=True,
             pad_to_multiple_of=self.pad_to_multiple_of,
         )
-        labels = [instance["Instance"]["Output"] for instance in batch]
         # Add space for auto-regressive model tokenization
-        labels = self.tokenizer(
+        tokenized_labels = self.tokenizer(
             labels,
             max_length=self.max_output_length,
             padding=self.padding,
             return_tensors=self.return_tensors,
             truncation=True,
         )
-        label_mask = labels["attention_mask"].bool()
-        model_inputs["labels"] = labels["input_ids"].masked_fill(
+        label_mask = tokenized_labels["attention_mask"].bool()
+        tokenized_inputs["labels"] = tokenized_labels["input_ids"].masked_fill(
             ~label_mask, self.label_pad_token_id
         )
         task_names = [instance["Task"] for instance in batch]
-        model_inputs["task_names"] = task_names
+        tokenized_inputs["task_names"] = task_names
         if self.task_to_id is not None:
-            model_inputs["task_ids"] = torch.LongTensor([self.task_to_id[task] for task in task_names])
-        return model_inputs
+            tokenized_inputs["task_ids"] = torch.LongTensor([self.task_to_id[task] for task in task_names])
+        tokenized_inputs["labels_texts"] = labels
+        return tokenized_inputs
 
 
 class MMLUDataModule(LightningDataModule):
