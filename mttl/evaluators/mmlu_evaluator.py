@@ -60,9 +60,9 @@ class MMLUEvaluator(object):
             extra_kwargs = {}
 
             max_length = self.config.max_output_length
-            if self.config.model_family == 'gpt':
-                max_length += batch['input_ids'].shape[-1]
-                extra_kwargs['pad_token_id'] = tokenizer.eos_token_id
+            if self.config.model_family == "gpt":
+                max_length += batch["input_ids"].shape[-1]
+                extra_kwargs["pad_token_id"] = tokenizer.eos_token_id
 
             with torch.no_grad():
                 try:
@@ -90,21 +90,21 @@ class MMLUEvaluator(object):
 
             logits = predictions.scores[0]
             probs = (
-                    torch.stack(
-                        [
-                            logits[:, tokenizer(" A").input_ids[0]],
-                            logits[:, tokenizer(" B").input_ids[0]],
-                            logits[:, tokenizer(" C").input_ids[0]],
-                            logits[:, tokenizer(" D").input_ids[0]],
-                        ],
-                        dim=-1
-                    )
-                .max(dim=-1)[1]    
+                torch.stack(
+                    [
+                        logits[:, tokenizer(" A").input_ids[0]],
+                        logits[:, tokenizer(" B").input_ids[0]],
+                        logits[:, tokenizer(" C").input_ids[0]],
+                        logits[:, tokenizer(" D").input_ids[0]],
+                    ],
+                    dim=-1,
+                )
+                .max(dim=-1)[1]
                 .detach()
                 .cpu()
                 .numpy()
             )
-            predictions = [{0: "A", 1: "B", 2: "C", 3: "D"}[p] for p in probs]      
+            predictions = [{0: "A", 1: "B", 2: "C", 3: "D"}[p] for p in probs]
             references = decode(batch["labels"])
 
             # If we are in a multiprocess environment, the last batch has duplicates
@@ -118,9 +118,9 @@ class MMLUEvaluator(object):
             all_predictions += predictions
             all_references += references
             task_names += task_name
-        
+
             eval_metrics = compute_metrics(
-               predictions, [[r] for r in references], reduction="mean"
+                predictions, [[r] for r in references], reduction="mean"
             )
 
             all_EM.append(eval_metrics["exact_match"])
@@ -134,7 +134,9 @@ class MMLUEvaluator(object):
         )
         mean_metrics = {}
         for metric_name, metric_value in eval_metrics.items():
-            metric_value = sum(eval_metrics[metric_name]) / len(eval_metrics[metric_name])
+            metric_value = sum(eval_metrics[metric_name]) / len(
+                eval_metrics[metric_name]
+            )
             mean_metrics[metric_name] = metric_value
 
         if metric_per_task:
