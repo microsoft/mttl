@@ -55,7 +55,6 @@ class VariationalRouter(RoutingSelector):
         return x_rout
 
     def forward(self, routing_infos, input: torch.Tensor):
-        bs, seq, _ = input.shape
         padding_mask = routing_infos.pad_token_mask
         inst_padding_mask = routing_infos.inst_token_mask
 

@@ -53,8 +53,8 @@ class DefaultCollator:
         labels = [labels + " " + self.tokenizer.eos_token for labels in labels]
 
         output_batch = {}
-        tokenized_labels = self.tokenizer(
-            labels,
+        tokenized_sources = self.tokenizer(
+            sources,
             max_length=self.max_input_length,
             padding=self.padding,
             return_tensors=self.return_tensors,
@@ -68,12 +68,23 @@ class DefaultCollator:
             truncation=True,
             pad_to_multiple_of=self.pad_to_multiple_of,
         )
-        targets_len = tokenized_labels["attention_mask"].int().sum(-1)
-        mask = torch.zeros_like(tok_sources_plus_labels["attention_mask"])
-        mask[(torch.arange(mask.shape[0]), mask.shape[1] - targets_len)] = 1
+
+        input_len = tokenized_sources["attention_mask"].int().sum(-1)
+        pad_tokens = tok_sources_plus_labels["attention_mask"].shape[
+            1
+        ] - tok_sources_plus_labels["attention_mask"].int().sum(-1)
+        offset = torch.clamp(pad_tokens + input_len, max=self.max_input_length)
+        mask = torch.zeros(
+            tok_sources_plus_labels["attention_mask"].shape[0],
+            tok_sources_plus_labels["attention_mask"].shape[1] + 1,
+        )
+        mask[(torch.arange(mask.shape[0]), offset)] = 1
         mask = mask.cumsum(dim=1).bool()
+        mask = mask[:, :-1]
+
         targets = tok_sources_plus_labels["input_ids"].clone()
         targets = torch.masked_fill(targets, ~mask, self.label_pad_token_id)
+
         output_batch["input_ids"] = tok_sources_plus_labels["input_ids"]
         output_batch["attention_mask"] = tok_sources_plus_labels["attention_mask"]
         output_batch["labels"] = targets
