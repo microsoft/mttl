@@ -45,14 +45,20 @@ class DefaultCollator:
         return output_batch
 
     def prepare_inputs_for_gpt_family(self, sources, labels):
+        assert self.tokenizer.padding_side == "left"
+
+        # Add space for auto-regressive model tokenization
+        labels = [" " + l.strip() for l in labels]
+        # Add eos token
+        labels = [labels + " " + self.tokenizer.eos_token for labels in labels]
+
         output_batch = {}
         tokenized_labels = self.tokenizer(
             labels,
-            max_length=self.max_output_length,
+            max_length=self.max_input_length,
             padding=self.padding,
             return_tensors=self.return_tensors,
             truncation=True,
-            pad_to_multiple_of=self.pad_to_multiple_of,
         )
         tok_sources_plus_labels = self.tokenizer(
             [i + t for i, t in zip(sources, labels)],
@@ -60,6 +66,7 @@ class DefaultCollator:
             padding=self.padding,
             return_tensors=self.return_tensors,
             truncation=True,
+            pad_to_multiple_of=self.pad_to_multiple_of,
         )
         targets_len = tokenized_labels["attention_mask"].int().sum(-1)
         mask = torch.zeros_like(tok_sources_plus_labels["attention_mask"])
@@ -77,8 +84,6 @@ class DefaultCollator:
         # Remove multiple spaces, which mess with tiktoken (?)
         sources = [" ".join(s.split()) for s in sources]
         labels = [b.target for b in batch]
-        # Add space for auto-regressive model tokenization
-        labels = [" " + l for l in labels]
         hashes = [b.hash for b in batch]
         task_ids = [b.task_id for b in batch]
         instruction_hashes = [b.instruction_hash for b in batch]
