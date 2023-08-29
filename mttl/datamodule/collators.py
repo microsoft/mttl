@@ -19,58 +19,64 @@ class DefaultCollator():
     model_family: str = "seq2seq"
 
     def __call__(self, batch: List[ExampleInfo]):
-        inputs = [b.input for b in batch]
-        targets = [b.target for b in batch]
-        # Add space for auto-regressive model tokenization
-        targets = [' ' + l for l in targets]
+        sources = [b.input for b in batch]
         # Remove multiple spaces, which mess with tiktoken (?)
-        inputs = [' '.join(s.split()) for s in inputs]
+        sources = [' '.join(s.split()) for s in sources]
+        labels = [b.target for b in batch]
+        # Add space for auto-regressive model tokenization
+        labels = [' ' + l for l in labels]
         hashes = [b.hash for b in batch]
         task_ids = [b.task_id for b in batch]
         instruction_hashes = [b.instruction_hash for b in batch]
 
         output_batch = {}
 
-        tok_targets = self.tokenizer(
-            targets,
-            max_length=self.max_output_length,
-            padding=self.padding,
-            return_tensors=self.return_tensors,
-            truncation=True,
-        )
-        label_mask = tok_targets["attention_mask"].bool()
-        labels = tok_targets["input_ids"].masked_fill(
-            ~label_mask, self.label_pad_token_id
-        )
-
         if self.model_family == "gpt":
-            tok_inputs_plus_targets = self.tokenizer(
-                [i + t for i, t in zip(inputs, targets)],
+            tokenized_labels = self.tokenizer(
+                labels,
+                max_length=self.max_output_length,
+                padding=self.padding,
+                return_tensors=self.return_tensors,
+                truncation=True,
+            )
+            tok_sources_plus_labels = self.tokenizer(
+                [i + t for i, t in zip(sources, labels)],
                 max_length=self.max_input_length,
                 padding=self.padding,
                 return_tensors=self.return_tensors,
                 truncation=True,
             )
-            targets_len = tok_targets["attention_mask"].int().sum(-1)
-            mask = torch.zeros_like(tok_inputs_plus_targets["attention_mask"])
+            targets_len = tokenized_labels["attention_mask"].int().sum(-1)
+            mask = torch.zeros_like(tok_sources_plus_labels["attention_mask"])
             mask[(torch.arange(mask.shape[0]), mask.shape[1] - targets_len)] = 1
             mask = mask.cumsum(dim=1).bool()
-            labels = tok_inputs_plus_targets["input_ids"].clone()
+            labels = tok_sources_plus_labels["input_ids"].clone()
             labels = torch.masked_fill(labels, ~mask, self.label_pad_token_id)
-            output_batch["input_ids"] = tok_inputs_plus_targets["input_ids"]
-            output_batch["attention_mask"] = tok_inputs_plus_targets["attention_mask"]
+            output_batch["input_ids"] = tok_sources_plus_labels["input_ids"]
+            output_batch["attention_mask"] = tok_sources_plus_labels["attention_mask"]
             output_batch["labels"] = labels
         else:
-            tok_inputs = self.tokenizer(
-                inputs,
+            tokenized_labels = self.tokenizer(
+                labels,
+                max_length=self.max_output_length,
+                padding=self.padding,
+                return_tensors=self.return_tensors,
+                truncation=True,
+            )
+            tokenized_sources = self.tokenizer(
+                sources,
                 max_length=self.max_input_length,
                 padding=self.padding,
                 return_tensors=self.return_tensors,
                 truncation=True,
                 pad_to_multiple_of=self.pad_to_multiple_of,
             )
-            output_batch["input_ids"] = tok_inputs["input_ids"]
-            output_batch["attention_mask"] = tok_inputs["attention_mask"]
+            label_mask = tokenized_labels["attention_mask"].bool()
+            masked_labels = tokenized_labels["input_ids"].masked_fill(
+                ~label_mask, self.label_pad_token_id
+            )
+            output_batch["input_ids"] = tokenized_sources["input_ids"]
+            output_batch["attention_mask"] = tokenized_sources["attention_mask"]
             output_batch["labels"] = labels
 
         output_batch["hashes"] = hashes
