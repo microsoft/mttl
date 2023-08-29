@@ -1,8 +1,14 @@
 import torch
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, LlamaTokenizer
 
 
 def get_tokenizer(config):
+    if config.model=="yahma/llama-7b-hf":        
+        tokenizer = LlamaTokenizer.from_pretrained(config.model)
+        tokenizer.pad_token_id = 0 
+        tokenizer.padding_side = 'left'
+        return tokenizer
+    
     tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)
     tokenizer.model_max_length = int(1e9)
 
@@ -18,7 +24,7 @@ def get_tokenizer(config):
 def prepare_inputs_for_gpt_family(batch: dict, tokenizer: AutoTokenizer):
     input_ids, labels = batch['input_ids'], batch['labels']
     eos_tokens = torch.full((labels.shape[0], 1), tokenizer.eos_token_id, device=labels.device)
-    labels = torch.cat((labels, eos_tokens), dim=-1)
+    labels = torch.cat((labels, eos_tokens), dim=-1) # add eos token to labels
     padded_labels = torch.where((labels == -100), tokenizer.pad_token_id, labels)
     padded_input_ids = torch.full_like(input_ids, -100)
     batch['input_ids'] = torch.cat((input_ids, padded_labels), dim=-1)
