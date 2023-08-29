@@ -15,8 +15,8 @@ from mttl.models.modifiers.routing import (
 )
 
 
-@register_selector("vsmear")
-class VariationalRouter(RoutingSelector):
+@register_selector("smear")
+class SMEARRouter(RoutingSelector):
     def __init__(self, config, in_d):
         super().__init__()
 
@@ -29,11 +29,6 @@ class VariationalRouter(RoutingSelector):
         self.prior_router = nn.Linear(in_d, config.n_skills * self.n_splits)
         self.prior_router_ln = nn.LayerNorm(in_d)
         self.prior_router_ln.weight = nn.Parameter(torch.ones(in_d))
-
-        self.post_router = nn.Linear(in_d, config.n_skills * self.n_splits)
-        self.post_router.bias.data.fill_(0)
-        self.post_router_ln = nn.LayerNorm(in_d)
-        self.post_router_ln.weight = nn.Parameter(torch.ones(self.in_d))
 
     @property
     def W_norm(self):
@@ -53,6 +48,25 @@ class VariationalRouter(RoutingSelector):
         lengths = x_rout.ne(0).sum(dim=1)
         x_rout = x_rout.sum(dim=1) / lengths
         return x_rout
+
+    def forward(self, routing_infos, input: torch.Tensor):
+        inst_padding_mask = routing_infos.inst_token_mask
+        prior_input = self.apply_mask_and_average(input, inst_padding_mask)
+        prior_routes = self.route(self.prior_router, self.prior_router_ln, prior_input)
+        routing_probs = F.softmax(prior_routes, dim=-1)
+        auxiliary_loss = routing_probs.sum().detach() * 0.0
+        return routing_probs.unsqueeze(1), auxiliary_loss
+
+
+@register_selector("vsmear")
+class VSMEARRouter(SMEARRouter):
+    def __init__(self, config, in_d):
+        super().__init__(config, in_d)
+
+        self.post_router = nn.Linear(in_d, config.n_skills * self.n_splits)
+        self.post_router.bias.data.fill_(0)
+        self.post_router_ln = nn.LayerNorm(in_d)
+        self.post_router_ln.weight = nn.Parameter(torch.ones(self.in_d))
 
     def forward(self, routing_infos, input: torch.Tensor):
         padding_mask = routing_infos.pad_token_mask
@@ -116,9 +130,9 @@ class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
         return SkilledLoRA.forward(self, input, mixing_weights)
 
 
-@register_modifier("vsmear")
-def modify_with_vsmear(transformer, config):
-    config.router_selector = config.router_selector or "vsmear"
+@register_modifier("smear")
+def modify_with_smear(transformer, config):
+    config.router_selector = config.router_selector or "smear"
     config.adapter_type = config.adapter_type or "lora"
 
     if config.adapter_type in ["lora"]:
@@ -129,3 +143,10 @@ def modify_with_vsmear(transformer, config):
         raise NotImplementedError(
             f"Adapter type {config.adapter_type} not implemented for vsmear modifier."
         )
+
+
+@register_modifier("vsmear")
+def modify_with_vsmear(transformer, config):
+    config.router_selector = "vsmear"
+
+    return modify_with_smear(transformer, config)
