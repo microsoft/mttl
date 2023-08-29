@@ -1,18 +1,9 @@
-import copy
-import json
 import torch
 import os
-import numpy as np
-import transformers
 from datasets import load_dataset
-from scipy.stats import entropy as calc_entropy
 
 from mttl.dataloader.data_utils import ExampleInfo
 from mttl.utils import hash_example
-from typing import List, Sequence, Dict
-
-
-IGNORE_INDEX = -100
 
 
 class AlpacaTemplateForHash(
