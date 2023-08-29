@@ -5,6 +5,8 @@
     "micro_batch_size": 1,
     "train_batch_size": 16,
     "predict_batch_size": 8,
+    "max_input_length": 4096,
+    "max_output_length": 4096,
     "model": "meta-llama/Llama-2-13b-hf",
     "model_family": "gpt",
     "optimizer": "adamw",
