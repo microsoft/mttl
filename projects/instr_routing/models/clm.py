@@ -123,6 +123,8 @@ class CLM(EfficientCheckpointModule):
 
     def forward(self, batch, reduction="mean"):
         input_ids, labels = batch["input_ids"], batch["labels"]
+
+        breakpoint()
         routing_infos = AugmentedRoutingInfo.from_batch(batch)
 
         pad_mask, instruction_mask = self.calculate_routing_mask(
