@@ -123,7 +123,6 @@ class CLM(EfficientCheckpointModule):
 
     def forward(self, batch, reduction="mean"):
         input_ids, labels = batch["input_ids"], batch["labels"]
-
         routing_infos = AugmentedRoutingInfo.from_batch(batch)
 
         pad_mask, instruction_mask = self.calculate_routing_mask(
@@ -184,7 +183,7 @@ class CLM(EfficientCheckpointModule):
         padding_mask = (inputs != self.pad_token_id).float()
         # 1 if the token is part of instruction or pad token (so outputs are 0s)
         if labels is not None:
-            instruction_mask = (labels == -100).float()
+            instruction_mask = (labels == -100).float() * padding_mask
         else:
             instruction_mask = padding_mask.clone()
         return padding_mask, instruction_mask
