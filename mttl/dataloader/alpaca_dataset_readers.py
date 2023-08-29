@@ -1,18 +1,9 @@
-import copy
-import json
 import torch
 import os
-import numpy as np
-import transformers
 from datasets import load_dataset
-from scipy.stats import entropy as calc_entropy
 
 from mttl.dataloader.data_utils import ExampleInfo
 from mttl.utils import hash_example
-from typing import List, Sequence, Dict
-
-
-IGNORE_INDEX = -100
 
 
 class AlpacaTemplateForHash(
@@ -82,11 +73,9 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
         self,
         data_dir,
         idxs=None,
-        loss_for_keywords=True,
         subset=None,
     ):
-        super().__init__()  
-        self.loss_for_keywords = loss_for_keywords
+        super().__init__()
 
         # load the data
         if os.getenv("ALPACA_DATA_DIR") is not None:

@@ -1,8 +1,12 @@
 from pytorch_lightning import LightningModule
 import torch
-from dataclasses import dataclass
-from typing import List
-from dataclasses import dataclass, field
+
+
+def transfer_batch_to_device(batch, device):
+    for key in batch:
+        if isinstance(batch[key], torch.Tensor):
+            batch[key] = batch[key].to(device)
+    return batch
 
 
 class EfficientCheckpointModule(LightningModule):
@@ -60,10 +64,7 @@ class EfficientCheckpointModule(LightningModule):
         ), f"Load model failed, unexpected keys {load_result.unexpected_keys.__str__()}"
 
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
-        for key in batch:
-            if isinstance(batch[key], torch.Tensor):
-                batch[key] = batch[key].to(device)
-        return batch
+        return transfer_batch_to_device(batch, device)
 
 
 def get_global_batch_size(batch_size, accumulation_steps):

@@ -28,7 +28,7 @@ class RoutingConfig(Config):
         self.eval_truthfulqa = True
         self.eval_superni = True
         self.eval_mmlu = True
-        self.eval_batches = 50
+        self.eval_batches = -1
         self.gen_alpaca_eval = False
 
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")

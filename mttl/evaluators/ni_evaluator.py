@@ -4,8 +4,8 @@ import tqdm
 import torch
 import numpy as np
 
-from transformers import AutoModelForCausalLM
 from mttl.dataloader.ni_metrics import compute_metrics
+from mttl.models.utils import transfer_batch_to_device
 
 
 class NIEvaluator(object):
@@ -51,27 +51,29 @@ class NIEvaluator(object):
         task_names = []
         all_rougeL = []
 
-        dataloader = self.datamodule.test_dataloader()
+        dataloader = self.datamodule.test_dataloader(shuffle=eval_batches > 0)
         pbar = tqdm.tqdm(
             enumerate(dataloader),
             total=len(dataloader),
         )
         for step, batch in pbar:
             task_name = batch.pop("task_names", None)
-            texts = batch.pop("input_texts", None)
-            batch.pop("labels_texts", None)
+            batch.pop("input_texts", None)
+            
+            # we use labels texts here for evaluation, because some tokenizers do not skip
+            # pad token when decoding, even if skip_special_tokens=True
+            labels_texts = batch.pop("labels_texts", None)
 
             extra_kwargs = {}
-
             max_length = self.config.max_output_length
+
             if self.config.model_family == 'gpt':
                 max_length += batch['input_ids'].shape[-1]
-                extra_kwargs['pad_token_id'] = tokenizer.eos_token_id
+                extra_kwargs['pad_token_id'] = tokenizer.pad_token_id
 
+            batch = transfer_batch_to_device(batch, self.device)
             with torch.no_grad():
                 try:
-                    batch["input_ids"] = batch["input_ids"].to(self.device)
-                    batch["attention_mask"] = batch["attention_mask"].to(self.device)
                     predictions = model.generate(
                         input_ids=batch["input_ids"],
                         attention_mask=batch["attention_mask"],
@@ -94,7 +96,7 @@ class NIEvaluator(object):
             predictions = predictions.sequences
             predictions = predictions[:, batch["input_ids"].shape[-1] :]
             predictions = decode(predictions)
-            references = decode(batch["labels"])
+            references = labels_texts
 
             # If we are in a multiprocess environment, the last batch has duplicates
             if step == len(dataloader) - 1:
@@ -112,7 +114,7 @@ class NIEvaluator(object):
                predictions, [[r] for r in references], reduction="mean"
             )
             all_rougeL.append(eval_metrics["rougeL"])
-            pbar.set_description(f"rougeL: {np.mean(all_rougeL):.4f}")
+            pbar.set_description(f"Task: {task_name[0] if task_name else None}, rougeL: {np.mean(all_rougeL):.4f}")
             
             if step == eval_batches:
                 break

@@ -9,14 +9,15 @@ import random
 import string
 from typing import Optional
 
-from mttl.datamodule.utils import get_tokenizer, prepare_inputs_for_gpt_family
+from mttl.datamodule.utils import get_tokenizer
+from mttl.datamodule.collators import DefaultCollator
 from mttl.utils import hash_example
 
 from dataclasses import dataclass
 
 
 @dataclass
-class DataCollatorForNI:
+class DataCollatorForNI(DefaultCollator):
     tokenizer: AutoTokenizer
     padding: bool = True
     max_input_length: Optional[int] = 1024
@@ -30,7 +31,6 @@ class DataCollatorForNI:
     num_neg_examples: int = 0
     add_explanation: bool = False
     tk_instruct: bool = False
-    text_only: bool = False
     model_family: str = None
     task_to_id: dict = None
 
@@ -218,64 +218,25 @@ class DataCollatorForNI:
                     + "\nOutput:"
                 )
 
+        output_batch = {}
         # Remove multiple spaces, which mess with tiktoken
         sources = [" ".join(s.split()) for s in sources]
-        if self.text_only:
-            model_inputs = {"inputs": sources}
-        else:
-            model_inputs = self.tokenizer(
-                sources,
-                max_length=self.max_input_length,
-                padding=self.padding,
-                return_tensors=self.return_tensors,
-                truncation=True,
-                pad_to_multiple_of=self.pad_to_multiple_of,
-            )
-            model_inputs["inputs"] = sources
+        # Randomly select one reference if multiple are provided.
+        labels = [random.choice(ex["Instance"]["output"]) for ex in batch]
+        # Add space for auto-regressive model tokenization
+        labels = [" " + l for l in labels]
 
-        if "output" in batch[0]["Instance"] and batch[0]["Instance"]["output"]:
-            # Randomly select one reference if multiple are provided.
-            labels = [random.choice(ex["Instance"]["output"]) for ex in batch]
-            # Add space for auto-regressive model tokenization
-            labels = [" " + l for l in labels]
-            if self.text_only:
-                model_inputs["labels_texts"] = labels
-            else:
-                model_inputs["labels_texts"] = labels
-                labels = self.tokenizer(
-                    labels,
-                    max_length=self.max_output_length,
-                    padding=self.padding,
-                    return_tensors=self.return_tensors,
-                    truncation=True,
-                    pad_to_multiple_of=self.pad_to_multiple_of,
-                )
-                label_mask = labels["attention_mask"].bool()
-                model_inputs["labels"] = labels["input_ids"].masked_fill(
-                    ~label_mask, self.label_pad_token_id
-                )
-        else:
-            model_inputs["labels"] = None
-
+        output_batch = (
+            self.prepare_inputs_for_gpt_family(sources, labels)
+            if self.model_family == "gpt"
+            else self.prepare_inputs_for_seq2seq_family(sources, labels)
+        )
         task_names = [ex["Task"] for ex in batch]
-        model_inputs["task_names"] = task_names
-
-        output_batch = {
-            "input_ids": model_inputs["input_ids"],
-            "labels": model_inputs["labels"],
-            "attention_mask": model_inputs["attention_mask"],
-            "input_texts": model_inputs["inputs"],
-            "labels_texts": model_inputs["labels_texts"],
-            "task_names": model_inputs["task_names"],
-            "task_ids": torch.LongTensor([self.task_to_id[task] for task in task_names]),
-            "hashes": [
-                hash_example(i + o)
-                for i, o in zip(model_inputs["inputs"], model_inputs["labels_texts"])
-            ],
-            "instruction_hashes": [hash_example(i) for i in model_inputs["inputs"]],
-        }
-        if self.model_family == "gpt":
-            output_batch = prepare_inputs_for_gpt_family(output_batch, self.tokenizer)
+        output_batch["task_names"] = task_names
+        output_batch["task_ids"] = torch.LongTensor([self.task_to_id[task] for task in task_names])
+        output_batch["labels_texts"] = labels
+        output_batch["hashes"] = [hash_example(i + o) for i, o in zip(sources, labels)]
+        output_batch["instruction_hashes"] = [hash_example(i) for i in sources]
         return output_batch
 
 
@@ -291,24 +252,24 @@ class NIOriginalDataModule(LightningDataModule):
             collate_fn=self.collate_fn,
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self, shuffle=False):
         return DataLoader(
             self.val_dataset,
             batch_size=self.config.predict_batch_size,
             num_workers=16,
             pin_memory=True,
-            shuffle=True,
+            shuffle=shuffle,
             persistent_workers=True,
             collate_fn=self.collate_fn,
         )
 
-    def test_dataloader(self):
+    def test_dataloader(self, shuffle=False):
         return DataLoader(
             self.test_dataset,
             batch_size=self.config.predict_batch_size,
             num_workers=16,
             pin_memory=True,
-            shuffle=True,
+            shuffle=shuffle,
             persistent_workers=True,
             collate_fn=self.collate_fn,
         )
