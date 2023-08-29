@@ -25,21 +25,23 @@ class NIDataModule(LightningDataModule):
             collate_fn=self.collate_fn,
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self, shuffle=False):
         return DataLoader(
             self.val_dataset,
             batch_size=self.config.predict_batch_size,
             num_workers=16,
             pin_memory=True,
+            shuffle=shuffle,
             persistent_workers=True,
             collate_fn=self.collate_fn,
         )
 
-    def test_dataloader(self):
+    def test_dataloader(self, shuffle=False):
         return DataLoader(
             self.test_dataset,
             batch_size=self.config.predict_batch_size,
             num_workers=16,
+            shuffle=shuffle,
             pin_memory=True,
             persistent_workers=True,
             collate_fn=self.collate_fn,

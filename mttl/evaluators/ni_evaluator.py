@@ -5,6 +5,7 @@ import torch
 import numpy as np
 
 from mttl.dataloader.ni_metrics import compute_metrics
+from mttl.models.utils import transfer_batch_to_device
 
 
 class NIEvaluator(object):
@@ -50,7 +51,7 @@ class NIEvaluator(object):
         task_names = []
         all_rougeL = []
 
-        dataloader = self.datamodule.test_dataloader()
+        dataloader = self.datamodule.test_dataloader(shuffle=eval_batches > 0)
         pbar = tqdm.tqdm(
             enumerate(dataloader),
             total=len(dataloader),
@@ -70,10 +71,9 @@ class NIEvaluator(object):
                 max_length += batch['input_ids'].shape[-1]
                 extra_kwargs['pad_token_id'] = tokenizer.pad_token_id
 
+            batch = transfer_batch_to_device(batch, self.device)
             with torch.no_grad():
                 try:
-                    batch["input_ids"] = batch["input_ids"].to(self.device)
-                    batch["attention_mask"] = batch["attention_mask"].to(self.device)
                     predictions = model.generate(
                         input_ids=batch["input_ids"],
                         attention_mask=batch["attention_mask"],

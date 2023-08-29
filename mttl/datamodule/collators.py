@@ -47,6 +47,8 @@ class DefaultCollator:
     def prepare_inputs_for_gpt_family(self, sources, labels):
         assert self.tokenizer.padding_side == "left"
 
+        # Remove multiple spaces, which mess with tiktoken (?)
+        sources = [" ".join(s.split()) for s in sources]
         # Add space for auto-regressive model tokenization
         labels = [" " + l.strip() for l in labels]
         # Add eos token
@@ -92,8 +94,6 @@ class DefaultCollator:
 
     def __call__(self, batch: List[ExampleInfo]):
         sources = [b.input for b in batch]
-        # Remove multiple spaces, which mess with tiktoken (?)
-        sources = [" ".join(s.split()) for s in sources]
         labels = [b.target for b in batch]
         hashes = [b.hash for b in batch]
         task_ids = [b.task_id for b in batch]
