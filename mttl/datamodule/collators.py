@@ -5,7 +5,6 @@ from typing import List, Union, Optional
 import torch
 
 from mttl.dataloader.data_utils import ExampleInfo
-from mttl.datamodule.utils import prepare_inputs_for_gpt_family
 
 
 @dataclass
@@ -30,31 +29,51 @@ class DefaultCollator():
         task_ids = [b.task_id for b in batch]
         instruction_hashes = [b.instruction_hash for b in batch]
 
-        model_inputs = self.tokenizer(
-            inputs,
-            max_length=self.max_input_length,
-            padding=self.padding,
-            return_tensors=self.return_tensors,
-            truncation=True,
-            pad_to_multiple_of=self.pad_to_multiple_of,
-        )
-        # model_inputs["inputs"] = inputs
-        # model_inputs["labels_text"] = targets
-        targets = self.tokenizer(
+        output_batch = {}
+
+        tok_targets = self.tokenizer(
             targets,
             max_length=self.max_output_length,
             padding=self.padding,
             return_tensors=self.return_tensors,
             truncation=True,
         )
-        label_mask = targets["attention_mask"].bool()
-        model_inputs["labels"] = targets["input_ids"].masked_fill(
+        label_mask = tok_targets["attention_mask"].bool()
+        labels = tok_targets["input_ids"].masked_fill(
             ~label_mask, self.label_pad_token_id
         )
-        model_inputs["hashes"] = hashes
-        model_inputs["instruction_hashes"] = instruction_hashes
-        model_inputs["task_ids"] = torch.LongTensor(task_ids)
 
         if self.model_family == "gpt":
-            model_inputs = prepare_inputs_for_gpt_family(model_inputs, self.tokenizer)
-        return model_inputs
+            tok_inputs_plus_targets = self.tokenizer(
+                [i + t for i, t in zip(inputs, targets)],
+                max_length=self.max_input_length,
+                padding=self.padding,
+                return_tensors=self.return_tensors,
+                truncation=True,
+            )
+            targets_len = tok_targets["attention_mask"].int().sum(-1)
+            mask = torch.zeros_like(tok_inputs_plus_targets["attention_mask"])
+            mask[(torch.arange(mask.shape[0]), mask.shape[1] - targets_len)] = 1
+            mask = mask.cumsum(dim=1).bool()
+            labels = tok_inputs_plus_targets["input_ids"].clone()
+            labels = torch.masked_fill(labels, ~mask, self.label_pad_token_id)
+            output_batch["input_ids"] = tok_inputs_plus_targets["input_ids"]
+            output_batch["attention_mask"] = tok_inputs_plus_targets["attention_mask"]
+            output_batch["labels"] = labels
+        else:
+            tok_inputs = self.tokenizer(
+                inputs,
+                max_length=self.max_input_length,
+                padding=self.padding,
+                return_tensors=self.return_tensors,
+                truncation=True,
+                pad_to_multiple_of=self.pad_to_multiple_of,
+            )
+            output_batch["input_ids"] = tok_inputs["input_ids"]
+            output_batch["attention_mask"] = tok_inputs["attention_mask"]
+            output_batch["labels"] = labels
+
+        output_batch["hashes"] = hashes
+        output_batch["instruction_hashes"] = instruction_hashes
+        output_batch["task_ids"] = torch.LongTensor(task_ids)
+        return output_batch

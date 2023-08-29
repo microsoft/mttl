@@ -9,7 +9,7 @@ import random
 import string
 from typing import Optional
 
-from mttl.datamodule.utils import get_tokenizer, prepare_inputs_for_gpt_family
+from mttl.datamodule.utils import get_tokenizer
 from mttl.utils import hash_example
 
 from dataclasses import dataclass
@@ -30,7 +30,6 @@ class DataCollatorForNI:
     num_neg_examples: int = 0
     add_explanation: bool = False
     tk_instruct: bool = False
-    text_only: bool = False
     model_family: str = None
     task_to_id: dict = None
 
@@ -218,12 +217,42 @@ class DataCollatorForNI:
                     + "\nOutput:"
                 )
 
+        output_batch = {}
         # Remove multiple spaces, which mess with tiktoken
         sources = [" ".join(s.split()) for s in sources]
-        if self.text_only:
-            model_inputs = {"inputs": sources}
+        # Randomly select one reference if multiple are provided.
+        labels = [random.choice(ex["Instance"]["output"]) for ex in batch]
+        # Add space for auto-regressive model tokenization
+        labels = [" " + l for l in labels]
+
+        tokenized_labels = self.tokenizer(
+            labels,
+            max_length=self.max_output_length,
+            padding=self.padding,
+            return_tensors=self.return_tensors,
+            truncation=True,
+            pad_to_multiple_of=self.pad_to_multiple_of,
+        )
+
+        if self.model_family == "gpt" and labels is not None:
+            tok_inputs_plus_targets = self.tokenizer(
+                [i + t for i, t in zip(sources, labels)],
+                max_length=self.max_input_length,
+                padding=self.padding,
+                return_tensors=self.return_tensors,
+                truncation=True,
+            )
+            targets_len = tokenized_labels["attention_mask"].int().sum(-1)
+            mask = torch.zeros_like(tok_inputs_plus_targets["attention_mask"])
+            mask[(torch.arange(mask.shape[0]), mask.shape[1] - targets_len)] = 1
+            mask = mask.cumsum(dim=1).bool()
+            targets = tok_inputs_plus_targets["input_ids"].clone()
+            targets = torch.masked_fill(targets, ~mask, self.label_pad_token_id)
+            output_batch["input_ids"] = tok_inputs_plus_targets["input_ids"]
+            output_batch["attention_mask"] = tok_inputs_plus_targets["attention_mask"]
+            output_batch["labels"] = targets
         else:
-            model_inputs = self.tokenizer(
+            tokenized_inputs = self.tokenizer(
                 sources,
                 max_length=self.max_input_length,
                 padding=self.padding,
@@ -231,51 +260,19 @@ class DataCollatorForNI:
                 truncation=True,
                 pad_to_multiple_of=self.pad_to_multiple_of,
             )
-            model_inputs["inputs"] = sources
-
-        if "output" in batch[0]["Instance"] and batch[0]["Instance"]["output"]:
-            # Randomly select one reference if multiple are provided.
-            labels = [random.choice(ex["Instance"]["output"]) for ex in batch]
-            # Add space for auto-regressive model tokenization
-            labels = [" " + l for l in labels]
-            if self.text_only:
-                model_inputs["labels_texts"] = labels
-            else:
-                model_inputs["labels_texts"] = labels
-                labels = self.tokenizer(
-                    labels,
-                    max_length=self.max_output_length,
-                    padding=self.padding,
-                    return_tensors=self.return_tensors,
-                    truncation=True,
-                    pad_to_multiple_of=self.pad_to_multiple_of,
-                )
-                label_mask = labels["attention_mask"].bool()
-                model_inputs["labels"] = labels["input_ids"].masked_fill(
-                    ~label_mask, self.label_pad_token_id
-                )
-        else:
-            model_inputs["labels"] = None
+            label_mask = tokenized_labels["attention_mask"].bool()
+            labels = tokenized_labels["input_ids"].masked_fill(
+                ~label_mask, self.label_pad_token_id
+            )
+            output_batch["input_ids"] = tokenized_inputs["input_ids"]
+            output_batch["attention_mask"] = tokenized_inputs["attention_mask"]
+            output_batch["labels"] = labels
 
         task_names = [ex["Task"] for ex in batch]
-        model_inputs["task_names"] = task_names
-
-        output_batch = {
-            "input_ids": model_inputs["input_ids"],
-            "labels": model_inputs["labels"],
-            "attention_mask": model_inputs["attention_mask"],
-            "input_texts": model_inputs["inputs"],
-            "labels_texts": model_inputs["labels_texts"],
-            "task_names": model_inputs["task_names"],
-            "task_ids": torch.LongTensor([self.task_to_id[task] for task in task_names]),
-            "hashes": [
-                hash_example(i + o)
-                for i, o in zip(model_inputs["inputs"], model_inputs["labels_texts"])
-            ],
-            "instruction_hashes": [hash_example(i) for i in model_inputs["inputs"]],
-        }
-        if self.model_family == "gpt":
-            output_batch = prepare_inputs_for_gpt_family(output_batch, self.tokenizer)
+        output_batch["task_names"] = task_names
+        output_batch["task_ids"] = torch.LongTensor([self.task_to_id[task] for task in task_names])
+        output_batch["hashes"] = [hash_example(i + o) for i, o in zip(sources, labels)]
+        output_batch["instruction_hashes"] = [hash_example(i) for i in sources]
         return output_batch
 
 
