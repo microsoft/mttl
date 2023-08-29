@@ -179,10 +179,10 @@ class CLM(EfficientCheckpointModule):
         return loss, aux_loss
 
     def calculate_routing_mask(self, inputs, labels=None):
-        # bs, seq = x.shape
+        # 1 if the token is not a pad token (so inputs and outputs are 1)
         padding_mask = (inputs != self.pad_token_id).float()
-        # 1 if the token is part of instruction or pad token (so outputs are 0s)
         if labels is not None:
+            # 1 if the token is part of instruction (so outputs and pad tokens are 0s)
             instruction_mask = (labels == -100).float() * padding_mask
         else:
             instruction_mask = padding_mask.clone()
