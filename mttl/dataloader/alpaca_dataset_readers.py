@@ -82,11 +82,9 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
         self,
         data_dir,
         idxs=None,
-        loss_for_keywords=True,
         subset=None,
     ):
         super().__init__()
-        self.loss_for_keywords = loss_for_keywords
 
         # load the data
         if os.getenv("ALPACA_DATA_DIR") is not None:
