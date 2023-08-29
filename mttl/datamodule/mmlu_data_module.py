@@ -4,16 +4,17 @@ from torch.utils.data import DataLoader
 
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PaddingStrategy
-from typing import List, Union, Optional
-from mttl.dataloader.platyplus_dataset_reader import PlatypusDataset
+from typing import Union, Optional
 
 from datasets import load_dataset
-from mttl.datamodule.utils import get_tokenizer
 from dataclasses import dataclass
+
+from mttl.datamodule.utils import get_tokenizer
+from mttl.datamodule.collators import DefaultCollator
 
 
 @dataclass
-class DataCollatorForMMLU:
+class DataCollatorForMMLU(DefaultCollator):
     tokenizer: AutoTokenizer
     padding: Union[bool, str, PaddingStrategy] = True
     max_input_length: Optional[int] = 2048
@@ -21,7 +22,6 @@ class DataCollatorForMMLU:
     pad_to_multiple_of: Optional[int] = None
     label_pad_token_id: int = -100
     return_tensors: str = "pt"
-    text_only: bool = False
     model_family: str = "seq2seq"
     task_to_id: dict = None
 
@@ -53,45 +53,19 @@ class DataCollatorForMMLU:
             sources.append(prompt)
 
         # Remove multiple spaces, which mess with tiktoken
-        sources = [" ".join(s.split()) for s in sources]
-        if self.text_only:
-            model_inputs = {"inputs": sources}
-        else:
-            model_inputs = self.tokenizer(
-                sources,
-                max_length=self.max_input_length,
-                padding=self.padding,
-                return_tensors=self.return_tensors,
-                truncation=True,
-                pad_to_multiple_of=self.pad_to_multiple_of,
-            )
-            model_inputs["inputs"] = sources
-
         labels = [instance["Instance"]["Output"] for instance in batch]
-        # Add space for auto-regressive model tokenization
-        labels = [" " + l for l in labels]
-
-        if self.text_only:
-            model_inputs["labels"] = labels
-        else:
-            model_inputs["labels_text"] = labels
-            labels = self.tokenizer(
-                labels,
-                max_length=self.max_output_length,
-                padding=self.padding,
-                return_tensors=self.return_tensors,
-                truncation=True,
-            )
-            label_mask = labels["attention_mask"].bool()
-            model_inputs["labels"] = labels["input_ids"].masked_fill(
-                ~label_mask, self.label_pad_token_id
-            )
+        output_batch = (
+            self.prepare_inputs_for_gpt_family(sources, labels)
+            if self.model_family == "gpt"
+            else self.prepare_inputs_for_seq2seq_family(sources, labels)
+        )
 
         task_names = [instance["Task"] for instance in batch]
-        model_inputs["task_names"] = task_names
+        output_batch["task_names"] = task_names
         if self.task_to_id is not None:
-            model_inputs["task_ids"] = torch.LongTensor([self.task_to_id[task] for task in task_names])
-        return model_inputs
+            output_batch["task_ids"] = torch.LongTensor([self.task_to_id[task] for task in task_names])
+        output_batch["labels_texts"] = labels
+        return output_batch
 
 
 class MMLUDataModule(LightningDataModule):
@@ -106,33 +80,34 @@ class MMLUDataModule(LightningDataModule):
             collate_fn=self.collate_fn,
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self, shuffle=False):
         return DataLoader(
             self.dev_dataset,
             batch_size=self.config.predict_batch_size,
-            shuffle=False,
+            shuffle=shuffle,
             num_workers=16,
             pin_memory=True,
             persistent_workers=True,
             collate_fn=self.collate_fn,
         )
 
-    def test_dataloader(self):
+    def test_dataloader(self, shuffle=False):
         return DataLoader(
             self.test_set,
             batch_size=self.config.predict_batch_size,
-            shuffle=False,
+            shuffle=shuffle,
             num_workers=16,
             pin_memory=True,
             persistent_workers=True,
             collate_fn=self.collate_fn,
         )
 
-    def __init__(self, config, data_dir=None):
+    def __init__(self, config, data_dir=None, for_generation=False):
         super().__init__()
 
         self.data_dir = data_dir or config.data_dir
         self.config = config
+        self.for_generation = for_generation
         self.tokenizer = get_tokenizer(config)
         self._setup()
 
@@ -160,7 +135,7 @@ class MMLUDataModule(LightningDataModule):
             max_output_length=self.config.max_output_length,
             pad_to_multiple_of=8,
             return_tensors="pt",
-            model_family=self.config.model_family,
+            model_family="seq2seq" if self.for_generation else self.config.model_family,
             task_to_id=self.task_to_id,
         )
 
