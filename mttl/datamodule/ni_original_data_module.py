@@ -225,17 +225,16 @@ class DataCollatorForNI:
         # Add space for auto-regressive model tokenization
         labels = [" " + l for l in labels]
 
-        tokenized_labels = self.tokenizer(
-            labels,
-            max_length=self.max_output_length,
-            padding=self.padding,
-            return_tensors=self.return_tensors,
-            truncation=True,
-            pad_to_multiple_of=self.pad_to_multiple_of,
-        )
-
         if self.model_family == "gpt" and labels is not None:
-            tok_inputs_plus_targets = self.tokenizer(
+            tokenized_labels = self.tokenizer(
+                labels,
+                max_length=self.max_output_length,
+                padding=self.padding,
+                return_tensors=self.return_tensors,
+                truncation=True,
+                pad_to_multiple_of=self.pad_to_multiple_of,
+            )
+            tok_sources_plus_labels = self.tokenizer(
                 [i + t for i, t in zip(sources, labels)],
                 max_length=self.max_input_length,
                 padding=self.padding,
@@ -243,16 +242,24 @@ class DataCollatorForNI:
                 truncation=True,
             )
             targets_len = tokenized_labels["attention_mask"].int().sum(-1)
-            mask = torch.zeros_like(tok_inputs_plus_targets["attention_mask"])
+            mask = torch.zeros_like(tok_sources_plus_labels["attention_mask"])
             mask[(torch.arange(mask.shape[0]), mask.shape[1] - targets_len)] = 1
             mask = mask.cumsum(dim=1).bool()
-            targets = tok_inputs_plus_targets["input_ids"].clone()
+            targets = tok_sources_plus_labels["input_ids"].clone()
             targets = torch.masked_fill(targets, ~mask, self.label_pad_token_id)
-            output_batch["input_ids"] = tok_inputs_plus_targets["input_ids"]
-            output_batch["attention_mask"] = tok_inputs_plus_targets["attention_mask"]
+            output_batch["input_ids"] = tok_sources_plus_labels["input_ids"]
+            output_batch["attention_mask"] = tok_sources_plus_labels["attention_mask"]
             output_batch["labels"] = targets
         else:
-            tokenized_inputs = self.tokenizer(
+            tokenized_labels = self.tokenizer(
+                labels,
+                max_length=self.max_output_length,
+                padding=self.padding,
+                return_tensors=self.return_tensors,
+                truncation=True,
+                pad_to_multiple_of=self.pad_to_multiple_of,
+            )
+            tokenized_sources = self.tokenizer(
                 sources,
                 max_length=self.max_input_length,
                 padding=self.padding,
@@ -261,12 +268,12 @@ class DataCollatorForNI:
                 pad_to_multiple_of=self.pad_to_multiple_of,
             )
             label_mask = tokenized_labels["attention_mask"].bool()
-            labels = tokenized_labels["input_ids"].masked_fill(
+            masked_labels = tokenized_labels["input_ids"].masked_fill(
                 ~label_mask, self.label_pad_token_id
             )
-            output_batch["input_ids"] = tokenized_inputs["input_ids"]
-            output_batch["attention_mask"] = tokenized_inputs["attention_mask"]
-            output_batch["labels"] = labels
+            output_batch["input_ids"] = tokenized_sources["input_ids"]
+            output_batch["attention_mask"] = tokenized_sources["attention_mask"]
+            output_batch["labels"] = masked_labels
 
         task_names = [ex["Task"] for ex in batch]
         output_batch["task_names"] = task_names

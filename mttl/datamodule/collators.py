@@ -77,7 +77,7 @@ class DefaultCollator():
             )
             output_batch["input_ids"] = tokenized_sources["input_ids"]
             output_batch["attention_mask"] = tokenized_sources["attention_mask"]
-            output_batch["labels"] = labels
+            output_batch["labels"] = masked_labels
 
         output_batch["hashes"] = hashes
         output_batch["instruction_hashes"] = instruction_hashes
