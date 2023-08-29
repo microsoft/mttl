@@ -10,5 +10,6 @@
     "use_t0_templates_as_tasks": true,
     "adafactor_scale_parameter": false, 
     "adapters_learning_rate" : 1e-3,
-    "module_logits_relaxed_bernoulli": false
+    "module_logits_relaxed_bernoulli": false,
+    "router_selector": "poly"
 }

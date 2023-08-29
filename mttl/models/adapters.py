@@ -28,6 +28,13 @@ class LoRA(Adapter):
         self.scaling = self.alpha / self.rank
         self.forward_fn = None
         self.layer = layer
+
+        if hasattr(layer, "weight"):
+            self.weight = layer.weight
+
+        if hasattr(layer, "bias"):
+            self.bias = layer.bias        
+
         self.create_for_layer(layer)
         self.reset_parameters()
 
@@ -65,7 +72,7 @@ class LoRA(Adapter):
         return self.forward_fn(*args, **kwargs)
 
 
-class IA3(nn.Module):
+class IA3(Adapter):
     def __init__(self, config, layer):
         super().__init__()
 

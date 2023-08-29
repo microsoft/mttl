@@ -1,4 +1,6 @@
+from typing import Union
 import torch
+from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
@@ -9,8 +11,8 @@ from mttl.global_vars import EPS
 from mttl.models.adapters import SkilledLoRA
 from mttl.models.modifiers.modify_model import register_modifier
 from mttl.models.modifiers.routing import (
-    RoutingAdapter,
     RouterWrapper,
+    RoutingMixin,
     RoutingSelector,
     get_selector,
     register_selector,
@@ -31,10 +33,6 @@ class SkillWrapper(RouterWrapper):
         for name, selector in object.get_selectors().items():
             print("Resizing module_logits of selector", name, "with", n_tasks, "tasks.")
             selector.resize_module_logits(n_tasks)
-
-
-class PolytroponAdapter(RoutingAdapter):
-    pass
 
 
 @register_selector("poly")
@@ -116,14 +114,15 @@ class PolytroponSelector(RoutingSelector):
         return module_weights
 
 
-class PolyLoRALinear(PolytroponAdapter):
+class PolyLoRA(SkilledLoRA, RoutingMixin):
     def __init__(self, config, task_id_ptr, layer, selector=None):
-        super().__init__(task_id_ptr)
+        RoutingMixin.__init__(self, task_id_ptr)
+        SkilledLoRA.__init__(self, config, layer)
+
         if selector is None:
             self.selector = get_selector(config)
         else:
             self.selector = selector
-        self.adapter = SkilledLoRA(config, layer)
 
     def forward(self, input):
         task_id = self.routing_infos.task_ids
@@ -134,7 +133,7 @@ class PolyLoRALinear(PolytroponAdapter):
             self.routing_infos.repeat_interleave(repeat)
 
         mixing_weights = self.selector(self.routing_infos).to(dtype=input.dtype)
-        return self.adapter(input, mixing_weights)
+        return SkilledLoRA.forward(self, input, mixing_weights)
 
 
 @register_modifier("poly")
@@ -143,6 +142,6 @@ def modify_with_poly_ia3(transformer, config):
     config.adapter_type = config.adapter_type or "lora"
 
     if config.adapter_type == "lora":
-        return modify_with_routing(transformer, config, PolyLoRALinear, SkillWrapper)
+        return modify_with_routing(transformer, config, PolyLoRA, SkillWrapper)
     else:
         raise NotImplementedError(f"Poly modifier not implemented for adapter {config.adapter_type}.")

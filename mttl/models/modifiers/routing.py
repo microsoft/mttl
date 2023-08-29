@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import List
 import re
 
+from mttl.models.adapters import Adapter
+
 
 SELECTORS = {}
 
@@ -112,7 +114,7 @@ class RouterWrapper:
     def get_adapters(cls, object):
         adapters = {}
         for n, m in object.named_modules():
-            if isinstance(m, RoutingAdapter):
+            if isinstance(m, Adapter):
                 adapters[n] = m
         return adapters
 
@@ -195,9 +197,8 @@ class RoutingInfo:
         )
 
 
-class RoutingAdapter(nn.Module):
+class RoutingMixin:
     def __init__(self, task_id_ptr) -> None:
-        super().__init__()
         self.task_id_ptr = task_id_ptr
 
     @property
