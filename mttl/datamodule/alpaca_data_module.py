@@ -63,11 +63,10 @@ class AlpacaDataModule(LightningDataModule):
         )
         self.task_to_id = {"alpaca_full": 0}
 
-    def get_dataset(self, idxs=None, loss_for_keywords=True):
+    def get_dataset(self, idxs=None):
         return AlpacaDataset(
             self.config.data_dir,
             idxs,
-            loss_for_keywords=loss_for_keywords,
         )
 
     def setup(self, stage=None):
