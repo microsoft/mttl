@@ -70,7 +70,7 @@ class AlpacaTemplateSource(object):
 
 class AlpacaDataset(torch.utils.data.dataset.Dataset):
     def __init__(
-        self,
+        self,   
         data_dir,
         idxs=None,
         subset=None,
@@ -78,8 +78,8 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
         super().__init__()
 
         # load the data
-        if os.getenv("ALPACA_DATA_DIR") is not None:
-            data_dir = os.getenv("ALPACA_DATA_DIR")
+        if os.getenv("AP_DATA_DIR") is not None:
+            data_dir = os.getenv("AP_DATA_DIR")
 
         self.dataset = load_dataset("yahma/alpaca-cleaned", cache_dir=data_dir)["train"]
 
