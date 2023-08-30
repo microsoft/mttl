@@ -58,6 +58,7 @@ class RoutingLoRASoftMoe(nn.Module, RoutingMixin):
         if gen_mode:
             if input.shape[1] == 1:
                 input = torch.cat([self.prev_gen_input, input], dim=1)
+                self.routing_infos.pad_token_mask = torch.cat((self.routing_infos.pad_token_mask, torch.ones(input.shape[0], 1).to(input.device)), dim=1)
             # cash the input for the next generation step
             self.prev_gen_input = copy.deepcopy(input)
         else:
