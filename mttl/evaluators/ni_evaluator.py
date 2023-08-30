@@ -75,6 +75,7 @@ class NIEvaluator(object):
 
             if self.config.model_family == 'gpt':
                 max_length += batch['input_ids'].shape[-1]
+
                 extra_kwargs['pad_token_id'] = tokenizer.pad_token_id
 
             batch = transfer_batch_to_device(batch, self.device)
@@ -98,9 +99,11 @@ class NIEvaluator(object):
                         output_scores=True,
                         **extra_kwargs,
                     )
+
             predictions = predictions.sequences
             predictions = predictions[:, batch["input_ids"].shape[-1] :]
             predictions = decode(predictions)
+
             references = labels_texts
 
             # If we are in a multiprocess environment, the last batch has duplicates
