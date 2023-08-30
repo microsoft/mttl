@@ -14,28 +14,24 @@ from mttl.models.modifiers.routing import (
     register_selector,
 )
 
-
-class SkilledLoRA_MergeAfterOP(LoRA):
+                     
+class SkilledLoRA_MergeLoraAfterOP(SkilledLoRA):
     def __init__(
         self,
         config,
         layer,
     ):
-        self.n_splits = config.n_splits
-        self.n_skills = config.n_skills
         super().__init__(config, layer)
 
     def forward_linear_(self, input, weights):
         if self.training:     
             self.training_steps += 1
 
-        bs, _, _ = weights.size()
-        A = torch.einsum("bqs,qsdr->bqdr", (weights, self.lora_a))
-        B = torch.einsum("bqs,qsrd->bqrd", (weights, self.lora_b))
-        A = A.reshape(bs, self.in_features, self.rank)
-        B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
-        adapter_out = input.bmm(A).bmm(B) * self.scaling
-
+        bs, _, _ = weights.size()         
+        adapter_out = torch.einsum("bsd,qkdr->bsqkr", (input, self.lora_a)) # bs x n_splits x n_skills x rank")       
+        adapter_out = torch.einsum("bsqkr,qkrd->bsqkd", (adapter_out, self.lora_b)) # bs x seq x n_splits x n_skills x D        
+        adapter_out = torch.einsum("bsqkd,bqk->bsd", (adapter_out, weights)) # bs x seq x n_splits x D
+        adapter_out *= self.scaling
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
@@ -195,7 +191,7 @@ def modify_with_vsmear(transformer, config):
 
 
   
-@register_selector("vsmear_w_reg")          
+@register_selector("vsmear_wreg")          
 class VSMEARRouterExperimental(VSMEARRouter):
     def __init__(self, config, in_d):
         super().__init__(config, in_d)
@@ -222,18 +218,30 @@ class VSMEARRouterExperimental(VSMEARRouter):
         return routing_probs.unsqueeze(1), auxiliary_loss
 
 
-class AuxRoutingLoRALinear_wreg(SkilledLoRA_MergeAfterOP, RoutingMixin):
+class AuxRoutingLoRALinear_wreg(SkilledLoRA_MergeLoraAfterOP, RoutingMixin):
     def __init__(self, config, task_id_ptr, layer, selector=None, **kwargs):
         RoutingMixin.__init__(self, task_id_ptr)
-        SkilledLoRA_MergeAfterOP.__init__(self, config, layer, **kwargs)
+        SkilledLoRA_MergeLoraAfterOP.__init__(self, config, layer, **kwargs)
+
+        self.selector = VSMEARRouterExperimental(config, self.in_features)
+
+        self._losses = []
+        self._metrics = {}
+
+    @property
+    def losses(self):
+        return self._losses
+
+    @property
+    def metrics(self):
+        return self._metrics
+
+    def clear(self):
+        self._losses.clear()
+        self._metrics.clear()
         
-        self.selector = VSMEARRouterExperimental(config, in_d=self.in_features)
-
-        # store losses and metrics
-        self.losses = []
-        self.metrics = {}
-
     def forward(self, input):
+        self.clear()    
         task_id = self.routing_infos.task_ids
         repeat = input.size(0) // task_id.size(0)
 
@@ -253,12 +261,12 @@ class AuxRoutingLoRALinear_wreg(SkilledLoRA_MergeAfterOP, RoutingMixin):
             )
 
         self.metrics["routing"] = mixing_weights.detach().cpu().float()   
-        return SkilledLoRA_MergeAfterOP.forward(self, input, mixing_weights)
+        return super(SkilledLoRA_MergeLoraAfterOP, self).forward(input, mixing_weights)
 
   
-@register_modifier("vsmear_w_reg")            
+@register_modifier("vsmear_wreg")            
 def modify_with_vsmear_reg(transformer, config):
-    config.router_selector = "vsmear_w_reg"
+    config.router_selector = "vsmear_wreg"
     config.adapter_type = "lora"
 
     if config.adapter_type in ["lora"]:
