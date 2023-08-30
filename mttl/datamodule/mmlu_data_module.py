@@ -83,21 +83,25 @@ class MMLUDataModule(LightningDataModule):
             collate_fn=self.collate_fn,
         )
 
-    def val_dataloader(self, shuffle=False, workers=16):
+    def val_dataloader(self, shuffle=False):
         return DataLoader(
             self.dev_dataset,
             batch_size=self.config.predict_batch_size,
             shuffle=shuffle,
-            num_workers=workers,
+            num_workers=16,
+            pin_memory=True,
+            persistent_workers=True,
             collate_fn=self.collate_fn,
         )
 
-    def test_dataloader(self, shuffle=False, workers=16):
+    def test_dataloader(self, shuffle=False):
         return DataLoader(
             self.test_set,
             batch_size=self.config.predict_batch_size,
             shuffle=shuffle,
-            num_workers=workers,
+            num_workers=16,
+            pin_memory=True,
+            persistent_workers=True,
             collate_fn=self.collate_fn,
         )
 
