@@ -89,18 +89,6 @@ class RouterWrapper:
         return aux_losses
 
     @classmethod
-    def clear_routing_losses(cls, object):
-        for _, adapter in object.get_adapters().items():
-            if getattr(adapter, "losses", None):
-                adapter.losses = []
-
-    @classmethod
-    def clear_routing_metrics(cls, object):
-        for _, adapter in object.get_adapters().items():
-            if getattr(adapter, "metrics", None):
-                adapter.metrics = {}
-
-    @classmethod
     def get_routing_metrics(cls, object):
         metrics = {}
 

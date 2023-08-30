@@ -103,11 +103,25 @@ class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
         else:
             self.selector = selector
 
-        # store losses and metrics
-        self.losses = []
-        self.metrics = {}
+        self._losses = []
+        self._metrics = {}
+
+    @property
+    def losses(self):
+        return self._losses
+
+    @property
+    def metrics(self):
+        return self._metrics
+
+    def clear(self):
+        self._losses.clear()
+        self._metrics.clear()
 
     def forward(self, input):
+        # Need to clear losses and metrics before forward pass!
+        self.clear()
+
         task_id = self.routing_infos.task_ids
         repeat = input.size(0) // task_id.size(0)
 
@@ -117,16 +131,17 @@ class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
 
         if self.selector is not None:
             mixing_weights = self.selector(self.routing_infos, input=input)
+
             if isinstance(mixing_weights, tuple):
                 mixing_weights, kl = mixing_weights
-                self.losses.append(kl)
+                self._losses.append(kl)
         else:
             bs = input.size(0)
             mixing_weights = torch.ones(
                 bs, self.n_splits, self.n_skills, device=input.device, dtype=input.dtype
             )
 
-        self.metrics["routing"] = mixing_weights.detach().cpu().float()
+        self._metrics["routing"] = mixing_weights.detach().cpu().float()
         return SkilledLoRA.forward(self, input, mixing_weights)
 
 
