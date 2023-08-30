@@ -27,6 +27,10 @@ class MMLUEvaluator(object):
         self.datamodule.setup("test")
 
     def evaluate(self, model, metric_per_task=True, eval_batches=-1):
+        was_train = model.training
+        if was_train:
+            model.eval()
+
         tokenizer = self.datamodule.tokenizer
         samples_seen = 0
 
@@ -151,4 +155,8 @@ class MMLUEvaluator(object):
             metric_values = metric_values_all
         else:
             metric_values = mean_metrics
+
+        if was_train:
+            was_train = True
+            model.train()
         return metric_values
