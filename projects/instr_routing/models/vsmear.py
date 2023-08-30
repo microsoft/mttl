@@ -4,7 +4,7 @@ import torch.nn as nn
 from enum import Enum
 
 import torch.nn.functional as F
-from mttl.models.adapters import SkilledLoRA
+from mttl.models.adapters import SkilledLoRA, LoRA
 from mttl.models.modifiers import modify_with_routing, register_modifier
 from mttl.models.modifiers.routing import (
     RouterWrapper,
@@ -14,6 +14,33 @@ from mttl.models.modifiers.routing import (
     register_selector,
 )
 
+
+class SkilledLoRA_MergeAfterOP(LoRA):
+    def __init__(
+        self,
+        config,
+        layer,
+    ):
+        self.n_splits = config.n_splits
+        self.n_skills = config.n_skills
+        super().__init__(config, layer)
+
+    def forward_linear_(self, input, weights):
+        if self.training:     
+            self.training_steps += 1
+
+        bs, _, _ = weights.size()
+        A = torch.einsum("bqs,qsdr->bqdr", (weights, self.lora_a))
+        B = torch.einsum("bqs,qsrd->bqrd", (weights, self.lora_b))
+        A = A.reshape(bs, self.in_features, self.rank)
+        B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
+        adapter_out = input.bmm(A).bmm(B) * self.scaling
+
+        warmup = min(self.training_steps / 10_000, 1)
+        if self.use_warmup:
+            adapter_out = adapter_out * warmup
+
+        return self.layer(input) + adapter_out
 
 @register_selector("smear")
 class SMEARRouter(RoutingSelector):
@@ -180,10 +207,10 @@ class VSMEARRouterExperimental(VSMEARRouter):
         return routing_probs.unsqueeze(1), auxiliary_loss
 
 
-class AuxRoutingLoRALinear_wreg(SkilledLoRA, RoutingMixin):
+class AuxRoutingLoRALinear_wreg(SkilledLoRA_MergeAfterOP, RoutingMixin):
     def __init__(self, config, task_id_ptr, layer, selector=None, **kwargs):
         RoutingMixin.__init__(self, task_id_ptr)
-        SkilledLoRA.__init__(self, config, layer, **kwargs)
+        SkilledLoRA_MergeAfterOP.__init__(self, config, layer, **kwargs)
         
         self.selector = VSMEARRouterExperimental(config, in_d=self.in_features)
 
@@ -210,8 +237,8 @@ class AuxRoutingLoRALinear_wreg(SkilledLoRA, RoutingMixin):
                 bs, self.n_splits, self.n_skills, device=input.device, dtype=input.dtype
             )
 
-        self.metrics["routing"] = mixing_weights.detach().cpu().float()
-        return SkilledLoRA.forward(self, input, mixing_weights)
+        self.metrics["routing"] = mixing_weights.detach().cpu().float()   
+        return SkilledLoRA_MergeAfterOP.forward(self, input, mixing_weights)
 
   
 @register_modifier("vsmear_w_reg")            
