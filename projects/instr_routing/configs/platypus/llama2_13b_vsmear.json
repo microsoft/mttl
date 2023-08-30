@@ -1,0 +1,11 @@
+{
+    "lora_rank": 4,
+    "lora_dropout": 0.05,
+    "weight_decay": 0.00,
+    "n_skills": 8,
+    "model_modifier": "vsmear",
+    "modify_modules": ".*mlp.*",
+    "router_learning_rate": 0.001,
+    "modify_layers": "gate_proj|down_proj|up_proj",
+    "trainable_param_names": ".*lora_[ab].*|.*router.*"
+}
