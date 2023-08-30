@@ -166,8 +166,9 @@ class SoftMOEAdapter(SkilledLoRA):
         # transform back into b x s x D: mix along expert dimension
         del input_mixed, D, mixing_weight_causal, causal_mask
         C = torch.softmax(mixing_weights, dim=-1)  # b x s x (n_slots x n_skills)
+
         adapter_out = torch.einsum("bsk,bskd->bsd", (C, adapter_out))  # b x s x D
-        adapter_out *= self.scaling  # / self.rank
+        adapter_out *= self.scaling
 
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
