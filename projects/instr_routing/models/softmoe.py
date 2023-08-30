@@ -51,19 +51,27 @@ class RoutingLoRASoftMoe(nn.Module, RoutingMixin):
         self.adapter = SoftMOEAdapter(config, layer)
 
     def forward(self, input):
+        bs, seq, in_d = input.shape
         task_id = self.routing_infos.task_ids
         repeat = input.size(0) // task_id.size(0)
-
+        ######## cashing for generation ################
         gen_mode = self.routing_infos.gen_mode or 0
         if gen_mode:
             if input.shape[1] == 1:
                 input = torch.cat([self.prev_gen_input, input], dim=1)
-                self.routing_infos.pad_token_mask = torch.cat((self.routing_infos.pad_token_mask, torch.ones(input.shape[0], 1).to(input.device)), dim=1)
+                if self.routing_infos.pad_token_mask.shape[1] < input.shape[1]:
+                    self.routing_infos.pad_token_mask = torch.cat(
+                        (
+                            self.routing_infos.pad_token_mask,
+                            torch.ones(input.shape[0], 1).to(input.device),
+                        ),
+                        dim=1,
+                    )
             # cash the input for the next generation step
             self.prev_gen_input = copy.deepcopy(input)
         else:
             self.prev_gen_input = None
-
+        ################################################
         # this repeat follows the patten in `model.predict()` line 152
         if repeat:
             self.routing_infos.repeat_interleave(repeat)
@@ -80,7 +88,10 @@ class RoutingLoRASoftMoe(nn.Module, RoutingMixin):
             )
 
         # self.metrics["routing"] = mixing_weights.detach().cpu().float()
-        return self.adapter(input, mixing_weights, self.routing_infos, gen_mode)
+        adapter_out = self.adapter(input, mixing_weights, self.routing_infos, gen_mode)
+        if seq == 1 and gen_mode:
+            return self.adapter.layer(input)[:, -1:, :] + adapter_out[:, -1:, :]
+        return self.adapter.layer(input) + adapter_out
 
 
 def create_causal_prefix_mask(inst_padding_mask, padding_mask, device, bs, seq):
@@ -189,7 +200,8 @@ class SoftMOEAdapter(SkilledLoRA):
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
-        return self.layer(input) + adapter_out
+
+        return adapter_out
 
 
 @register_modifier("softmoe")
