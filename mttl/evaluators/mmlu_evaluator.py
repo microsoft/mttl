@@ -20,7 +20,9 @@ class MMLUEvaluator(object):
             data_dir = config.data_dir
 
         self.data_dir = data_dir
-        self.datamodule = MMLUDataModule(self.config, data_dir=self.data_dir, for_generation=True)
+        self.datamodule = MMLUDataModule(
+            self.config, data_dir=self.data_dir, for_generation=True
+        )
         self.datamodule.setup("test")
 
     def evaluate(self, model, metric_per_task=True, eval_batches=-1):
