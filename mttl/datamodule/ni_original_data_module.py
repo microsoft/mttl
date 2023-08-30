@@ -236,6 +236,7 @@ class DataCollatorForNI(DefaultCollator):
             if self.model_family == "gpt"
             else self.prepare_inputs_for_seq2seq_family(sources, labels)
         )
+
         task_names = [ex["Task"] for ex in batch]
         output_batch["task_names"] = task_names
         output_batch["task_ids"] = torch.LongTensor([self.task_to_id[task] for task in task_names])
