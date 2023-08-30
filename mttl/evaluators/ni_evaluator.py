@@ -71,7 +71,7 @@ class NIEvaluator(object):
             labels_texts = batch.pop("labels_texts", None)
 
             extra_kwargs = {}
-            max_length = self.config.max_output_length
+            max_length = 128  # default output length for NI
 
             if self.config.model_family == 'gpt':
                 max_length += batch['input_ids'].shape[-1]
