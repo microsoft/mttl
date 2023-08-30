@@ -26,7 +26,7 @@ class MMLUCallback(cb.Callback):
 
 
 class NICallback(cb.Callback):
-    def son_validation_epoch_end(self, trainer, pl_module) -> None:
+    def on_validation_epoch_end(self, trainer, pl_module) -> None:
         from mttl.evaluators import NIEvaluator
 
         evaluator = NIEvaluator(
