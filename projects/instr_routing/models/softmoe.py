@@ -54,6 +54,15 @@ class RoutingLoRASoftMoe(nn.Module, RoutingMixin):
         task_id = self.routing_infos.task_ids
         repeat = input.size(0) // task_id.size(0)
 
+        gen_mode = self.routing_infos.gen_mode or 0
+        if gen_mode:
+            if input.shape[1] == 1:
+                input = torch.cat([self.prev_gen_input, input], dim=1)
+            # cash the input for the next generation step
+            self.prev_gen_input = copy.deepcopy(input)
+        else:
+            self.prev_gen_input = None
+
         # this repeat follows the patten in `model.predict()` line 152
         if repeat:
             self.routing_infos.repeat_interleave(repeat)
@@ -70,7 +79,7 @@ class RoutingLoRASoftMoe(nn.Module, RoutingMixin):
             )
 
         # self.metrics["routing"] = mixing_weights.detach().cpu().float()
-        return self.adapter(input, mixing_weights, self.routing_infos)
+        return self.adapter(input, mixing_weights, self.routing_infos, gen_mode)
 
 
 def create_causal_prefix_mask(inst_padding_mask, padding_mask, device, bs, seq):
@@ -114,15 +123,21 @@ class SoftMOEAdapter(SkilledLoRA):
     def __init__(self, config, layer):
         super().__init__(config, layer)
 
-    def forward(self, input, weights, routing_infos):
+    def forward(self, input, weights, routing_infos, gen_mode):
         if self.training:
             self.training_steps += 1
         mixing_weights = weights
         bs, seq, n_skills = mixing_weights.size()
+
         # mixing_logit_tks = mixing_weights.unsqueeze(2).expand(-1, -1, seq, -1) # b x s x s x n_skills
         # causal routing: aggreage over sequence length, then aggregate over experts
         if hasattr(routing_infos, "causal_mask"):
             causal_mask = routing_infos.causal_mask
+            if gen_mode and input.shape[1] != causal_mask.shape[1]:
+                # repeat the last token along dim 1 and 2 to account for the newly generated and appended token
+                causal_mask = torch.cat((causal_mask, causal_mask[:, -1:, :]), dim=1)
+                causal_mask = torch.cat((causal_mask, causal_mask[:, :, -1:]), dim=2)
+                setattr(routing_infos, "causal_mask", causal_mask)
         else:
             causal_mask = create_causal_prefix_mask(
                 routing_infos.inst_token_mask,
