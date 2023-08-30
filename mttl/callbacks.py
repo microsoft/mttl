@@ -1,7 +1,49 @@
-import sys
+import sys, os
 
 from pytorch_lightning import callbacks as cb
 from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
+from torch.utils.data import DataLoader
+
+
+class MMLUCallback(cb.Callback):
+    def on_validation_epoch_end(self, trainer, pl_module) -> None:
+        from mttl.evaluators import MMLUEvaluator
+
+        evaluator = MMLUEvaluator(
+            pl_module.hparams,
+            data_dir=os.environ["MMLU_DATA_DIR"],
+        )
+        metrics = evaluator.evaluate(
+            pl_module, metric_per_task=True, eval_batches=150, workers=1
+        )
+        pl_module.log(
+            "val/mmlu",
+            metrics["exact_match"]["all"],
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+
+
+class NICallback(cb.Callback):
+    def on_validation_epoch_end(self, trainer, pl_module) -> None:
+        from mttl.evaluators import NIEvaluator
+
+        evaluator = NIEvaluator(
+            pl_module.hparams,
+            data_dir=os.environ["NI_DATA_DIR"],
+            num_pos_examples=2,
+        )
+        metrics = evaluator.evaluate(
+            pl_module, metric_per_task=True, eval_batches=50, workers=1
+        )
+        pl_module.log(
+            "val/sni",
+            metrics["rougeL"]["all"],
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
 
 
 class ProgressCallback(cb.TQDMProgressBar):
