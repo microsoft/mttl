@@ -14,7 +14,7 @@ class MMLUCallback(cb.Callback):
             data_dir=os.environ["MMLU_DATA_DIR"],
         )
         metrics = evaluator.evaluate(
-            pl_module, metric_per_task=True, eval_batches=150, workers=1
+            pl_module, metric_per_task=True, eval_batches=150,
         )
         pl_module.log(
             "val/mmlu",
