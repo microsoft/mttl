@@ -20,8 +20,9 @@ class SoftMoERouter(RoutingSelector):
         """
         Basic version of attention based router.
         """
-        self.p = 2
         super().__init__()
+
+        self.p = 2
         self.in_d = in_d
         self.config = config
         self.phi = nn.Parameter(
@@ -185,5 +186,5 @@ def modify_with_softmoe(transformer, config):
         )
     else:
         raise NotImplementedError(
-            f"Adapter type {config.adapter_type} not implemented for vsmear modifier."
+            f"Adapter type {config.adapter_type} not implemented for softmoe modifier."
         )
