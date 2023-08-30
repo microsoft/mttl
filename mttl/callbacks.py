@@ -7,6 +7,9 @@ from torch.utils.data import DataLoader
 
 class MMLUCallback(cb.Callback):
     def on_validation_epoch_end(self, trainer, pl_module) -> None:
+        if trainer.global_step == 0:
+            return
+
         from mttl.evaluators import MMLUEvaluator
 
         evaluator = MMLUEvaluator(
@@ -27,6 +30,9 @@ class MMLUCallback(cb.Callback):
 
 class NICallback(cb.Callback):
     def on_validation_epoch_end(self, trainer, pl_module) -> None:
+        if trainer.global_step == 0:
+            return
+
         from mttl.evaluators import NIEvaluator
 
         evaluator = NIEvaluator(

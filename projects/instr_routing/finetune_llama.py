@@ -117,7 +117,6 @@ def run_multitask(args):
     )
     callbacks.append(checkpoint_callback)
     # callbacks.append(MMLUCallback())
-    # callbacks.append(NICallback())
 
     trainer = Trainer(
         devices=-1, 
@@ -138,7 +137,10 @@ def run_multitask(args):
         fast_dev_run=args.fast_dev_run,
         **kwargs,
     )
+<<<<<<< HEAD
         
+=======
+>>>>>>> platypus
     trainer.fit(module, dm)
 
     path_best_model = trainer.checkpoint_callback.best_model_path

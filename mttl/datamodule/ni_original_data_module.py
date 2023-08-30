@@ -132,6 +132,9 @@ class DataCollatorForNI(DefaultCollator):
                 pos_example_str += f" Output: {pos_example['output'].strip()}"
                 if not pos_example_str[-1] in string.punctuation:
                     pos_example_str += "."
+                # add eos token
+                pos_example_str += " " + self.tokenizer.eos_token
+                # end add eos token
                 pos_example_str += "\n"
                 if add_explanation and "explanation" in pos_example:
                     pos_example_str += (
@@ -169,6 +172,9 @@ class DataCollatorForNI(DefaultCollator):
                 neg_example_str += f" Output: {neg_example['output'].strip()}"
                 if not neg_example_str[-1] in string.punctuation:
                     neg_example_str += "."
+                # add eos token
+                neg_example_str += " " + self.tokenizer.eos_token
+                # end add eos token
                 neg_example_str += "\n"
                 if add_explanation and "explanation" in neg_example:
                     neg_example_str += (
@@ -219,8 +225,7 @@ class DataCollatorForNI(DefaultCollator):
                 )
 
         output_batch = {}
-        # Remove multiple spaces, which mess with tiktoken
-        sources = [" ".join(s.split()) for s in sources]
+
         # Randomly select one reference if multiple are provided.
         labels = [random.choice(ex["Instance"]["output"]) for ex in batch]
         # Add space for auto-regressive model tokenization
@@ -231,6 +236,7 @@ class DataCollatorForNI(DefaultCollator):
             if self.model_family == "gpt"
             else self.prepare_inputs_for_seq2seq_family(sources, labels)
         )
+
         task_names = [ex["Task"] for ex in batch]
         output_batch["task_names"] = task_names
         output_batch["task_ids"] = torch.LongTensor([self.task_to_id[task] for task in task_names])
