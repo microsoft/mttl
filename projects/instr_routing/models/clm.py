@@ -194,7 +194,7 @@ class CLM(EfficientCheckpointModule):
         return out, oracle_routings
 
     def on_before_zero_grad(self, optimizer: Optimizer) -> None:
-        self.model.zero_grad()
+        self.model.zero_grad() 
         return super().on_before_zero_grad(optimizer)
 
     def generate(

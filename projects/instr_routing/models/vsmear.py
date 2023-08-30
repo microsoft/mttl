@@ -45,7 +45,7 @@ class SMEARRouter(RoutingSelector):
 
     def apply_mask_and_average(self, x, padding_mask):
         x_rout = x * padding_mask.unsqueeze(-1).to(x.device)
-        lengths = padding_mask.ne(0).sum(dim=1) + 1e-5
+        lengths = padding_mask.ne(0).sum(dim=1, keepdim=True) + 1e-5
         x_rout = x_rout.sum(dim=1) / lengths
         return x_rout
 
@@ -152,30 +152,34 @@ def modify_with_vsmear(transformer, config):
     return modify_with_smear(transformer, config)
 
 
-
+  
 @register_selector("vsmear_w_reg")          
 class VSMEARRouterExperimental(VSMEARRouter):
     def __init__(self, config, in_d):
         super().__init__(config, in_d)
 
     def forward(self, routing_infos, input: torch.Tensor):
-        padding_mask = routing_infos.pad_token_mask
-        inst_padding_mask = routing_infos.inst_token_mask
+        padding_mask = routing_infos.pad_token_mask # 1 for everythin that is not a pad token, i.e. instuction, input, output
+        inst_padding_mask = routing_infos.inst_token_mask # 1 for everything that is instruction
 
         prior_input = self.apply_mask_and_average(input, inst_padding_mask)
         prior_routes = self.route(self.prior_router, self.prior_router_ln, prior_input)
 
         if self.training:
-            # during training :-)
+            # during training :-)     
             post_input = self.apply_mask_and_average(input, padding_mask)
             post_routes = self.route(self.post_router, self.post_router_ln, post_input)
-            routing_probs = F.softmax(post_routes, dim=-1)
+             
+            routing_probs = F.softmax(prior_routes, dim=-1) # output and teacher
 
             # compute auxiliary loss (KL divergence), KL = - H(posterior) + Xent(posterior, prior)
-            auxiliary_loss = routing_probs * F.log_softmax(
-                post_routes, -1
-            ) - routing_probs * F.log_softmax(prior_routes, dim=-1)
-            auxiliary_loss = auxiliary_loss.sum(dim=-1).mean()
+            # auxiliary_loss = routing_probs * F.log_softmax(
+            #     post_routes, -1
+            # ) - routing_probs * F.log_softmax(prior_routes, dim=-1)
+            # auxiliary_loss = auxiliary_loss.sum(dim=-1).mean()
+            # cosine similarity          
+            auxiliary_loss = 1 - F.cosine_similarity(post_routes, prior_routes.detach(), dim=-1).mean()
+            
         else:
             # during eval :-(
             routing_probs = F.softmax(prior_routes, dim=-1)
