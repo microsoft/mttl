@@ -49,7 +49,7 @@ class NIConfig(datasets.BuilderConfig):
     def __init__(self, *args, data_dir=None, task_dir=None, max_num_instances_per_task=None, max_num_instances_per_eval_task=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.data_dir: str = data_dir
-        self.task_dir: str = task_dir if task_dir else f"{data_dir}/tasks"
+        self.task_dir: str = task_dir
         self.max_num_instances_per_task: int = max_num_instances_per_task
         self.max_num_instances_per_eval_task: int = max_num_instances_per_eval_task
 
@@ -108,17 +108,17 @@ class NIOriginalDataset(datasets.GeneratorBasedBuilder):
         """Returns SplitGenerators."""
         if self.config.data_dir is None or self.config.task_dir is None:
             dl_path = dl_manager.download_and_extract(_URL)
-            self.config.data_dir = self.config.data_dir or os.path.join(dl_path, "splits", "default")
-            self.config.task_dir = self.config.task_dir or os.path.join(dl_path, "tasks")
-
-        split_dir = os.path.join(self.config.data_dir, "splits", "default")
-        task_dir = self.config.task_dir or os.path.join(self.config.data_dir, "tasks")
+            data_dir = self.config.data_dir or os.path.join(dl_path, "splits", "default")
+            task_dir = self.config.task_dir or os.path.join(dl_path, "tasks")
+        else:
+            data_dir = os.path.join(self.config.data_dir, "splits", "default")
+            task_dir = os.path.join(self.config.data_dir, "tasks")
 
         return [
             datasets.SplitGenerator(
                 name=datasets.Split.TRAIN,
                 gen_kwargs={
-                    "path": os.path.join(split_dir, "train_tasks.txt"), 
+                    "path": os.path.join(data_dir, "train_tasks.txt"), 
                     "task_dir": task_dir, 
                     "max_num_instances_per_task": self.config.max_num_instances_per_task,
                     "subset": "train"
@@ -126,7 +126,7 @@ class NIOriginalDataset(datasets.GeneratorBasedBuilder):
             datasets.SplitGenerator(
                 name=datasets.Split.VALIDATION,
                 gen_kwargs={
-                    "path": os.path.join(split_dir, "test_tasks.txt"), 
+                    "path": os.path.join(data_dir, "test_tasks.txt"), 
                     "task_dir": task_dir, 
                     "max_num_instances_per_task": self.config.max_num_instances_per_task,
                     "subset": "validation"
@@ -134,7 +134,7 @@ class NIOriginalDataset(datasets.GeneratorBasedBuilder):
             datasets.SplitGenerator(
                 name=datasets.Split.TEST,
                 gen_kwargs={
-                    "path": os.path.join(split_dir, "test_tasks.txt"), 
+                    "path": os.path.join(data_dir, "test_tasks.txt"),
                     "task_dir": task_dir, 
                     "max_num_instances_per_task": self.config.max_num_instances_per_eval_task,
                     "subset": "test"
@@ -144,10 +144,12 @@ class NIOriginalDataset(datasets.GeneratorBasedBuilder):
     def _generate_examples(self, path=None, task_dir=None, max_num_instances_per_task=None, subset=None):
         """Yields examples."""
         logger.info(f"Generating tasks from = {path}")
+
         with open(path, encoding="utf-8") as split_f:
             for line in split_f:
                 task_name = line.strip()
                 task_path = os.path.join(task_dir, task_name + ".json")
+
                 with open(task_path, encoding="utf-8") as task_f:
                     s = task_f.read()
                     task_data = json.loads(s)
