@@ -3,6 +3,7 @@ from copy import deepcopy
 import tqdm
 import torch
 import numpy as np
+import pytorch_lightning as pl
 
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.models.utils import transfer_batch_to_device
@@ -28,8 +29,9 @@ class NIEvaluator(object):
         self.datamodule.setup("test")
 
     def evaluate(self, model, metric_per_task=True, eval_batches=-1):
-        model.eval()
-        model = model.to(self.device)
+        was_train = model.training
+        if was_train:
+            model.eval()
 
         tokenizer = self.datamodule.tokenizer
         samples_seen = 0
@@ -77,20 +79,19 @@ class NIEvaluator(object):
 
             batch = transfer_batch_to_device(batch, self.device)
             with torch.no_grad():
-                try:
+                if isinstance(model, pl.LightningModule):
                     predictions = model.generate(
-                        input_ids=batch["input_ids"],
-                        attention_mask=batch["attention_mask"],
+                        batch,
                         max_length=max_length,
                         generation_config=model.generation_config,
                         return_dict_in_generate=True,
                         output_scores=True,
                         **extra_kwargs,
                     )
-                except:
-                    batch = model.transfer_batch_to_device(batch, self.device, 0)
+                else:
                     predictions = model.generate(
-                        batch,
+                        input_ids=batch["input_ids"],
+                        attention_mask=batch["attention_mask"],
                         max_length=max_length,
                         generation_config=model.generation_config,
                         return_dict_in_generate=True,
@@ -147,4 +148,7 @@ class NIEvaluator(object):
             metric_values = metric_values_all
         else:
             metric_values = mean_metrics
+
+        if was_train:
+            model.train()
         return metric_values
