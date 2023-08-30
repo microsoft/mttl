@@ -24,7 +24,7 @@ if __name__ == "__main__":
     from config import RoutingConfig
     from huggingface_hub import login
     
-    login(token="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")
+    login(token=os.environ["HF_TOKEN"])
 
     config = RoutingConfig.parse(extra_kwargs={"eval_superni": False})
 
