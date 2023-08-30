@@ -106,13 +106,11 @@ class NIOriginalDataset(datasets.GeneratorBasedBuilder):
 
     def _split_generators(self, dl_manager):
         """Returns SplitGenerators."""
-        if self.config.data_dir is None or self.config.task_dir is None:
-            dl_path = dl_manager.download_and_extract(_URL)
-            data_dir = self.config.data_dir or os.path.join(dl_path, "splits", "default")
-            task_dir = self.config.task_dir or os.path.join(dl_path, "tasks")
-        else:
-            data_dir = os.path.join(self.config.data_dir, "splits", "default")
-            task_dir = os.path.join(self.config.data_dir, "tasks")
+        if self.config.data_dir is None:
+            raise ValueError("data_dir cannot be None.")
+
+        data_dir = os.path.join(self.config.data_dir, "splits", "default")
+        task_dir = os.path.join(self.config.data_dir, "tasks")
 
         return [
             datasets.SplitGenerator(
