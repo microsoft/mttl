@@ -58,8 +58,8 @@ class SMEARRouter(RoutingSelector):
         return routing_probs.unsqueeze(1), auxiliary_loss
 
 
-@register_selector("vsmear")
-class VSMEARRouter(SMEARRouter):
+@register_selector("vsmear_w_reg")
+class VSMEARRouterExperimental(SMEARRouter):
     def __init__(self, config, in_d):
         super().__init__(config, in_d)
 
@@ -129,11 +129,10 @@ class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
         self.metrics["routing"] = mixing_weights.detach().cpu().float()
         return SkilledLoRA.forward(self, input, mixing_weights)
 
-
-@register_modifier("smear")   
-def modify_with_smear(transformer, config):
-    config.router_selector = config.router_selector or "smear"
-    config.adapter_type = config.adapter_type or "lora"
+  
+@register_modifier("vsmear_w_reg")            
+def modify_with_vsmear_reg(transformer, config):
+    config.router_selector = "vsmear_w_reg"
 
     if config.adapter_type in ["lora"]:
         return modify_with_routing(
@@ -143,10 +142,3 @@ def modify_with_smear(transformer, config):
         raise NotImplementedError(
             f"Adapter type {config.adapter_type} not implemented for vsmear modifier."
         )
-
-
-@register_modifier("vsmear")
-def modify_with_vsmear(transformer, config):
-    config.router_selector = "vsmear"
-
-    return modify_with_smear(transformer, config)

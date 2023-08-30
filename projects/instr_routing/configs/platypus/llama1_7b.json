@@ -12,5 +12,10 @@
     "model_modifier": "softmoe",
     "modify_modules": ".*attn.*",  
     "modify_layers": "q_proj|v_proj|k_proj",
-    "trainable_param_names": ".*lora_[ab].*|.*router.*"
+    "trainable_param_names": ".*lora_[ab].*|.*router.*",
+        
+    "eval_hellaswag": 0,
+    "eval_arc": 0,
+    "eval_truthfulqa": 0
+
 }

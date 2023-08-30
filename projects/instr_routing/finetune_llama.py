@@ -79,8 +79,8 @@ def run_multitask(args):
     if mlf_logger:
         loggers.append(mlf_logger)
 
-    # tb_logger = pl.loggers.TensorBoardLogger(save_dir=args.output_dir)
-    # loggers.append(tb_logger)
+    tb_logger = pl.loggers.TensorBoardLogger(save_dir=args.output_dir)
+    loggers.append(tb_logger)
     loggers.append(pl.loggers.CSVLogger(save_dir=args.output_dir, name="csv_metrics"))
 
     kwargs = {"val_check_interval": args.eval_every} if args.eval_every else {}
@@ -110,8 +110,8 @@ def run_multitask(args):
         mode=mode,
     )
     callbacks.append(checkpoint_callback)
-    callbacks.append(MMLUCallback())
-    callbacks.append(NICallback())
+    # callbacks.append(MMLUCallback())
+    # callbacks.append(NICallback())
 
     trainer = Trainer(
         devices=-1, 
@@ -132,7 +132,7 @@ def run_multitask(args):
         fast_dev_run=args.fast_dev_run,
         **kwargs,
     )
-
+        
     trainer.fit(module, dm)
 
     path_best_model = trainer.checkpoint_callback.best_model_path
@@ -175,7 +175,7 @@ def run_multitask(args):
         from eval_ni import eval_ni
 
         rouge_L_super_ni = eval_ni(
-            args,
+            args, 
             best_model,
             nshot=2,
             data_dir=os.environ["NI_DATA_DIR"],

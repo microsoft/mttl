@@ -1,3 +1,7 @@
+
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from projects.instr_routing.finetune_llama import RoutingConfig
 from transformers import AutoModelForCausalLM
 import os
