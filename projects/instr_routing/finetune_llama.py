@@ -79,8 +79,10 @@ def run_multitask(args):
     if mlf_logger:
         loggers.append(mlf_logger)
 
-    # tb_logger = pl.loggers.TensorBoardLogger(save_dir=args.output_dir)
-    # loggers.append(tb_logger)
+    if args.tensorboard:
+        tb_logger = pl.loggers.TensorBoardLogger(save_dir=args.output_dir)
+        loggers.append(tb_logger)
+
     loggers.append(pl.loggers.CSVLogger(save_dir=args.output_dir, name="csv_metrics"))
 
     kwargs = {"val_check_interval": args.eval_every} if args.eval_every else {}
@@ -100,6 +102,7 @@ def run_multitask(args):
         model_name += run_id
 
     exp_name = os.environ.get("AMLT_JOB_NAME", args.exp_name)
+
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.output_dir,
         monitor=monitor,
@@ -151,13 +154,13 @@ def run_multitask(args):
     logger.info(f"Best model path: {path_best_model}")
     logger.info(f"Last model path: {path_last_model}")
 
-    torch.cuda.empty_cache()
-
     # load best model
     if path_best_model:
         del module
+        torch.cuda.empty_cache()
         best_model = CLM.load_from_checkpoint(path_best_model, tokenizer=dm.tokenizer)
     else:
+        torch.cuda.empty_cache()
         best_model = module
 
     # empty memory

@@ -6,10 +6,11 @@ class RoutingConfig(Config):
     def _set_defaults(self):
         super()._set_defaults()
 
-        self.load_in_8bit = False
         self.micro_batch_size = 4
+        self.load_in_8bit = False
 
         self.wandb_project = None
+        self.tensorboard = False
         self.switch_to_average = 0
 
         # scale the output a bit
