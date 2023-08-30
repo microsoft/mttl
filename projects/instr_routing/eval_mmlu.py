@@ -21,21 +21,24 @@ def eval_mmlu(
 
 
 if __name__ == "__main__":
-    import sys
-    import os    
-    sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
-    from projects.instr_routing.finetune_llama import RoutingConfig
+    from config import RoutingConfig
+    from huggingface_hub import login
+    
+    login(token="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")
 
-    config = RoutingConfig.parse()
+    config = RoutingConfig.parse(extra_kwargs={"eval_superni": False})
 
-    config.model = "uoe-nlp/gpt-neo-125m_instruction-tuned_sni"
+    config.model = "meta-llama/Llama-2-7b-hf"
+    config.load_in_8bit = True
     config.model_family = "gpt"
     config.data_dir = os.environ["MMLU_DATA_DIR"]
-    config.predict_batch_size = 4
-    config.max_input_length = 1024
-    config.max_output_length = 128
+    config.predict_batch_size = 2
+    config.max_input_length = 4096
+    config.max_output_length = 5
 
-    model = AutoModelForCausalLM.from_pretrained(config.model)
-    model = model.cuda()
-
-    print(eval_mmlu(config, model))
+    model = AutoModelForCausalLM.from_pretrained(
+        config.model,
+        load_in_8bit=config.load_in_8bit,
+        device_map="auto"
+    )
+    print(eval_mmlu(config, model, eval_batches=200))

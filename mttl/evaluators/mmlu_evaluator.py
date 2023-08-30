@@ -90,10 +90,10 @@ class MMLUEvaluator(object):
             probs = (
                 torch.stack(
                     [
-                        logits[:, tokenizer(" A").input_ids[0]],
-                        logits[:, tokenizer(" B").input_ids[0]],
-                        logits[:, tokenizer(" C").input_ids[0]],
-                        logits[:, tokenizer(" D").input_ids[0]],
+                        logits[:, tokenizer("A", add_special_tokens=False).input_ids[-1]],
+                        logits[:, tokenizer("B", add_special_tokens=False).input_ids[-1]],
+                        logits[:, tokenizer("C", add_special_tokens=False).input_ids[-1]],
+                        logits[:, tokenizer("D", add_special_tokens=False).input_ids[-1]],
                     ],
                     dim=-1,
                 )
