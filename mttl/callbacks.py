@@ -35,7 +35,7 @@ class NICallback(cb.Callback):
             num_pos_examples=2,
         )
         metrics = evaluator.evaluate(
-            pl_module, metric_per_task=True, eval_batches=50, workers=1
+            pl_module, metric_per_task=True, eval_batches=50,
         )
         pl_module.log(
             "val/sni",

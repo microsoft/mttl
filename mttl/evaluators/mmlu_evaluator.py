@@ -39,9 +39,13 @@ class MMLUEvaluator(object):
         all_EM = []
 
         dataloader = self.datamodule.test_dataloader(shuffle=eval_batches > 0)
+
+        if eval_batches == -1:
+            eval_batches = len(dataloader)
+        
         pbar = tqdm.tqdm(
             enumerate(dataloader),
-            total=len(dataloader),
+            total=min(len(dataloader), eval_batches),
         )
         for step, batch in pbar:
             task_name = batch.pop("task_names", None)
