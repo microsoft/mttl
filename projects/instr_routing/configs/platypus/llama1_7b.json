@@ -9,7 +9,7 @@
     "predict_batch_size": 4,
     "micro_batch_size": 1,  
     "max_input_length": 4096,
-    "model_modifier": "vsmear_w_reg",
+    "model_modifier": "vsmear",
     "modify_modules": ".*attn.*",  
     "modify_layers": "q_proj|v_proj|k_proj",
     "trainable_param_names": ".*lora_[ab].*|.*router.*",

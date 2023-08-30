@@ -116,14 +116,14 @@ def run_multitask(args):
         mode=mode,
     )
     callbacks.append(checkpoint_callback)
-    callbacks.append(MMLUCallback())
-    callbacks.append(NICallback())
+    # callbacks.append(MMLUCallback())
+    # callbacks.append(NICallback())
 
     trainer = Trainer(
         devices=-1, 
         accelerator="gpu",
-        logger=loggers,
-        num_sanity_val_steps=5,
+        logger=loggers,      
+        num_sanity_val_steps=5,  
         default_root_dir=args.output_dir,
         max_epochs=args.num_train_epochs,
         max_steps=args.total_steps + 1 if args.total_steps != -1 else -1,

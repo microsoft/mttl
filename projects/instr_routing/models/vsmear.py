@@ -171,14 +171,7 @@ class VSMEARRouterExperimental(VSMEARRouter):
             post_routes = self.route(self.post_router, self.post_router_ln, post_input)
              
             routing_probs = F.softmax(prior_routes, dim=-1) # output and teacher
-
-            # compute auxiliary loss (KL divergence), KL = - H(posterior) + Xent(posterior, prior)
-            # auxiliary_loss = routing_probs * F.log_softmax(
-            #     post_routes, -1
-            # ) - routing_probs * F.log_softmax(prior_routes, dim=-1)
-            # auxiliary_loss = auxiliary_loss.sum(dim=-1).mean()
-            # cosine similarity          
-            auxiliary_loss = 1 - F.cosine_similarity(post_routes, prior_routes.detach(), dim=-1).mean()
+            auxiliary_loss = 1 - F.cosine_similarity(post_routes, prior_routes, dim=-1).mean()
             
         else:
             # during eval :-(
@@ -191,11 +184,8 @@ class AuxRoutingLoRALinear_wreg(SkilledLoRA, RoutingMixin):
     def __init__(self, config, task_id_ptr, layer, selector=None, **kwargs):
         RoutingMixin.__init__(self, task_id_ptr)
         SkilledLoRA.__init__(self, config, layer, **kwargs)
-
-        if selector is None:
-            self.selector = get_selector(config, in_d=self.in_features)
-        else:
-            self.selector = selector
+        
+        self.selector = VSMEARRouterExperimental(config, in_d=self.in_features)
 
         # store losses and metrics
         self.losses = []
