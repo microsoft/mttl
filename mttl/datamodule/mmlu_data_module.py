@@ -31,7 +31,7 @@ class DataCollatorForMMLU(DefaultCollator):
             return_tensors = self.return_tensors
 
         sources = []
-        print("Start batch", self.counter)
+
         for instance in batch:
             prompt = (
                 instance["Definition"]
@@ -40,7 +40,7 @@ class DataCollatorForMMLU(DefaultCollator):
             )
             input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids
 
-            while input_ids.shape[-1] > self.max_input_length and len(instance["Positive Examples"].split("\n\n")):
+            while input_ids.shape[-1] > self.max_input_length and len(instance["Positive Examples"].split("\n\n")) > 2:
                 instance["Positive Examples"] = (
                     "\n\n".join(instance["Positive Examples"].split("\n\n")[:-2])
                     + "\n\n"
@@ -66,9 +66,8 @@ class DataCollatorForMMLU(DefaultCollator):
         output_batch["task_names"] = task_names
         if self.task_to_id is not None:
             output_batch["task_ids"] = torch.LongTensor([self.task_to_id[task] for task in task_names])
+
         output_batch["labels_texts"] = labels
-        print("Module", self.counter)
-        self.counter += 1
         return output_batch
 
 
