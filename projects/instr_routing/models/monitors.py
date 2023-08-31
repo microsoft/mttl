@@ -22,15 +22,16 @@ class Averager:
 
     def update(self, stats):
         for key, value in stats.items():
-            self.total[key] = self.total[key] * self.weight + value * self.weight
-            self.counter[key] = self.counter[key] * self.weight + self.weight
+            self.total[key] = self.total[key] * (1 - self.weight) + value * self.weight
+            self.counter[key] = self.counter[key] * (1 - self.weight) + self.weight
 
     def average(self):
         averaged_stats = {
-            key: tot / self.counter[key] for key, tot in self.total.items()
+            key: tot / (
+                self.counter[key] if self.weight else 1.
+            ) for key, tot in self.total.items()
         }
         self.reset()
-
         return averaged_stats
 
 
