@@ -29,7 +29,7 @@ class SelectorRoutingsLog(Callback):
             return
 
         if current_step % self.LOG_EVERY == 0 and trainer.global_step > 0:
-            stats = []
+            layer_stats = []
 
             for name, stats in self.routings.items():
                 layer_routing_dist = torch.cat(stats, dim=0)
@@ -45,14 +45,14 @@ class SelectorRoutingsLog(Callback):
                 ).entropy().mean() / math.log(dims)
                 mi = h_mean - mean_h
 
-                stats.append(
+                layer_stats.append(
                     {
                         "routing_mi": mi,
                         "routing_ents": mean_h,
                     }
                 )
 
-            stats = average_dicts(stats)
+            stats = average_dicts(layer_stats)
             for k, v in stats.items():
                 pl_module.log(
                     f"{split}/{k}", v, on_epoch=True, on_step=True, sync_dist=True, prog_bar=True
@@ -96,13 +96,13 @@ class SelectorMetricsLog(Callback):
             return
 
         if trainer.global_step % self.LOG_EVERY == 0 and trainer.global_step > 0:
-            stats = []
+            layer_stats = []
 
             for name, stats in self.metrics.items():
                 avg_metrics = average_dicts(stats)
-                stats.append(avg_metrics)
+                layer_stats.append(avg_metrics)
 
-            stats = average_dicts(stats)
+            stats = average_dicts(layer_stats)
             for k, v in stats.items():
                 pl_module.log(
                     f"train/{k}", v, on_epoch=True, on_step=True, sync_dist=True
