@@ -410,6 +410,7 @@ class CLM(EfficientCheckpointModule):
             plt.clf()
 
     def log_xrouter_W_norm(self):
+        return 
         if isinstance(self.loggers[0], pl.loggers.wandb.WandbLogger):
             from .vsmear import XRouter
 
