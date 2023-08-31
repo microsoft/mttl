@@ -286,20 +286,17 @@ def get_checkpoint_path(path, step=None, use_last=False):
     return path
 
 
-def setup_logging(log_level, log_dir):
+def setup_logging(log_dir):
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
-    logger = logging.getLogger("mttl")
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        level=logging.INFO,
+    )
     logger.setLevel(logging.INFO)
-
-    stream_handler = logging.StreamHandler()
-    stream_handler.setLevel(logging.INFO)
-    formatter = logging.Formatter("%(asctime)-15s %(levelname)-8s %(message)s")
-    stream_handler.setFormatter(formatter)
-
     logger.addHandler(logging.FileHandler(os.path.join(log_dir, "log.txt")))
-    logger.addHandler(stream_handler)
 
     logging.getLogger("openai").setLevel(logging.WARNING)
     logger.info(
