@@ -14,7 +14,7 @@ from typing import List
 from collections import defaultdict
 from torch import Tensor, nn
 from mttl.models.modifiers import modify_transformer
-from mttl.models.modifiers.routing import RoutingInfo
+from mttl.models.modifiers.routing import RoutingInfo, RoutingSelector
 from transformers import AutoModelForCausalLM, LlamaForCausalLM
 
 from mttl.models.get_scheduler import get_scheduler
@@ -225,10 +225,11 @@ class CLM(EfficientCheckpointModule):
     def gather_auxiliary_losses(self):
         # get some losses from the model if it is a router
         aux_loss = []
-        for _, mod in self.model.get_selectors().items():
-            aux_loss_mod = getattr(mod, 'auxiliary_loss', None)
-            if aux_loss_mod is not None:
-                aux_loss.append(aux_loss_mod)
+        for name, module in self.model.named_modules():
+            if isinstance(module, RoutingSelector) and hasattr(module, "auxiliary_loss"):
+                aux_loss_mod = getattr(module, 'auxiliary_loss', None)
+                if aux_loss_mod is not None:
+                    aux_loss.append(aux_loss_mod)
         return aux_loss
 
     def training_step(self, batch, _):

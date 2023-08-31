@@ -108,7 +108,7 @@ class MiniProgress(cb.ProgressBar):
         seconds_to_go = (
             (trainer.num_training_batches - trainer.global_step)
             * trainer.accumulate_grad_batches
-            / ((1.0 / (self.time_end - self.time_start)) * 3600)
+            / (1.0 / ((self.time_end - self.time_start)))
         )
         metrics["ETA"] = "~{}".format(str(datetime.timedelta(seconds=seconds_to_go)))
 
@@ -119,6 +119,7 @@ class MiniProgress(cb.ProgressBar):
             f"Trn - Epc {trainer.current_epoch} / {trainer.global_step} / {trainer.num_training_batches}"
             + " | "
         )
+
         dict_msg = " | ".join([f"{k} -> {v}" for k, v in metrics.items()]) + " | "
         msg = msg_start + dict_msg
         logger.info(msg)
