@@ -55,7 +55,7 @@ class SelectorRoutingsLog(Callback):
             stats = average_dicts(stats)
             for k, v in stats.items():
                 pl_module.log(
-                    f"{split}/{k}", v, on_epoch=True, on_step=True, sync_dist=True
+                    f"{split}/{k}", v, on_epoch=True, on_step=True, sync_dist=True, prog_bar=True
                 )
             self.routings.clear()
 
@@ -87,7 +87,7 @@ class SelectorMetricsLog(Callback):
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:
         # get routing attributes of all layers
         for name, module in pl_module.named_modules():
-            if isinstance(module, RoutingSelector) and hasattr("module", "metrics"):
+            if isinstance(module, RoutingSelector) and hasattr(module, "metrics"):
                 if name not in self.metrics:
                     self.metrics[name] = []
                 self.metrics[name].append(module.metrics)
