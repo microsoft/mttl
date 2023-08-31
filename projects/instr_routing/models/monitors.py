@@ -6,7 +6,7 @@ import math
 from torch.distributions import Categorical
 from pytorch_lightning import Callback
 
-from mttl.utils import average_dicts
+from mttl.utils import agg_dicts
 from mttl.models.modifiers.routing import RoutingSelector
 from collections import defaultdict
 
@@ -64,8 +64,8 @@ class SelectorRoutingsLog(Callback):
                     }
                 )
 
-            global_stats = average_dicts(layer_stats)
-            global_stats = self.averager.update(global_stats)
+            global_stats = agg_dicts(layer_stats)
+            global_stats = self.averager.update({**global_stats})
 
             for k, v in global_stats.items():
                 pl_module.log(
@@ -107,8 +107,12 @@ class SelectorMetricsLog(Callback):
             if isinstance(module, RoutingSelector) and hasattr(module, "metrics"):
                 self.metrics[name] = module.metrics
 
-        global_stats = average_dicts(list(self.metrics.values()))
-        global_stats = self.averager.update(global_stats)
+        layer_stats = list(self.metrics.values())
+        global_stats = agg_dicts(layer_stats)
+        max_stats = agg_dicts(layer_stats, "max", tag=True)
+        min_stats = agg_dicts(layer_stats, "min", tag=True)
+
+        global_stats = self.averager.update({**global_stats, **max_stats, **min_stats})
         for k, v in global_stats.items():
             pl_module.log(
                 f"train/{k}",

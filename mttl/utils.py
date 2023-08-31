@@ -121,14 +121,25 @@ def get_example_to_ids(filename):
     return package
 
 
-def average_dicts(list_of_dicts):
-    out = list_of_dicts[0]
-    for item in list_of_dicts[1:]:
-        assert len(item) == len(out)
+def agg_dicts(list_of_dicts, agg="mean", tag=False):
+    out = {}
+    for item in list_of_dicts:
         for k, v in item.items():
-            out[k] += v
-
-    return {k: v / len(list_of_dicts) for (k, v) in out.items()}
+            if tag:
+                k = f"{agg}_{k}"
+            if k not in out:
+                out[k] = v
+            else:
+                if agg == "min":
+                    out[k] = np.minimum(out[k], v)
+                elif agg == "max":
+                    out[k] = np.maximum(out[k], v)
+                else:
+                    out[k] += v
+    if agg == "mean":
+        for k, v in out.items():
+            out[k] = v / len(list_of_dicts)
+    return out
 
 
 class CustomModelCheckpoint(pl.callbacks.ModelCheckpoint):
