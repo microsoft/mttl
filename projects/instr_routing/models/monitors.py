@@ -109,9 +109,7 @@ class SelectorMetricsLog(Callback):
 
         global_stats = average_dicts(list(self.metrics.values()))
         global_stats = self.averager.update(global_stats)
-
-        average_so_far = self.averager.average()
-        for k, v in average_so_far.items():
+        for k, v in global_stats.items():
             pl_module.log(
                 f"train/{k}",
                 v,
