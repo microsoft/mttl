@@ -20,7 +20,7 @@ class SelectorRoutingsLog(Callback):
     def aggregate_and_maybe_log(self, trainer, pl_module, current_step, split) -> None:
         # get routing attributes of all layers
         for name, module in pl_module.named_modules():
-            if isinstance(module, RoutingSelector) and hasattr("module", "routings"):
+            if isinstance(module, RoutingSelector) and hasattr(module, "routings"):
                 if name not in self.routings:
                     self.routings[name] = []
                 self.routings[name].append(module.routings.detach())
