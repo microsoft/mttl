@@ -16,6 +16,20 @@ from mttl.models.modifiers.routing import (
 )
 
 
+class Metrics:
+    def __init__(self) -> None:
+        self.metrics = {}
+
+    def add(self, key, value):
+        self.metrics[key] = value.detach().cpu()
+
+    def __setitem__(self, key, value):
+        self.add(key, value)
+
+    def items(self):
+        return self.metrics.items()
+
+
 @register_selector("smear")
 class SMEARRouter(RoutingSelector):
     def __init__(self, config, in_d):
@@ -67,11 +81,9 @@ class VSMEARRouter(SMEARRouter):
         self.post_router.bias.data.fill_(0)
         self.post_router_ln = nn.LayerNorm(in_d)
         self.post_router_ln.weight = nn.Parameter(torch.ones(self.in_d))
-        self.metrics = {}
+        self.metrics = Metrics()
 
     def forward(self, routing_infos, input: torch.Tensor):
-        self.metrics.clear()
-
         padding_mask = routing_infos.pad_token_mask
         inst_padding_mask = routing_infos.inst_token_mask
 
@@ -91,8 +103,8 @@ class VSMEARRouter(SMEARRouter):
             x_ent = -(post_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
 
             self.routings = post_probs.detach().cpu()
-            self.metrics["h_post"] = h_post.detach().cpu() / math.log(self.n_skills)
-            self.metrics["h_pri"] = h_pri.detach().cpu() / math.log(self.n_skills)
+            self.metrics["h_post"] = h_post / math.log(self.n_skills)
+            self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
             self.metrics["x_ent"] = x_ent
             self.auxiliary_loss = -1. * h_post + x_ent
         else:
@@ -101,7 +113,7 @@ class VSMEARRouter(SMEARRouter):
             h_pri = -(prior_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
 
             self.routings = prior_probs.detach().cpu()
-            self.metrics["h_pri"] = h_pri.detach().cpu() / math.log(self.n_skills)
+            self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
             self.auxiliary_loss = h_pri.sum() * 0.
         return routing_probs.unsqueeze(1)
 

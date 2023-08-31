@@ -122,6 +122,10 @@ def get_example_to_ids(filename):
 
 
 def agg_dicts(list_of_dicts, agg="mean", tag=False):
+    """Aggregate a list of dicts by taking the aggregate of each key.
+
+    Could be "min", "max", or "mean".
+    """
     out = {}
     for item in list_of_dicts:
         for k, v in item.items():
@@ -131,9 +135,9 @@ def agg_dicts(list_of_dicts, agg="mean", tag=False):
                 out[k] = v
             else:
                 if agg == "min":
-                    out[k] = np.minimum(out[k], v)
+                    out[k] = torch.minimum(out[k], v)
                 elif agg == "max":
-                    out[k] = np.maximum(out[k], v)
+                    out[k] = torch.maximum(out[k], v)
                 else:
                     out[k] += v
     if agg == "mean":
