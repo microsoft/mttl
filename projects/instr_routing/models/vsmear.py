@@ -1,3 +1,4 @@
+import math
 import torch
 import copy
 import torch.nn as nn
@@ -22,6 +23,7 @@ class SMEARRouter(RoutingSelector):
 
         self.config = config
         self.in_d = in_d
+        self.n_skills = config.n_skills
         self.n_splits = config.n_splits
         self.temperature = config.router_temperature
         assert self.n_splits == 1
@@ -36,7 +38,7 @@ class SMEARRouter(RoutingSelector):
         norm = torch.norm(W, p=1, keepdim=True)
         return norm.item()
 
-    def route(self, router: nn.Linear, layer_norm: nn.LayerNorm, x, ln=False):
+    def route(self, router: nn.Linear, layer_norm: nn.LayerNorm, x, ln=True):
         if ln:
             x = layer_norm(x)
         return router(x) / self.temperature
@@ -89,8 +91,8 @@ class VSMEARRouter(SMEARRouter):
             x_ent = -(post_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
 
             self.routings = post_probs.detach().cpu()
-            self.metrics["h_post"] = h_post
-            self.metrics["h_pri"] = h_pri
+            self.metrics["h_post"] = h_post.detach().cpu() / math.log(self.n_skills)
+            self.metrics["h_pri"] = h_pri.detach().cpu() / math.log(self.n_skills)
             self.metrics["x_ent"] = x_ent
             self.auxiliary_loss = -1. * h_post + x_ent
         else:
@@ -99,7 +101,7 @@ class VSMEARRouter(SMEARRouter):
             h_pri = -(prior_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
 
             self.routings = prior_probs.detach().cpu()
-            self.metrics["h_pri"] = h_pri
+            self.metrics["h_pri"] = h_pri.detach().cpu() / math.log(self.n_skills)
             self.auxiliary_loss = h_pri.sum() * 0.
         return routing_probs.unsqueeze(1)
 

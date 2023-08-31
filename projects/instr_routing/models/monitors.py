@@ -8,30 +8,54 @@ from pytorch_lightning import Callback
 
 from mttl.utils import average_dicts
 from mttl.models.modifiers.routing import RoutingSelector
-from mttl.models.adapters import Adapter
+from collections import defaultdict
+
+
+class Averager:
+    def __init__(self, weight: float = 1):
+        self.weight = weight
+        self.reset()
+
+    def reset(self):
+        self.total = defaultdict(float)
+        self.counter = defaultdict(float)
+
+    def update(self, stats):
+        for key, value in stats.items():
+            self.total[key] = self.total[key] * self.weight + value * self.weight
+            self.counter[key] = self.counter[key] * self.weight + self.weight
+
+    def average(self):
+        averaged_stats = {
+            key: tot / self.counter[key] for key, tot in self.total.items()
+        }
+        self.reset()
+
+        return averaged_stats
 
 
 class SelectorRoutingsLog(Callback):
-    LOG_EVERY = 16
+    ACC_OVER = 10
 
     def __init__(self):
-        self.routings = {}
+        self.averager = Averager(0.9)
+        self.acc_routings = {}
 
     def aggregate_and_maybe_log(self, trainer, pl_module, current_step, split) -> None:
         # get routing attributes of all layers
         for name, module in pl_module.named_modules():
             if isinstance(module, RoutingSelector) and hasattr(module, "routings"):
-                if name not in self.routings:
-                    self.routings[name] = []
-                self.routings[name].append(module.routings.detach())
+                if name not in self.acc_routings:
+                    self.acc_routings[name] = []
+                self.acc_routings[name].append(module.routings.detach())
 
-        if not self.routings:
+        if not self.acc_routings:
             return
 
-        if current_step % self.LOG_EVERY == 0 and trainer.global_step > 0:
+        if current_step % self.ACC_OVER == 0 and trainer.global_step > 0:
             layer_stats = []
 
-            for name, stats in self.routings.items():
+            for name, stats in self.acc_routings.items():
                 layer_routing_dist = torch.cat(stats, dim=0)
                 batch_size = layer_routing_dist.size(0)
                 layer_routing_dist = layer_routing_dist.view(batch_size, -1)
@@ -52,12 +76,21 @@ class SelectorRoutingsLog(Callback):
                     }
                 )
 
-            stats = average_dicts(layer_stats)
-            for k, v in stats.items():
+            global_stats = average_dicts(layer_stats)
+            self.averager.update(global_stats)
+            global_stats = self.averager.average()
+
+            for k, v in global_stats.items():
                 pl_module.log(
-                    f"{split}/{k}", v, on_epoch=True, on_step=True, sync_dist=True, prog_bar=True
+                    f"{split}/{k}",
+                    v,
+                    on_epoch=True,
+                    on_step=True,
+                    sync_dist=True,
+                    prog_bar=True,
                 )
-            self.routings.clear()
+
+            self.acc_routings.clear()
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:
         self.aggregate_and_maybe_log(
@@ -73,38 +106,31 @@ class SelectorRoutingsLog(Callback):
         batch_idx: int,
         dataloader_idx: int = 0,
     ) -> None:
-        self.aggregate_and_maybe_log(
-            trainer, pl_module, batch_idx, split="val"
-        )
+        self.aggregate_and_maybe_log(trainer, pl_module, batch_idx, split="val")
 
 
 class SelectorMetricsLog(Callback):
-    LOG_EVERY = 16
-
     def __init__(self):
+        self.averager = Averager(weight=0.9)
         self.metrics = {}
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:
         # get routing attributes of all layers
         for name, module in pl_module.named_modules():
             if isinstance(module, RoutingSelector) and hasattr(module, "metrics"):
-                if name not in self.metrics:
-                    self.metrics[name] = []
-                self.metrics[name].append(module.metrics)
+                self.metrics[name] = module.metrics
 
-        if not self.metrics:
-            return
+        global_stats = average_dicts(list(self.metrics.values()))
+        self.averager.update(global_stats)
 
-        if trainer.global_step % self.LOG_EVERY == 0 and trainer.global_step > 0:
-            layer_stats = []
-
-            for name, stats in self.metrics.items():
-                avg_metrics = average_dicts(stats)
-                layer_stats.append(avg_metrics)
-
-            stats = average_dicts(layer_stats)
-            for k, v in stats.items():
-                pl_module.log(
-                    f"train/{k}", v, on_epoch=True, on_step=True, sync_dist=True
-                )
-            self.metrics.clear()
+        average_so_far = self.averager.average()
+        for k, v in average_so_far.items():
+            pl_module.log(
+                f"train/{k}",
+                v,
+                on_epoch=True,
+                on_step=True,
+                sync_dist=True,
+                prog_bar=True,
+            )
+        self.metrics.clear()
