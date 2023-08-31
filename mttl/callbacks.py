@@ -1,8 +1,14 @@
+import time
 import sys, os
+from typing import Any
 
 from pytorch_lightning import callbacks as cb
 from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
+from pytorch_lightning.utilities.types import STEP_OUTPUT
 from torch.utils.data import DataLoader
+
+
+from mttl.utils import logger
 
 
 class MMLUCallback(cb.Callback):
@@ -17,7 +23,9 @@ class MMLUCallback(cb.Callback):
             data_dir=os.environ["MMLU_DATA_DIR"],
         )
         metrics = evaluator.evaluate(
-            pl_module, metric_per_task=True, eval_batches=200,
+            pl_module,
+            metric_per_task=True,
+            eval_batches=200,
         )
         pl_module.log(
             "val/mmlu",
@@ -41,7 +49,9 @@ class NICallback(cb.Callback):
             num_pos_examples=2,
         )
         metrics = evaluator.evaluate(
-            pl_module, metric_per_task=True, eval_batches=50,
+            pl_module,
+            metric_per_task=True,
+            eval_batches=50,
         )
         pl_module.log(
             "val/sni",
@@ -50,6 +60,54 @@ class NICallback(cb.Callback):
             on_epoch=True,
             prog_bar=True,
         )
+
+
+class MiniProgress(cb.ProgressBar):
+    def on_train_batch_start(self, trainer, pl_module, batch: Any, batch_idx: int) -> None:
+        self.time_start = time.time()
+        
+    def on_train_batch_end(
+        self,
+        trainer,
+        pl_module,
+        outputs,
+        batch,
+        batch_idx,
+    ) -> None:
+        self.time_end = time.time()
+        metrics = self.get_metrics(trainer, pl_module)
+        metrics = {k.replace("_step", "").replace("_epoch", ""): v for k, v in metrics.items()}
+        metrics["it/s"] = "{:.1f}".format(1 / (self.time_end - self.time_start))
+        for k, v in metrics.items():
+            metrics[k] = '{:.2f}'.format(v) if isinstance(v, float) else v
+
+        msg_start = f'Trn - Epc {trainer.current_epoch} / {trainer.global_step} / {trainer.num_training_batches}' + ' | '
+        dict_msg = ' | '.join([f'{k} -> {v}' for k, v in metrics.items()]) + ' | '
+        msg = msg_start + dict_msg
+        logger.info(msg)
+    
+    def on_validation_batch_start(self, trainer, pl_module, batch: Any, batch_idx: int) -> None:
+        self.time_start = time.time()
+
+    def on_validation_batch_end(
+        self,
+        trainer,
+        pl_module,
+        outputs,
+        batch,
+        batch_idx,
+    ) -> None:
+        self.time_end = time.time()
+        metrics = self.get_metrics(trainer, pl_module)
+        metrics = {k.replace("_step", "").replace("_epoch", ""): v for k, v in metrics.items()}
+        metrics["it/s"] = 1. / (self.time_end - self.time_start)
+        for k, v in metrics.items():
+            metrics[k] = '{:.2f}'.format(v) if isinstance(v, float) else v
+
+        msg_start = f'Val - Epc {trainer.current_epoch} / {batch_idx} / {trainer.num_val_batches[0]}' + ' | '
+        dict_msg = ' | '.join([f'{k} -> {v}' for k, v in metrics.items()]) + ' | '
+        msg = msg_start + dict_msg
+        logger.info(msg)
 
 
 class ProgressCallback(cb.TQDMProgressBar):
