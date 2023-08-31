@@ -116,10 +116,10 @@ def run_multitask(args):
         mode=mode,
     )
     callbacks.append(checkpoint_callback)
-    callbacks.append(MMLUCallback())
     callbacks.append(SelectorRoutingsLog())
     callbacks.append(SelectorMetricsLog())
     callbacks.append(MiniProgress())
+    callbacks.append(MMLUCallback(5))
 
     trainer = Trainer(
         devices=-1, 
