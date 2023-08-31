@@ -263,53 +263,25 @@ class CLM(EfficientCheckpointModule):
         divs, entropies, specializations, names = [], [], [], []
 
         for k, v in self.accumulate_metrics_batch.items():
-            names.append(k)
-            # log per lyer metrics: -MI and entropy, calculated over minimatch
-            layer_routing_dist = torch.cat(v, dim=0)
-            layer_routing_dist = layer_routing_dist.view(
-                -1, layer_routing_dist.shape[-2], layer_routing_dist.shape[-1]
-            )
-            bs = layer_routing_dist.shape[0]
-            n_skills, n_splits = self.hparams.n_skills, self.hparams.n_splits
+            names.append(k)                       
+            layer_routing_dist = torch.cat(v, dim=0)   
+            layer_routing_dist = layer_routing_dist.view(-1, layer_routing_dist.shape[-2], layer_routing_dist.shape[-1])
+                        
+            bs = layer_routing_dist.shape[0]                
+            n_skills, n_splits = self.args.n_skills, self.args.n_splits
             # calculate entropy and diversity over the full batch
-            mixing_weights_ = layer_routing_dist.view(
-                -1, n_skills
-            )  # ex x n_skills
-            mixing_weights_mean = layer_routing_dist.transpose(0, 1).mean(
-                dim=1
-            )  # n_splits x n_skills
-            average_normalized_entropy = (
-                -torch.sum(mixing_weights_ * torch.log(mixing_weights_ + EPS), dim=-1)
-                / np.log(n_skills)
-                if n_skills > 1
-                else torch.ones_like(mixing_weights_[:, 0])
-            )  # ex
-            # solit in n_splits chunks
-            average_normalized_entropy = average_normalized_entropy.reshape(
-                bs, n_splits
-            ).mean(
-                dim=0
-            )  # bs
-            # how different are the routinf for different examples? calculate MI, entropy of average - average entropy
-            mixing_weights_mean = layer_routing_dist.transpose(0, 1).mean(
-                dim=1
-            )  # n_splits x n_skills
-            entropy_of_av_normalized = (
-                -torch.sum(
-                    mixing_weights_mean * torch.log(mixing_weights_mean + EPS),
-                    dim=-1,
-                )
-                / np.log(n_skills)
-                if n_skills > 1
-                else torch.zeros_like(mixing_weights_mean[0])
-            )  # ex
-            div = (
-                entropy_of_av_normalized - average_normalized_entropy
-            ).mean()  # mean over n_splits
-            entropy = average_normalized_entropy.mean()  # .item()
-            specialization = div - entropy
+            layer_routing_dist = layer_routing_dist.view(-1, n_skills)  # ex x n_skills
+            layer_routing_dist_mean = layer_routing_dist.transpose(0, 1).mean(dim=1)  # n_splits x n_skills
+                
+            normalized_entropy = (entropy(layer_routing_dist) / np.log(n_skills) if n_skills > 1 else torch.zeros_like(layer_routing_dist[:, 0]))  # ex
+            average_normalized_entropy = normalized_entropy.reshape(bs, n_splits).mean(dim=0)  
+            # how different are the routinf for different examples? calculate MI, entropy of average - average entropy                
+            entropy_of_av_normalized = entropy(layer_routing_dist_mean) / np.log(n_skills) if n_skills > 1 else torch.zeros_like(layer_routing_dist_mean[0])
+                    
+            div = (entropy_of_av_normalized - average_normalized_entropy).mean()  # mean over n_splits                        
+            specialization = div - average_normalized_entropy            
             divs.append(div.float().item())
-            entropies.append(entropy.float().item())
+            entropies.append(average_normalized_entropy.float().item())
             specializations.append(specialization.float().item())
 
         # log mean over all layers divs and entropies
