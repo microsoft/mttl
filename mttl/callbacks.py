@@ -106,8 +106,7 @@ class MiniProgress(cb.ProgressBar):
         }
         metrics["it/s"] = "{:.1f}".format(1 / (self.time_end - self.time_start))
         seconds_to_go = (
-            (trainer.num_training_batches - trainer.global_step)
-            * trainer.accumulate_grad_batches
+            (trainer.num_training_batches - batch_idx)
             / (1.0 / ((self.time_end - self.time_start)))
         )
         metrics["ETA"] = "~{}".format(str(datetime.timedelta(seconds=seconds_to_go)))
@@ -116,7 +115,7 @@ class MiniProgress(cb.ProgressBar):
             metrics[k] = "{:.2f}".format(v) if isinstance(v, float) else v
 
         msg_start = (
-            f"Trn - Epc {trainer.current_epoch} / {trainer.global_step} / {trainer.num_training_batches}"
+            f"Trn - Epc {trainer.current_epoch} / {batch_idx} / {trainer.num_training_batches}"
             + " | "
         )
 
