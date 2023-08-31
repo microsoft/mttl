@@ -38,10 +38,8 @@ class SMEARRouter(RoutingSelector):
 
     def route(self, router: nn.Linear, layer_norm: nn.LayerNorm, x, ln=False):
         if ln:
-            weights = layer_norm(router.weight)
-        else:
-            weights = router.weight
-        return F.linear(x, weights, router.bias) / self.temperature
+            x = layer_norm(x)
+        return router(x) / self.temperature
 
     def apply_mask_and_average(self, x, padding_mask):
         x_rout = x * padding_mask.unsqueeze(-1).to(x.device)
@@ -67,8 +65,11 @@ class VSMEARRouter(SMEARRouter):
         self.post_router.bias.data.fill_(0)
         self.post_router_ln = nn.LayerNorm(in_d)
         self.post_router_ln.weight = nn.Parameter(torch.ones(self.in_d))
+        self.metrics = {}
 
     def forward(self, routing_infos, input: torch.Tensor):
+        self.metrics.clear()
+
         padding_mask = routing_infos.pad_token_mask
         inst_padding_mask = routing_infos.inst_token_mask
 
@@ -79,18 +80,28 @@ class VSMEARRouter(SMEARRouter):
             # during training :-)
             post_input = self.apply_mask_and_average(input, padding_mask)
             post_routes = self.route(self.post_router, self.post_router_ln, post_input)
-            routing_probs = F.softmax(post_routes, dim=-1)
+            post_probs = routing_probs = F.softmax(post_routes, dim=-1)
+            prior_probs = F.softmax(prior_routes, dim=-1)
 
             # compute auxiliary loss (KL divergence), KL = - H(posterior) + Xent(posterior, prior)
-            auxiliary_loss = routing_probs * F.log_softmax(
-                post_routes, -1
-            ) - routing_probs * F.log_softmax(prior_routes, dim=-1)
-            auxiliary_loss = auxiliary_loss.sum(dim=-1).mean()
+            h_post = -(post_probs * F.log_softmax(post_routes, -1)).sum(1).mean()
+            h_pri = -(prior_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
+            x_ent = -(post_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
+
+            self.routings = post_probs.detach().cpu()
+            self.metrics["h_post"] = h_post
+            self.metrics["h_pri"] = h_pri
+            self.metrics["x_ent"] = x_ent
+            self.auxiliary_loss = -1. * h_post + x_ent
         else:
             # during eval :-(
-            routing_probs = F.softmax(prior_routes, dim=-1)
-            auxiliary_loss = routing_probs.sum().detach() * 0.0
-        return routing_probs.unsqueeze(1), auxiliary_loss
+            prior_probs = routing_probs = F.softmax(prior_routes, dim=-1)
+            h_pri = -(prior_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
+
+            self.routings = prior_probs.detach().cpu()
+            self.metrics["h_pri"] = h_pri
+            self.auxiliary_loss = h_pri.sum() * 0.
+        return routing_probs.unsqueeze(1)
 
 
 class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
@@ -103,25 +114,7 @@ class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
         else:
             self.selector = selector
 
-        self._losses = []
-        self._metrics = {}
-
-    @property
-    def losses(self):
-        return self._losses
-
-    @property
-    def metrics(self):
-        return self._metrics
-
-    def clear(self):
-        self._losses.clear()
-        self._metrics.clear()
-
     def forward(self, input):
-        # Need to clear losses and metrics before forward pass!
-        self.clear()
-
         task_id = self.routing_infos.task_ids
         repeat = input.size(0) // task_id.size(0)
 
@@ -131,17 +124,11 @@ class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
 
         if self.selector is not None:
             mixing_weights = self.selector(self.routing_infos, input=input)
-
-            if isinstance(mixing_weights, tuple):
-                mixing_weights, kl = mixing_weights
-                self._losses.append(kl)
         else:
             bs = input.size(0)
             mixing_weights = torch.ones(
                 bs, self.n_splits, self.n_skills, device=input.device, dtype=input.dtype
             )
-
-        self._metrics["routing"] = mixing_weights.detach().cpu().float()
         return SkilledLoRA.forward(self, input, mixing_weights)
 
 

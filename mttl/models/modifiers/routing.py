@@ -96,6 +96,10 @@ class RouterWrapper:
             if getattr(adapter, "metrics", None):
                 for n, v in adapter.metrics.items():
                     metrics[name + "." + n] = v
+        for name, adapter in object.get_selectors().items():
+            if getattr(adapter, "metrics", None):
+                for n, v in adapter.metrics.items():
+                    metrics[name + "." + n] = v
         return metrics
 
     @classmethod
