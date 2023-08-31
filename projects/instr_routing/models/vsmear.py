@@ -26,6 +26,9 @@ class Metrics:
     def __setitem__(self, key, value):
         self.add(key, value)
 
+    def clear(self):
+        self.metrics.clear()
+
     def items(self):
         return self.metrics.items()
 
@@ -84,6 +87,8 @@ class VSMEARRouter(SMEARRouter):
         self.metrics = Metrics()
 
     def forward(self, routing_infos, input: torch.Tensor):
+        self.metrics.clear()
+
         padding_mask = routing_infos.pad_token_mask
         inst_padding_mask = routing_infos.inst_token_mask
 

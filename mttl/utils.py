@@ -127,17 +127,27 @@ def agg_dicts(list_of_dicts, agg="mean", tag=False):
     Could be "min", "max", or "mean".
     """
     out = {}
-    for item in list_of_dicts:
-        for k, v in item.items():
+    for curr_dict in list_of_dicts:
+        for k, v in curr_dict.items():
             if tag:
                 k = f"{agg}_{k}"
             if k not in out:
-                out[k] = v
+                # clone the variable so that we don't modify the original
+                out[k] = v.clone() if isinstance(v, torch.Tensor) else v
             else:
                 if agg == "min":
-                    out[k] = torch.minimum(out[k], v)
+                    # take minimum between tensors
+                    out[k] = (
+                        torch.minimum(out[k], v)
+                        if isinstance(v, torch.Tensor)
+                        else min(out[k], v)
+                    )
                 elif agg == "max":
-                    out[k] = torch.maximum(out[k], v)
+                    out[k] = (
+                        torch.maximum(out[k], v)
+                        if isinstance(v, torch.Tensor)
+                        else max(out[k], v)
+                    )
                 else:
                     out[k] += v
     if agg == "mean":
@@ -249,9 +259,11 @@ def get_checkpoint_path(path, step=None, use_last=False):
 
     if use_last:
         # search for last.ckpt
-        match = [m for m in match if 'last.ckpt' in m]
+        match = [m for m in match if "last.ckpt" in m]
         if len(match) != 1:
-            raise ValueError("last.ckpt not found or found multiple (?) in the list of checkpoints!")
+            raise ValueError(
+                "last.ckpt not found or found multiple (?) in the list of checkpoints!"
+            )
         return match[0]
 
     if len(match) > 1:
@@ -337,7 +349,6 @@ class MemEfficientLoRA(Function):
 
     @staticmethod
     def backward(ctx, O_grad):
-
         bs, L, O = O_grad.size()
 
         input, A, B, skills = ctx.saved_tensors
