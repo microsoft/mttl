@@ -131,7 +131,7 @@ class VSMEARRouter(SMEARRouter):
             self.metrics["h_post"] = h_post / math.log(self.n_skills)
             self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
             self.metrics["x_ent"] = x_ent
-            self.auxiliary_loss = x_ent
+            self.auxiliary_loss = -h_post + x_ent
         else:
             # during eval :-(
             prior_probs = routing_probs = F.softmax(prior_routes, dim=-1)
