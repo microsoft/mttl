@@ -114,11 +114,17 @@ class CLM(EfficientCheckpointModule):
     def generation_config(self):
         return self.model.generation_config
 
-    def add_loss_plugin(self, plugin):
-        if self.loss_plugins is not None:
-            self.loss_plugins[plugin.name] = plugin
-        else:
-            self.loss_plugins = nn.ModuleDict({plugin.name: plugin})
+    def gather_auxiliary_losses(self):
+        # get some losses from the model if it is a router
+        aux_loss = []
+        for name, module in self.model.named_modules():
+            if isinstance(module, RoutingSelector) and hasattr(
+                module, "auxiliary_loss"
+            ):
+                aux_loss_mod = getattr(module, "auxiliary_loss", None)
+                if aux_loss_mod is not None:
+                    aux_loss.append(aux_loss_mod)
+        return aux_loss
 
     def forward(self, batch, reduction="mean"):
         input_ids, labels = batch["input_ids"], batch["labels"]
@@ -161,7 +167,10 @@ class CLM(EfficientCheckpointModule):
             loss = loss.sum(dim=-1) / non_zero_loss
 
         del outputs, shift_logits, shift_labels
-        return loss
+
+        aux_loss = self.gather_auxiliary_losses()
+        aux_loss = torch.stack(aux_loss).sum() if len(aux_loss) else 0.0
+        return loss, aux_loss
 
     def calculate_routing_mask(self, inputs, labels=None):
         # 1 if the token is not a pad token (so inputs and outputs are 1)
@@ -179,10 +188,6 @@ class CLM(EfficientCheckpointModule):
         )
         oracle_routings = self.model.task_id_container["routing_infos"].oracle_routings
         return out, oracle_routings
-
-    def on_before_zero_grad(self, optimizer: Optimizer) -> None:
-        self.model.zero_grad()
-        return super().on_before_zero_grad(optimizer)
 
     def generate(
         self,
@@ -205,59 +210,35 @@ class CLM(EfficientCheckpointModule):
         )
 
         self.model.task_id_container["routing_infos"] = routing_infos
-        return self.model.generate(
-            inputs=batch["input_ids"], **kwargs
-        )
-
-    def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
-        # self.log_routing_metrics() .
-        return super().on_before_optimizer_step(optimizer)
-
-    def gather_auxiliary_losses(self):
-        # get some losses from the model if it is a router
-        aux_loss = []
-        for name, module in self.model.named_modules():
-            if isinstance(module, RoutingSelector) and hasattr(
-                module, "auxiliary_loss"
-            ):
-                aux_loss_mod = getattr(module, "auxiliary_loss", None)
-                if aux_loss_mod is not None:
-                    aux_loss.append(aux_loss_mod)
-        return aux_loss
+        generations = self.model.generate(inputs=batch["input_ids"], **kwargs)
+        self.model.clear_cache()
+        return generations
 
     def training_step(self, batch, _):
-        loss = self.forward(batch)
-
-        aux_loss = self.gather_auxiliary_losses()
-        aux_loss = torch.stack(aux_loss).sum() if len(aux_loss) else 0.0
+        loss, aux_loss = self.forward(batch)
         total_loss = loss + aux_loss
 
-        self.log("train/loss", loss, on_epoch=True, prog_bar=True)
-        self.log("train/aux_loss", aux_loss, on_epoch=True, prog_bar=True)
-        self.log("train/total_loss", total_loss, on_epoch=True, prog_bar=True)
-
+        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train/aux_loss", aux_loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log(
+            "train/total_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True
+        )
         for i, pg in enumerate(self.optimizers().optimizer.param_groups):
             self.log(f"train/lr_{i}", pg["lr"])
         return total_loss
 
-    def validation_step(self, batch, batch_idx, log=True):
-        loss = self.forward(batch, reduction="none")
+    def validation_step(self, batch, batch_idx):
+        loss, aux_loss = self.forward(batch, reduction="none")
         mean_loss = loss.sum() / loss.shape[0]
-        aux_loss = self.gather_auxiliary_losses()
-        aux_loss_sum = torch.stack(aux_loss).sum() if len(aux_loss) else 0.0
 
-        if log:
-            self.log("val/loss", mean_loss, on_epoch=True, prog_bar=True)
-            self.log("val/aux_loss", aux_loss_sum, on_epoch=True, prog_bar=True)
+        self.log("val/loss", mean_loss, on_epoch=True, on_step=True, prog_bar=True)
+        self.log("val/aux_loss", aux_loss, on_epoch=True, on_step=True, prog_bar=True)
 
         self._inference_outputs += [(loss, batch["task_ids"])]
         return loss, batch["task_ids"]
 
-    def on_before_backward(self, loss: Tensor) -> None:
-        return super().on_before_backward(loss)
-
     def test_step(self, batch, batch_idx):
-        loss = self.forward(batch, reduction="none")
+        loss, _ = self.forward(batch, reduction="none")
         self._inference_outputs += [(loss, batch["task_ids"])]
         return loss, batch["task_ids"]
 
@@ -283,8 +264,6 @@ class CLM(EfficientCheckpointModule):
                 on_epoch=True,
                 prog_bar=True,
             )
-
-        self.accumulate_metrics_batch = defaultdict(list)
         self._inference_outputs.clear()
         return losses
 

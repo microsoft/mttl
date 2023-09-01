@@ -98,7 +98,8 @@ class SMEARRouter(RoutingSelector):
         so that we can use it to compute the prior routing probabilities.
         """
         if routing_infos.generation_mode:
-            if self._router_input_cache is None:
+            # if input.size(1) != 1 it means that this is the first forward call (context encoding)
+            if self._router_input_cache is None or input.size(1) != 1:
                 router_input = self.apply_mask_and_average(
                     input, routing_infos.inst_token_mask
                 )
@@ -111,6 +112,9 @@ class SMEARRouter(RoutingSelector):
                 input, routing_infos.inst_token_mask
             )
         return router_input
+
+    def clear_cache(self) -> None:
+        self._router_input_cache = None
 
     def forward(self, routing_infos: AugmentedRoutingInfo, input: torch.Tensor):
         self.metrics.clear()

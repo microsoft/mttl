@@ -4,7 +4,8 @@ import math
 
 
 class Adapter(nn.Module):
-    pass
+    def clear_cache(self):
+        pass
 
 
 class LoRA(Adapter):

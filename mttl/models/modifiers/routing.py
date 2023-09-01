@@ -80,27 +80,11 @@ class RouterWrapper:
                     )
 
     @classmethod
-    def get_routing_losses(cls, object):
-        aux_losses = {}
-
-        for name, adapter in object.get_adapters().items():
-            if getattr(adapter, "losses", None):
-                aux_losses[name] = adapter.losses
-        return aux_losses
-
-    @classmethod
-    def get_routing_metrics(cls, object):
-        metrics = {}
-
-        for name, adapter in object.get_adapters().items():
-            if getattr(adapter, "metrics", None):
-                for n, v in adapter.metrics.items():
-                    metrics[name + "." + n] = v
-        for name, adapter in object.get_selectors().items():
-            if getattr(adapter, "metrics", None):
-                for n, v in adapter.metrics.items():
-                    metrics[name + "." + n] = v
-        return metrics
+    def clear_cached_objects(cls, object):
+        for adapter in object.get_adapters().values():
+            adapter.clear_cache()
+        for selector in object.get_selectors().values():
+            selector.clear_cache()
 
     @classmethod
     def get_adapters(cls, object):
@@ -124,7 +108,8 @@ class RouterWrapper:
 
 
 class RoutingSelector(nn.Module):
-    pass
+    def clear_cache(self) -> None:
+        pass
 
 
 @register_selector("average")
