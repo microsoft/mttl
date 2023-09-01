@@ -125,11 +125,14 @@ def get_example_to_ids(filename):
 class Averager:
     def __init__(self, weight: float = 1):
         self.weight = weight
-        self.total = defaultdict(float)
+        self.total = {}
 
     def update(self, stats):
         for key, value in stats.items():
-            self.total[key] = self.total[key] * self.weight + value * (1 - self.weight)
+            if key not in self.total:
+                self.total[key] = value
+            else:
+                self.total[key] = self.total[key] * self.weight + value * (1 - self.weight)
         return self.total
 
 

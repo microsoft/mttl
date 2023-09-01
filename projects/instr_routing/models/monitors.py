@@ -15,7 +15,7 @@ class SelectorRoutingsLog(Callback):
     ACC_OVER = 10
 
     def __init__(self):
-        self.averager = Averager(0.9)
+        self.averager = Averager(0.5)
         self.acc_routings = {}
 
     def aggregate_and_maybe_log(self, trainer, pl_module, current_step, split) -> None:
@@ -87,7 +87,7 @@ class SelectorRoutingsLog(Callback):
 
 class SelectorMetricsLog(Callback):
     def __init__(self):
-        self.averager = Averager(weight=0.9)
+        self.averager = Averager(weight=0.5)
         self.metrics = {}
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:

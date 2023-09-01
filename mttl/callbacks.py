@@ -122,7 +122,7 @@ class MiniProgress(cb.ProgressBar):
                 metrics[k] = "{:.2f}".format(v) if isinstance(v, float) else v
 
         msg_start = (
-            f"Trn - Epc {trainer.current_epoch} / {batch_idx} / {trainer.num_training_batches}"
+            f"Trn - Epc {trainer.current_epoch} / {trainer.global_step} / {trainer.num_training_batches // trainer.accumulate_grad_batches}"
             + " | "
         )
         dict_msg = " | ".join([f"{k} -> {v}" for k, v in metrics.items()]) + " | "
