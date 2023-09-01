@@ -5,8 +5,6 @@ from typing import Any
 
 from pytorch_lightning import callbacks as cb
 from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
-from pytorch_lightning.utilities.types import STEP_OUTPUT
-from torch.utils.data import DataLoader
 
 
 from mttl.utils import Averager, logger
@@ -112,9 +110,7 @@ class MiniProgress(cb.ProgressBar):
         eta = (trainer.num_training_batches - batch_idx) / (
             1.0 / ((self.time_end - self.time_start))
         )
-        time_metrics = self.averager.update(
-            {"it/s": it_per_sec, "eta": eta}
-        )
+        time_metrics = self.averager.update({"it/s": it_per_sec, "eta": eta})
         for k, v in {**metrics, **time_metrics}.items():
             if k == "eta":
                 metrics[k] = "{}".format(datetime.timedelta(seconds=v))
