@@ -11,7 +11,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.callbacks import MMLUCallback, MiniProgress, ProgressCallback
+from mttl.callbacks import MMLUCallback, MiniProgress, ProgressCallback, NICallback
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.platypus_module import PlatypusModule
 from mttl.datamodule.flan100k_module import Flan100kModule
@@ -118,9 +118,9 @@ def run_multitask(args):
     callbacks.append(checkpoint_callback)
     callbacks.append(SelectorRoutingsLog())
     callbacks.append(SelectorMetricsLog())
-    callbacks.append(MiniProgress())
+    # callbacks.append(MiniProgress())
     callbacks.append(MMLUCallback(5))
-
+    # callbacks.append(NICallback())
     trainer = Trainer(
         devices=-1, 
         accelerator="gpu",

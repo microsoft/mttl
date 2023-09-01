@@ -5,6 +5,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from projects.instr_routing.finetune_llama import RoutingConfig
 from projects.instr_routing.models.clm import CLM
 from transformers import AutoModelForCausalLM
+from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 import os
 import torch
 
@@ -37,18 +38,28 @@ if __name__ == "__main__":
 
     config = RoutingConfig.parse(extra_kwargs={"eval_superni": True})
 
-    config.model = "meta-llama/Llama-2-7b-hf"
-    config.load_in_8bit = True
+    config.model = "yahma/llama-7b-hf"
+    config.load_in_8bit = 0 # True
     config.model_family = "gpt"
     config.data_dir = os.environ["NI_DATA_DIR"]
     config.predict_batch_size = 2
-    config.max_input_length = 4096
+    config.max_input_length = 256
     config.max_output_length = 128
+    config.model_modifier="softmoe"
+    config.dataset = "alpaca"
+    
+    config.modify_modules=".*attn.*"        
+    config.modify_layers="q_proj|v_proj|k_proj"   
+    config.trainable_param_names=".*lora_[ab].*|.*selector.*"
 
     model = AutoModelForCausalLM.from_pretrained(
         config.model,
         load_in_8bit=config.load_in_8bit,
         device_map="auto"
     )
+    model_class = CLM
+    dm = AlpacaDataModule(config)
+    model = model_class(**vars(config), tokenizer=dm.tokenizer)
+    model.to("cuda")
 
-    print(eval_ni(config, model, nshot=2, eval_batches=50))
+    print(eval_ni(config, model, nshot=0))#, eval_batches=50))

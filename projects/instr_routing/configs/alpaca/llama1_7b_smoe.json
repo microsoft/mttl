@@ -4,7 +4,7 @@
     "learning_rate": 3e-4,
     "lora_dropout": 0.05,
     "weight_decay": 0.00,
-    "n_skills": 1,       
+    "n_skills": 8,      
     "load_in_8bit":0,  
     "model_family":"gpt",   
 

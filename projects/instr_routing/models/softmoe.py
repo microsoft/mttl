@@ -141,7 +141,7 @@ class SoftMOEAdapter(SkilledLoRA):
         mixing_weights = weights
         bs, seq, n_skills = mixing_weights.size()
 
-        # mixing_logit_tks = mixing_weights.unsqueeze(2).expand(-1, -1, seq, -1) # b x s x s x n_skills
+        mixing_logit_tks = mixing_weights.unsqueeze(2).expand(-1, -1, seq, -1) # b x s x s x n_skills
         # causal routing: aggreage over sequence length, then aggregate over experts
         if hasattr(routing_infos, "causal_mask"):
             causal_mask = routing_infos.causal_mask
@@ -164,13 +164,14 @@ class SoftMOEAdapter(SkilledLoRA):
 
         # smalles number -1e38
         mixing_weight_causal = torch.where(
-            causal_mask.bool(), mixing_weights, -1e38
+            causal_mask.unsqueeze(-1).bool(), mixing_logit_tks, -1e38
         )  # bs x s x s x n_skills
+        mixing_weight_causal = mixing_weight_causal.permute(0,3,1,2) # bs x n_skills x s x s
         D = torch.softmax(
-            mixing_weight_causal, dim=2
+            mixing_weight_causal, dim=-1
         )  # for ech token create a mixing distribution over previous tokens excluding the pad tokens
         D = torch.einsum(
-            "bsk,bs->bsk", (D, routing_infos.pad_token_mask)
+            "bksp,bs->bksp", (D, routing_infos.pad_token_mask)
         )  # zero out pad tokens (there are pad tokens that have mixing_weights all -1e38, after softmax they will be non-zero)
         assert torch.isnan(D).sum() == 0
         assert torch.isclose(D[0][-1].sum(), torch.tensor(1.0))
