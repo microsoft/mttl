@@ -165,13 +165,14 @@ class RoutingInfo:
     labels: torch.Tensor = None
 
     @classmethod
-    def from_batch(cls, batch: dict):
+    def from_batch(cls, batch: dict, **kwargs):
         ri = cls(
             task_ids=batch.get("task_ids", None),
             hashes=batch.get("hashes", None),
             example_ids=batch.get("example_ids", None),
             instruction_hashes=batch.get("instruction_hashes", None),
             labels=batch.get("labels", None),
+            **kwargs,
         )
         return ri
 

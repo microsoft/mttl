@@ -23,14 +23,13 @@ from mttl.models.utils import (
     get_global_batch_size,
 )
 from mttl.models.get_optimizer import get_optimizer
-from mttl.global_vars import EPS
 from dataclasses import dataclass
 
 
 @dataclass
 class AugmentedRoutingInfo(RoutingInfo):
     save_oracle_routings: bool = False
-    gen_mode: bool = False
+    generation_mode: bool = False
     routings: List[torch.Tensor] = None
     oracle_routings: List[torch.Tensor] = None
     pad_token_mask: torch.Tensor = None
@@ -123,19 +122,18 @@ class CLM(EfficientCheckpointModule):
 
     def forward(self, batch, reduction="mean"):
         input_ids, labels = batch["input_ids"], batch["labels"]
-        routing_infos = AugmentedRoutingInfo.from_batch(batch)
-
         pad_mask, instruction_mask = self.calculate_routing_mask(
             batch["input_ids"], batch["labels"]
         )
-        routing_infos.pad_token_mask = pad_mask
-        routing_infos.inst_token_mask = instruction_mask
-
-        self.model.task_id_container["routing_infos"] = routing_infos
+        routing_infos = AugmentedRoutingInfo.from_batch(
+            batch, pad_token_mask=pad_mask, inst_token_mask=instruction_mask
+        )
         assert (
             routing_infos.pad_token_mask.shape[1]
             == routing_infos.inst_token_mask.shape[1]
         )
+
+        self.model.task_id_container["routing_infos"] = routing_infos
 
         outputs = self.model.forward(input_ids, attention_mask=pad_mask)
 
@@ -176,7 +174,9 @@ class CLM(EfficientCheckpointModule):
         return padding_mask, instruction_mask
 
     def compute_routings(self, batch, **kwargs):
-        out = self.generate(batch, save_oracle_routings=True, gen_mode=0, **kwargs)
+        out = self.generate(
+            batch, save_oracle_routings=True, generation_mode=False, **kwargs
+        )
         oracle_routings = self.model.task_id_container["routing_infos"].oracle_routings
         return out, oracle_routings
 
@@ -187,35 +187,26 @@ class CLM(EfficientCheckpointModule):
     def generate(
         self,
         batch,
+        routings=None,
+        save_oracle_routings=None,
         **kwargs,
     ):
         if not hasattr(self.model, "task_id_container"):
             self.model.task_id_container = {}
 
-        routing_infos = AugmentedRoutingInfo.from_batch(batch)
-        routing_infos.gen_mode = 1
-
         pad_mask, instruction_mask = self.calculate_routing_mask(batch["input_ids"])
-        routing_infos.pad_token_mask = pad_mask
-        routing_infos.inst_token_mask = instruction_mask
-
-        # if routings are given (should be oracle routings), we will use them for generation
-        if "routings" in kwargs:
-            routing_infos.routings = kwargs["routings"]
-            kwargs.pop("routings")
-
-        # if flag is set, we will store the oracle routings
-        if "save_oracle_routings" in kwargs:
-            routing_infos.save_oracle_routings = kwargs["save_oracle_routings"]
-            kwargs.pop("save_oracle_routings")
-
-        if "gen_mode" in kwargs:  # so that in xr4 we look at both nput and output
-            routing_infos.gen_mode = kwargs["gen_mode"]
+        routing_infos = AugmentedRoutingInfo.from_batch(
+            batch,
+            generation_mode=True,
+            routings=routings,
+            save_oracle_routings=save_oracle_routings,
+            pad_token_mask=pad_mask,
+            inst_token_mask=instruction_mask,
+        )
 
         self.model.task_id_container["routing_infos"] = routing_infos
-
         return self.model.generate(
-            inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
+            inputs=batch["input_ids"], **kwargs
         )
 
     def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
@@ -226,17 +217,19 @@ class CLM(EfficientCheckpointModule):
         # get some losses from the model if it is a router
         aux_loss = []
         for name, module in self.model.named_modules():
-            if isinstance(module, RoutingSelector) and hasattr(module, "auxiliary_loss"):
-                aux_loss_mod = getattr(module, 'auxiliary_loss', None)
+            if isinstance(module, RoutingSelector) and hasattr(
+                module, "auxiliary_loss"
+            ):
+                aux_loss_mod = getattr(module, "auxiliary_loss", None)
                 if aux_loss_mod is not None:
                     aux_loss.append(aux_loss_mod)
         return aux_loss
 
     def training_step(self, batch, _):
-        loss = self.forward(batch) 
+        loss = self.forward(batch)
 
         aux_loss = self.gather_auxiliary_losses()
-        aux_loss = torch.stack(aux_loss).sum() if len(aux_loss) else 0.
+        aux_loss = torch.stack(aux_loss).sum() if len(aux_loss) else 0.0
         total_loss = loss + aux_loss
 
         self.log("train/loss", loss, on_epoch=True, prog_bar=True)
@@ -251,7 +244,7 @@ class CLM(EfficientCheckpointModule):
         loss = self.forward(batch, reduction="none")
         mean_loss = loss.sum() / loss.shape[0]
         aux_loss = self.gather_auxiliary_losses()
-        aux_loss_sum = torch.stack(aux_loss).sum() if len(aux_loss) else 0.
+        aux_loss_sum = torch.stack(aux_loss).sum() if len(aux_loss) else 0.0
 
         if log:
             self.log("val/loss", mean_loss, on_epoch=True, prog_bar=True)

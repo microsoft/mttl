@@ -19,6 +19,7 @@ class RoutingConfig(Config):
         self.router_weight_decay = None
         self.router_learning_rate = None
         self.router_temperature = 1.
+        self.router_normalize_weights = False
 
         self.fast_dev_run = False
         self.hf_token_hub = None

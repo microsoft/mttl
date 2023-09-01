@@ -14,6 +14,7 @@ from mttl.models.modifiers.routing import (
     get_selector,
     register_selector,
 )
+from projects.instr_routing.models.clm import AugmentedRoutingInfo
 
 
 class Metrics:
@@ -43,8 +44,13 @@ class SMEARRouter(RoutingSelector):
         self.n_skills = config.n_skills
         self.n_splits = config.n_splits
         self.temperature = config.router_temperature
+        self.normalize_weights = config.router_normalize_weights
+
         assert self.n_splits == 1
 
+        # during generation we want to cache the input encoding
+        # because in successive generation steps, the input is going to be only the encoding for the last token
+        self._router_input_cache = None
         self.prior_router = nn.Linear(in_d, config.n_skills * self.n_splits)
         self.prior_router_ln = nn.LayerNorm(in_d)
         self.prior_router_ln.weight = nn.Parameter(torch.ones(in_d))
@@ -55,10 +61,11 @@ class SMEARRouter(RoutingSelector):
         norm = torch.norm(W, p=1, keepdim=True)
         return norm.item()
 
-    def route(self, router: nn.Linear, layer_norm: nn.LayerNorm, x, ln=True):
-        if ln:
-            x = layer_norm(x)
-        return router(x) / self.temperature
+    def route(self, router: nn.Linear, layer_norm: nn.LayerNorm, x):
+        if self.normalize_weights:
+            weights = layer_norm(router.weight)
+            return F.linear(x, weights, router.bias)
+        return F.linear(x, router.weight, router.bias)
 
     def apply_mask_and_average(self, x, padding_mask):
         x_rout = x * padding_mask.unsqueeze(-1).to(x.device)
@@ -66,9 +73,25 @@ class SMEARRouter(RoutingSelector):
         x_rout = x_rout.sum(dim=1) / lengths
         return x_rout
 
-    def forward(self, routing_infos, input: torch.Tensor):
-        inst_padding_mask = routing_infos.inst_token_mask
-        prior_input = self.apply_mask_and_average(input, inst_padding_mask)
+    def _get_router_inputs(self, input: torch.Tensor, routing_infos: AugmentedRoutingInfo):
+        """When generating, the successive forward calls only receive the last token (bs, 1, d).
+
+        Therefore, at the first forward call (context encoding), we need to cache the input encodings
+        so that we can use it to compute the prior routing probabilities.
+        """
+        if routing_infos.generation_mode:
+            if self._router_input_cache is None:
+                router_input = self.apply_mask_and_average(input, routing_infos.inst_token_mask)
+                self._router_input_cache = router_input
+            else:
+                router_input = self._router_input_cache
+        else:
+            self._router_input_cache = None
+            router_input = self.apply_mask_and_average(input, routing_infos.inst_token_mask)
+        return router_input
+
+    def forward(self, routing_infos: AugmentedRoutingInfo, input: torch.Tensor):
+        prior_input = self._get_router_inputs(input, routing_infos)
         prior_routes = self.route(self.prior_router, self.prior_router_ln, prior_input)
         routing_probs = F.softmax(prior_routes, dim=-1)
         auxiliary_loss = routing_probs.sum().detach() * 0.0
@@ -86,17 +109,17 @@ class VSMEARRouter(SMEARRouter):
         self.post_router_ln.weight = nn.Parameter(torch.ones(self.in_d))
         self.metrics = Metrics()
 
-    def forward(self, routing_infos, input: torch.Tensor):
+    def forward(self, routing_infos: AugmentedRoutingInfo, input: torch.Tensor):
         self.metrics.clear()
 
-        padding_mask = routing_infos.pad_token_mask
-        inst_padding_mask = routing_infos.inst_token_mask
-
-        prior_input = self.apply_mask_and_average(input, inst_padding_mask)
+        prior_input = self._get_router_inputs(input, routing_infos)
         prior_routes = self.route(self.prior_router, self.prior_router_ln, prior_input)
 
         if self.training:
             # during training :-)
+            assert routing_infos.generation_mode is False, "We are not expecting to be in generation mode during training."
+
+            padding_mask = routing_infos.pad_token_mask
             post_input = self.apply_mask_and_average(input, padding_mask)
             post_routes = self.route(self.post_router, self.post_router_ln, post_input)
             post_probs = routing_probs = F.softmax(post_routes, dim=-1)
@@ -111,7 +134,7 @@ class VSMEARRouter(SMEARRouter):
             self.metrics["h_post"] = h_post / math.log(self.n_skills)
             self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
             self.metrics["x_ent"] = x_ent
-            self.auxiliary_loss = - h_post + x_ent
+            self.auxiliary_loss = -h_post + x_ent
         else:
             # during eval :-(
             prior_probs = routing_probs = F.softmax(prior_routes, dim=-1)
@@ -119,7 +142,7 @@ class VSMEARRouter(SMEARRouter):
 
             self.routings = prior_probs.detach().cpu()
             self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
-            self.auxiliary_loss = h_pri.sum() * 0.
+            self.auxiliary_loss = h_pri.sum() * 0.0
         return routing_probs.unsqueeze(1)
 
 
