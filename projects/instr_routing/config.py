@@ -16,10 +16,17 @@ class RoutingConfig(Config):
         # scale the output a bit
         self.lora_alpha = 16
 
-        self.router_weight_decay = None
-        self.router_learning_rate = None
-        self.router_temperature = 1.
-        self.router_normalize_weights = False
+        self.router_weight_decay = None  # weight decay for the routing parameters
+        self.router_learning_rate = None  # learning rate of the routing parameters
+        self.router_temperature = 1.0  # temperature of router for softmax
+        self.router_teacher_temperature = (
+            1.0  # temperature of router for teacher softmax
+        )
+        self.router_normalize_weights = (
+            False  # l2 normalize cluster centroids before routing
+        )
+        self.router_teacher_center_momentum = 1.0  # centering momentum a-la DINO_v2, if 1.0 don't use centering
+        self.router_shared_weights = True  # share weights between teacher and student
 
         self.fast_dev_run = False
         self.hf_token_hub = None
