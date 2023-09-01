@@ -25,7 +25,8 @@ class RoutingConfig(Config):
         self.router_normalize_weights = (
             False  # l2 normalize cluster centroids before routing
         )
-        self.router_teacher_center_momentum = 1.0  # centering momentum a-la DINO_v2, if 1.0 don't use centering
+        self.router_teacher_ent_factor = 1.  # factor for the posterior entropy term in the vsmear router
+        self.router_center_momentum = 0.   # centering momentum a-la DINO_v2, if 0. don't use centering
         self.router_shared_weights = True  # share weights between teacher and student
 
         self.fast_dev_run = False

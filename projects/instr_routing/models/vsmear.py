@@ -50,32 +50,38 @@ class SMEARRouter(RoutingSelector):
         # during generation we want to cache the input encoding
         # because in successive generation steps, the input is going to be only the encoding for the last token
         self._router_input_cache = None
+
         self.prior_router = nn.Linear(in_d, config.n_skills * self.n_splits, bias=False)
         self.prior_router_ln = nn.LayerNorm(in_d)
         self.prior_router_ln.weight = nn.Parameter(torch.ones(in_d))
 
+        self.router_center_momentum = self.config.router_center_momentum
+        self.register_buffer("center", torch.zeros(1, self.n_skills))
+
         self.metrics = Metrics()
 
-    @property
-    def W_norm(self):
-        W = self.ff.weight
-        norm = torch.norm(W, p=1, keepdim=True)
-        return norm.item()
+    @torch.no_grad()
+    def apply_center_update(self, routes):
+        if self.training:
+            self.center = (
+                self.center * (1 - self.router_center_momentum)
+                + torch.mean(routes, dim=0, keepdim=True)
+                * self.router_center_momentum
+            )
 
-    def route(
-        self,
-        router: nn.Linear,
-        layer_norm: nn.LayerNorm,
-        x: torch.Tensor,
-        temperature: float = 1.0,
-    ):
-        x = layer_norm(x)
-
+    def route_maybe_center(self, input, router, router_ln, temperature=1.0, center=False):
+        """Computes routes for the teacher / posterior.
+        """
+        input = router_ln(input)
         if self.normalize_weights:
             weights = router.weight / torch.norm(router.weight, p=2, keepdim=True)
-            return F.linear(x, weights, None) / temperature
+            routes = F.linear(input, weights, None)
         else:
-            return F.linear(x, router.weight, None) / temperature
+            routes = F.linear(input, router.weight, None)
+        if center:
+            self.apply_center_update(routes)
+        # teacher centering and sharpening
+        return (routes - self.center) / temperature
 
     def apply_mask_and_average(self, x, padding_mask):
         x_rout = x * padding_mask.unsqueeze(-1).to(x.device)
@@ -108,13 +114,16 @@ class SMEARRouter(RoutingSelector):
 
     def forward(self, routing_infos: AugmentedRoutingInfo, input: torch.Tensor):
         self.metrics.clear()
+
         prior_input = self._get_router_inputs(input, routing_infos)
-        prior_routes = self.route(
+        prior_routes = self.route_maybe_center(
+            prior_input,
             self.prior_router,
             self.prior_router_ln,
-            prior_input,
             temperature=self.temperature,
+            center=self.router_center_momentum > 0.,
         )
+
         routing_probs = F.softmax(prior_routes, dim=-1)
         h_pri = -(routing_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
         self.routings = routing_probs.detach().cpu()
@@ -139,28 +148,9 @@ class VSMEARRouter(SMEARRouter):
             self.post_router_ln = nn.LayerNorm(in_d)
             self.post_router_ln.weight = nn.Parameter(torch.ones(in_d))
 
+        self.router_teacher_ent_factor = self.config.router_teacher_ent_factor
         self.router_teacher_temperature = self.config.router_teacher_temperature
-        self.router_teacher_center_momentum = config.router_teacher_center_momentum
-        self.register_buffer("center", torch.zeros(1, self.n_skills))
-
-    @torch.no_grad()
-    def apply_center_update(self, routes):
-        if self.router_teacher_center_momentum < 1.0:
-            self.center = (
-                self.center * self.router_teacher_center_momentum
-                + torch.mean(routes, dim=0, keepdim=True)
-                * (1 - self.router_teacher_center_momentum)
-            )
-
-    def teacher_route_maybe_center(self, post_input):
-        """Computes routes for the teacher / posterior.
-        """
-
-        # do not apply temperature here, delay it for eventual softmax centering
-        post_routes = self.route(self.post_router, self.post_router_ln, post_input)
-        self.apply_center_update(post_routes)
-        # teacher centering and sharpening
-        return (post_routes - self.center) / self.router_teacher_temperature
+        self.router_center_momentum = config.router_center_momentum
 
     def get_posterior_input(self, input, routing_infos):
         padding_mask = routing_infos.pad_token_mask
@@ -171,11 +161,14 @@ class VSMEARRouter(SMEARRouter):
         self.metrics.clear()
 
         prior_input = self._get_router_inputs(input, routing_infos)
-        prior_routes = self.route(
+
+        # do not center the student, center only the teacher now
+        prior_routes = self.route_maybe_center(
             self.prior_router,
             self.prior_router_ln,
             prior_input,
             temperature=self.temperature,
+            center=False,
         )
 
         if self.training:
@@ -185,7 +178,13 @@ class VSMEARRouter(SMEARRouter):
             ), "We are not expecting to be in generation mode during training."
 
             post_input = self.get_posterior_input(input, routing_infos)
-            post_routes = self.teacher_route_maybe_center(post_input)
+            post_routes = self.route_maybe_center(
+                self.post_router,
+                self.post_router_ln,
+                post_input,
+                temperature=self.router_teacher_temperature,
+                center=self.router_center_momentum > 0.,
+            )
             post_probs = routing_probs = F.softmax(post_routes, dim=-1)
             prior_probs = F.softmax(prior_routes, dim=-1)
 
@@ -198,7 +197,7 @@ class VSMEARRouter(SMEARRouter):
             self.metrics["h_post"] = h_post / math.log(self.n_skills)
             self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
             self.metrics["x_ent"] = x_ent
-            self.auxiliary_loss = -h_post + x_ent
+            self.auxiliary_loss = -self.router_teacher_ent_factor * h_post + x_ent
         else:
             # during eval :-(
             prior_probs = routing_probs = F.softmax(prior_routes, dim=-1)
