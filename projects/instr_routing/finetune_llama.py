@@ -190,7 +190,9 @@ def run_multitask(args):
         )
         if wandb.run is not None:
             wandb.log({"rouge_L_super_ni": rouge_L_super_ni})
-        tb_logger.experiment.add_scalar("tasks/sni", rouge_L_super_ni, trainer.global_step)
+        
+        if args.tensorboard:
+            tb_logger.experiment.add_scalar("tasks/sni", rouge_L_super_ni, trainer.global_step)
         logger.info("SuperNI RougeL: {:.2f}".format(rouge_L_super_ni))
 
     if args.eval_mmlu:
@@ -205,7 +207,9 @@ def run_multitask(args):
         )
         if wandb.run is not None:
             wandb.log({"mmlu_acc": acc})
-        tb_logger.experiment.add_scalar("tasks/mmlu", acc, trainer.global_step)
+
+        if args.tensorboard:
+            tb_logger.experiment.add_scalar("tasks/mmlu", acc, trainer.global_step)
         logger.info("MMLU accuracy: {:.2f}".format(acc))
 
 
