@@ -1,3 +1,4 @@
+from collections import defaultdict
 import glob
 import json
 import logging
@@ -121,14 +122,50 @@ def get_example_to_ids(filename):
     return package
 
 
-def average_dicts(list_of_dicts):
-    out = list_of_dicts[0]
-    for item in list_of_dicts[1:]:
-        assert len(item) == len(out)
-        for k, v in item.items():
-            out[k] += v
+class Averager:
+    def __init__(self, weight: float = 1):
+        self.weight = weight
+        self.total = defaultdict(float)
 
-    return {k: v / len(list_of_dicts) for (k, v) in out.items()}
+    def update(self, stats):
+        for key, value in stats.items():
+            self.total[key] = self.total[key] * self.weight + value * (1 - self.weight)
+        return self.total
+
+
+def agg_dicts(list_of_dicts, agg="mean", tag=False):
+    """Aggregate a list of dicts by taking the aggregate of each key.
+
+    Could be "min", "max", or "mean".
+    """
+    out = {}
+    for curr_dict in list_of_dicts:
+        for k, v in curr_dict.items():
+            if tag:
+                k = f"{agg}_{k}"
+            if k not in out:
+                # clone the variable so that we don't modify the original
+                out[k] = v.clone() if isinstance(v, torch.Tensor) else v
+            else:
+                if agg == "min":
+                    # take minimum between tensors
+                    out[k] = (
+                        torch.minimum(out[k], v)
+                        if isinstance(v, torch.Tensor)
+                        else min(out[k], v)
+                    )
+                elif agg == "max":
+                    out[k] = (
+                        torch.maximum(out[k], v)
+                        if isinstance(v, torch.Tensor)
+                        else max(out[k], v)
+                    )
+                else:
+                    out[k] += v
+    if agg == "mean":
+        for k, v in out.items():
+            out[k] = v / len(list_of_dicts)
+    return out
 
 
 class CustomModelCheckpoint(pl.callbacks.ModelCheckpoint):
@@ -234,9 +271,11 @@ def get_checkpoint_path(path, step=None, use_last=False):
 
     if use_last:
         # search for last.ckpt
-        match = [m for m in match if 'last.ckpt' in m]
+        match = [m for m in match if "last.ckpt" in m]
         if len(match) != 1:
-            raise ValueError("last.ckpt not found or found multiple (?) in the list of checkpoints!")
+            raise ValueError(
+                "last.ckpt not found or found multiple (?) in the list of checkpoints!"
+            )
         return match[0]
 
     if len(match) > 1:
@@ -286,20 +325,17 @@ def get_checkpoint_path(path, step=None, use_last=False):
     return path
 
 
-def setup_logging(log_level, log_dir):
+def setup_logging(log_dir):
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
 
-    logger = logging.getLogger("mttl")
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        level=logging.INFO,
+    )
     logger.setLevel(logging.INFO)
-
-    stream_handler = logging.StreamHandler()
-    stream_handler.setLevel(logging.INFO)
-    formatter = logging.Formatter("%(asctime)-15s %(levelname)-8s %(message)s")
-    stream_handler.setFormatter(formatter)
-
     logger.addHandler(logging.FileHandler(os.path.join(log_dir, "log.txt")))
-    logger.addHandler(stream_handler)
 
     logging.getLogger("openai").setLevel(logging.WARNING)
     logger.info(
@@ -325,7 +361,6 @@ class MemEfficientLoRA(Function):
 
     @staticmethod
     def backward(ctx, O_grad):
-
         bs, L, O = O_grad.size()
 
         input, A, B, skills = ctx.saved_tensors

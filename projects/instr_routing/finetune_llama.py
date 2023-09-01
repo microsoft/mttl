@@ -11,7 +11,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.callbacks import MMLUCallback, NICallback, ProgressCallback
+from mttl.callbacks import MMLUCallback, MiniProgress, ProgressCallback
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.platypus_module import PlatypusModule
 from mttl.datamodule.flan100k_module import Flan100kModule
@@ -20,6 +20,7 @@ from mttl.utils import get_mlf_logger, setup_logging, logger
 # register models
 import models.vsmear  # noqa: F401
 import models.softmoe # noqa: F401
+from models.monitors import SelectorMetricsLog, SelectorRoutingsLog
 from models.clm import CLM
 from config import RoutingConfig
 
@@ -39,7 +40,7 @@ def run_multitask(args):
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file
-    setup_logging(logging.INFO, args.output_dir)
+    setup_logging(args.output_dir)
 
     if args.hf_token_hub:
         login(token=args.hf_token_hub)
@@ -92,7 +93,6 @@ def run_multitask(args):
 
     # get metric monitors for models
     callbacks = []
-    callbacks.append(ProgressCallback())
 
     monitor = "val/loss"
     mode = "min"
@@ -116,7 +116,10 @@ def run_multitask(args):
         mode=mode,
     )
     callbacks.append(checkpoint_callback)
-    callbacks.append(MMLUCallback())
+    callbacks.append(SelectorRoutingsLog())
+    callbacks.append(SelectorMetricsLog())
+    callbacks.append(MiniProgress())
+    callbacks.append(MMLUCallback(5))
 
     trainer = Trainer(
         devices=-1, 

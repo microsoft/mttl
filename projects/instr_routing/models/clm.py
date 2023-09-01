@@ -14,7 +14,7 @@ from typing import List
 from collections import defaultdict
 from torch import Tensor, nn
 from mttl.models.modifiers import modify_transformer
-from mttl.models.modifiers.routing import RoutingInfo
+from mttl.models.modifiers.routing import RoutingInfo, RoutingSelector
 from transformers import AutoModelForCausalLM, LlamaForCausalLM
 
 from mttl.models.get_scheduler import get_scheduler
@@ -233,14 +233,12 @@ class CLM(EfficientCheckpointModule):
 
     def gather_auxiliary_losses(self):
         # get some losses from the model if it is a router
-        if hasattr(self.model, "get_routing_losses"):
-            aux_loss = list(
-                itertools.chain(*list(self.model.get_routing_losses().values()))
-            )
-            for k, v in self.model.get_routing_metrics().items():
-                self.accumulate_metrics_batch[k].append(v)
-        else:
-            aux_loss = []
+        aux_loss = []
+        for name, module in self.model.named_modules():
+            if isinstance(module, RoutingSelector) and hasattr(module, "auxiliary_loss"):
+                aux_loss_mod = getattr(module, 'auxiliary_loss', None)
+                if aux_loss_mod is not None:
+                    aux_loss.append(aux_loss_mod)
         return aux_loss
 
     def training_step(self, batch, _):
@@ -256,157 +254,7 @@ class CLM(EfficientCheckpointModule):
 
         for i, pg in enumerate(self.optimizers().optimizer.param_groups):
             self.log(f"train/lr_{i}", pg["lr"])
-
-        if (
-            self.global_step
-            % (self.hparams.gradient_accumulation_steps * self.hparams.micro_batch_size)
-            == 0
-            and self.global_step > 0
-        ):  # to accumulate over larger batch
-            self.log_routing_metrics(stage="train")
-
         return total_loss
-
-    def log_routing_metrics(self, stage="train"):
-        # we need to keep online mean ove rthe metrics over mictobatches (s.t. the metrics are calculated for the whole batch and not microbatches)
-        divs, entropies, specializations, names = [], [], [], []
-
-        for k, v in self.accumulate_metrics_batch.items():
-            names.append(k)                       
-            layer_routing_dist = torch.cat(v, dim=0)   # bs x n_splits x n_skills                        
-            
-            bs, n_skills, n_splits = layer_routing_dist.shape[0], layer_routing_dist.shape[2], layer_routing_dist.shape[1]
-            # calculate entropy and diversity over the full batch
-            layer_routing_dist_mean = layer_routing_dist.transpose(0, 1).mean(dim=1)  # n_splits x n_skills
-                
-            normalized_entropy = (entropy(layer_routing_dist) / np.log(n_skills) if n_skills > 1 else torch.zeros(bs, n_splits))  # ex x n_splits
-            average_normalized_entropy = normalized_entropy.mean(dim=0)  # n_splits
-            
-            # how different are the routinf for different examples? calculate MI, entropy of average - average entropy                
-            entropy_of_av_normalized = entropy(layer_routing_dist_mean) / np.log(n_skills) if n_skills > 1 else torch.zeros_like(layer_routing_dist_mean[0])
-                    
-            div = (entropy_of_av_normalized - average_normalized_entropy).mean()  # mean over n_splits                        
-            specialization = div - average_normalized_entropy            
-            divs.append(div.float().item())
-            entropies.append(average_normalized_entropy.float().item())
-            specializations.append(specialization.float().item())
-
-        # log mean over all layers divs and entropies
-        if len(divs) > 0:
-            self.log(
-                f"{stage}/div_layers_mean", torch.tensor(divs).mean(), on_step=True
-            )
-            self.log(
-                f"{stage}/entropy_layers_mean",
-                torch.tensor(entropies).mean(),
-                on_step=True,
-            )
-            self.log(
-                f"{stage}/diversity(H-MI)_layers_mean",
-                torch.tensor(specializations).mean(),
-                on_step=True,
-            )
-
-            if (
-                len(self.loggers) > 0
-                and isinstance(self.loggers[0], pl.loggers.wandb.WandbLogger)
-                and stage == "val"
-            ):
-                wandb_logger = self.loggers[0]
-                # bar plot with reduced memory size
-                plt.clf()
-                _ = plt.plot(range(len(divs)), divs)
-                wandb_logger.log_image(
-                    f"{stage}/div_layers_dist",
-                    [wandb.Image(plt)],
-                    step=self.global_step,
-                )
-                plt.clf()
-                _ = plt.plot(range(len(entropies)), entropies)
-                wandb_logger.log_image(
-                    f"{stage}/entropy_layers_dist",
-                    [wandb.Image(plt)],
-                    step=self.global_step,
-                )
-                plt.clf()
-                _ = plt.plot(range(len(specializations)), specializations)
-                wandb_logger.log_image(
-                    f"{stage}/diversity(MI-H)_layers_dist",
-                    [wandb.Image(plt)],
-                    step=self.global_step,
-                )
-                plt.clf()
-
-                # create csv table if not exists
-                csv_filename = (
-                    f"{self.hparams.output_dir}/{stage}/div_layers_dist_table.csv"
-                )
-                if not os.path.exists(csv_filename):
-                    os.makedirs(os.path.dirname(csv_filename), exist_ok=True)
-                    writer = csv.writer(open(csv_filename, "a"))
-                    writer.writerow(names)
-                with open(csv_filename, mode="a", newline="") as csv_file:
-                    writer = csv.writer(csv_file)
-                    writer.writerow(divs)
-
-                csv_filename = (
-                    f"{self.hparams.output_dir}/{stage}/entropy_layers_dist_table.csv"
-                )
-                if not os.path.exists(csv_filename):
-                    os.makedirs(os.path.dirname(csv_filename), exist_ok=True)
-                    writer = csv.writer(open(csv_filename, "a"))
-                    writer.writerow(names)
-                with open(csv_filename, mode="a", newline="") as csv_file:
-                    writer = csv.writer(csv_file)
-                    writer.writerow(entropies)
-
-                csv_filename = f"{self.hparams.output_dir}/{stage}/diversity(MI-H)_layers_dist_table.csv"
-                if not os.path.exists(csv_filename):
-                    os.makedirs(os.path.dirname(csv_filename), exist_ok=True)
-                    writer = csv.writer(open(csv_filename, "a"))
-                    writer.writerow(names)
-                with open(csv_filename, mode="a", newline="") as csv_file:
-                    writer = csv.writer(csv_file)
-                    writer.writerow(specializations)
-
-        self.accumulate_metrics_batch = defaultdict(list)
-
-    def on_validation_epoch_start(self) -> None:
-        self.accumulate_metrics_batch = defaultdict(list)
-        return super().on_validation_epoch_start()
-
-    def log_aux_loss_per_layer(self, aux_loss):
-        if isinstance(self.loggers[0], pl.loggers.wandb.WandbLogger):
-            wandb_logger = self.loggers[0]
-            plt.clf()
-            aux_loss = [l.detach().item() for l in aux_loss]
-            _ = plt.plot(range(len(aux_loss)), aux_loss)
-            wandb_logger.log_image(
-                "val/aux_loss_per_layer",
-                [wandb.Image(plt)],
-                step=self.global_step,
-            )  # , commit=False)
-            plt.clf()
-
-    def log_xrouter_W_norm(self):
-        return 
-        if isinstance(self.loggers[0], pl.loggers.wandb.WandbLogger):
-            from .vsmear import XRouter
-
-            norms = []
-            for n, layer in self.model.named_modules():
-                if isinstance(layer, XRouter):
-                    norms.append(layer.W_norm)
-            if len(norms) > 0:
-                wandb_logger = self.loggers[0]
-                plt.clf()
-                _ = plt.plot(range(len(norms)), norms)
-                wandb_logger.log_image(
-                    "val/xrouter_W_norm",
-                    [wandb.Image(plt)],
-                    step=self.global_step,
-                )
-                plt.clf()
 
     def validation_step(self, batch, batch_idx, log=True):
         loss = self.forward(batch, reduction="none")
@@ -417,17 +265,6 @@ class CLM(EfficientCheckpointModule):
         if log:
             self.log("val/loss", mean_loss, on_epoch=True, prog_bar=True)
             self.log("val/aux_loss", aux_loss_sum, on_epoch=True, prog_bar=True)
-            self.log_aux_loss_per_layer(aux_loss)
-            if (
-                batch_idx
-                % (
-                    self.hparams.gradient_accumulation_steps
-                    * self.hparams.micro_batch_size
-                )
-                == 0
-                and batch_idx > 0
-            ):  # to accumulate over larger batch
-                self.log_routing_metrics(stage="val")
 
         self._inference_outputs += [(loss, batch["task_ids"])]
         return loss, batch["task_ids"]
@@ -451,6 +288,7 @@ class CLM(EfficientCheckpointModule):
 
         # log per task loss and overall loss
         self.log(log_name, losses.mean(), on_epoch=True, prog_bar=True)
+
         for task_id in torch.unique(task_ids):
             log_name = f"test/loss_{task_id.item()}"
             if hasattr(self.model, "checkpoint_tested"):
@@ -479,10 +317,6 @@ class CLM(EfficientCheckpointModule):
             for task_id in torch.unique(task_ids):
                 task_losses[task_id.item()] = losses[task_ids == task_id].mean().item()
             f.write(json.dumps(task_losses) + "\n")
-
-        self.accumulate_metrics_batch = defaultdict(list)
-        self.log_routing_metrics(stage="val")
-        self.log_xrouter_W_norm()
         self._inference_outputs.clear()
 
     def configure_optimizers(self):
