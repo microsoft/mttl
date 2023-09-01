@@ -31,13 +31,9 @@ class Flan100KDataset(torch.utils.data.dataset.Dataset):
                  data_dir=None,
                  idxs=None,     
                  loss_for_keywords=True):
-        super().__init__()
+        super().__init__()  
         self.loss_for_keywords = loss_for_keywords
-            
-        if os.getenv("AP_DATA_DIR") is not None:
-            data_dir = os.getenv("AP_DATA_DIR")  
-        
-        self.dataset = load_dataset("ostapeno/flanv2_100k_2", cache_dir=data_dir)["train"]
+        self.dataset = load_dataset("ostapeno/flanv2_100k_2")["train"]
         if idxs is not None:     
             self.dataset = self.dataset.select(idxs) 
 

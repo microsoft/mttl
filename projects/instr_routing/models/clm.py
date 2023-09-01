@@ -27,6 +27,15 @@ from mttl.global_vars import EPS
 from dataclasses import dataclass
 
 
+EPS = 1e-12
+        
+def entropy(mixing_weights):
+    return (
+        -torch.sum(
+            mixing_weights * torch.log(mixing_weights + EPS), dim=-1
+        )
+    )
+    
 @dataclass
 class AugmentedRoutingInfo(RoutingInfo):
     save_oracle_routings: bool = False
@@ -264,17 +273,15 @@ class CLM(EfficientCheckpointModule):
 
         for k, v in self.accumulate_metrics_batch.items():
             names.append(k)                       
-            layer_routing_dist = torch.cat(v, dim=0)   
-            layer_routing_dist = layer_routing_dist.view(-1, layer_routing_dist.shape[-2], layer_routing_dist.shape[-1])
-                        
-            bs = layer_routing_dist.shape[0]                
-            n_skills, n_splits = self.args.n_skills, self.args.n_splits
+            layer_routing_dist = torch.cat(v, dim=0)   # bs x n_splits x n_skills                        
+            
+            bs, n_skills, n_splits = layer_routing_dist.shape[0], layer_routing_dist.shape[2], layer_routing_dist.shape[1]
             # calculate entropy and diversity over the full batch
-            layer_routing_dist = layer_routing_dist.view(-1, n_skills)  # ex x n_skills
             layer_routing_dist_mean = layer_routing_dist.transpose(0, 1).mean(dim=1)  # n_splits x n_skills
                 
-            normalized_entropy = (entropy(layer_routing_dist) / np.log(n_skills) if n_skills > 1 else torch.zeros_like(layer_routing_dist[:, 0]))  # ex
-            average_normalized_entropy = normalized_entropy.reshape(bs, n_splits).mean(dim=0)  
+            normalized_entropy = (entropy(layer_routing_dist) / np.log(n_skills) if n_skills > 1 else torch.zeros(bs, n_splits))  # ex x n_splits
+            average_normalized_entropy = normalized_entropy.mean(dim=0)  # n_splits
+            
             # how different are the routinf for different examples? calculate MI, entropy of average - average entropy                
             entropy_of_av_normalized = entropy(layer_routing_dist_mean) / np.log(n_skills) if n_skills > 1 else torch.zeros_like(layer_routing_dist_mean[0])
                     

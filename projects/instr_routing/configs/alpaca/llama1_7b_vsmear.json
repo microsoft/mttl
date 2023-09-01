@@ -8,12 +8,14 @@
     "load_in_8bit":0,  
     "model_family":"gpt",   
 
-    "predict_batch_size": 4,
+    "predict_batch_size": 2,
     "micro_batch_size": 4,  
     "train_batch_size": 32,
     "max_input_length": 256,    
+    "eval_every":400, 
+    "num_train_epochs":3,
 
-    "model_modifier": "vsmear_wreg",
+    "model_modifier": "vsmear_xr4",
     "modify_modules": ".*attn.*",       
     "modify_layers": "q_proj|v_proj|k_proj",   
     "trainable_param_names": ".*lora_[ab].*|.*selector.*",
@@ -21,7 +23,6 @@
     "eval_hellaswag": 0,
     "eval_arc": 0, 
     "eval_truthfulqa": 0,
-
     "wandb_project": "test"
 
 }

@@ -1,6 +1,8 @@
 from transformers import AutoModelForCausalLM
 import os
 import torch
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
 def eval_mmlu(
@@ -24,7 +26,7 @@ if __name__ == "__main__":
     from config import RoutingConfig
     from huggingface_hub import login
     
-    login(token=os.environ["HF_TOKEN"])
+    login(token=os.environ["HUGGING_FACE_HUB_TOKEN"])
 
     config = RoutingConfig.parse(extra_kwargs={"eval_superni": False})
 

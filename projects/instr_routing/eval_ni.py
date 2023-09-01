@@ -33,7 +33,7 @@ if __name__ == "__main__":
 
     config = RoutingConfig.parse()
 
-    login(token=os.environ["HF_TOKEN"])
+    login(token=os.environ["HUGGING_FACE_HUB_TOKEN"])
 
     config = RoutingConfig.parse(extra_kwargs={"eval_superni": True})
 

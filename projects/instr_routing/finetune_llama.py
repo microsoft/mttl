@@ -116,7 +116,7 @@ def run_multitask(args):
         mode=mode,
     )
     callbacks.append(checkpoint_callback)
-    # callbacks.append(MMLUCallback())
+    callbacks.append(MMLUCallback())
 
     trainer = Trainer(
         devices=-1, 
@@ -156,7 +156,9 @@ def run_multitask(args):
     else:
         torch.cuda.empty_cache()
         best_model = module
-
+          
+    best_model.to("cuda")
+    
     # empty memory
     del (
         dm,

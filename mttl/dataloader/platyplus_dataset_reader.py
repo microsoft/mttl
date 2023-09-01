@@ -51,13 +51,8 @@ class PlatypusDataset(torch.utils.data.dataset.Dataset):
         super().__init__()
         self.loss_for_keywords = loss_for_keywords
 
-        # load the data
-        if os.getenv("AP_DATA_DIR") is not None:
-            data_dir = os.getenv("AP_DATA_DIR")
-
-        self.dataset = load_dataset("garage-bAInd/Open-Platypus", cache_dir=data_dir)[
-            "train"
-        ]
+        # load the data        
+        self.dataset = load_dataset("garage-bAInd/Open-Platypus")["train"]
         if idxs is not None:
             self.dataset = self.dataset.select(idxs)
         if subset is not None:

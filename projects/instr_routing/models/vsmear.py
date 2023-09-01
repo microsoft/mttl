@@ -22,8 +22,12 @@ class SkilledLoRA_MergeLoraAfterOP(SkilledLoRA):
         layer,
     ):
         super().__init__(config, layer)
+        self.merge_after_op = config.merge_after_op
 
     def forward_linear_(self, input, weights):
+        if not self.merge_after_op:
+            return super().forward_linear_(input, weights)
+        
         if self.training:     
             self.training_steps += 1
 
@@ -191,7 +195,7 @@ def modify_with_vsmear(transformer, config):
 
 
   
-@register_selector("vsmear_wreg")          
+@register_selector("vsmear_xr4")          
 class VSMEARRouterExperimental(VSMEARRouter):
     def __init__(self, config, in_d):
         super().__init__(config, in_d)
@@ -236,7 +240,7 @@ class AuxRoutingLoRALinear_wreg(SkilledLoRA_MergeLoraAfterOP, RoutingMixin):
     def metrics(self):
         return self._metrics
 
-    def clear(self):
+    def clear(self):      
         self._losses.clear()
         self._metrics.clear()
         
@@ -264,9 +268,41 @@ class AuxRoutingLoRALinear_wreg(SkilledLoRA_MergeLoraAfterOP, RoutingMixin):
         return super(SkilledLoRA_MergeLoraAfterOP, self).forward(input, mixing_weights)
 
   
-@register_modifier("vsmear_wreg")            
+@register_modifier("vsmear_xr4")            
 def modify_with_vsmear_reg(transformer, config):
-    config.router_selector = "vsmear_wreg"
+    config.router_selector = "vsmear_xr4"
+    config.adapter_type = "lora"
+
+    if config.adapter_type in ["lora"]:
+        return modify_with_routing(     
+            transformer, config, AuxRoutingLoRALinear_wreg, RouterWrapper
+        )
+    else:
+        raise NotImplementedError(
+            f"Adapter type {config.adapter_type} not implemented for vsmear modifier."
+        )
+
+  
+@register_selector("vsmear_xr1")          
+class VSMEARRouterExperimentalXR1(VSMEARRouter):
+    def __init__(self, config, in_d):
+        super().__init__(config, in_d)
+
+    def forward(self, routing_infos, input: torch.Tensor):
+        padding_mask = routing_infos.pad_token_mask # 1 for everythin that is not a pad token, i.e. instuction, input, output
+        inst_padding_mask = routing_infos.inst_token_mask # 1 for everything that is instruction
+
+        prior_input = self.apply_mask_and_average(input, inst_padding_mask)  
+        prior_routes = self.route(self.prior_router, self.prior_router_ln, prior_input)         
+        routing_probs = F.softmax(prior_routes, dim=-1)
+        
+        auxiliary_loss = routing_probs.sum().detach() * 0.0
+        return routing_probs.unsqueeze(1), auxiliary_loss
+
+
+@register_modifier("vsmear_xr1")            
+def modify_with_vsmear_reg(transformer, config):
+    config.router_selector = "vsmear_xr1"
     config.adapter_type = "lora"
 
     if config.adapter_type in ["lora"]:

@@ -75,13 +75,8 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
         idxs=None,
         subset=None,
     ):
-        super().__init__()
-
-        # load the data
-        if os.getenv("AP_DATA_DIR") is not None:
-            data_dir = os.getenv("AP_DATA_DIR")
-
-        self.dataset = load_dataset("yahma/alpaca-cleaned", cache_dir=data_dir)["train"]
+        super().__init__()     
+        self.dataset = load_dataset("yahma/alpaca-cleaned")["train"] #, cache_dir=data_dir)["train"]
 
         if idxs is not None:
             self.dataset = self.dataset.select(idxs)
