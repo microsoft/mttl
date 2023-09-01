@@ -45,13 +45,12 @@ class SMEARRouter(RoutingSelector):
         self.n_splits = config.n_splits
         self.temperature = config.router_temperature
         self.normalize_weights = config.router_normalize_weights
-
         assert self.n_splits == 1
 
         # during generation we want to cache the input encoding
         # because in successive generation steps, the input is going to be only the encoding for the last token
         self._router_input_cache = None
-        self.prior_router = nn.Linear(in_d, config.n_skills * self.n_splits)
+        self.prior_router = nn.Linear(in_d, config.n_skills * self.n_splits, bias=False)
         self.prior_router_ln = nn.LayerNorm(in_d)
         self.prior_router_ln.weight = nn.Parameter(torch.ones(in_d))
 
@@ -62,10 +61,13 @@ class SMEARRouter(RoutingSelector):
         return norm.item()
 
     def route(self, router: nn.Linear, layer_norm: nn.LayerNorm, x):
+        x = self.prior_router_ln(x)
+
         if self.normalize_weights:
-            weights = layer_norm(router.weight)
-            return F.linear(x, weights, router.bias)
-        return F.linear(x, router.weight, router.bias)
+            weights = router.weight / torch.norm(router.weight, p=2, keepdim=True)
+            return F.linear(x, weights, None) / self.temperature
+        else:
+            return F.linear(x, router.weight, None) / self.temperature
 
     def apply_mask_and_average(self, x, padding_mask):
         x_rout = x * padding_mask.unsqueeze(-1).to(x.device)
@@ -94,8 +96,7 @@ class SMEARRouter(RoutingSelector):
         prior_input = self._get_router_inputs(input, routing_infos)
         prior_routes = self.route(self.prior_router, self.prior_router_ln, prior_input)
         routing_probs = F.softmax(prior_routes, dim=-1)
-        auxiliary_loss = routing_probs.sum().detach() * 0.0
-        return routing_probs.unsqueeze(1), auxiliary_loss
+        return routing_probs.unsqueeze(1)
 
 
 @register_selector("vsmear")
@@ -103,10 +104,6 @@ class VSMEARRouter(SMEARRouter):
     def __init__(self, config, in_d):
         super().__init__(config, in_d)
 
-        self.post_router = nn.Linear(in_d, config.n_skills * self.n_splits)
-        self.post_router.bias.data.fill_(0)
-        self.post_router_ln = nn.LayerNorm(in_d)
-        self.post_router_ln.weight = nn.Parameter(torch.ones(self.in_d))
         self.metrics = Metrics()
 
     def forward(self, routing_infos: AugmentedRoutingInfo, input: torch.Tensor):
@@ -121,7 +118,7 @@ class VSMEARRouter(SMEARRouter):
 
             padding_mask = routing_infos.pad_token_mask
             post_input = self.apply_mask_and_average(input, padding_mask)
-            post_routes = self.route(self.post_router, self.post_router_ln, post_input)
+            post_routes = self.route(self.prior_router, self.prior_router_ln, post_input)
             post_probs = routing_probs = F.softmax(post_routes, dim=-1)
             prior_probs = F.softmax(prior_routes, dim=-1)
 
@@ -134,7 +131,7 @@ class VSMEARRouter(SMEARRouter):
             self.metrics["h_post"] = h_post / math.log(self.n_skills)
             self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
             self.metrics["x_ent"] = x_ent
-            self.auxiliary_loss = -h_post + x_ent
+            self.auxiliary_loss = x_ent
         else:
             # during eval :-(
             prior_probs = routing_probs = F.softmax(prior_routes, dim=-1)

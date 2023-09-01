@@ -42,6 +42,8 @@ def run_multitask(args):
     # get directory of the current file
     setup_logging(args.output_dir)
 
+    logger.info("Args: {}".format(args.to_json()))
+
     if args.hf_token_hub:
         login(token=args.hf_token_hub)
 
