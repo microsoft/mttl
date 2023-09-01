@@ -6,20 +6,9 @@ import math
 from torch.distributions import Categorical
 from pytorch_lightning import Callback
 
-from mttl.utils import agg_dicts
+from mttl.utils import agg_dicts, Averager
 from mttl.models.modifiers.routing import RoutingSelector
 from collections import defaultdict
-
-
-class Averager:
-    def __init__(self, weight: float = 1):
-        self.weight = weight
-        self.total = defaultdict(float)
-
-    def update(self, stats):
-        for key, value in stats.items():
-            self.total[key] = self.total[key] * (1 - self.weight) + value * self.weight
-        return self.total
 
 
 class SelectorRoutingsLog(Callback):

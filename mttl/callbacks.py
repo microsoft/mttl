@@ -9,7 +9,7 @@ from pytorch_lightning.utilities.types import STEP_OUTPUT
 from torch.utils.data import DataLoader
 
 
-from mttl.utils import logger
+from mttl.utils import Averager, logger
 
 
 class MMLUCallback(cb.Callback):
@@ -86,6 +86,10 @@ class NICallback(cb.Callback):
 
 
 class MiniProgress(cb.ProgressBar):
+    def __init__(self):
+        super().__init__()
+        self.averager = Averager(0.9)
+
     def on_train_batch_start(
         self, trainer, pl_module, batch: Any, batch_idx: int
     ) -> None:
@@ -104,21 +108,23 @@ class MiniProgress(cb.ProgressBar):
         metrics = {
             k.replace("_step", "").replace("_epoch", ""): v for k, v in metrics.items()
         }
-        metrics["it/s"] = "{:.1f}".format(1 / (self.time_end - self.time_start))
-        seconds_to_go = (
-            (trainer.num_training_batches - batch_idx)
-            / (1.0 / ((self.time_end - self.time_start)))
+        it_per_sec = 1 / (self.time_end - self.time_start)
+        eta = (trainer.num_training_batches - batch_idx) / (
+            1.0 / ((self.time_end - self.time_start))
         )
-        metrics["ETA"] = "~{}".format(str(datetime.timedelta(seconds=seconds_to_go)))
-
-        for k, v in metrics.items():
-            metrics[k] = "{:.2f}".format(v) if isinstance(v, float) else v
+        time_metrics = self.averager.update(
+            {"it/s": it_per_sec, "eta": eta}
+        )
+        for k, v in {**metrics, **time_metrics}.items():
+            if k == "eta":
+                metrics[k] = "{}".format(datetime.timedelta(seconds=v))
+            else:
+                metrics[k] = "{:.2f}".format(v) if isinstance(v, float) else v
 
         msg_start = (
             f"Trn - Epc {trainer.current_epoch} / {batch_idx} / {trainer.num_training_batches}"
             + " | "
         )
-
         dict_msg = " | ".join([f"{k} -> {v}" for k, v in metrics.items()]) + " | "
         msg = msg_start + dict_msg
         logger.info(msg)

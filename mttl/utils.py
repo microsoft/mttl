@@ -1,3 +1,4 @@
+from collections import defaultdict
 import glob
 import json
 import logging
@@ -119,6 +120,17 @@ def get_example_to_ids(filename):
     with open(filename, "rb") as f:
         package = pickle.load(f)
     return package
+
+
+class Averager:
+    def __init__(self, weight: float = 1):
+        self.weight = weight
+        self.total = defaultdict(float)
+
+    def update(self, stats):
+        for key, value in stats.items():
+            self.total[key] = self.total[key] * self.weight + value * (1 - self.weight)
+        return self.total
 
 
 def agg_dicts(list_of_dicts, agg="mean", tag=False):
