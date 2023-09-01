@@ -54,6 +54,8 @@ class SMEARRouter(RoutingSelector):
         self.prior_router_ln = nn.LayerNorm(in_d)
         self.prior_router_ln.weight = nn.Parameter(torch.ones(in_d))
 
+        self.metrics = Metrics()
+
     @property
     def W_norm(self):
         W = self.ff.weight
@@ -105,6 +107,7 @@ class SMEARRouter(RoutingSelector):
         return router_input
 
     def forward(self, routing_infos: AugmentedRoutingInfo, input: torch.Tensor):
+        self.metrics.clear()
         prior_input = self._get_router_inputs(input, routing_infos)
         prior_routes = self.route(
             self.prior_router,
@@ -113,6 +116,9 @@ class SMEARRouter(RoutingSelector):
             temperature=self.temperature,
         )
         routing_probs = F.softmax(prior_routes, dim=-1)
+        h_pri = -(routing_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
+        self.routings = routing_probs.detach().cpu()
+        self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
         return routing_probs.unsqueeze(1)
 
 
@@ -121,7 +127,6 @@ class VSMEARRouter(SMEARRouter):
     def __init__(self, config, in_d):
         super().__init__(config, in_d)
 
-        self.metrics = Metrics()
         self.router_shared_weights = config.router_shared_weights
 
         if self.router_shared_weights:
