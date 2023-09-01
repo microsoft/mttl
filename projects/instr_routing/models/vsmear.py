@@ -74,7 +74,7 @@ class SMEARRouter(RoutingSelector):
         """
         input = router_ln(input)
         if self.normalize_weights:
-            weights = router.weight / torch.norm(router.weight, p=2, keepdim=True)
+            weights = router.weight / torch.norm(router.weight, p=2, dim=-1, keepdim=True)
             routes = F.linear(input, weights, None)
         else:
             routes = F.linear(input, router.weight, None)
@@ -164,9 +164,9 @@ class VSMEARRouter(SMEARRouter):
 
         # do not center the student, center only the teacher now
         prior_routes = self.route_maybe_center(
+            prior_input,
             self.prior_router,
             self.prior_router_ln,
-            prior_input,
             temperature=self.temperature,
             center=False,
         )
@@ -179,9 +179,9 @@ class VSMEARRouter(SMEARRouter):
 
             post_input = self.get_posterior_input(input, routing_infos)
             post_routes = self.route_maybe_center(
+                post_input,
                 self.post_router,
                 self.post_router_ln,
-                post_input,
                 temperature=self.router_teacher_temperature,
                 center=self.router_center_momentum > 0.,
             )
