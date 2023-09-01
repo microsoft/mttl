@@ -14,7 +14,6 @@ from mttl.models.modifiers.routing import (
     RouterWrapper,
     RoutingMixin,
     RoutingSelector,
-    get_selector,
     register_selector,
     modify_with_routing,
 )
@@ -115,14 +114,10 @@ class PolytroponSelector(RoutingSelector):
 
 
 class PolyLoRA(SkilledLoRA, RoutingMixin):
-    def __init__(self, config, task_id_ptr, layer, selector=None):
+    def __init__(self, config, task_id_ptr, layer, selector):
         RoutingMixin.__init__(self, task_id_ptr)
         SkilledLoRA.__init__(self, config, layer)
-
-        if selector is None:
-            self.selector = get_selector(config)
-        else:
-            self.selector = selector
+        self.selector = selector
 
     def forward(self, input):
         task_id = self.routing_infos.task_ids

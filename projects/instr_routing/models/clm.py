@@ -1,18 +1,11 @@
-from ast import Dict
 import json
 import os
 import csv
 import torch
 import copy
-import itertools
-import numpy as np
-import pytorch_lightning as pl
-import matplotlib.pyplot as plt
-from torch.optim.optimizer import Optimizer
-import wandb
-from typing import List
+from typing import Any, List, Dict
 from collections import defaultdict
-from torch import Tensor, nn
+from torch import nn
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.routing import RoutingInfo, RoutingSelector
 from transformers import AutoModelForCausalLM, LlamaForCausalLM
@@ -23,17 +16,27 @@ from mttl.models.utils import (
     get_global_batch_size,
 )
 from mttl.models.get_optimizer import get_optimizer
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
 class AugmentedRoutingInfo(RoutingInfo):
+    # save oracle routings during generation
     save_oracle_routings: bool = False
+    # signals if the model is in generation mode
     generation_mode: bool = False
+    # holds the routings for the generation
     routings: List[torch.Tensor] = None
+    # holds the oracle routings for the generation
     oracle_routings: List[torch.Tensor] = None
+    # holds the mask for the padding tokens, 1 token, 0 padding
     pad_token_mask: torch.Tensor = None
+    # holds the mask for the instruction tokens, 1 instruction, 0 not
     inst_token_mask: torch.Tensor = None
+    # layer_name -> tensor, holds the encoding for the instruction during generation
+    # this is needed because the instruction is not passed as input during generation of subsequent tokens
+    inputs_cache_for_generation: Dict[object, torch.Tensor] = field(default_factory=dict)
+
 
 
 def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
@@ -211,7 +214,6 @@ class CLM(EfficientCheckpointModule):
 
         self.model.task_id_container["routing_infos"] = routing_infos
         generations = self.model.generate(inputs=batch["input_ids"], **kwargs)
-        self.model.clear_cache()
         return generations
 
     def training_step(self, batch, _):
@@ -231,8 +233,8 @@ class CLM(EfficientCheckpointModule):
         loss, aux_loss = self.forward(batch, reduction="none")
         mean_loss = loss.sum() / loss.shape[0]
 
-        self.log("val/loss", mean_loss, on_epoch=True, on_step=True, prog_bar=True)
-        self.log("val/aux_loss", aux_loss, on_epoch=True, on_step=True, prog_bar=True)
+        self.log("val/loss", mean_loss, on_epoch=True, prog_bar=True)
+        self.log("val/aux_loss", aux_loss, on_epoch=True, prog_bar=True)
 
         self._inference_outputs += [(loss, batch["task_ids"])]
         return loss, batch["task_ids"]

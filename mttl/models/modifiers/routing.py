@@ -80,13 +80,6 @@ class RouterWrapper:
                     )
 
     @classmethod
-    def clear_cached_objects(cls, object):
-        for adapter in object.get_adapters().values():
-            adapter.clear_cache()
-        for selector in object.get_selectors().values():
-            selector.clear_cache()
-
-    @classmethod
     def get_adapters(cls, object):
         adapters = {}
         for n, m in object.named_modules():
@@ -108,8 +101,12 @@ class RouterWrapper:
 
 
 class RoutingSelector(nn.Module):
-    def clear_cache(self) -> None:
-        pass
+    @property
+    def layer_name(self):
+        if not hasattr(self, '__layer_name__'):
+            raise ValueError("Layer name not available, dependency injection not done properly?")
+
+        return self.__layer_name__
 
 
 @register_selector("average")
@@ -217,14 +214,18 @@ def modify_with_routing(transformer, config, layer_type, optional_wrapper=None):
         if re.fullmatch(config.modify_modules, m_name):
             for c_name, layer in dict(module.named_children()).items():
                 if re.fullmatch(config.modify_layers, c_name):
+                    layer_name = f"{m_name}.{c_name}"
+
                     identifier = _extract_identifier(
                         f"{m_name}.{c_name}", config.router_granularity
                     )
+
                     if identifier not in selectors.keys():
                         selectors[identifier] = get_selector(
                             config,
                             in_d=layer.in_features,
                         )
+                        selectors[identifier].__layer_name__ = layer_name + ".selector"
 
                     selector = selectors[identifier]
                     total_layers += 1

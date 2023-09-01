@@ -97,24 +97,15 @@ class SMEARRouter(RoutingSelector):
         Therefore, at the first forward call (context encoding), we need to cache the input encodings
         so that we can use it to compute the prior routing probabilities.
         """
-        if routing_infos.generation_mode:
-            # if input.size(1) != 1 it means that this is the first forward call (context encoding)
-            if self._router_input_cache is None or input.size(1) != 1:
-                router_input = self.apply_mask_and_average(
-                    input, routing_infos.inst_token_mask
-                )
-                self._router_input_cache = router_input
-            else:
-                router_input = self._router_input_cache
-        else:
-            self._router_input_cache = None
+        router_input = routing_infos.inputs_cache_for_generation.get(self)
+        if router_input is None:
             router_input = self.apply_mask_and_average(
                 input, routing_infos.inst_token_mask
             )
+            # if in generation mode, cache the input encoding for the next forward calls
+            if routing_infos.generation_mode:
+                routing_infos.inputs_cache_for_generation[self] = router_input
         return router_input
-
-    def clear_cache(self) -> None:
-        self._router_input_cache = None
 
     def forward(self, routing_infos: AugmentedRoutingInfo, input: torch.Tensor):
         self.metrics.clear()
