@@ -333,7 +333,7 @@ def setup_logging(log_dir):
         os.makedirs(log_dir)
 
     logging.basicConfig(
-        format="%(asctime)s %(levelname)s %(message)s",
+        format="%(asctime)s %(levelname)s %(message)s - ",
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO,
     )

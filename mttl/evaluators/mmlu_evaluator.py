@@ -7,6 +7,7 @@ import pytorch_lightning as pl
 
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.models.utils import transfer_batch_to_device
+from mttl.evaluators.base import mean, mean_stderr
 
 
 class MMLUEvaluator(object):
@@ -140,10 +141,10 @@ class MMLUEvaluator(object):
             metric_values[task_name] += [em]
 
         metric_values = {
-            task_name: (np.mean(values), np.std(values))
+            task_name: (mean(values), mean_stderr(values))
             for task_name, values in metric_values.items()
         }
-        metric_values["all"] = (np.mean(all_exact_matches), np.std(all_exact_matches))
+        metric_values["all"] = (mean(all_exact_matches), mean_stderr(all_exact_matches))
 
         if was_train:
             model.train()

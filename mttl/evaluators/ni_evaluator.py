@@ -7,6 +7,7 @@ import pytorch_lightning as pl
 
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.models.utils import transfer_batch_to_device
+from mttl.evaluators.base import mean, mean_stderr
 
 
 class NIEvaluator(object):
@@ -137,10 +138,10 @@ class NIEvaluator(object):
         for em, task_name in zip(all_rouges, task_names):
             metric_values[task_name] += [em]
         metric_values = {
-            task_name: (np.mean(values), np.std(values))
+            task_name: (mean(values), mean_stderr(values))
             for task_name, values in metric_values.items()
         }
-        metric_values["all"] = (np.mean(all_rouges), np.std(all_rouges))
+        metric_values["all"] = (mean(all_rouges), mean_stderr(all_rouges))
 
         if was_train:
             model.train()
