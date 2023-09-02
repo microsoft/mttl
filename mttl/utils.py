@@ -328,23 +328,23 @@ def get_checkpoint_path(path, step=None, use_last=False):
     return path
 
 
-def setup_logging(log_dir):
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-
+def setup_logging(log_dir: str = None):
     logging.basicConfig(
         format="%(asctime)s %(levelname)s %(message)s - ",
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO,
     )
     logger.setLevel(logging.INFO)
-    logger.addHandler(logging.FileHandler(os.path.join(log_dir, "log.txt")))
-
     logging.getLogger("openai").setLevel(logging.WARNING)
-    logger.info(
-        "New experiment, log will be at %s",
-        os.path.join(log_dir, "log.txt"),
-    )
+
+    if log_dir:
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        logger.addHandler(logging.FileHandler(os.path.join(log_dir, "log.txt")))
+        logger.info(
+            "New experiment, log will be at %s",
+            os.path.join(log_dir, "log.txt"),
+        )
 
 
 class MemEfficientLoRA(Function):
