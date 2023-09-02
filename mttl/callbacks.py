@@ -39,7 +39,7 @@ class MMLUCallback(cb.Callback):
         )
         pl_module.log(
             "val/mmlu",
-            metrics["exact_match"]["all"],
+            metrics["all"][0],
             on_step=False,
             on_epoch=True,
             prog_bar=True,
@@ -76,7 +76,7 @@ class NICallback(cb.Callback):
         )
         pl_module.log(
             "val/sni",
-            metrics["rougeL"]["all"],
+            metrics["all"][0],
             on_step=False,
             on_epoch=True,
             prog_bar=True,

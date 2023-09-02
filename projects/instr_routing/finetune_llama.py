@@ -183,36 +183,40 @@ def run_multitask(args):
         logger.info("Evaluating on super NI")
         from eval_ni import eval_ni
 
-        rouge_L_super_ni = eval_ni(
+        rougel_ni_all = eval_ni(
             args,
             best_model,
             nshot=2,
             data_dir=os.environ["NI_DATA_DIR"],
             eval_batches=args.eval_batches,
         )
+        rougel_ni = rougel_ni_all["all"][0]
         if wandb.run is not None:
-            wandb.log({"rouge_L_super_ni": rouge_L_super_ni})
-        
+            wandb.log({"rouge_L_super_ni": rougel_ni})
         if args.tensorboard:
-            tb_logger.experiment.add_scalar("tasks/sni", rouge_L_super_ni, trainer.global_step)
-        logger.info("SuperNI RougeL: {:.2f}".format(rouge_L_super_ni))
+            tb_logger.experiment.add_scalar("tasks/sni", rougel_ni, trainer.global_step)
+        with open(os.path.join(args.output_dir, "sni_results.json"), "w") as f:
+            json.dumps(rougel_ni_all, f, indent=2)
+        logger.info("SuperNI RougeL: {:.2f}".format(rougel_ni))
 
     if args.eval_mmlu:
         from eval_mmlu import eval_mmlu
 
         logger.info("Evaluating on MMLU")
-        acc = eval_mmlu(
+        em_mmlu_all = eval_mmlu(
             args,
             best_model,
             data_dir=os.environ["MMLU_DATA_DIR"],
             eval_batches=args.eval_batches,
         )
+        mmlu_em = em_mmlu_all["all"][0]
         if wandb.run is not None:
-            wandb.log({"mmlu_acc": acc})
-
+            wandb.log({"mmlu_acc": mmlu_em})
         if args.tensorboard:
-            tb_logger.experiment.add_scalar("tasks/mmlu", acc, trainer.global_step)
-        logger.info("MMLU accuracy: {:.2f}".format(acc))
+            tb_logger.experiment.add_scalar("tasks/mmlu", mmlu_em, trainer.global_step)
+        with open(os.path.join(args.output_dir, "mmlu_results.json"), "w") as f:
+            json.dumps(em_mmlu_all, f, indent=2)
+        logger.info("MMLU accuracy: {:.2f}".format(mmlu_em))
 
 
 if __name__ == "__main__":
