@@ -101,7 +101,8 @@ class NIEvaluator(object):
                     )
 
             predictions = predictions.sequences
-            predictions = predictions[:, batch["input_ids"].shape[-1] :]
+            if self.config.model_family == 'gpt':
+                predictions = predictions[:, batch["input_ids"].shape[-1] :]
             predictions = decode(predictions)
 
             references = labels_texts
