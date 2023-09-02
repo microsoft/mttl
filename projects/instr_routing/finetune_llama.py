@@ -177,7 +177,7 @@ def run_multitask(args):
             if args.tensorboard:
                 tb_logger.experiment.add_scalar("tasks/sni", rougel_ni, trainer.global_step)
             with open(os.path.join(args.output_dir, "sni_results.json"), "w") as f:
-                json.dumps(rougel_ni_all, f, indent=2)
+                json.dump(rougel_ni_all, f, indent=2)
             logger.info("SuperNI RougeL: {:.2f}".format(rougel_ni))
 
         if args.eval_mmlu:
@@ -196,7 +196,7 @@ def run_multitask(args):
             if args.tensorboard:
                 tb_logger.experiment.add_scalar("tasks/mmlu", mmlu_em, trainer.global_step)
             with open(os.path.join(args.output_dir, "mmlu_results.json"), "w") as f:
-                json.dumps(em_mmlu_all, f, indent=2)
+                json.dump(em_mmlu_all, f, indent=2)
             logger.info("MMLU accuracy: {:.2f}".format(mmlu_em))
 
 
