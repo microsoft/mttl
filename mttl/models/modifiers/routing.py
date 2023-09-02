@@ -7,6 +7,7 @@ from typing import List
 import re
 
 from mttl.models.adapters import Adapter
+from mttl.utils import logger
 
 
 SELECTORS = {}
@@ -230,7 +231,7 @@ def modify_with_routing(transformer, config, layer_type, optional_wrapper=None):
                     selector = selectors[identifier]
                     total_layers += 1
 
-                    print(f"Patching {m_name}.{c_name}...")
+                    logger.info(f"Patching {m_name}.{c_name}...")
 
                     wrapper = layer_type(
                         config,
