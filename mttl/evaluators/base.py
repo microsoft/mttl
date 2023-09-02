@@ -33,6 +33,6 @@ def compute_task_aggregation(task_names, metric_values):
             "mean": mean(values),
             "stderr": mean_stderr(values),
         }
-        for task_name, values in metric_values.items()
+        for task_name, values in aggregation.items()
     }
     return aggregation
