@@ -33,13 +33,9 @@ class RoutingConfig(Config):
         self.hf_token_hub = None
         self.validation_portion = 0.03
 
-        self.eval_hellaswag = True
-        self.eval_arc = True
-        self.eval_truthfulqa = True
-        self.eval_superni = True
-        self.eval_mmlu = True
+        self.eval_superni = False
+        self.eval_mmlu = False
         self.eval_batches = -1
-        self.gen_alpaca_eval = False
 
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
