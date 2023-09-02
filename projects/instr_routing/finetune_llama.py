@@ -148,16 +148,17 @@ def run_multitask(args):
 
     path_best_model = trainer.checkpoint_callback.best_model_path
     ckpt_path = "best" if path_best_model else "last"
+
     trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
 
     if is_main_process():
         if path_best_model:
             del module
             torch.cuda.empty_cache()
-            best_model = CLM.load_from_checkpoint(path_best_model, tokenizer=dm.tokenizer).to("cuda")
+            best_model = CLM.load_from_checkpoint(path_best_model, tokenizer=dm.tokenizer).cuda()
         else:
             torch.cuda.empty_cache()
-            best_model = module
+            best_model = module.cuda()
 
         if args.eval_superni:
             logger.info("Evaluating on super NI")
