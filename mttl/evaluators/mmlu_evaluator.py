@@ -26,7 +26,7 @@ class MMLUEvaluator(object):
         )
         self.datamodule.setup("test")
 
-    def evaluate(self, model, metric_per_task=True, eval_batches=-1):
+    def evaluate(self, model, eval_batches=-1):
         was_train = model.training
         if was_train:
             model.eval()
@@ -132,31 +132,19 @@ class MMLUEvaluator(object):
         eval_metrics = compute_metrics(
             all_predictions, [[r] for r in all_references], reduction="none"
         )
-        mean_metrics = {}
-        for metric_name, metric_value in eval_metrics.items():
-            metric_value = sum(eval_metrics[metric_name]) / len(
-                eval_metrics[metric_name]
-            )
-            mean_metrics[metric_name] = metric_value
+        all_exact_matches = eval_metrics["exact_match"]
+    
+        metric_values = defaultdict(list)
 
-        if metric_per_task:
-            metric_values_all = {}
+        for em, task_name in zip(all_exact_matches, task_names):
+            metric_values[task_name] += [em]
 
-            for metric_name in eval_metrics.keys():
-                metric_values = defaultdict(list)
-                for task_name, v in zip(task_names, eval_metrics[metric_name]):
-                    metric_values[task_name] += [v]
-                metric_values["all"] = [mean_metrics[metric_name]]
-                metric_values = {
-                    task_name: sum(vs) / len(vs)
-                    for task_name, vs in metric_values.items()
-                }
-                metric_values_all[metric_name] = metric_values
-            metric_values = metric_values_all
-        else:
-            metric_values = mean_metrics
+        metric_values = {
+            task_name: (np.mean(values), np.std(values))
+            for task_name, values in metric_values.items()
+        }
+        metric_values["all"] = (np.mean(all_exact_matches), np.std(all_exact_matches))
 
         if was_train:
-            was_train = True
             model.train()
         return metric_values
