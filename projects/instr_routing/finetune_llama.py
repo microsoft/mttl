@@ -161,17 +161,16 @@ def run_multitask(args):
             best_model = module.cuda()
 
         if args.eval_superni:
-            logger.info("Evaluating on super NI")
             from eval_ni import eval_ni
 
+            logger.info("Evaluating on super NI")
             rougel_ni_all = eval_ni(
                 args,
                 best_model,
                 nshot=2,
                 data_dir=os.environ["NI_DATA_DIR"],
-                eval_batches=args.eval_batches,
             )
-            rougel_ni = rougel_ni_all["all"][0]
+            rougel_ni = rougel_ni_all["all"]["mean"]
             if wandb.run is not None:
                 wandb.log({"rouge_L_super_ni": rougel_ni})
             if args.tensorboard:
@@ -188,9 +187,8 @@ def run_multitask(args):
                 args,
                 best_model,
                 data_dir=os.environ["MMLU_DATA_DIR"],
-                eval_batches=args.eval_batches,
             )
-            mmlu_em = em_mmlu_all["all"][0]
+            mmlu_em = em_mmlu_all["all"]["mean"]
             if wandb.run is not None:
                 wandb.log({"mmlu_acc": mmlu_em})
             if args.tensorboard:
