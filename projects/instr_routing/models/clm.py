@@ -172,7 +172,7 @@ class CLM(EfficientCheckpointModule):
         del outputs, shift_logits, shift_labels
 
         aux_loss = self.gather_auxiliary_losses()
-        aux_loss = torch.stack(aux_loss).sum() if len(aux_loss) else 0.0
+        aux_loss = torch.stack(aux_loss).mean() if len(aux_loss) else 0.0
         return loss, aux_loss
 
     def calculate_routing_mask(self, inputs, labels=None):
