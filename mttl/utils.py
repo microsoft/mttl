@@ -330,7 +330,7 @@ def get_checkpoint_path(path, step=None, use_last=False):
 
 def setup_logging(log_dir: str = None):
     logging.basicConfig(
-        format="%(asctime)s %(levelname)s %(message)s - ",
+        format="%(asctime)s %(levelname)s --> %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO,
     )
