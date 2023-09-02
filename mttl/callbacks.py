@@ -34,12 +34,11 @@ class MMLUCallback(cb.Callback):
         )
         metrics = evaluator.evaluate(
             pl_module,
-            metric_per_task=True,
             eval_batches=200,
         )
         pl_module.log(
             "val/mmlu",
-            metrics["all"][0],
+            metrics["all"]["mean"],
             on_step=False,
             on_epoch=True,
             prog_bar=True,
@@ -71,12 +70,11 @@ class NICallback(cb.Callback):
         )
         metrics = evaluator.evaluate(
             pl_module,
-            metric_per_task=True,
             eval_batches=50,
         )
         pl_module.log(
             "val/sni",
-            metrics["all"][0],
+            metrics["all"]["mean"],
             on_step=False,
             on_epoch=True,
             prog_bar=True,
