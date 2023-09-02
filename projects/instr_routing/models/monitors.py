@@ -97,11 +97,10 @@ class SelectorMetricsLog(Callback):
                 self.metrics[name] = module.metrics
 
         layer_stats = list(self.metrics.values())
-        global_stats = agg_dicts(layer_stats)
-        max_stats = agg_dicts(layer_stats, "max", tag=True)
-        min_stats = agg_dicts(layer_stats, "min", tag=True)
 
-        global_stats = self.averager.update({**global_stats, **max_stats, **min_stats})
+        global_stats = agg_dicts(layer_stats)
+        global_stats = self.averager.update(global_stats)
+
         for k, v in global_stats.items():
             pl_module.log(
                 f"train/{k}",
