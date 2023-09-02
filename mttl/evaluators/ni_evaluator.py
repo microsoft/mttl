@@ -7,7 +7,7 @@ import pytorch_lightning as pl
 
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.models.utils import transfer_batch_to_device
-from mttl.evaluators.base import mean, mean_stderr
+from mttl.evaluators.base import compute_task_aggregation
 
 
 class NIEvaluator(object):
@@ -66,7 +66,7 @@ class NIEvaluator(object):
         for step, batch in pbar:
             task_name = batch.pop("task_names", None)
             batch.pop("input_texts", None)
-            
+
             # we use labels texts here for evaluation, because some tokenizers do not skip
             # pad token when decoding, even if skip_special_tokens=True
             labels_texts = batch.pop("labels_texts", None)
@@ -74,10 +74,10 @@ class NIEvaluator(object):
             extra_kwargs = {}
             max_length = 128  # default output length for NI
 
-            if self.config.model_family == 'gpt':
-                max_length += batch['input_ids'].shape[-1]
+            if self.config.model_family == "gpt":
+                max_length += batch["input_ids"].shape[-1]
 
-                extra_kwargs['pad_token_id'] = tokenizer.pad_token_id
+                extra_kwargs["pad_token_id"] = tokenizer.pad_token_id
 
             batch = transfer_batch_to_device(batch, self.device)
             with torch.no_grad():
@@ -102,7 +102,7 @@ class NIEvaluator(object):
                     )
 
             predictions = predictions.sequences
-            if self.config.model_family == 'gpt':
+            if self.config.model_family == "gpt":
                 predictions = predictions[:, batch["input_ids"].shape[-1] :]
             predictions = decode(predictions)
 
@@ -119,30 +119,22 @@ class NIEvaluator(object):
             all_predictions += predictions
             all_references += references
             task_names += task_name
-        
+
             eval_metrics = compute_metrics(
-               predictions, [[r] for r in references], reduction="mean"
+                predictions, [[r] for r in references], reduction="mean"
             )
             all_rougeL.append(eval_metrics["rougeL"])
-            pbar.set_description(f"Task: {task_name[0] if task_name else None}, rougeL: {np.mean(all_rougeL):.4f}")
-            
+            pbar.set_description(
+                f"Task: {task_name[0] if task_name else None}, rougeL: {np.mean(all_rougeL):.4f}"
+            )
+
             if step == eval_batches:
                 break
 
         eval_metrics = compute_metrics(
             all_predictions, [[r] for r in all_references], reduction="none"
         )
-        all_rouges = eval_metrics["rougeL"]
-        metric_values = defaultdict(list)
-
-        for em, task_name in zip(all_rouges, task_names):
-            metric_values[task_name] += [em]
-        metric_values = {
-            task_name: (mean(values), mean_stderr(values))
-            for task_name, values in metric_values.items()
-        }
-        metric_values["all"] = (mean(all_rouges), mean_stderr(all_rouges))
 
         if was_train:
             model.train()
-        return metric_values
+        return compute_task_aggregation(task_names, eval_metrics["rougeL"])

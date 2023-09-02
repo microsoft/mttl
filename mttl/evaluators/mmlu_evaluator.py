@@ -7,7 +7,7 @@ import pytorch_lightning as pl
 
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.models.utils import transfer_batch_to_device
-from mttl.evaluators.base import mean, mean_stderr
+from mttl.evaluators.base import compute_task_aggregation
 
 
 class MMLUEvaluator(object):
@@ -130,22 +130,10 @@ class MMLUEvaluator(object):
             if step == eval_batches:
                 break
 
+        if was_train:
+            model.train()
+
         eval_metrics = compute_metrics(
             all_predictions, [[r] for r in all_references], reduction="none"
         )
-        all_exact_matches = eval_metrics["exact_match"]
-    
-        metric_values = defaultdict(list)
-
-        for em, task_name in zip(all_exact_matches, task_names):
-            metric_values[task_name] += [em]
-
-        metric_values = {
-            task_name: (mean(values), mean_stderr(values))
-            for task_name, values in metric_values.items()
-        }
-        metric_values["all"] = (mean(all_exact_matches), mean_stderr(all_exact_matches))
-
-        if was_train:
-            model.train()
-        return metric_values
+        return compute_task_aggregation(task_names, eval_metrics["exact_match"])
