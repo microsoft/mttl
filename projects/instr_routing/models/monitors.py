@@ -60,7 +60,6 @@ class SelectorRoutingsLog(Callback):
                 pl_module.log(
                     f"{split}/{k}",
                     v,
-                    on_epoch=True,
                     on_step=True,
                     sync_dist=True,
                     prog_bar=True,
@@ -105,7 +104,6 @@ class SelectorMetricsLog(Callback):
             pl_module.log(
                 f"train/{k}",
                 v,
-                on_epoch=True,
                 on_step=True,
                 sync_dist=True,
                 prog_bar=True,
