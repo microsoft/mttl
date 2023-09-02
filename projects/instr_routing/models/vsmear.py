@@ -65,16 +65,18 @@ class SMEARRouter(RoutingSelector):
         if self.training:
             self.center = (
                 self.center * (1 - self.router_center_momentum)
-                + torch.mean(routes, dim=0, keepdim=True)
-                * self.router_center_momentum
+                + torch.mean(routes, dim=0, keepdim=True) * self.router_center_momentum
             )
 
-    def route_maybe_center(self, input, router, router_ln, temperature=1.0, center=False):
-        """Computes routes for the teacher / posterior.
-        """
+    def route_maybe_center(
+        self, input, router, router_ln, temperature=1.0, center=False
+    ):
+        """Computes routes for the teacher / posterior."""
         input = router_ln(input)
         if self.normalize_weights:
-            weights = router.weight / torch.norm(router.weight, p=2, dim=-1, keepdim=True)
+            weights = router.weight / torch.norm(
+                router.weight, p=2, dim=-1, keepdim=True
+            )
             routes = F.linear(input, weights, None)
         else:
             routes = F.linear(input, router.weight, None)
@@ -116,7 +118,7 @@ class SMEARRouter(RoutingSelector):
             self.prior_router,
             self.prior_router_ln,
             temperature=self.temperature,
-            center=self.router_center_momentum > 0.,
+            center=self.router_center_momentum > 0.0,
         )
 
         routing_probs = F.softmax(prior_routes, dim=-1)
@@ -178,7 +180,7 @@ class VSMEARRouter(SMEARRouter):
                 self.post_router,
                 self.post_router_ln,
                 temperature=self.router_teacher_temperature,
-                center=self.router_center_momentum > 0.,
+                center=self.router_center_momentum > 0.0,
             )
             post_probs = routing_probs = F.softmax(post_routes, dim=-1)
             prior_probs = F.softmax(prior_routes, dim=-1)
