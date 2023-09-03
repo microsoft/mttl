@@ -8,12 +8,13 @@ from datasets import load_dataset
 import random
 import string
 from typing import Optional
+import pkg_resources
+from dataclasses import dataclass
+
 
 from mttl.datamodule.utils import get_tokenizer
 from mttl.datamodule.collators import DefaultCollator
-from mttl.utils import hash_example
-
-from dataclasses import dataclass
+from mttl.utils import hash_example, logger
 
 
 @dataclass
@@ -258,24 +259,24 @@ class NIOriginalDataModule(LightningDataModule):
             collate_fn=self.collate_fn,
         )
 
-    def val_dataloader(self, shuffle=False):
+    def val_dataloader(self):
         return DataLoader(
             self.val_dataset,
             batch_size=self.config.predict_batch_size,
             num_workers=16,
             pin_memory=True,
-            shuffle=shuffle,
+            shuffle=False,
             persistent_workers=True,
             collate_fn=self.collate_fn,
         )
 
-    def test_dataloader(self, shuffle=False):
+    def test_dataloader(self):
         return DataLoader(
             self.test_dataset,
             batch_size=self.config.predict_batch_size,
             num_workers=16,
             pin_memory=True,
-            shuffle=shuffle,
+            shuffle=False,
             persistent_workers=True,
             collate_fn=self.collate_fn,
         )
@@ -288,42 +289,25 @@ class NIOriginalDataModule(LightningDataModule):
         self.data_dir = data_dir or config.data_dir
         self.for_generation = for_generation
         self.tokenizer = get_tokenizer(config)
-        self._setup()
+        self.setup_done = False
+        self.setup()
 
-    @property
-    def full_dataset(self):
-        return torch.utils.data.dataset.ConcatDataset(
-            [self.train_dataset, self.val_dataset, self.test_dataset]
-        )
-
-    def get_dataset(self):
-        import pkg_resources
-
+    def setup(self, stage="fit"):
         filename = pkg_resources.resource_filename(
             __name__, "../dataloader/ni_original_dataset.py"
         )
-        return load_dataset(
+        dataset = load_dataset(
             filename,
             data_dir=self.data_dir,
             max_num_instances_per_task=self.config.max_num_instances_per_task,
         )
 
-    @property
-    def dataset_name(self):
-        return hash_example("-".join(self.tasks))
-
-    def setup(self, stage=None):
-        pass
-
-    def _setup(self, stage="fit"):
-        dataset = self.get_dataset()
-
         task_to_id = set(dataset["train"]["Task"])
         task_to_id = task_to_id.union(set(dataset["validation"]["Task"]))
         task_to_id = task_to_id.union(set(dataset["test"]["Task"]))
         task_to_id = {task: i for i, task in enumerate(task_to_id)}
-        self.task_to_id = task_to_id
 
+        self.task_to_id = task_to_id
         self.collate_fn = DataCollatorForNI(
             tokenizer=self.tokenizer,
             padding="longest",
@@ -332,19 +316,17 @@ class NIOriginalDataModule(LightningDataModule):
             num_pos_examples=self.config.num_pos_examples,
             pad_to_multiple_of=8,
             return_tensors="pt",
-            model_family=config.model_family if not self.for_generation else "seq2seq",
+            model_family=self.config.model_family if not self.for_generation else "seq2seq",
             task_to_id=self.task_to_id,
         )
 
+        self.train_dataset = dataset["train"]
         self.val_dataset = dataset["validation"]
         self.test_dataset = dataset["test"]
 
-        if stage == "fit":
-            self.train_dataset = dataset["train"]
-            print("Training examples:", len(self.train_dataset))
-
-        print("Validation examples:", len(self.val_dataset))
-        print("Test examples:", len(self.test_dataset))
+        logger.info("Training examples: {}".format(len(self.train_dataset)))
+        logger.info("Validation examples: {}".format(len(self.val_dataset)))
+        logger.info("Test examples: {}".format(len(self.test_dataset)))
 
 
 if __name__ == "__main__":
