@@ -2,7 +2,7 @@
     "model": "google/t5-large-lm-adapt",
     "dataset": "ni",
     "optimizer": "adamw",
-    "train_dir": "$NI_DATA_DIR",
+    "data_dir": "$NI_DATA_DIR",
     "warmup_proportion": 0.06,
     "total_steps": 1000,
     "learning_rate": 1e-3,
