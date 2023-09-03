@@ -338,8 +338,15 @@ class NIOriginalDataModule(LightningDataModule):
             self.test_dataset = dataset["test"].select(test_indices)
             # we have to pick some examples from the validation set
             if len(self.train_dataset) == 0:
-                self.train_dataset = self.val_dataset[:self.config.max_num_instances_per_task]
-                self.val_dataset = self.val_dataset[self.config.max_num_instances_per_task:]
+                self.train_dataset = self.val_dataset.select(
+                    range(self.config.max_num_instances_per_task)
+                )
+                self.val_dataset = self.val_dataset.select(
+                    range(
+                        self.config.max_num_instances_per_task,
+                        len(self.val_dataset),
+                    )
+                )
 
         self.collate_fn = DataCollatorForNI(
             tokenizer=self.tokenizer,
