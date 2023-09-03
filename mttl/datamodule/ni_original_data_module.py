@@ -298,10 +298,17 @@ class NIOriginalDataModule(LightningDataModule):
         filename = pkg_resources.resource_filename(
             __name__, "../dataloader/ni_original_dataset.py"
         )
+
+        # if we are fine-tuning, we have to load ~1000 instances,
+        # in order to be able to select the ones in training and in the valid set.
         dataset = load_dataset(
             filename,
             data_dir=self.data_dir,
-            max_num_instances_per_task=self.config.max_num_instances_per_task,
+            max_num_instances_per_task=(
+                self.config.max_num_instances_per_task
+                if self.config.finetune_task_name is None
+                else self.config.max_num_instances_per_task * 2
+            ),
         )
 
         if self.config.finetune_task_name is None:
@@ -310,14 +317,29 @@ class NIOriginalDataModule(LightningDataModule):
             test_tasks = set(dataset["test"]["Task"])
             all_tasks = train_tasks.union(validation_tasks).union(test_tasks)
             self.task_to_id = {task: i for i, task in enumerate(all_tasks)}
+            self.train_dataset = dataset["train"]
+            self.val_dataset = dataset["validation"]
+            self.test_dataset = dataset["test"]
         else:
-            train_indices = np.where(dataset["train"]["Task"] == self.config.finetune_task_name)[0]
-            valid_indices = np.where(dataset["validation"]["Task"] == self.config.finetune_task_name)[0]
-            test_indices = np.where(dataset["test"]["Task"] == self.config.finetune_task_name)[0]
-            dataset["train"] = dataset["train"].select(train_indices)
-            dataset["validation"] = dataset["validation"].select(valid_indices)
-            dataset["test"] = dataset["test"].select(test_indices)
+            # take only the examples from the task we want to finetune on.
             self.task_to_id = {self.config.finetune_task_name: 0}
+            train_indices = np.where(
+                np.array(dataset["train"]["Task"]) == self.config.finetune_task_name
+            )[0].tolist()
+            valid_indices = np.where(
+                np.array(dataset["validation"]["Task"])
+                == self.config.finetune_task_name
+            )[0].tolist()
+            test_indices = np.where(
+                np.array(dataset["test"]["Task"]) == self.config.finetune_task_name
+            )[0].tolist()
+            self.train_dataset = dataset["train"].select(train_indices)
+            self.val_dataset = dataset["validation"].select(valid_indices)
+            self.test_dataset = dataset["test"].select(test_indices)
+            # we have to pick some examples from the validation set
+            if len(self.train_dataset) == 0:
+                self.train_dataset = self.val_dataset[:self.config.max_num_instances_per_task]
+                self.val_dataset = self.val_dataset[self.config.max_num_instances_per_task:]
 
         self.collate_fn = DataCollatorForNI(
             tokenizer=self.tokenizer,
@@ -333,11 +355,6 @@ class NIOriginalDataModule(LightningDataModule):
             else "seq2seq",
             task_to_id=self.task_to_id,
         )
-
-        self.train_dataset = dataset["train"]
-        self.val_dataset = dataset["validation"]
-        self.test_dataset = dataset["test"]
-
         logger.info("Training examples: {}".format(len(self.train_dataset)))
         logger.info("Validation examples: {}".format(len(self.val_dataset)))
         logger.info("Test examples: {}".format(len(self.test_dataset)))
