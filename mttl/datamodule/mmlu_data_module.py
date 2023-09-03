@@ -124,13 +124,9 @@ class MMLUDataModule(LightningDataModule):
         self.for_generation = for_generation
         self.tokenizer = get_tokenizer(config)
         self.rng = np.random.RandomState(config.seed)
-        self.setup_done = False
-        self.setup()
+        self.setup_dataset()
 
-    def setup(self, stage=None):
-        if self.setup_done:
-            return
-
+    def setup_dataset(self, stage=None):
         filename = pkg_resources.resource_filename(__name__, "../dataloader/mmlu_dataset.py")
         dataset = load_dataset(filename, data_dir=self.data_dir)
 
@@ -155,7 +151,6 @@ class MMLUDataModule(LightningDataModule):
 
         self.train_dataset = dataset["train"]
         self.test_dataset = self.dev_dataset = dataset["test"]
-        self.setup_done = True
 
 
 if __name__ == "__main__":
