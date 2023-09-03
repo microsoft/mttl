@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 
 from pytorch_lightning import LightningDataModule
@@ -240,7 +241,9 @@ class DataCollatorForNI(DefaultCollator):
 
         task_names = [ex["Task"] for ex in batch]
         output_batch["task_names"] = task_names
-        output_batch["task_ids"] = torch.LongTensor([self.task_to_id[task] for task in task_names])
+        output_batch["task_ids"] = torch.LongTensor(
+            [self.task_to_id[task] for task in task_names]
+        )
         output_batch["labels_texts"] = labels
         output_batch["hashes"] = [hash_example(i + o) for i, o in zip(sources, labels)]
         output_batch["instruction_hashes"] = [hash_example(i) for i in sources]
@@ -289,10 +292,9 @@ class NIOriginalDataModule(LightningDataModule):
         self.data_dir = data_dir or config.data_dir
         self.for_generation = for_generation
         self.tokenizer = get_tokenizer(config)
-        self.setup_done = False
-        self.setup()
+        self.setup_dataset()
 
-    def setup(self, stage="fit"):
+    def setup_dataset(self):
         filename = pkg_resources.resource_filename(
             __name__, "../dataloader/ni_original_dataset.py"
         )
@@ -302,21 +304,33 @@ class NIOriginalDataModule(LightningDataModule):
             max_num_instances_per_task=self.config.max_num_instances_per_task,
         )
 
-        task_to_id = set(dataset["train"]["Task"])
-        task_to_id = task_to_id.union(set(dataset["validation"]["Task"]))
-        task_to_id = task_to_id.union(set(dataset["test"]["Task"]))
-        task_to_id = {task: i for i, task in enumerate(task_to_id)}
+        if self.config.finetune_task_name is None:
+            train_tasks = set(dataset["train"]["Task"])
+            validation_tasks = set(dataset["validation"]["Task"])
+            test_tasks = set(dataset["test"]["Task"])
+            all_tasks = train_tasks.union(validation_tasks).union(test_tasks)
+            self.task_to_id = {task: i for i, task in enumerate(all_tasks)}
+        else:
+            train_indices = np.where(dataset["train"]["Task"] == self.config.finetune_task_name)[0]
+            valid_indices = np.where(dataset["validation"]["Task"] == self.config.finetune_task_name)[0]
+            test_indices = np.where(dataset["test"]["Task"] == self.config.finetune_task_name)[0]
+            dataset["train"] = dataset["train"].select(train_indices)
+            dataset["validation"] = dataset["validation"].select(valid_indices)
+            dataset["test"] = dataset["test"].select(test_indices)
+            self.task_to_id = {self.config.finetune_task_name: 0}
 
-        self.task_to_id = task_to_id
         self.collate_fn = DataCollatorForNI(
             tokenizer=self.tokenizer,
             padding="longest",
             max_input_length=self.config.max_input_length,
             max_output_length=self.config.max_output_length,
             num_pos_examples=self.config.num_pos_examples,
+            add_task_definition=self.config.use_task_descriptions,
             pad_to_multiple_of=8,
             return_tensors="pt",
-            model_family=self.config.model_family if not self.for_generation else "seq2seq",
+            model_family=self.config.model_family
+            if not self.for_generation
+            else "seq2seq",
             task_to_id=self.task_to_id,
         )
 
