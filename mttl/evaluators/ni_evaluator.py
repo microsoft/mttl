@@ -10,6 +10,15 @@ from mttl.models.utils import transfer_batch_to_device
 from mttl.evaluators.base import compute_task_aggregation
 
 
+def decode(preds, tokenizer):
+    preds[preds == -100] = tokenizer.pad_token_id
+    preds = tokenizer.batch_decode(
+        preds, skip_special_tokens=True, clean_up_tokenization_spaces=True
+    )
+    preds = [pred.strip() for pred in preds]
+    return preds
+
+
 class NIEvaluator(object):
     def __init__(self, config, data_dir=None, num_pos_examples=0, device="cuda"):
         from mttl.datamodule.ni_original_data_module import NIOriginalDataModule
@@ -40,14 +49,6 @@ class NIEvaluator(object):
         # DDP
         if hasattr(model, "module"):
             model = model.module
-
-        def decode(preds):
-            preds[preds == -100] = tokenizer.pad_token_id
-            preds = tokenizer.batch_decode(
-                preds, skip_special_tokens=True, clean_up_tokenization_spaces=True
-            )
-            preds = [pred.strip() for pred in preds]
-            return preds
 
         all_predictions = []
         all_references = []
@@ -104,7 +105,7 @@ class NIEvaluator(object):
             predictions = predictions.sequences
             if self.config.model_family == "gpt":
                 predictions = predictions[:, batch["input_ids"].shape[-1] :]
-            predictions = decode(predictions)
+            predictions = decode(predictions, tokenizer)
 
             references = labels_texts
 
