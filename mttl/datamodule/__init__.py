@@ -1,5 +1,33 @@
+from collections import defaultdict
+from torch.utils.data import DataLoader
 from torch.utils.data.dataset import ConcatDataset
 import numpy as np
+from pytorch_lightning import LightningDataModule
+from abc import ABC, abstractmethod
+
+
+
+def take_n_examples_per_task(task_names, n, rng=None):
+    """Returns indices of n examples per task given a list of task names.
+    
+    Args:
+        task_names (list): List of task names, one per example.
+        n (int): Number of examples per task.
+        rng (np.random.RandomState, optional): Random number generator. Defaults to None.
+
+    Returns:
+        list: List of indices.
+    """
+    if rng is None:
+        rng = np.random.RandomState(0)
+
+    tasks_to_ids = defaultdict(list)
+    for i, task in enumerate(task_names):
+        tasks_to_ids[task].append(i)
+    indices = []
+    for task in tasks_to_ids.keys():
+        indices += rng.choice(tasks_to_ids[task], n, replace=False).tolist()
+    return indices
 
 
 class UniformSampler:

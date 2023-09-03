@@ -27,7 +27,7 @@ class MMLUEvaluator(object):
         )
         self.datamodule.setup("test")
 
-    def evaluate(self, model, eval_batches=-1):
+    def evaluate(self, model, subsample=-1):
         was_train = model.training
         if was_train:
             model.eval()
@@ -44,14 +44,10 @@ class MMLUEvaluator(object):
         task_names = []
         all_EM = []
 
-        dataloader = self.datamodule.test_dataloader(shuffle=eval_batches > 0)
-
-        if eval_batches == -1:
-            eval_batches = len(dataloader)
-        
+        dataloader = self.datamodule.test_dataloader(subsample)
         pbar = tqdm.tqdm(
             enumerate(dataloader),
-            total=min(len(dataloader), eval_batches),
+            total=len(dataloader),
         )
         for step, batch in pbar:
             task_name = batch.pop("task_names", None)
@@ -126,9 +122,6 @@ class MMLUEvaluator(object):
             pbar.set_description(
                 f"Task: {task_name[0] if task_name else None}, EM: {np.mean(all_EM):.4f}"
             )
-
-            if step == eval_batches:
-                break
 
         if was_train:
             model.train()

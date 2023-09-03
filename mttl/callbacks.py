@@ -34,7 +34,7 @@ class MMLUCallback(cb.Callback):
         )
         metrics = evaluator.evaluate(
             pl_module,
-            eval_batches=200,
+            subsample=10,
         )
         pl_module.log(
             "val/mmlu",
