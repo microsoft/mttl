@@ -149,8 +149,8 @@ class MMLUDataModule(LightningDataModule):
         self.train_dataset = dataset["train"]
         self.test_dataset = self.dev_dataset = dataset["test"]
 
-        logger.info("Training examples: {}".format(len(self.train_dataset())))
-        logger.info("Test examples: {}".format(len(self.test_dataset())))
+        logger.info("Training examples: {}".format(len(self.train_dataset)))
+        logger.info("Test examples: {}".format(len(self.test_dataset)))
 
 
 if __name__ == "__main__":
