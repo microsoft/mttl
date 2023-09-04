@@ -26,7 +26,7 @@ def take_n_examples_per_task(task_names, n, rng=None):
     indices = []
     for task in tasks_to_ids.keys():
         indices += rng.choice(
-            tasks_to_ids[task], min(len(tasks_to_ids[task]) // n, 1), replace=False
+            tasks_to_ids[task], max(len(tasks_to_ids[task]) // n, 1), replace=False
         ).tolist()
     return indices
 
