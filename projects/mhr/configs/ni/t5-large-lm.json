@@ -1,4 +1,4 @@
 {
     "model": "google/t5-large-lm-adapt",
-    "precision": "bf16"
+    "precision": "32"
 }

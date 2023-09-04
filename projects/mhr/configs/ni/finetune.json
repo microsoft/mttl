@@ -10,5 +10,8 @@
     "weight_decay": 0.01,
     "train_batch_size": 8,
     "predict_batch_size": 8,
-    "precision": "bf16"
+    "precision": "bf16",
+    "use_task_descriptions": true,
+    "num_pos_examples": 0,
+    "max_num_instances_per_task": 32
 }

@@ -14,5 +14,7 @@
     "precision": "bf16",
     "max_input_length": 1024,
     "max_output_length": 128,
-    "use_task_descriptions": true
+    "use_task_descriptions": true,
+    "num_pos_examples": 0,
+    "max_num_instances_per_task": 100
 }
