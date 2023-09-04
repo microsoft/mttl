@@ -101,7 +101,7 @@ class MMLUDataModule(LightningDataModule):
         if subsample > 0:
             from mttl.datamodule import take_n_examples_per_task
 
-            indices = take_n_examples_per_task(list(self.test_set["Task"]), n=subsample, rng=self.rng)
+            indices = take_n_examples_per_task(list(self.test_dataset["Task"]), n=subsample, rng=self.rng)
             test_dataset = self.test_dataset.select(indices)
         else:
             test_dataset = self.test_dataset
@@ -146,11 +146,11 @@ class MMLUDataModule(LightningDataModule):
             task_to_id=self.task_to_id,
         )
 
-        logger.info("Training steps: {}".format(len(self.train_dataloader())))
-        logger.info("Validation steps: {}".format(len(self.val_dataloader())))
-
         self.train_dataset = dataset["train"]
         self.test_dataset = self.dev_dataset = dataset["test"]
+
+        logger.info("Training examples: {}".format(len(self.train_dataset())))
+        logger.info("Test examples: {}".format(len(self.test_dataset())))
 
 
 if __name__ == "__main__":
