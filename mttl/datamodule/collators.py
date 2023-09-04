@@ -17,7 +17,6 @@ class DefaultCollator:
     label_pad_token_id: int = -100
     return_tensors: str = "pt"
     model_family: str = "seq2seq"
-    train_on_inputs: bool = False
 
     def prepare_inputs_for_seq2seq_family(self, sources, labels):
         output_batch = {}
@@ -70,24 +69,21 @@ class DefaultCollator:
             pad_to_multiple_of=self.pad_to_multiple_of,
         )
 
-        if not self.train_on_inputs:
-            input_len = tokenized_sources["attention_mask"].int().sum(-1)
-            pad_tokens = tok_sources_plus_labels["attention_mask"].shape[
-                1
-            ] - tok_sources_plus_labels["attention_mask"].int().sum(-1)
-            offset = torch.clamp(pad_tokens + input_len, max=self.max_input_length)
-            mask = torch.zeros(
-                tok_sources_plus_labels["attention_mask"].shape[0],
-                tok_sources_plus_labels["attention_mask"].shape[1] + 1,
-            )
-            mask[(torch.arange(mask.shape[0]), offset)] = 1
-            mask = mask.cumsum(dim=1).bool()
-            mask = mask[:, :-1]
+        input_len = tokenized_sources["attention_mask"].int().sum(-1)
+        pad_tokens = tok_sources_plus_labels["attention_mask"].shape[
+            1
+        ] - tok_sources_plus_labels["attention_mask"].int().sum(-1)
+        offset = torch.clamp(pad_tokens + input_len, max=self.max_input_length)
+        mask = torch.zeros(
+            tok_sources_plus_labels["attention_mask"].shape[0],
+            tok_sources_plus_labels["attention_mask"].shape[1] + 1,
+        )
+        mask[(torch.arange(mask.shape[0]), offset)] = 1
+        mask = mask.cumsum(dim=1).bool()
+        mask = mask[:, :-1]
 
-            targets = tok_sources_plus_labels["input_ids"].clone()
-            targets = torch.masked_fill(targets, ~mask, self.label_pad_token_id)
-        else:
-            targets = tok_sources_plus_labels["input_ids"]
+        targets = tok_sources_plus_labels["input_ids"].clone()
+        targets = torch.masked_fill(targets, ~mask, self.label_pad_token_id)
 
         output_batch["input_ids"] = tok_sources_plus_labels["input_ids"]
         output_batch["attention_mask"] = tok_sources_plus_labels["attention_mask"]

@@ -6,13 +6,12 @@ from pytorch_lightning import LightningDataModule
 from abc import ABC, abstractmethod
 
 
-
 def take_n_examples_per_task(task_names, n, rng=None):
-    """Returns indices of n examples per task given a list of task names.
-    
+    """Returns indices of x / n examples per task given a list of task names.
+
     Args:
         task_names (list): List of task names, one per example.
-        n (int): Number of examples per task.
+        n (int): Subsampling factor.
         rng (np.random.RandomState, optional): Random number generator. Defaults to None.
 
     Returns:
@@ -26,7 +25,9 @@ def take_n_examples_per_task(task_names, n, rng=None):
         tasks_to_ids[task].append(i)
     indices = []
     for task in tasks_to_ids.keys():
-        indices += rng.choice(tasks_to_ids[task], n, replace=False).tolist()
+        indices += rng.choice(
+            tasks_to_ids[task], min(len(tasks_to_ids[task]) // n, 1), replace=False
+        ).tolist()
     return indices
 
 

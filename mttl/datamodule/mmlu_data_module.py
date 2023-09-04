@@ -43,7 +43,10 @@ class DataCollatorForMMLU(DefaultCollator):
             )
             input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids
 
-            while input_ids.shape[-1] > self.max_input_length and len(instance["Positive Examples"].split("\n\n")) > 2:
+            while (
+                input_ids.shape[-1] > self.max_input_length
+                and len(instance["Positive Examples"].split("\n\n")) > 2
+            ):
                 instance["Positive Examples"] = (
                     "\n\n".join(instance["Positive Examples"].split("\n\n")[:-2])
                     + "\n\n"
@@ -68,7 +71,9 @@ class DataCollatorForMMLU(DefaultCollator):
         task_names = [instance["Task"] for instance in batch]
         output_batch["task_names"] = task_names
         if self.task_to_id is not None:
-            output_batch["task_ids"] = torch.LongTensor([self.task_to_id[task] for task in task_names])
+            output_batch["task_ids"] = torch.LongTensor(
+                [self.task_to_id[task] for task in task_names]
+            )
 
         output_batch["labels_texts"] = labels
         return output_batch
@@ -101,7 +106,9 @@ class MMLUDataModule(LightningDataModule):
         if subsample > 0:
             from mttl.datamodule import take_n_examples_per_task
 
-            indices = take_n_examples_per_task(list(self.test_dataset["Task"]), n=subsample, rng=self.rng)
+            indices = take_n_examples_per_task(
+                list(self.test_dataset["Task"]), n=subsample, rng=self.rng
+            )
             test_dataset = self.test_dataset.select(indices)
         else:
             test_dataset = self.test_dataset
@@ -127,7 +134,9 @@ class MMLUDataModule(LightningDataModule):
         self.setup_dataset()
 
     def setup_dataset(self, stage=None):
-        filename = pkg_resources.resource_filename(__name__, "../dataloader/mmlu_dataset.py")
+        filename = pkg_resources.resource_filename(
+            __name__, "../dataloader/mmlu_dataset.py"
+        )
         dataset = load_dataset(filename, data_dir=self.data_dir)
 
         task_to_id = set(dataset["train"]["Task"])
