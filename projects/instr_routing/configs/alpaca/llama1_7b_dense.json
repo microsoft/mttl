@@ -10,7 +10,7 @@
 
     "predict_batch_size": 2,
     "micro_batch_size": 4,  
-    "train_batch_size": 32,
+    "train_batch_size": 128,
     "max_input_length": 256,    
     "eval_every":400, 
     "num_train_epochs":3,

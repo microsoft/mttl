@@ -1,6 +1,6 @@
 
 import sys
-import os
+import os  
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from projects.instr_routing.finetune_llama import RoutingConfig
 from projects.instr_routing.models.clm import CLM
@@ -57,9 +57,11 @@ if __name__ == "__main__":
         load_in_8bit=config.load_in_8bit,
         device_map="auto"
     )
-    model_class = CLM
+    model_class = CLM    
     dm = AlpacaDataModule(config)
-    model = model_class(**vars(config), tokenizer=dm.tokenizer)
-    model.to("cuda")
-
-    print(eval_ni(config, model, nshot=0))#, eval_batches=50))
+    path_best_model = "/home/v-oostapenko/dev/mttl/tmp/instruction_learning/yahma_llama-7b-hf0qx192oq_None-val/loss=1.4099.ckpt"
+    best_model = CLM.load_from_checkpoint(path_best_model, tokenizer=dm.tokenizer).cuda()
+    # model = model_class(**vars(config), tokenizer=dm.tokenizer)
+    # model.to("cuda")
+      
+    print(eval_ni(config, model, nshot=0, eval_batches=50))

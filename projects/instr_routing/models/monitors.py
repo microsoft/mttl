@@ -71,7 +71,12 @@ class SelectorRoutingsLog(Callback):
                     sync_dist=True,
                     prog_bar=True,
                 )
-            if self.log_per_layer and wandb.run is not None and split == "val":
+            if (
+                self.log_per_layer
+                and wandb.run is not None
+                and split == "val"
+                and not isinstance(pl_module.loggers[0], pl.loggers.logger.DummyLogger)
+            ):
                 wandb_logger = [
                     lgr
                     for lgr in pl_module.loggers
