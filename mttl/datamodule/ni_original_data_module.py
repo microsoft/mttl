@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 
 from pytorch_lightning import LightningDataModule
@@ -8,12 +9,13 @@ from datasets import load_dataset
 import random
 import string
 from typing import Optional
+import pkg_resources
+from dataclasses import dataclass
+
 
 from mttl.datamodule.utils import get_tokenizer
 from mttl.datamodule.collators import DefaultCollator
-from mttl.utils import hash_example
-
-from dataclasses import dataclass
+from mttl.utils import hash_example, logger
 
 
 @dataclass
@@ -239,7 +241,9 @@ class DataCollatorForNI(DefaultCollator):
 
         task_names = [ex["Task"] for ex in batch]
         output_batch["task_names"] = task_names
-        output_batch["task_ids"] = torch.LongTensor([self.task_to_id[task] for task in task_names])
+        output_batch["task_ids"] = torch.LongTensor(
+            [self.task_to_id[task] for task in task_names]
+        )
         output_batch["labels_texts"] = labels
         output_batch["hashes"] = [hash_example(i + o) for i, o in zip(sources, labels)]
         output_batch["instruction_hashes"] = [hash_example(i) for i in sources]
@@ -258,24 +262,24 @@ class NIOriginalDataModule(LightningDataModule):
             collate_fn=self.collate_fn,
         )
 
-    def val_dataloader(self, shuffle=False):
+    def val_dataloader(self):
         return DataLoader(
             self.val_dataset,
             batch_size=self.config.predict_batch_size,
             num_workers=16,
             pin_memory=True,
-            shuffle=shuffle,
+            shuffle=False,
             persistent_workers=True,
             collate_fn=self.collate_fn,
         )
 
-    def test_dataloader(self, shuffle=False):
+    def test_dataloader(self):
         return DataLoader(
             self.test_dataset,
             batch_size=self.config.predict_batch_size,
             num_workers=16,
             pin_memory=True,
-            shuffle=shuffle,
+            shuffle=False,
             persistent_workers=True,
             collate_fn=self.collate_fn,
         )
@@ -288,41 +292,61 @@ class NIOriginalDataModule(LightningDataModule):
         self.data_dir = data_dir or config.data_dir
         self.for_generation = for_generation
         self.tokenizer = get_tokenizer(config)
-        self._setup()
+        self.setup_dataset()
 
-    @property
-    def full_dataset(self):
-        return torch.utils.data.dataset.ConcatDataset(
-            [self.train_dataset, self.val_dataset, self.test_dataset]
-        )
-
-    def get_dataset(self):
-        import pkg_resources
-
+    def setup_dataset(self):
         filename = pkg_resources.resource_filename(
             __name__, "../dataloader/ni_original_dataset.py"
         )
-        return load_dataset(
+
+        # if we are fine-tuning, we have to load ~1000 instances,
+        # in order to be able to select the ones in training and in the valid set.
+        dataset = load_dataset(
             filename,
             data_dir=self.data_dir,
-            max_num_instances_per_task=self.config.max_num_instances_per_task,
+            max_num_instances_per_task=(
+                self.config.max_num_instances_per_task
+                if self.config.finetune_task_name is None
+                else self.config.max_num_instances_per_task * 2
+            ),
         )
 
-    @property
-    def dataset_name(self):
-        return hash_example("-".join(self.tasks))
-
-    def setup(self, stage=None):
-        pass
-
-    def _setup(self, stage="fit"):
-        dataset = self.get_dataset()
-
-        task_to_id = set(dataset["train"]["Task"])
-        task_to_id = task_to_id.union(set(dataset["validation"]["Task"]))
-        task_to_id = task_to_id.union(set(dataset["test"]["Task"]))
-        task_to_id = {task: i for i, task in enumerate(task_to_id)}
-        self.task_to_id = task_to_id
+        if self.config.finetune_task_name is None:
+            train_tasks = set(dataset["train"]["Task"])
+            validation_tasks = set(dataset["validation"]["Task"])
+            test_tasks = set(dataset["test"]["Task"])
+            all_tasks = train_tasks.union(validation_tasks).union(test_tasks)
+            self.task_to_id = {task: i for i, task in enumerate(all_tasks)}
+            self.train_dataset = dataset["train"]
+            self.val_dataset = dataset["validation"]
+            self.test_dataset = dataset["test"]
+        else:
+            # take only the examples from the task we want to finetune on.
+            self.task_to_id = {self.config.finetune_task_name: 0}
+            train_indices = np.where(
+                np.array(dataset["train"]["Task"]) == self.config.finetune_task_name
+            )[0].tolist()
+            valid_indices = np.where(
+                np.array(dataset["validation"]["Task"])
+                == self.config.finetune_task_name
+            )[0].tolist()
+            test_indices = np.where(
+                np.array(dataset["test"]["Task"]) == self.config.finetune_task_name
+            )[0].tolist()
+            self.train_dataset = dataset["train"].select(train_indices)
+            self.val_dataset = dataset["validation"].select(valid_indices)
+            self.test_dataset = dataset["test"].select(test_indices)
+            # we have to pick some examples from the validation set
+            if len(self.train_dataset) == 0:
+                self.train_dataset = self.val_dataset.select(
+                    range(self.config.max_num_instances_per_task)
+                )
+                self.val_dataset = self.val_dataset.select(
+                    range(
+                        self.config.max_num_instances_per_task,
+                        len(self.val_dataset),
+                    )
+                )
 
         self.collate_fn = DataCollatorForNI(
             tokenizer=self.tokenizer,
@@ -330,21 +354,17 @@ class NIOriginalDataModule(LightningDataModule):
             max_input_length=self.config.max_input_length,
             max_output_length=self.config.max_output_length,
             num_pos_examples=self.config.num_pos_examples,
+            add_task_definition=self.config.use_task_descriptions,
             pad_to_multiple_of=8,
             return_tensors="pt",
-            model_family=config.model_family if not self.for_generation else "seq2seq",
+            model_family=self.config.model_family
+            if not self.for_generation
+            else "seq2seq",
             task_to_id=self.task_to_id,
         )
-
-        self.val_dataset = dataset["validation"]
-        self.test_dataset = dataset["test"]
-
-        if stage == "fit":
-            self.train_dataset = dataset["train"]
-            print("Training examples:", len(self.train_dataset))
-
-        print("Validation examples:", len(self.val_dataset))
-        print("Test examples:", len(self.test_dataset))
+        logger.info("Training examples: {}".format(len(self.train_dataset)))
+        logger.info("Validation examples: {}".format(len(self.val_dataset)))
+        logger.info("Test examples: {}".format(len(self.test_dataset)))
 
 
 if __name__ == "__main__":

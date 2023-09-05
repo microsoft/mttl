@@ -46,7 +46,15 @@ _URL = "https://instructions.apps.allenai.org/"
 
 
 class NIConfig(datasets.BuilderConfig):
-    def __init__(self, *args, data_dir=None, task_dir=None, max_num_instances_per_task=None, max_num_instances_per_eval_task=None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        data_dir=None,
+        task_dir=None,
+        max_num_instances_per_task=None,
+        max_num_instances_per_eval_task=None,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self.data_dir: str = data_dir
         self.task_dir: str = task_dir
@@ -77,16 +85,20 @@ class NIOriginalDataset(datasets.GeneratorBasedBuilder):
                     "Categories": [datasets.Value("string")],
                     "Reasoning": [datasets.Value("string")],
                     "Definition": [datasets.Value("string")],
-                    "Positive Examples": [{
-                        "input": datasets.Value("string"),
-                        "output": datasets.Value("string"),
-                        "explanation": datasets.Value("string")
-                    }],
-                    "Negative Examples": [{
-                        "input": datasets.Value("string"),
-                        "output": datasets.Value("string"),
-                        "explanation": datasets.Value("string")
-                    }],
+                    "Positive Examples": [
+                        {
+                            "input": datasets.Value("string"),
+                            "output": datasets.Value("string"),
+                            "explanation": datasets.Value("string"),
+                        }
+                    ],
+                    "Negative Examples": [
+                        {
+                            "input": datasets.Value("string"),
+                            "output": datasets.Value("string"),
+                            "explanation": datasets.Value("string"),
+                        }
+                    ],
                     "Input_language": [datasets.Value("string")],
                     "Output_language": [datasets.Value("string")],
                     "Instruction_language": [datasets.Value("string")],
@@ -94,9 +106,9 @@ class NIOriginalDataset(datasets.GeneratorBasedBuilder):
                     "Instance": {
                         "id": datasets.Value("string"),
                         "input": datasets.Value("string"),
-                        "output": [datasets.Value("string")]
+                        "output": [datasets.Value("string")],
                     },
-                    "Instance License": [datasets.Value("string")]
+                    "Instance License": [datasets.Value("string")],
                 }
             ),
             supervised_keys=None,
@@ -116,30 +128,35 @@ class NIOriginalDataset(datasets.GeneratorBasedBuilder):
             datasets.SplitGenerator(
                 name=datasets.Split.TRAIN,
                 gen_kwargs={
-                    "path": os.path.join(data_dir, "train_tasks.txt"), 
-                    "task_dir": task_dir, 
+                    "path": os.path.join(data_dir, "train_tasks.txt"),
+                    "task_dir": task_dir,
                     "max_num_instances_per_task": self.config.max_num_instances_per_task,
-                    "subset": "train"
-                }),
+                    "subset": "train",
+                },
+            ),
             datasets.SplitGenerator(
                 name=datasets.Split.VALIDATION,
                 gen_kwargs={
-                    "path": os.path.join(data_dir, "test_tasks.txt"), 
-                    "task_dir": task_dir, 
+                    "path": os.path.join(data_dir, "test_tasks.txt"),
+                    "task_dir": task_dir,
                     "max_num_instances_per_task": self.config.max_num_instances_per_task,
-                    "subset": "validation"
-                }),
+                    "subset": "validation",
+                },
+            ),
             datasets.SplitGenerator(
                 name=datasets.Split.TEST,
                 gen_kwargs={
                     "path": os.path.join(data_dir, "test_tasks.txt"),
-                    "task_dir": task_dir, 
+                    "task_dir": task_dir,
                     "max_num_instances_per_task": self.config.max_num_instances_per_eval_task,
-                    "subset": "test"
-                }),
+                    "subset": "test",
+                },
+            ),
         ]
 
-    def _generate_examples(self, path=None, task_dir=None, max_num_instances_per_task=None, subset=None):
+    def _generate_examples(
+        self, path=None, task_dir=None, max_num_instances_per_task=None, subset=None
+    ):
         """Yields examples."""
         logger.info(f"Generating tasks from = {path}")
 
@@ -164,7 +181,11 @@ class NIOriginalDataset(datasets.GeneratorBasedBuilder):
                         instances = all_instances[100:]
                     elif subset == "train":
                         instances = all_instances
-                    if max_num_instances_per_task is not None and max_num_instances_per_task >= 0:
+                    if (
+                        subset != "test"
+                        and max_num_instances_per_task is not None
+                        and max_num_instances_per_task >= 0
+                    ):
                         random.shuffle(instances)
                         instances = instances[:max_num_instances_per_task]
                     for idx, instance in enumerate(instances):
