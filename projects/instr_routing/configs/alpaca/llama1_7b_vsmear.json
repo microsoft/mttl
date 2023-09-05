@@ -15,14 +15,10 @@
     "eval_every":400, 
     "num_train_epochs":3,
 
-    "model_modifier": "vsmear_xr4",
+    "model_modifier": "vsmear_xr1",
     "modify_modules": ".*attn.*",       
     "modify_layers": "q_proj|v_proj|k_proj",   
     "trainable_param_names": ".*lora_[ab].*|.*selector.*",
-        
-    "eval_hellaswag": 0,
-    "eval_arc": 0, 
-    "eval_truthfulqa": 0,
     "wandb_project": "test"
 
 }

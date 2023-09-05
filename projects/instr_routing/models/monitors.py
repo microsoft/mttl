@@ -112,10 +112,9 @@ class SelectorRoutingsLog(Callback):
 
 
 class SelectorMetricsLog(Callback):
-    def __init__(self, args):
+    def __init__(self):
         self.averager = Averager(weight=0.5)
         self.metrics = {}
-        self.log_per_layer = args.selector_log_per_layer
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:
         # get routing attributes of all layers

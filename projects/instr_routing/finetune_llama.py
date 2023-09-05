@@ -120,8 +120,8 @@ def run_multitask(args):
         mode=mode,
     )
     callbacks.append(checkpoint_callback)
-    callbacks.append(SelectorRoutingsLog())
-    callbacks.append(SelectorMetricsLog(args))
+    callbacks.append(SelectorRoutingsLog(args))
+    callbacks.append(SelectorMetricsLog())
     # callbacks.append(MiniProgress())
     callbacks.append(MMLUCallback(5))
     # callbacks.append(NICallback())
