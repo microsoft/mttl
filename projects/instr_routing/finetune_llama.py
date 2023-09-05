@@ -11,11 +11,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-<<<<<<< HEAD
-from mttl.callbacks import MMLUCallback, MiniProgress, ProgressCallback, NICallback
-=======
 from mttl.callbacks import MMLUCallback, MiniProgress
->>>>>>> platypus
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.platypus_module import PlatypusModule
 from mttl.datamodule.flan100k_module import Flan100kModule
