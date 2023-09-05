@@ -11,15 +11,18 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.callbacks import MMLUCallback, NICallback, ProgressCallback
+from mttl.callbacks import MMLUCallback, MiniProgress
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.platypus_module import PlatypusModule
 from mttl.datamodule.flan100k_module import Flan100kModule
 from mttl.utils import get_mlf_logger, setup_logging, logger
+from mttl.dist_utils import is_main_process
+
 
 # register models
 import models.vsmear  # noqa: F401
 import models.softmoe # noqa: F401
+from models.monitors import SelectorMetricsLog, SelectorRoutingsLog
 from models.clm import CLM
 from config import RoutingConfig
 
@@ -39,7 +42,9 @@ def run_multitask(args):
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file
-    setup_logging(logging.INFO, args.output_dir)
+    setup_logging(args.output_dir)
+
+    logger.info("Args: {}".format(args.to_json()))
 
     if args.hf_token_hub:
         login(token=args.hf_token_hub)
@@ -92,7 +97,6 @@ def run_multitask(args):
 
     # get metric monitors for models
     callbacks = []
-    callbacks.append(ProgressCallback())
 
     monitor = "val/loss"
     mode = "min"
@@ -116,7 +120,10 @@ def run_multitask(args):
         mode=mode,
     )
     callbacks.append(checkpoint_callback)
-    callbacks.append(MMLUCallback())
+    callbacks.append(SelectorRoutingsLog())
+    callbacks.append(SelectorMetricsLog())
+    callbacks.append(MiniProgress())
+    callbacks.append(MMLUCallback(5))
 
     trainer = Trainer(
         devices=-1, 
@@ -140,70 +147,55 @@ def run_multitask(args):
     trainer.fit(module, dm)
 
     path_best_model = trainer.checkpoint_callback.best_model_path
-    path_last_model = trainer.checkpoint_callback.last_model_path
+    ckpt_path = "best" if path_best_model else "last"
 
-    ckpt_path = "best" if not args.fast_dev_run and path_best_model else "last"
     trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
 
-    if not args.fast_dev_run and path_best_model:
-        module.model.checkpoint_tested = "best"
-        trainer.test(dataloaders=dm, ckpt_path=ckpt_path)
+    if is_main_process():
+        if path_best_model:
+            del module
+            torch.cuda.empty_cache()
+            best_model = CLM.load_from_checkpoint(path_best_model, tokenizer=dm.tokenizer).cuda()
+        else:
+            torch.cuda.empty_cache()
+            best_model = module.cuda()
 
-    module.model.checkpoint_tested = "last"
-    trainer.test(dataloaders=dm, ckpt_path="last")
+        if args.eval_superni:
+            from eval_ni import eval_ni
 
-    logger.info(f"Best model path: {path_best_model}")
-    logger.info(f"Last model path: {path_last_model}")
+            logger.info("Evaluating on super NI")
+            rougel_ni_all = eval_ni(
+                args,
+                best_model,
+                nshot=2,
+                data_dir=os.environ["NI_DATA_DIR"],
+            )
+            rougel_ni = rougel_ni_all["all"]["mean"]
+            if wandb.run is not None:
+                wandb.log({"rouge_L_super_ni": rougel_ni})
+            if args.tensorboard:
+                tb_logger.experiment.add_scalar("tasks/sni", rougel_ni, trainer.global_step)
+            with open(os.path.join(args.output_dir, "sni_results.json"), "w") as f:
+                json.dump(rougel_ni_all, f, indent=2)
+            logger.info("SuperNI RougeL: {:.2f}".format(rougel_ni))
 
-    # load best model
-    if path_best_model:
-        del module
-        torch.cuda.empty_cache()
-        best_model = CLM.load_from_checkpoint(path_best_model, tokenizer=dm.tokenizer)
-    else:
-        torch.cuda.empty_cache()
-        best_model = module
+        if args.eval_mmlu:
+            from eval_mmlu import eval_mmlu
 
-    # empty memory
-    del (
-        dm,
-        loggers,
-        callbacks,
-        checkpoint_callback,
-        wandb_logger,
-        mlf_logger,
-    )
-
-    if args.eval_superni:
-        logger.info("Evaluating on super NI")
-        from eval_ni import eval_ni
-
-        rouge_L_super_ni = eval_ni(
-            args,
-            best_model,
-            nshot=2,
-            data_dir=os.environ["NI_DATA_DIR"],
-            eval_batches=args.eval_batches,
-        )
-        if wandb.run is not None:
-            wandb.log({"rouge_L_super_ni": rouge_L_super_ni})
-        tb_logger.experiment.add_scalar("tasks/sni", rouge_L_super_ni, trainer.global_step)
-        logger.info("SuperNI RougeL: {:.2f}".format(rouge_L_super_ni))
-
-    if args.eval_mmlu:
-        from eval_mmlu import eval_mmlu
-
-        logger.info("Evaluating on MMLU")
-        acc = eval_mmlu(
-            args,
-            best_model,
-            data_dir=os.environ["MMLU_DATA_DIR"],
-            eval_batches=args.eval_batches,
-        )
-        if wandb.run is not None:
-            wandb.log({"mmlu_acc": acc})
-        tb_logger.experiment.add_scalar("tasks/mmlu", acc, trainer.global_step)
-        logger.info("MMLU accuracy: {:.2f}".format(acc))
+            logger.info("Evaluating on MMLU")
+            em_mmlu_all = eval_mmlu(
+                args,
+                best_model,
+                data_dir=os.environ["MMLU_DATA_DIR"],
+            )
+            mmlu_em = em_mmlu_all["all"]["mean"]
+            if wandb.run is not None:
+                wandb.log({"mmlu_acc": mmlu_em})
+            if args.tensorboard:
+                tb_logger.experiment.add_scalar("tasks/mmlu", mmlu_em, trainer.global_step)
+            with open(os.path.join(args.output_dir, "mmlu_results.json"), "w") as f:
+                json.dump(em_mmlu_all, f, indent=2)
+            logger.info("MMLU accuracy: {:.2f}".format(mmlu_em))
 
 
 if __name__ == "__main__":

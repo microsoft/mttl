@@ -1,3 +1,4 @@
+import math
 import torch
 import copy
 import torch.nn as nn
@@ -13,6 +14,24 @@ from mttl.models.modifiers.routing import (
     get_selector,
     register_selector,
 )
+from projects.instr_routing.models.clm import AugmentedRoutingInfo
+
+
+class Metrics:
+    def __init__(self) -> None:
+        self.metrics = {}
+
+    def add(self, key, value):
+        self.metrics[key] = value.detach().cpu()
+
+    def __setitem__(self, key, value):
+        self.add(key, value)
+
+    def clear(self):
+        self.metrics.clear()
+
+    def items(self):
+        return self.metrics.items()
 
 
 @register_selector("smear")
@@ -22,26 +41,49 @@ class SMEARRouter(RoutingSelector):
 
         self.config = config
         self.in_d = in_d
+        self.n_skills = config.n_skills
         self.n_splits = config.n_splits
         self.temperature = config.router_temperature
+        self.normalize_weights = config.router_normalize_weights
         assert self.n_splits == 1
 
-        self.prior_router = nn.Linear(in_d, config.n_skills * self.n_splits)
+        # during generation we want to cache the input encoding
+        # because in successive generation steps, the input is going to be only the encoding for the last token
+        self._router_input_cache = None
+
+        self.prior_router = nn.Linear(in_d, config.n_skills * self.n_splits, bias=False)
         self.prior_router_ln = nn.LayerNorm(in_d)
         self.prior_router_ln.weight = nn.Parameter(torch.ones(in_d))
 
-    @property
-    def W_norm(self):
-        W = self.ff.weight
-        norm = torch.norm(W, p=1, keepdim=True)
-        return norm.item()
+        self.router_center_momentum = self.config.router_center_momentum
+        self.register_buffer("center", torch.zeros(1, self.n_skills))
 
-    def route(self, router: nn.Linear, layer_norm: nn.LayerNorm, x, ln=False):
-        if ln:
-            weights = layer_norm(router.weight)
+        self.metrics = Metrics()
+
+    @torch.no_grad()
+    def apply_center_update(self, routes):
+        if self.training:
+            self.center = (
+                self.center * (1 - self.router_center_momentum)
+                + torch.mean(routes, dim=0, keepdim=True) * self.router_center_momentum
+            )
+
+    def route_maybe_center(
+        self, input, router, router_ln, temperature=1.0, center=False
+    ):
+        """Computes routes for the teacher / posterior."""
+        input = router_ln(input)
+        if self.normalize_weights:
+            weights = router.weight / torch.norm(
+                router.weight, p=2, dim=-1, keepdim=True
+            )
+            routes = F.linear(input, weights, None)
         else:
-            weights = router.weight
-        return F.linear(x, weights, router.bias) / self.temperature
+            routes = F.linear(input, router.weight, None)
+        if center:
+            self.apply_center_update(routes)
+        # teacher centering and sharpening
+        return (routes - self.center) / temperature
 
     def apply_mask_and_average(self, x, padding_mask):
         x_rout = x * padding_mask.unsqueeze(-1).to(x.device)
@@ -49,13 +91,41 @@ class SMEARRouter(RoutingSelector):
         x_rout = x_rout.sum(dim=1) / lengths
         return x_rout
 
-    def forward(self, routing_infos, input: torch.Tensor):
-        inst_padding_mask = routing_infos.inst_token_mask
-        prior_input = self.apply_mask_and_average(input, inst_padding_mask)
-        prior_routes = self.route(self.prior_router, self.prior_router_ln, prior_input)
+    def _get_router_inputs(
+        self, input: torch.Tensor, routing_infos: AugmentedRoutingInfo
+    ):
+        """When generating, the successive forward calls only receive the last token (bs, 1, d).
+
+        Therefore, at the first forward call (context encoding), we need to cache the input encodings
+        so that we can use it to compute the prior routing probabilities.
+        """
+        router_input = routing_infos.inputs_cache_for_generation.get(self)
+        if router_input is None:
+            router_input = self.apply_mask_and_average(
+                input, routing_infos.inst_token_mask
+            )
+            # if in generation mode, cache the input encoding for the next forward calls
+            if routing_infos.generation_mode:
+                routing_infos.inputs_cache_for_generation[self] = router_input
+        return router_input
+
+    def forward(self, routing_infos: AugmentedRoutingInfo, input: torch.Tensor):
+        self.metrics.clear()
+
+        prior_input = self._get_router_inputs(input, routing_infos)
+        prior_routes = self.route_maybe_center(
+            prior_input,
+            self.prior_router,
+            self.prior_router_ln,
+            temperature=self.temperature,
+            center=self.router_center_momentum > 0.0,
+        )
+
         routing_probs = F.softmax(prior_routes, dim=-1)
-        auxiliary_loss = routing_probs.sum().detach() * 0.0
-        return routing_probs.unsqueeze(1), auxiliary_loss
+        h_pri = -(routing_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
+        self.routings = routing_probs.detach().cpu()
+        self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
+        return routing_probs.unsqueeze(1)
 
 
 @register_selector("vsmear")
@@ -63,34 +133,77 @@ class VSMEARRouter(SMEARRouter):
     def __init__(self, config, in_d):
         super().__init__(config, in_d)
 
-        self.post_router = nn.Linear(in_d, config.n_skills * self.n_splits)
-        self.post_router.bias.data.fill_(0)
-        self.post_router_ln = nn.LayerNorm(in_d)
-        self.post_router_ln.weight = nn.Parameter(torch.ones(self.in_d))
+        self.router_shared_weights = config.router_shared_weights
 
-    def forward(self, routing_infos, input: torch.Tensor):
+        if self.router_shared_weights:
+            self.post_router = self.prior_router
+            self.post_router_ln = self.prior_router_ln
+        else:
+            self.post_router = nn.Linear(
+                in_d, config.n_skills * self.n_splits, bias=False
+            )
+            self.post_router_ln = nn.LayerNorm(in_d)
+            self.post_router_ln.weight = nn.Parameter(torch.ones(in_d))
+
+        self.router_teacher_ent_factor = self.config.router_teacher_ent_factor
+        self.router_teacher_temperature = self.config.router_teacher_temperature
+        self.router_center_momentum = config.router_center_momentum
+
+    def get_posterior_input(self, input, routing_infos):
         padding_mask = routing_infos.pad_token_mask
-        inst_padding_mask = routing_infos.inst_token_mask
+        post_input = self.apply_mask_and_average(input, padding_mask)
+        return post_input
 
-        prior_input = self.apply_mask_and_average(input, inst_padding_mask)
-        prior_routes = self.route(self.prior_router, self.prior_router_ln, prior_input)
+    def forward(self, routing_infos: AugmentedRoutingInfo, input: torch.Tensor):
+        self.metrics.clear()
+
+        prior_input = self._get_router_inputs(input, routing_infos)
+
+        # do not center the student, center only the teacher now
+        prior_routes = self.route_maybe_center(
+            prior_input,
+            self.prior_router,
+            self.prior_router_ln,
+            temperature=self.temperature,
+            center=False,
+        )
 
         if self.training:
             # during training :-)
-            post_input = self.apply_mask_and_average(input, padding_mask)
-            post_routes = self.route(self.post_router, self.post_router_ln, post_input)
-            routing_probs = F.softmax(post_routes, dim=-1)
+            assert (
+                routing_infos.generation_mode is False
+            ), "We are not expecting to be in generation mode during training."
+
+            post_input = self.get_posterior_input(input, routing_infos)
+            post_routes = self.route_maybe_center(
+                post_input,
+                self.post_router,
+                self.post_router_ln,
+                temperature=self.router_teacher_temperature,
+                center=self.router_center_momentum > 0.0,
+            )
+            post_probs = routing_probs = F.softmax(post_routes, dim=-1)
+            prior_probs = F.softmax(prior_routes, dim=-1)
 
             # compute auxiliary loss (KL divergence), KL = - H(posterior) + Xent(posterior, prior)
-            auxiliary_loss = routing_probs * F.log_softmax(
-                post_routes, -1
-            ) - routing_probs * F.log_softmax(prior_routes, dim=-1)
-            auxiliary_loss = auxiliary_loss.sum(dim=-1).mean()
+            h_post = -(post_probs * F.log_softmax(post_routes, -1)).sum(1).mean()
+            h_pri = -(prior_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
+            x_ent = -(post_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
+
+            self.routings = post_probs.detach().cpu()
+            self.metrics["h_post"] = h_post / math.log(self.n_skills)
+            self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
+            self.metrics["x_ent"] = x_ent
+            self.auxiliary_loss = -self.router_teacher_ent_factor * h_post + x_ent
         else:
             # during eval :-(
-            routing_probs = F.softmax(prior_routes, dim=-1)
-            auxiliary_loss = routing_probs.sum().detach() * 0.0
-        return routing_probs.unsqueeze(1), auxiliary_loss
+            prior_probs = routing_probs = F.softmax(prior_routes, dim=-1)
+            h_pri = -(prior_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
+
+            self.routings = prior_probs.detach().cpu()
+            self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
+            self.auxiliary_loss = h_pri.sum() * 0.0
+        return routing_probs.unsqueeze(1)
 
 
 class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
@@ -103,25 +216,7 @@ class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
         else:
             self.selector = selector
 
-        self._losses = []
-        self._metrics = {}
-
-    @property
-    def losses(self):
-        return self._losses
-
-    @property
-    def metrics(self):
-        return self._metrics
-
-    def clear(self):
-        self._losses.clear()
-        self._metrics.clear()
-
     def forward(self, input):
-        # Need to clear losses and metrics before forward pass!
-        self.clear()
-
         task_id = self.routing_infos.task_ids
         repeat = input.size(0) // task_id.size(0)
 
@@ -131,17 +226,11 @@ class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
 
         if self.selector is not None:
             mixing_weights = self.selector(self.routing_infos, input=input)
-
-            if isinstance(mixing_weights, tuple):
-                mixing_weights, kl = mixing_weights
-                self._losses.append(kl)
         else:
             bs = input.size(0)
             mixing_weights = torch.ones(
                 bs, self.n_splits, self.n_skills, device=input.device, dtype=input.dtype
             )
-
-        self._metrics["routing"] = mixing_weights.detach().cpu().float()
         return SkilledLoRA.forward(self, input, mixing_weights)
 
 

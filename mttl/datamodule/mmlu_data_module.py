@@ -1,4 +1,6 @@
+import numpy as np
 import torch
+import pkg_resources
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 
@@ -9,6 +11,7 @@ from typing import Union, Optional
 from datasets import load_dataset
 from dataclasses import dataclass
 
+from mttl.utils import logger
 from mttl.datamodule.utils import get_tokenizer
 from mttl.datamodule.collators import DefaultCollator
 
@@ -40,7 +43,10 @@ class DataCollatorForMMLU(DefaultCollator):
             )
             input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids
 
-            while input_ids.shape[-1] > self.max_input_length and len(instance["Positive Examples"].split("\n\n")) > 2:
+            while (
+                input_ids.shape[-1] > self.max_input_length
+                and len(instance["Positive Examples"].split("\n\n")) > 2
+            ):
                 instance["Positive Examples"] = (
                     "\n\n".join(instance["Positive Examples"].split("\n\n")[:-2])
                     + "\n\n"
@@ -65,7 +71,9 @@ class DataCollatorForMMLU(DefaultCollator):
         task_names = [instance["Task"] for instance in batch]
         output_batch["task_names"] = task_names
         if self.task_to_id is not None:
-            output_batch["task_ids"] = torch.LongTensor([self.task_to_id[task] for task in task_names])
+            output_batch["task_ids"] = torch.LongTensor(
+                [self.task_to_id[task] for task in task_names]
+            )
 
         output_batch["labels_texts"] = labels
         return output_batch
@@ -83,22 +91,32 @@ class MMLUDataModule(LightningDataModule):
             collate_fn=self.collate_fn,
         )
 
-    def val_dataloader(self, shuffle=False):
+    def val_dataloader(self):
         return DataLoader(
             self.dev_dataset,
             batch_size=self.config.predict_batch_size,
-            shuffle=shuffle,
+            shuffle=False,
             num_workers=16,
             pin_memory=True,
             persistent_workers=True,
             collate_fn=self.collate_fn,
         )
 
-    def test_dataloader(self, shuffle=False):
+    def test_dataloader(self, subsample=-1):
+        if subsample > 0:
+            from mttl.datamodule import take_n_examples_per_task
+
+            indices = take_n_examples_per_task(
+                list(self.test_dataset["Task"]), n=subsample, rng=self.rng
+            )
+            test_dataset = self.test_dataset.select(indices)
+        else:
+            test_dataset = self.test_dataset
+
         return DataLoader(
-            self.test_set,
+            test_dataset,
             batch_size=self.config.predict_batch_size,
-            shuffle=shuffle,
+            shuffle=False,
             num_workers=16,
             pin_memory=True,
             persistent_workers=True,
@@ -112,25 +130,20 @@ class MMLUDataModule(LightningDataModule):
         self.config = config
         self.for_generation = for_generation
         self.tokenizer = get_tokenizer(config)
-        self._setup()
+        self.rng = np.random.RandomState(config.seed)
+        self.setup_dataset()
 
-    def get_dataset(self):
-        import pkg_resources
-
-        filename = pkg_resources.resource_filename(__name__, "../dataloader/mmlu_dataset.py")
-        return load_dataset(filename, data_dir=self.data_dir)
-
-    def setup(self, stage=None):
-        pass
-
-    def _setup(self):
-        dataset = self.get_dataset()
+    def setup_dataset(self, stage=None):
+        filename = pkg_resources.resource_filename(
+            __name__, "../dataloader/mmlu_dataset.py"
+        )
+        dataset = load_dataset(filename, data_dir=self.data_dir)
 
         task_to_id = set(dataset["train"]["Task"])
         task_to_id = task_to_id.union(set(dataset["validation"]["Task"]))
         task_to_id = task_to_id.union(set(dataset["test"]["Task"]))
-        self.task_to_id = {task: i for i, task in enumerate(task_to_id)}
 
+        self.task_to_id = {task: i for i, task in enumerate(task_to_id)}
         self.collate_fn = DataCollatorForMMLU(
             tokenizer=self.tokenizer,
             padding="longest",
@@ -143,10 +156,10 @@ class MMLUDataModule(LightningDataModule):
         )
 
         self.train_dataset = dataset["train"]
-        self.test_set = self.dev_dataset = dataset["test"]
+        self.test_dataset = self.dev_dataset = dataset["test"]
 
-        print("Training steps:", len(self.train_dataloader()))
-        print("Validation steps:", len(self.val_dataloader()))
+        logger.info("Training examples: {}".format(len(self.train_dataset)))
+        logger.info("Test examples: {}".format(len(self.test_dataset)))
 
 
 if __name__ == "__main__":

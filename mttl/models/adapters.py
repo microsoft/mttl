@@ -4,7 +4,12 @@ import math
 
 
 class Adapter(nn.Module):
-    pass
+    @property
+    def layer_name(self):
+        if not hasattr(self, '__layer_name__'):
+            raise ValueError("Layer name not set, dependency injection not done properly?")
+
+        return self.__layer_name__
 
 
 class LoRA(Adapter):

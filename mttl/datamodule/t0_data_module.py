@@ -54,7 +54,7 @@ class T0FinetuneDataModule(LightningDataModule):
         )
 
         self.dataset_reader = get_dataset_reader(config)
-        self.task2id = {config.finetune_task_name: 0}
+        self.task_to_id = {config.finetune_task_name: 0}
 
     def prepare_data(self):
         # download, split, etc...
@@ -206,8 +206,8 @@ class T0PretrainDataModule(LightningDataModule):
         self.dataset_reader = get_dataset_reader(config)
         self.base_templates = self.dataset_reader.get_template()
         self.base_tasks = self.dataset_reader.get_base_tasks()
-        self.task2id = {t: i for i, t in enumerate(self.base_tasks)}
-        self.id2task = dict((k, v) for v, k in self.task2id.items())
+        self.task_to_id = {t: i for i, t in enumerate(self.base_tasks)}
+        self.id_to_task = dict((k, v) for v, k in self.task_to_id.items())
         self.flatten_templates = flatten_templates
 
     @property
@@ -233,11 +233,11 @@ class T0PretrainDataModule(LightningDataModule):
             self.train_datasets, self.base_templates
         ):
             if self.dataset_reader.config.use_t0_templates_as_tasks:
-                task_id = self.task2id[
+                task_id = self.task_to_id[
                     f"{train_dataset.dataset_name}/{train_dataset.subset_name}/{train_dataset.template_name}"
                 ]
             else:
-                task_id = self.task2id[
+                task_id = self.task_to_id[
                     f"{train_dataset.dataset_name}/{train_dataset.subset_name}"
                 ]
 

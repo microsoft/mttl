@@ -7,6 +7,7 @@ from typing import List
 import re
 
 from mttl.models.adapters import Adapter
+from mttl.utils import logger
 
 
 SELECTORS = {}
@@ -80,25 +81,6 @@ class RouterWrapper:
                     )
 
     @classmethod
-    def get_routing_losses(cls, object):
-        aux_losses = {}
-
-        for name, adapter in object.get_adapters().items():
-            if getattr(adapter, "losses", None):
-                aux_losses[name] = adapter.losses
-        return aux_losses
-
-    @classmethod
-    def get_routing_metrics(cls, object):
-        metrics = {}
-
-        for name, adapter in object.get_adapters().items():
-            if getattr(adapter, "metrics", None):
-                for n, v in adapter.metrics.items():
-                    metrics[name + "." + n] = v
-        return metrics
-
-    @classmethod
     def get_adapters(cls, object):
         adapters = {}
         for n, m in object.named_modules():
@@ -120,7 +102,12 @@ class RouterWrapper:
 
 
 class RoutingSelector(nn.Module):
-    pass
+    @property
+    def layer_name(self):
+        if not hasattr(self, '__layer_name__'):
+            raise ValueError("Layer name not available, dependency injection not done properly?")
+
+        return self.__layer_name__
 
 
 @register_selector("average")
@@ -161,13 +148,14 @@ class RoutingInfo:
     labels: torch.Tensor = None
 
     @classmethod
-    def from_batch(cls, batch: dict):
+    def from_batch(cls, batch: dict, **kwargs):
         ri = cls(
             task_ids=batch.get("task_ids", None),
             hashes=batch.get("hashes", None),
             example_ids=batch.get("example_ids", None),
             instruction_hashes=batch.get("instruction_hashes", None),
             labels=batch.get("labels", None),
+            **kwargs,
         )
         return ri
 
@@ -227,19 +215,23 @@ def modify_with_routing(transformer, config, layer_type, optional_wrapper=None):
         if re.fullmatch(config.modify_modules, m_name):
             for c_name, layer in dict(module.named_children()).items():
                 if re.fullmatch(config.modify_layers, c_name):
+                    layer_name = f"{m_name}.{c_name}"
+
                     identifier = _extract_identifier(
                         f"{m_name}.{c_name}", config.router_granularity
                     )
+
                     if identifier not in selectors.keys():
                         selectors[identifier] = get_selector(
                             config,
                             in_d=layer.in_features,
                         )
+                        selectors[identifier].__layer_name__ = layer_name + ".selector"
 
                     selector = selectors[identifier]
                     total_layers += 1
 
-                    print(f"Patching {m_name}.{c_name}...")
+                    logger.info(f"Patching {m_name}.{c_name}...")
 
                     wrapper = layer_type(
                         config,
