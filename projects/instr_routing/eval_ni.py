@@ -25,20 +25,39 @@ def eval_ni(
         data_dir=data_dir or config.data_dir,
         num_pos_examples=nshot
     )
-    metrics = ni_evaluator.evaluate(model,subsample)
+    metrics = ni_evaluator.evaluate(model, subsample=subsample)
     torch.cuda.empty_cache()
     return metrics
 
 
 if __name__ == "__main__":
-    from huggingface_hub import login
-
+    from huggingface_hub import login  
+    
+    # check with loading
     config = RoutingConfig.parse(c="/home/v-oostapenko/dev/mttl/projects/instr_routing/configs/alpaca/llama1_7b_vsmear.json")
-
-    login(token=os.environ["HUGGING_FACE_HUB_TOKEN"])
+    login(token=os.environ["HF_TOKEN"])
     config.data_dir = os.environ["NI_DATA_DIR"]
     dm = AlpacaDataModule(config)
     path_best_model = "/home/v-oostapenko/dev/mttl/tmp/instruction_learning/yahma_llama-7b-hf0qx192oq_None-val/loss=1.4099.ckpt"
     best_model = CLM.load_from_checkpoint(path_best_model, tokenizer=dm.tokenizer).cuda()
-      
-    print(eval_ni(config, best_model, nshot=0, subsample=10))
+    config = RoutingConfig.parse()
+    print(eval_ni(config, best_model, nshot=2, subsample=50))
+    
+    
+    login(token=os.environ["HF_TOKEN"])
+    config = RoutingConfig.parse(extra_kwargs={"eval_superni": True})
+    config.model = "meta-llama/Llama-2-7b-hf"
+    config.load_in_8bit = True
+    config.model_family = "gpt"
+    config.data_dir = os.environ["NI_DATA_DIR"]
+    config.predict_batch_size = 2
+    config.max_input_length = 4096
+    config.max_output_length = 128
+
+    model = AutoModelForCausalLM.from_pretrained(
+        config.model,
+        load_in_8bit=config.load_in_8bit,
+        device_map="auto"
+    )
+
+    print(eval_ni(config, model, nshot=2, subsample=50))
