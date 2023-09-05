@@ -33,15 +33,14 @@ def eval_ni(
 if __name__ == "__main__":
     from huggingface_hub import login  
     
-    # check with loading
+    # check with loading      
     config = RoutingConfig.parse(c="/home/v-oostapenko/dev/mttl/projects/instr_routing/configs/alpaca/llama1_7b_vsmear.json")
     login(token=os.environ["HF_TOKEN"])
     config.data_dir = os.environ["NI_DATA_DIR"]
     dm = AlpacaDataModule(config)
     path_best_model = "/home/v-oostapenko/dev/mttl/tmp/instruction_learning/yahma_llama-7b-hf0qx192oq_None-val/loss=1.4099.ckpt"
     best_model = CLM.load_from_checkpoint(path_best_model, tokenizer=dm.tokenizer).cuda()
-    config = RoutingConfig.parse()
-    print(eval_ni(config, best_model, nshot=2, subsample=50))
+    print(eval_ni(config, best_model, nshot=2, subsample=10))
     
     
     login(token=os.environ["HF_TOKEN"])
