@@ -19,8 +19,6 @@ def modify_transformer(transformer, config):
     import mttl.models.modifiers.lora  # noqa: F401
     import mttl.models.modifiers.poly  # noqa: F401
     import mttl.models.modifiers.routing  # noqa: F401
-    import projects.instr_routing.models.vsmear  # noqa: F401
-    import projects.instr_routing.models.softmoe  # noqa: F401
 
     # create a shared container for the task id 
     transformer.task_id_container = {}
