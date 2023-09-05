@@ -15,7 +15,7 @@
     "eval_every":400, 
     "num_train_epochs":3,
 
-    "model_modifier": "vsmear_xr1",
+    "model_modifier": "vsmear_xr4",
     "modify_modules": ".*attn.*",       
     "modify_layers": "q_proj|v_proj|k_proj",   
     "trainable_param_names": ".*lora_[ab].*|.*selector.*",

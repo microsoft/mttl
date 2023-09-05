@@ -6,7 +6,7 @@ class RoutingConfig(Config):
     def _set_defaults(self):
         super()._set_defaults()
               
-        self.merge_after_op= False
+        self.merge_after_op= False # if true, vsmear/SkilledLoRA_MergeLoraAfterOP will merge loras after the outer product. Will require more memory.
 
         self.micro_batch_size = 4
         self.load_in_8bit = False

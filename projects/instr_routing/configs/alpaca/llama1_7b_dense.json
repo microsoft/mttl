@@ -18,10 +18,6 @@
     "model_modifier": "lora",
     "modify_modules": ".*attn.*",       
     "modify_layers": "q_proj|v_proj|k_proj",   
-    "trainable_param_names": ".*lora_[ab].*|.*selector.*",
-        
-    "eval_hellaswag": 0,
-    "eval_arc": 0, 
-    "eval_truthfulqa": 0
+    "trainable_param_names": ".*lora_[ab].*|.*selector.*"
 
 }
