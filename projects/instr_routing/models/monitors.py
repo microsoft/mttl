@@ -2,7 +2,9 @@ from typing import Any, Optional
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 import torch
 import math
-
+import wandb
+import pytorch_lightning as pl
+import matplotlib.pyplot as plt
 from torch.distributions import Categorical
 from pytorch_lightning import Callback
 
@@ -14,9 +16,10 @@ from collections import defaultdict
 class SelectorRoutingsLog(Callback):
     ACC_OVER = 10
 
-    def __init__(self):
+    def __init__(self, args):
         self.averager = Averager(0.5)
         self.acc_routings = {}
+        self.log_per_layer = args.selector_log_per_layer
 
     def aggregate_and_maybe_log(self, trainer, pl_module, current_step, split) -> None:
         # get routing attributes of all layers
@@ -30,12 +33,14 @@ class SelectorRoutingsLog(Callback):
             return
 
         if current_step % self.ACC_OVER == 0 and trainer.global_step > 0:
-            layer_stats = []
-
+            layer_stats, layer_names = [], []
             for name, stats in self.acc_routings.items():
+                layer_names.append(name)
                 layer_routing_dist = torch.cat(stats, dim=0)
                 batch_size = layer_routing_dist.size(0)
-                layer_routing_dist = layer_routing_dist.view(batch_size, -1)
+                layer_routing_dist = layer_routing_dist.view(
+                    batch_size, -1
+                )  # TODO: wopuld it also work fine for multihead routing?
                 dims = layer_routing_dist.shape[1]
                 layer_routing_mean = layer_routing_dist.mean(0)
                 h_mean = Categorical(probs=layer_routing_mean).entropy() / math.log(
@@ -54,7 +59,9 @@ class SelectorRoutingsLog(Callback):
                 )
 
             global_stats = agg_dicts(layer_stats)
-            global_stats = self.averager.update({**global_stats})
+            global_stats = self.averager.update(
+                {**global_stats}
+            )  # average accross layers of the metrics
 
             for k, v in global_stats.items():
                 pl_module.log(
@@ -64,6 +71,31 @@ class SelectorRoutingsLog(Callback):
                     sync_dist=True,
                     prog_bar=True,
                 )
+            if (
+                self.log_per_layer
+                and wandb.run is not None
+                and split == "val"
+                and not isinstance(pl_module.loggers[0], pl.loggers.logger.DummyLogger)
+            ):
+                wandb_logger = [
+                    lgr
+                    for lgr in pl_module.loggers
+                    if isinstance(lgr, pl.loggers.wandb.WandbLogger)
+                ][0]
+                for mertric in global_stats.keys():
+                    plt.clf()
+                    metric_dict = {
+                        name: stat[mertric]
+                        for name, stat in zip(layer_names, layer_stats)
+                    }
+                    values = metric_dict.values()
+                    _ = plt.plot(range(len(values)), values)
+                    wandb_logger.log_image(
+                        f"{split}/{mertric}_per_layer",
+                        [wandb.Image(plt)],
+                        step=pl_module.global_step,
+                    )
+                    plt.clf()
 
             self.acc_routings.clear()
 
