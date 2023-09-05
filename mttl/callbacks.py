@@ -5,8 +5,6 @@ from typing import Any
 
 from pytorch_lightning import callbacks as cb
 from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
-from pytorch_lightning.utilities.types import STEP_OUTPUT
-from torch.utils.data import DataLoader
 
 
 from mttl.utils import Averager, logger
@@ -36,12 +34,11 @@ class MMLUCallback(cb.Callback):
         )
         metrics = evaluator.evaluate(
             pl_module,
-            metric_per_task=True,
-            eval_batches=200,
+            subsample=10,
         )
         pl_module.log(
             "val/mmlu",
-            metrics["exact_match"]["all"],
+            metrics["all"]["mean"],
             on_step=False,
             on_epoch=True,
             prog_bar=True,
@@ -73,12 +70,11 @@ class NICallback(cb.Callback):
         )
         metrics = evaluator.evaluate(
             pl_module,
-            metric_per_task=True,
             eval_batches=50,
         )
         pl_module.log(
             "val/sni",
-            metrics["rougeL"]["all"],
+            metrics["all"]["mean"],
             on_step=False,
             on_epoch=True,
             prog_bar=True,
@@ -112,9 +108,7 @@ class MiniProgress(cb.ProgressBar):
         eta = (trainer.num_training_batches - batch_idx) / (
             1.0 / ((self.time_end - self.time_start))
         )
-        time_metrics = self.averager.update(
-            {"it/s": it_per_sec, "eta": eta}
-        )
+        time_metrics = self.averager.update({"it/s": it_per_sec, "eta": eta})
         for k, v in {**metrics, **time_metrics}.items():
             if k == "eta":
                 metrics[k] = "{}".format(datetime.timedelta(seconds=v))
@@ -122,7 +116,7 @@ class MiniProgress(cb.ProgressBar):
                 metrics[k] = "{:.2f}".format(v) if isinstance(v, float) else v
 
         msg_start = (
-            f"Trn - Epc {trainer.current_epoch} / {batch_idx} / {trainer.num_training_batches}"
+            f"Trn - Epc {trainer.current_epoch} / {trainer.global_step} / {trainer.num_training_batches // trainer.accumulate_grad_batches}"
             + " | "
         )
         dict_msg = " | ".join([f"{k} -> {v}" for k, v in metrics.items()]) + " | "

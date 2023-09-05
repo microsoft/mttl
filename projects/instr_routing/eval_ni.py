@@ -24,9 +24,9 @@ def eval_ni(
         data_dir=data_dir or config.data_dir,
         num_pos_examples=nshot
     )
-    metrics = ni_evaluator.evaluate(model, metric_per_task=True, eval_batches=eval_batches)
+    metrics = ni_evaluator.evaluate(model, eval_batches=eval_batches)
     torch.cuda.empty_cache()
-    return metrics["rougeL"]["all"]
+    return metrics
 
 
 if __name__ == "__main__":

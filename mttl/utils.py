@@ -35,16 +35,14 @@ def label_smoothed_nll_loss(
     """From fairseq"""
     if target.dim() == lprobs.dim() - 1:
         target = target.unsqueeze(-1)
+
+    pad_mask = target.eq(ignore_index)
+    # because otherwise we gather -100 :-(
+    target.masked_fill_(pad_mask, 0)
     nll_loss = -lprobs.gather(dim=-1, index=target)
     smooth_loss = -lprobs.sum(dim=-1, keepdim=True)
-
-    if ignore_index is not None:
-        pad_mask = target.eq(ignore_index)
-        nll_loss.masked_fill_(pad_mask, 0.0)
-        smooth_loss.masked_fill_(pad_mask, 0.0)
-    else:
-        nll_loss = nll_loss.squeeze(-1)
-        smooth_loss = smooth_loss.squeeze(-1)
+    nll_loss.masked_fill_(pad_mask, 0.0)
+    smooth_loss.masked_fill_(pad_mask, 0.0)
 
     if reduction == "mean":
         nll_loss = nll_loss.sum()
@@ -125,11 +123,14 @@ def get_example_to_ids(filename):
 class Averager:
     def __init__(self, weight: float = 1):
         self.weight = weight
-        self.total = defaultdict(float)
+        self.total = {}
 
     def update(self, stats):
         for key, value in stats.items():
-            self.total[key] = self.total[key] * self.weight + value * (1 - self.weight)
+            if key not in self.total:
+                self.total[key] = value
+            else:
+                self.total[key] = self.total[key] * self.weight + value * (1 - self.weight)
         return self.total
 
 
@@ -325,23 +326,23 @@ def get_checkpoint_path(path, step=None, use_last=False):
     return path
 
 
-def setup_logging(log_dir):
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-
+def setup_logging(log_dir: str = None):
     logging.basicConfig(
-        format="%(asctime)s %(levelname)s %(message)s",
+        format="%(asctime)s %(levelname)s --> %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO,
     )
     logger.setLevel(logging.INFO)
-    logger.addHandler(logging.FileHandler(os.path.join(log_dir, "log.txt")))
-
     logging.getLogger("openai").setLevel(logging.WARNING)
-    logger.info(
-        "New experiment, log will be at %s",
-        os.path.join(log_dir, "log.txt"),
-    )
+
+    if log_dir:
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        logger.addHandler(logging.FileHandler(os.path.join(log_dir, "log.txt")))
+        logger.info(
+            "New experiment, log will be at %s",
+            os.path.join(log_dir, "log.txt"),
+        )
 
 
 class MemEfficientLoRA(Function):

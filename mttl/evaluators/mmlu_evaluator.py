@@ -7,6 +7,7 @@ import pytorch_lightning as pl
 
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.models.utils import transfer_batch_to_device
+from mttl.evaluators.base import compute_task_aggregation
 
 
 class MMLUEvaluator(object):
@@ -26,7 +27,7 @@ class MMLUEvaluator(object):
         )
         self.datamodule.setup("test")
 
-    def evaluate(self, model, metric_per_task=True, eval_batches=-1):
+    def evaluate(self, model, subsample=-1):
         was_train = model.training
         if was_train:
             model.eval()
@@ -43,14 +44,10 @@ class MMLUEvaluator(object):
         task_names = []
         all_EM = []
 
-        dataloader = self.datamodule.test_dataloader(shuffle=eval_batches > 0)
-
-        if eval_batches == -1:
-            eval_batches = len(dataloader)
-        
+        dataloader = self.datamodule.test_dataloader(subsample)
         pbar = tqdm.tqdm(
             enumerate(dataloader),
-            total=min(len(dataloader), eval_batches),
+            total=len(dataloader),
         )
         for step, batch in pbar:
             task_name = batch.pop("task_names", None)
@@ -126,37 +123,10 @@ class MMLUEvaluator(object):
                 f"Task: {task_name[0] if task_name else None}, EM: {np.mean(all_EM):.4f}"
             )
 
-            if step == eval_batches:
-                break
+        if was_train:
+            model.train()
 
         eval_metrics = compute_metrics(
             all_predictions, [[r] for r in all_references], reduction="none"
         )
-        mean_metrics = {}
-        for metric_name, metric_value in eval_metrics.items():
-            metric_value = sum(eval_metrics[metric_name]) / len(
-                eval_metrics[metric_name]
-            )
-            mean_metrics[metric_name] = metric_value
-
-        if metric_per_task:
-            metric_values_all = {}
-
-            for metric_name in eval_metrics.keys():
-                metric_values = defaultdict(list)
-                for task_name, v in zip(task_names, eval_metrics[metric_name]):
-                    metric_values[task_name] += [v]
-                metric_values["all"] = [mean_metrics[metric_name]]
-                metric_values = {
-                    task_name: sum(vs) / len(vs)
-                    for task_name, vs in metric_values.items()
-                }
-                metric_values_all[metric_name] = metric_values
-            metric_values = metric_values_all
-        else:
-            metric_values = mean_metrics
-
-        if was_train:
-            was_train = True
-            model.train()
-        return metric_values
+        return compute_task_aggregation(task_names, eval_metrics["exact_match"])

@@ -18,21 +18,26 @@ class RoutingConfig(Config):
         # scale the output a bit
         self.lora_alpha = 16
 
-        self.router_weight_decay = None
-        self.router_learning_rate = None
-        self.router_temperature = 1.
+        self.router_weight_decay = None  # weight decay for the routing parameters
+        self.router_learning_rate = None  # learning rate of the routing parameters
+        self.router_temperature = 1.0  # temperature of router for softmax
+        self.router_teacher_temperature = (
+            1.0  # temperature of router for teacher softmax
+        )
+        self.router_normalize_weights = (
+            False  # l2 normalize cluster centroids before routing
+        )
+        self.router_teacher_ent_factor = 1.  # factor for the posterior entropy term in the vsmear router
+        self.router_center_momentum = 0.   # centering momentum a-la DINO_v2, if 0. don't use centering
+        self.router_shared_weights = True  # share weights between teacher and student
 
         self.fast_dev_run = False
         self.hf_token_hub = None
         self.validation_portion = 0.03
 
-        self.eval_hellaswag = True
-        self.eval_arc = True
-        self.eval_truthfulqa = True
-        self.eval_superni = True
-        self.eval_mmlu = True
+        self.eval_superni = False
+        self.eval_mmlu = False
         self.eval_batches = -1
-        self.gen_alpaca_eval = False
 
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")

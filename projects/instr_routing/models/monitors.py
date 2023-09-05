@@ -15,7 +15,7 @@ class SelectorRoutingsLog(Callback):
     ACC_OVER = 10
 
     def __init__(self):
-        self.averager = Averager(0.9)
+        self.averager = Averager(0.5)
         self.acc_routings = {}
 
     def aggregate_and_maybe_log(self, trainer, pl_module, current_step, split) -> None:
@@ -60,7 +60,6 @@ class SelectorRoutingsLog(Callback):
                 pl_module.log(
                     f"{split}/{k}",
                     v,
-                    on_epoch=True,
                     on_step=True,
                     sync_dist=True,
                     prog_bar=True,
@@ -87,7 +86,7 @@ class SelectorRoutingsLog(Callback):
 
 class SelectorMetricsLog(Callback):
     def __init__(self):
-        self.averager = Averager(weight=0.9)
+        self.averager = Averager(weight=0.5)
         self.metrics = {}
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:
@@ -97,16 +96,14 @@ class SelectorMetricsLog(Callback):
                 self.metrics[name] = module.metrics
 
         layer_stats = list(self.metrics.values())
-        global_stats = agg_dicts(layer_stats)
-        max_stats = agg_dicts(layer_stats, "max", tag=True)
-        min_stats = agg_dicts(layer_stats, "min", tag=True)
 
-        global_stats = self.averager.update({**global_stats, **max_stats, **min_stats})
+        global_stats = agg_dicts(layer_stats)
+        global_stats = self.averager.update(global_stats)
+
         for k, v in global_stats.items():
             pl_module.log(
                 f"train/{k}",
                 v,
-                on_epoch=True,
                 on_step=True,
                 sync_dist=True,
                 prog_bar=True,

@@ -3,7 +3,7 @@ import numpy as np
 import math
 from torch.distributions import Bernoulli, Categorical
 from pytorch_lightning import Callback
-from mttl.utils import average_dicts
+from mttl.utils import agg_dicts
 
 
 def get_monitors(config):
@@ -60,7 +60,7 @@ class PolytroponLog(Callback):
 
             # average over layers
             if len(stats[coder]):
-                stats[coder] = average_dicts(stats[coder])
+                stats[coder] = agg_dicts(stats[coder])
 
                 for k, v in stats[coder].items():
                     pl_module.log(
