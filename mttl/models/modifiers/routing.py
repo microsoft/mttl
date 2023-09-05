@@ -133,10 +133,10 @@ class PrivateSelector(RoutingSelector):
     def __init__(self, config, **kwargs):
         super().__init__()
 
-        self.n_skills = config.n_skills
+        self.n_tasks = config.n_tasks
 
     def forward(self, routing_infos, **kwargs):
-        return F.one_hot(routing_infos.task_ids, num_classes=self.n_skills).unsqueeze(1)
+        return F.one_hot(routing_infos.task_ids, num_classes=self.n_tasks).unsqueeze(1)
 
 
 @dataclass

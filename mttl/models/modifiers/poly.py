@@ -128,6 +128,9 @@ class PolyLoRA(SkilledLoRA, RoutingMixin):
             self.routing_infos.repeat_interleave(repeat)
 
         mixing_weights = self.selector(self.routing_infos).to(dtype=input.dtype)
+        # add n_splits dimension
+        if mixing_weights.ndim == 2:
+            mixing_weights = mixing_weights.unsqueeze(1)
         return SkilledLoRA.forward(self, input, mixing_weights)
 
 
@@ -140,3 +143,17 @@ def modify_with_poly_ia3(transformer, config):
         return modify_with_routing(transformer, config, PolyLoRA, SkillWrapper)
     else:
         raise NotImplementedError(f"Poly modifier not implemented for adapter {config.adapter_type}.")
+
+
+@register_modifier("skilled")
+def modify_with_poly_ia3(transformer, config):
+    # setting router_selector to private
+    config.router_selector = "private"
+    config.adapter_type = config.adapter_type or "lora"
+    # setting n_skills to n_tasks in case of skilled modifier
+    config.n_skills = config.n_tasks
+
+    if config.adapter_type == "lora":
+        return modify_with_routing(transformer, config, PolyLoRA, SkillWrapper)
+    else:
+        raise NotImplementedError(f"Skilled modifier not implemented for adapter {config.adapter_type}.")
