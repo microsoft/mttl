@@ -40,7 +40,7 @@ class WikiMMLUDataCollator:
         sources = []
         for instance in batch:
             split_text = instance["text"].split(" ")
-            if len(split_text) < num_words:
+            if len(split_text) <= num_words:
                 sources.append(" ".join(split_text))
             else:
                 split_point = self.rng.randint(0, len(split_text) - num_words)
