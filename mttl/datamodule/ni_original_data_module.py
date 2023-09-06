@@ -316,12 +316,15 @@ class NIOriginalDataModule(LightningDataModule):
             validation_tasks = set(dataset["validation"]["Task"])
             test_tasks = set(dataset["test"]["Task"])
             all_tasks = train_tasks.union(validation_tasks).union(test_tasks)
-            self.task_to_id = {task: i for i, task in enumerate(all_tasks)}
+
+            self.task_names = list(sorted(all_tasks)))
+            self.task_to_id = {task: i for i, task in enumerate(self.task_names)}
             self.train_dataset = dataset["train"]
             self.val_dataset = dataset["validation"]
             self.test_dataset = dataset["test"]
         else:
             # take only the examples from the task we want to finetune on.
+            self.task_names = [self.config.finetune_task_name]
             self.task_to_id = {self.config.finetune_task_name: 0}
             train_indices = np.where(
                 np.array(dataset["train"]["Task"]) == self.config.finetune_task_name

@@ -149,11 +149,13 @@ class MMLUDataModule(LightningDataModule):
         )
         dataset = load_dataset(filename, data_dir=self.data_dir)
 
-        task_to_id = set(dataset["train"]["Task"])
-        task_to_id = task_to_id.union(set(dataset["validation"]["Task"]))
-        task_to_id = task_to_id.union(set(dataset["test"]["Task"]))
+        task_names = set(dataset["train"]["Task"])
+        task_names = task_to_id.union(set(dataset["validation"]["Task"]))
+        task_names = task_to_id.union(set(dataset["test"]["Task"]))
 
-        self.task_to_id = {task: i for i, task in enumerate(task_to_id)}
+        self.task_names = sorted(list(task_names))
+        self.task_to_id = {task: i for i, task in enumerate(task_names)}
+
         self.collate_fn = DataCollatorForMMLU(
             tokenizer=self.tokenizer,
             padding="longest",
