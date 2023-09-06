@@ -43,10 +43,6 @@ class PlatypusModule(LightningDataModule):
             collate_fn=self.collate_fn,
         )
 
-    @property
-    def all_instructions(self):
-        return self.dataset.read_all_instructions()
-
     def __init__(self, config):
         super().__init__()
 
