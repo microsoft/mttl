@@ -71,45 +71,42 @@ class WikiMMLUDataCollator:
 
 
 class TaskSampler(torch.utils.data.sampler.Sampler):
-    def __init__(self, dataset, task_names, batch_size, num_tasks_per_batch=1):
+    def __init__(self, dataset, task_names, batch_size, num_tasks_per_batch=1, rng=None):
         self.dataset = dataset
         self.batch_size = batch_size
-        self.tasks = task_names
         self.num_tasks_per_batch = num_tasks_per_batch
-        self.datasets = []
-        self.num_tasks = len(set(task_names))
-        self.tasks_to_ids_d = {task: i for i, task in enumerate(set(task_names))}
         self.num_examples = len(self.dataset)
-        self.tasks_to_ids = [[] for _ in range(self.num_tasks)]
-        for i in range(self.num_examples):
-            self.tasks_to_ids[self.tasks_to_ids_d[self.tasks[i]]].append(i)
+        self.num_tasks = len(set(task_names))
+        self.rng = rng or np.random.RandomState(0)
+
+        tasks_to_ids = {task: i for i, task in enumerate(set(task_names))}
+        self.task_ids = [tasks_to_ids[task] for task in task_names]
 
     def __len__(self):
         import math
         return self.batch_size * math.ceil(self.num_examples / self.batch_size)
 
     def __iter__(self):
-        samplers_list = []
-        samplers_iters = []
-        active_tasks = []
-
-        for i in range(self.num_tasks):
-            samplers_list.append(
-                torch.utils.data.RandomSampler(self.tasks_to_ids[i], replacement=False)
-            )
-            samplers_iters.append(samplers_list[i].__iter__())
-            active_tasks.append(i)
+        active_examples = [set() for _ in range(self.num_tasks)]
+        for i in range(self.num_examples):
+            active_examples[self.task_ids[i]].add(i)
+        active_tasks = [i for i in range(self.num_tasks) if len(active_examples[i])]
 
         for j in range(0, self.num_examples):
-            while len(active_tasks):
-                if j % (self.batch_size // self.num_tasks_per_batch) == 0:
-                    i = np.random.choice(range(len(active_tasks)))
-                try:
-                    a = samplers_iters[i].__next__()
-                    yield self.tasks_to_ids[i][a]
-                    break
-                except:
-                    active_tasks.pop(i)
+            if j % (self.batch_size // self.num_tasks_per_batch) == 0:
+                t = self.rng.choice(active_tasks)
+
+            ex_pool = active_examples[t]
+            a = self.rng.choice(list(ex_pool))
+
+            yield a
+            ex_pool.remove(a)
+
+            if not len(ex_pool):
+                active_tasks.remove(t)
+
+            if not len(active_tasks):
+                break
 
 
 class WikiMMLUDataModule(LightningDataModule):
@@ -118,6 +115,8 @@ class WikiMMLUDataModule(LightningDataModule):
             dataset=dataset,
             task_names=self.train_tasks,
             batch_size=batch_size,
+            num_tasks_per_batch=batch_size,
+            rng=self.rng,
         )
 
     def train_dataloader(self):
@@ -130,7 +129,7 @@ class WikiMMLUDataModule(LightningDataModule):
             collate_fn=self.collate_fn,
             sampler=self.get_task_sampler(
                 self.train_dataset,
-                self.config.train_batch_size,
+                batch_size=self.config.train_batch_size,
             )
         )
 
@@ -161,6 +160,7 @@ class WikiMMLUDataModule(LightningDataModule):
 
         self.config = config
         self.tokenizer = get_tokenizer(config)
+
         self.rng = np.random.RandomState(config.seed)
         self.mmlu_module = MMLUDataModule(config, data_dir="from_env")
         self.setup_dataset()
