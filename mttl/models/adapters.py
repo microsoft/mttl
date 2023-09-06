@@ -147,12 +147,18 @@ class SkilledLoRA(LoRA):
             raise NotImplementedError("SkilledLoRA only supports nn.Linear layers.")
 
     def forward_linear_(self, input, weights):
-        if self.training:     
+        if self.training:
             self.training_steps += 1
 
-        bs, _, _ = weights.size()
-        A = torch.einsum("bqs,qsdr->bqdr", (weights, self.lora_a))
-        B = torch.einsum("bqs,qsrd->bqrd", (weights, self.lora_b))
+        bs = input.size(0)
+        if weights.ndim == 1:
+            # use indexing!
+            A = self.lora_a[:, weights.long(), :, :]
+            B = self.lora_b[:, weights.long(), :, :]
+        else:
+            A = torch.einsum("bqs,qsdr->bqdr", (weights, self.lora_a))
+            B = torch.einsum("bqs,qsrd->bqrd", (weights, self.lora_b))
+
         A = A.reshape(bs, self.in_features, self.rank)
         B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
         adapter_out = input.bmm(A).bmm(B) * self.scaling

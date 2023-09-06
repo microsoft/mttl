@@ -133,10 +133,8 @@ class PrivateSelector(RoutingSelector):
     def __init__(self, config, **kwargs):
         super().__init__()
 
-        self.n_tasks = config.n_tasks
-
     def forward(self, routing_infos, **kwargs):
-        return F.one_hot(routing_infos.task_ids, num_classes=self.n_tasks).unsqueeze(1)
+        return routing_infos.task_ids.long()
 
 
 @dataclass
@@ -149,8 +147,12 @@ class RoutingInfo:
 
     @classmethod
     def from_batch(cls, batch: dict, **kwargs):
+        if "task_ids" not in batch:
+            task_ids = None
+        else:
+            task_ids = batch["task_ids"].long()
         ri = cls(
-            task_ids=batch.get("task_ids", None),
+            task_ids=task_ids,
             hashes=batch.get("hashes", None),
             example_ids=batch.get("example_ids", None),
             instruction_hashes=batch.get("instruction_hashes", None),

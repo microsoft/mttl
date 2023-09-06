@@ -9,7 +9,6 @@ def modify_with_adapter(transformer, config, adapter_klass):
         if re.fullmatch(config.modify_modules, m_name):
             for c_name, layer in dict(module.named_children()).items():
                 if re.fullmatch(config.modify_layers, c_name):
-
                     logger.info(f"Patching {m_name}.{c_name}...")
                     
                     setattr(
