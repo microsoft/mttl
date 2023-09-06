@@ -3,7 +3,7 @@ from transformers import AutoTokenizer, LlamaTokenizerFast
 from mttl.utils import logger
 
 
-def get_tokenizer(config):
+def get_tokenizer(config, for_generation=False):
     if "llama" in config.model: 
         tokenizer = LlamaTokenizerFast.from_pretrained(config.model)
         tokenizer.model_max_length = int(1e9)
@@ -14,7 +14,10 @@ def get_tokenizer(config):
         tokenizer.model_max_length = int(1e9)
 
     if config.model_family == 'gpt':
-        tokenizer.padding_side = 'left'
+        if for_generation:
+            logger.warn("for_generation is True, setting padding_side for tokenizer to 'left'.")
+            tokenizer.padding_side = 'left'
+
         # do not add eos token, we will add it accordingly *if* needed.
         tokenizer.add_eos_token = False
 

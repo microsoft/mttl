@@ -139,7 +139,7 @@ class MMLUDataModule(LightningDataModule):
             self.data_dir = data_dir or config.data_dir
         self.config = config
         self.for_generation = for_generation
-        self.tokenizer = get_tokenizer(config)
+        self.tokenizer = get_tokenizer(config, for_generation=for_generation)
         self.rng = np.random.RandomState(config.seed)
         self.setup_dataset()
 

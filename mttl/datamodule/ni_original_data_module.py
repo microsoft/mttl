@@ -291,7 +291,7 @@ class NIOriginalDataModule(LightningDataModule):
         self.dataset_reader = None
         self.data_dir = data_dir or config.data_dir
         self.for_generation = for_generation
-        self.tokenizer = get_tokenizer(config)
+        self.tokenizer = get_tokenizer(config, for_generation=for_generation)
         self.setup_dataset()
 
     def setup_dataset(self):
