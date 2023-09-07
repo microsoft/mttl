@@ -45,6 +45,8 @@ class RoutingConfig(Config):
         # logging    
         self.selector_log_per_layer = True
         self.mmlu_callback = True
+        # softmoe
+        self.use_causal_mask_for_D = False
 
     def post_init(self):
         if self.eval_mmlu and "MMLU_DATA_DIR" not in os.environ:
