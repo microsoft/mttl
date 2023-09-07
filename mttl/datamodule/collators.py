@@ -74,7 +74,9 @@ class DefaultCollator:
         )
         targets = tok_sources_plus_labels["input_ids"].clone()
         targets = torch.masked_fill(
-            targets, ~tok_sources_plus_labels["attention_mask"].bool(), self.label_pad_token_id
+            targets,
+            ~tok_sources_plus_labels["attention_mask"].bool(),
+            self.label_pad_token_id
         )
 
         if not self.train_on_inputs:

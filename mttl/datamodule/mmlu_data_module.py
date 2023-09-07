@@ -154,7 +154,7 @@ class MMLUDataModule(LightningDataModule):
         task_names = task_names.union(set(dataset["test"]["Task"]))
 
         self.task_names = sorted(list(task_names))
-        self.task_to_id = {task: i for i, task in enumerate(task_names)}
+        self.task_to_id = {task: i for i, task in enumerate(self.task_names)}
 
         self.collate_fn = DataCollatorForMMLU(
             tokenizer=self.tokenizer,

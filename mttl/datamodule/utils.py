@@ -4,7 +4,7 @@ from mttl.utils import logger
 
 
 def get_tokenizer(config, for_generation=False):
-    if "llama" in config.model: 
+    if "llama" in config.model:
         tokenizer = LlamaTokenizerFast.from_pretrained(config.model)
         tokenizer.model_max_length = int(1e9)
         if not config.model_family == "gpt":
@@ -13,9 +13,20 @@ def get_tokenizer(config, for_generation=False):
         tokenizer = AutoTokenizer.from_pretrained(config.model)
         tokenizer.model_max_length = int(1e9)
 
+    if hasattr(config, 'padding_side'):
+        logger.warn("Setting padding side to {}".format(config.padding_side))
+
+        tokenizer.padding_side = config.padding_side
+    else:
+        logger.warn("Padding side is {}".format(tokenizer.padding_side))
+
     if config.model_family == 'gpt':
         if for_generation:
+            if config.padding_side == 'right':
+                logger.warn("Padding side is 'right', but we are in generation mode!")
+
             logger.warn("for_generation is True, setting padding_side for tokenizer to 'left'.")
+            
             tokenizer.padding_side = 'left'
 
         # do not add eos token, we will add it accordingly *if* needed.
