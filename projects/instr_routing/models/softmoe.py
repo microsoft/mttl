@@ -94,19 +94,26 @@ class RoutingLoRASoftMoe(nn.Module, RoutingMixin):
         return self.adapter.layer(input) + adapter_out
 
 
-def create_causal_prefix_mask(inst_padding_mask, padding_mask, device, bs, seq):
+def create_causal_prefix_mask(inst_padding_mask, padding_mask, device, bs, seq, padding_side='left'):
     # inst_padding_mask - 1s only on the instruction part, everything else is 0
     # padding_mask - 1s on the instruction and output, pad tokens are 0
-
-    # Find the indices of the fist occurrence of 1 along the last dimension
-    first_one_idx = inst_padding_mask.argmax(
-        dim=1, keepdim=True
-    )  # start of instruction
-    n_ones = inst_padding_mask.sum(dim=1).unsqueeze(-1)  # instruction length
-    last_one_idx = first_one_idx + n_ones - 1  # b x 1 <- index of the last one
+    if padding_side == "left":
+        # Find the indices of the fist occurrence of 1 along the last dimension
+        first_one_idx = inst_padding_mask.argmax(
+            dim=1, keepdim=True
+        )  # start of instruction
+        n_ones = inst_padding_mask.sum(dim=1).unsqueeze(-1)  # instruction length
+        last_one_idx = first_one_idx + n_ones - 1  # b x 1 <- index of the last one
+    
+    elif padding_side=="right":
+        # Find the indices of the last occurrence of 1 along the last dimension
+        n_ones = inst_padding_mask.sum(dim=1).unsqueeze(-1)  # instruction length
+        last_one_idx = n_ones - 1  # b x 1 <- index of the last one
+    else:           
+        raise ValueError(f"padding_side {padding_side} not supported")
 
     # Expand dimensions of last_ones_indices to match the shape of B
-    expanded_indices = last_one_idx + 1
+    expanded_indices = last_one_idx + 1    
     expanded_indices = expanded_indices.expand(-1, seq)  # b x s
 
     expanded_indices_inverse = seq - expanded_indices  # length after last 1
@@ -159,6 +166,7 @@ class SoftMOEAdapter(SkilledLoRA):
                     input.device,
                     bs,
                     seq,
+                    self.config.padding_side,
                 )  # bs x s x s
                 setattr(
                     routing_infos, "causal_mask", causal_mask
@@ -191,7 +199,7 @@ class SoftMOEAdapter(SkilledLoRA):
         adapter_out = torch.einsum(
             "bsqkr,qkrd->bsqkd", (adapter_out, self.lora_b)
         )  # bs x seq x n_splits x n_skills x D
-        assert self.n_splits == 1
+        assert self.n_splits == 1       
         adapter_out = adapter_out.squeeze(
             2
         )  # bs x seq x n_skills x D (D = output feaatures D)

@@ -33,7 +33,7 @@ if __name__ == "__main__":
     login(token=os.environ["HUGGING_FACE_HUB_TOKEN"])
     config.data_dir = os.environ["MMLU_DATA_DIR"]
     dm = AlpacaDataModule(config)
-    path_best_model = "/home/v-oostapenko/dev/mttl/tmp/instruction_learning/yahma_llama-7b-hf0qx192oq_None-val/loss=1.4099.ckpt"
+    path_best_model = "/home/v-oostapenko/dev/mttl/tmp/instruction_learning/yahma_llama-7b-hfajqzpacw_None-val/loss=1.5464.ckpt"
     best_model = CLM.load_from_checkpoint(path_best_model, tokenizer=dm.tokenizer).cuda()
     result = eval_mmlu(config, best_model) #, subsample=20)
     print(result)

@@ -129,7 +129,7 @@ class SMEARRouter(RoutingSelector):
         router_input = routing_infos.inputs_cache_for_generation.get(self)
         if router_input is None:
             router_input = self.apply_mask_and_average(
-                input, routing_infos.inst_token_mask
+                input, routing_infos.inst_token_mask # only instruction is marked with 1
             )
             # if in generation mode, cache the input encoding for the next forward calls
             if routing_infos.generation_mode:
@@ -284,7 +284,7 @@ def modify_with_vsmear(transformer, config):
 
 
   
-@register_selector("vsmear_xr4")           
+@register_selector("vsmear_xr4")                
 class VSMEARRouterExperimental(VSMEARRouter):
     def __init__(self, config, in_d):
         super().__init__(config, in_d)
@@ -321,8 +321,8 @@ class VSMEARRouterExperimental(VSMEARRouter):
             )          
             post_probs = F.softmax(post_routes, dim=-1)  
             prior_probs=routing_probs = F.softmax(prior_routes, dim=-1) # output and teacher
-            self.auxiliary_loss = 1 - F.cosine_similarity(post_routes*self.temperature, 
-                                                          prior_routes.detach()*self.router_teacher_temperature, dim=-1).mean()
+            self.auxiliary_loss = 1 - F.cosine_similarity(post_routes, 
+                                                          prior_routes.detach(), dim=-1).mean()
             
             
             h_post = -(post_probs * F.log_softmax(post_routes, -1)).sum(1).mean()
