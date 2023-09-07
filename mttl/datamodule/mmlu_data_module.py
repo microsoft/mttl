@@ -129,7 +129,7 @@ class MMLUDataModule(LightningDataModule):
         self.data_dir = data_dir or config.data_dir
         self.config = config
         self.for_generation = for_generation
-        self.tokenizer = get_tokenizer(config)
+        self.tokenizer = get_tokenizer(config, for_generation=for_generation)
         self.rng = np.random.RandomState(config.seed)
         self.setup_dataset()
 
@@ -139,11 +139,13 @@ class MMLUDataModule(LightningDataModule):
         )
         dataset = load_dataset(filename, data_dir=self.data_dir)
 
-        task_to_id = set(dataset["train"]["Task"])
-        task_to_id = task_to_id.union(set(dataset["validation"]["Task"]))
-        task_to_id = task_to_id.union(set(dataset["test"]["Task"]))
+        task_names = set(dataset["train"]["Task"])
+        task_names = task_names.union(set(dataset["validation"]["Task"]))
+        task_names = task_names.union(set(dataset["test"]["Task"]))
 
-        self.task_to_id = {task: i for i, task in enumerate(task_to_id)}
+        self.task_names = sorted(list(task_names))
+        self.task_to_id = {task: i for i, task in enumerate(self.task_names)}
+
         self.collate_fn = DataCollatorForMMLU(
             tokenizer=self.tokenizer,
             padding="longest",
