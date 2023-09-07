@@ -150,8 +150,8 @@ class MMLUDataModule(LightningDataModule):
         dataset = load_dataset(filename, data_dir=self.data_dir)
 
         task_names = set(dataset["train"]["Task"])
-        task_names = task_to_id.union(set(dataset["validation"]["Task"]))
-        task_names = task_to_id.union(set(dataset["test"]["Task"]))
+        task_names = task_names.union(set(dataset["validation"]["Task"]))
+        task_names = task_names.union(set(dataset["test"]["Task"]))
 
         self.task_names = sorted(list(task_names))
         self.task_to_id = {task: i for i, task in enumerate(task_names)}
