@@ -45,12 +45,8 @@ class DefaultCollator:
         return output_batch
 
     def prepare_inputs_for_gpt_family(self, sources, labels):
-        assert self.tokenizer.padding_side == "left"
-
-        # Add space for auto-regressive model tokenization
-        labels = [" " + l.strip() for l in labels]
         # Add eos token
-        labels = [labels + " " + self.tokenizer.eos_token for labels in labels]
+        labels = [l + " " + self.tokenizer.eos_token for l in labels]
 
         output_batch = {}
         tokenized_sources = self.tokenizer(
@@ -69,21 +65,33 @@ class DefaultCollator:
             pad_to_multiple_of=self.pad_to_multiple_of,
         )
 
-        input_len = tokenized_sources["attention_mask"].int().sum(-1)
-        pad_tokens = tok_sources_plus_labels["attention_mask"].shape[
-            1
-        ] - tok_sources_plus_labels["attention_mask"].int().sum(-1)
-        offset = torch.clamp(pad_tokens + input_len, max=self.max_input_length)
-        mask = torch.zeros(
-            tok_sources_plus_labels["attention_mask"].shape[0],
-            tok_sources_plus_labels["attention_mask"].shape[1] + 1,
-        )
-        mask[(torch.arange(mask.shape[0]), offset)] = 1
-        mask = mask.cumsum(dim=1).bool()
-        mask = mask[:, :-1]
-
         targets = tok_sources_plus_labels["input_ids"].clone()
-        targets = torch.masked_fill(targets, ~mask, self.label_pad_token_id)
+        targets = torch.masked_fill(
+            targets,
+            ~tok_sources_plus_labels["attention_mask"].bool(),
+            self.label_pad_token_id
+        )
+
+        if not self.train_on_inputs:
+            # mask targets positions corresponding to the inputs
+            input_len = tokenized_sources["attention_mask"].int().sum(-1)
+            pad_tokens = tok_sources_plus_labels["attention_mask"].shape[
+                1
+            ] - tok_sources_plus_labels["attention_mask"].int().sum(-1)
+            mask = torch.zeros(
+                tok_sources_plus_labels["attention_mask"].shape[0],
+                tok_sources_plus_labels["attention_mask"].shape[1] + 1,
+            )
+            # handle right padding here!
+            if self.tokenizer.padding_side == "left":
+                offset = torch.clamp(pad_tokens + input_len, max=self.max_input_length)
+            else:
+                offset = input_len
+
+            mask[(torch.arange(mask.shape[0]), offset)] = 1
+            mask = mask.cumsum(dim=1).bool()
+            mask = mask[:, :-1]
+            targets = torch.masked_fill(targets, ~mask, self.label_pad_token_id)
 
         output_batch["input_ids"] = tok_sources_plus_labels["input_ids"]
         output_batch["attention_mask"] = tok_sources_plus_labels["attention_mask"]

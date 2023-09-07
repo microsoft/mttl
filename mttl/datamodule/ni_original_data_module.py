@@ -230,8 +230,6 @@ class DataCollatorForNI(DefaultCollator):
 
         # Randomly select one reference if multiple are provided.
         labels = [random.choice(ex["Instance"]["output"]) for ex in batch]
-        # Add space for auto-regressive model tokenization
-        labels = [" " + l for l in labels]
 
         output_batch = (
             self.prepare_inputs_for_gpt_family(sources, labels)
@@ -302,7 +300,7 @@ class NIOriginalDataModule(LightningDataModule):
         self.data_dir = data_dir or config.data_dir
         self.for_generation = for_generation
         self.rng = np.random.RandomState(config.seed)
-        self.tokenizer = get_tokenizer(config)
+        self.tokenizer = get_tokenizer(config, for_generation=for_generation)
         self.setup_dataset()
 
     def setup_dataset(self):
@@ -327,7 +325,8 @@ class NIOriginalDataModule(LightningDataModule):
             validation_tasks = set(dataset["validation"]["Task"])
             test_tasks = set(dataset["test"]["Task"])
             all_tasks = train_tasks.union(validation_tasks).union(test_tasks)
-            self.task_to_id = {task: i for i, task in enumerate(all_tasks)}
+            self.task_names = list(sorted(all_tasks))
+            self.task_to_id = {task: i for i, task in enumerate(self.task_names)}
             self.train_dataset = dataset["train"]
             self.val_dataset = dataset["validation"]
             self.test_dataset = dataset["test"]
