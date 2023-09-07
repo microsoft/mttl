@@ -34,7 +34,7 @@ class PlatypusModule(LightningDataModule):
 
     def test_dataloader(self):
         return DataLoader(
-            self.test_set,
+            self.test_dataset,
             batch_size=self.config.predict_batch_size,
             shuffle=False,
             num_workers=16,
@@ -84,7 +84,7 @@ class PlatypusModule(LightningDataModule):
             ],
             generator=rng,
         )
-        self.test_set = self.dev_dataset
+        self.test_dataset = self.dev_dataset
 
         print("Training steps:", len(self.train_dataloader()))
         print("Validation steps:", len(self.val_dataloader()))

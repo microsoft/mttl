@@ -15,6 +15,7 @@ class DefaultCollator:
     If model_family is "gpt", then the inputs and outputs are constructed for a causal language model,
     e.g. concatenated in a single string and labels are set to be -100 for all tokens in the input.
     """
+
     tokenizer: AutoTokenizer
     padding: Union[bool, str, PaddingStrategy] = True
     max_input_length: Optional[int] = None
@@ -52,10 +53,8 @@ class DefaultCollator:
         return output_batch
 
     def prepare_inputs_for_gpt_family(self, sources, labels):
-        # Add space for auto-regressive model tokenization
-        labels = [" " + l.strip() for l in labels]
         # Add eos token
-        labels = [labels + " " + self.tokenizer.eos_token for labels in labels]
+        labels = [l + " " + self.tokenizer.eos_token for l in labels]
 
         output_batch = {}
         tokenized_sources = self.tokenizer(
@@ -74,6 +73,9 @@ class DefaultCollator:
             pad_to_multiple_of=self.pad_to_multiple_of,
         )
         targets = tok_sources_plus_labels["input_ids"].clone()
+        targets = torch.masked_fill(
+            targets, ~tok_sources_plus_labels["attention_mask"].bool(), self.label_pad_token_id
+        )
 
         if not self.train_on_inputs:
             # mask targets positions corresponding to the inputs
