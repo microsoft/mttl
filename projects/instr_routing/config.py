@@ -42,8 +42,9 @@ class RoutingConfig(Config):
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
         
-        # logging
+        # logging    
         self.selector_log_per_layer = True
+        self.mmlu_callback = True
 
     def post_init(self):
         if self.eval_mmlu and "MMLU_DATA_DIR" not in os.environ:

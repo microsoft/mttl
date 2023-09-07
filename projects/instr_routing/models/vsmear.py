@@ -37,7 +37,7 @@ class SkilledLoRA_MergeLoraAfterOP(SkilledLoRA):
         adapter_out = torch.einsum("bsd,qkdr->bsqkr", (input, self.lora_a)) # bs x n_splits x n_skills x rank")       
         adapter_out = torch.einsum("bsqkr,qkrd->bsqkd", (adapter_out, self.lora_b)) # bs x seq x n_splits x n_skills x D        
         adapter_out = torch.einsum("bsqkd,bqk->bsd", (adapter_out, weights)) # bs x seq x n_splits x D
-        adapter_out *= self.scaling
+        adapter_out *= self.scaling # (adapter_out[0,:,:]*weights[0].unsqueeze(0).unsqueeze(-1)).sum(-2)[0][0] like adapter_out[0][0]
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
