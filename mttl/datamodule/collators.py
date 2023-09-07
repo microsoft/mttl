@@ -17,6 +17,7 @@ class DefaultCollator:
     label_pad_token_id: int = -100
     return_tensors: str = "pt"
     model_family: str = "seq2seq"
+    train_on_inputs: bool = False
 
     def prepare_inputs_for_seq2seq_family(self, sources, labels):
         output_batch = {}
