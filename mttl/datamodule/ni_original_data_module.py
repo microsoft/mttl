@@ -273,13 +273,23 @@ class NIOriginalDataModule(LightningDataModule):
             collate_fn=self.collate_fn,
         )
 
-    def test_dataloader(self):
+    def test_dataloader(self, subsample=-1):
+        if subsample > 0:
+            from mttl.datamodule import take_n_examples_per_task
+
+            indices = take_n_examples_per_task(
+                list(self.test_dataset["Task"]), n=subsample, rng=self.rng
+            )
+            test_dataset = self.test_dataset.select(indices)
+        else:
+            test_dataset = self.test_dataset
+            
         return DataLoader(
-            self.test_dataset,
+            test_dataset,
             batch_size=self.config.predict_batch_size,
+            shuffle=False,
             num_workers=16,
             pin_memory=True,
-            shuffle=False,
             persistent_workers=True,
             collate_fn=self.collate_fn,
         )
@@ -292,6 +302,7 @@ class NIOriginalDataModule(LightningDataModule):
         self.data_dir = data_dir or config.data_dir
         self.for_generation = for_generation
         self.tokenizer = get_tokenizer(config, for_generation=for_generation)
+        self.rng = np.random.RandomState(config.seed)
         self.setup_dataset()
 
     def setup_dataset(self):
@@ -317,7 +328,7 @@ class NIOriginalDataModule(LightningDataModule):
             test_tasks = set(dataset["test"]["Task"])
             all_tasks = train_tasks.union(validation_tasks).union(test_tasks)
 
-            self.task_names = list(sorted(all_tasks)))
+            self.task_names = list(sorted(all_tasks))
             self.task_to_id = {task: i for i, task in enumerate(self.task_names)}
             self.train_dataset = dataset["train"]
             self.val_dataset = dataset["validation"]
