@@ -17,7 +17,7 @@ from mttl.datamodule.platypus_module import PlatypusModule
 from mttl.datamodule.flan100k_module import Flan100kModule
 from mttl.utils import get_mlf_logger, setup_logging, logger
 from mttl.dist_utils import is_main_process
-
+torch.set_float32_matmul_precision('high')
 
 # register models
 import models.vsmear  # noqa: F401
