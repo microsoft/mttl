@@ -19,10 +19,8 @@
     "modify_modules": ".*attn.*",       
     "modify_layers": "q_proj|v_proj|k_proj",   
     "trainable_param_names": ".*lora_[ab].*|.*selector.*",
-        
-    "eval_hellaswag": 0,
-    "eval_arc": 0, 
-    "eval_truthfulqa": 0,
-    "wandb_project": "test"
+    "wandb_project": "test",
+    "eval_superni": 1,
+    "eval_mmlu": 1
 
 }
