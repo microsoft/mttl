@@ -14,6 +14,8 @@
     "max_input_length": 256,    
     "eval_every":400, 
     "num_train_epochs":3,
+    "router_temperature": 0.1,
+    "router_teacher_temperature": 0.1,
 
     "model_modifier": "vsmear_xr4",
     "modify_modules": ".*attn.*",       

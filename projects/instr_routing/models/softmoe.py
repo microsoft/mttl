@@ -137,7 +137,8 @@ class SoftMOEAdapter(SkilledLoRA):
         self.use_causal_mask_for_D = config.use_causal_mask_for_D
 
     def forward(self, input, weights, routing_infos, gen_mode):
-        if self.training:
+        #this assumes left padding
+        if self.training:   
             self.training_steps += 1
         mixing_weights = weights
         bs, seq, n_skills = mixing_weights.size()

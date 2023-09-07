@@ -35,7 +35,7 @@ if __name__ == "__main__":
     dm = AlpacaDataModule(config)
     path_best_model = "/home/v-oostapenko/dev/mttl/tmp/instruction_learning/yahma_llama-7b-hf0qx192oq_None-val/loss=1.4099.ckpt"
     best_model = CLM.load_from_checkpoint(path_best_model, tokenizer=dm.tokenizer).cuda()
-    result = eval_mmlu(config, best_model, subsample=20)
+    result = eval_mmlu(config, best_model) #, subsample=20)
     print(result)
     
     

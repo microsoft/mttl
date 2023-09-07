@@ -33,7 +33,7 @@ class SelectorRoutingsLog(Callback):
             return
 
         if current_step % self.ACC_OVER == 0 and trainer.global_step > 0:
-            layer_stats, layer_names = [], []
+            layer_stats, layer_names = [], []  
             for name, stats in self.acc_routings.items():
                 layer_names.append(name)
                 layer_routing_dist = torch.cat(stats, dim=0)

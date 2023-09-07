@@ -305,8 +305,7 @@ class VSMEARRouterExperimental(VSMEARRouter):
         )        
         # padding_mask = routing_infos.pad_token_mask # 1 for everythin that is not a pad token, i.e. instuction, input, output
         # inst_padding_mask = routing_infos.inst_token_mask # 1 for everything that is instruction
-        if self.training:
-            # during training :-)     
+        if self.training:     
             # during training :-)
             assert (
                 routing_infos.generation_mode is False
@@ -320,9 +319,10 @@ class VSMEARRouterExperimental(VSMEARRouter):
                 temperature=self.router_teacher_temperature,
                 center=self.router_center_momentum > 0.0,
             )          
-            post_probs = F.softmax(post_routes, dim=-1)   
+            post_probs = F.softmax(post_routes, dim=-1)  
             prior_probs=routing_probs = F.softmax(prior_routes, dim=-1) # output and teacher
-            self.auxiliary_loss = 1 - F.cosine_similarity(post_routes, prior_routes.detach(), dim=-1).mean()
+            self.auxiliary_loss = 1 - F.cosine_similarity(post_routes*self.temperature, 
+                                                          prior_routes.detach()*self.router_teacher_temperature, dim=-1).mean()
             
             
             h_post = -(post_probs * F.log_softmax(post_routes, -1)).sum(1).mean()
