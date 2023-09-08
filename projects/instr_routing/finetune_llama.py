@@ -168,7 +168,8 @@ def run_multitask(args):
             rougel_ni_all = eval_ni(
                 args,
                 best_model,
-                nshot=2,
+                nshot=0, 
+                max_input_length=-1,
                 data_dir=os.environ["NI_DATA_DIR"],
             )
             rougel_ni = rougel_ni_all["all"]["mean"]
@@ -187,6 +188,7 @@ def run_multitask(args):
             em_mmlu_all = eval_mmlu(
                 args,
                 best_model,
+                max_input_length = 2048,
                 data_dir=os.environ["MMLU_DATA_DIR"],
             )
             mmlu_em = em_mmlu_all["all"]["mean"]
