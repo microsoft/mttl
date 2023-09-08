@@ -28,21 +28,34 @@ class DefaultCollator:
 
     def prepare_inputs_for_seq2seq_family(self, sources, labels):
         output_batch = {}
-        tokenized_labels = self.tokenizer(
-            labels,
-            max_length=self.max_output_length,
-            padding=self.padding,
-            return_tensors=self.return_tensors,
-            truncation=True,
-        )
-        tokenized_sources = self.tokenizer(
-            sources,
-            max_length=self.max_input_length,
-            padding=self.padding,
-            return_tensors=self.return_tensors,
-            truncation=True,
-            pad_to_multiple_of=self.pad_to_multiple_of,
-        )
+        if self.max_input_length > 0:
+            tokenized_labels = self.tokenizer(
+                labels,
+                max_length=self.max_output_length,
+                padding=self.padding,
+                return_tensors=self.return_tensors,
+                truncation=True,
+            )
+            tokenized_sources = self.tokenizer(
+                sources,
+                max_length=self.max_input_length,
+                padding=self.padding,
+                return_tensors=self.return_tensors,
+                truncation=True,
+                pad_to_multiple_of=self.pad_to_multiple_of,
+            )
+        else:       
+            tokenized_labels = self.tokenizer(
+                labels,
+                padding="longest",
+                return_tensors=self.return_tensors
+            )
+            tokenized_sources = self.tokenizer(
+                sources,
+                padding="longest",   
+                return_tensors=self.return_tensors,
+                pad_to_multiple_of=self.pad_to_multiple_of,
+            )     
         label_mask = tokenized_labels["attention_mask"].bool()
         masked_labels = tokenized_labels["input_ids"].masked_fill(
             ~label_mask, self.label_pad_token_id

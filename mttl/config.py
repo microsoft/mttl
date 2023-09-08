@@ -144,7 +144,7 @@ class Config:
         self.embeddings_path = None
         
         # NI related configs
-        self.use_task_descriptions = False  # Use task descriptions
+        self.use_task_descriptions = True  # Use task descriptions
         self.max_num_instances_per_task = 100  # Max instances per training task (applies to NI)
         self.num_pos_examples = 0  # Use some few-shot examples if possible (applies to NI)
 

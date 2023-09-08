@@ -100,7 +100,7 @@ class DataCollatorForNI(DefaultCollator):
 
             task_input = ""
             # add the input first.
-            task_input += "Now complete the following example -\n"
+            # task_input += "Now complete the following example -\n"
             task_input += f"Input: {instance['Instance']['input'].strip()}"
             if not task_input[-1] in string.punctuation:
                 task_input += "."
@@ -114,12 +114,12 @@ class DataCollatorForNI(DefaultCollator):
             definition = ""
             if add_task_definition:
                 if isinstance(instance["Definition"], list):
-                    definition = "Definition: " + instance["Definition"][0].strip()
+                    definition = "Task definition: " + instance["Definition"][0].strip()
                 else:
-                    definition = "Definition: " + instance["Definition"].strip()
+                    definition = "Task definition: " + instance["Definition"].strip()
                 if not definition[-1] in string.punctuation:
                     definition += "."
-                definition += "\n\n"
+                definition += "\n"
 
             # try to add positive examples.
             pos_examples = []
@@ -146,7 +146,7 @@ class DataCollatorForNI(DefaultCollator):
                         pos_example_str += "."
                     pos_example_str += "\n"
                 pos_example_str += "\n"
-                if (
+                if self.max_input_length < 0 or (
                     len(
                         self.tokenizer(
                             definition
@@ -282,7 +282,7 @@ class NIOriginalDataModule(LightningDataModule):
             test_dataset = self.test_dataset.select(indices)
         else:
             test_dataset = self.test_dataset
-            
+
         return DataLoader(
             test_dataset,
             batch_size=self.config.predict_batch_size,

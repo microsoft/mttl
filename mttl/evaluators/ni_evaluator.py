@@ -33,6 +33,7 @@ class NIEvaluator(object):
             self.config.max_input_length = max_input_length
         self.config.max_output_length = 128
         self.config.num_pos_examples = num_pos_examples
+        self.config.use_task_descriptions = True
 
         if data_dir is None:
             data_dir = config.data_dir
@@ -70,18 +71,11 @@ class NIEvaluator(object):
         output_path = os.path.join(output_path, "eval/ni")
 
         # write results to a file
-        task_results_existing=None     
         if not os.path.exists(output_path):
             # create
             os.makedirs(output_path)   
         
         output_dir = os.path.join(output_path, out_file_name)
-        if os.path.exists(output_dir):
-            with open(output_dir) as f:
-                lines = f.readlines()
-            lines = [json.loads(line) for line in lines]
-            #unique task names
-            task_results_existing = {l["task_name"] for l in lines}
 
         
         pbar = tqdm.tqdm(  
@@ -91,9 +85,7 @@ class NIEvaluator(object):
         for step, batch in pbar:
             task_name = batch.pop("task_names", None)
             batch.pop("input_texts", None)
-            if task_results_existing and task_name in task_results_existing:
-                print(f"Skipping {task_name}")
-                continue
+            #TODO: add some logic to remove examples from the batch if they ae already in the generated file?
             # we use labels texts here for evaluation, because some tokenizers do not skip
             # pad token when decoding, even if skip_special_tokens=True
             labels_texts = batch.pop("labels_texts", None)
@@ -111,7 +103,7 @@ class NIEvaluator(object):
                 if isinstance(model, pl.LightningModule):
                     predictions = model.generate(
                         batch,
-                        max_length=max_length,
+                        max_length=max_length,       
                         generation_config=model.generation_config,
                         return_dict_in_generate=True,
                         output_scores=True,
