@@ -69,7 +69,7 @@ class SMEARRouter(RoutingSelector):
         self.config = config
         self.in_d = in_d
         self.n_skills = config.n_skills
-        self.n_splits = config.n_splits
+        self.n_splits = config.n_splits     
         self.temperature = config.router_temperature
         self.normalize_weights = config.router_normalize_weights
         assert self.n_splits == 1
@@ -78,12 +78,16 @@ class SMEARRouter(RoutingSelector):
         # because in successive generation steps, the input is going to be only the encoding for the last token
         self._router_input_cache = None
 
-        self.prior_router = nn.Linear(in_d, config.n_skills * self.n_splits, bias=False)
+        self.prior_router = nn.Linear(in_d, config.n_skills * self.n_splits, bias=True)
         self.prior_router_ln = nn.LayerNorm(in_d)
         self.prior_router_ln.weight = nn.Parameter(torch.ones(in_d))
 
         self.router_center_momentum = self.config.router_center_momentum
         self.register_buffer("center", torch.zeros(1, self.n_skills))
+        
+        # normal innit
+        self.prior_router.weight.data.normal_(mean=0.0, std=0.02)
+        self.prior_router.bias.data.fill_(0)
 
         self.metrics = Metrics()
 
@@ -106,7 +110,7 @@ class SMEARRouter(RoutingSelector):
             )
             routes = F.linear(input, weights, None)
         else:
-            routes = F.linear(input, router.weight, None)
+            routes = F.linear(input, router.weight, router.bias)
         if center:
             self.apply_center_update(routes)
         # teacher centering and sharpening
@@ -167,10 +171,14 @@ class VSMEARRouter(SMEARRouter):
             self.post_router_ln = self.prior_router_ln
         else:
             self.post_router = nn.Linear(
-                in_d, config.n_skills * self.n_splits, bias=False
+                in_d, config.n_skills * self.n_splits, bias=True
             )
             self.post_router_ln = nn.LayerNorm(in_d)
             self.post_router_ln.weight = nn.Parameter(torch.ones(in_d))
+            
+        
+            self.post_router.weight.data.normal_(mean=0.0, std=0.02)
+            self.post_router.bias.data.fill_(0)
 
         self.router_teacher_ent_factor = self.config.router_teacher_ent_factor
         self.router_teacher_temperature = self.config.router_teacher_temperature
@@ -284,7 +292,7 @@ def modify_with_vsmear(transformer, config):
 
 
   
-@register_selector("vsmear_xr4")                
+@register_selector("vsmear_xr4")   
 class VSMEARRouterExperimental(VSMEARRouter):
     def __init__(self, config, in_d):
         super().__init__(config, in_d)
@@ -297,7 +305,7 @@ class VSMEARRouterExperimental(VSMEARRouter):
 
         # do not center the student, center only the teacher now
         prior_routes = self.route_maybe_center(
-            prior_input,
+            prior_input,     
             self.prior_router,
             self.prior_router_ln,
             temperature=self.temperature,
@@ -342,6 +350,64 @@ class VSMEARRouterExperimental(VSMEARRouter):
             self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
             self.auxiliary_loss = h_pri.sum() * 0.0
         return routing_probs.unsqueeze(1)
+
+@register_selector("smear_oracle")   
+class VSMEARRouterOracle(VSMEARRouter):
+    def __init__(self, config, in_d):
+        super().__init__(config, in_d)
+        self.prior_router_ln = nn.Identity()
+        self.post_router_ln = nn.Identity()
+
+    def forward(self, routing_infos, input: torch.Tensor):
+        self.metrics.clear()     
+        prior_input = self._get_router_inputs(input, routing_infos)
+
+        # do not center the student, center only the teacher now
+        prior_routes = self.route_maybe_center(
+            prior_input,     
+            self.prior_router,
+            self.prior_router_ln,
+            temperature=self.temperature,
+            center=False,
+        )        
+        # padding_mask = routing_infos.pad_token_mask # 1 for everythin that is not a pad token, i.e. instuction, input, output
+        # inst_padding_mask = routing_infos.inst_token_mask # 1 for everything that is instruction
+        # if self.training:     
+            # during training and eval route with posterior
+        # assert (
+        #     routing_infos.generation_mode is False
+        # ), "We are not expecting to be in generation mode during training."
+
+        post_input = self.get_posterior_input(input, routing_infos)
+        post_routes = self.route_maybe_center(
+            post_input,
+            self.post_router,
+            self.post_router_ln,
+            temperature=self.router_teacher_temperature,
+            center=self.router_center_momentum > 0.0,
+        )          
+        routing_probs = post_probs = F.softmax(post_routes, dim=-1)  
+        prior_probs=F.softmax(prior_routes, dim=-1) # route with posterior
+        
+        h_post = -(post_probs * F.log_softmax(post_routes, -1)).sum(1).mean()
+        h_pri = -(prior_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
+        x_ent = -(post_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
+        self.routings = routing_probs.detach().cpu()
+        self.metrics["h_post"] = h_post / math.log(self.n_skills)
+        self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
+        self.metrics["x_ent"] = x_ent
+        self.auxiliary_loss  = h_pri.sum() * 0.0
+            
+        # else:
+        #     # during eval also route with posterior
+        #     prior_probs = routing_probs = F.softmax(prior_routes, dim=-1)
+        #     h_pri = -(prior_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
+
+        #     self.routings = prior_probs.detach().cpu()
+        #     self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
+        #     self.auxiliary_loss = h_pri.sum() * 0.0
+        return routing_probs.unsqueeze(1)
+
 
 
 class AuxRoutingLoRALinear_MergeAfterOP(SkilledLoRA_MergeLoraAfterOP, RoutingMixin):
@@ -414,6 +480,21 @@ class VSMEARRouterExperimentalXR1(SMEARRouter):
 @register_modifier("vsmear_xr1")    
 def modify_with_vsmear_reg(transformer, config):
     config.router_selector = "vsmear_xr1"
+    config.adapter_type = "lora"
+
+    if config.adapter_type in ["lora"]:
+        return modify_with_routing(     
+            transformer, config, AuxRoutingLoRALinear_MergeAfterOP, RouterWrapper
+        )
+    else:
+        raise NotImplementedError(
+            f"Adapter type {config.adapter_type} not implemented for vsmear modifier."
+        )
+     
+# same as smear, but uses merging after the ouyter product
+@register_modifier("smear_oracle")    
+def modify_with_vsmear_reg(transformer, config):
+    config.router_selector = "smear_oracle"
     config.adapter_type = "lora"
 
     if config.adapter_type in ["lora"]:

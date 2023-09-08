@@ -1,5 +1,7 @@
 from collections import defaultdict
 from copy import deepcopy
+import os
+import json
 import tqdm
 import torch
 import numpy as np
@@ -54,10 +56,24 @@ class NIEvaluator(object):
         all_references = []
         task_names = []
         all_rougeL = []
-                  
+                               
         dataloader = self.datamodule.test_dataloader(subsample)
+        output_dir = self.config.output_dir
+        out_file_name = f"ni_pred_{self.config.model}ni-nshot{self.config.num_pos_examples}.jsonl"
+        out_file_name=out_file_name.replace("/", "_")  
+        out_file_name = out_file_name.strip()
+        output_dir = os.path.join(output_dir, "eval/ni", out_file_name)
 
-
+        
+        task_results_existing=None
+        if os.path.exists(output_dir):
+            with open(output_dir) as f:
+                lines = f.readlines()
+            lines = [json.loads(line) for line in lines]
+            #unique task names
+            task_results_existing = {l["task_name"] for l in lines}
+                    
+        
         pbar = tqdm.tqdm(  
             enumerate(dataloader),
             total=len(dataloader),
@@ -65,7 +81,9 @@ class NIEvaluator(object):
         for step, batch in pbar:
             task_name = batch.pop("task_names", None)
             batch.pop("input_texts", None)
-
+            if task_results_existing and task_name in task_results_existing:
+                print(f"Skipping {task_name}")
+                continue
             # we use labels texts here for evaluation, because some tokenizers do not skip
             # pad token when decoding, even if skip_special_tokens=True
             labels_texts = batch.pop("labels_texts", None)
@@ -118,6 +136,10 @@ class NIEvaluator(object):
             all_predictions += predictions
             all_references += references
             task_names += task_name
+            #save generations to a file                 
+            with open(output_dir) as f:    
+                l = {"id": id,"prediction": pred, "task_name": task_name}
+                f.write(json.dumps(l) + "\n")
 
             eval_metrics = compute_metrics(
                 predictions, [[r] for r in references], reduction="mean"
