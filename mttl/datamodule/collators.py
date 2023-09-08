@@ -57,21 +57,34 @@ class DefaultCollator:
         labels = [l + " " + self.tokenizer.eos_token for l in labels]
 
         output_batch = {}
-        tokenized_sources = self.tokenizer(
-            sources,
-            max_length=self.max_input_length,
-            padding=self.padding,
-            return_tensors=self.return_tensors,
-            truncation=True,
-        )
-        tok_sources_plus_labels = self.tokenizer(
-            [i + t for i, t in zip(sources, labels)],
-            max_length=self.max_input_length,
-            padding=self.padding,
-            return_tensors=self.return_tensors,
-            truncation=True,
-            pad_to_multiple_of=self.pad_to_multiple_of,
-        )
+        if self.max_input_length > 0:
+            tokenized_sources = self.tokenizer(
+                sources,
+                max_length=self.max_input_length,
+                padding=self.padding,
+                return_tensors=self.return_tensors,
+                truncation=True,
+            )
+            tok_sources_plus_labels = self.tokenizer(
+                [i + t for i, t in zip(sources, labels)],
+                max_length=self.max_input_length,
+                padding=self.padding,
+                return_tensors=self.return_tensors,
+                truncation=True,
+                pad_to_multiple_of=self.pad_to_multiple_of,
+            )
+        else:
+            tokenized_sources = self.tokenizer(
+                sources,
+                padding="longest",
+                return_tensors=self.return_tensors,
+            )
+            tok_sources_plus_labels = self.tokenizer(
+                [i + t for i, t in zip(sources, labels)],
+                padding="longest",
+                return_tensors=self.return_tensors,
+                pad_to_multiple_of=self.pad_to_multiple_of,
+            )
         targets = tok_sources_plus_labels["input_ids"].clone()
         targets = torch.masked_fill(
             targets,

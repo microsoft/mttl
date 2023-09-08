@@ -11,11 +11,12 @@ from mttl.utils import Averager, logger
 
 
 class MMLUCallback(cb.Callback):
-    def __init__(self, every_val_epochs=1):
+    def __init__(self, every_val_epochs=1, **kwargs):
         super().__init__()
 
         self.val_epoch = 0
         self.every_val_epochs = every_val_epochs
+        self.eval_kwargs = kwargs
 
     def on_validation_epoch_end(self, trainer, pl_module) -> None:
         self.val_epoch += 1
@@ -31,6 +32,7 @@ class MMLUCallback(cb.Callback):
         evaluator = MMLUEvaluator(
             pl_module.hparams,
             data_dir=os.environ["MMLU_DATA_DIR"],
+            **self.eval_kwargs,
         )
         metrics = evaluator.evaluate(
             pl_module,
@@ -46,11 +48,12 @@ class MMLUCallback(cb.Callback):
 
 
 class NICallback(cb.Callback):
-    def __init__(self, every_val_epochs=1):
+    def __init__(self, every_val_epochs=1, **kwargs):
         super().__init__()
 
         self.val_epoch = 0
         self.every_val_epochs = every_val_epochs
+        self.eval_kwargs = kwargs
 
     def on_validation_epoch_end(self, trainer, pl_module) -> None:
         self.val_epoch += 1
@@ -67,6 +70,7 @@ class NICallback(cb.Callback):
             pl_module.hparams,
             data_dir=os.environ["NI_DATA_DIR"],
             num_pos_examples=2,
+            **self.eval_kwargs,
         )
         metrics = evaluator.evaluate(
             pl_module,

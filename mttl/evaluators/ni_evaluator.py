@@ -22,11 +22,16 @@ def decode(preds, tokenizer):
 
 
 class NIEvaluator(object):
-    def __init__(self, config, data_dir=None, num_pos_examples=0, device="cuda"):
+    def __init__(self, config, data_dir=None, num_pos_examples=0, max_input_length=None, device="cuda"):
         from mttl.datamodule.ni_original_data_module import NIOriginalDataModule
 
         self.config = deepcopy(config)
         self.device = device
+
+        # unrestricted input length for SNI pass -1
+        if max_input_length is not None:
+            self.config.max_input_length = max_input_length
+        self.config.max_output_length = 128
         self.config.num_pos_examples = num_pos_examples
 
         if data_dir is None:
@@ -89,7 +94,7 @@ class NIEvaluator(object):
             labels_texts = batch.pop("labels_texts", None)
 
             extra_kwargs = {}
-            max_length = 128  # default output length for NI
+            max_length = self.config.max_output_length  # default output length for NI
 
             if self.config.model_family == "gpt":
                 max_length += batch["input_ids"].shape[-1]
