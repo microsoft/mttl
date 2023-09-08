@@ -230,7 +230,7 @@ class DataCollatorForNI(DefaultCollator):
 
         # Randomly select one reference if multiple are provided.
         labels = [random.choice(ex["Instance"]["output"]) for ex in batch]
-
+        instance_ids = [ex["Instance"]["id"] for ex in batch]
         output_batch = (
             self.prepare_inputs_for_gpt_family(sources, labels)
             if self.model_family == "gpt"
@@ -245,6 +245,7 @@ class DataCollatorForNI(DefaultCollator):
         output_batch["labels_texts"] = labels
         output_batch["hashes"] = [hash_example(i + o) for i, o in zip(sources, labels)]
         output_batch["instruction_hashes"] = [hash_example(i) for i in sources]
+        output_batch["instance_ids"] = instance_ids
         return output_batch
 
 

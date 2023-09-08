@@ -63,21 +63,26 @@ class NIEvaluator(object):
         all_rougeL = []
                                
         dataloader = self.datamodule.test_dataloader(subsample)
-        output_dir = self.config.output_dir
+        output_path = self.config.output_dir
         out_file_name = f"ni_pred_{self.config.model}ni-nshot{self.config.num_pos_examples}.jsonl"
         out_file_name=out_file_name.replace("/", "_")  
         out_file_name = out_file_name.strip()
-        output_dir = os.path.join(output_dir, "eval/ni", out_file_name)
+        output_path = os.path.join(output_path, "eval/ni")
 
+        # write results to a file
+        task_results_existing=None     
+        if not os.path.exists(output_path):
+            # create
+            os.makedirs(output_path)   
         
-        task_results_existing=None
+        output_dir = os.path.join(output_path, out_file_name)
         if os.path.exists(output_dir):
             with open(output_dir) as f:
                 lines = f.readlines()
             lines = [json.loads(line) for line in lines]
             #unique task names
             task_results_existing = {l["task_name"] for l in lines}
-                    
+
         
         pbar = tqdm.tqdm(  
             enumerate(dataloader),
@@ -141,18 +146,20 @@ class NIEvaluator(object):
             all_predictions += predictions
             all_references += references
             task_names += task_name
-            #save generations to a file                 
-            with open(output_dir) as f:    
-                l = {"id": id,"prediction": pred, "task_name": task_name}
-                f.write(json.dumps(l) + "\n")
 
             eval_metrics = compute_metrics(
-                predictions, [[r] for r in references], reduction="mean"
+                predictions, [[r] for r in references], reduction='none'
             )
-            all_rougeL.append(eval_metrics["rougeL"])
+            all_rougeL.append(np.mean(eval_metrics["rougeL"]))
             pbar.set_description(
                 f"Task: {task_name[0] if task_name else None}, rougeL: {np.mean(all_rougeL):.4f}"
             )
+            
+            #save generations to a file                 
+            with open(output_dir, "a") as f:    
+                for p, id_, tn, r, rouge in zip(predictions, batch["instance_ids"],task_name, references, eval_metrics["rougeL"]):   
+                    l = {"id": id_,"task_name": tn, "prediction": p, "reference": r, "rougeL": rouge}
+                    f.write(json.dumps(l) + "\n")
 
         eval_metrics = compute_metrics(
             all_predictions, [[r] for r in all_references], reduction="none"
