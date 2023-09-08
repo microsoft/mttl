@@ -299,6 +299,7 @@ class NIOriginalDataModule(LightningDataModule):
         self.dataset_reader = None
         self.data_dir = data_dir or config.data_dir
         self.for_generation = for_generation
+        self.tokenizer = get_tokenizer(config, for_generation=for_generation)
         self.rng = np.random.RandomState(config.seed)
         self.tokenizer = get_tokenizer(config, for_generation=for_generation)
         self.setup_dataset()
@@ -332,6 +333,7 @@ class NIOriginalDataModule(LightningDataModule):
             self.test_dataset = dataset["test"]
         else:
             # take only the examples from the task we want to finetune on.
+            self.task_names = [self.config.finetune_task_name]
             self.task_to_id = {self.config.finetune_task_name: 0}
             train_indices = np.where(
                 np.array(dataset["train"]["Task"]) == self.config.finetune_task_name

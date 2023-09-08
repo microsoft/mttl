@@ -5,6 +5,7 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning import Trainer
 
 from mttl.datamodule.ni_data_module import NIDataModule
+from mttl.datamodule.ni_original_data_module import NIOriginalDataModule
 from mttl.models.encoder_decoder import Finetuner
 import json
 
@@ -26,14 +27,7 @@ class NIOnlineZeroShot(Callback):
         config.custom_tasks_splits = self.VAL_TASKS
         config.predict_batch_size = 8
 
-        self.val_data = NIDataModule(config)
-        self.val_data.setup("fit")
-
-        config = copy.deepcopy(pl_module.hparams)
-        config.custom_tasks_splits = self.TEST_TASKS
-
-        self.test_data = NIDataModule(config)
-        self.test_data.setup("fit")
+        self.val_data = NIOriginalDataModule(config, for_generation=True)
 
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx) -> None:
         # create backup of the current pl_module weights

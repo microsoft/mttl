@@ -9,6 +9,13 @@ from mttl.dataloader.data_utils import ExampleInfo
 
 @dataclass
 class DefaultCollator:
+    """Simple collator
+
+    Converts a batch of examples into a batch of inputs and labels for a sequence to sequence task.
+    If model_family is "gpt", then the inputs and outputs are constructed for a causal language model,
+    e.g. concatenated in a single string and labels are set to be -100 for all tokens in the input.
+    """
+
     tokenizer: AutoTokenizer
     padding: Union[bool, str, PaddingStrategy] = True
     max_input_length: Optional[int] = None
@@ -65,7 +72,6 @@ class DefaultCollator:
             truncation=True,
             pad_to_multiple_of=self.pad_to_multiple_of,
         )
-
         targets = tok_sources_plus_labels["input_ids"].clone()
         targets = torch.masked_fill(
             targets,

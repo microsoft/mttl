@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import os
 import pkg_resources
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
@@ -27,7 +28,6 @@ class DataCollatorForMMLU(DefaultCollator):
     return_tensors: str = "pt"
     model_family: str = "seq2seq"
     task_to_id: dict = None
-    counter: int = 0
 
     def __call__(self, batch, return_tensors=None):
         if return_tensors is None:
@@ -80,6 +80,8 @@ class DataCollatorForMMLU(DefaultCollator):
 
 
 class MMLUDataModule(LightningDataModule):
+    DATA_ENV = "MMLU_DATA_DIR"
+
     def train_dataloader(self):
         return DataLoader(
             self.train_dataset,
@@ -126,7 +128,15 @@ class MMLUDataModule(LightningDataModule):
     def __init__(self, config, data_dir=None, for_generation=False):
         super().__init__()
 
-        self.data_dir = data_dir or config.data_dir
+        if data_dir == "from_env":
+            self.data_dir = os.environ.get(self.DATA_ENV, None)
+            if self.data_dir is None:
+                raise ValueError(
+                    f"Environment variable {self.DATA_ENV} is not set. "
+                    "Please set it to the directory containing the MMLU dataset."
+                )
+        else:
+            self.data_dir = data_dir or config.data_dir
         self.config = config
         self.for_generation = for_generation
         self.tokenizer = get_tokenizer(config, for_generation=for_generation)
