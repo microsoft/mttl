@@ -70,6 +70,7 @@ class DataCollatorForMMLU(DefaultCollator):
 
         task_names = [instance["Task"] for instance in batch]
         output_batch["task_names"] = task_names
+
         if self.task_to_id is not None:
             output_batch["task_ids"] = torch.LongTensor(
                 [self.task_to_id[task] for task in task_names]

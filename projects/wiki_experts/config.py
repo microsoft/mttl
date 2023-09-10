@@ -2,12 +2,11 @@ from mttl.config import Config
 import os
 
 
-class RoutingConfig(Config):
+class ExpertConfig(Config):
     def _set_defaults(self):
         super()._set_defaults()
-              
-        self.merge_after_op= False
 
+        self.merge_after_op = False
         self.micro_batch_size = 4
         self.load_in_8bit = False
 
@@ -37,15 +36,13 @@ class RoutingConfig(Config):
 
         self.eval_superni = False
         self.eval_mmlu = False
-        self.eval_batches = -1
+        self.experts_to_load = None
 
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
         
         # logging
         self.selector_log_per_layer = True
-        # softmoe
-        self.use_causal_mask_for_D = False
 
     def post_init(self):
         if self.eval_mmlu and "MMLU_DATA_DIR" not in os.environ:

@@ -145,6 +145,7 @@ class PrivateSelector(RoutingSelector):
 @dataclass
 class RoutingInfo:
     task_ids: torch.Tensor = None
+    task_names: List[str] = None
     hashes: List[str] = None
     instruction_hashes: List[str] = None
     example_ids: List[int] = None
@@ -152,12 +153,11 @@ class RoutingInfo:
 
     @classmethod
     def from_batch(cls, batch: dict, **kwargs):
-        if "task_ids" not in batch:
-            task_ids = None
-        else:
-            task_ids = batch["task_ids"].long()
+        task_ids = batch.get("task_ids").long() if "task_ids" in batch else None
+        task_names = batch.get("task_names", None)
         ri = cls(
             task_ids=task_ids,
+            task_names=task_names,
             hashes=batch.get("hashes", None),
             example_ids=batch.get("example_ids", None),
             instruction_hashes=batch.get("instruction_hashes", None),
@@ -166,18 +166,22 @@ class RoutingInfo:
         )
         return ri
 
+    def _repeat(self, inputs, n):
+        if inputs is not None:
+            if type(inputs) == torch.Tensor:
+                return inputs.repeat_interleave(repeats)
+            else:
+                return [item for item in input_list for _ in range(n)]
+        return inputs
+
     def repeat_interleave(self, repeats):
         # useful for beam search
-        self.task_ids = self.task_ids.repeat_interleave(repeats)
-        if self.hashes:
-            self.hashes = [h for h in self.hashes for _ in range(repeats)]
-        if self.instruction_hashes:
-            self.instruction_hashes = [h for h in self.instruction_hashes for _ in range(repeats)]
-        self.example_ids = (
-            self.example_ids.repeat_interleave(repeats)
-            if self.example_ids is not None
-            else None
-        )
+        self.task_ids = self._repeat(self.task_ids, repeats)
+        self.task_names = self._repeat(self.task_names, repeats)    
+        self.task_names = self._repeat(self.task_names, repeats)
+        self.hashes = self._repeat(self.hashes, repeats)
+        self.instruction_hashes = self._repeat(self.instruction_hashes, repeats)
+        self.example_ids = self._repeat(self.example_ids, repeats)
 
 
 class RoutingMixin:

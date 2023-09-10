@@ -15,7 +15,7 @@ from mttl.callbacks import MiniProgress
 from mttl.utils import get_mlf_logger, setup_logging, logger
 
 from projects.wiki_experts.expert_trainer import ExpertTrainer
-from config import RoutingConfig
+from config import ExpertConfig
 
 
 def run_multitask(args):
@@ -102,5 +102,5 @@ def run_multitask(args):
 
 
 if __name__ == "__main__":
-    args = RoutingConfig.parse()
+    args = ExpertConfig.parse()
     run_multitask(args)

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Any, Dict
 from torch import nn
 import torch
 import math
@@ -41,10 +41,22 @@ class LoRA(Adapter):
             self.weight = layer.weight
 
         if hasattr(layer, "bias"):
-            self.bias = layer.bias        
+            self.bias = layer.bias
 
         self.create_for_layer(layer)
         self.reset_parameters()
+        self.merged_with_layer = False
+
+    def load_lora_weights(self, state_dict):
+        self.lora_a.data.copy_(state_dict["lora_a"])
+        self.lora_b.data.copy_(state_dict["lora_b"])
+
+    def merge_with_layer(self):
+        if isinstance(self.layer, nn.Linear):
+            self.merged_with_layer = True
+            self.layer.weight.data.add_(self.lora_a.data @ self.lora_b.data) * self.scaling
+        else:
+            raise NotImplementedError("LoRA only supports nn.Linear layers.")
 
     def create_for_layer(self, layer):
         if isinstance(layer, nn.Linear):
@@ -55,13 +67,30 @@ class LoRA(Adapter):
             raise NotImplementedError("LoRA only supports nn.Linear layers.")
 
     def forward_linear_(self, input, **kwargs):
-        if self.training:
-            self.training_steps += 1
-        adapter_out = torch.matmul(torch.matmul(input, self.lora_a), self.lora_b) * self.scaling
-        warmup = min(self.training_steps / 10_000, 1)
-        if self.use_warmup:
-            adapter_out = adapter_out * warmup
-        return self.layer(input) + adapter_out
+        if self.merged_with_layer:
+            return self.layer(input)
+        else:            
+            if self.training:
+                self.training_steps += 1
+            adapter_out = torch.matmul(torch.matmul(input, self.lora_a), self.lora_b) * self.scaling
+            warmup = min(self.training_steps / 10_000, 1)
+            if self.use_warmup:
+                adapter_out = adapter_out * warmup
+            return self.layer(input) + adapter_out
+
+    @classmethod
+    def parallel_linear_forward(cls, input, loras):
+        if any([lora.merged_with_layer for lora in loras]):
+            raise ValueError("Cannot parallelize merged loras.")
+        if len(set([lora.layer for lora in loras])) > 1:
+            raise ValueError("Cannot parallelize loras applied to different layers.")
+
+        lora_a = torch.stack([lora.lora_a for lora in loras], dim=0)
+        lora_b = torch.stack([lora.lora_b for lora in loras], dim=0)
+        scaling = torch.cat([torch.LongTensor([lora.scaling]) for lora in loras], dim=0).to(lora_a.device)
+        adapter_out = torch.bmm(torch.bmm(input, lora_a), lora_b)
+
+        return loras[0].layer(input) + adapter_out * scaling[:, None, None]
 
     def reset_parameters(self):
         gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
@@ -178,74 +207,57 @@ class SkilledLoRA(LoRA):
         return self.layer(input) + adapter_out
 
 
-class LoRAKnoweldgeContainer(LoRA):
+class ExpertContainer(Adapter):
     def __init__(
         self,
         config,
+        task_id_container,
         layer,
     ):
-        super().__init__(config, layer)
+        super().__init__()
+        self.config = config
 
-        self.km_names = set()
-        self.km_to_id = {}
-        self.n_skills = 0
+        if type(layer) != nn.Linear:
+            raise ValueError("ExpertLoRA only supports nn.Linear layers.")
 
-    def add_module(self, name: str, weights: torch.Tensor) -> None:
-        if name in self.km_names:
-            raise ValueError("A knowledge module with this name already exists.")
+        self.layer = layer
+        self.info_container = task_id_container
+        self.merged_expert_names = []
+        self.experts = nn.ModuleDict({})
 
-        self.km_names.add(name)
-        self.km_to_id[name] = len(self.km_to_id)
-        self.add_module_weights(self.km_to_id[name], weights)
+    def add_expert(self, name: str, expert_config: Any, expert_weights: Dict[str, torch.Tensor], action = "merge") -> None:
+        if name in self.experts:
+            raise ValueError("An expert with name {} already exists.".format(name))
 
-    def add_module_weights(self, km_id: int, weights: torch.Tensor) -> None:
-        self.lora_b.data.expand(self.lora_b.size(0) + 1, -1, -1)
-
-        self.lora_a[km_id].copy_(weights["lora_a"].data.unsqueeze(0))
-        self.lora_b[km_id].copy_(weights["lora_a"].data.unsqueeze(0))
-
-    def create_for_layer(self, layer):
-        if isinstance(layer, nn.Linear):
-            self.lora_a = nn.Parameter(
-                torch.empty(
-                    0,
-                    layer.in_features,
-                    self.rank,
-                )
-            )
-            self.lora_b = nn.Parameter(
-                torch.empty(
-                    0,
-                    self.rank,
-                    layer.out_features,
-                )
-            )
-            self.forward_fn = self.forward_linear_
+        # hack this for now, but build a proper config for each module
+        if expert_config.model_modifier == "lora":
+            expert_module = LoRA(expert_config, self.layer)
+            expert_module.load_lora_weights(expert_weights)
         else:
-            raise NotImplementedError("LoRAKnoweldgeContainer only supports nn.Linear layers.")
+            raise NotImplementedError("ExpertContainer only supports LoRA experts.")
 
-    def forward_linear_(self, input, weights):
-        if self.training:
-            self.training_steps += 1
-
-        bs = input.size(0)
-        if weights.ndim == 1:
-            # use indexing!
-            wrm_steps = 1_000
-            if self.training_steps < wrm_steps:
-                A = self.lora_a[torch.zeros_like(weights).long()]
-                B = self.lora_b[torch.zeros_like(weights).long()]
+        if action == "merge":
+            # weight is merged with layer so we can discard it now
+            if expert_config.model_modifier == "lora":
+                expert_module.merge_with_layer()
+                self.merged_expert_names.append(name)
             else:
-                if self.training_steps == wrm_steps:
-                    self.lora_a.data.copy_(self.lora_a.data[:1].repeat(self.n_skills, 1, 1, 1))
-                    self.lora_b.data.copy_(self.lora_b.data[:1].repeat(self.n_skills, 1, 1, 1))
-                A = self.lora_a[weights.long(), :, :, :]
-                B = self.lora_b[weights.long(), :, :, :]
+                raise NotImplementedError("Merging experts only supports LoRA experts.")
         else:
-            A = torch.einsum("bqs,sqdr->bqdr", (weights, self.lora_a))
-            B = torch.einsum("bqs,srqd->brqd", (weights, self.lora_b))
+            # we keep track of the expert weights
+            self.experts[name] = expert_module
 
-        A = A.view(bs, self.in_features, self.rank)
-        B = B.view(bs, self.rank, self.out_features)
-        adapter_out = torch.bmm(torch.bmm(input, A), B) * self.scaling
-        return self.layer(input) + adapter_out
+    def forward(self, input, **kwargs):
+        task_names = self.info_container["routing_infos"].task_names
+
+        if any(task_name not in self.experts for task_name in task_names) and not self.merged_expert_names:
+            raise ValueError("Experts for all tasks have not been loaded! Set a default expert?")
+
+        # if it has some routing experts *and* task names, then we can route
+        if len(self.experts) and task_names:
+            load_experts = [self.experts[task_name] for task_name in task_names]
+            # assume all experts are loras
+            output = LoRA.parallel_linear_forward(input, load_experts)
+        else:
+            output = self.layer(input, **kwargs)
+        return output

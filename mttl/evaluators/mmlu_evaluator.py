@@ -45,7 +45,7 @@ class MMLUEvaluator(object):
 
         all_predictions = []
         all_references = []
-        task_names = []
+        all_task_names = []
         all_EM = []
 
         dataloader = self.datamodule.test_dataloader(subsample)
@@ -54,10 +54,8 @@ class MMLUEvaluator(object):
             total=len(dataloader),
         )
         for step, batch in pbar:
-            task_name = batch.pop("task_names", None)
-            batch.pop("input_texts", None)
+            task_names = batch.get("task_names", None)
             labels_text = batch.pop("labels_texts", None)
-
             extra_kwargs = {}
             max_length = 5
 
@@ -110,13 +108,13 @@ class MMLUEvaluator(object):
             if step == len(dataloader) - 1:
                 predictions = predictions[: len(dataloader.dataset) - samples_seen]
                 references = references[: len(dataloader.dataset) - samples_seen]
-                task_name = task_name[: len(dataloader.dataset) - samples_seen]
+                task_names = task_names[: len(dataloader.dataset) - samples_seen]
             else:
                 samples_seen += len(references)
 
             all_predictions += predictions
             all_references += references
-            task_names += task_name
+            all_task_names += task_names
 
             eval_metrics = compute_metrics(
                 predictions, [[r] for r in references], reduction="mean"
@@ -124,7 +122,7 @@ class MMLUEvaluator(object):
 
             all_EM.append(eval_metrics["exact_match"])
             pbar.set_description(
-                f"Task: {task_name[0] if task_name else None}, EM: {np.mean(all_EM):.4f}"
+                f"Task: {task_names[0] if task_names else None}, EM: {np.mean(all_EM):.4f}"
             )
 
         if was_train:
@@ -133,4 +131,4 @@ class MMLUEvaluator(object):
         eval_metrics = compute_metrics(
             all_predictions, [[r] for r in all_references], reduction="none"
         )
-        return compute_task_aggregation(task_names, eval_metrics["exact_match"])
+        return compute_task_aggregation(all_task_names, eval_metrics["exact_match"])

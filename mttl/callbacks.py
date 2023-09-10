@@ -106,7 +106,7 @@ class MiniProgress(cb.ProgressBar):
         self.time_end = time.time()
         metrics = self.get_metrics(trainer, pl_module)
         metrics = {
-            k.replace("_step", "").replace("_epoch", ""): v for k, v in metrics.items()
+            k: v for k, v in metrics.items()
         }
         it_per_sec = 1 / (self.time_end - self.time_start)
 
@@ -124,6 +124,7 @@ class MiniProgress(cb.ProgressBar):
         eta = (num_total_steps - batch_idx) / (
             1.0 / ((self.time_end - self.time_start))
         )
+
         time_metrics = self.averager.update({"it/s": it_per_sec, "eta": eta})
         for k, v in {**metrics, **time_metrics}.items():
             if k == "eta":
@@ -155,7 +156,7 @@ class MiniProgress(cb.ProgressBar):
         self.time_end = time.time()
         metrics = self.get_metrics(trainer, pl_module)
         metrics = {
-            k.replace("_step", "").replace("_epoch", ""): v for k, v in metrics.items()
+            k: v for k, v in metrics.items()
         }
         metrics["it/s"] = 1.0 / (self.time_end - self.time_start)
         for k, v in metrics.items():
