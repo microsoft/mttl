@@ -11,6 +11,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.datamodule.wiki_mmlu_module import WikiMMLUDataModule
 from mttl.datamodule.platypus_module import PlatypusModule
+from mttl.callbacks import MiniProgress
 from mttl.utils import get_mlf_logger, setup_logging, logger
 
 from projects.wiki_experts.expert_trainer import ExpertTrainer
