@@ -109,7 +109,19 @@ class MiniProgress(cb.ProgressBar):
             k.replace("_step", "").replace("_epoch", ""): v for k, v in metrics.items()
         }
         it_per_sec = 1 / (self.time_end - self.time_start)
-        eta = (trainer.num_training_batches - batch_idx) / (
+
+        # num total steps will be min of num_training_batches and max_steps
+        if trainer.max_steps > -1:
+            num_total_steps = min(
+                trainer.num_training_batches * trainer.max_epochs,
+                trainer.max_steps
+            )
+        else:
+            num_total_steps = (
+                trainer.num_training_batches // trainer.accumulate_grad_batches
+            ) * trainer.max_epochs
+
+        eta = (num_total_steps - batch_idx) / (
             1.0 / ((self.time_end - self.time_start))
         )
         time_metrics = self.averager.update({"it/s": it_per_sec, "eta": eta})
@@ -120,7 +132,7 @@ class MiniProgress(cb.ProgressBar):
                 metrics[k] = "{:.2f}".format(v) if isinstance(v, float) else v
 
         msg_start = (
-            f"Trn - Epc {trainer.current_epoch} / {trainer.global_step} / {trainer.num_training_batches // trainer.accumulate_grad_batches}"
+            f"Trn - Epc {trainer.current_epoch} / {trainer.global_step} / {num_total_steps}"
             + " | "
         )
         dict_msg = " | ".join([f"{k} -> {v}" for k, v in metrics.items()]) + " | "
