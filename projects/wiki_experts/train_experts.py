@@ -90,9 +90,14 @@ def run_multitask(args):
         if args.precision in ["16", "32"]
         else args.precision,
         fast_dev_run=args.fast_dev_run,
-        val_check_interval=min(args.eval_every, len(dm.train_dataloader())),
+        val_check_interval=np.min(args.eval_every, len(dm.train_dataloader())),
     )
     trainer.fit(module, dm)
+
+    path_best_model = trainer.checkpoint_callback.best_model_path
+    ckpt_path = "best" if path_best_model else "last"
+
+    trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
 
 
 if __name__ == "__main__":
