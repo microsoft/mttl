@@ -73,6 +73,12 @@ def run_multitask(args):
     )
     callbacks.append(checkpoint_callback)
 
+    val_check_interval = args.eval_every
+    if val_check_interval > len(dm.train_dataloader()):
+        val_check_interval = len(dm.train_dataloader())
+    if val_check_interval > args.total_steps and args.total_steps != -1:
+        val_check_interval = args.total_steps
+
     trainer = Trainer(
         devices=-1, 
         accelerator="gpu",
@@ -90,7 +96,7 @@ def run_multitask(args):
         if args.precision in ["16", "32"]
         else args.precision,
         fast_dev_run=args.fast_dev_run,
-        val_check_interval=min(args.eval_every, len(dm.train_dataloader())),
+        val_check_interval=val_check_interval,
     )
     trainer.fit(module, dm)
 
