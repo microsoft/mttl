@@ -11,17 +11,11 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.callbacks import MMLUCallback, MiniProgress
+from mttl.callbacks import MiniProgress
 from mttl.datamodule.wiki_mmlu_module import WikiMMLUDataModule
 from mttl.utils import get_mlf_logger, setup_logging, logger
-from mttl.dist_utils import is_main_process
 
-
-# register models
-import models.vsmear  # noqa: F401
-import models.softmoe # noqa: F401
-from models.monitors import SelectorMetricsLog, SelectorRoutingsLog
-from models.lm_trainer import ExpertCard, ExpertTrainer
+from projects.wiki_experts.expert_trainer import ExpertTrainer
 from config import RoutingConfig
 
 

@@ -142,7 +142,7 @@ class Config:
         self.finetune_task_name = None
         self.example_to_ids_path = None  # path to clustering of data
         self.embeddings_path = None
-        
+
         # NI related configs
         self.use_task_descriptions = False  # Use task descriptions
         self.max_num_instances_per_task = 100  # Max instances per training task (applies to NI)

@@ -1,6 +1,9 @@
+from typing import Optional
 from torch import nn
 import torch
 import math
+from torch.autograd import Function
+from torch.nn.modules.module import Module
 
 
 class Adapter(nn.Module):
@@ -67,7 +70,7 @@ class LoRA(Adapter):
             self.lora_a.uniform_(-std, std)
 
         # ensure that initially, adding the adapter does not change the output
-        if self.use_warmup or self.init_b_random:
+        if self.init_b_random:
             with torch.no_grad():
                 self.lora_b.uniform_(-std, std)
         else:
@@ -128,17 +131,17 @@ class SkilledLoRA(LoRA):
         if isinstance(layer, nn.Linear):
             self.lora_a = nn.Parameter(
                 torch.empty(
-                    self.n_splits,
                     self.n_skills,
+                    self.n_splits,
                     layer.in_features // self.n_splits,
                     self.rank,
                 )
             )
             self.lora_b = nn.Parameter(
                 torch.empty(
-                    self.n_splits,
                     self.n_skills,
                     self.rank,
+                    self.n_splits,
                     layer.out_features // self.n_splits,
                 )
             )
@@ -151,20 +154,98 @@ class SkilledLoRA(LoRA):
             self.training_steps += 1
 
         bs = input.size(0)
+        
+        # these are task ids
         if weights.ndim == 1:
             # use indexing!
-            A = self.lora_a[:, weights.long(), :, :]
-            B = self.lora_b[:, weights.long(), :, :]
+            wrm_steps = 0
+            if self.training_steps < wrm_steps:
+                A = self.lora_a[torch.zeros_like(weights).long()]
+                B = self.lora_b[torch.zeros_like(weights).long()]
+            else:
+                if self.training_steps == wrm_steps:
+                    self.lora_a.data.copy_(self.lora_a.data[:1].repeat(self.n_skills, 1, 1, 1))
+                    self.lora_b.data.copy_(self.lora_b.data[:1].repeat(self.n_skills, 1, 1, 1))
+                A = self.lora_a[weights.long(), :, :, :]
+                B = self.lora_b[weights.long(), :, :, :]
         else:
-            A = torch.einsum("bqs,qsdr->bqdr", (weights, self.lora_a))
-            B = torch.einsum("bqs,qsrd->bqrd", (weights, self.lora_b))
+            A = torch.einsum("bqs,sqdr->bqdr", (weights, self.lora_a))
+            B = torch.einsum("bqs,srqd->brqd", (weights, self.lora_b))
 
-        A = A.reshape(bs, self.in_features, self.rank)
-        B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
-        adapter_out = input.bmm(A).bmm(B) * self.scaling
+        A = A.view(bs, self.in_features, self.rank)
+        B = B.view(bs, self.rank, self.out_features)
+        adapter_out = torch.bmm(torch.bmm(input, A), B) * self.scaling
+        return self.layer(input) + adapter_out
 
-        warmup = min(self.training_steps / 10_000, 1)
-        if self.use_warmup:
-            adapter_out = adapter_out * warmup
 
+class LoRAKnoweldgeContainer(LoRA):
+    def __init__(
+        self,
+        config,
+        layer,
+    ):
+        super().__init__(config, layer)
+
+        self.km_names = set()
+        self.km_to_id = {}
+        self.n_skills = 0
+
+    def add_module(self, name: str, weights: torch.Tensor) -> None:
+        if name in self.km_names:
+            raise ValueError("A knowledge module with this name already exists.")
+
+        self.km_names.add(name)
+        self.km_to_id[name] = len(self.km_to_id)
+        self.add_module_weights(self.km_to_id[name], weights)
+
+    def add_module_weights(self, km_id: int, weights: torch.Tensor) -> None:
+        self.lora_b.data.expand(self.lora_b.size(0) + 1, -1, -1)
+
+        self.lora_a[km_id].copy_(weights["lora_a"].data.unsqueeze(0))
+        self.lora_b[km_id].copy_(weights["lora_a"].data.unsqueeze(0))
+
+    def create_for_layer(self, layer):
+        if isinstance(layer, nn.Linear):
+            self.lora_a = nn.Parameter(
+                torch.empty(
+                    0,
+                    layer.in_features,
+                    self.rank,
+                )
+            )
+            self.lora_b = nn.Parameter(
+                torch.empty(
+                    0,
+                    self.rank,
+                    layer.out_features,
+                )
+            )
+            self.forward_fn = self.forward_linear_
+        else:
+            raise NotImplementedError("LoRAKnoweldgeContainer only supports nn.Linear layers.")
+
+    def forward_linear_(self, input, weights):
+        if self.training:
+            self.training_steps += 1
+
+        bs = input.size(0)
+        if weights.ndim == 1:
+            # use indexing!
+            wrm_steps = 1_000
+            if self.training_steps < wrm_steps:
+                A = self.lora_a[torch.zeros_like(weights).long()]
+                B = self.lora_b[torch.zeros_like(weights).long()]
+            else:
+                if self.training_steps == wrm_steps:
+                    self.lora_a.data.copy_(self.lora_a.data[:1].repeat(self.n_skills, 1, 1, 1))
+                    self.lora_b.data.copy_(self.lora_b.data[:1].repeat(self.n_skills, 1, 1, 1))
+                A = self.lora_a[weights.long(), :, :, :]
+                B = self.lora_b[weights.long(), :, :, :]
+        else:
+            A = torch.einsum("bqs,sqdr->bqdr", (weights, self.lora_a))
+            B = torch.einsum("bqs,srqd->brqd", (weights, self.lora_b))
+
+        A = A.view(bs, self.in_features, self.rank)
+        B = B.view(bs, self.rank, self.out_features)
+        adapter_out = torch.bmm(torch.bmm(input, A), B) * self.scaling
         return self.layer(input) + adapter_out

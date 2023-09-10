@@ -59,9 +59,8 @@ class NIEvaluator(object):
         all_references = []
         task_names = []
         all_rougeL = []
-                  
-        dataloader = self.datamodule.test_dataloader(subsample)
 
+        dataloader = self.datamodule.test_dataloader(subsample)
 
         pbar = tqdm.tqdm(  
             enumerate(dataloader),

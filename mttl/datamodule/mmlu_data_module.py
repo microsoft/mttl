@@ -152,6 +152,13 @@ class MMLUDataModule(LightningDataModule):
         task_names = set(dataset["train"]["Task"])
         task_names = task_names.union(set(dataset["validation"]["Task"]))
         task_names = task_names.union(set(dataset["test"]["Task"]))
+        task_subset = None
+
+        if self.config.finetune_task_name is not None:
+            task_subset = sorted(self.config.finetune_task_name.split(","))
+            if any(task not in task_names for task in task_subset):
+                raise ValueError("Unknown task name in finetune_task_name")
+            task_names = task_subset
 
         self.task_names = sorted(list(task_names))
         self.task_to_id = {task: i for i, task in enumerate(self.task_names)}
@@ -167,8 +174,19 @@ class MMLUDataModule(LightningDataModule):
             task_to_id=self.task_to_id,
         )
 
-        self.train_dataset = dataset["train"]
-        self.test_dataset = self.dev_dataset = dataset["test"]
+        if task_subset is not None:
+            self.train_dataset = dataset["train"].filter(
+                lambda x: x["Task"] in task_subset
+            )
+            self.dev_dataset = dataset["validation"].filter(
+                lambda x: x["Task"] in task_subset
+            )
+            self.test_dataset = dataset["test"].filter(
+                lambda x: x["Task"] in task_subset
+            )
+        else:
+            self.train_dataset = dataset["train"]
+            self.test_dataset = self.dev_dataset = dataset["test"]
 
         logger.info("Training examples: {}".format(len(self.train_dataset)))
         logger.info("Test examples: {}".format(len(self.test_dataset)))

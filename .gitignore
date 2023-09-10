@@ -1,5 +1,6 @@
 # Project related stuff
 configs/
+amlt/
 dataloader/*_data/processed/
 amulet_*/
 wandb

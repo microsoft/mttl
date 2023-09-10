@@ -1,3 +1,4 @@
+from collections import defaultdict
 import torch
 import os
 import numpy as np
@@ -58,6 +59,8 @@ class WikiMMLUDataCollator:
             pad_to_multiple_of=self.pad_to_multiple_of,
         )
 
+        # leave ~20 tokens for burn in
+        num_burn_in = 20
         output_batch["task_names"] = task_names
         if self.task_to_id is not None:
             output_batch["task_ids"] = torch.LongTensor(
@@ -67,6 +70,7 @@ class WikiMMLUDataCollator:
         output_batch["labels"] = torch.masked_fill(
             labels, ~output_batch["attention_mask"].bool(), self.label_pad_token_id
         )
+        output_batch["labels"][:, :num_burn_in] = self.label_pad_token_id
         return output_batch
 
 
@@ -168,7 +172,9 @@ class WikiMMLUDataModule(LightningDataModule):
     def setup_dataset(self, stage=None):
         dataset = load_dataset(self.config.dataset)
 
+        self.task_names = self.mmlu_module.task_names
         self.task_to_id = self.mmlu_module.task_to_id
+
         self.collate_fn = WikiMMLUDataCollator(
             tokenizer=self.tokenizer,
             padding="longest",
@@ -181,15 +187,16 @@ class WikiMMLUDataModule(LightningDataModule):
             rng=self.rng,
         )
 
+        train_dataset = dataset["train"]
+        train_dataset = train_dataset.filter(lambda x: x["subject"] in self.task_names)
         torch_rng = torch.Generator().manual_seed(self.config.seed)
 
-        self.train_dataset = dataset["train"]
-        n_tr_samples = int(len(self.train_dataset) * (1 - 0.03))
+        n_tr_samples = int(len(train_dataset) * 0.9)
         self.train_dataset, self.dev_dataset = torch.utils.data.random_split(
-            self.train_dataset,
+            train_dataset,
             [
                 n_tr_samples,
-                len(self.train_dataset) - n_tr_samples,
+                len(train_dataset) - n_tr_samples,
             ],
             generator=torch_rng,
         )

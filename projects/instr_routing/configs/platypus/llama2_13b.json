@@ -10,7 +10,7 @@
     "model": "meta-llama/Llama-2-13b-hf",
     "model_family": "gpt",
     "optimizer": "adamw",
-    "eval_every": 400,
+    "eval_every": 800,
     "warmup_steps": 100,
     "precision": "bf16",
     "dataset": "platypus"

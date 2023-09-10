@@ -25,7 +25,9 @@ class MMLUEvaluator(object):
 
         self.data_dir = data_dir
         self.datamodule = MMLUDataModule(
-            self.config, data_dir=self.data_dir, for_generation=True
+            self.config,
+            data_dir=self.data_dir,
+            for_generation=True
         )
         self.datamodule.setup("test")
 

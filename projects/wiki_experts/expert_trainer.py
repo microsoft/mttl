@@ -176,12 +176,12 @@ class ExpertTrainer(EfficientCheckpointModule):
 
         self.log("val/loss", mean_loss, on_epoch=True, prog_bar=True)
 
-        self._inference_outputs += [(loss, batch["task_ids"])]
+        self._inference_outputs += [(loss.detach().cpu(), batch["task_ids"])]
         return loss, batch["task_ids"]
 
     def test_step(self, batch, batch_idx):
         loss = self.forward(batch, reduction="none")
-        self._inference_outputs += [(loss, batch["task_ids"])]
+        self._inference_outputs += [(loss.detach().cpu(), batch["task_ids"])]
         return loss, batch["task_ids"]
 
     def on_test_epoch_end(self):

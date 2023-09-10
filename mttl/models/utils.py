@@ -1,5 +1,8 @@
+import os
+from typing import Any
 from pytorch_lightning import LightningModule
 import torch
+import json
 
 
 def transfer_batch_to_device(batch, device):
@@ -19,6 +22,7 @@ class EfficientCheckpointModule(LightningModule):
     def __init__(self, **kwargs):
         super().__init__()
 
+        self.loss_plugins = {}
         self.save_if_loaded = kwargs.get("save_if_loaded", True)
 
     def load_state_dict(self, ckpt, **kwargs):

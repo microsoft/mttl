@@ -37,9 +37,8 @@ class SkillWrapper(RouterWrapper):
 @register_selector("poly")
 class PolytroponSelector(RoutingSelector):
     def __init__(self, config, **kwargs):
-        super().__init__()
+        super().__init__(config)
 
-        self.config = config
         self.n_splits = config.n_splits
         self.n_skills = config.n_skills
         self.dropout = config.module_logits_dropout

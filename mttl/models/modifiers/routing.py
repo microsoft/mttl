@@ -109,11 +109,16 @@ class RoutingSelector(nn.Module):
 
         return self.__layer_name__
 
+    def __init__(self, config):
+        super().__init__()
+
+        self.config = config
+
 
 @register_selector("average")
 class AverageSelector(RoutingSelector):
     def __init__(self, config, **kwargs):
-        super().__init__()
+        super().__init__(config)
 
         self.n_splits = config.n_splits
         self.n_skills = config.n_skills
@@ -131,10 +136,10 @@ class AverageSelector(RoutingSelector):
 @register_selector("private")
 class PrivateSelector(RoutingSelector):
     def __init__(self, config, **kwargs):
-        super().__init__()
+        super().__init__(config)
 
     def forward(self, routing_infos, **kwargs):
-        return routing_infos.task_ids.long()
+        return routing_infos.task_ids
 
 
 @dataclass

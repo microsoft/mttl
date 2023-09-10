@@ -16,13 +16,14 @@ from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.platypus_module import PlatypusModule
 from mttl.datamodule.flan100k_module import Flan100kModule
 from mttl.utils import get_mlf_logger, setup_logging, logger
+from mttl.models.monitors import SelectorMetricsLog, SelectorRoutingsLog
 from mttl.dist_utils import is_main_process
+
 torch.set_float32_matmul_precision('high')
 
 # register models
 import models.vsmear  # noqa: F401
 import models.softmoe # noqa: F401
-from models.monitors import SelectorMetricsLog, SelectorRoutingsLog
 from models.clm import CLM
 from config import RoutingConfig
 
