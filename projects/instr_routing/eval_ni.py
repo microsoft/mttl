@@ -18,7 +18,7 @@ torch.set_float32_matmul_precision("high")
 def eval_ni(
     config,
     model,
-    nshot=2,
+    nshot=2, 
     data_dir=None,
     subsample=-1,
     max_input_length=None,
@@ -35,46 +35,74 @@ def eval_ni(
     torch.cuda.empty_cache()
     return metrics
 
+def load_hf_model(model_name):   
+    from mttl.datamodule.utils import get_tokenizer    
+    from peft import PeftModel  
+    config = RoutingConfig()
+    config.model = "yahma/llama-7b-hf"
+    config.model_family = "gpt"
+    tokenizer = get_tokenizer(config)
+    model = CLM(**vars(config),tokenizer=tokenizer)
+    model = model.cuda()    
+    model = PeftModel.from_pretrained(
+        model.model,           
+        model_name,
+        device_map={"": "cuda"},
+    )       
+    config.model_object = model 
+    model = CLM(**vars(config), tokenizer=tokenizer)
+    return model, config
+
 
 @click.command()  
-@click.option("--model_name", type=str, default="alpaca_vsmear_e12[xr4,t_1]")
-@click.option("--amlt_experiment_name", type=str, default="routing")
+@click.option("--model_name", type=str, default="flan_dense_r4[no_mmlu_cb]") #chainyo/alpaca-lora-7b") #alpaca_vsmear_e12[xr4,t_1]")
+@click.option("--amlt_experiment_name", type=str, default="routing") #routing")
 @click.option("--model_path", type=str, default=None, help="path to the model")
-@click.option("--batch_size", type=int, default=2)
+@click.option("--batch_size", type=int, default=3)
 @click.option("--wandb_proj", type=str, default="eval")
+@click.option("--use_old_gen_config", type=bool, default=False)
 def run_ni_eval(
     model_name,
     amlt_experiment_name=None,
     model_path=None,
     batch_size=5,
     wandb_proj=None,
+    use_old_gen_config=False,
 ):
-    if model_path is None:
-        if os.environ.get("AMLT_OUTPUT_DIR") is not None:  # on gcr
-            base_model_path = "/mnt/default/data/models"
-        else:
-            base_model_path = os.path.join(os.path.dirname(__file__), "..", "..", "..")
-            base_model_path = os.path.join(base_model_path, "amlt")
-        if amlt_experiment_name:
-            model_name = re.sub(r"(\[)", r"[[]", model_name)
-            model_name = re.sub(r"(\])$", r"[]]", model_name)
-            model_path = glob.glob(
-                f"{base_model_path}/{amlt_experiment_name}/{model_name}/yahma*/loss=*.ckpt"
-            )     
-            if len(model_path) == 1:
-                model_path = model_path[0]
-            else:    
-                import numpy as np
-                # take the one with minimum loss 
-                idx_min = np.argmin([float(x.split("loss=")[-1].split(".ckpt")[0]) for x in model_path])
-                model_path = model_path[idx_min]
-            model_name = model_name.replace("[]","")
-    # load state dict
-    config = RoutingConfig()
-    config.update_kwargs(torch.load(model_path)["hyper_parameters"])
-    dm = AlpacaDataModule(config)
-    model = CLM.load_from_checkpoint(model_path, tokenizer=dm.tokenizer).cuda()
-    config = model.hparams
+         
+    if amlt_experiment_name =="hf":
+        raise NotImplementedError
+        model, config = load_hf_model(model_name)
+    elif amlt_experiment_name =="hf_peft":
+        model, config = load_hf_model(model_name)
+    else:
+        if model_path is None:
+            if os.environ.get("AMLT_OUTPUT_DIR") is not None:  # on gcr
+                base_model_path = "/mnt/default/data/models"
+            else:
+                base_model_path = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+                base_model_path = os.path.join(base_model_path, "amlt")
+            if amlt_experiment_name:
+                model_name = re.sub(r"(\[)", r"[[]", model_name)
+                model_name = re.sub(r"(\])$", r"[]]", model_name)
+                model_path = glob.glob(
+                    f"{base_model_path}/{amlt_experiment_name}/{model_name}/yahma*/loss=*.ckpt"
+                )     
+                if len(model_path) == 1:
+                    model_path = model_path[0]
+                else:    
+                    import numpy as np
+                    # take the one with minimum loss 
+                    idx_min = np.argmin([float(x.split("loss=")[-1].split(".ckpt")[0]) for x in model_path])
+                    model_path = model_path[idx_min]
+                model_name = model_name.replace("[]","")
+        # load state dict
+        config = RoutingConfig()
+        config.update_kwargs(torch.load(model_path)["hyper_parameters"])
+        dm = AlpacaDataModule(config)
+        model = CLM.load_from_checkpoint(model_path, tokenizer=dm.tokenizer).cuda()
+        config = model.hparams
+    config.use_old_gen_config = use_old_gen_config
     config.data_dir = os.environ["NI_DATA_DIR"]
     config.predict_batch_size = batch_size
     config.output_dir = os.environ.get(
@@ -99,7 +127,7 @@ def run_ni_eval(
             config=config,
         )
         wandb.log(rougel_ni_all["all"])
-    print(rougel_ni)
+    print(rougel_ni_all)
 
 
 if __name__ == "__main__":

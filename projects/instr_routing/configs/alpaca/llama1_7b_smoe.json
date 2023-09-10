@@ -17,7 +17,7 @@
 
     "model_modifier": "softmoe",
     "modify_modules": ".*attn.*",       
-    "modify_layers": "q_proj|v_proj|k_proj",   
+    "modify_layers": "q_proj|v_proj|k_proj|o_proj",   
     "trainable_param_names": ".*lora_[ab].*|.*selector.*",
     "wandb_project": "test",
     "eval_superni": 1,

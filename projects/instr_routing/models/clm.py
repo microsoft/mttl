@@ -97,7 +97,7 @@ class CLM(EfficientCheckpointModule):
         self.accumulate_metrics_batch = defaultdict(list)
 
         if kwargs.get("model_object") is None:
-            if "llama" in self.hparams.model:
+            if "llama" in self.hparams.model or "alpaca" in self.hparams.model:
                 model_object = LlamaForCausalLM.from_pretrained(
                     self.hparams.model,
                     load_in_8bit=self.hparams.load_in_8bit,
@@ -125,6 +125,14 @@ class CLM(EfficientCheckpointModule):
     @property
     def generation_config(self):
         return self.model.generation_config
+
+    @property
+    def generation_config_old(self):
+        gen_config = self.model.generation_config
+        gen_config.do_sample = False
+        gen_config.temperature = 0.7
+        gen_config.max_new_tokens=128
+        return gen_config
 
     def gather_auxiliary_losses(self):
         # get some losses from the model if it is a router

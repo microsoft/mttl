@@ -42,7 +42,7 @@ def run_multitask(args, module):
     # select dataloader
     model_class = CLM
     if args.dataset == "alpaca":
-        dm = AlpacaDataModule(args, fast=1)
+        dm = AlpacaDataModule(args)
     elif args.dataset == "platypus":
         dm = PlatypusModule(args)
     elif args.dataset == "flan100k":
@@ -71,22 +71,18 @@ def run_multitask(args, module):
     path_best_model = args.model_path
     ckpt_path = path_best_model  
     # trainer.validate(dataloaders=dm, model=module)
-    print("Validation with checkpoint", ckpt_path)
+    print("Validation with checkpoint", ckpt_path)   
     trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
-
+           
 @click.command()  
-@click.option("--model_name", type=str, default="alpaca_vsmear_e12[xr4,t_1]") #alpaca_vsmear_e12[xr4,t_1]")
+@click.option("--model_name", type=str, default="alpaca_dense_r4") #alpaca_dense_r4") #alpaca_vsmear_e12[xr4,t_1]")
 @click.option("--amlt_experiment_name", type=str, default="routing")
 @click.option("--model_path", type=str, default=None, help="path to the model")
-@click.option("--batch_size", type=int, default=2)
-@click.option("--wandb_proj", type=str, default="eval")
 def run_eval(
     model_name,
     amlt_experiment_name=None,
     model_path=None,
-    batch_size=5,
-    wandb_proj=None,
-):
+):      
     if model_path is None:
         if os.environ.get("AMLT_OUTPUT_DIR") is not None:  # on gcr
             base_model_path = "/mnt/default/data/models"
@@ -107,6 +103,7 @@ def run_eval(
                 idx_min = np.argmin([float(x.split("loss=")[-1].split(".ckpt")[0]) for x in model_path])
                 model_path = model_path[idx_min]
             model_name = model_name.replace("[]","")
+            
     # load state dict
     config = RoutingConfig()
     config.update_kwargs(torch.load(model_path)["hyper_parameters"])

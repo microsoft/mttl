@@ -20,7 +20,7 @@
 
     "model_modifier": "lora",
     "modify_modules": ".*attn.*",       
-    "modify_layers": "q_proj|v_proj|k_proj",   
+    "modify_layers": "q_proj|v_proj|k_proj|o_proj",   
     "trainable_param_names": ".*lora_[ab].*|.*selector.*",
     "eval_superni": 1,
     "eval_mmlu": 1

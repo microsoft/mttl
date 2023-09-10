@@ -5,7 +5,9 @@ from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 from datasets import load_dataset
-
+import json
+import tqdm
+import os
 import random
 import string
 from typing import Optional
@@ -210,7 +212,7 @@ class DataCollatorForNI(DefaultCollator):
                 + task_input
             )
             tokenized_source = self.tokenizer(source)["input_ids"]
-            if len(tokenized_source) <= self.max_input_length:
+            if len(tokenized_source) <= self.max_input_length or self.max_input_length<0:
                 sources.append(source)
             else:
                 tokenized_task_input = self.tokenizer(
@@ -378,7 +380,21 @@ class NIOriginalDataModule(LightningDataModule):
         logger.info("Training examples: {}".format(len(self.train_dataset)))
         logger.info("Validation examples: {}".format(len(self.val_dataset)))
         logger.info("Test examples: {}".format(len(self.test_dataset)))
-
+        
+        # make sure all test instances are in eference file        
+        reference_file = os.path.join(self.data_dir, "test_references.jsonl")
+        eval_instances={}
+        with open(reference_file) as fin:
+            for line in fin:
+                instance = json.loads(line)
+                # if track is not provided in the refernce file, we use set the track to `default` and use the default tokenizer in rouge-score.
+                if "track" not in instance:
+                    instance["track"] = "default"
+                eval_instances[instance["id"]] = instance
+        eval_ids = list(eval_instances.keys()) 
+        for element in tqdm.tqdm(self.test_dataset, desc="Checking test instances", total=len(self.test_dataset)):
+            id = element["id"]  
+            assert id in eval_ids, f"{id} not in test references, see https://github.com/allenai/natural-instructions/blob/master/eval/leaderboard/create_reference_file.py"
 
 if __name__ == "__main__":
     from mttl.config import Config

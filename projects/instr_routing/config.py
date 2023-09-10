@@ -41,7 +41,8 @@ class RoutingConfig(Config):
 
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
-        
+        #  eval       
+        self.use_old_gen_config = False # if 'True', use the old generation config from previous versions
         # logging    
         self.selector_log_per_layer = True
         self.mmlu_callback = True
