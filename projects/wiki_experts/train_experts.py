@@ -90,7 +90,7 @@ def run_multitask(args):
         if args.precision in ["16", "32"]
         else args.precision,
         fast_dev_run=args.fast_dev_run,
-        val_check_interval=np.min(args.eval_every, len(dm.train_dataloader())),
+        val_check_interval=min(args.eval_every, len(dm.train_dataloader())),
     )
     trainer.fit(module, dm)
 
