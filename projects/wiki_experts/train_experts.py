@@ -100,11 +100,6 @@ def run_multitask(args):
     )
     trainer.fit(module, dm)
 
-    path_best_model = trainer.checkpoint_callback.best_model_path
-    ckpt_path = "best" if path_best_model else "last"
-
-    trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
-
 
 if __name__ == "__main__":
     args = RoutingConfig.parse()
