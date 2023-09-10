@@ -16,6 +16,7 @@ from mttl.models.utils import (
     get_global_batch_size,
 )
 from mttl.models.get_optimizer import get_optimizer
+from mttl.utils import get_mlf_logger, setup_logging, logger
 from dataclasses import dataclass, field
 
 
@@ -176,12 +177,12 @@ class ExpertTrainer(EfficientCheckpointModule):
 
         self.log("val/loss", mean_loss, on_epoch=True, prog_bar=True)
 
-        self._inference_outputs += [(loss.detach().cpu(), batch["task_ids"])]
+        self._inference_outputs += [(loss.detach().cpu(), batch["task_ids"].cpu())]
         return loss, batch["task_ids"]
 
     def test_step(self, batch, batch_idx):
         loss = self.forward(batch, reduction="none")
-        self._inference_outputs += [(loss.detach().cpu(), batch["task_ids"])]
+        self._inference_outputs += [(loss.detach().cpu(), batch["task_ids"].cpu())]
         return loss, batch["task_ids"]
 
     def on_test_epoch_end(self):
@@ -201,33 +202,3 @@ class ExpertTrainer(EfficientCheckpointModule):
                 task_losses[task_id.item()] = losses[task_ids == task_id].mean().item()
             f.write(json.dumps(task_losses) + "\n")
         self._inference_outputs.clear()
-
-    def configure_optimizers(self):
-        args = self.hparams
-        self.ml_optimizer = self.ml_scheduler = None
-
-        optimizer, self.trainable_param_names = get_optimizer(
-            self, args, no_decay=["bias", "LayerNorm.weight"]
-        )
-        global_bs = get_global_batch_size(
-            args.train_batch_size, args.gradient_accumulation_steps
-        )
-
-        if args.total_steps == -1:
-            args.total_steps = (
-                len(self.trainer.datamodule.train_dataset) // global_bs
-            ) * self.trainer.max_epochs
-
-        if args.warmup_steps == -1:
-            args.warmup_steps = int(args.warmup_proportion * args.total_steps)
-
-        # args.scheduler = "linear_decay_with_warmup"
-        scheduler = get_scheduler(optimizer, args)
-
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "interval": "step",
-            },
-        }

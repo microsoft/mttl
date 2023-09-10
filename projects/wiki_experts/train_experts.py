@@ -1,33 +1,20 @@
 import os
 import sys
 import json
-import torch
-import wandb 
-import logging
 import pytorch_lightning as pl
+
 from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.callbacks import MiniProgress
 from mttl.datamodule.wiki_mmlu_module import WikiMMLUDataModule
+from mttl.datamodule.platypus_module import PlatypusModule
 from mttl.utils import get_mlf_logger, setup_logging, logger
 
 from projects.wiki_experts.expert_trainer import ExpertTrainer
 from config import RoutingConfig
-
-
-def remove_non_serializable(d):
-    """
-    Recursively remove non-JSON serializable values from a dictionary.
-    """
-    for k, v in d.items():
-        if isinstance(v, (list, dict)):
-            remove_non_serializable(v)
-        elif not json.dumps(v, default=lambda x: None):
-            del d[k]
 
 
 def run_multitask(args):
@@ -43,9 +30,12 @@ def run_multitask(args):
 
     # select dataloader
     model_class = ExpertTrainer
-    dm = WikiMMLUDataModule(args)
+    if args.dataset == "platypus":
+        dm = PlatypusModule(args)
+    elif "wiki_mmlu" in args.dataset:
+        dm = WikiMMLUDataModule(args)
 
-    args.n_tasks = len(dm.task_to_id)
+    args.n_tasks = len(dm.task_to_id) if hasattr(dm, "task_to_id") else 0
     module = model_class(**vars(args), tokenizer=dm.tokenizer)
 
     # legit logging
@@ -60,8 +50,6 @@ def run_multitask(args):
         loggers.append(tb_logger)
 
     loggers.append(pl.loggers.CSVLogger(save_dir=args.output_dir, name="csv_metrics"))
-
-    kwargs = {"val_check_interval": args.eval_every} if args.eval_every else {}
 
     # get metric monitors for models
     callbacks = []
@@ -101,14 +89,9 @@ def run_multitask(args):
         if args.precision in ["16", "32"]
         else args.precision,
         fast_dev_run=args.fast_dev_run,
-        **kwargs,
+        val_check_interval=min(args.eval_every, len(dm.train_dataloader())),
     )
     trainer.fit(module, dm)
-
-    path_best_model = trainer.checkpoint_callback.best_model_path
-    ckpt_path = "best" if path_best_model else "last"
-
-    trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
 
 
 if __name__ == "__main__":

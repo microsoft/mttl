@@ -61,6 +61,7 @@ class WikiMMLUDataCollator:
 
         # leave ~20 tokens for burn in
         num_burn_in = 20
+
         output_batch["task_names"] = task_names
         if self.task_to_id is not None:
             output_batch["task_ids"] = torch.LongTensor(

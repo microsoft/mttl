@@ -4,6 +4,10 @@ from pytorch_lightning import LightningModule
 import torch
 import json
 
+from mttl.utils import logger
+from mttl.models.get_optimizer import get_optimizer
+from mttl.models.get_scheduler import get_scheduler
+
 
 def transfer_batch_to_device(batch, device):
     for key in batch:
@@ -69,6 +73,38 @@ class EfficientCheckpointModule(LightningModule):
 
     def transfer_batch_to_device(self, batch, device, dataloader_idx):
         return transfer_batch_to_device(batch, device)
+
+    def configure_optimizers(self):
+        args = self.hparams
+        self.ml_optimizer = self.ml_scheduler = None
+
+        optimizer, self.trainable_param_names = get_optimizer(
+            self, args, no_decay=["bias", "LayerNorm.weight"]
+        )
+        global_bs = get_global_batch_size(
+            args.train_batch_size, args.gradient_accumulation_steps
+        )
+
+        if args.total_steps == -1:
+            args.total_steps = (
+                len(self.trainer.datamodule.train_dataset) // global_bs
+            ) * self.trainer.max_epochs
+
+        if args.warmup_steps == -1 or args.warmup_proportion > 0.:
+            logger.info("Warmup proportion is set to {}, has priority over warmup_steps".format(args.warmup_proportion))
+
+            args.warmup_steps = int(args.warmup_proportion * args.total_steps)
+
+        # args.scheduler = "linear_decay_with_warmup"
+        scheduler = get_scheduler(optimizer, args)
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "step",
+            },
+        }
 
 
 def get_global_batch_size(batch_size, accumulation_steps):

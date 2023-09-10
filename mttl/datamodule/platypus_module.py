@@ -59,16 +59,13 @@ class PlatypusModule(LightningDataModule):
             model_family=config.model_family,
         )
         self.task_to_id = {"alpaca_full": 0}
-
-    def get_dataset(self, idxs=None, loss_for_keywords=True):
-        return PlatypusDataset(
-            self.config.data_dir,
-            idxs,
-            loss_for_keywords=loss_for_keywords,
-        )
+        self.setup_dataset()
 
     def setup(self, stage=None):
-        dataset = self.get_dataset()
+        pass
+
+    def setup_dataset(self):
+        dataset = PlatypusDataset(self.config.data_dir)
 
         # always use the same split for the dataset
         rng = torch.Generator().manual_seed(1234)
