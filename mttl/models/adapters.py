@@ -4,13 +4,16 @@ import torch
 import math
 from torch.autograd import Function
 from torch.nn.modules.module import Module
+import bitsandbytes as bnb
 
 
 class Adapter(nn.Module):
     @property
     def layer_name(self):
-        if not hasattr(self, '__layer_name__'):
-            raise ValueError("Layer name not set, dependency injection not done properly?")
+        if not hasattr(self, "__layer_name__"):
+            raise ValueError(
+                "Layer name not set, dependency injection not done properly?"
+            )
 
         return self.__layer_name__
 
@@ -54,7 +57,52 @@ class LoRA(Adapter):
     def merge_with_layer(self):
         if isinstance(self.layer, nn.Linear):
             self.merged_with_layer = True
-            self.layer.weight.data.add_(self.lora_a.data @ self.lora_b.data) * self.scaling
+            # for back-compatibility, try the two sides:
+            if self.lora_a.data.shape[0] == self.layer.weight.shape[0]:
+                to_merge = self.lora_a.data @ self.lora_b.data
+            else:
+                to_merge = (self.lora_a.data @ self.lora_b.data).T
+            to_merge = to_merge * self.scaling
+
+            if isinstance(self.layer, bnb.nn.Linear8bitLt):
+                if self.layer.state.SCB is None:
+                    self.layer.state.SCB = self.layer.weight.SCB
+
+                # Dequantize the result of identity matrix and int8 weight because bitsandbytes does not support int8
+                # dequantization directly
+                im = (
+                    torch.eye(self.layer.weight.data.shape[-1])
+                    .contiguous()
+                    .half()
+                    .to(self.weight.device)
+                )
+                im, imt, SCim, SCimt, coo_tensorim = bnb.functional.double_quant(im)
+                im, Sim = bnb.functional.transform(im, "col32")
+
+                if self.layer.state.CxB is None:
+                    (
+                        self.layer.state.CxB,
+                        self.layer.state.SB,
+                    ) = bnb.functional.transform(
+                        self.layer.weight.data, to_order=self.layer.state.formatB
+                    )
+
+                out32, Sout32 = bnb.functional.igemmlt(
+                    im, self.layer.state.CxB, Sim, self.layer.state.SB
+                )
+                output = bnb.functional.mm_dequant(
+                    out32, Sout32, SCim, self.layer.state.SCB, bias=None
+                ).t()
+                w_data = output.to(to_merge.dtype).to(to_merge.device) + to_merge
+
+                self.layer.weight = bnb.nn.Int8Params(
+                    w_data.to("cpu"),
+                    requires_grad=False,
+                    has_fp16_weights=self.layer.weight.has_fp16_weights,
+                ).to(self.layer.weight.device)
+                self.layer.state.reset_grads()
+            else:
+                self.layer.weight.data.add_(to_merge)
         else:
             raise NotImplementedError("LoRA only supports nn.Linear layers.")
 
@@ -69,10 +117,13 @@ class LoRA(Adapter):
     def forward_linear_(self, input, **kwargs):
         if self.merged_with_layer:
             return self.layer(input)
-        else:            
+        else:
             if self.training:
                 self.training_steps += 1
-            adapter_out = torch.matmul(torch.matmul(input, self.lora_a), self.lora_b) * self.scaling
+            adapter_out = (
+                torch.matmul(torch.matmul(input, self.lora_a), self.lora_b)
+                * self.scaling
+            )
             warmup = min(self.training_steps / 10_000, 1)
             if self.use_warmup:
                 adapter_out = adapter_out * warmup
@@ -87,7 +138,9 @@ class LoRA(Adapter):
 
         lora_a = torch.stack([lora.lora_a for lora in loras], dim=0)
         lora_b = torch.stack([lora.lora_b for lora in loras], dim=0)
-        scaling = torch.cat([torch.LongTensor([lora.scaling]) for lora in loras], dim=0).to(lora_a.device)
+        scaling = torch.cat(
+            [torch.LongTensor([lora.scaling]) for lora in loras], dim=0
+        ).to(lora_a.device)
         adapter_out = torch.bmm(torch.bmm(input, lora_a), lora_b)
 
         return loras[0].layer(input) + adapter_out * scaling[:, None, None]
@@ -127,7 +180,7 @@ class IA3(Adapter):
 class LN(Adapter):
     def __init__(self, config, layer):
         super().__init__()
-        
+
         self.out_features = layer.weight.size(0)
         self.weight = layer.weight
         self.variance_epsilon = layer.variance_epsilon
@@ -183,7 +236,7 @@ class SkilledLoRA(LoRA):
             self.training_steps += 1
 
         bs = input.size(0)
-        
+
         # these are task ids
         if weights.ndim == 1:
             # use indexing!
@@ -193,8 +246,12 @@ class SkilledLoRA(LoRA):
                 B = self.lora_b[torch.zeros_like(weights).long()]
             else:
                 if self.training_steps == wrm_steps:
-                    self.lora_a.data.copy_(self.lora_a.data[:1].repeat(self.n_skills, 1, 1, 1))
-                    self.lora_b.data.copy_(self.lora_b.data[:1].repeat(self.n_skills, 1, 1, 1))
+                    self.lora_a.data.copy_(
+                        self.lora_a.data[:1].repeat(self.n_skills, 1, 1, 1)
+                    )
+                    self.lora_b.data.copy_(
+                        self.lora_b.data[:1].repeat(self.n_skills, 1, 1, 1)
+                    )
                 A = self.lora_a[weights.long(), :, :, :]
                 B = self.lora_b[weights.long(), :, :, :]
         else:
@@ -216,16 +273,18 @@ class ExpertContainer(Adapter):
     ):
         super().__init__()
         self.config = config
-
-        if type(layer) != nn.Linear:
-            raise ValueError("ExpertLoRA only supports nn.Linear layers.")
-
         self.layer = layer
         self.info_container = task_id_container
         self.merged_expert_names = []
         self.experts = nn.ModuleDict({})
 
-    def add_expert(self, name: str, expert_config: Any, expert_weights: Dict[str, torch.Tensor], action = "merge") -> None:
+    def add_expert(
+        self,
+        name: str,
+        expert_config: Any,
+        expert_weights: Dict[str, torch.Tensor],
+        action="merge",
+    ) -> None:
         if name in self.experts:
             raise ValueError("An expert with name {} already exists.".format(name))
 
@@ -250,8 +309,13 @@ class ExpertContainer(Adapter):
     def forward(self, input, **kwargs):
         task_names = self.info_container["routing_infos"].task_names
 
-        if any(task_name not in self.experts for task_name in task_names) and not self.merged_expert_names:
-            raise ValueError("Experts for all tasks have not been loaded! Set a default expert?")
+        if (
+            any(task_name not in self.experts for task_name in task_names)
+            and not self.merged_expert_names
+        ):
+            raise ValueError(
+                "Experts for all tasks have not been loaded! Set a default expert?"
+            )
 
         # if it has some routing experts *and* task names, then we can route
         if len(self.experts) and task_names:

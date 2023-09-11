@@ -32,7 +32,6 @@ class Config:
             self.update_kwargs(kwargs, raise_error=raise_error, silent=silent)
 
         self.post_init()
-        self.save_config(self.output_dir)
 
     def post_init(self):
         pass
