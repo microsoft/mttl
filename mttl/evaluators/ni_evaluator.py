@@ -6,6 +6,7 @@ import tqdm
 import torch
 import numpy as np
 import pytorch_lightning as pl
+from pathlib import Path
 
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.models.utils import transfer_batch_to_device
@@ -28,14 +29,14 @@ class NIEvaluator(object):
         data_dir=None,
         num_pos_examples=0,
         max_input_length=None,
+        pred_output_file_path=None,
         device="cuda",
     ):
         from mttl.datamodule.ni_original_data_module import NIOriginalDataModule
 
         self.config = deepcopy(config)
         self.device = device
-        if not hasattr(self.config, "output_file_name"):
-            self.config.output_file_name = None
+        self.pred_output_file_path = pred_output_file_path # if not None, will trute generations into it
 
         # unrestricted input length for SNI pass -1
         if max_input_length is not None:
@@ -73,11 +74,9 @@ class NIEvaluator(object):
         all_rougeL = []
 
         dataloader = self.datamodule.test_dataloader(subsample)
-        if not self.config.output_file_name is None:
-            # write results to a file
-            if not os.path.exists(self.config.output_dir):
-                # create
-                os.makedirs(self.config.output_dir)
+        if not self.pred_output_file_path is None:
+            path = os.path.join(*self.pred_output_file_path.split("/")[:-1])
+            Path(path).mkdir(parents=True, exist_ok=True)
 
         pbar = tqdm.tqdm(
             enumerate(dataloader),
@@ -148,8 +147,8 @@ class NIEvaluator(object):
             )
 
             # save generations to a file
-            if self.config.output_file_name is not None:
-                with open(os.path.join(self.config.output_dir, self.config.output_file_name), "a") as f:
+            if self.pred_output_file_path is not None:
+                with open(self.pred_output_file_path, "a") as f:
                     for p, id_, tn, r, rouge in zip(
                         predictions,
                         batch["instance_ids"],

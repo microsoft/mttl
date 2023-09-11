@@ -6,8 +6,7 @@ from mttl.utils import logger
 def get_tokenizer(config, for_generation=False):
     if "llama" in config.model:
         tokenizer = LlamaTokenizerFast.from_pretrained(config.model)
-        # tokenizer.model_max_length = int(1e9)
-        tokenizer.pad_token_id = 0
+        tokenizer.model_max_length = int(1e9)
         if not config.model_family == "gpt":
             raise ValueError(
                 "We detected a Llama model, but model_family != 'gpt', fix your config!"

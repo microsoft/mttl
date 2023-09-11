@@ -17,6 +17,7 @@ torch.set_float32_matmul_precision("high")
 
 def dict_to_dataclass(d):
     from dataclasses import make_dataclass
+
     return make_dataclass("args", d.keys())(**d)
 
 
@@ -30,30 +31,30 @@ def eval_ni(
 ):
     from mttl.evaluators import NIEvaluator
 
-    config = deepcopy(config)
     output_file_name = f"ni_pred_{config.model}ni-nshot{nshot}.jsonl"
     output_file_name = output_file_name.replace("/", "_")
     output_file_name = output_file_name.strip()
-    config.output_dir = os.path.join(config.output_dir, "eval/ni")
-    config.output_file_name = output_file_name
+    output_file_path = os.path.join(config.output_dir, "eval/ni", output_file_name)
     ni_evaluator = NIEvaluator(
         config,
         data_dir=data_dir or config.data_dir,
         num_pos_examples=nshot,
         max_input_length=max_input_length,
+        pred_output_file_path=output_file_path,
     )
     metrics = ni_evaluator.evaluate(model, subsample=subsample)
     # evaluate generations file per category and write to the output directory
     args = dict_to_dataclass(
         {
-            "prediction_file": os.path.join(config.output_dir, output_file_name),
+            "prediction_file": output_file_path,
             "reference_file": os.environ["NI_DATA_DIR"] + "/test_references.jsonl",
-            "output_file": os.path.join(
-                config.output_dir, output_file_name.replace(".jsonl", "_metrics.json")),
-            "track": "default"
+            "output_file": output_file_path.replace(".jsonl", "_metrics.json"),
+            "track": "default",
         }
-    )  
-    _ = eval_output_file(args)
+    )
+    _ = eval_output_file(
+        args
+    )  # TODO: this call is unnecessary really, the per category/task metrics can be implemented in ni_evaluator, but I don't want to change ni_evaluator right now
     torch.cuda.empty_cache()
     return metrics
 
@@ -63,7 +64,7 @@ if __name__ == "__main__":
 
     login(token=os.environ["HF_TOKEN"])
     config = RoutingConfig.parse(extra_kwargs={"eval_superni": True})
-    config.model = "meta-llama/Llama-2-7b-hf"
+    config.model = "meta-llama/Llama-2-13b-hf"
     config.load_in_8bit = True
     config.model_family = "gpt"
     config.data_dir = os.environ["NI_DATA_DIR"]
@@ -74,4 +75,4 @@ if __name__ == "__main__":
     model = AutoModelForCausalLM.from_pretrained(
         config.model, load_in_8bit=config.load_in_8bit, device_map="auto"
     )
-    print(eval_ni(config, model, nshot=0, subsample=-1, max_input_length=4096))
+    print(eval_ni(config, model, nshot=0, subsample=-1))
