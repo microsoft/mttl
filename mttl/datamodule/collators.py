@@ -124,19 +124,6 @@ class DefaultCollator:
             mask = mask[:, :-1]
             targets = torch.masked_fill(targets, ~mask, self.label_pad_token_id)
 
-        # simulate the default behaviour of LLamatokenizer, when adding eos token and truncating: the last token must always be eos
-        # make sure the last token is eos
-        if self.tokenizer.padding_side == "left":
-            targets[(torch.arange(targets.shape[0]), -1)] = self.tokenizer.eos_token_id
-        else:
-            # make sure last token is eos if not -100
-            targets[(torch.arange(targets.shape[0]), -1)] = torch.where(
-                targets[(torch.arange(targets.shape[0]), -1)]
-                != self.label_pad_token_id,
-                self.tokenizer.eos_token_id,
-                self.label_pad_token_id,
-            )
-
         output_batch["input_ids"] = tok_sources_plus_labels["input_ids"]
         output_batch["attention_mask"] = tok_sources_plus_labels["attention_mask"]
         output_batch["labels"] = targets
