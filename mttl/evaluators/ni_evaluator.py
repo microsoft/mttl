@@ -1,5 +1,7 @@
 from collections import defaultdict
 from copy import deepcopy
+import os
+import json
 import tqdm
 import torch
 import numpy as np
@@ -20,7 +22,14 @@ def decode(preds, tokenizer):
 
 
 class NIEvaluator(object):
-    def __init__(self, config, data_dir=None, num_pos_examples=0, max_input_length=None, device="cuda"):
+    def __init__(
+        self,
+        config,
+        data_dir=None,
+        num_pos_examples=0,
+        max_input_length=None,
+        device="cuda",
+    ):
         from mttl.datamodule.ni_original_data_module import NIOriginalDataModule
 
         self.config = deepcopy(config)
@@ -31,6 +40,7 @@ class NIEvaluator(object):
             self.config.max_input_length = max_input_length
         self.config.max_output_length = 128
         self.config.num_pos_examples = num_pos_examples
+        self.config.use_task_descriptions = True
 
         if data_dir is None:
             data_dir = config.data_dir
@@ -59,18 +69,26 @@ class NIEvaluator(object):
         all_references = []
         task_names = []
         all_rougeL = []
-                  
+
         dataloader = self.datamodule.test_dataloader(subsample)
+        output_path = self.config.output_dir  
+        out_file_name = self.config.out_file_name
 
+        # write results to a file
+        if not os.path.exists(output_path):
+            # create
+            os.makedirs(output_path)
 
-        pbar = tqdm.tqdm(  
+        output_dir = os.path.join(output_path, out_file_name)
+
+        pbar = tqdm.tqdm(
             enumerate(dataloader),
             total=len(dataloader),
         )
         for step, batch in pbar:
             task_name = batch.pop("task_names", None)
             batch.pop("input_texts", None)
-
+            # TODO: add some logic to remove examples from the batch if they ae already in the generated file?
             # we use labels texts here for evaluation, because some tokenizers do not skip
             # pad token when decoding, even if skip_special_tokens=True
             labels_texts = batch.pop("labels_texts", None)
@@ -125,12 +143,30 @@ class NIEvaluator(object):
             task_names += task_name
 
             eval_metrics = compute_metrics(
-                predictions, [[r] for r in references], reduction="mean"
+                predictions, [[r] for r in references], reduction="none"
             )
-            all_rougeL.append(eval_metrics["rougeL"])
+            all_rougeL.append(np.mean(eval_metrics["rougeL"]))
             pbar.set_description(
                 f"Task: {task_name[0] if task_name else None}, rougeL: {np.mean(all_rougeL):.4f}"
             )
+
+            # save generations to a file
+            with open(output_dir, "a") as f:
+                for p, id_, tn, r, rouge in zip(
+                    predictions,
+                    batch["instance_ids"],
+                    task_name,
+                    references,
+                    eval_metrics["rougeL"],
+                ):
+                    l = {
+                        "id": id_,
+                        "task_name": tn,
+                        "prediction": p,
+                        "reference": r,
+                        "rougeL": rouge,
+                    }
+                    f.write(json.dumps(l) + "\n")
 
         eval_metrics = compute_metrics(
             all_predictions, [[r] for r in all_references], reduction="none"
