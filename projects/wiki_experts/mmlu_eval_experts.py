@@ -42,7 +42,7 @@ def run_eval(args):
         **vars(args),
         tokenizer=mmlu.datamodule.tokenizer
     )
-    
+
     def find_experts(path):
         import glob
 

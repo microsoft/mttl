@@ -56,14 +56,6 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
     return model
 
 
-@dataclass
-class ExpertCard:
-    expert_id: int
-    dataset: str
-    subject: str
-    base_model: str
-
-
 class ExpertTrainer(EfficientCheckpointModule):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

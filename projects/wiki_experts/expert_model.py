@@ -88,6 +88,7 @@ class MultiExpertModel(pl.LightningModule):
             model_object = prepare_model_for_kbit_training(model_object)
 
         self.model = model_object
+        self.experts = []
 
     def load_expert(
         self, expert_path: str, expert_name: str = None, action: str = "merge"
@@ -128,18 +129,75 @@ class MultiExpertModel(pl.LightningModule):
         self.model = add_expert_to_transformer(
             self.model, expert_name, expert_config, expert_weights, action=action
         )
+        if action != 'merge':
+            self.experts.append(expert_name)
 
     @property
     def generation_config(self):
         return self.model.generation_config
 
+    def expert_choice(
+        self,
+        batch,
+        **kwargs
+    ):
+        input_ids = batch["input_ids"]
+        mask = batch["input_ids"].ne(self.tokenizer.pad_token_id)
+        
+        # convert left to right padding here
+        def roll_along(arr, shifts, dim):
+            assert arr.ndim - 1 == shifts.ndim
+            dim %= arr.ndim
+            shape = (1,) * dim + (-1,) + (1,) * (arr.ndim - dim - 1)
+            dim_indices = torch.arange(arr.shape[dim]).reshape(shape).to(arr.device)
+            indices = (dim_indices - shifts.unsqueeze(dim)) % arr.shape[dim]
+            return torch.gather(arr, dim, indices)
+
+        input_ids = roll_along(input_ids, mask.sum(1), 1)
+        mask = input_ids.ne(0)
+        labels = torch.masked_fill(input_ids, ~mask, -100)
+
+        scores = []
+        for expert in self.experts:
+            batch["task_names"] = [expert for _ in range(batch["input_ids"].shape[0])]
+            self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
+                batch
+            )
+            outputs = self.model.forward(
+                input_ids,
+                attention_mask=mask,
+            )
+            # calculate loss, could also be done inside of the model
+            bs = input_ids.size(0)
+            logits = outputs.logits
+            vocab_size = logits.size(-1)
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            # Flatten the tokens
+            loss_fct = torch.nn.CrossEntropyLoss(reduction='none')
+            shift_logits = shift_logits.view(-1, vocab_size)
+            shift_labels = shift_labels.view(-1)
+
+            # Enable model parallelism
+            shift_labels = shift_labels.to(shift_logits.device)
+            loss = loss_fct(shift_logits, shift_labels)
+            loss = loss.view((bs, -1)).sum(1)
+            # mean only non-zero
+            scores.append(loss.cpu())
+
+        scores = torch.stack(scores, 0)
+        expert_indices = scores.argmin(0)
+        batch["task_names"] = [self.experts[i] for i in expert_indices]
+
     def generate(
         self,
         batch,
-        routings=None,
-        save_oracle_routings=None,
         **kwargs,
     ):
+        logger.info(batch["task_names"])
+        self.expert_choice(batch)
+        logger.info(batch["task_names"])
+
         if hasattr(self.model, "task_id_container"):
             self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
                 batch
