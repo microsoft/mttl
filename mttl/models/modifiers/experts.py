@@ -16,8 +16,9 @@ def add_expert_to_transformer(
     expert_config,
     expert_weights,
     action="route",
+    is_default=False,
 ):
-    # create a shared container for the task id 
+    # create a shared container for the task id
     if not hasattr(transformer, "task_id_container"):
         transformer.task_id_container = {}
 
@@ -27,8 +28,6 @@ def add_expert_to_transformer(
         if re.fullmatch(expert_config.modify_modules, m_name):
             for c_name, layer in dict(module.named_children()).items():
                 if re.fullmatch(expert_config.modify_layers, c_name):
-                    layer_name = f"{m_name}.{c_name}"
-
                     total_layers += 1
 
                     if type(layer) != ExpertContainer:
@@ -54,6 +53,10 @@ def add_expert_to_transformer(
                         if k.startswith(expert_container.__layer_name__)
                     }
                     expert_container.add_expert(
-                        expert_name, expert_config, subset_expert_weights, action=action
+                        expert_name,
+                        expert_config,
+                        subset_expert_weights,
+                        action=action,
+                        is_default=is_default,
                     )
     return transformer

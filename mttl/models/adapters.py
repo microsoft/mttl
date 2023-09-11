@@ -55,8 +55,7 @@ class LoRA(Adapter):
         self.lora_b.data.copy_(state_dict["lora_b"])
 
     def merge_with_layer(self):
-        """Merge this adapter with the layer!
-        """
+        """Merge this adapter with the layer!"""
         if isinstance(self.layer, nn.Linear):
             self.merged_with_layer = True
             # for back-compatibility, try the two sides:
@@ -278,9 +277,12 @@ class ExpertContainer(Adapter):
         self.layer = layer
 
         if not isinstance(self.layer, nn.Linear):
-            raise ValueError("Expert containers for layers other than nn.Linear have not been implemented.")
- 
+            raise ValueError(
+                "Expert containers for layers other than nn.Linear have not been implemented."
+            )
+
         self.info_container = task_id_container
+        self.default_expert_name = None
         self.merged_expert_names = []
         self.experts = nn.ModuleDict({})
 
@@ -290,9 +292,15 @@ class ExpertContainer(Adapter):
         expert_config: Any,
         expert_weights: Dict[str, torch.Tensor],
         action="merge",
+        is_default=False,
     ) -> None:
         if name in self.experts:
             raise ValueError("An expert with name {} already exists.".format(name))
+
+        if is_default and action == "merge":
+            raise ValueError(
+                "Cannot set is_default if this expert is merged, change to 'route'."
+            )
 
         # hack this for now, but build a proper config for each module
         if expert_config.model_modifier == "lora":
@@ -311,6 +319,8 @@ class ExpertContainer(Adapter):
         else:
             # we keep track of the expert weights
             self.experts[name] = expert_module
+        if is_default:
+            self.default_expert_name = name
 
     def forward(self, input, **kwargs):
         task_names = self.info_container["routing_infos"].task_names
@@ -325,7 +335,20 @@ class ExpertContainer(Adapter):
 
         # if it has some routing experts *and* task names, then we can route
         if len(self.experts) and task_names:
-            load_experts = [self.experts[task_name] for task_name in task_names]
+            load_experts = []
+            for task_name in task_names:
+                if task_name not in self.experts:
+                    if not self.default_expert_name:
+                        raise ValueError(
+                            "The expert for this task {} does not exists. Consider setting a default expert!".format(
+                                task_name
+                            )
+                        )
+                    else:
+                        selected_expert = self.default_expert_name
+                else:
+                    selected_expert = task_name
+                load_experts.append(self.experts[selected_expert])
             # assume all experts are loras
             output = LoRA.parallel_linear_forward(input, load_experts)
         else:
