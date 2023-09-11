@@ -184,7 +184,15 @@ class WikiMMLUDataModule(LightningDataModule):
         )
 
         train_dataset = dataset["train"]
-        train_dataset = train_dataset.filter(lambda x: x["subject"] in self.task_names)
+        task_names = set(list(train_dataset["subject"]))
+
+        if self.config.finetune_task_name is not None:
+            task_subset = sorted(self.config.finetune_task_name.split(","))
+            if any(task not in task_names for task in task_subset):
+                raise ValueError("Unknown task name in finetune_task_name")
+
+            task_names = task_subset
+            train_dataset = train_dataset.filter(lambda x: x["subject"] in task_names)
 
         torch_rng = torch.Generator().manual_seed(self.config.seed)
 
