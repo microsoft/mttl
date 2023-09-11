@@ -10,6 +10,8 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from projects.instr_routing.finetune_llama import RoutingConfig
 from projects.instr_routing.models.clm import CLM
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
+from mttl.datamodule.flan100k_module import Flan100kModule
+from mttl.datamodule.platypus_module import PlatypusModule
 from eval_ni import load_hf_model
 torch.set_float32_matmul_precision('high')
 
@@ -34,10 +36,10 @@ def eval_mmlu(
 
 
 @click.command()          
-@click.option("--model_name", type=str, default="platypus_13B")
+@click.option("--model_name", type=str, default="platypus_13B") 
 @click.option("--amlt_experiment_name", type=str, default="routing")        
-@click.option("--model_path", type=str, default="/home/v-oostapenko/dev/amlt/shared_files/results_as_sep10/platypus/platypus-13b-right/meta-llama_Llama-2-13b-hf_platypus-13b-right-val/loss=0.5543.ckpt", help="path to the model")
-@click.option("--batch_size", type=int, default=3)
+@click.option("--model_path", type=str, default="/home/v-oostapenko/results/platypus/platypus-13b-right/meta-llama_Llama-2-13b-hf_platypus-13b-right-val/loss=0.5543.ckpt", help="path to the model")
+@click.option("--batch_size", type=int, default=2)
 @click.option("--wandb_proj", type=str, default="eval")
 def run_mmlu_eval(model_name, amlt_experiment_name=None, model_path=None, batch_size=5, wandb_proj=None):
     
@@ -68,11 +70,19 @@ def run_mmlu_eval(model_name, amlt_experiment_name=None, model_path=None, batch_
         # load state dict
         config = RoutingConfig()
         config.update_kwargs(torch.load(model_path)['hyper_parameters'])
-        dm = AlpacaDataModule(config)   
+        if config.dataset == "alpaca":
+            dm = AlpacaDataModule(config)
+        elif config.dataset == "platypus":
+            dm = PlatypusModule(config)
+        elif config.dataset == "flan100k":
+            dm = Flan100kModule(config)
+        else:
+            raise NotImplementedError()
         model = CLM.load_from_checkpoint(model_path, tokenizer = dm.tokenizer).cuda()
         config = model.hparams       
         config.model_path = model_path      
-    config.predict_batch_size=batch_size    
+    config.predict_batch_size=batch_size  
+    config.max_output_length = 5    
     config.data_dir = os.environ["MMLU_DATA_DIR"] 
     config.output_dir = os.environ.get(
         "AMLT_OUTPUT_DIR",
@@ -82,7 +92,7 @@ def run_mmlu_eval(model_name, amlt_experiment_name=None, model_path=None, batch_
             f"../tmp/instruction_learning/{model_name}/",
         ),
     )
-    em_mmlu_all = eval_mmlu(config, model, subsample=-1, max_input_length=4096)     
+    em_mmlu_all = eval_mmlu(config, model, subsample=10)     
     mmlu_em = em_mmlu_all["all"]["mean"]
     if wandb_proj:
         import wandb 
