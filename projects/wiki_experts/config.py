@@ -10,7 +10,7 @@ class ExpertConfig(Config):
         self.wandb_project = None
         self.tensorboard = False
         self.hf_token_hub = None
-        self.push_to_hub = False
+        self.hf_repo_id = None
 
         self.expert_name = None
         self.experts_auto_route = False

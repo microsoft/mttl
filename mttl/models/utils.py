@@ -11,11 +11,45 @@ from mttl.models.get_optimizer import get_optimizer
 from mttl.models.get_scheduler import get_scheduler
 
 
+CHECKPOINT_PATH_IN_HUB = "checkpoint.ckpt"
+
+
 def transfer_batch_to_device(batch, device):
     for key in batch:
         if isinstance(batch[key], torch.Tensor):
             batch[key] = batch[key].to(device)
     return batch
+
+
+def convert_and_push_to_hub(ckpt_path, repo_id, auto_search=True, use_last=False) -> None:
+    """Searches into local path for the checkpoint with lowest validation loss,
+       then uploads that.
+       
+       if use_last is True, then uses the last checkpoint `last.ckpt` instead
+       of the one with lowest validation loss.
+    """
+    import huggingface_hub
+    from mttl.utils import get_checkpoint_path
+
+    if auto_search:
+        ckpt_path = get_checkpoint_path(ckpt_path, use_last=use_last)
+
+    logger.info("Uploading checkpoint at {}".format(ckpt_path))
+
+    huggingface_hub.create_repo(repo_id, repo_type="model", exist_ok=True)
+    huggingface_hub.upload_file(
+        path_or_fileobj=ckpt_path,
+        repo_id=repo_id,
+        path_in_repo=CHECKPOINT_PATH_IN_HUB
+    )
+
+
+def download_from_hub(repo_id) -> str:
+    """Download checkpoint from hub.
+    """
+    from huggingface_hub import hf_hub_download
+
+    return hf_hub_download(repo_id=repo_id, filename=CHECKPOINT_PATH_IN_HUB, repo_type="model")
 
 
 class EfficientCheckpointModule(LightningModule, PushToHubMixin):

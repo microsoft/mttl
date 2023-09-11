@@ -80,7 +80,7 @@ def run_multitask(args):
         val_check_interval = args.total_steps
 
     trainer = Trainer(
-        devices=-1, 
+        devices=-1,
         accelerator="gpu",
         logger=loggers,
         num_sanity_val_steps=0,
@@ -95,12 +95,26 @@ def run_multitask(args):
         precision=int(args.precision)
         if args.precision in ["16", "32"]
         else args.precision,
-        fast_dev_run=args.fast_dev_run,
         val_check_interval=val_check_interval,
     )
+
     # initial validation!
-    losses = trainer.validate(module, dm)[0]
+    trainer.validate(module, dm)[0]
     trainer.fit(module, dm)
+
+    # reload best model before pushing!
+    checkpoint = checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
+
+    if args.hf_repo_id and checkpoint:
+        from mttl.models.utils import convert_and_push_to_hub
+
+        convert_and_push_to_hub(
+            checkpoint,
+            "{}/experts-{}-{}".format(
+                args.hf_repo_id, args.model.replace("/", "_").lower(), args.expert_name
+            ),
+            auto_search=False,
+        )
 
 
 if __name__ == "__main__":

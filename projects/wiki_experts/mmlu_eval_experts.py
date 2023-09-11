@@ -49,11 +49,14 @@ def run_eval(args):
     if args.experts_to_load:
         for expert in args.experts_to_load.split(","):
             expert_path, action = expert.split(":")
-            action = action.split("*")
-            is_default = len(action) > 1
-            action = action[0]
+            is_default = "*" in action
+            action = action.replace("*", "")
+            all_experts = list(find_experts(expert_path))
 
-            for expert_path in find_experts(expert_path):
+            if is_default and len(all_experts) > 1:
+                raise ValueError("Cannot define more than one default expert! Are you using * in expert path?")
+
+            for expert_path in all_experts:
                 module.load_expert(expert_path, action=action, is_default=is_default)
 
     module.to("cuda")

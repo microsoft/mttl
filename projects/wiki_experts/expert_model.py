@@ -1,27 +1,16 @@
-import json
-import os
-import csv
 import torch
-import copy
 
-import pytorch_lightning as pl
-from typing import Any, List, Dict
-from collections import defaultdict
-from torch import nn
-from mttl.models.modifiers import modify_transformer
-from mttl.models.modifiers.routing import RoutingInfo, RoutingSelector
+from mttl.models.modifiers.routing import RoutingInfo
 from transformers import AutoModelForCausalLM, LlamaForCausalLM
 
-from mttl.models.get_scheduler import get_scheduler
 from mttl.models.utils import (
     EfficientCheckpointModule,
-    get_global_batch_size,
 )
+
+from mttl.models.utils import convert_and_push_to_hub, download_from_hub
 from mttl.models.modifiers.experts import add_expert_to_transformer
 from mttl.utils import get_checkpoint_path, logger
-from mttl.models.get_optimizer import get_optimizer
 from config import ExpertConfig
-from dataclasses import dataclass, field
 
 
 def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
@@ -60,7 +49,7 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
     return model
 
 
-class MultiExpertModel(pl.LightningModule):
+class MultiExpertModel(EfficientCheckpointModule):
     def __init__(self, **kwargs):
         super().__init__()
 
@@ -101,23 +90,26 @@ class MultiExpertModel(pl.LightningModule):
         import json
         import os
 
-        if expert_name is None:
-            expert_name = os.path.basename(expert_path)
-
-        expert_checkpoint = get_checkpoint_path(expert_path)
+        if os.path.isdir(expert_path):
+            expert_checkpoint = get_checkpoint_path(expert_path)
+        else:
+            expert_checkpoint = download_from_hub(expert_path)
 
         logger.info(f"Loading expert from {expert_checkpoint}...")
 
         expert_checkpoint = torch.load(expert_checkpoint, map_location="cpu")
+
         expert_config = ExpertConfig(
             kwargs=expert_checkpoint["hyper_parameters"], silent=True, raise_error=False
         )
+        if expert_config.expert_name is None:
+            logger.info("Assigning expert name, not found in checkpoint: {}".format(expert_path))
+            expert_name = os.path.basename(expert_path)
 
         expert_weights = expert_checkpoint["state_dict"]
         expert_weights = {
             k.replace("model.", "", 1): v for k, v in expert_weights.items()
         }
-
         if self.hparams.model != expert_config.model:
             raise ValueError(
                 "The expert has been trained on top of a different model!"
@@ -192,13 +184,18 @@ class MultiExpertModel(pl.LightningModule):
 
         scores = torch.stack(scores, 0)
         expert_indices = scores.argmin(0)
-        batch["task_names"] = [self.experts[i] for i in expert_indices]
+        return [self.experts[i] for i in expert_indices]
 
     def generate(
         self,
         batch,
         **kwargs,
     ):
+        if getattr(self.hparams, 'experts_auto_route', False):
+            logger.info("Auto-routing... ground-truth tasks: {}".format(batch["task_names"]))
+            batch["task_names"] = self.expert_choice(batch)
+            logger.info("Auto-route tasks: {}".format(batch["task_names"]))
+
         if hasattr(self.model, "task_id_container"):
             self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
                 batch
