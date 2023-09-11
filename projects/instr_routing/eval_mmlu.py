@@ -78,7 +78,7 @@ def run_mmlu_eval(model_name, amlt_experiment_name=None, model_path=None, batch_
             dm = Flan100kModule(config)
         else:
             raise NotImplementedError()
-        model = CLM.load_from_checkpoint(model_path, tokenizer = dm.tokenizer).cuda()
+        model = CLM.load_from_checkpoint(model_path, tokenizer = dm.tokenizer).to("cuda")
         config = model.hparams       
         config.model_path = model_path      
     config.predict_batch_size=batch_size  

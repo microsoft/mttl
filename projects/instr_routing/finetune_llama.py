@@ -158,7 +158,7 @@ def run_multitask(args):
         if path_best_model:
             del module   
             torch.cuda.empty_cache()
-            best_model = CLM.load_from_checkpoint(path_best_model, tokenizer=dm.tokenizer).cuda()
+            best_model = CLM.load_from_checkpoint(path_best_model, tokenizer=dm.tokenizer).to("cuda")
             # TODO: check this, is it only for Llama1?
             best_model.model.config.pad_token_id = dm.tokenizer.pad_token_id #= 0  # unk
             best_model.model.config.bos_token_id = dm.tokenizer.bos_token_id
