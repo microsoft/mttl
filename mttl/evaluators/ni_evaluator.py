@@ -72,14 +72,14 @@ class NIEvaluator(object):
 
         dataloader = self.datamodule.test_dataloader(subsample)
         output_path = self.config.output_dir  
-        out_file_name = self.config.out_file_name
+        output_file_name = self.config.output_file_name
 
         # write results to a file
         if not os.path.exists(output_path):
             # create
             os.makedirs(output_path)
 
-        output_dir = os.path.join(output_path, out_file_name)
+        output_file_name = os.path.join(output_path, output_file_name)
 
         pbar = tqdm.tqdm(
             enumerate(dataloader),
@@ -151,7 +151,7 @@ class NIEvaluator(object):
             )
 
             # save generations to a file
-            with open(output_dir, "a") as f:
+            with open(output_file_name, "a") as f:
                 for p, id_, tn, r, rouge in zip(
                     predictions,
                     batch["instance_ids"],

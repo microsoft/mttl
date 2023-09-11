@@ -7,6 +7,8 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from projects.instr_routing.finetune_llama import RoutingConfig
 from projects.instr_routing.models.clm import CLM
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
+from projects.instr_routing.eval.ni.evaluate import eval_instances
+
 import os
 import torch
 
@@ -30,11 +32,11 @@ def eval_ni(
     from mttl.evaluators import NIEvaluator
 
     config = deepcopy(config)
-    out_file_name = f"ni_pred_{config.model}ni-nshot{nshot}.jsonl"
-    out_file_name = out_file_name.replace("/", "_")
-    out_file_name = out_file_name.strip()
+    output_file_name = f"ni_pred_{config.model}ni-nshot{nshot}.jsonl"
+    output_file_name = output_file_name.replace("/", "_")
+    output_file_name = output_file_name.strip()
     config.output_dir = os.path.join(config.output_dir, "eval/ni")
-    config.out_file_name = out_file_name
+    config.output_file_name = output_file_name
     ni_evaluator = NIEvaluator(
         config,
         data_dir=data_dir or config.data_dir,
@@ -44,14 +46,12 @@ def eval_ni(
     metrics = ni_evaluator.evaluate(model, subsample=subsample)
 
     # evaluate using the original script for evaluaitng sni
-    from projects.instr_routing.eval.ni.evaluate import parse_args, eval_instances
-
     args = dict_to_dataclass(
         {
-            "prediction_file": os.path.join(config.output_dir, out_file_name),
+            "prediction_file": os.path.join(config.output_dir, output_file_name),
             "reference_file": os.environ["NI_DATA_DIR"] + "/test_references.jsonl",
             "output_file": os.path.join(
-                config.output_dir, out_file_name.replace(".jsonl", "_metrics.json")
+                config.output_dir, output_file_name.replace(".jsonl", "_metrics.json")
             ),
             "clean": 0,
         }
