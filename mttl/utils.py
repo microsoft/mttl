@@ -268,7 +268,7 @@ def get_checkpoint_path(path, step=None, use_last=False):
         return path
 
     # use glob to avoid explicitly writing out long paths
-    match = glob.glob(f"{path}/*.ckpt", recursive=True)
+    match = glob.glob(f"{path}/**/*.ckpt", recursive=True)
 
     if use_last:
         # search for last.ckpt
@@ -278,6 +278,8 @@ def get_checkpoint_path(path, step=None, use_last=False):
                 "last.ckpt not found or found multiple (?) in the list of checkpoints!"
             )
         return match[0]
+    else:
+        match = [m for m in match if "last.ckpt" not in m]
 
     if len(match) > 1:
         logger.warning(
