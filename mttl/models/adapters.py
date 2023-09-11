@@ -55,6 +55,8 @@ class LoRA(Adapter):
         self.lora_b.data.copy_(state_dict["lora_b"])
 
     def merge_with_layer(self):
+        """Merge this adapter with the layer!
+        """
         if isinstance(self.layer, nn.Linear):
             self.merged_with_layer = True
             # for back-compatibility, try the two sides:
@@ -274,6 +276,10 @@ class ExpertContainer(Adapter):
         super().__init__()
         self.config = config
         self.layer = layer
+
+        if not isinstance(self.layer, nn.Linear):
+            raise ValueError("Expert containers for layers other than nn.Linear have not been implemented.")
+ 
         self.info_container = task_id_container
         self.merged_expert_names = []
         self.experts = nn.ModuleDict({})

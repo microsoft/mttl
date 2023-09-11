@@ -33,6 +33,7 @@ def run_eval(args):
 
     # select dataloader
     args.finetune_task_name = "college_biology,high_school_government_and_politics,prehistory,security_studies"
+
     mmlu = MMLUEvaluator(
         args,
         data_dir=os.environ["MMLU_DATA_DIR"],
@@ -41,21 +42,24 @@ def run_eval(args):
         **vars(args),
         tokenizer=mmlu.datamodule.tokenizer
     )
+    
+    def find_experts(path):
+        import glob
+
+        for path in glob.glob(expert_path + "/**/csv_metrics/", recursive=True):
+            yield "/".join(path.split("/")[:-2])
 
     if args.experts_to_load:
         for expert in args.experts_to_load.split(","):
             expert_path, action = expert.split(":")
-            module.load_expert(expert_path, action=action)
-    elif args.experts_to_load == "all":
-        module.load_expert("gptneo_125m_experts/infollow", action="merge")
-        module.load_expert("gptneo_125m_experts/college_biology", action="route")
-        module.load_expert("gptneo_125m_experts/high_school_government_and_politics", action="route")
-        module.load_expert("gptneo_125m_experts/prehistory", action="route")
-        module.load_expert("gptneo_125m_experts/security_studies", action="route")
+
+            for expert_path in find_experts(expert_path):
+                module.load_expert(expert_path, action=action)
 
     module.to("cuda")
     scores = mmlu.evaluate(module, subsample=10)
-    print("MMLU Accuracy:", scores["all"]["mean"])
+
+    logger.info("MMLU Accuracy: {}".format(scores["all"]["mean"]))
 
     del module, mmlu
 
