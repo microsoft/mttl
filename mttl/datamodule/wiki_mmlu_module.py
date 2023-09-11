@@ -167,14 +167,10 @@ class WikiMMLUDataModule(LightningDataModule):
         self.tokenizer = get_tokenizer(config)
 
         self.rng = np.random.RandomState(config.seed)
-        self.mmlu_module = MMLUDataModule(config, data_dir="from_env")
         self.setup_dataset()
 
     def setup_dataset(self, stage=None):
         dataset = load_dataset(self.config.dataset)
-
-        self.task_names = self.mmlu_module.task_names
-        self.task_to_id = self.mmlu_module.task_to_id
 
         self.collate_fn = WikiMMLUDataCollator(
             tokenizer=self.tokenizer,
@@ -184,12 +180,12 @@ class WikiMMLUDataModule(LightningDataModule):
             pad_to_multiple_of=8,
             return_tensors="pt",
             model_family="gpt",
-            task_to_id=self.task_to_id,
             rng=self.rng,
         )
 
         train_dataset = dataset["train"]
         train_dataset = train_dataset.filter(lambda x: x["subject"] in self.task_names)
+
         torch_rng = torch.Generator().manual_seed(self.config.seed)
 
         n_tr_samples = int(len(train_dataset) * 0.9)

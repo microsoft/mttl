@@ -163,9 +163,9 @@ class ExpertTrainer(EfficientCheckpointModule):
         loss = self.forward(batch)
         total_loss = loss
 
-        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train/loss", loss, on_step=True, prog_bar=True)
         self.log(
-            "train/total_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True
+            "train/total_loss", total_loss, on_step=True, prog_bar=True
         )
         for i, pg in enumerate(self.optimizers().optimizer.param_groups):
             self.log(f"train/lr_{i}", pg["lr"])
@@ -175,18 +175,8 @@ class ExpertTrainer(EfficientCheckpointModule):
         loss = self.forward(batch, reduction="none")
         mean_loss = loss.sum() / loss.shape[0]
 
-        self.log("val/loss", mean_loss, on_epoch=True, prog_bar=True)
-
         self._inference_outputs += [(loss.detach().cpu(), batch["task_ids"].cpu())]
         return loss, batch["task_ids"]
-
-    def test_step(self, batch, batch_idx):
-        loss = self.forward(batch, reduction="none")
-        self._inference_outputs += [(loss.detach().cpu(), batch["task_ids"].cpu())]
-        return loss, batch["task_ids"]
-
-    def on_test_epoch_end(self):
-        pass
 
     def on_validation_epoch_end(self):
         outputs = self._inference_outputs
@@ -201,4 +191,7 @@ class ExpertTrainer(EfficientCheckpointModule):
             for task_id in torch.unique(task_ids):
                 task_losses[task_id.item()] = losses[task_ids == task_id].mean().item()
             f.write(json.dumps(task_losses) + "\n")
+
         self._inference_outputs.clear()
+        self.log("val/loss", losses.mean(), on_epoch=True, prog_bar=True)
+        
