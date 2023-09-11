@@ -89,7 +89,9 @@ class MultiExpertModel(pl.LightningModule):
 
         self.model = model_object
 
-    def load_expert(self, expert_path: str, expert_name: str = None, action: str = "merge"):
+    def load_expert(
+        self, expert_path: str, expert_name: str = None, action: str = "merge"
+    ):
         # load the expert weights
         import json
         import os
@@ -102,11 +104,14 @@ class MultiExpertModel(pl.LightningModule):
         logger.info(f"Loading expert from {expert_checkpoint}...")
 
         expert_checkpoint = torch.load(expert_checkpoint, map_location="cpu")
-        with open(os.path.join(expert_path, "config.json")) as f:
-            expert_config = ExpertConfig(kwargs=json.load(f), silent=True, raise_error=False)
+        expert_config = ExpertConfig(
+            kwargs=expert_checkpoint["hyper_parameters"],
+            silent=True,
+            raise_error=False
+        )
 
-        expert_weights = expert_checkpoint['state_dict']
-        expert_weights = {k.replace("model.", ""): v for k, v in expert_weights.items()}
+        expert_weights = expert_checkpoint["state_dict"]
+        expert_weights = {k.replace("model.", "", 1): v for k, v in expert_weights.items()}
 
         if self.hparams.model != expert_config.model:
             raise ValueError(
@@ -116,14 +121,12 @@ class MultiExpertModel(pl.LightningModule):
                 )
             )
 
-        logger.info(f"Adding expert with name {expert_name}... with action ... {action}!")
+        logger.info(
+            f"Adding expert with name {expert_name}... with action ... {action}!"
+        )
 
         self.model = add_expert_to_transformer(
-            self.model,
-            expert_name,
-            expert_config,
-            expert_weights,
-            action=action
+            self.model, expert_name, expert_config, expert_weights, action=action
         )
 
     @property
@@ -138,7 +141,9 @@ class MultiExpertModel(pl.LightningModule):
         **kwargs,
     ):
         if hasattr(self.model, "task_id_container"):
-            self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
+            self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
+                batch
+            )
 
         generations = self.model.generate(inputs=batch["input_ids"], **kwargs)
         return generations
