@@ -1,12 +1,6 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from types import MethodType
-from dataclasses import dataclass
-from typing import List
 import re
 
-from mttl.models.adapters import Adapter, ExpertContainer
+from mttl.models.adapters import ExpertContainer
 from mttl.utils import logger
 
 
