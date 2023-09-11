@@ -29,7 +29,10 @@ def parse_experts_to_load(experts_to_load):
         for path in glob.glob(expert_path + "/**/csv_metrics/", recursive=True):
             yield "/".join(path.split("/")[:-2])
 
-    for expert in experts_to_load.split(","):
+    if type(experts_to_load) != list:
+        experts_to_load = [experts_to_load]
+
+    for expert in experts_to_load:
         expert_path, _, action = expert.partition(":")
         expert_path, _, expert_name = expert_path.partition("=")
         all_paths = list(find_experts(expert_path)) or [expert_path]
@@ -53,7 +56,6 @@ def parse_experts_to_load(experts_to_load):
                 "expert_name": expert_name
             }
         )
-
     return kwargs
 
 
@@ -76,7 +78,7 @@ def run_eval(args):
         data_dir=os.environ["MMLU_DATA_DIR"],
     )
     module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
-    kwargs = parse_experts_to_load(args.experts_to_load)
+    kwargs = parse_experts_to_load(args.load_module)
     for expert_kwargs in kwargs:
         module.load_expert(**expert_kwargs)
 

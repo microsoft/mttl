@@ -14,7 +14,7 @@ class ExpertConfig(Config):
 
         self.expert_name = None
         self.experts_auto_route = False
-        self.experts_to_load = None
+        self.load_module = None
         self.micro_batch_size = None
 
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")

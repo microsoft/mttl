@@ -115,12 +115,20 @@ class Config:
             args = argparse.Namespace()
             args.kwargs = None
             args.config_files = c
+
         kwargs = {}
         if args.kwargs:
             kwargs_opts = list(itertools.chain(*args.kwargs))
             for value in kwargs_opts:
                 key, _, value = value.partition("=")
-                kwargs[key] = value
+
+                # allows multiple values for a given option when specified in the command line!
+                if key in kwargs:
+                    if type(kwargs[key]) != list:
+                        kwargs[key] = [kwargs[key]]
+                    kwargs[key].append(value)
+                else:
+                    kwargs[key] = value
 
         args.kwargs = kwargs
         if extra_kwargs:
@@ -275,11 +283,3 @@ class Config:
         self.adapters_weight_decay = None
         self.module_logits_dropout = 0.0
         self.module_logits_l2_norm = False
-
-
-class ParseKwargs(argparse.Action):
-    def __call__(self, parser, namespace, values, option_string=None):
-        setattr(namespace, self.dest, dict())
-        for value in values:
-            key, value = value.split("=")
-            getattr(namespace, self.dest)[key] = value
