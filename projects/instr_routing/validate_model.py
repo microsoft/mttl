@@ -8,7 +8,7 @@ import wandb
 import re
 import logging
 import pytorch_lightning as pl
-from huggingface_hub import login
+from huggingface_hub import login  
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 
@@ -50,6 +50,14 @@ def run_multitask(args, module):
     else:
         raise NotImplementedError()
     
+    # module = CLM(**vars(args), tokenizer=dm.tokenizer)
+    # # save state dict
+    # import numpy as np
+    # torch.save(module.state_dict(), "model.pt")
+    # print("params sum", np.sum([torch.sum(p.detach().cpu()) for p in module.parameters()]))
+    # module.load_state_dict(torch.load("model.pt"))
+    # print("params sum after", np.sum([torch.sum(p.detach().cpu()) for p in module.parameters()]))
+    
     trainer = Trainer(
         devices=-1, 
         accelerator="gpu",   
@@ -71,15 +79,15 @@ def run_multitask(args, module):
     path_best_model = args.model_path
     ckpt_path = path_best_model  
     # trainer.validate(dataloaders=dm, model=module)
-    print("Validation with checkpoint", ckpt_path)   
+    print("Validation with checkpoint", ckpt_path)      
     trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
            
 @click.command()  
 @click.option("--model_name", type=str, default="alpaca_dense_r4") #alpaca_dense_r4") #alpaca_vsmear_e12[xr4,t_1]")
 @click.option("--amlt_experiment_name", type=str, default="routing")
-@click.option("--model_path", type=str, default=None, help="path to the model")
+@click.option("--model_path", type=str, default="/home/v-oostapenko/dev/amlt/shared_files/results_as_sep10/platypus/platypus-13b-right/meta-llama_Llama-2-13b-hf_platypus-13b-right-val/loss=0.5543.ckpt", help="path to the model")
 def run_eval(
-    model_name,
+    model_name, 
     amlt_experiment_name=None,
     model_path=None,
 ):      
@@ -109,8 +117,9 @@ def run_eval(
     config.update_kwargs(torch.load(model_path)["hyper_parameters"])
     dm = AlpacaDataModule(config)
     model = CLM.load_from_checkpoint(model_path, tokenizer=dm.tokenizer).cuda()
-    config = model.hparams
-    config.output_dir = os.environ.get(
+    config_loaded = RoutingConfig()
+    config_loaded.update_kwargs(model.hparams)
+    config_loaded.output_dir = os.environ.get(
         "AMLT_OUTPUT_DIR",
         os.path.join(  
             os.path.dirname(__file__),
@@ -118,8 +127,8 @@ def run_eval(
             f"../../tmp/instruction_learning/",
         ),
     )
-    config.model_path = model_path
-    run_multitask(config, model)
+    config_loaded.model_path = model_path
+    run_multitask(config_loaded, model)
 
 if __name__ == "__main__":
     run_eval()

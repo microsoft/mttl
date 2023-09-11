@@ -154,7 +154,7 @@ def run_multitask(args):
 
     if is_main_process():
         if path_best_model:
-            del module
+            del module   
             torch.cuda.empty_cache()
             best_model = CLM.load_from_checkpoint(path_best_model, tokenizer=dm.tokenizer).cuda()
             # TODO: check this, is it only for Llama1?
@@ -168,8 +168,9 @@ def run_multitask(args):
         if args.eval_superni:
             from eval_ni import eval_ni
 
-            logger.info("Evaluating on super NI")
-            rougel_ni_all = eval_ni(
+            logger.info("Evaluating on super NI")   
+            # all_results_original -- dict of results on sni eval obtained by running the original evaluate.py
+            rougel_ni_all, all_results_original = eval_ni(
                 args,
                 best_model,
                 nshot=0, 
@@ -178,7 +179,8 @@ def run_multitask(args):
             )
             rougel_ni = rougel_ni_all["all"]["mean"]
             if wandb.run is not None:
-                wandb.log({"rouge_L_super_ni": rougel_ni})
+                wandb.log({"rouge_L_super_ni": rougel_ni})     
+                wandb.log({"rouge_L_super_ni_[original]": all_results_original["rougeL_default_track"]})
             if args.tensorboard:
                 tb_logger.experiment.add_scalar("tasks/sni", rougel_ni, trainer.global_step)
             with open(os.path.join(args.output_dir, "sni_results.json"), "w") as f:

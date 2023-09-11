@@ -192,6 +192,7 @@ class SoftMOEAdapter(SkilledLoRA):
         input_mixed = torch.einsum(
             "bsd,bkps->bkpd", (input, D) # this should be right, (input[0]*D[0][0][0].unsqueeze(-1)) should be same as input_mixed[0][0][0]
         )  # b x n_skills x s x D <- mixing after forward pass, for linear operation its the same as mixng before
+                        
         # apply Loras of all skills to the mixed input
         adapter_out = torch.einsum(
             "bksd,qkdr->bsqkr", (input_mixed, self.lora_a)
@@ -203,6 +204,9 @@ class SoftMOEAdapter(SkilledLoRA):
         adapter_out = adapter_out.squeeze(
             2
         )  # bs x seq x n_skills x D (D = output feaatures D)
+        
+        
+        
         # ^^ expert outputs
         # transform back into b x s x D: mix along expert dimension
         del input_mixed, D, mixing_weight_causal

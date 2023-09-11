@@ -71,13 +71,8 @@ class NIEvaluator(object):
         all_rougeL = []
 
         dataloader = self.datamodule.test_dataloader(subsample)
-        output_path = self.config.output_dir
-        out_file_name = (
-            f"ni_pred_{self.config.model}ni-nshot{self.config.num_pos_examples}.jsonl"
-        )
-        out_file_name = out_file_name.replace("/", "_")
-        out_file_name = out_file_name.strip()
-        output_path = os.path.join(output_path, "eval/ni")
+        output_path = self.config.output_dir  
+        out_file_name = self.config.out_file_name
 
         # write results to a file
         if not os.path.exists(output_path):

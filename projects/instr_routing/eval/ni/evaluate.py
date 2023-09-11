@@ -126,8 +126,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(               
         "--prediction_file", required=False,                 
-        help="Jsonl file with each line corresponding to a prediction. " 
-             "Each json object should have an `id` and a `prediction` key.", default="/home/v-oostapenko/dev/amlt/routing/eval_alpaca_dense_4r_old_gen_config/eval/ni/ni_pred_yahma_llama-7b-hfni-nshot0.jsonl")
+        help="Jsonl file with each line corresponding to a prediction. "             
+             "Each json object should have an `id` and a `prediction` key.", default="/home/v-oostapenko/dev/amlt/routing/eval_alpaca_vsmear_e12[xr4,t_1,maop]/eval/ni/ni_pred_yahma_llama-7b-hfni-nshot0.jsonl")
     parser.add_argument(
         "--reference_file", required=False,
         help="Jsonl file with each line corresponding to a reference. " 
@@ -209,7 +209,7 @@ def eval_instances(args):
             
 
 if __name__ == "__main__":
-    args = parse_args()
+    args = parse_args()  
     all_results=eval_instances(args)
     
     # import glob   
