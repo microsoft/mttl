@@ -46,9 +46,7 @@ class DefaultCollator:
             )
         else:       
             tokenized_labels = self.tokenizer(
-                labels,
-                padding="longest",
-                return_tensors=self.return_tensors
+                labels, padding="longest", return_tensors=self.return_tensors
             )
             tokenized_sources = self.tokenizer(
                 sources,

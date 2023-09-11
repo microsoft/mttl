@@ -310,6 +310,28 @@ class NIOriginalDataModule(LightningDataModule):
         self.tokenizer = get_tokenizer(config, for_generation=for_generation)
         self.setup_dataset()
 
+    def _check_test_references(self):
+        # make sure all test instances are in reference file
+        reference_file = os.path.join(self.data_dir, "test_references.jsonl")
+        eval_instances = {}
+        with open(reference_file) as fin:
+            for line in fin:
+                instance = json.loads(line)
+                # if track is not provided in the refernce file, we use set the track to `default` and use the default tokenizer in rouge-score.
+                if "track" not in instance:
+                    instance["track"] = "default"
+                eval_instances[instance["id"]] = instance
+        eval_ids = list(eval_instances.keys())
+        for element in tqdm.tqdm(
+            self.test_dataset,
+            desc="Checking test instances",
+            total=len(self.test_dataset),
+        ):
+            id = element["id"]
+            assert (
+                id in eval_ids
+            ), f"{id} not in test references, see https://github.com/allenai/natural-instructions/blob/master/eval/leaderboard/create_reference_file.py"
+
     def setup_dataset(self):
         filename = pkg_resources.resource_filename(
             __name__, "../dataloader/ni_original_dataset.py"
@@ -384,26 +406,7 @@ class NIOriginalDataModule(LightningDataModule):
         logger.info("Validation examples: {}".format(len(self.val_dataset)))
         logger.info("Test examples: {}".format(len(self.test_dataset)))
 
-        # make sure all test instances are in reference file
-        reference_file = os.path.join(self.data_dir, "test_references.jsonl")
-        eval_instances = {}
-        with open(reference_file) as fin:
-            for line in fin:
-                instance = json.loads(line)
-                # if track is not provided in the refernce file, we use set the track to `default` and use the default tokenizer in rouge-score.
-                if "track" not in instance:
-                    instance["track"] = "default"
-                eval_instances[instance["id"]] = instance
-        eval_ids = list(eval_instances.keys())
-        for element in tqdm.tqdm(
-            self.test_dataset,
-            desc="Checking test instances",
-            total=len(self.test_dataset),
-        ):
-            id = element["id"]
-            assert (
-                id in eval_ids
-            ), f"{id} not in test references, see https://github.com/allenai/natural-instructions/blob/master/eval/leaderboard/create_reference_file.py"
+        self._check_test_references()
 
 
 if __name__ == "__main__":

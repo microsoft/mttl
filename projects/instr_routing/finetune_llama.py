@@ -2,7 +2,7 @@ import os
 import sys
 import json
 import torch
-import wandb 
+import wandb
 import logging
 import pytorch_lightning as pl
 from huggingface_hub import login
@@ -18,9 +18,11 @@ from mttl.datamodule.flan100k_module import Flan100kModule
 from mttl.utils import get_mlf_logger, setup_logging, logger
 from mttl.dist_utils import is_main_process
 
+torch.set_float32_matmul_precision("high")
+
 # register models
 import models.vsmear  # noqa: F401
-import models.softmoe # noqa: F401
+import models.softmoe  # noqa: F401
 from models.monitors import SelectorMetricsLog, SelectorRoutingsLog
 from models.clm import CLM
 from config import RoutingConfig
@@ -127,7 +129,7 @@ def run_multitask(args):
         callbacks.append(MMLUCallback(5))
     # callbacks.append(NICallback())
     trainer = Trainer(
-        devices=-1, 
+        devices=-1,
         accelerator="gpu",
         logger=loggers,      
         num_sanity_val_steps=5,  
@@ -168,21 +170,22 @@ def run_multitask(args):
         if args.eval_superni:
             from eval_ni import eval_ni
 
-            logger.info("Evaluating on super NI")   
+            logger.info("Evaluating on super NI")
             # all_results_original -- dict of results on sni eval obtained by running the original evaluate.py
-            rougel_ni_all, all_results_original = eval_ni(
+            rougel_ni_all = eval_ni(
                 args,
                 best_model,
-                nshot=0, 
+                nshot=0,
                 max_input_length=-1,
                 data_dir=os.environ["NI_DATA_DIR"],
             )
             rougel_ni = rougel_ni_all["all"]["mean"]
             if wandb.run is not None:
                 wandb.log({"rouge_L_super_ni": rougel_ni})     
-                wandb.log({"rouge_L_super_ni_[original]": all_results_original["rougeL_default_track"]})
             if args.tensorboard:
-                tb_logger.experiment.add_scalar("tasks/sni", rougel_ni, trainer.global_step)
+                tb_logger.experiment.add_scalar(
+                    "tasks/sni", rougel_ni, trainer.global_step
+                )
             with open(os.path.join(args.output_dir, "sni_results.json"), "w") as f:
                 json.dump(rougel_ni_all, f, indent=2)
             logger.info("SuperNI RougeL: {:.2f}".format(rougel_ni))
@@ -194,14 +197,15 @@ def run_multitask(args):
             em_mmlu_all = eval_mmlu(
                 args,
                 best_model,
-                max_input_length = 2048,
                 data_dir=os.environ["MMLU_DATA_DIR"],
             )
             mmlu_em = em_mmlu_all["all"]["mean"]
             if wandb.run is not None:
                 wandb.log({"mmlu_acc": mmlu_em})
             if args.tensorboard:
-                tb_logger.experiment.add_scalar("tasks/mmlu", mmlu_em, trainer.global_step)
+                tb_logger.experiment.add_scalar(
+                    "tasks/mmlu", mmlu_em, trainer.global_step
+                )
             with open(os.path.join(args.output_dir, "mmlu_results.json"), "w") as f:
                 json.dump(em_mmlu_all, f, indent=2)
             logger.info("MMLU accuracy: {:.2f}".format(mmlu_em))
