@@ -34,6 +34,8 @@ class NIEvaluator(object):
 
         self.config = deepcopy(config)
         self.device = device
+        if not hasattr(self.config, "output_file_name"):
+            self.config.output_file_name = None
 
         # unrestricted input length for SNI pass -1
         if max_input_length is not None:
@@ -71,15 +73,11 @@ class NIEvaluator(object):
         all_rougeL = []
 
         dataloader = self.datamodule.test_dataloader(subsample)
-        output_path = self.config.output_dir  
-        output_file_name = self.config.output_file_name
-
-        # write results to a file
-        if not os.path.exists(output_path):
-            # create
-            os.makedirs(output_path)
-
-        output_file_name = os.path.join(output_path, output_file_name)
+        if not self.config.output_file_name is None:
+            # write results to a file
+            if not os.path.exists(self.config.output_dir):
+                # create
+                os.makedirs(self.config.output_dir)
 
         pbar = tqdm.tqdm(
             enumerate(dataloader),
@@ -88,7 +86,6 @@ class NIEvaluator(object):
         for step, batch in pbar:
             task_name = batch.pop("task_names", None)
             batch.pop("input_texts", None)
-            # TODO: add some logic to remove examples from the batch if they ae already in the generated file?
             # we use labels texts here for evaluation, because some tokenizers do not skip
             # pad token when decoding, even if skip_special_tokens=True
             labels_texts = batch.pop("labels_texts", None)
@@ -151,22 +148,23 @@ class NIEvaluator(object):
             )
 
             # save generations to a file
-            with open(output_file_name, "a") as f:
-                for p, id_, tn, r, rouge in zip(
-                    predictions,
-                    batch["instance_ids"],
-                    task_name,
-                    references,
-                    eval_metrics["rougeL"],
-                ):
-                    l = {
-                        "id": id_,
-                        "task_name": tn,
-                        "prediction": p,
-                        "reference": r,
-                        "rougeL": rouge,
-                    }
-                    f.write(json.dumps(l) + "\n")
+            if self.config.output_file_name is not None:
+                with open(os.path.join(self.config.output_dir, self.config.output_file_name), "a") as f:
+                    for p, id_, tn, r, rouge in zip(
+                        predictions,
+                        batch["instance_ids"],
+                        task_name,
+                        references,
+                        eval_metrics["rougeL"],
+                    ):
+                        l = {
+                            "id": id_,
+                            "task_name": tn,
+                            "prediction": p,
+                            "reference": r,
+                            "rougeL": rouge,
+                        }
+                        f.write(json.dumps(l) + "\n")
 
         eval_metrics = compute_metrics(
             all_predictions, [[r] for r in all_references], reduction="none"

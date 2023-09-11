@@ -7,7 +7,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from projects.instr_routing.finetune_llama import RoutingConfig
 from projects.instr_routing.models.clm import CLM
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
-from projects.instr_routing.eval.ni.evaluate import eval_instances
+from mttl.dataloader.ni_metrics import eval_instances as eval_output_file
 
 import os
 import torch
@@ -17,8 +17,7 @@ torch.set_float32_matmul_precision("high")
 
 def dict_to_dataclass(d):
     from dataclasses import make_dataclass
-
-    return make_dataclass("X", d.keys())(**d)
+    return make_dataclass("args", d.keys())(**d)
 
 
 def eval_ni(
@@ -44,22 +43,19 @@ def eval_ni(
         max_input_length=max_input_length,
     )
     metrics = ni_evaluator.evaluate(model, subsample=subsample)
-
-    # evaluate using the original script for evaluaitng sni
+    # evaluate generations file per category and write to the output directory
     args = dict_to_dataclass(
         {
             "prediction_file": os.path.join(config.output_dir, output_file_name),
             "reference_file": os.environ["NI_DATA_DIR"] + "/test_references.jsonl",
             "output_file": os.path.join(
-                config.output_dir, output_file_name.replace(".jsonl", "_metrics.json")
-            ),
-            "clean": 0,
+                config.output_dir, output_file_name.replace(".jsonl", "_metrics.json")),
+            "track": "default"
         }
-    )
-    all_results_original = eval_instances(args)
-
+    )  
+    _ = eval_output_file(args)
     torch.cuda.empty_cache()
-    return metrics, all_results_original
+    return metrics
 
 
 if __name__ == "__main__":
