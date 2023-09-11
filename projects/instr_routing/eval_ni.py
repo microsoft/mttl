@@ -1,8 +1,6 @@
 from transformers import AutoModelForCausalLM
 import sys
 import os
-import re
-import wandb
 from copy import deepcopy
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -11,8 +9,6 @@ from projects.instr_routing.models.clm import CLM
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 import os
 import torch
-import click
-import glob
 
 torch.set_float32_matmul_precision("high")
 
@@ -65,7 +61,8 @@ def eval_ni(
     torch.cuda.empty_cache()
     return metrics, all_results_original
 
-if __name__ == "__main__": 
+
+if __name__ == "__main__":
     from huggingface_hub import login
 
     login(token=os.environ["HF_TOKEN"])
