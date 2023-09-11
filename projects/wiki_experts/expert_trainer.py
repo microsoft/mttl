@@ -167,23 +167,32 @@ class ExpertTrainer(EfficientCheckpointModule):
         loss = self.forward(batch, reduction="none")
         mean_loss = loss.sum() / loss.shape[0]
 
-        self._inference_outputs += [(loss.detach().cpu(), batch["task_ids"].cpu())]
-        return loss, batch["task_ids"]
+        self._inference_outputs += [(loss.detach().cpu(), batch["task_names"])]
+        return loss, batch["task_names"]
 
     def on_validation_epoch_end(self):
+        from itertools import chain
+
         outputs = self._inference_outputs
         losses = torch.cat([out[0] for out in outputs], 0)
-        task_ids = torch.cat([out[1] for out in outputs], 0)
+        task_names = list(chain(*[out[1] for out in outputs]))
 
         # compute the loss per task id
         with open(
             os.path.join(self.hparams.output_dir, "val_loss_by_task.txt"), "a+"
         ) as f:
-            task_losses = {}
-            for task_id in torch.unique(task_ids):
-                task_losses[task_id.item()] = losses[task_ids == task_id].mean().item()
+            task_losses = defaultdict(lambda: 0.)
+            task_counts = defaultdict(lambda: 0.)
+            for i, task_name in enumerate(task_names):
+                task_losses[task_name] += losses[i].item()
+                task_counts[task_name] += 1
+            for tn in task_losses.keys():
+                task_losses[tn] /= task_counts[tn]
+                task_losses[tn] = {
+                    "loss": task_losses[tn],
+                    "n": task_counts[tn]
+                }
             f.write(json.dumps(task_losses) + "\n")
 
         self._inference_outputs.clear()
         self.log("val/loss", losses.mean(), on_epoch=True, prog_bar=True)
-        
