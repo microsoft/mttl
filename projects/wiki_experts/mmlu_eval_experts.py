@@ -20,6 +20,43 @@ from projects.wiki_experts.expert_model import MultiExpertModel
 from config import ExpertConfig
 
 
+def parse_experts_to_load(experts_to_load):
+    kwargs = []
+
+    def find_experts(path):
+        import glob
+
+        for path in glob.glob(expert_path + "/**/csv_metrics/", recursive=True):
+            yield "/".join(path.split("/")[:-2])
+
+    for expert in experts_to_load.split(","):
+        expert_path, _, action = expert.partition(":")
+        expert_path, _, expert_name = expert_path.partition("=")
+        all_paths = list(find_experts(expert_path)) or [expert_path]
+
+        if not action:
+            action = "route"
+        is_default = "*" in action
+        action = action.replace("*", "")
+
+        if len(all_paths) > 1:
+            if is_default:
+                raise ValueError("Cannot define more than one default expert! Are you using * in expert path?")
+            if expert_name:
+                raise ValueError("Cannot declare a name when using a wildcard in the expert path!")
+
+        kwargs.append(
+            {
+                "expert_path": expert_path,
+                "action": action,
+                "is_default": is_default,
+                "expert_name": expert_name
+            }
+        )
+
+    return kwargs
+
+
 def run_eval(args):
     seed_everything(args.seed, workers=True)
 
@@ -39,31 +76,14 @@ def run_eval(args):
         data_dir=os.environ["MMLU_DATA_DIR"],
     )
     module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
-
-    def find_experts(path):
-        import glob
-
-        for path in glob.glob(expert_path + "/**/csv_metrics/", recursive=True):
-            yield "/".join(path.split("/")[:-2])
-
-    if args.experts_to_load:
-        for expert in args.experts_to_load.split(","):
-            expert_path, action = expert.split(":")
-            is_default = "*" in action
-            action = action.replace("*", "")
-            all_experts = list(find_experts(expert_path))
-
-            if is_default and len(all_experts) > 1:
-                raise ValueError("Cannot define more than one default expert! Are you using * in expert path?")
-
-            for expert_path in all_experts:
-                module.load_expert(expert_path, action=action, is_default=is_default)
+    kwargs = parse_experts_to_load(args.experts_to_load)
+    for expert_kwargs in kwargs:
+        module.load_expert(**expert_kwargs)
 
     module.to("cuda")
     scores = mmlu.evaluate(module, subsample=10)
 
     logger.info("MMLU Accuracy: {}".format(scores["all"]["mean"]))
-
     del module, mmlu
 
 

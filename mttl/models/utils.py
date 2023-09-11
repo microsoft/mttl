@@ -21,12 +21,14 @@ def transfer_batch_to_device(batch, device):
     return batch
 
 
-def convert_and_push_to_hub(ckpt_path, repo_id, auto_search=True, use_last=False) -> None:
+def convert_and_push_to_hub(
+    ckpt_path, repo_id, auto_search=True, use_last=False,
+) -> None:
     """Searches into local path for the checkpoint with lowest validation loss,
-       then uploads that.
-       
-       if use_last is True, then uses the last checkpoint `last.ckpt` instead
-       of the one with lowest validation loss.
+    then uploads that.
+
+    if use_last is True, then uses the last checkpoint `last.ckpt` instead
+    of the one with lowest validation loss.
     """
     import huggingface_hub
     from mttl.utils import get_checkpoint_path
@@ -38,23 +40,22 @@ def convert_and_push_to_hub(ckpt_path, repo_id, auto_search=True, use_last=False
 
     huggingface_hub.create_repo(repo_id, repo_type="model", exist_ok=True)
     huggingface_hub.upload_file(
-        path_or_fileobj=ckpt_path,
-        repo_id=repo_id,
-        path_in_repo=CHECKPOINT_PATH_IN_HUB
+        path_or_fileobj=ckpt_path, repo_id=repo_id, path_in_repo=CHECKPOINT_PATH_IN_HUB
     )
 
 
 def download_from_hub(repo_id) -> str:
-    """Download checkpoint from hub.
-    """
+    """Download checkpoint from hub."""
     from huggingface_hub import hf_hub_download
 
-    return hf_hub_download(repo_id=repo_id, filename=CHECKPOINT_PATH_IN_HUB, repo_type="model")
+    return hf_hub_download(
+        repo_id=repo_id, filename=CHECKPOINT_PATH_IN_HUB, repo_type="model"
+    )
 
 
 class EfficientCheckpointModule(LightningModule, PushToHubMixin):
     """Efficiently save and load checkpoints.
-    
+
     Only saves and loads parameters that are either in the trainable parameters
     or have been loaded from a previous checkpoint.
     """
@@ -67,24 +68,35 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
         self.save_if_loaded = kwargs.get("save_if_loaded", True)
 
     @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path: Optional[Union[str, os.PathLike]], *model_args, **kwargs):
+    def from_pretrained(
+        cls,
+        pretrained_model_name_or_path: Optional[Union[str, os.PathLike]],
+        *model_args,
+        **kwargs,
+    ):
         # Load model
-        instantiate_model = kwargs.pop('instantiate_model', True)
-        cache_dir = kwargs.pop('cache_dir', None)
-        force_download = kwargs.pop('force_download', None)
+        instantiate_model = kwargs.pop("instantiate_model", True)
+        cache_dir = kwargs.pop("cache_dir", None)
+        force_download = kwargs.pop("force_download", None)
         force_download = kwargs.pop("force_download", False)
         resume_download = kwargs.pop("resume_download", False)
         proxies = kwargs.pop("proxies", None)
         local_files_only = kwargs.pop("local_files_only", False)
         use_auth_token = kwargs.pop("use_auth_token", None)
 
-        user_agent = {"file_type": "model", "framework": "pytorch", "from_auto_class": False}
+        user_agent = {
+            "file_type": "model",
+            "framework": "pytorch",
+            "from_auto_class": False,
+        }
 
         if pretrained_model_name_or_path is not None:
             pretrained_model_name_or_path = str(pretrained_model_name_or_path)
 
             if os.path.isdir(pretrained_model_name_or_path):
-                resolved_archive_file = get_checkpoint_path(pretrained_model_name_or_path)
+                resolved_archive_file = get_checkpoint_path(
+                    pretrained_model_name_or_path
+                )
             else:
                 try:
                     # Load from URL or cache if already cached
@@ -111,7 +123,9 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
                 if resolved_archive_file == pretrained_model_name_or_path:
                     logger.info(f"loading weights file {resolved_archive_file}")
                 else:
-                    logger.info(f"loading weights file {pretrained_model_name_or_path} from cache at {resolved_archive_file}")
+                    logger.info(
+                        f"loading weights file {pretrained_model_name_or_path} from cache at {resolved_archive_file}"
+                    )
         else:
             resolved_archive_file = None
 
@@ -120,7 +134,7 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
         else:
             ckpt = torch.load(resolved_archive_file, map_location="cpu")
 
-            return ckpt['state_dict'], ckpt['hyper_parameters']
+            return ckpt["state_dict"], ckpt["hyper_parameters"]
 
     @classmethod
     def load_from_checkpoint(
@@ -135,14 +149,14 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
 
         if tokenizer is None:
             tokenizer = get_tokenizer_with_args(
-                model_name=ckpt['hyper_parameters']['model'],
-                model_family=ckpt['hyper_parameters']['model_family'],
-                padding_side=ckpt['hyper_parameters']['padding_side'],
+                model_name=ckpt["hyper_parameters"]["model"],
+                model_family=ckpt["hyper_parameters"]["model_family"],
+                padding_side=ckpt["hyper_parameters"]["padding_side"],
             )
             model_kwargs["tokenizer"] = tokenizer
 
-        model = cls(**ckpt['hyper_parameters'], **model_kwargs)
-        model.load_state_dict(ckpt['state_dict'], strict=False)
+        model = cls(**ckpt["hyper_parameters"], **model_kwargs)
+        model.load_state_dict(ckpt["state_dict"], strict=False)
         return model
 
     def save_pretrained(
@@ -165,8 +179,8 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
             hparams_allowed[k] = v
 
         save_package = {
-            'state_dict': ckpt,
-            'hyper_parameters': hparams_allowed,
+            "state_dict": ckpt,
+            "hyper_parameters": hparams_allowed,
         }
 
         output_model_file = os.path.join(save_directory, "checkpoint.ckpt")
@@ -206,7 +220,7 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
                 logger.info("Deleting from state dict: {}".format(key))
 
     def on_save_checkpoint(self, ckpt):
-        self._delete_non_trainable_params(ckpt['state_dict'])
+        self._delete_non_trainable_params(ckpt["state_dict"])
 
     def on_load_checkpoint(self, ckpt):
         print("Loading checkpoint...")
@@ -236,8 +250,12 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
                 len(self.trainer.datamodule.train_dataset) // global_bs
             ) * self.trainer.max_epochs
 
-        if args.warmup_steps == -1 or args.warmup_proportion > 0.:
-            logger.info("Warmup proportion is set to {}, has priority over warmup_steps".format(args.warmup_proportion))
+        if args.warmup_steps == -1 or args.warmup_proportion > 0.0:
+            logger.info(
+                "Warmup proportion is set to {}, has priority over warmup_steps".format(
+                    args.warmup_proportion
+                )
+            )
 
             args.warmup_steps = int(args.warmup_proportion * args.total_steps)
 

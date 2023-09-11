@@ -103,8 +103,11 @@ class MultiExpertModel(EfficientCheckpointModule):
             kwargs=expert_checkpoint["hyper_parameters"], silent=True, raise_error=False
         )
         if expert_config.expert_name is None:
-            logger.info("Assigning expert name, not found in checkpoint: {}".format(expert_path))
-            expert_name = os.path.basename(expert_path)
+            if expert_config.finetune_task_name is not None:
+                expert_name = expert_config.finetune_task_name
+            else:
+                expert_name = os.path.basename(expert_path)
+            logger.info("Assigning expert name, not found in checkpoint: {}".format(expert_name))
 
         expert_weights = expert_checkpoint["state_dict"]
         expert_weights = {
