@@ -91,7 +91,11 @@ class MultiExpertModel(pl.LightningModule):
         self.experts = []
 
     def load_expert(
-        self, expert_path: str, expert_name: str = None, action: str = "merge"
+        self,
+        expert_path: str,
+        expert_name: str = None,
+        action: str = "merge",
+        is_default: bool = False,
     ):
         # load the expert weights
         import json
@@ -106,13 +110,13 @@ class MultiExpertModel(pl.LightningModule):
 
         expert_checkpoint = torch.load(expert_checkpoint, map_location="cpu")
         expert_config = ExpertConfig(
-            kwargs=expert_checkpoint["hyper_parameters"],
-            silent=True,
-            raise_error=False
+            kwargs=expert_checkpoint["hyper_parameters"], silent=True, raise_error=False
         )
 
         expert_weights = expert_checkpoint["state_dict"]
-        expert_weights = {k.replace("model.", "", 1): v for k, v in expert_weights.items()}
+        expert_weights = {
+            k.replace("model.", "", 1): v for k, v in expert_weights.items()
+        }
 
         if self.hparams.model != expert_config.model:
             raise ValueError(
@@ -127,23 +131,24 @@ class MultiExpertModel(pl.LightningModule):
         )
 
         self.model = add_expert_to_transformer(
-            self.model, expert_name, expert_config, expert_weights, action=action
+            self.model,
+            expert_name,
+            expert_config,
+            expert_weights,
+            action=action,
+            is_default=is_default,
         )
-        if action != 'merge':
+        if action != "merge":
             self.experts.append(expert_name)
 
     @property
     def generation_config(self):
         return self.model.generation_config
 
-    def expert_choice(
-        self,
-        batch,
-        **kwargs
-    ):
+    def expert_choice(self, batch, **kwargs):
         input_ids = batch["input_ids"]
         mask = batch["input_ids"].ne(self.tokenizer.pad_token_id)
-        
+
         # convert left to right padding here
         def roll_along(arr, shifts, dim):
             assert arr.ndim - 1 == shifts.ndim
@@ -174,7 +179,7 @@ class MultiExpertModel(pl.LightningModule):
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
             # Flatten the tokens
-            loss_fct = torch.nn.CrossEntropyLoss(reduction='none')
+            loss_fct = torch.nn.CrossEntropyLoss(reduction="none")
             shift_logits = shift_logits.view(-1, vocab_size)
             shift_labels = shift_labels.view(-1)
 
@@ -194,10 +199,6 @@ class MultiExpertModel(pl.LightningModule):
         batch,
         **kwargs,
     ):
-        logger.info(batch["task_names"])
-        self.expert_choice(batch)
-        logger.info(batch["task_names"])
-
         if hasattr(self.model, "task_id_container"):
             self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
                 batch

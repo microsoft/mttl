@@ -2,7 +2,7 @@ import os
 import sys
 import json
 import torch
-import wandb 
+import wandb
 import logging
 import pytorch_lightning as pl
 from huggingface_hub import login
@@ -38,10 +38,7 @@ def run_eval(args):
         args,
         data_dir=os.environ["MMLU_DATA_DIR"],
     )
-    module = MultiExpertModel(
-        **vars(args),
-        tokenizer=mmlu.datamodule.tokenizer
-    )
+    module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
 
     def find_experts(path):
         import glob
@@ -52,9 +49,12 @@ def run_eval(args):
     if args.experts_to_load:
         for expert in args.experts_to_load.split(","):
             expert_path, action = expert.split(":")
+            action = action.split("*")
+            is_default = len(action) > 1
+            action = action[0]
 
             for expert_path in find_experts(expert_path):
-                module.load_expert(expert_path, action=action)
+                module.load_expert(expert_path, action=action, is_default=is_default)
 
     module.to("cuda")
     scores = mmlu.evaluate(module, subsample=10)
