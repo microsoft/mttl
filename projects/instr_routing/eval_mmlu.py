@@ -34,7 +34,7 @@ def eval_mmlu(
 
 
 @click.command()          
-@click.option("--model_name", type=str, default="alpaca_softmoe_e12[wo_cmask]")
+@click.option("--model_name", type=str, default="platypus_13B")
 @click.option("--amlt_experiment_name", type=str, default="routing")        
 @click.option("--model_path", type=str, default="/home/v-oostapenko/dev/amlt/shared_files/results_as_sep10/platypus/platypus-13b-right/meta-llama_Llama-2-13b-hf_platypus-13b-right-val/loss=0.5543.ckpt", help="path to the model")
 @click.option("--batch_size", type=int, default=3)
