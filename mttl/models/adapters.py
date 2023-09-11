@@ -31,7 +31,6 @@ class LoRA(Adapter):
         self.rank = config.lora_rank
         self.alpha = config.lora_alpha
         self.dropout = config.lora_dropout
-        self.use_warmup = config.lora_warmup
         self.in_features = layer.in_features
         self.out_features = layer.out_features
         self.init_b_random = config.lora_init_b_random
@@ -119,15 +118,10 @@ class LoRA(Adapter):
         if self.merged_with_layer:
             return self.layer(input)
         else:
-            if self.training:
-                self.training_steps += 1
             adapter_out = (
                 torch.matmul(torch.matmul(input, self.lora_a), self.lora_b)
                 * self.scaling
             )
-            warmup = min(self.training_steps / 10_000, 1)
-            if self.use_warmup:
-                adapter_out = adapter_out * warmup
             return self.layer(input) + adapter_out
 
     @classmethod
@@ -142,9 +136,10 @@ class LoRA(Adapter):
         scaling = torch.cat(
             [torch.LongTensor([lora.scaling]) for lora in loras], dim=0
         ).to(lora_a.device)
-        adapter_out = torch.bmm(torch.bmm(input, lora_a), lora_b)
-
-        return loras[0].layer(input) + adapter_out * scaling[:, None, None]
+        adapter_out = (
+            torch.bmm(torch.bmm(input, lora_a), lora_b) * scaling[:, None, None]
+        )
+        return loras[0].layer(input) + adapter_out
 
     def reset_parameters(self):
         gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
@@ -327,7 +322,7 @@ class ExpertContainer(Adapter):
 
         if (
             any(task_name not in self.experts for task_name in task_names)
-            and not self.merged_expert_names
+            and not self.default_expert_name
         ):
             raise ValueError(
                 "Experts for all tasks have not been loaded! Set a default expert?"
