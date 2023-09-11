@@ -36,7 +36,7 @@ def eval_mmlu(
 @click.command()          
 @click.option("--model_name", type=str, default="alpaca_softmoe_e12[wo_cmask]")
 @click.option("--amlt_experiment_name", type=str, default="routing")        
-@click.option("--model_path", type=str, default=None, help="path to the model")
+@click.option("--model_path", type=str, default="/home/v-oostapenko/dev/amlt/shared_files/results_as_sep10/platypus/platypus-13b-right/meta-llama_Llama-2-13b-hf_platypus-13b-right-val/loss=0.5543.ckpt", help="path to the model")
 @click.option("--batch_size", type=int, default=3)
 @click.option("--wandb_proj", type=str, default="eval")
 def run_mmlu_eval(model_name, amlt_experiment_name=None, model_path=None, batch_size=5, wandb_proj=None):
@@ -82,7 +82,7 @@ def run_mmlu_eval(model_name, amlt_experiment_name=None, model_path=None, batch_
             f"../tmp/instruction_learning/{model_name}/",
         ),
     )
-    em_mmlu_all = eval_mmlu(config, model, subsample=-1, max_input_length=2048)     
+    em_mmlu_all = eval_mmlu(config, model, subsample=-1, max_input_length=4096)     
     mmlu_em = em_mmlu_all["all"]["mean"]
     if wandb_proj:
         import wandb 

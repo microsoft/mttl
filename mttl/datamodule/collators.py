@@ -102,7 +102,7 @@ class DefaultCollator:
         targets = torch.masked_fill(
             targets,
             ~tok_sources_plus_labels["attention_mask"].bool(),
-            self.label_pad_token_id
+            self.label_pad_token_id,
         )
 
         if not self.train_on_inputs:
