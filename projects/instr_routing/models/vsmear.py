@@ -298,6 +298,8 @@ class VSMEARRouterExperimental(VSMEARRouter):
         super().__init__(config, in_d)
         self.prior_router_ln = nn.Identity()
         self.post_router_ln = nn.Identity()
+        self.xrouter_x4_target = config.xrouter_x4_target
+        self.xrouter_x4target_detach = config.xrouter_x4target_detach
 
     def forward(self, routing_infos, input: torch.Tensor):
         self.metrics.clear()     
@@ -328,9 +330,21 @@ class VSMEARRouterExperimental(VSMEARRouter):
                 center=self.router_center_momentum > 0.0,
             )          
             post_probs = F.softmax(post_routes, dim=-1)  
-            prior_probs=routing_probs = F.softmax(prior_routes, dim=-1) # output and teacher
-            self.auxiliary_loss = 1 - F.cosine_similarity(post_routes, 
-                                                          prior_routes.detach(), dim=-1).mean()
+            prior_probs= F.softmax(prior_routes, dim=-1) # output and teacher
+            
+                
+            if self.xrouter_x4_target=="posterior": 
+                target = post_routes * self.router_teacher_temperature
+                student_logit = prior_routes * self.temperature
+                routing_probs = post_probs
+            elif self.xrouter_x4_target=="prior":
+                target = prior_routes * self.temperature
+                student_logit = post_routes * self.router_teacher_temperature
+                routing_probs = prior_probs
+            
+            
+            self.auxiliary_loss = 1 - F.cosine_similarity(student_logit, 
+                                                          target.detach() if self.xrouter_x4target_detach else target, dim=-1).mean()
             
             
             h_post = -(post_probs * F.log_softmax(post_routes, -1)).sum(1).mean()

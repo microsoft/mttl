@@ -1,22 +1,20 @@
 from transformers import AutoModelForCausalLM
 import sys
 import os
-import re
-import wandb
 from copy import deepcopy
-
+import os
+import re
+import glob
+import wandb
+import click
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from projects.instr_routing.finetune_llama import RoutingConfig
 from projects.instr_routing.models.clm import CLM
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
-from mttl.dataloader.ni_metrics import eval_instances as eval_output_file
+from mttl.dataloader.ni_metrics_old import eval_instances
 
 import os
 import torch
-import click
-import glob
-
-torch.set_float32_matmul_precision("high")
 
 torch.set_float32_matmul_precision("high")
 
@@ -49,35 +47,45 @@ def eval_ni(
         pred_output_file_path=output_file_path,
     )
     metrics = ni_evaluator.evaluate(model, subsample=subsample)
+    # evaluate generations file per category and write to the output directory
+    args = dict_to_dataclass(
+        {
+            "prediction_file": output_file_path,
+            "reference_file": os.environ["NI_DATA_DIR"] + "/test_references.jsonl",
+            "output_file": output_file_path.replace(".jsonl", "_metrics.json"),
+            "clean": 0,
+        }
+    )
+    all_results_old = eval_instances(
+        args
+    )  
     torch.cuda.empty_cache()
-    return metrics
+    return metrics, all_results_old
 
-def load_hf_model(model_name):
-    from mttl.datamodule.utils import get_tokenizer
-    from peft import PeftModel
 
+def load_hf_model(model_name):   
+    from mttl.datamodule.utils import get_tokenizer    
+    from peft import PeftModel  
     config = RoutingConfig()
     config.model = "yahma/llama-7b-hf"
     config.model_family = "gpt"
     tokenizer = get_tokenizer(config)
-    model = CLM(**vars(config), tokenizer=tokenizer)
-    model = model.cuda()
+    model = CLM(**vars(config),tokenizer=tokenizer)
+    model = model.cuda()    
     model = PeftModel.from_pretrained(
-        model.model,
+        model.model,           
         model_name,
         device_map={"": "cuda"},
-    )
-    config.model_object = model
+    )       
+    config.model_object = model      
     model = CLM(**vars(config), tokenizer=tokenizer)
     config.model_object = None
     return model, config
 
-
-@click.command()
-@click.option(
-    "--model_name", type=str, default="alpaca_vsmear_e12[xr4,t_1,maop]"
-)  # chainyo/alpaca-lora-7b") #alpaca_vsmear_e12[xr4,t_1]")
-@click.option("--amlt_experiment_name", type=str, default="routing")  # routing")
+          
+@click.command()  
+@click.option("--model_name", type=str, default="alpaca_dense_r4") #chainyo/alpaca-lora-7b") #alpaca_vsmear_e12[xr4,t_1]")
+@click.option("--amlt_experiment_name", type=str, default="routing") #routing")
 @click.option("--model_path", type=str, default=None, help="path to the model")
 @click.option("--batch_size", type=int, default=3)
 @click.option("--wandb_proj", type=str, default="eval")
@@ -89,44 +97,36 @@ def run_ni_eval(
     batch_size=5,
     wandb_proj=None,
     use_old_gen_config=False,
-):
-    if amlt_experiment_name == "hf":
+):           
+    if amlt_experiment_name =="hf":
         raise NotImplementedError
         model, config = load_hf_model(model_name)
-    elif amlt_experiment_name == "hf_peft":
+    elif amlt_experiment_name =="hf_peft":
         model, config = load_hf_model(model_name)
     else:
         if model_path is None:
             if os.environ.get("AMLT_OUTPUT_DIR") is not None:  # on gcr
                 base_model_path = "/mnt/default/data/models"
             else:
-                base_model_path = os.path.join(
-                    os.path.dirname(__file__), "..", "..", ".."
-                )
+                base_model_path = os.path.join(os.path.dirname(__file__), "..", "..", "..")
                 base_model_path = os.path.join(base_model_path, "amlt")
             if amlt_experiment_name:
                 model_name = re.sub(r"(\[)", r"[[]", model_name)
                 model_name = re.sub(r"(\])$", r"[]]", model_name)
                 model_path = glob.glob(
                     f"{base_model_path}/{amlt_experiment_name}/{model_name}/yahma*/loss=*.ckpt"
-                )
+                )     
                 if len(model_path) == 1:
                     model_path = model_path[0]
-                else:
+                else:    
                     import numpy as np
-
-                    # take the one with minimum loss
-                    idx_min = np.argmin(
-                        [
-                            float(x.split("loss=")[-1].split(".ckpt")[0])
-                            for x in model_path
-                        ]
-                    )
+                    # take the one with minimum loss 
+                    idx_min = np.argmin([float(x.split("loss=")[-1].split(".ckpt")[0]) for x in model_path])
                     model_path = model_path[idx_min]
-                model_name = model_name.replace("[]", "")
-        print("#" * 100)
+                model_name = model_name.replace("[]","")
+        print("#"*100) 
         print("loaded model fom ", model_path)
-        print("#" * 100)
+        print("#"*100)
         # load state dict
         config = RoutingConfig()
         config.update_kwargs(torch.load(model_path)["hyper_parameters"])
@@ -142,7 +142,7 @@ def run_ni_eval(
             project=wandb_proj,
             name=os.environ.get("AMLT_JOB_NAME", run_name),
             config=config,
-        )
+        )  
     config.use_old_gen_config = use_old_gen_config
     config.data_dir = os.environ["NI_DATA_DIR"]
     config.predict_batch_size = batch_size
@@ -154,33 +154,31 @@ def run_ni_eval(
             f"../tmp/instruction_learning/{model_name}/",
         ),
     )
-    rougel_ni_all = eval_ni(
-        config, model, nshot=0, subsample=-1, max_input_length=-1
-    )
+    rougel_ni_all, all_results_original = eval_ni(config, model, nshot=0, subsample=100, max_input_length=-1)
     rougel_ni = rougel_ni_all["all"]["mean"]
     config.model_path = model_path
     if wandb_proj:
         wandb.log({"rouge_L_super_ni": rougel_ni_all["all"]["mean"]})
-        wandb.log({"rouge_L_super_ni_stderr": rougel_ni_all["all"]["stderr"]})
-    print(rougel_ni)
+        wandb.log({"rouge_L_super_ni_stderr": rougel_ni_all["all"]["stderr"]}) 
+        wandb.log({"rouge_L_super_ni[original]": all_results_original["rougeL_default_track"]})
+    print(rougel_ni,all_results_original["rougeL_default_track"])
 
 
 if __name__ == "__main__":
     run_ni_eval()
-    os._exit(0)
-    from huggingface_hub import login
+    # from huggingface_hub import login
 
-    login(token=os.environ["HF_TOKEN"])
-    config = RoutingConfig.parse(extra_kwargs={"eval_superni": True})
-    config.model = "meta-llama/Llama-2-13b-hf"
-    config.load_in_8bit = True
-    config.model_family = "gpt"
-    config.data_dir = os.environ["NI_DATA_DIR"]
-    config.predict_batch_size = 2
-    config.max_input_length = 4096
-    config.max_output_length = 128
+    # login(token=os.environ["HF_TOKEN"])
+    # config = RoutingConfig.parse(extra_kwargs={"eval_superni": True})
+    # config.model = "meta-llama/Llama-2-13b-hf"
+    # config.load_in_8bit = True
+    # config.model_family = "gpt"
+    # config.data_dir = os.environ["NI_DATA_DIR"]
+    # config.predict_batch_size = 2
+    # config.max_input_length = 4096
+    # config.max_output_length = 128
 
-    model = AutoModelForCausalLM.from_pretrained(
-        config.model, load_in_8bit=config.load_in_8bit, device_map="auto"
-    )
-    print(eval_ni(config, model, nshot=0, subsample=-1))
+    # model = AutoModelForCausalLM.from_pretrained(
+    #     config.model, load_in_8bit=config.load_in_8bit, device_map="auto"
+    # )
+    # print(eval_ni(config, model, nshot=0, subsample=-1))
