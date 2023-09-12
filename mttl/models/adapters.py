@@ -322,15 +322,16 @@ class ExpertContainer(Adapter):
 
         if (
             any(task_name not in self.experts for task_name in task_names)
-            and not self.default_expert_name
+            and not self.default_expert_name and len(self.experts)
         ):
             raise ValueError(
                 "Experts for all tasks have not been loaded! Set a default expert?"
             )
 
         # if it has some routing experts *and* task names, then we can route
-        if len(self.experts) and task_names:
+        if len(self.experts) and task_names is not None:
             load_experts = []
+
             for task_name in task_names:
                 if task_name not in self.experts:
                     if not self.default_expert_name:
