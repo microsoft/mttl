@@ -43,18 +43,6 @@ def eval_ni(
         pred_output_file_path=output_file_path,
     )
     metrics = ni_evaluator.evaluate(model, subsample=subsample)
-    # evaluate generations file per category and write to the output directory
-    args = dict_to_dataclass(
-        {
-            "prediction_file": output_file_path,
-            "reference_file": os.environ["NI_DATA_DIR"] + "/test_references.jsonl",
-            "output_file": output_file_path.replace(".jsonl", "_metrics.json"),
-            "track": "default",
-        }
-    )
-    _ = eval_output_file(
-        args
-    )  # TODO: this call is unnecessary really, the per category/task metrics can be implemented in ni_evaluator, but I don't want to change ni_evaluator right now
     torch.cuda.empty_cache()
     return metrics
 

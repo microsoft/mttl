@@ -8,10 +8,9 @@ import numpy as np
 import pytorch_lightning as pl
 from pathlib import Path
 
-from mttl.dataloader.ni_metrics import compute_metrics
+from mttl.dataloader.ni_metrics import compute_metrics, compute_grouped_metrics
 from mttl.models.utils import transfer_batch_to_device
-from mttl.evaluators.base import compute_task_aggregation
-
+from mttl.evaluators.base import mean_stderr
 
 def decode(preds, tokenizer):
     preds[preds == -100] = tokenizer.pad_token_id
@@ -20,6 +19,49 @@ def decode(preds, tokenizer):
     )
     preds = [pred.strip() for pred in preds]
     return preds
+
+
+def compute_aggregation_and_maybe_save(
+    results, predictions, references, eval_instances, track="default", output_file=None
+):
+    instance_ids = [
+        id for id, instance in eval_instances.items() if instance["track"] == track
+    ]
+    all_results = {}
+    print("======== Overall Metrics ========")
+    for metric, value in results.items():
+        print(f"{metric}: {value}")
+        all_results[f"{metric}_{track}_track"] = value
+
+    if "task_category" in eval_instances[instance_ids[0]]:
+        all_results['per_category']={}
+        categories = [
+            "_".join(eval_instances[id]["task_category"].lower().split())
+            for id in instance_ids
+        ]
+        results_per_category = compute_grouped_metrics(
+            predictions, references, categories, xlingual=(track == "xlingual")
+        )
+        print("======== Metrics per Category ========")
+        for metric, value in results_per_category.items():
+            print(f"{metric}: {value}")
+            all_results['per_category'][f"{metric}_{track}_track"] = value
+
+    if "task_id" in eval_instances[instance_ids[0]]:
+        all_results['per_task'] = {}
+        tasks = [eval_instances[id]["task_id"] for id in instance_ids]
+        results_per_task = compute_grouped_metrics(
+            predictions, references, tasks, xlingual=(track == "xlingual")
+        )
+        print("======== Metrics per Task ========")
+        for metric, value in results_per_task.items():
+            print(f"{metric}: {value}")
+            all_results['per_task'][f"{metric}_{track}_track"] = value
+
+    if output_file:
+        with open(output_file, "w") as fout:
+            json.dump(all_results, fout, indent=2)
+    return all_results
 
 
 class NIEvaluator(object):
@@ -36,7 +78,9 @@ class NIEvaluator(object):
 
         self.config = deepcopy(config)
         self.device = device
-        self.pred_output_file_path = pred_output_file_path # if not None, will trute generations into it
+        self.pred_output_file_path = (
+            pred_output_file_path  # if not None, will trute generations into it
+        )
 
         # unrestricted input length for SNI pass -1
         if max_input_length is not None:
@@ -69,7 +113,6 @@ class NIEvaluator(object):
             model = model.module
 
         all_predictions = []
-        all_references = []
         task_names = []
         all_rougeL = []
 
@@ -82,16 +125,27 @@ class NIEvaluator(object):
             enumerate(dataloader),
             total=len(dataloader),
         )
+        eval_instances = {}
         for step, batch in pbar:
             task_name = batch.pop("task_names", None)
             batch.pop("input_texts", None)
             # we use labels texts here for evaluation, because some tokenizers do not skip
             # pad token when decoding, even if skip_special_tokens=True
             labels_texts = batch.pop("labels_texts", None)
-
+            task_ids = batch.pop("task_ids", None)
+            task_categories = batch.pop("task_categories", None)
             extra_kwargs = {}
             max_length = self.config.max_output_length  # default output length for NI
-
+            for id, category, label_text, task_id in zip(
+                batch["instance_ids"], task_categories, labels_texts, task_ids
+            ):
+                eval_instances[id] = {
+                    "id": id,
+                    "track": "default",
+                    "references": label_text,
+                    "task_category": category[0],
+                    "task_id": task_id,
+                }
             if self.config.model_family == "gpt":
                 max_length += batch["input_ids"].shape[-1]
 
@@ -135,12 +189,9 @@ class NIEvaluator(object):
                 samples_seen += len(references)
 
             all_predictions += predictions
-            all_references += references
             task_names += task_name
 
-            eval_metrics = compute_metrics(
-                predictions, [[r] for r in references], reduction="none"
-            )
+            eval_metrics = compute_metrics(predictions, references, reduction="none")
             all_rougeL.append(np.mean(eval_metrics["rougeL"]))
             pbar.set_description(
                 f"Task: {task_name[0] if task_name else None}, rougeL: {np.mean(all_rougeL):.4f}"
@@ -165,10 +216,25 @@ class NIEvaluator(object):
                         }
                         f.write(json.dumps(l) + "\n")
 
+        instance_ids = [id for id, instance in eval_instances.items()]
+        all_references = [eval_instances[id]["references"] for id in instance_ids]
         eval_metrics = compute_metrics(
-            all_predictions, [[r] for r in all_references], reduction="none"
+            all_predictions, all_references
         )
 
         if was_train:
             model.train()
-        return compute_task_aggregation(task_names, eval_metrics["rougeL"])
+            
+        all_results = compute_aggregation_and_maybe_save(
+            eval_metrics,
+            all_predictions,
+            all_references,
+            eval_instances,
+            track="default",
+            output_file=None #self.pred_output_file_path.replace(".jsonl", "_metrics.json"),
+        )
+        all_results["all"]={}
+        all_results["all"]["mean"]=all_results["rougeL_default_track"]
+        if "per_task" in all_results:
+            all_results["all"]["stderr"] = mean_stderr([v for k, v in all_results["per_task"].items() if "rougeL" in k])
+        return all_results
