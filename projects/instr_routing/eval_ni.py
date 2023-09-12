@@ -37,34 +37,20 @@ def eval_ni(
 ):
     from mttl.evaluators import NIEvaluator
 
-    config = deepcopy(config)
     output_file_name = f"ni_pred_{config.model}ni-nshot{nshot}.jsonl"
     output_file_name = output_file_name.replace("/", "_")
     output_file_name = output_file_name.strip()
-    config.output_dir = os.path.join(config.output_dir, "eval/ni")
-    config.output_file_name = output_file_name
+    output_file_path = os.path.join(config.output_dir, "eval/ni", output_file_name)
     ni_evaluator = NIEvaluator(
         config,
         data_dir=data_dir or config.data_dir,
         num_pos_examples=nshot,
         max_input_length=max_input_length,
+        pred_output_file_path=output_file_path,
     )
     metrics = ni_evaluator.evaluate(model, subsample=subsample)
-    # evaluate generations file per category and write to the output directory
-    args = dict_to_dataclass(
-        {
-            "prediction_file": os.path.join(config.output_dir, output_file_name),
-            "reference_file": os.environ["NI_DATA_DIR"] + "/test_references.jsonl",
-            "output_file": os.path.join(
-                config.output_dir, output_file_name.replace(".jsonl", "_metrics.json")
-            ),
-            "track": "default",
-        }
-    )
-    _ = eval_output_file(args)
     torch.cuda.empty_cache()
-    return metrics, all_results_original
-
+    return metrics
 
 def load_hf_model(model_name):
     from mttl.datamodule.utils import get_tokenizer
@@ -168,7 +154,7 @@ def run_ni_eval(
             f"../tmp/instruction_learning/{model_name}/",
         ),
     )
-    rougel_ni_all, all_results_original = eval_ni(
+    rougel_ni_all = eval_ni(
         config, model, nshot=0, subsample=-1, max_input_length=-1
     )
     rougel_ni = rougel_ni_all["all"]["mean"]
@@ -176,10 +162,7 @@ def run_ni_eval(
     if wandb_proj:
         wandb.log({"rouge_L_super_ni": rougel_ni_all["all"]["mean"]})
         wandb.log({"rouge_L_super_ni_stderr": rougel_ni_all["all"]["stderr"]})
-        wandb.log(
-            {"rouge_L_super_ni[original]": all_results_original["rougeL_default_track"]}
-        )
-    print(rougel_ni, all_results_original["rougeL_default_track"])
+    print(rougel_ni)
 
 
 if __name__ == "__main__":
@@ -189,7 +172,7 @@ if __name__ == "__main__":
 
     login(token=os.environ["HF_TOKEN"])
     config = RoutingConfig.parse(extra_kwargs={"eval_superni": True})
-    config.model = "meta-llama/Llama-2-7b-hf"
+    config.model = "meta-llama/Llama-2-13b-hf"
     config.load_in_8bit = True
     config.model_family = "gpt"
     config.data_dir = os.environ["NI_DATA_DIR"]
