@@ -105,7 +105,7 @@ class MMLUDataModule(LightningDataModule):
             collate_fn=self.collate_fn,
         )
 
-    def test_dataloader(self, subsample=-1):
+    def test_dataloader(self, subsample=-1, shuffle=False):
         if subsample > 0:
             from mttl.datamodule import take_n_examples_per_task
 
@@ -119,7 +119,7 @@ class MMLUDataModule(LightningDataModule):
         return DataLoader(
             test_dataset,
             batch_size=self.config.predict_batch_size,
-            shuffle=False,
+            shuffle=shuffle,
             num_workers=16,
             pin_memory=True,
             persistent_workers=True,
