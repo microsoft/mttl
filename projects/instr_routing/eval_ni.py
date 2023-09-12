@@ -84,11 +84,11 @@ def load_hf_model(model_name):
 
           
 @click.command()  
-@click.option("--model_name", type=str, default="alpaca_dense_r4") #chainyo/alpaca-lora-7b") #alpaca_vsmear_e12[xr4,t_1]")
+@click.option("--model_name", type=str, default="alpaca_vsmear_e12[xr4,t_1,maop,bf16]") #chainyo/alpaca-lora-7b") #alpaca_vsmear_e12[xr4,t_1]")
 @click.option("--amlt_experiment_name", type=str, default="routing") #routing")
 @click.option("--model_path", type=str, default=None, help="path to the model")
 @click.option("--batch_size", type=int, default=3)
-@click.option("--wandb_proj", type=str, default="eval")
+@click.option("--wandb_proj", type=str, default=None)
 @click.option("--use_old_gen_config", type=bool, default=False)
 def run_ni_eval(
     model_name,

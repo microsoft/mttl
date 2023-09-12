@@ -237,7 +237,7 @@ class DataCollatorForNI(DefaultCollator):
         labels = [ex["Instance"]["output"] for ex in batch]
         instance_ids = [ex["Instance"]["id"] for ex in batch]
         task_categoreis = [ex["Categories"] for ex in batch]
-        task_id = [ex["Task"] for ex in batch]
+        task_identifiers = [ex["Task"] for ex in batch]
         output_batch = (
             self.prepare_inputs_for_gpt_family(sources, None)
             if self.model_family == "gpt"
@@ -254,7 +254,7 @@ class DataCollatorForNI(DefaultCollator):
         output_batch["instruction_hashes"] = [hash_example(i) for i in sources]
         output_batch["instance_ids"] = instance_ids
         output_batch["task_categories"] = task_categoreis
-        output_batch["task_ids"] = task_id
+        output_batch["task_identifiers"] = task_identifiers
         return output_batch
 
 
