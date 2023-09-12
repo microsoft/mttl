@@ -107,7 +107,9 @@ class MultiExpertModel(EfficientCheckpointModule):
                 expert_name = expert_config.finetune_task_name
             else:
                 expert_name = os.path.basename(expert_path)
-            logger.info("Assigning expert name, not found in checkpoint: {}".format(expert_name))
+            logger.info(
+                "Assigning expert name, not found in checkpoint: {}".format(expert_name)
+            )
 
         expert_weights = expert_checkpoint["state_dict"]
         expert_weights = {
@@ -195,15 +197,21 @@ class MultiExpertModel(EfficientCheckpointModule):
         **kwargs,
     ):
         if self.hparams.routing == "auto":
-            logger.info("Auto-routing... ground-truth tasks: {}".format(batch["task_names"]))
+            logger.info(
+                "Auto-routing... ground-truth tasks: {}".format(batch["task_names"])
+            )
             batch["task_names"] = self.expert_choice(batch)
             logger.info("Auto-route tasks: {}".format(batch["task_names"]))
         elif self.hparams.routing == "first":
-            batch["task_names"] = [self.experts[0] for _ in range(batch['input_ids'].shape[0])]
+            batch["task_names"] = [
+                self.experts[0] for _ in range(batch["input_ids"].shape[0])
+            ]
         elif self.hparams.routing == "random":
             import numpy as np
 
-            batch["task_names"] = np.random.choice(self.experts, batch['input_ids'].shape[0], replace=True).tolist()
+            batch["task_names"] = np.random.choice(
+                self.experts, batch["input_ids"].shape[0], replace=True
+            ).tolist()
 
         if hasattr(self.model, "task_id_container"):
             self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
