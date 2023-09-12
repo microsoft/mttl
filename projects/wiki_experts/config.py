@@ -13,7 +13,7 @@ class ExpertConfig(Config):
         self.hf_repo_id = None
 
         self.expert_name = None
-        self.experts_auto_route = False
+        self.routing = "subject"
         self.load_module = None
         self.micro_batch_size = None
 

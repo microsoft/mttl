@@ -78,12 +78,14 @@ def run_eval(args):
         data_dir=os.environ["MMLU_DATA_DIR"],
     )
     module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
-    kwargs = parse_experts_to_load(args.load_module)
-    for expert_kwargs in kwargs:
-        module.load_expert(**expert_kwargs)
+    
+    if args.load_module is not None:
+        kwargs = parse_experts_to_load(args.load_module)
+        for expert_kwargs in kwargs:
+            module.load_expert(**expert_kwargs)
 
     module.to("cuda")
-    scores = mmlu.evaluate(module, subsample=10)
+    scores = mmlu.evaluate(module)
 
     logger.info("MMLU Accuracy: {}".format(scores["all"]["mean"]))
     del module, mmlu

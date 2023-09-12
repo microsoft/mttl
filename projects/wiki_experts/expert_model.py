@@ -194,10 +194,16 @@ class MultiExpertModel(EfficientCheckpointModule):
         batch,
         **kwargs,
     ):
-        if getattr(self.hparams, 'experts_auto_route', False):
+        if self.hparams.routing == "auto":
             logger.info("Auto-routing... ground-truth tasks: {}".format(batch["task_names"]))
             batch["task_names"] = self.expert_choice(batch)
             logger.info("Auto-route tasks: {}".format(batch["task_names"]))
+        elif self.hparams.routing == "first":
+            batch["task_names"] = [self.experts[0] for _ in range(batch['input_ids'].shape[0])]
+        elif self.hparams.routing == "random":
+            import numpy as np
+
+            batch["task_names"] = np.random.choice(self.experts, batch['input_ids'].shape[0], replace=True).tolist()
 
         if hasattr(self.model, "task_id_container"):
             self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
