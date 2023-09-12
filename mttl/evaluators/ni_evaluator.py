@@ -1,6 +1,6 @@
 from collections import defaultdict
 from copy import deepcopy
-import os
+import re
 import json
 import tqdm
 import torch
@@ -118,7 +118,7 @@ class NIEvaluator(object):
 
         dataloader = self.datamodule.test_dataloader(subsample)
         if not self.pred_output_file_path is None:
-            path = os.path.join(*self.pred_output_file_path.split("/")[:-1])
+            path = re.sub(r'/[^/]*$', '', self.pred_output_file_path)
             Path(path).mkdir(parents=True, exist_ok=True)
 
         pbar = tqdm.tqdm(
@@ -132,7 +132,7 @@ class NIEvaluator(object):
             # we use labels texts here for evaluation, because some tokenizers do not skip
             # pad token when decoding, even if skip_special_tokens=True
             labels_texts = batch.pop("labels_texts", None)
-            task_ids = batch.pop("task_ids", None)
+            task_ids = batch.pop("task_identifiers", None)
             task_categories = batch.pop("task_categories", None)
             extra_kwargs = {}
             max_length = self.config.max_output_length  # default output length for NI
@@ -157,7 +157,9 @@ class NIEvaluator(object):
                     predictions = model.generate(
                         batch,
                         max_length=max_length,
-                        generation_config=model.generation_config,
+                        generation_config=model.generation_config
+                            if not self.config.use_old_gen_config
+                            else model.generation_config_old,
                         return_dict_in_generate=True,
                         output_scores=True,
                         **extra_kwargs,
