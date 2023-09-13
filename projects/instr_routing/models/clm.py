@@ -95,13 +95,15 @@ class CLM(EfficientCheckpointModule):
         self.pad_token_id = self.tokenizer.pad_token_id
         self.model: AutoModelForCausalLM = None
         self.accumulate_metrics_batch = defaultdict(list)
-        if kwargs.get("model_object") is None:             
-            load_8bit = kwargs.get("load_in_8bit", self.hparams.load_in_8bit)
-            if "llama" in self.hparams.model or "alpaca" in self.hparams.model:
+
+        if kwargs.get("model_object") is None:
+            load_8_bit = kwargs.get("load_8_bit", self.hparams.load_in_8bit)
+            dtype = kwargs.get("dtype_eval", torch.float32)
+            if "llama" in self.hparams.model:
                 model_object = LlamaForCausalLM.from_pretrained(
                     self.hparams.model,
-                    load_in_8bit=load_8bit if load_8bit is not None else self.hparams.load_in_8bit, 
-                    torch_dtype=torch.float32,
+                    load_in_8bit=load_8_bit,
+                    torch_dtype=dtype,
                     device_map="auto",
                 )
             else:
@@ -110,7 +112,7 @@ class CLM(EfficientCheckpointModule):
             if model_object.config.vocab_size != len(self.tokenizer):
                 model_object.resize_token_embeddings(len(self.tokenizer))
 
-            if self.hparams.load_in_8bit:
+            if load_8_bit:
                 model_object = prepare_model_for_kbit_training(model_object)
 
             self.model = modify_transformer(model_object, self.hparams)

@@ -152,17 +152,35 @@ def run_multitask(args):
     path_best_model = trainer.checkpoint_callback.best_model_path
     ckpt_path = "best" if path_best_model else "last"
 
-    trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
+    if args.load_in_8bit:
+        # to prevent final spike in valid loss, we first load the model and path is to the evaluator
+        # there is a bug with pl for 8bit model wjen calling .cuda() on it, to("cuda") works
+        best_model = CLM.load_from_checkpoint(
+            path_best_model, tokenizer=dm.tokenizer
+        ).to("cuda")
+        trainer.validate(dataloaders=dm, model=best_model)
+    else:
+        trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
 
     if is_main_process():
         if path_best_model:
             del module   
             torch.cuda.empty_cache()
-            best_model = CLM.load_from_checkpoint(path_best_model, tokenizer=dm.tokenizer).to("cuda")
-            # TODO: check this, is it only for Llama1?
-            best_model.model.config.pad_token_id = dm.tokenizer.pad_token_id #= 0  # unk
-            best_model.model.config.bos_token_id = dm.tokenizer.bos_token_id
-            best_model.model.config.eos_token_id = dm.tokenizer.eos_token_id 
+            load_8bit_eval = args.load_in_8bit
+            dtype_eval = torch.float32
+            if args.dtype_eval == "float16":
+                load_8bit_eval = False
+                dtype_eval = torch.float16
+            elif args.dtype_eval == "float32":
+                load_8bit_eval = False
+                dtype_eval = torch.float32
+
+            best_model = CLM.load_from_checkpoint(
+                path_best_model,
+                tokenizer=dm.tokenizer,
+                load_8bit=load_8bit_eval,
+                dtype=dtype_eval,
+            ).cuda()
         else:
             torch.cuda.empty_cache()
             best_model = module.cuda()
