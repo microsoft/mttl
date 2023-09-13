@@ -7,7 +7,7 @@ from mttl.models.utils import (
     EfficientCheckpointModule,
 )
 
-from mttl.models.utils import convert_and_push_to_hub, download_from_hub
+from mttl.models.utils import download_from_hub
 from mttl.models.modifiers.experts import add_expert_to_transformer
 from mttl.utils import get_checkpoint_path, logger
 from config import ExpertConfig
@@ -47,6 +47,49 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
         model.gradient_checkpointing_enable()
 
     return model
+
+
+def push_expert_to_hub(
+    ckpt_path,
+    hf_user_id,
+    auto_search=True,
+    use_last=False,
+    expert_name=None,
+) -> None:
+    from mttl.models.utils import convert_and_push_to_hub
+
+    """Searches into local path for the checkpoint with lowest validation loss,
+    then uploads that.
+
+    if use_last is True, then uses the last checkpoint `last.ckpt` instead
+    of the one with lowest validation loss.
+    """
+    from mttl.utils import get_checkpoint_path
+
+    if auto_search:
+        ckpt_path = get_checkpoint_path(ckpt_path, use_last=use_last)
+
+    ckpt = torch.load(ckpt_path)
+
+    if expert_name is None:
+        for key in ['expert_name', 'finetune_task_name']:
+            expert_name = ckpt['hyper_parameters'].get(key)
+            if expert_name is not None:
+                break
+
+    dataset_name = ckpt['hyper_parameters']['dataset']
+    # handle the case where dataset is from huggingface
+    if "/" in dataset_name:
+        dataset_name = dataset_name.partition("/")[-1]
+
+    # model is definitely from HF
+    model_name = ckpt['hyper_parameters']['model']
+    model_name = model_name.partition("/")[-1]
+
+    repo_id = f"{hf_user_id}/exp_{model_name}__{dataset_name}__{expert_name}"
+
+    logger.info("Uploading checkpoint {} --> {}".format(ckpt_path, repo_id))
+    convert_and_push_to_hub(ckpt_path, repo_id, auto_search=False, use_last=False)
 
 
 class MultiExpertModel(EfficientCheckpointModule):
