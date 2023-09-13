@@ -116,6 +116,10 @@ def retrieve(index, split):
         print(f"Number of questions: {len(questions)}")
         print(f"Number of unique documents retrieved: {len(docscore)}")
 
+        # dfq filter
+        docscore = {k: v for k, v in docscore.items() if v["dfq"] > 2}
+        print(f"Number of documents after filtering: {len(docscore)}")
+
         sorted_docscore = sorted(docscore.items(), key=lambda x: x[1]["score"], reverse=True)
         print(
             f"Top 10 documents: {sorted_docscore[:10]}"
