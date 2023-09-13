@@ -109,7 +109,7 @@ def run_mmlu_eval(
         if dtype == "float16":
             dtype = torch.float16
         model = CLM.load_from_checkpoint(
-            model_path, tokenizer=dm.tokenizer, load_in_8bit=load_in_8bit, dtype=dtype
+            model_path, tokenizer=dm.tokenizer, load_in_8bit=load_in_8bit, dtype=dtype, load_for_eval=True
         ).to("cuda")
         config = model.hparams
         config.model_path = model_path

@@ -95,10 +95,10 @@ class CLM(EfficientCheckpointModule):
         self.pad_token_id = self.tokenizer.pad_token_id
         self.model: AutoModelForCausalLM = None
         self.accumulate_metrics_batch = defaultdict(list)
-
+        self.load_for_eval = kwargs.get("load_for_eval", False)
         if kwargs.get("model_object") is None:
             load_in_8bit = kwargs.get("load_in_8bit", self.hparams.load_in_8bit)
-            dtype = kwargs.get("dtype_eval", torch.float32)
+            dtype = kwargs.get("dtype_eval", torch.float32) if self.load_for_eval else torch.float32
             if "llama" in self.hparams.model:
                 model_object = LlamaForCausalLM.from_pretrained(
                     self.hparams.model,

@@ -86,7 +86,7 @@ def load_hf_model(model_name):
 def upcast_to_dtype(model, dtype: torch.dtype):
     # iterate over all modules and convert to dtype
     import bitsandbytes as bnb
-           
+
     for name, module in dict(model.named_modules()).items():
         if isinstance(module, bnb.nn.Linear8bitLt):
             # convert to dtype
@@ -100,13 +100,13 @@ def upcast_to_dtype(model, dtype: torch.dtype):
                 if hasattr(v, "dtype") and v.dtype != dtype:
                     state_dict[k] = v.to(dtype)
             new_layer.load_state_dict(state_dict, strict=False)
-            setattr(model, name, new_layer)  
+            setattr(model, name, new_layer)
             print("Upcasting layer", name, "to", dtype)
     return model
 
 
 @click.command()
-@click.option(           
+@click.option(
     "--model_name", type=str, default="platypus_dense_er4"
 )  # chainyo/alpaca-lora-7b") #alpaca_vsmear_e12[xr4,t_1]")
 @click.option("--amlt_experiment_name", type=str, default="routing")  # routing")
@@ -179,7 +179,9 @@ def run_ni_eval(
         dtype = torch.float32
         if dtype == "float16":
             dtype = torch.float16
-        model = CLM.load_from_checkpoint(model_path, tokenizer=dm.tokenizer, load_in_8bit=load_in_8bit, dtype=dtype).to("cuda")
+        model = CLM.load_from_checkpoint(   
+            model_path, tokenizer=dm.tokenizer, load_in_8bit=load_in_8bit, dtype=dtype, load_for_eval=True
+        ).to("cuda")
         # model = upcast_to_dtype(model, torch.float32)
         config = model.hparams
         config.model_path = model_path
