@@ -102,13 +102,12 @@ def retrieve(index, split):
         results = search(index, questions)
         docnos = list(results["docno"])
         scores = list(results["score"])
-        titles = list(results["title"])
 
         # agg by score
         docscore = {}
-        for docno, score, title in zip(docnos, scores, titles):
+        for docno, score, title in zip(docnos, scores):
             if docno not in docscore:
-                docscore[docno] = {"score": score, "title": title, "dfq": 1}
+                docscore[docno] = {"score": score, "dfq": 1}
             else:
                 docscore[docno]["score"] += score
                 docscore[docno]["dfq"] += 1
