@@ -22,7 +22,7 @@ class Config:
                     )
 
                 if not os.path.exists(filename):
-                    filename = os.path.join(filename, ".json")
+                    filename = filename + ".json"
 
                 self.update_kwargs(
                     json.load(open(filename)),
