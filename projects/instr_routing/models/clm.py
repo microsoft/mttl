@@ -86,10 +86,10 @@ class CLM(EfficientCheckpointModule):
         self.pad_token_id = self.tokenizer.pad_token_id
         self.model: AutoModelForCausalLM = None
         self.accumulate_metrics_batch = defaultdict(list)
-
+        self.load_for_eval = kwargs.get("load_for_eval", False)
         if kwargs.get("model_object") is None:
             load_in_8bit = kwargs.get("load_in_8bit", self.hparams.load_in_8bit)
-            dtype = kwargs.get("dtype_eval", torch.float32)
+            dtype = kwargs.get("dtype_eval", torch.float32) if self.load_for_eval else torch.float32
             if "llama" in self.hparams.model:
                 model_object = LlamaForCausalLM.from_pretrained(
                     self.hparams.model,
@@ -118,6 +118,14 @@ class CLM(EfficientCheckpointModule):
     @property
     def generation_config(self):
         return self.model.generation_config
+
+    @property
+    def generation_config_old(self):
+        gen_config = self.model.generation_config
+        gen_config.do_sample = False
+        gen_config.temperature = 0.7
+        gen_config.max_new_tokens=128
+        return gen_config
 
     def gather_auxiliary_losses(self):
         # get some losses from the model if it is a router

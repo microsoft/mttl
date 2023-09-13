@@ -178,6 +178,7 @@ def run_multitask(args):
                 tokenizer=dm.tokenizer,
                 load_in_8bit=load_in_8bit_eval,
                 dtype=dtype_eval,
+                load_for_eval=True,
             ).cuda()
         else:
             torch.cuda.empty_cache()
