@@ -54,8 +54,6 @@ def run_multitask(args):
 
     # get metric monitors for models
     callbacks = []
-    callbacks.append(MiniProgress())
-
     monitor = "val/loss"
     mode = "min"
 
