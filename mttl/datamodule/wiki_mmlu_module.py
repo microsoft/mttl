@@ -7,10 +7,9 @@ from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 from datasets import load_dataset
 from transformers.tokenization_utils_base import PaddingStrategy
-from typing import Iterator, List, Sized, Union, Optional
+from typing import Union, Optional
 from dataclasses import dataclass
 
-from mttl.datamodule.mmlu_data_module import MMLUDataModule
 from mttl.datamodule.utils import get_tokenizer
 from mttl.utils import logger
 
@@ -59,8 +58,8 @@ class WikiMMLUDataCollator:
             pad_to_multiple_of=self.pad_to_multiple_of,
         )
 
-        # leave ~20 tokens for burn in
-        num_burn_in = 20
+        # leave ~10 tokens for burn in
+        num_burn_in = 10
 
         output_batch["task_names"] = task_names
         if self.task_to_id is not None:
