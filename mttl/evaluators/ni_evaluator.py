@@ -31,7 +31,7 @@ def compute_aggregation_and_maybe_save(
     print("======== Overall Metrics ========")
     for metric, value in results.items():
         print(f"{metric}: {value}")
-        all_results[f"{metric}_{track}_track"] = value
+        all_results[f"{metric}"] = value
 
     if "task_category" in eval_instances[instance_ids[0]]:
         all_results['per_category']={}
@@ -45,7 +45,7 @@ def compute_aggregation_and_maybe_save(
         print("======== Metrics per Category ========")
         for metric, value in results_per_category.items():
             print(f"{metric}: {value}")
-            all_results['per_category'][f"{metric}_{track}_track"] = value
+            all_results['per_category'][f"{metric}"] = value
 
     if "task_id" in eval_instances[instance_ids[0]]:
         all_results['per_task'] = {}
@@ -56,7 +56,7 @@ def compute_aggregation_and_maybe_save(
         print("======== Metrics per Task ========")
         for metric, value in results_per_task.items():
             print(f"{metric}: {value}")
-            all_results['per_task'][f"{metric}_{track}_track"] = value
+            all_results['per_task'][f"{metric}"] = value
 
     if output_file:
         with open(output_file, "w") as fout:
@@ -234,7 +234,7 @@ class NIEvaluator(object):
             output_file=None #self.pred_output_file_path.replace(".jsonl", "_metrics.json"),
         )
         all_results["all"]={}
-        all_results["all"]["mean"]=all_results["rougeL_default_track"]
+        all_results["all"]["mean"]=all_results["rougeL"]
         if "per_task" in all_results:
             all_results["all"]["stderr"] = mean_stderr([v for k, v in all_results["per_task"].items() if "rougeL" in k])
         return all_results
