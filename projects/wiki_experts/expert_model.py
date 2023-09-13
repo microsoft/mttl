@@ -86,7 +86,7 @@ def push_expert_to_hub(
     model_name = ckpt['hyper_parameters']['model']
     model_name = model_name.partition("/")[-1]
 
-    repo_id = f"{hf_user_id}/exp_{model_name}__{dataset_name}__{expert_name}"
+    repo_id = f"{hf_user_id}/expert__{model_name}__{dataset_name}__{expert_name}"
 
     logger.info("Uploading checkpoint {} --> {}".format(ckpt_path, repo_id))
     convert_and_push_to_hub(ckpt_path, repo_id, auto_search=False, use_last=False)
