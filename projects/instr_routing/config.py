@@ -10,7 +10,7 @@ class RoutingConfig(Config):
 
         self.micro_batch_size = 4
         self.load_in_8bit = False
-        self.dtype_eval = "float16" # float16,float32. Nything else would use self.load_in_8bit.
+        self.dtype_eval = "float16" # float16,float32. Anything else would use self.load_in_8bit.
 
         self.wandb_project = None
         self.tensorboard = False
