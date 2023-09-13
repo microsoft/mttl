@@ -9,9 +9,8 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.datamodule.wiki_mmlu_module import WikiMMLUDataModule
+from mttl.datamodule.retrieval_lm_module import RetrievalLMDataModule
 from mttl.datamodule.platypus_module import PlatypusModule
-from mttl.callbacks import MiniProgress
 from mttl.utils import get_mlf_logger, setup_logging, logger
 
 from projects.wiki_experts.expert_trainer import ExpertTrainer
@@ -33,8 +32,8 @@ def run_multitask(args):
     model_class = ExpertTrainer
     if args.dataset == "platypus":
         dm = PlatypusModule(args)
-    elif "wiki_mmlu" in args.dataset:
-        dm = WikiMMLUDataModule(args)
+    else:
+        dm = RetrievalLMDataModule(args)
 
     args.n_tasks = len(dm.task_to_id) if hasattr(dm, "task_to_id") else 0
     module = model_class(**vars(args), tokenizer=dm.tokenizer)

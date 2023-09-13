@@ -15,7 +15,7 @@ from mttl.utils import logger
 
 
 @dataclass
-class WikiMMLUDataCollator:
+class RetrievalLMDataCollator:
     tokenizer: AutoTokenizer
     padding: Union[bool, str, PaddingStrategy] = True
     max_input_length: Optional[int] = 2048
@@ -24,7 +24,6 @@ class WikiMMLUDataCollator:
     label_pad_token_id: int = -100
     return_tensors: str = "pt"
     model_family: str = "gpt"
-    task_to_id: dict = None
     rng: np.random.RandomState = None
 
     def __call__(self, batch, return_tensors=None):
@@ -62,10 +61,7 @@ class WikiMMLUDataCollator:
         num_burn_in = 10
 
         output_batch["task_names"] = task_names
-        if self.task_to_id is not None:
-            output_batch["task_ids"] = torch.LongTensor(
-                [self.task_to_id[task] for task in task_names]
-            )
+
         labels = output_batch["input_ids"]
         output_batch["labels"] = torch.masked_fill(
             labels, ~output_batch["attention_mask"].bool(), self.label_pad_token_id
@@ -113,7 +109,7 @@ class TaskSampler(torch.utils.data.sampler.Sampler):
                 break
 
 
-class WikiMMLUDataModule(LightningDataModule):
+class RetrievalLMDataModule(LightningDataModule):
     def get_task_sampler(self, dataset, batch_size):
         return TaskSampler(
             dataset=dataset,
@@ -171,7 +167,7 @@ class WikiMMLUDataModule(LightningDataModule):
     def setup_dataset(self, stage=None):
         dataset = load_dataset(self.config.dataset)
 
-        self.collate_fn = WikiMMLUDataCollator(
+        self.collate_fn = RetrievalLMDataCollator(
             tokenizer=self.tokenizer,
             padding="longest",
             max_input_length=self.config.max_input_length,
@@ -225,6 +221,6 @@ if __name__ == "__main__":
     config.model_family = "gpt"
     os.environ["MMLU_DATA_DIR"] = "/datadrive/datasets/mmlu/data"
 
-    datamodule = WikiMMLUDataModule(config)
+    datamodule = RetrievalLMDataCollator(config)
     batch = next(iter(datamodule.train_dataloader()))
     breakpoint()

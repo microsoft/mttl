@@ -12,8 +12,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.evaluators import MMLUEvaluator
-from mttl.datamodule.wiki_mmlu_module import WikiMMLUDataModule
-from mttl.utils import get_mlf_logger, setup_logging, logger
+from mttl.utils import setup_logging, logger
 
 # register models
 from projects.wiki_experts.expert_model import MultiExpertModel
@@ -71,7 +70,13 @@ def run_eval(args):
         login(token=args.hf_token_hub)
 
     # select dataloader
-    args.finetune_task_name = "college_biology,high_school_government_and_politics,prehistory,security_studies"
+    configuration = os.environ["MMLU_CONFIG"]
+    logger.info("MMLU Configuration: {}".format(configuration))
+
+    if configuration == "random_5":
+        args.finetune_task_name = "college_biology,high_school_government_and_politics,prehistory,security_studies"
+    elif configuration == "worst_5":
+        args.finetune_task_name = "formal_logic,machine_learning,global_facts,abstract_algebra,high_school_physics"
 
     mmlu = MMLUEvaluator(
         args,
@@ -85,7 +90,11 @@ def run_eval(args):
             module.load_expert(**expert_kwargs)
 
     module.to("cuda")
-    scores = mmlu.evaluate(module)
+    scores = mmlu.evaluate(module, subsample=10, shuffle=True)
+
+    with open(args.output_dir + "/mmlu.json", "w") as f:
+        import json
+        json.dump(scores, f)
 
     logger.info("MMLU Accuracy: {}".format(scores["all"]["mean"]))
     del module, mmlu
