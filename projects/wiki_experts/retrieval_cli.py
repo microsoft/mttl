@@ -79,8 +79,10 @@ def do_retrieval(index, split, docs_json):
 
     # group by subjects
     group_by_subject = defaultdict(list)
-    for ex in mmlu[split]:
-        group_by_subject[ex["subject"]].append(ex["question"])
+    
+    for split_ in split.split(","):
+        for ex in mmlu[split_]:
+            group_by_subject[ex["subject"]].append(ex["question"])
 
     # issue a query per subject
     documents_by_subject = {'_index_infos': read_infos(index)}
@@ -104,7 +106,7 @@ def do_retrieval(index, split, docs_json):
         print(f"Number of unique documents retrieved: {len(docscore)}")
 
         # dfq filter
-        docscore = {k: v for k, v in docscore.items() if v["dfq"] >= 2}
+        docscore = {k: v for k, v in docscore.items() if v["dfq"] >= (2 if len(questions) > 100 else 0)}
         print(f"Number of documents after filtering: {len(docscore)}")
 
         sorted_docscore = sorted(docscore.items(), key=lambda x: x[1]["score"], reverse=True)
@@ -196,13 +198,13 @@ def create_dataset(docs_json, max_tokens, hub_name):
 @click.option("--dataset")
 @click.option("--path")
 @click.option("--mmlu_split")
-@click.option("--hub_id")
-def e2e(dataset, path, mmlu_split, hub_id):
+@click.option("--hub_name")
+def e2e(dataset, path, mmlu_split, hub_name):
     if not os.path.exists(path):
         make_index(dataset, path)
 
     do_retrieval(path, mmlu_split, "/tmp/docs.json")
-    do_create_dataset("/tmp/docs.json", hub_id=hub_id)
+    do_create_dataset("/tmp/docs.json", max_tokens=-1, hub_name=hub_name)
 
 
 if __name__ == '__main__':
