@@ -254,12 +254,19 @@ class VSMEARRouter(SMEARRouter):
 class VSMEARRouterDirichlet(SMEARRouter):
     def __init__(self, config, in_d):
         super().__init__(config, in_d)
-        self.router_shared_weights = 0  # config.router_shared_weights
+        self.router_shared_weights = config.router_shared_weights
 
         # add a little bit capacity to the router
-        self.prior_router = nn.Linear(in_d, 512, bias=False)
-        self.prior_mu = nn.Linear(512, config.n_skills * self.n_splits, bias=False)
-        self.prior_logvar = nn.Linear(512, config.n_skills * self.n_splits, bias=False)
+        self.prior_router = nn.Linear(in_d, 512, bias=True)
+        self.prior_mu = nn.Linear(512, config.n_skills * self.n_splits, bias=True)
+        self.prior_logvar = nn.Linear(512, config.n_skills * self.n_splits, bias=True)
+                
+        self.prior_router.weight.data.normal_(mean=0.0, std=0.02)
+        self.prior_router.bias.data.fill_(0)
+        self.prior_mu.weight.data.normal_(mean=0.0, std=0.02)
+        self.prior_mu.bias.data.fill_(0)
+        self.prior_logvar.weight.data.normal_(mean=0.0, std=0.02)
+        self.prior_logvar.bias.data.fill_(0)
 
         if self.router_shared_weights:
             self.post_router = self.prior_router
@@ -274,6 +281,13 @@ class VSMEARRouterDirichlet(SMEARRouter):
             self.post_logvar = nn.Linear(
                 512, config.n_skills * self.n_splits, bias=False
             )
+            
+            self.post_router.weight.data.normal_(mean=0.0, std=0.02)
+            self.post_router.bias.data.fill_(0)
+            self.post_mu.weight.data.normal_(mean=0.0, std=0.02)
+            self.post_mu.bias.data.fill_(0)
+            self.post_logvar.weight.data.normal_(mean=0.0, std=0.02)
+            self.post_logvar.bias.data.fill_(0)
 
         self.router_teacher_ent_factor = self.config.router_teacher_ent_factor
         self.router_teacher_temperature = self.config.router_teacher_temperature
@@ -318,7 +332,7 @@ class VSMEARRouterDirichlet(SMEARRouter):
         )
         mu = self.prior_mu(routes)
         # logvar = self.prior_logvar(routes)
-        logvar = torch.ones_like(mu) * 0.1
+        logvar = torch.ones_like(mu) * 1.
         return mu, logvar
 
     def encode_post(self, input):
@@ -331,7 +345,7 @@ class VSMEARRouterDirichlet(SMEARRouter):
         # split mu x and logvar
         mu = self.post_mu(routes)
         # logvar = self.post_logvar(routes)
-        logvar = torch.ones_like(mu) * 0.1
+        logvar = torch.ones_like(mu) * 1.
         return mu, logvar
 
     def get_posterior_input(self, input, routing_infos):
@@ -674,4 +688,3 @@ def modify_with_vsmear(transformer, config):
     config.router_selector = "vsmear_dir"
 
     return modify_with_smear(transformer, config)
-    
