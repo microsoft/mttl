@@ -4,6 +4,7 @@ import click
 import os
 import tqdm
 import pyterrier as pt
+import tqdm
 import datasets
 from datasets import Dataset
 
@@ -98,7 +99,9 @@ def retrieve(index, split):
 
     # issue a query per subject
     documents_by_subject = {'_index_infos': read_infos(index)}
-    for subject, questions in group_by_subject.items():
+    dataset_name = documents_by_subject['_index_infos']['dataset_name']
+
+    for subject, questions in tqdm.tqmd(group_by_subject.items()):
         results = search(index, questions)
         docnos = list(results["docno"])
         scores = list(results["score"])
@@ -126,20 +129,15 @@ def retrieve(index, split):
         )
         documents_by_subject[subject] = sorted_docscore
 
-        with open(f"./documents_by_subject_mmlu_split{split}.json", "w") as f:
+        with open(f"./docs_from_{dataset_name}_for_mmlu_split{split}.json", "w") as f:
             f.write(json.dumps(documents_by_subject, indent=2))
 
 
 @cli.command('create_dataset')
 @click.option("--docs_json", type=str)
 @click.option("--hub_name", type=str)
-@click.option("--max_tokens", type=int)
+@click.option("--max_tokens", type=int, default=-1)
 def create_dataset(docs_json, max_tokens, hub_name):
-    if max_tokens == -1:
-        setting = "all"
-    else:
-        setting = str(max_tokens // 1e6) + "M"
-
     with open(docs_json, "rt") as f:
         documents_by_subject = json.load(f)
 
@@ -152,7 +150,7 @@ def create_dataset(docs_json, max_tokens, hub_name):
         "score": [],
         "dfq": [],
     }
-    for key in dataset_.keys():
+    for key in dataset_.features:
         dataset[key] = []
 
     for subject, documents in documents_by_subject.items():
@@ -166,11 +164,11 @@ def create_dataset(docs_json, max_tokens, hub_name):
             dataset["dfq"].append(document[1]["dfq"])
             dataset["score"].append(document[1]["score"])
 
-            for key in dataset_.keys():
-                dataset[key].append(document[key])
+            for key in dataset_.features:
+                dataset[key].append(dataset_[int(docno)][key])
 
             num_tokens += len(text.split())
-            if num_tokens > total_num_tokens and total_num_tokens != -1:
+            if num_tokens > max_tokens and max_tokens != -1:
                 break
 
         print(f"=====================")
@@ -180,7 +178,7 @@ def create_dataset(docs_json, max_tokens, hub_name):
         print(f"Number of added documents: {j + 1}")
 
     dataset = Dataset.from_dict(dataset)
-    dataset.push_to_hub(hub_name + "_{}".format(setting), token=os.environ.get("HF_TOKEN"))
+    dataset.push_to_hub(hub_name, token=os.environ.get("HF_TOKEN"))
 
 
 if __name__ == '__main__':
