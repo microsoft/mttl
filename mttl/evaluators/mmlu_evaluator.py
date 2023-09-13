@@ -31,7 +31,7 @@ class MMLUEvaluator(object):
         )
         self.datamodule.setup("test")
 
-    def evaluate(self, model, subsample=-1):
+    def evaluate(self, model, subsample=-1, shuffle=False):
         was_train = model.training
         if was_train:
             model.eval()
@@ -48,7 +48,7 @@ class MMLUEvaluator(object):
         all_task_names = []
         all_EM = []
 
-        dataloader = self.datamodule.test_dataloader(subsample)
+        dataloader = self.datamodule.test_dataloader(subsample, shuffle)
         pbar = tqdm.tqdm(
             enumerate(dataloader),
             total=len(dataloader),
