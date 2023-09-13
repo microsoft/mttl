@@ -37,8 +37,6 @@ class DefaultCollator:
                     return_tensors=self.return_tensors,
                     truncation=True,
                 )
-                if labels
-                else None
             )
             tokenized_sources = self.tokenizer(
                 sources,
@@ -53,8 +51,6 @@ class DefaultCollator:
                 self.tokenizer(
                     labels, padding="longest", return_tensors=self.return_tensors
                 )
-                if labels
-                else None
             )
             tokenized_sources = self.tokenizer(
                 sources,
@@ -62,13 +58,11 @@ class DefaultCollator:
                 return_tensors=self.return_tensors,
                 pad_to_multiple_of=self.pad_to_multiple_of,
             )
-        label_mask = tokenized_labels["attention_mask"].bool() if labels else None
+        label_mask = tokenized_labels["attention_mask"].bool()
         masked_labels = (
             tokenized_labels["input_ids"].masked_fill(
                 ~label_mask, self.label_pad_token_id
             )
-            if labels
-            else None
         )
         output_batch["input_ids"] = tokenized_sources["input_ids"]
         output_batch["attention_mask"] = tokenized_sources["attention_mask"]
@@ -97,8 +91,6 @@ class DefaultCollator:
                     truncation=True,
                     pad_to_multiple_of=self.pad_to_multiple_of,
                 )
-                if labels
-                else None
             )
         else:
             tokenized_sources = self.tokenizer(
@@ -113,18 +105,14 @@ class DefaultCollator:
                     return_tensors=self.return_tensors,
                     pad_to_multiple_of=self.pad_to_multiple_of,
                 )
-                if labels
-                else None
             )
-        targets = tok_sources_plus_labels["input_ids"].clone() if labels else None
+        targets = tok_sources_plus_labels["input_ids"].clone()
         targets = (
             torch.masked_fill(
                 targets,
                 ~tok_sources_plus_labels["attention_mask"].bool(),
                 self.label_pad_token_id,
             )
-            if labels
-            else None
         )
 
         if not self.train_on_inputs:
@@ -148,8 +136,6 @@ class DefaultCollator:
             mask = mask[:, :-1]
             targets = (
                 torch.masked_fill(targets, ~mask, self.label_pad_token_id)
-                if labels
-                else None
             )
 
         output_batch["input_ids"] = tok_sources_plus_labels["input_ids"]

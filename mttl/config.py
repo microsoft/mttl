@@ -47,8 +47,7 @@ class Config:
                 v = v
 
             if not hasattr(self, k) and raise_error:
-                pass
-                # raise ValueError(f"{k} is not in the config")
+                raise ValueError(f"{k} is not in the config")
 
             if eval:
                 logger.warn("Overwriting {} to {}".format(k, v))
