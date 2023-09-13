@@ -205,6 +205,96 @@ class VSMEARRouter(SMEARRouter):
             self.auxiliary_loss = h_pri.sum() * 0.0
         return routing_probs.unsqueeze(1)
 
+@register_selector("vsmear_dir")
+class VSMEARRouterDirichlet(SMEARRouter):
+    def __init__(self, config, in_d):
+        super().__init__(config, in_d)
+        self.router_shared_weights = config.router_shared_weights
+        
+
+        self.prior_router = nn.Linear(in_d, config.n_skills * self.n_splits*2, bias=False)
+        self.prior_router_ln = nn.LayerNorm(in_d)
+        self.prior_router_ln.weight = nn.Parameter(torch.ones(in_d))
+
+        if self.router_shared_weights:
+            self.post_router = self.prior_router
+            self.post_router_ln = self.prior_router_ln
+        else:
+            self.post_router = nn.Linear(
+                in_d, config.n_skills * self.n_splits*2, bias=False
+            )
+            self.post_router_ln = nn.LayerNorm(in_d)
+            self.post_router_ln.weight = nn.Parameter(torch.ones(in_d))
+
+        self.router_teacher_ent_factor = self.config.router_teacher_ent_factor
+        self.router_teacher_temperature = self.config.router_teacher_temperature
+        self.router_center_momentum = config.router_center_momentum
+
+    def kl_div(self, mu, logvar, prior_mean, prior_logvar):   
+        K = self.config.n_skills
+        # prior_mean = self.prior_mean.expand_as(mu)
+        # prior_var = self.prior_var.expand_as(logvar)
+        # prior_logvar = self.prior_logvar.expand_as(logvar)
+        prior_var = prior_logvar.exp()
+        var_division = logvar.exp() / prior_var # Σ_0 / Σ_1
+        diff = mu - prior_mean # μ_１ - μ_0
+        diff_term = diff *diff / prior_var # (μ_1 - μ_0)(μ_1 - μ_0)/Σ_1
+        logvar_division = prior_logvar - logvar # log|Σ_1| - log|Σ_0| = log(|Σ_1|/|Σ_2|)
+        # KL
+        KLD = 0.5 * ((var_division + diff_term + logvar_division).sum(1) - K)
+        return KLD.mean()     
+    
+    def encode(self, input, encoder):
+        routes = self.route_maybe_center(
+            input,
+            encoder,
+            nn.Identity(),
+            temperature=1,
+            center=False,
+        ) # bx x config.n_skills * self.n_splits*2
+        # split mu x and logvar
+        mu, logvar = torch.split(routes, self.n_skills * self.n_splits, dim=-1)
+        return mu, logvar
+    
+    def get_posterior_input(self, input, routing_infos):
+        padding_mask = routing_infos.pad_token_mask
+        post_input = self.apply_mask_and_average(input, padding_mask)
+        return post_input
+
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5*logvar) 
+        eps = torch.randn_like(std)
+        return mu + eps*std
+
+    
+    def forward(self, routing_infos: AugmentedRoutingInfo, input: torch.Tensor):
+        self.metrics.clear()
+
+        prior_input = self._get_router_inputs(input, routing_infos)
+        mu_prior, logvar_prior = self.encode(prior_input, self.prior_router)
+
+        if self.training:
+            # during training :-)
+            assert (
+                routing_infos.generation_mode is False
+            ), "We are not expecting to be in generation mode during training."
+
+            post_input = self.get_posterior_input(input, routing_infos)
+            mu_post, logvar_post = self.encode(post_input, self.post_router)
+            gauss_z = self.reparameterize(mu_post, logvar_post) 
+            routing_probs = dir_z = F.softmax(gauss_z,dim=1) # This variable follows a Dirichlet distribution
+                         
+            self.auxiliary_loss = self.kl_div(mu_post, logvar_post, mu_prior, logvar_prior)
+        else:
+            # during eval :-(   
+            gauss_z = self.reparameterize(mu_prior, logvar_prior)
+            routing_probs = dir_z = F.softmax(gauss_z,dim=1) # This variable follows a Dirichlet distribution
+
+            self.routings = routing_probs.detach().cpu()
+            self.auxiliary_loss = routing_probs.sum() * 0.0
+        return routing_probs.unsqueeze(1)
+
+
 
 class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
     def __init__(self, config, task_id_ptr, layer, selector=None, **kwargs):
@@ -252,5 +342,11 @@ def modify_with_smear(transformer, config):
 @register_modifier("vsmear")
 def modify_with_vsmear(transformer, config):
     config.router_selector = "vsmear"
+
+    return modify_with_smear(transformer, config)
+
+@register_modifier("vsmear_dir")
+def modify_with_vsmear(transformer, config):
+    config.router_selector = "vsmear_dir"
 
     return modify_with_smear(transformer, config)
