@@ -79,13 +79,16 @@ def run_multitask(args, module):
     path_best_model = args.model_path
     ckpt_path = path_best_model  
     # trainer.validate(dataloaders=dm, model=module)
-    print("Validation with checkpoint", ckpt_path)      
-    trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
+    print("Validation with checkpoint", ckpt_path)   
+    
+    model = CLM.load_from_checkpoint(path_best_model, tokenizer=dm.tokenizer).to("cuda")   
+    model.hparams.output_dir = args.output_dir  
+    trainer.validate(dataloaders=dm, model=model)
            
 @click.command()  
-@click.option("--model_name", type=str, default="alpaca_dense_r4") #alpaca_dense_r4") #alpaca_vsmear_e12[xr4,t_1]")
+@click.option("--model_name", type=str, default="platypus_dense_er4") #alpaca_dense_r4") #alpaca_vsmear_e12[xr4,t_1]")
 @click.option("--amlt_experiment_name", type=str, default="routing")
-@click.option("--model_path", type=str, default="/home/v-oostapenko/dev/amlt/shared_files/results_as_sep10/platypus/platypus-13b-right/meta-llama_Llama-2-13b-hf_platypus-13b-right-val/loss=0.5543.ckpt", help="path to the model")
+@click.option("--model_path", type=str, default="/home/v-oostapenko/dev/amlt/routing/platypus_dense_er4/meta-llama_Llama-2-13b-hfxtwi2gjz_platypus_dense_er4-val/loss=0.5698.ckpt", help="path to the model")
 def run_eval(
     model_name, 
     amlt_experiment_name=None,
@@ -116,7 +119,7 @@ def run_eval(
     config = RoutingConfig()
     config.update_kwargs(torch.load(model_path)["hyper_parameters"])
     dm = AlpacaDataModule(config)
-    model = CLM.load_from_checkpoint(model_path, tokenizer=dm.tokenizer).cuda()
+    model = CLM.load_from_checkpoint(model_path, tokenizer=dm.tokenizer).to("cuda")
     config_loaded = RoutingConfig()
     config_loaded.update_kwargs(model.hparams)
     config_loaded.output_dir = os.environ.get(
@@ -127,6 +130,7 @@ def run_eval(
             f"../../tmp/instruction_learning/",
         ),
     )
+    model.hparams.output_dir = config_loaded.output_dir
     config_loaded.model_path = model_path
     run_multitask(config_loaded, model)
 
