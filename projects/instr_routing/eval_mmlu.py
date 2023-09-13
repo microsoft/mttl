@@ -35,13 +35,13 @@ def eval_mmlu(
     return metrics
 
 
-@click.command()
+@click.command()  
 @click.option("--model_name", type=str, default="platypus_13B")
 @click.option("--amlt_experiment_name", type=str, default="routing")
 @click.option(
     "--model_path",
     type=str,
-    default="/home/v-oostapenko/results/platypus/platypus-13b-right/meta-llama_Llama-2-13b-hf_platypus-13b-right-val/loss=0.5543.ckpt",
+    default="/home/v-oostapenko/dev/amlt/routing/platypus_vsmear_e8[xr4]/meta-llama_Llama-2-13b-hfpqtor60j_platypus_vsmear_e8[xr4]-val/loss=0.5533.ckpt",
 )
 # /home/v-oostapenko/dev/amlt/routing/platypus_dense_er4/meta-llama_Llama-2-13b-hf284ifsm8_platypus_dense_er4-val/loss=0.5510.ckpt
 #   /home/v-oostapenko/results/platypus/platypus-13b-right/meta-llama_Llama-2-13b-hf_platypus-13b-right-val/loss=0.5543.ckpt", help="path to the model")

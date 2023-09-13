@@ -106,21 +106,23 @@ def upcast_to_dtype(model, dtype: torch.dtype):
 
 
 @click.command()
-@click.option(
+@click.option(           
     "--model_name", type=str, default="platypus_dense_er4"
 )  # chainyo/alpaca-lora-7b") #alpaca_vsmear_e12[xr4,t_1]")
 @click.option("--amlt_experiment_name", type=str, default="routing")  # routing")
 @click.option(
     "--model_path",
     type=str,
-    default="/home/v-oostapenko/dev/amlt/routing/platypus_dense_er4/meta-llama_Llama-2-13b-hfxtwi2gjz_platypus_dense_er4-val/loss=0.5698.ckpt",
+    default="/home/v-oostapenko/dev/amlt/routing/platypus_vsmear_e8[xr4]/meta-llama_Llama-2-13b-hfpqtor60j_platypus_vsmear_e8[xr4]-val/loss=0.5533.ckpt",
     help="path to the model",
 )
 @click.option("--batch_size", type=int, default=2)
-@click.option("--wandb_proj", type=str, default=None)
+@click.option("--wandb_proj", type=str, default="eval")
 @click.option("--n_shots", type=int, default=0)
 @click.option("--use_old_gen_config", type=bool, default=False)
 @click.option("--subsample", type=int, default=-1)
+@click.option("--load_in_8bit", type=bool, default=False)
+@click.option("--dtype", type=str, default="float16")
 def run_ni_eval(
     model_name,
     amlt_experiment_name=None,
@@ -130,6 +132,8 @@ def run_ni_eval(
     use_old_gen_config=False,
     n_shots=0,
     subsample=-1,
+    load_in_8bit=False,
+    dtype="float16",
 ):
     if amlt_experiment_name == "hf":
         raise NotImplementedError
@@ -172,7 +176,10 @@ def run_ni_eval(
         config = RoutingConfig()
         config.update_kwargs(torch.load(model_path)["hyper_parameters"])
         dm = AlpacaDataModule(config)
-        model = CLM.load_from_checkpoint(model_path, tokenizer=dm.tokenizer).to("cuda")
+        dtype = torch.float32
+        if dtype == "float16":
+            dtype = torch.float16
+        model = CLM.load_from_checkpoint(model_path, tokenizer=dm.tokenizer, load_in_8bit=load_in_8bit, dtype=dtype).to("cuda")
         # model = upcast_to_dtype(model, torch.float32)
         config = model.hparams
         config.model_path = model_path
