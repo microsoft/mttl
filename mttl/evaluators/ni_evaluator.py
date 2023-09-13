@@ -131,7 +131,7 @@ class NIEvaluator(object):
             batch.pop("input_texts", None)
             # we use labels texts here for evaluation, because some tokenizers do not skip
             # pad token when decoding, even if skip_special_tokens=True
-            labels_texts = batch.pop("labels_texts", None)
+            labels_texts = batch.pop("labels_full_seq", None)
             task_ids = batch.pop("task_identifiers", None)
             task_categories = batch.pop("task_categories", None)
             extra_kwargs = {}
