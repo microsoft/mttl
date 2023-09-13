@@ -75,8 +75,12 @@ def run_eval(args):
 
     if configuration == "random_5":
         args.finetune_task_name = "college_biology,high_school_government_and_politics,prehistory,security_studies"
+        subsample = None
     elif configuration == "worst_5":
         args.finetune_task_name = "formal_logic,machine_learning,global_facts,abstract_algebra,high_school_physics"
+        subsample = None
+    else:
+        subsample = 10
 
     mmlu = MMLUEvaluator(
         args,
@@ -90,7 +94,7 @@ def run_eval(args):
             module.load_expert(**expert_kwargs)
 
     module.to("cuda")
-    scores = mmlu.evaluate(module, subsample=10, shuffle=True)
+    scores = mmlu.evaluate(module, subsample, shuffle=True)
 
     with open(args.output_dir + "/mmlu.json", "w") as f:
         import json
