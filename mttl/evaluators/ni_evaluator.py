@@ -157,9 +157,7 @@ class NIEvaluator(object):
                     predictions = model.generate(
                         batch,
                         max_length=max_length,
-                        generation_config=model.generation_config
-                            if not self.config.use_old_gen_config
-                            else model.generation_config_old,
+                        generation_config=model.generation_config,
                         return_dict_in_generate=True,
                         output_scores=True,
                         **extra_kwargs,
