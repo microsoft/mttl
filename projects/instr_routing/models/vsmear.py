@@ -274,12 +274,12 @@ class VSMEARRouterDirichlet(SMEARRouter):
             self.post_mu = self.prior_mu
             self.post_logvar = self.prior_logvar
         else:
-            self.post_router = nn.Linear(in_d, 512, bias=False)
+            self.post_router = nn.Linear(in_d, 512, bias=True)
             self.post_router_ln = nn.LayerNorm(in_d)
             self.post_router_ln.weight = nn.Parameter(torch.ones(in_d))
-            self.post_mu = nn.Linear(512, config.n_skills * self.n_splits, bias=False)
+            self.post_mu = nn.Linear(512, config.n_skills * self.n_splits, bias=True)
             self.post_logvar = nn.Linear(
-                512, config.n_skills * self.n_splits, bias=False
+                512, config.n_skills * self.n_splits, bias=True
             )
             
             self.post_router.weight.data.normal_(mean=0.0, std=0.02)
