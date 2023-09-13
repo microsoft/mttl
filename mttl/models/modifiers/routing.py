@@ -168,16 +168,15 @@ class RoutingInfo:
 
     def _repeat(self, inputs, n):
         if inputs is not None:
-            if type(inputs) == torch.Tensor:
+            if isinstance(inputs, torch.Tensor):
                 return inputs.repeat_interleave(n)
             else:
-                return [item for item in input for _ in range(n)]
+                return [item for item in inputs for _ in range(n)]
         return inputs
 
     def repeat_interleave(self, repeats):
         # useful for beam search
         self.task_ids = self._repeat(self.task_ids, repeats)
-        self.task_names = self._repeat(self.task_names, repeats)    
         self.task_names = self._repeat(self.task_names, repeats)
         self.hashes = self._repeat(self.hashes, repeats)
         self.instruction_hashes = self._repeat(self.instruction_hashes, repeats)
