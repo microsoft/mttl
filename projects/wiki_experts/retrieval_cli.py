@@ -73,23 +73,7 @@ def make_index(dataset_name, path):
         json.dump({'dataset_name': dataset_name}, f)
 
 
-@click.group()
-def cli():
-    pass
-
-
-@cli.command('index')
-@click.option("--dataset")
-@click.option("--path")
-def index(dataset, path):
-    make_index(dataset, path=path)
-
-
-@cli.command('retrieve')
-@click.option("--index")
-@click.option("--split", help="MMLU split")
-@click.option("--docs_json")
-def retrieve(index, split, docs_json):
+def do_retrieval(index, split, docs_json):
     # load dataset
     mmlu = datasets.load_dataset("cais/mmlu", "all")
 
@@ -100,9 +84,8 @@ def retrieve(index, split, docs_json):
 
     # issue a query per subject
     documents_by_subject = {'_index_infos': read_infos(index)}
-    dataset_name = documents_by_subject['_index_infos']['dataset_name']
 
-    for subject, questions in tqdm.tqmd(group_by_subject.items()):
+    for subject, questions in tqdm.tqdm(group_by_subject.items()):
         results = search(index, questions)
         docnos = list(results["docno"])
         scores = list(results["score"])
@@ -134,11 +117,7 @@ def retrieve(index, split, docs_json):
             f.write(json.dumps(documents_by_subject, indent=2))
 
 
-@cli.command('create_dataset')
-@click.option("--docs_json", type=str)
-@click.option("--hub_name", type=str)
-@click.option("--max_tokens", type=int, default=-1)
-def create_dataset(docs_json, max_tokens, hub_name):
+def do_create_dataset(docs_json, max_tokens, hub_name):
     with open(docs_json, "rt") as f:
         documents_by_subject = json.load(f)
 
@@ -185,15 +164,45 @@ def create_dataset(docs_json, max_tokens, hub_name):
     dataset.push_to_hub(hub_name, token=os.environ.get("HF_TOKEN"))
 
 
+@click.group()
+def cli():
+    pass
+
+
+@cli.command('index')
+@click.option("--dataset")
+@click.option("--path")
+def index(dataset, path):
+    make_index(dataset, path=path)
+
+
+@cli.command('retrieve')
+@click.option("--index")
+@click.option("--split", help="MMLU split")
+@click.option("--docs_json")
+def retrieve(index, split, docs_json):
+    do_retrieval(index, split, docs_json)
+
+
+@cli.command('create_dataset')
+@click.option("--docs_json", type=str)
+@click.option("--hub_name", type=str)
+@click.option("--max_tokens", type=int, default=-1)
+def create_dataset(docs_json, max_tokens, hub_name):
+    do_create_dataset(docs_json, max_tokens, hub_name)
+
+
 @cli.command("e2e")
 @click.option("--dataset")
 @click.option("--path")
 @click.option("--mmlu_split")
 @click.option("--hub_id")
 def e2e(dataset, path, mmlu_split, hub_id):
-    make_index(dataset, path)
-    retrieve(path, mmlu_split, "/tmp/docs.json")
-    create_dataset("/tmp/docs.json", hub_id=hub_id)
+    if not os.path.exists(path):
+        make_index(dataset, path)
+
+    do_retrieval(path, mmlu_split, "/tmp/docs.json")
+    do_create_dataset("/tmp/docs.json", hub_id=hub_id)
 
 
 if __name__ == '__main__':
