@@ -105,7 +105,7 @@ def retrieve(index, split):
 
         # agg by score
         docscore = {}
-        for docno, score, title in zip(docnos, scores):
+        for docno, score in zip(docnos, scores):
             if docno not in docscore:
                 docscore[docno] = {"score": score, "dfq": 1}
             else:
