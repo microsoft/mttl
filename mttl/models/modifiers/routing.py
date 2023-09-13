@@ -169,9 +169,9 @@ class RoutingInfo:
     def _repeat(self, inputs, n):
         if inputs is not None:
             if type(inputs) == torch.Tensor:
-                return inputs.repeat_interleave(repeats)
+                return inputs.repeat_interleave(n)
             else:
-                return [item for item in input_list for _ in range(n)]
+                return [item for item in input for _ in range(n)]
         return inputs
 
     def repeat_interleave(self, repeats):
