@@ -77,16 +77,16 @@ def cli():
     pass
 
 
-@cli.command()
-@cli.option("--dataset")
-@cli.option("--path")
+@cli.command('index')
+@click.option("--dataset")
+@click.option("--path")
 def index(dataset, path):
     make_index(dataset, path=path)
 
 
-@cli.command()
-@cli.option("--index")
-@cli.option("--split", help="MMLU split")
+@cli.command('retrieve')
+@click.option("--index")
+@click.option("--split", help="MMLU split")
 def retrieve(index, split):
     # load dataset
     mmlu = datasets.load_dataset("cais/mmlu", "all")
@@ -127,10 +127,10 @@ def retrieve(index, split):
             f.write(json.dumps(documents_by_subject, indent=2))
 
 
-@cli.command()
-@cli.option("--docs_json", type=str)
-@cli.option("--hub_name", type=str)
-@cli.option("--max_tokens", type=int)
+@cli.command('create_dataset')
+@click.option("--docs_json", type=str)
+@click.option("--hub_name", type=str)
+@click.option("--max_tokens", type=int)
 def create_dataset(docs_json, max_tokens, hub_name):
     if max_tokens == -1:
         setting = "all"
