@@ -88,7 +88,8 @@ def index(dataset, path):
 @cli.command('retrieve')
 @click.option("--index")
 @click.option("--split", help="MMLU split")
-def retrieve(index, split):
+@click.option("--docs_json")
+def retrieve(index, split, docs_json):
     # load dataset
     mmlu = datasets.load_dataset("cais/mmlu", "all")
 
@@ -129,7 +130,7 @@ def retrieve(index, split):
         )
         documents_by_subject[subject] = sorted_docscore
 
-        with open(f"./docs_from_{dataset_name}_for_mmlu_split{split}.json", "w") as f:
+        with open(docs_json, "w") as f:
             f.write(json.dumps(documents_by_subject, indent=2))
 
 
@@ -144,30 +145,32 @@ def create_dataset(docs_json, max_tokens, hub_name):
     infos = documents_by_subject.pop('_index_infos')
     dataset_ = get_dataset(infos['dataset_name'])['train']
 
-    dataset = {
+    data = {
         "subject": [],
         "docno": [],
         "score": [],
         "dfq": [],
     }
     for key in dataset_.features:
-        dataset[key] = []
+        data[key] = []
 
     for subject, documents in documents_by_subject.items():
         num_tokens = 0
 
         for j, document in enumerate(documents):
             docno = document[0]
-            text = dataset_[int(docno)]["text"]
-            dataset["subject"].append(subject)
-            dataset["docno"].append(int(docno))
-            dataset["dfq"].append(document[1]["dfq"])
-            dataset["score"].append(document[1]["score"])
+            doc = dataset_[int(docno)]
+            if j == 0:
+                first_doc = doc
+            data["subject"].append(subject)
+            data["docno"].append(int(docno))
+            data["dfq"].append(document[1]["dfq"])
+            data["score"].append(document[1]["score"])
 
             for key in dataset_.features:
-                dataset[key].append(dataset_[int(docno)][key])
+                data[key].append(doc[key])
+            num_tokens += len(doc['text'].split())
 
-            num_tokens += len(text.split())
             if num_tokens > max_tokens and max_tokens != -1:
                 break
 
@@ -176,9 +179,21 @@ def create_dataset(docs_json, max_tokens, hub_name):
         print(f"Number of documents: {len(documents)}")
         print(f"Number of tokens: {num_tokens}")
         print(f"Number of added documents: {j + 1}")
+        print(f"Top-Ranked Document: {first_doc['text'][:100]}")
 
-    dataset = Dataset.from_dict(dataset)
+    dataset = Dataset.from_dict(data)
     dataset.push_to_hub(hub_name, token=os.environ.get("HF_TOKEN"))
+
+
+@cli.command("e2e")
+@click.option("--dataset")
+@click.option("--path")
+@click.option("--mmlu_split")
+@click.option("--hub_id")
+def e2e(dataset, path, mmlu_split, hub_id):
+    make_index(dataset, path)
+    retrieve(path, mmlu_split, "/tmp/docs.json")
+    create_dataset("/tmp/docs.json", hub_id=hub_id)
 
 
 if __name__ == '__main__':
