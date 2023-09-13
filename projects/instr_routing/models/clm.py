@@ -92,7 +92,7 @@ class CLM(EfficientCheckpointModule):
                 model_object = LlamaForCausalLM.from_pretrained(
                     self.hparams.model,
                     load_in_8bit=self.hparams.load_in_8bit,
-                    torch_dtype=torch.float32,
+                    torch_dtype=torch.float32 if self.hparams.load_in_8bit else torch.float16,
                     device_map="auto",
                 )
             else:

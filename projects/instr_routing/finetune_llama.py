@@ -156,10 +156,14 @@ def run_multitask(args):
         if path_best_model:
             del module
             torch.cuda.empty_cache()
-            best_model = CLM.load_from_checkpoint(path_best_model, tokenizer=dm.tokenizer).cuda()
+            best_model = CLM.load_from_checkpoint(
+                path_best_model,
+                load_in_8bit=False,
+                tokenizer=dm.tokenizer
+            ).to("cuda")
         else:
             torch.cuda.empty_cache()
-            best_model = module.cuda()
+            best_model = module.to("cuda")
 
         if args.eval_superni:
             from eval_ni import eval_ni
