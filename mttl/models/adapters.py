@@ -102,7 +102,7 @@ class LoRA(Adapter):
                 ).to(self.layer.weight.device)
                 self.layer.state.reset_grads()
             else:
-                self.layer.weight.data.add_(to_merge)
+                self.layer.weight.data.add_(to_merge.to(self.layer.weight.device))
         else:
             raise NotImplementedError("LoRA only supports nn.Linear layers.")
 
