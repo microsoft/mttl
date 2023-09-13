@@ -131,11 +131,15 @@ class LoRA(Adapter):
         if len(set([lora.layer for lora in loras])) > 1:
             raise ValueError("Cannot parallelize loras applied to different layers.")
 
+        # (n_examples, in_features, rank)
         lora_a = torch.stack([lora.lora_a for lora in loras], dim=0)
+        # (n_examples, rank, out_features)
         lora_b = torch.stack([lora.lora_b for lora in loras], dim=0)
+        # (n_examples,)
         scaling = torch.cat(
             [torch.LongTensor([lora.scaling]) for lora in loras], dim=0
         ).to(lora_a.device)
+        # (n_examples, seq_len, out_features)
         adapter_out = (
             torch.bmm(torch.bmm(input, lora_a), lora_b) * scaling[:, None, None]
         )

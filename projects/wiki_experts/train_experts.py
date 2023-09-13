@@ -74,9 +74,11 @@ def run_multitask(args):
     callbacks.append(checkpoint_callback)
 
     val_check_interval = args.eval_every
-    if val_check_interval > len(dm.train_dataloader()):
+    if val_check_interval == -1:
+        val_check_interval = None
+    elif val_check_interval > len(dm.train_dataloader()):
         val_check_interval = len(dm.train_dataloader())
-    if val_check_interval > args.total_steps and args.total_steps != -1:
+    elif val_check_interval > args.total_steps and args.total_steps != -1:
         val_check_interval = args.total_steps
 
     trainer = Trainer(
@@ -99,7 +101,6 @@ def run_multitask(args):
     )
 
     # initial validation!
-    trainer.validate(module, dm)[0]
     trainer.fit(module, dm)
 
     # reload best model before pushing!
