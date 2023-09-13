@@ -1,11 +1,6 @@
-<<<<<<< HEAD
-datasets==2.2.1
-click      
-=======
 datasets==2.14.4
 click
->>>>>>> platypus
-transformers==4.29.0
+transformers==4.32.1
 pytorch-lightning==2.0.5
 wandb
 rouge
