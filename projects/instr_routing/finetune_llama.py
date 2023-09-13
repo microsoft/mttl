@@ -2,7 +2,7 @@ import os
 import sys
 import json
 import torch
-import wandb 
+import wandb
 import logging
 import pytorch_lightning as pl
 from huggingface_hub import login
@@ -17,11 +17,12 @@ from mttl.datamodule.platypus_module import PlatypusModule
 from mttl.datamodule.flan100k_module import Flan100kModule
 from mttl.utils import get_mlf_logger, setup_logging, logger
 from mttl.dist_utils import is_main_process
-torch.set_float32_matmul_precision('high')
+
+torch.set_float32_matmul_precision("high")
 
 # register models
 import models.vsmear  # noqa: F401
-import models.softmoe # noqa: F401
+import models.softmoe  # noqa: F401
 from models.monitors import SelectorMetricsLog, SelectorRoutingsLog
 from models.clm import CLM
 from config import RoutingConfig
@@ -126,7 +127,7 @@ def run_multitask(args):
     callbacks.append(MMLUCallback(5))
 
     trainer = Trainer(
-        devices=-1, 
+        devices=-1,
         accelerator="gpu",
         logger=loggers,
         num_sanity_val_steps=5,
@@ -149,13 +150,35 @@ def run_multitask(args):
     path_best_model = trainer.checkpoint_callback.best_model_path
     ckpt_path = "best" if path_best_model else "last"
 
-    trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
+    if args.load_in_8bit:
+        # to prevent final spike in valid loss, we first load the model and path is to the evaluator
+        # there is a bug with pl for 8bit model wjen calling .cuda() on it, to("cuda") works
+        best_model = CLM.load_from_checkpoint(
+            path_best_model, tokenizer=dm.tokenizer
+        ).to("cuda")
+        trainer.validate(dataloaders=dm, model=best_model)
+    else:
+        trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
 
     if is_main_process():
         if path_best_model:
             del module
             torch.cuda.empty_cache()
-            best_model = CLM.load_from_checkpoint(path_best_model, tokenizer=dm.tokenizer).cuda()
+            load_8bit_eval = args.load_in_8bit
+            dtype_eval = torch.float32
+            if args.dtype_eval == "float16":
+                load_8bit_eval = False
+                dtype_eval = torch.float16
+            elif args.dtype_eval == "float32":
+                load_8bit_eval = False
+                dtype_eval = torch.float32
+
+            best_model = CLM.load_from_checkpoint(
+                path_best_model,
+                tokenizer=dm.tokenizer,
+                load_8bit=load_8bit_eval,
+                dtype=dtype_eval,
+            ).cuda()
         else:
             torch.cuda.empty_cache()
             best_model = module.cuda()
@@ -174,7 +197,9 @@ def run_multitask(args):
             if wandb.run is not None:
                 wandb.log({"rouge_L_super_ni": rougel_ni})
             if args.tensorboard:
-                tb_logger.experiment.add_scalar("tasks/sni", rougel_ni, trainer.global_step)
+                tb_logger.experiment.add_scalar(
+                    "tasks/sni", rougel_ni, trainer.global_step
+                )
             with open(os.path.join(args.output_dir, "sni_results.json"), "w") as f:
                 json.dump(rougel_ni_all, f, indent=2)
             logger.info("SuperNI RougeL: {:.2f}".format(rougel_ni))
@@ -192,7 +217,9 @@ def run_multitask(args):
             if wandb.run is not None:
                 wandb.log({"mmlu_acc": mmlu_em})
             if args.tensorboard:
-                tb_logger.experiment.add_scalar("tasks/mmlu", mmlu_em, trainer.global_step)
+                tb_logger.experiment.add_scalar(
+                    "tasks/mmlu", mmlu_em, trainer.global_step
+                )
             with open(os.path.join(args.output_dir, "mmlu_results.json"), "w") as f:
                 json.dump(em_mmlu_all, f, indent=2)
             logger.info("MMLU accuracy: {:.2f}".format(mmlu_em))
