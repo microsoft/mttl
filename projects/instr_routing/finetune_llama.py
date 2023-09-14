@@ -178,7 +178,6 @@ def run_multitask(args):
                 path_best_model,
                 tokenizer=dm.tokenizer,
                 dtype=dtype_eval,
-                load_for_eval=True,
             ).to("cuda")
         else:
             torch.cuda.empty_cache()
