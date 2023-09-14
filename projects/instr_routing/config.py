@@ -20,13 +20,16 @@ class RoutingConfig(Config):
         self.router_weight_decay = None  # weight decay for the routing parameters
         self.router_learning_rate = None  # learning rate of the routing parameters
         self.router_temperature = 1.0  # temperature of router for softmax
+
         self.router_teacher_temperature = (
             1.0  # temperature of router for teacher softmax
         )
         self.router_normalize_weights = (
             False  # l2 normalize cluster centroids before routing
         )
-        self.router_teacher_ent_factor = 1.  # factor for the posterior entropy term in the vsmear router
+
+        self.router_kl_factor = 1.  # factor for the posterior entropy term in the vsmear router
+        self.router_kl_func = "kl"
         self.router_center_momentum = 0.   # centering momentum a-la DINO_v2, if 0. don't use centering
         self.router_shared_weights = True  # share weights between teacher and student
 

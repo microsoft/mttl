@@ -152,7 +152,9 @@ class VSMEARRouter(SMEARRouter):
             self.post_router.weight.data.normal_(mean=0.0, std=0.02)
             self.post_router.bias.data.fill_(0)
 
-        self.router_teacher_ent_factor = self.config.router_teacher_ent_factor
+        self.router_kl_factor = self.config.router_kl_factor
+        self.router_kl_func = self.config.router_kl_func
+
         self.router_teacher_temperature = self.config.router_teacher_temperature
         self.router_center_momentum = config.router_center_momentum
 
@@ -201,7 +203,11 @@ class VSMEARRouter(SMEARRouter):
             self.metrics["h_post"] = h_post / math.log(self.n_skills)
             self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
             self.metrics["x_ent"] = x_ent
-            self.auxiliary_loss = -self.router_teacher_ent_factor * h_post + 2. * x_ent
+
+            if self.router_kl_func == "kl":
+                self.auxiliary_loss = self.router_kl_factor * (- h_post + x_ent)
+            elif self.router_kl_func == "l2":
+                self.auxiliary_loss = self.router_kl_factor * (post_routes - prior_routes).pow(2.).sum(-1).mean()
         else:
             # during eval :-(
             prior_probs = routing_probs = F.softmax(prior_routes, dim=-1)
@@ -367,6 +373,6 @@ def modify_with_smear(transformer, config):
 
 @register_modifier("vsmear")
 def modify_with_vsmear(transformer, config):
-    config.router_selector = config.router_selector or "smear"
+    config.router_selector = config.router_selector or "vsmear"
 
     return modify_with_smear(transformer, config)
