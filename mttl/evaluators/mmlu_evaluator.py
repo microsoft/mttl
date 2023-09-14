@@ -104,14 +104,6 @@ class MMLUEvaluator(object):
             predictions = [{0: "A", 1: "B", 2: "C", 3: "D"}[p] for p in probs]
             references = labels_text
 
-            # If we are in a multiprocess environment, the last batch has duplicates
-            if step == len(dataloader) - 1:
-                predictions = predictions[: len(dataloader.dataset) - samples_seen]
-                references = references[: len(dataloader.dataset) - samples_seen]
-                task_names = task_names[: len(dataloader.dataset) - samples_seen]
-            else:
-                samples_seen += len(references)
-
             all_predictions += predictions
             all_references += references
             all_task_names += task_names
