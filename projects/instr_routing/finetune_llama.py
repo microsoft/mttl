@@ -166,19 +166,17 @@ def run_multitask(args):
         if path_best_model:
             del module   
             torch.cuda.empty_cache()
-            load_in_8bit_eval = args.load_in_8bit
-            dtype_eval = torch.float32
+            dtype_eval = torch.float32 if not args.load_in_8bit else "8bit"            
             if args.dtype_eval == "float16":
-                load_in_8bit_eval = False
                 dtype_eval = torch.float16
             elif args.dtype_eval == "float32":
-                load_in_8bit_eval = False
                 dtype_eval = torch.float32
+            elif args.dtype_eval == "8bit":
+                dtype_eval = "8bit"
 
             best_model = CLM.load_from_checkpoint(
                 path_best_model,
                 tokenizer=dm.tokenizer,
-                load_in_8bit=load_in_8bit_eval,
                 dtype=dtype_eval,
                 load_for_eval=True,
             ).cuda()
