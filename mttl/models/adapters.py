@@ -108,21 +108,26 @@ class LoRA(Adapter):
 
     def create_for_layer(self, layer):
         if isinstance(layer, nn.Linear):
-            self.lora_a = nn.Parameter(torch.empty(layer.in_features, self.rank))
-            self.lora_b = nn.Parameter(torch.empty(self.rank, layer.out_features))
+            self.lora_a = nn.Parameter(
+                torch.empty(layer.in_features, self.rank)
+            )
+            self.lora_b = nn.Parameter(
+                torch.empty(self.rank, layer.out_features)
+            )
             self.forward_fn = self.forward_linear_
         else:
             raise NotImplementedError("LoRA only supports nn.Linear layers.")
 
     def forward_linear_(self, input, **kwargs):
+        output = self.layer(input)
         if self.merged_with_layer:
-            return self.layer(input)
+            return output
         else:
             adapter_out = (
                 torch.matmul(torch.matmul(input, self.lora_a), self.lora_b)
                 * self.scaling
             )
-            return self.layer(input) + adapter_out
+            return output + adapter_out
 
     @classmethod
     def parallel_linear_forward(cls, input, loras):
@@ -137,13 +142,15 @@ class LoRA(Adapter):
         lora_b = torch.stack([lora.lora_b for lora in loras], dim=0)
         # (n_examples,)
         scaling = torch.cat(
-            [torch.LongTensor([lora.scaling]) for lora in loras], dim=0
-        ).to(lora_a.device)
+            [torch.FloatTensor([lora.scaling]) for lora in loras], dim=0
+        ).to(device=lora_a.device)
         # (n_examples, seq_len, out_features)
-        adapter_out = (
-            torch.bmm(torch.bmm(input, lora_a), lora_b) * scaling[:, None, None]
-        )
-        return loras[0].layer(input) + adapter_out
+        adapter_out = torch.bmm(torch.bmm(input.to(dtype=lora_a.dtype), lora_a), lora_b) * scaling[
+            :, None, None
+        ].to(dtype=input.dtype)
+
+        layer_out = loras[0].layer(input)
+        return layer_out + adapter_out.to(dtype=layer_out.dtype)
 
     def reset_parameters(self):
         gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
@@ -326,7 +333,8 @@ class ExpertContainer(Adapter):
 
         if (
             any(task_name not in self.experts for task_name in task_names)
-            and not self.default_expert_name and len(self.experts)
+            and not self.default_expert_name
+            and len(self.experts)
         ):
             raise ValueError(
                 "Experts for all tasks have not been loaded! Set a default expert?"
@@ -349,6 +357,7 @@ class ExpertContainer(Adapter):
                 else:
                     selected_expert = task_name
                 load_experts.append(self.experts[selected_expert])
+
             # assume all experts are loras
             output = LoRA.parallel_linear_forward(input, load_experts)
         else:
