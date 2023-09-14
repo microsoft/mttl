@@ -18,7 +18,6 @@ from mttl.models.utils import (
 from mttl.models.get_optimizer import get_optimizer
 from dataclasses import dataclass, field
 
-
 @dataclass
 class AugmentedRoutingInfo(RoutingInfo):
     # save oracle routings during generation
@@ -101,8 +100,8 @@ class CLM(EfficientCheckpointModule):
             if model_object.config.vocab_size != len(self.tokenizer):
                 model_object.resize_token_embeddings(len(self.tokenizer))
 
-            if self.hparams.load_in_8bit:
-                model_object = prepare_model_for_kbit_training(model_object)
+            # if self.hparams.load_in_8bit:
+            #     model_object = prepare_model_for_int8_training(model_object)
 
             self.model = modify_transformer(model_object, self.hparams)
         else:
