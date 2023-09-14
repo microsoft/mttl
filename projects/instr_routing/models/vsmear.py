@@ -37,7 +37,7 @@ class Metrics:
 @register_selector("smear")
 class SMEARRouter(RoutingSelector):
     def __init__(self, config, in_d):
-        super().__init__()
+        super().__init__(config)
 
         self.config = config
         self.in_d = in_d
@@ -51,13 +51,16 @@ class SMEARRouter(RoutingSelector):
         # because in successive generation steps, the input is going to be only the encoding for the last token
         self._router_input_cache = None
 
-        self.prior_router = nn.Linear(in_d, config.n_skills * self.n_splits, bias=False)
+        self.prior_router = nn.Linear(in_d, config.n_skills * self.n_splits)
         self.prior_router_ln = nn.LayerNorm(in_d)
         self.prior_router_ln.weight = nn.Parameter(torch.ones(in_d))
 
         self.router_center_momentum = self.config.router_center_momentum
         self.register_buffer("center", torch.zeros(1, self.n_skills))
 
+        # normal init
+        self.prior_router.weight.data.normal_(mean=0.0, std=0.02)
+        self.prior_router.bias.data.fill_(0)
         self.metrics = Metrics()
 
     @torch.no_grad()
@@ -82,8 +85,9 @@ class SMEARRouter(RoutingSelector):
             routes = F.linear(input, router.weight, None)
         if center:
             self.apply_center_update(routes)
+            routes = (routes - self.center) * self.router_gamma + self.router_beta
         # teacher centering and sharpening
-        return (routes - self.center) / temperature
+        return routes / temperature
 
     def apply_mask_and_average(self, x, padding_mask):
         x_rout = x * padding_mask.unsqueeze(-1).to(x.device)
@@ -140,10 +144,13 @@ class VSMEARRouter(SMEARRouter):
             self.post_router_ln = self.prior_router_ln
         else:
             self.post_router = nn.Linear(
-                in_d, config.n_skills * self.n_splits, bias=False
+                in_d, config.n_skills * self.n_splits, bias=True
             )
             self.post_router_ln = nn.LayerNorm(in_d)
             self.post_router_ln.weight = nn.Parameter(torch.ones(in_d))
+
+            self.post_router.weight.data.normal_(mean=0.0, std=0.02)
+            self.post_router.bias.data.fill_(0)
 
         self.router_teacher_ent_factor = self.config.router_teacher_ent_factor
         self.router_teacher_temperature = self.config.router_teacher_temperature
@@ -194,7 +201,116 @@ class VSMEARRouter(SMEARRouter):
             self.metrics["h_post"] = h_post / math.log(self.n_skills)
             self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
             self.metrics["x_ent"] = x_ent
-            self.auxiliary_loss = -self.router_teacher_ent_factor * h_post + x_ent
+            self.auxiliary_loss = -self.router_teacher_ent_factor * h_post + 2. * x_ent
+        else:
+            # during eval :-(
+            prior_probs = routing_probs = F.softmax(prior_routes, dim=-1)
+            h_pri = -(prior_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
+
+            self.routings = prior_probs.detach().cpu()
+            self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
+            self.auxiliary_loss = h_pri.sum() * 0.0
+        return routing_probs.unsqueeze(1)
+
+
+@register_selector("g-vsmear")
+class GVSMEARRouter(SMEARRouter):
+    def __init__(self, config, in_d):
+        super().__init__(config, in_d)
+
+        self.prior_router = nn.Linear(
+            in_d, config.n_skills * self.n_splits * 2, bias=True
+        )
+        self.prior_router_ln = nn.LayerNorm(in_d)
+        self.prior_router_ln.weight = nn.Parameter(torch.ones(in_d))
+
+        self.prior_router.weight.data.normal_(mean=0.0, std=0.02)
+        self.prior_router.bias.data.fill_(0)
+
+        self.post_router = nn.Linear(
+            in_d, config.n_skills * self.n_splits * 2, bias=True
+        )
+        self.post_router_ln = nn.LayerNorm(in_d)
+        self.post_router_ln.weight = nn.Parameter(torch.ones(in_d))
+
+        self.post_router.weight.data.normal_(mean=0.0, std=0.02)
+        self.post_router.bias.data.fill_(0)
+
+        self.router_teacher_ent_factor = self.config.router_teacher_ent_factor
+        self.router_teacher_temperature = self.config.router_teacher_temperature
+        self.router_center_momentum = config.router_center_momentum
+
+    def get_posterior_input(self, input, routing_infos):
+        padding_mask = routing_infos.pad_token_mask
+        post_input = self.apply_mask_and_average(input, padding_mask)
+        return post_input
+
+    def kl_div(self, mu, logvar, prior_mean, prior_logvar):
+        K = self.config.n_skills
+        prior_var = prior_logvar.exp()
+        var_division = logvar.exp() / prior_var  # Σ_0 / Σ_1
+        diff = mu - prior_mean  # μ_１ - μ_0
+        diff_term = diff * diff / prior_var  # (μ_1 - μ_0)(μ_1 - μ_0)/Σ_1
+        logvar_division = (
+            prior_logvar - logvar
+        )  # log|Σ_1| - log|Σ_0| = log(|Σ_1|/|Σ_2|)
+        # KL
+        KLD = 0.5 * ((var_division + diff_term + logvar_division).sum(1) - K)
+        return KLD.mean()
+
+    def forward(self, routing_infos: AugmentedRoutingInfo, input: torch.Tensor):
+        self.metrics.clear()
+
+        prior_input = self._get_router_inputs(input, routing_infos)
+
+        # do not center the student, center only the teacher now
+        prior_routes = self.route_maybe_center(
+            prior_input,
+            self.prior_router,
+            self.prior_router_ln,
+            temperature=self.temperature,
+            center=False,
+        )
+        prior_routes, prior_logvar = torch.chunk(prior_routes, 2, dim=-1)
+
+        if self.training:
+            # during training :-)
+            assert (
+                routing_infos.generation_mode is False
+            ), "We are not expecting to be in generation mode during training."
+
+            post_input = self.get_posterior_input(input, routing_infos)
+            post_routes = self.route_maybe_center(
+                post_input,
+                self.post_router,
+                self.post_router_ln,
+                temperature=self.router_teacher_temperature,
+                center=self.router_center_momentum > 0.0,
+            )
+            post_routes, post_logvar = torch.chunk(post_routes, 2, dim=1)
+            # reparametrize
+            std = torch.exp(0.5 * post_logvar)
+            eps = torch.randn_like(std)
+            kl = self.kl_div(
+                0.5 * post_routes + 0.5 * prior_routes, 0.5 * post_logvar + 0.5 * prior_logvar,
+                prior_routes, prior_logvar,
+            )
+
+            post_samples = post_routes + eps * std
+            post_probs = routing_probs = F.softmax(post_samples, dim=-1)
+            prior_probs = F.softmax(prior_routes, dim=-1)
+
+            # compute auxiliary loss (KL divergence), KL = - H(posterior) + Xent(posterior, prior)
+            h_post = -(post_probs * F.log_softmax(post_routes, -1)).sum(1).mean()
+            h_pri = -(prior_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
+            x_ent = -(post_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
+
+            self.routings = post_probs.detach().cpu()
+            self.metrics["h_post"] = h_post / math.log(self.n_skills)
+            self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
+            self.metrics["x_ent"] = x_ent
+            self.metrics["kl"] = kl
+            self.auxiliary_loss = kl
         else:
             # during eval :-(
             prior_probs = routing_probs = F.softmax(prior_routes, dim=-1)
@@ -251,6 +367,6 @@ def modify_with_smear(transformer, config):
 
 @register_modifier("vsmear")
 def modify_with_vsmear(transformer, config):
-    config.router_selector = "vsmear"
+    config.router_selector = config.router_selector or "smear"
 
     return modify_with_smear(transformer, config)

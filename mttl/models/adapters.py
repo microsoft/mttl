@@ -271,6 +271,29 @@ class SkilledLoRA(LoRA):
         return self.layer(input) + adapter_out
 
 
+class SkilledLoRAMergeAfter(SkilledLoRA):
+    def __init__(
+        self,
+        config,
+        layer,
+    ):
+        super().__init__(config, layer)
+
+    def forward_linear_(self, input, weights):
+        bs, _, _ = weights.size()
+        adapter_out = torch.einsum(
+            "bsd,qkdr->bsqkr", (input, self.lora_a)
+        )  # bs x n_splits x n_skills x rank")
+        adapter_out = torch.einsum(
+            "bsqkr,qkrd->bsqkd", (adapter_out, self.lora_b)
+        )  # bs x seq x n_splits x n_skills x D
+        adapter_out = torch.einsum(
+            "bsqkd,bqk->bsd", (adapter_out, weights)
+        )  # bs x seq x n_splits x D
+        adapter_out *= self.scaling
+        return self.layer(input) + adapter_out
+
+
 class ExpertContainer(Adapter):
     def __init__(
         self,

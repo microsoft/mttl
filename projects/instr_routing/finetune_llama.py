@@ -2,8 +2,7 @@ import os
 import sys
 import json
 import torch
-import wandb 
-import logging
+import wandb
 import pytorch_lightning as pl
 from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
@@ -11,7 +10,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.callbacks import MMLUCallback, MiniProgress
+from mttl.callbacks import MMLUCallback
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.platypus_module import PlatypusModule
 from mttl.datamodule.flan100k_module import Flan100kModule
@@ -123,7 +122,6 @@ def run_multitask(args):
     callbacks.append(checkpoint_callback)
     callbacks.append(SelectorRoutingsLog(args))
     callbacks.append(SelectorMetricsLog())
-    callbacks.append(MiniProgress())
     callbacks.append(MMLUCallback(5))
 
     trainer = Trainer(
