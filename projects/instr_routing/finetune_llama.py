@@ -134,7 +134,7 @@ def run_multitask(args):
         logger=loggers,      
         num_sanity_val_steps=5,  
         default_root_dir=args.output_dir,
-        max_epochs=args.num_train_epochs,
+        max_epochs=0, #args.num_train_epochs,
         max_steps=args.total_steps + 1 if args.total_steps != -1 else -1,
         gradient_clip_val=args.max_grad_norm,
         log_every_n_steps=20,
