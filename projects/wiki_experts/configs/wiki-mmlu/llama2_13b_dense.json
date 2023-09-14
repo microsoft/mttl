@@ -1,4 +1,5 @@
 {
+    "lora_alpha": 16,
     "lora_rank": 4,
     "lora_dropout": 0.05,
     "weight_decay": 0.00,
