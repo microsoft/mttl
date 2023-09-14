@@ -2,6 +2,13 @@ from transformers import AutoTokenizer, LlamaTokenizerFast
 
 from mttl.utils import logger
 
+def tokenizer_enforces_eos(tokenizer):
+    test = "this is a long text seq that should be truncated"
+    toke_ids = tokenizer(test, truncation=True, max_length=3)
+    if toke_ids["input_ids"][-1] != tokenizer.eos_token_id:
+        return False
+    return True
+
 
 def get_tokenizer(config, for_generation=False):
     if "llama" in config.model:
@@ -36,4 +43,5 @@ def get_tokenizer(config, for_generation=False):
         logger.warn("Setting pad_token_id to 0, given that pad_token_id was not detected.")
         tokenizer.pad_token_id = 0
 
+    setattr(tokenizer, "enforces_eos", tokenizer_enforces_eos(tokenizer))    
     return tokenizer

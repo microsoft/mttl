@@ -26,6 +26,21 @@ class DefaultCollator:
     model_family: str = "seq2seq"
     train_on_inputs: bool = False
 
+    def enforce_eos(self, targets):
+        # simulate the default behaviour of LLamatokenizer, when adding eos token and truncating: the last token must always be eos
+        # make sure the last token is eos
+        if self.tokenizer.padding_side == "left":
+            targets[(torch.arange(targets.shape[0]), -1)] = self.tokenizer.eos_token_id
+        else:
+            # make sure last token is eos if not -100
+            targets[(torch.arange(targets.shape[0]), -1)] = torch.where(
+                targets[(torch.arange(targets.shape[0]), -1)]
+                != self.label_pad_token_id,
+                self.tokenizer.eos_token_id,
+                self.label_pad_token_id,
+            )
+        return targets
+
     def prepare_inputs_for_seq2seq_family(self, sources, labels):
         output_batch = {}
         tokenized_labels = self.tokenizer(
@@ -89,7 +104,7 @@ class DefaultCollator:
         targets = torch.masked_fill(
             targets,
             ~tok_sources_plus_labels["attention_mask"].bool(),
-            self.label_pad_token_id
+            self.label_pad_token_id,
         )
 
         if not self.train_on_inputs:
@@ -112,6 +127,9 @@ class DefaultCollator:
             mask = mask.cumsum(dim=1).bool()
             mask = mask[:, :-1]
             targets = torch.masked_fill(targets, ~mask, self.label_pad_token_id)
+
+        if hasattr(self.tokenizer, "enforces_eos") and self.tokenizer.enforces_eos:
+            targets = self.enforce_eos(targets)
 
         output_batch["input_ids"] = tok_sources_plus_labels["input_ids"]
         output_batch["attention_mask"] = tok_sources_plus_labels["attention_mask"]
