@@ -16,7 +16,7 @@ from mttl.utils import setup_logging, logger
 
 # register models
 from projects.wiki_experts.expert_model import MultiExpertModel
-from config import ExpertConfig
+from projects.wiki_experts.config import ExpertConfig
 
 
 def parse_experts_to_load(experts_to_load):
@@ -43,16 +43,20 @@ def parse_experts_to_load(experts_to_load):
 
         if len(all_paths) > 1:
             if is_default:
-                raise ValueError("Cannot define more than one default expert! Are you using * in expert path?")
+                raise ValueError(
+                    "Cannot define more than one default expert! Are you using * in expert path?"
+                )
             if expert_name:
-                raise ValueError("Cannot declare a name when using a wildcard in the expert path!")
+                raise ValueError(
+                    "Cannot declare a name when using a wildcard in the expert path!"
+                )
 
         kwargs.append(
             {
                 "expert_path": expert_path,
                 "action": action,
                 "is_default": is_default,
-                "expert_name": expert_name
+                "expert_name": expert_name,
             }
         )
     return kwargs
@@ -79,25 +83,32 @@ def run_eval(args):
     elif configuration == "worst_5":
         args.finetune_task_name = "formal_logic,machine_learning,global_facts,abstract_algebra,high_school_physics"
         subsample = None
+    elif configuration == "first":
+        args.finetune_task_name = "abstract_algebra"
+        subsample = None
+    elif configuration == "sub_10":
+        args.finetune_task_name = "formal_logic,machine_learning,global_facts,abstract_algebra,high_school_physics,college_biology,high_school_government_and_politics,prehistory,security_studies,sociology"
+        subsample = None
     else:
-        subsample = 10
+        subsample = None
 
     mmlu = MMLUEvaluator(
         args,
         data_dir=os.environ["MMLU_DATA_DIR"],
     )
     module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
-    
+
     if args.load_module is not None:
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:
             module.load_expert(**expert_kwargs)
 
     module.to("cuda")
-    scores = mmlu.evaluate(module, subsample, shuffle=True)
+    scores = mmlu.evaluate(module, subsample)
 
     with open(args.output_dir + "/mmlu.json", "w") as f:
         import json
+
         json.dump(scores, f)
 
     logger.info("MMLU Accuracy: {}".format(scores["all"]["mean"]))
