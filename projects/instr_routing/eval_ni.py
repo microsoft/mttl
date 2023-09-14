@@ -120,7 +120,7 @@ def upcast_to_dtype(model, dtype: torch.dtype):
 @click.option("--wandb_proj", type=str, default="eval")
 @click.option("--n_shots", type=int, default=2)
 @click.option("--use_old_gen_config", type=bool, default=False)
-@click.option("--subsample", type=int, default=-1)
+@click.option("--subsample", type=int, default=100)
 @click.option("--load_in_8bit", type=bool, default=False)
 @click.option("--dtype", type=str, default="float16")
 def run_ni_eval(
@@ -227,7 +227,17 @@ def run_ni_eval(
                 "eval_load_in_8bit": load_in_8bit,
                 "eval_dtype": dtype,
             }
-        )
+        )        
+        # per task
+        data = [[label, val] for (label, val) in rougel_ni_all["per_task"].items() if "rougeL" in label]
+        table = wandb.Table(data=data, columns = ["task_sni", "mean_rougeL"])
+        wandb.log({f"sni_per_task_rougeL_{n_shots}sht" : wandb.plot.bar(table, "task_sni", "mean_rougeL",
+                                    title=f"sni_per_task_rougeL_{n_shots}sht")})
+        # per category
+        data = [[label, val] for (label, val) in rougel_ni_all["per_category"].items() if "rougeL" in label]
+        table2 = wandb.Table(data=data, columns = ["category_sni", "mean_rougeL"])
+        wandb.log({f"sni_per_category_rougeL_{n_shots}sht" : wandb.plot.bar(table2, "category_sni", "mean_rougeL",
+                                    title=f"sni_per_category_rougeL_{n_shots}sht")})
     print(rougel_ni, all_results_original["rougeL_default_track"])
 
 
