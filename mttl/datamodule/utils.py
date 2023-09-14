@@ -4,10 +4,13 @@ from mttl.utils import logger
 
 def tokenizer_enforces_eos(tokenizer):
     test = "this is a long text seq that should be truncated"
+    # copy tokenizer with add_eos parameter set to True
+    old_add_eos = tokenizer.add_eos_token if hasattr(tokenizer, "add_eos_token") else False
+    setattr(tokenizer, "add_eos_token", True)
     toke_ids = tokenizer(test, truncation=True, max_length=3)
-    if toke_ids["input_ids"][-1] != tokenizer.eos_token_id:
-        return False
-    return True
+    enforce_eos = toke_ids["input_ids"][-1] == tokenizer.eos_token_id    
+    tokenizer.add_eos_token = old_add_eos
+    return enforce_eos
 
 
 def get_tokenizer(config, for_generation=False):
