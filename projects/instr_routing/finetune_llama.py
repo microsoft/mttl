@@ -179,10 +179,10 @@ def run_multitask(args):
                 tokenizer=dm.tokenizer,
                 dtype=dtype_eval,
                 load_for_eval=True,
-            ).cuda()
+            ).to("cuda")
         else:
             torch.cuda.empty_cache()
-            best_model = module.cuda()
+            best_model = module.to("cuda")
 
         if args.eval_superni:
             from eval_ni import eval_ni
