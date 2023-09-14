@@ -14,7 +14,7 @@ from mttl.datamodule.platypus_module import PlatypusModule
 from mttl.utils import get_mlf_logger, setup_logging, logger
 
 from projects.wiki_experts.expert_trainer import ExpertTrainer
-from config import ExpertConfig
+from projects.wiki_experts.config import ExpertConfig
 
 
 def run_multitask(args):
