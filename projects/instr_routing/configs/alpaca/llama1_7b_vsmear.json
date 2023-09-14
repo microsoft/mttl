@@ -8,7 +8,7 @@
     "load_in_8bit":0,  
     "model_family":"gpt",   
 
-    "predict_batch_size": 2,
+    "predict_batch_size": 3,
     "micro_batch_size": 4,
     "train_batch_size": 128,
     "max_input_length": 256,    

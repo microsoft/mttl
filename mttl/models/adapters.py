@@ -51,14 +51,28 @@ class LoRA(Adapter):
         else:
             raise NotImplementedError("LoRA only supports nn.Linear layers.")
 
-    def forward_linear_(self, input, **kwargs):
+    def foward_layer(self, input):
+        dtype_input = input.dtype
+        dtype_layer=self.layer.weight.dtype
+        if dtype_input != dtype_layer and dtype_layer != torch.int8:
+            input = input.to(dtype_layer)
+        out = self.layer(input) # downcast input to layer dtype
+        out = out.to(dtype_input) # upcast output to input dtype
+        return out
+    
+    def forward_linear_(self, input, **kwargs):        
+        iput_dt = input.dtype
+        input = input.to(torch.float32) # upcast input
         if self.training:
             self.training_steps += 1
         adapter_out = torch.matmul(torch.matmul(input, self.lora_a), self.lora_b) * self.scaling
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
-        return self.layer(input) + adapter_out
+            
+        output = self.foward_layer(input) + adapter_out
+        output = output.to(iput_dt) # downcast output if neeed
+        return output
 
     def reset_parameters(self):
         gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
@@ -145,7 +159,7 @@ class SkilledLoRA(LoRA):
             self.forward_fn = self.forward_linear_
         else:
             raise NotImplementedError("SkilledLoRA only supports nn.Linear layers.")
-
+    
     def forward_linear_(self, input, weights):
         if self.training:
             self.training_steps += 1
@@ -167,4 +181,4 @@ class SkilledLoRA(LoRA):
         if self.use_warmup:
             adapter_out = adapter_out * warmup
 
-        return self.layer(input) + adapter_out
+        return self.foward_layer(input) + adapter_out

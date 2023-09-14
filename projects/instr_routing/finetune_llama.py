@@ -134,7 +134,7 @@ def run_multitask(args):
         logger=loggers,      
         num_sanity_val_steps=5,  
         default_root_dir=args.output_dir,
-        max_epochs=0, #args.num_train_epochs,
+        max_epochs=args.num_train_epochs,
         max_steps=args.total_steps + 1 if args.total_steps != -1 else -1,
         gradient_clip_val=args.max_grad_norm,
         log_every_n_steps=20,
@@ -183,6 +183,33 @@ def run_multitask(args):
         else:
             torch.cuda.empty_cache()
             best_model = module.to("cuda")
+        
+        if args.eval_mmlu:
+            from eval_mmlu import eval_mmlu
+
+            logger.info("Evaluating on MMLU")
+            em_mmlu_all = eval_mmlu(
+                args,
+                best_model,
+                data_dir=os.environ["MMLU_DATA_DIR"],
+            )
+            mmlu_em = em_mmlu_all["all"]["mean"]
+            if wandb.run is not None:
+                wandb.log({"mmlu_acc": mmlu_em})
+                # report per task peformance
+                data = [[label, val["mean"]] for (label, val) in em_mmlu_all.items()]
+                table = wandb.Table(data=data, columns = ["task", "mean_acc"])
+                wandb.log({"mmlu_per_task_acc" : wandb.plot.bar(table, "task", "mean_acc",
+                                            title="mmlu_per_task_acc")})
+                
+            if args.tensorboard:
+                tb_logger.experiment.add_scalar(
+                    "tasks/mmlu", mmlu_em, trainer.global_step
+                )
+            with open(os.path.join(args.output_dir, "mmlu_results.json"), "w") as f:
+                json.dump(em_mmlu_all, f, indent=2)
+            logger.info("MMLU accuracy: {:.2f}".format(mmlu_em))
+        
 
         if args.eval_superni:
             from eval_ni import eval_ni
@@ -207,26 +234,6 @@ def run_multitask(args):
             with open(os.path.join(args.output_dir, "sni_results.json"), "w") as f:
                 json.dump(rougel_ni_all, f, indent=2)
             logger.info("SuperNI RougeL: {:.2f}".format(rougel_ni))
-
-        if args.eval_mmlu:
-            from eval_mmlu import eval_mmlu
-
-            logger.info("Evaluating on MMLU")
-            em_mmlu_all = eval_mmlu(
-                args,
-                best_model,
-                data_dir=os.environ["MMLU_DATA_DIR"],
-            )
-            mmlu_em = em_mmlu_all["all"]["mean"]
-            if wandb.run is not None:
-                wandb.log({"mmlu_acc": mmlu_em})
-            if args.tensorboard:
-                tb_logger.experiment.add_scalar(
-                    "tasks/mmlu", mmlu_em, trainer.global_step
-                )
-            with open(os.path.join(args.output_dir, "mmlu_results.json"), "w") as f:
-                json.dump(em_mmlu_all, f, indent=2)
-            logger.info("MMLU accuracy: {:.2f}".format(mmlu_em))
 
 
 if __name__ == "__main__":

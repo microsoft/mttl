@@ -113,12 +113,12 @@ def upcast_to_dtype(model, dtype: torch.dtype):
 @click.option(
     "--model_path",
     type=str,
-    default="/home/v-oostapenko/dev/amlt/routing/platypus_vsmear_e8[xr4]/meta-llama_Llama-2-13b-hfpqtor60j_platypus_vsmear_e8[xr4]-val/loss=0.5533.ckpt",
+    default="/home/v-oostapenko/results/platypus/platypus-13b-right/meta-llama_Llama-2-13b-hf_platypus-13b-right-val/loss=0.5543.ckpt",
     help="path to the model",
 )
-@click.option("--batch_size", type=int, default=2)
+@click.option("--batch_size", type=int, default=3)
 @click.option("--wandb_proj", type=str, default="eval")
-@click.option("--n_shots", type=int, default=0)
+@click.option("--n_shots", type=int, default=2)
 @click.option("--use_old_gen_config", type=bool, default=False)
 @click.option("--subsample", type=int, default=-1)
 @click.option("--load_in_8bit", type=bool, default=False)
@@ -176,11 +176,12 @@ def run_ni_eval(
         config = RoutingConfig()
         config.update_kwargs(torch.load(model_path)["hyper_parameters"])
         dm = AlpacaDataModule(config)
-        dtype = torch.float32
         if dtype == "float16":
             dtype = torch.float16
+        else:
+            dtype = torch.float32
         model = CLM.load_from_checkpoint(   
-            model_path, tokenizer=dm.tokenizer, load_in_8bit=load_in_8bit, dtype=dtype, load_for_eval=True
+            model_path, tokenizer=dm.tokenizer, load_in_8bit=load_in_8bit, dtype=dtype
         ).to("cuda")
         # model = upcast_to_dtype(model, torch.float32)
         config = model.hparams
@@ -215,6 +216,17 @@ def run_ni_eval(
         wandb.log({"rouge_L_super_ni_stderr": rougel_ni_all["all"]["stderr"]})
         wandb.log(
             {"rouge_L_super_ni[original]": all_results_original["rougeL_default_track"]}
+        )        
+        # log all the function arguments to wandb
+        wandb.config.update(
+            {
+                "eval_model_path": model_path,
+                "eval_model_name": model_name,
+                "eval_batch_size": batch_size,
+                "eval_subsample": subsample,
+                "eval_load_in_8bit": load_in_8bit,
+                "eval_dtype": dtype,
+            }
         )
     print(rougel_ni, all_results_original["rougeL_default_track"])
 

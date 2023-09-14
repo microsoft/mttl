@@ -50,7 +50,7 @@ class SkilledLoRA_MergeLoraAfterOP(SkilledLoRA):
         if self.use_warmup:
             adapter_out = adapter_out * warmup
 
-        return self.layer(input) + adapter_out
+        return self.foward_layer(input) + adapter_out
 
 
 class Metrics:
@@ -99,7 +99,7 @@ class SMEARRouter(RoutingSelector):
         self.prior_router.bias.data.fill_(0)
 
         self.metrics = Metrics()
-
+    
     @torch.no_grad()
     def apply_center_update(self, routes):
         if self.training:
@@ -107,7 +107,7 @@ class SMEARRouter(RoutingSelector):
                 self.center * (1 - self.router_center_momentum)
                 + torch.mean(routes, dim=0, keepdim=True) * self.router_center_momentum
             )
-
+            
     def route_maybe_center(
         self, input, router, router_ln, temperature=1.0, center=False
     ):
@@ -403,7 +403,11 @@ class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
         else:
             self.selector = selector
 
+    
     def forward(self, input):
+        iput_dt = input.dtype
+        input = input.to(torch.float32)
+        
         task_id = self.routing_infos.task_ids
         repeat = input.size(0) // task_id.size(0)
 
@@ -418,7 +422,9 @@ class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
             mixing_weights = torch.ones(
                 bs, self.n_splits, self.n_skills, device=input.device, dtype=input.dtype
             )
-        return SkilledLoRA.forward(self, input, mixing_weights)
+        output = SkilledLoRA.forward(self, input, mixing_weights)
+        output = output.to(iput_dt)
+        return output
 
 
 @register_modifier("smear")
@@ -612,6 +618,9 @@ class AuxRoutingLoRALinear_MergeAfterOP(SkilledLoRA_MergeLoraAfterOP, RoutingMix
         self._metrics.clear()
 
     def forward(self, input):
+        iput_dt = input.dtype
+        input = input.to(torch.float32) # upcast input
+        
         task_id = self.routing_infos.task_ids
         repeat = input.size(0) // task_id.size(0)
 
@@ -626,7 +635,9 @@ class AuxRoutingLoRALinear_MergeAfterOP(SkilledLoRA_MergeLoraAfterOP, RoutingMix
             mixing_weights = torch.ones(
                 bs, self.n_splits, self.n_skills, device=input.device, dtype=input.dtype
             )
-        return super(SkilledLoRA_MergeLoraAfterOP, self).forward(input, mixing_weights)
+        output = super(SkilledLoRA_MergeLoraAfterOP, self).forward(input, mixing_weights)
+        output = output.to(iput_dt) # downcast output
+        return output
 
 
 @register_modifier("vsmear_xr4")

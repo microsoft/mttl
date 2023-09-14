@@ -6,6 +6,7 @@ import os
 import re
 import glob
 import click
+import wandb    
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from projects.instr_routing.finetune_llama import RoutingConfig
@@ -41,13 +42,14 @@ def eval_mmlu(
 @click.option(
     "--model_path",
     type=str,
-    default="/home/v-oostapenko/dev/amlt/routing/platypus_vsmear_e8[xr4]/meta-llama_Llama-2-13b-hfpqtor60j_platypus_vsmear_e8[xr4]-val/loss=0.5533.ckpt",
+    default="/home/v-oostapenko/results/platypus/platypus-13b-right/meta-llama_Llama-2-13b-hf_platypus-13b-right-val/loss=0.5543.ckpt",
 )
+# /home/v-oostapenko/dev/amlt/routing/platypus_vsmear_e8[xr4]/meta-llama_Llama-2-13b-hfpqtor60j_platypus_vsmear_e8[xr4]-val/loss=0.5533.ckpt
 # /home/v-oostapenko/dev/amlt/routing/platypus_dense_er4/meta-llama_Llama-2-13b-hf284ifsm8_platypus_dense_er4-val/loss=0.5510.ckpt
 #   /home/v-oostapenko/results/platypus/platypus-13b-right/meta-llama_Llama-2-13b-hf_platypus-13b-right-val/loss=0.5543.ckpt", help="path to the model")
-@click.option("--batch_size", type=int, default=2)
+@click.option("--batch_size", type=int, default=3)
 @click.option("--wandb_proj", type=str, default="eval")
-@click.option("--subsample", type=int, default=-1)
+@click.option("--subsample", type=int, default=100)
 @click.option("--load_in_8bit", type=bool, default=False)
 @click.option("--dtype", type=str, default="float16")
 def run_mmlu_eval(
@@ -105,18 +107,17 @@ def run_mmlu_eval(
             dm = Flan100kModule(config)
         else:
             raise NotImplementedError()
-        dtype = torch.float32
         if dtype == "float16":
             dtype = torch.float16
+        else:
+            dtype = torch.float32
         model = CLM.load_from_checkpoint(
-            model_path, tokenizer=dm.tokenizer, load_in_8bit=load_in_8bit, dtype=dtype, load_for_eval=True
+            model_path, tokenizer=dm.tokenizer, load_in_8bit=load_in_8bit, dtype=dtype
         ).to("cuda")
         config = model.hparams
         config.model_path = model_path
 
     if wandb_proj:
-        import wandb
-
         wandb_proj += f"_{config.dataset}"
         run_name = os.getenv("AMLT_JOB_NAME", f"{config.model}_mmlu")
         wandb.init(
@@ -150,7 +151,11 @@ def run_mmlu_eval(
     em_mmlu_all = eval_mmlu(config, model, subsample=subsample)
     mmlu_em = em_mmlu_all["all"]["mean"]
     if wandb_proj:
-        wandb.log({"mmlu_acc": mmlu_em})
+        wandb.log({"mmlu_acc": mmlu_em})        
+        data = [[label, val["mean"]] for (label, val) in em_mmlu_all.items()]
+        table = wandb.Table(data=data, columns = ["task", "mean_acc"])
+        wandb.log({"mmlu_per_task_acc" : wandb.plot.bar(table, "task", "mean_acc",
+                                    title="mmlu_per_task_acc")})
     print(em_mmlu_all)
 
 
