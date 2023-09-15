@@ -195,7 +195,7 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
         for name, _ in self.state_dict().items():
             if name in ckpt:
                 logger.info("Loading {} from state dict.".format(name))
-        super().load_state_dict(ckpt, strict=False)
+        return super().load_state_dict(ckpt, strict=False)
 
     def _delete_non_trainable_params(self, state_dict):
         if not hasattr(self, "_params_from_checkpoint"):
