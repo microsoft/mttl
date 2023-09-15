@@ -85,7 +85,7 @@ class SMEARRouter(RoutingSelector):
             routes = F.linear(input, router.weight, None)
         if center:
             self.apply_center_update(routes)
-            routes = (routes - self.center) * self.router_gamma + self.router_beta
+            routes = (routes - self.center)
         # teacher centering and sharpening
         return routes / temperature
 
@@ -207,7 +207,7 @@ class VSMEARRouter(SMEARRouter):
             if self.router_kl_func == "kl":
                 self.auxiliary_loss = self.router_kl_factor * (- h_post + x_ent)
             elif self.router_kl_func == "l2":
-                self.auxiliary_loss = self.router_kl_factor * (post_routes - prior_routes).pow(2.).sum(-1).mean()
+                self.auxiliary_loss = self.router_kl_factor * (post_routes - prior_routes).pow(2.).mean()
         else:
             # during eval :-(
             prior_probs = routing_probs = F.softmax(prior_routes, dim=-1)
