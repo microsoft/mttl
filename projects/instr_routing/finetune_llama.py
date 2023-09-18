@@ -164,18 +164,10 @@ def run_multitask(args):
         if path_best_model:
             del module
             torch.cuda.empty_cache()
-            dtype_eval = torch.float32          
-            if args.dtype_eval == "float16":
-                dtype_eval = torch.float16
-            elif args.dtype_eval == "float32":
-                dtype_eval = torch.float32
-            elif args.dtype_eval == "8bit":
-                dtype_eval = "8bit"
 
             best_model = CLM.load_from_checkpoint(
                 path_best_model,
                 tokenizer=dm.tokenizer,
-                dtype=dtype_eval,
                 load_in_8bit=False,
             ).to("cuda")
         else:
@@ -186,10 +178,12 @@ def run_multitask(args):
             from eval_ni import eval_ni
 
             logger.info("Evaluating on super NI")
+            # all_results_original -- dict of results on sni eval obtained by running the original evaluate.py
             rougel_ni_all = eval_ni(
                 args,
                 best_model,
-                nshot=2,
+                nshot=0,
+                max_input_length=-1,
                 data_dir=os.environ["NI_DATA_DIR"],
             )
             rougel_ni = rougel_ni_all["all"]["mean"]

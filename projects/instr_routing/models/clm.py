@@ -18,7 +18,6 @@ from mttl.models.utils import (
 from mttl.models.get_optimizer import get_optimizer
 from dataclasses import dataclass, field
 
-
 @dataclass
 class AugmentedRoutingInfo(RoutingInfo):
     # save oracle routings during generation
@@ -86,18 +85,15 @@ class CLM(EfficientCheckpointModule):
         self.pad_token_id = self.tokenizer.pad_token_id
         self.model: AutoModelForCausalLM = None
         self.accumulate_metrics_batch = defaultdict(list)
-        
+
         if kwargs.get("model_object") is None:
-            dtype = kwargs.get("dtype", torch.float32)
             load_in_8bit = kwargs.get("load_in_8bit", False)
-            if dtype == "8bit":
-                load_in_8bit = True
-                dtype = torch.float32
+
             if "llama" in self.hparams.model:
                 model_object = LlamaForCausalLM.from_pretrained(
                     self.hparams.model,
                     load_in_8bit=load_in_8bit,
-                    torch_dtype=dtype,
+                    torch_dtype=torch.float32 if load_in_8bit else torch.float16,
                     device_map="auto",
                 )
             else:
