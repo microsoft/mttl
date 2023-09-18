@@ -246,6 +246,7 @@ def run_multitask(args):
         
 
         if args.eval_superni:
+            tb_logger = None if not args.tensorboard else tb_logger
             eval_superni(best_model, args, tb_logger, trainer, n_shot=0)
             eval_superni(best_model, args, tb_logger, trainer, n_shot=2)
 

@@ -69,11 +69,14 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
             model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
 
         # enable gradient checkpointing for memory efficiency
+        from functools import partial
+
+        notfailing_checkpoint = partial(torch.utils.checkpoint.checkpoint, use_reentrant=False)
+        torch.utils.checkpoint.checkpoint = notfailing_checkpoint
         model.gradient_checkpointing_enable()
+        # FIX for enabling gradient of the auxiliary loss
 
     return model
-
-
 class CLM(EfficientCheckpointModule):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -105,8 +108,8 @@ class CLM(EfficientCheckpointModule):
             if model_object.config.vocab_size != len(self.tokenizer):
                 model_object.resize_token_embeddings(len(self.tokenizer))
 
-            # if self.hparams.load_in_8bit:
-            #     model_object = prepare_model_for_int8_training(model_object)
+            if self.hparams.load_in_8bit:
+                model_object = prepare_model_for_kbit_training(model_object)
 
             self.model = modify_transformer(model_object, self.hparams)
         else:

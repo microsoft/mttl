@@ -83,46 +83,25 @@ def load_hf_model(model_name):
     return model, config
 
 
-def upcast_to_dtype(model, dtype: torch.dtype):
-    # iterate over all modules and convert to dtype
-    import bitsandbytes as bnb
-
-    for name, module in dict(model.named_modules()).items():
-        if isinstance(module, bnb.nn.Linear8bitLt):
-            # convert to dtype
-            new_layer = torch.nn.Linear(
-                module.in_features, module.out_features, module.bias
-            )
-            new_layer.training = module.training
-            state_dict = module.state_dict()
-            # upcast everything to dtype
-            for k, v in state_dict.items():
-                if hasattr(v, "dtype") and v.dtype != dtype:
-                    state_dict[k] = v.to(dtype)
-            new_layer.load_state_dict(state_dict, strict=False)
-            setattr(model, name, new_layer)
-            print("Upcasting layer", name, "to", dtype)
-    return model
-
-
 @click.command()
 @click.option(
-    "--model_name", type=str, default="platypus_dense_er4"
+    "--model_name", type=str, default="platypus_vsmear_e8[xr4,bf16]"
 )  # chainyo/alpaca-lora-7b") #alpaca_vsmear_e12[xr4,t_1]")
 @click.option("--amlt_experiment_name", type=str, default="routing")  # routing")
 @click.option(
     "--model_path",
     type=str,
-    default="/home/v-oostapenko/results/platypus/platypus-13b-right/meta-llama_Llama-2-13b-hf_platypus-13b-right-val/loss=0.5543.ckpt",
+    default=None, #"/home/v-oostapenko/results/platypus/platypus-13b-right/meta-llama_Llama-2-13b-hf_platypus-13b-right-val/loss=0.5543.ckpt",
     help="path to the model",
 )
-@click.option("--batch_size", type=int, default=3)
+@click.option("--batch_size", type=int, default=2)
 @click.option("--wandb_proj", type=str, default="eval")
-@click.option("--n_shots", type=int, default=2)
+@click.option("--n_shots", type=int, default=0)
 @click.option("--use_old_gen_config", type=bool, default=False)
-@click.option("--subsample", type=int, default=100)
+@click.option("--subsample", type=int, default=-1)
 @click.option("--load_in_8bit", type=bool, default=False)
 @click.option("--dtype", type=str, default="float16")
+@click.option("--base_model_prefix", type=str, default="meta-llama") #yahma")
 def run_ni_eval(
     model_name,
     amlt_experiment_name=None,
@@ -134,6 +113,7 @@ def run_ni_eval(
     subsample=-1,
     load_in_8bit=False,
     dtype="float16",
+    base_model_prefix="yahma",
 ):
     if amlt_experiment_name == "hf":
         raise NotImplementedError
@@ -153,7 +133,7 @@ def run_ni_eval(
                 model_name = re.sub(r"(\[)", r"[[]", model_name)
                 model_name = re.sub(r"(\])$", r"[]]", model_name)
                 model_path = glob.glob(
-                    f"{base_model_path}/{amlt_experiment_name}/{model_name}/yahma*/loss=*.ckpt"
+                    f"{base_model_path}/{amlt_experiment_name}/{model_name}/{base_model_prefix}*/loss=*.ckpt"
                 )
                 if len(model_path) == 1:
                     model_path = model_path[0]
