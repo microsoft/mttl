@@ -10,15 +10,17 @@
 
     "predict_batch_size": 2,
     "micro_batch_size": 4,  
-    "train_batch_size": 32,
+    "train_batch_size": 128,
     "max_input_length": 256,    
     "eval_every":400, 
     "num_train_epochs":3,
 
     "model_modifier": "softmoe",
     "modify_modules": ".*attn.*",       
-    "modify_layers": "q_proj|v_proj|k_proj",   
+    "modify_layers": "q_proj|v_proj|k_proj|o_proj",   
     "trainable_param_names": ".*lora_[ab].*|.*selector.*",
-    "wandb_project": "test"
+    "wandb_project": "test",
+    "eval_superni": 1,
+    "eval_mmlu": 1
 
 }

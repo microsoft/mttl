@@ -6,8 +6,10 @@ import math
 class Adapter(nn.Module):
     @property
     def layer_name(self):
-        if not hasattr(self, '__layer_name__'):
-            raise ValueError("Layer name not set, dependency injection not done properly?")
+        if not hasattr(self, "__layer_name__"):
+            raise ValueError(
+                "Layer name not set, dependency injection not done properly?"
+            )
 
         return self.__layer_name__
 
@@ -38,7 +40,7 @@ class LoRA(Adapter):
             self.weight = layer.weight
 
         if hasattr(layer, "bias"):
-            self.bias = layer.bias        
+            self.bias = layer.bias
 
         self.create_for_layer(layer)
         self.reset_parameters()
@@ -50,15 +52,19 @@ class LoRA(Adapter):
             self.forward_fn = self.forward_linear_
         else:
             raise NotImplementedError("LoRA only supports nn.Linear layers.")
-
+        
     def forward_linear_(self, input, **kwargs):
+        layer_out = self.layer(input)
+        input_lora = input.to(self.lora_a.dtype)
         if self.training:
             self.training_steps += 1
-        adapter_out = torch.matmul(torch.matmul(input, self.lora_a), self.lora_b) * self.scaling
+        adapter_out = (
+            torch.matmul(torch.matmul(input_lora, self.lora_a), self.lora_b) * self.scaling
+        )
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
-        return self.layer(input) + adapter_out
+        return layer_out + adapter_out.to(input.dtype)
 
     def reset_parameters(self):
         gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
@@ -95,7 +101,7 @@ class IA3(Adapter):
 class LN(Adapter):
     def __init__(self, config, layer):
         super().__init__()
-        
+
         self.out_features = layer.weight.size(0)
         self.weight = layer.weight
         self.variance_epsilon = layer.variance_epsilon
@@ -147,6 +153,9 @@ class SkilledLoRA(LoRA):
             raise NotImplementedError("SkilledLoRA only supports nn.Linear layers.")
 
     def forward_linear_(self, input, weights):
+
+        layer_out = self.layer(input)
+        input_lora = input.to(self.lora_a.dtype)
         if self.training:
             self.training_steps += 1
 
@@ -161,10 +170,48 @@ class SkilledLoRA(LoRA):
 
         A = A.reshape(bs, self.in_features, self.rank)
         B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
-        adapter_out = input.bmm(A).bmm(B) * self.scaling
+        adapter_out = input_lora.bmm(A).bmm(B) * self.scaling
 
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
 
-        return self.layer(input) + adapter_out
+        return layer_out + adapter_out.to(input.dtype)
+
+
+class SkilledLoRA_MergeLoraAfterOP(SkilledLoRA):
+    def __init__(
+        self,
+        config,
+        layer,
+    ):
+        super().__init__(config, layer)
+        self.merge_after_op = config.merge_after_op
+
+    def forward_linear_(self, input, weights):
+        if not self.merge_after_op:
+            return super().forward_linear_(input, weights)
+
+        layer_out = self.layer(input)
+        input_lora = input.to(self.lora_a.dtype)
+        if self.training:
+            self.training_steps += 1
+
+        bs, _, _ = weights.size()
+        adapter_out = torch.einsum(
+            "bsd,qkdr->bsqkr", (input_lora, self.lora_a)
+        )  # bs x n_splits x n_skills x rank")
+        adapter_out = torch.einsum(
+            "bsqkr,qkrd->bsqkd", (adapter_out, self.lora_b)
+        )  # bs x seq x n_splits x n_skills x D
+        adapter_out = torch.einsum(
+            "bsqkd,bqk->bsd", (adapter_out, weights)
+        )  # bs x seq x n_splits x D
+        adapter_out *= (
+            self.scaling
+        )  # (adapter_out[0,:,:]*weights[0].unsqueeze(0).unsqueeze(-1)).sum(-2)[0][0] like adapter_out[0][0]
+        warmup = min(self.training_steps / 10_000, 1)
+        if self.use_warmup:
+            adapter_out = adapter_out * warmup
+
+        return layer_out + adapter_out.to(input.dtype)
