@@ -24,7 +24,7 @@ def tokenizer_enforces_eos(tokenizer):
 
 def get_tokenizer(config, for_generation=False):
     if "llama" in config.model:
-        tokenizer = LlamaTokenizerFast.from_pretrained(config.model)
+        tokenizer = LlamaTokenizer.from_pretrained(config.model)
         tokenizer.model_max_length = int(1e9)
         tokenizer.pad_token_id = 0 
         if not config.model_family == "gpt":
