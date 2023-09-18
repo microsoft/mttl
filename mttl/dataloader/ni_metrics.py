@@ -164,7 +164,10 @@ def compute_ni_metrics(
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--predictions", required=True, help="Path to predictions file."
+        "--prediction_file",
+        required=True,
+        help="Jsonl file with each line corresponding to a prediction. "
+        "Each json object should have an `id` and a `prediction` key.",
     )
     parser.add_argument(
         "--track",
@@ -173,87 +176,101 @@ def parse_args():
         help="default track or xlingual track. For xlingual, we need to use a different tokenizer.",
     )
     parser.add_argument(
-        "--compute_per_category_metrics",
-        action="store_true",
-        help="Compute metrics on every evaluation category.",
+        "--reference_file",
+        required=False,
+        help="Jsonl file with each line corresponding to a reference. "
+        "Each json object should have an `id` and a `references` key. "
+        "`task_id`, `task_category` and `task_track` are optional, which will be used to "
+        "compute the per-task performance, per-category performance and the performance for default (english) / xlingual Tracks.",
     )
     parser.add_argument(
         "--compute_per_task_metrics",
         action="store_true",
         help="Compute metrics on every evaluation task.",
     )
+    parser.add_argument("--output_file", help="Jsonl file to write the results to.")
+
     return parser.parse_args()
+
+
+def eval_instances(args):
+    eval_instances = {}
+    with open(args.reference_file) as fin:
+        for line in fin:
+            instance = json.loads(line)
+            # if track is not provided in the refernce file, we use set the track to `default` and use the default tokenizer in rouge-score.
+            if "track" not in instance:
+                instance["track"] = "default"
+            eval_instances[instance["id"]] = instance
+
+    all_predictions = {}
+    with open(args.prediction_file) as fin:
+        for line in fin:
+            prediction = json.loads(line)
+            id = prediction["id"]
+            task = prediction["task_name"]
+            # if task in tasks:
+            prediction = prediction["prediction"]
+            if "Input:" in prediction:
+                prediction = prediction.split("Input:")[0]
+            all_predictions[id] = prediction.strip()
+
+    all_results = {}
+    track = args.track
+    print("Evaluating track:", track)
+    instance_ids = [
+        id for id, instance in eval_instances.items() if instance["track"] == track
+    ]
+    references = [eval_instances[id]["references"] for id in instance_ids]
+    predictions = []
+    instructions = []
+    missing_predictions = []
+    for id in instance_ids:
+        if id in all_predictions:
+            predictions.append(all_predictions[id])
+        else:
+            missing_predictions.append(id)
+            predictions.append("")
+    if missing_predictions:
+        print(
+            f"No prediction for {len(missing_predictions)} instances. Use empty string as prediction."
+        )
+
+    results = compute_metrics(predictions, references, xlingual=(track == "xlingual"))
+    print("======== Overall Metrics ========")
+    for metric, value in results.items():
+        print(f"{metric}: {value}")
+        all_results[f"{metric}_{track}_track"] = value
+
+    if "task_category" in eval_instances[instance_ids[0]]:
+        categories = [
+            "_".join(eval_instances[id]["task_category"].lower().split())
+            for id in instance_ids
+        ]
+        results_per_category = compute_grouped_metrics(
+            predictions, references, categories, xlingual=(track == "xlingual")
+        )
+        print("======== Metrics per Category ========")
+        for metric, value in results_per_category.items():
+            print(f"{metric}: {value}")
+            all_results[f"{metric}_{track}_track"] = value
+
+    if "task_id" in eval_instances[instance_ids[0]]:
+        tasks = [eval_instances[id]["task_id"] for id in instance_ids]
+        results_per_task = compute_grouped_metrics(
+            predictions, references, tasks, xlingual=(track == "xlingual")
+        )
+        print("======== Metrics per Task ========")
+        for metric, value in results_per_task.items():
+            print(f"{metric}: {value}")
+            all_results[f"{metric}_{track}_track"] = value
+
+    if args.output_file:
+        with open(args.output_file, "w") as fout:
+            json.dump(all_results, fout, indent=2)
+    return all_results
 
 
 if __name__ == "__main__":
     args = parse_args()
-    with open(args.predictions) as fin:
-        examples = [json.loads(l) for l in fin]
-
-    predictions = [e["prediction"] for e in examples]
-    references = [e["Instance"]["output"] for e in examples]
-    tasks = []
-    for e in examples:
-        if e["Task"] == "task121_atomic_question_rewriting":
-            e["Task"] = "task121_zest_question_rewriting"
-        tasks.append(e["Task"])
-
-    results = compute_metrics(
-        predictions, references, xlingual=args.track == "xlingual"
-    )
-    print("======== Overall Metrics ========")
-    print("all_rougeL", results["rougeL"])
-    print("all_EM", results["exact_match"])
-    print()
-
-    category_metrics = [
-        ("Textual Entailment", "exact_match"),
-        ("Cause Effect Classification", "exact_match"),
-        ("Coreference Resolution", "exact_match"),
-        ("Dialogue Act Recognition", "exact_match"),
-        ("Answerability Classification", "exact_match"),
-        ("Word Analogy", "exact_match"),
-        ("Overlap Extraction", "rougeL"),
-        ("Keyword Tagging", "rougeL"),
-        ("Question Rewriting", "rougeL"),
-        ("Title Generation", "rougeL"),
-        ("Data to Text", "rougeL"),
-        ("Grammar Error Correction", "rougeL"),
-    ]
-    category_metrics = {
-        "_".join(category.lower().split()): metric
-        for category, metric in category_metrics
-    }
-
-    if args.compute_per_category_metrics:
-        print("======== Metrics per category ========")
-        task_category = {}
-        for task in set(tasks):
-            with open(os.path.join("./data/tasks/", task + ".json")) as fin:
-                task_data = json.load(fin)
-                task_category[task] = "_".join(
-                    task_data["Categories"][0].lower().split()
-                )
-        categories = [task_category[e["Task"]] for e in examples]
-        results.update(
-            compute_grouped_metrics(
-                predictions, references, categories, xlingual=args.track == "xlingual"
-            )
-        )
-
-        for category, metric in category_metrics.items():
-            # category = "_".join(category.lower().split())
-            if f"{metric}_for_{category}" in results:
-                print(f"{metric}_for_{category}", results[f"{metric}_for_{category}"])
-        print()
-
-    if args.compute_per_task_metrics:
-        print("======== Metrics per task ========")
-        results_by_task = compute_grouped_metrics(
-            predictions, references, tasks, xlingual=args.track == "xlingual"
-        )
-        for task in sorted(list(set(tasks))):
-            category = task_category[task]
-            metric = category_metrics[category]
-            print(task, results_by_task[f"{metric}_for_{task}"])
-        print()
+    all_results = eval_instances(args)

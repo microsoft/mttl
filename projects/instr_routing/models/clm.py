@@ -18,7 +18,6 @@ from mttl.models.utils import (
 from mttl.models.get_optimizer import get_optimizer
 from dataclasses import dataclass, field
 
-
 @dataclass
 class AugmentedRoutingInfo(RoutingInfo):
     # save oracle routings during generation
@@ -88,11 +87,13 @@ class CLM(EfficientCheckpointModule):
         self.accumulate_metrics_batch = defaultdict(list)
 
         if kwargs.get("model_object") is None:
+            load_in_8bit = kwargs.get("load_in_8bit", False)
+
             if "llama" in self.hparams.model:
                 model_object = LlamaForCausalLM.from_pretrained(
                     self.hparams.model,
-                    load_in_8bit=self.hparams.load_in_8bit,
-                    torch_dtype=torch.float32,
+                    load_in_8bit=load_in_8bit,
+                    torch_dtype=torch.float32 if load_in_8bit else torch.float16,
                     device_map="auto",
                 )
             else:
@@ -101,7 +102,7 @@ class CLM(EfficientCheckpointModule):
             if model_object.config.vocab_size != len(self.tokenizer):
                 model_object.resize_token_embeddings(len(self.tokenizer))
 
-            if self.hparams.load_in_8bit:
+            if load_in_8bit:
                 model_object = prepare_model_for_kbit_training(model_object)
 
             self.model = modify_transformer(model_object, self.hparams)
@@ -116,6 +117,14 @@ class CLM(EfficientCheckpointModule):
     @property
     def generation_config(self):
         return self.model.generation_config
+
+    @property
+    def generation_config_old(self):
+        gen_config = self.model.generation_config
+        gen_config.do_sample = False
+        gen_config.temperature = 0.7
+        gen_config.max_new_tokens=128
+        return gen_config
 
     def gather_auxiliary_losses(self):
         # get some losses from the model if it is a router
