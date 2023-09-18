@@ -233,20 +233,21 @@ class DataCollatorForNI(DefaultCollator):
 
         output_batch = {}
 
-           
         labels_full_seq = [ex["Instance"]["output"] for ex in batch]
         labels_rand = [random.choice(ex["Instance"]["output"]) for ex in batch]
         instance_ids = [ex["Instance"]["id"] for ex in batch]
-        task_categoreis = [ex["Categories"] for ex in batch]
+        task_categories = [ex["Categories"] for ex in batch]
         task_identifiers = [ex["Task"] for ex in batch]
+
         output_batch = (
             self.prepare_inputs_for_gpt_family(sources, labels_rand)
             if self.model_family == "gpt"
             else self.prepare_inputs_for_seq2seq_family(sources, labels_rand)
         )
 
-        task_names = [ex["Task"] for ex in batch]
-        output_batch["task_names"] = task_names
+        output_batch["task_names"] = task_identifiers
+        output_batch["task_identifiers"] = task_identifiers # sni task id like e.g. task1356_xlsum_title_generation
+        output_batch["task_categories"] = task_categories
         output_batch["task_ids"] = torch.LongTensor(
             [self.task_to_id[task] for task in task_names]
         ) # task ids potentially used in routing
@@ -255,8 +256,6 @@ class DataCollatorForNI(DefaultCollator):
         output_batch["hashes"] = [hash_example(i + o) for i, o in zip(sources, labels_rand)]
         output_batch["instruction_hashes"] = [hash_example(i) for i in sources]
         output_batch["instance_ids"] = instance_ids
-        output_batch["task_categories"] = task_categoreis
-        output_batch["task_identifiers"] = task_identifiers # sni task id like e.g. task1356_xlsum_title_generation
         return output_batch
 
 

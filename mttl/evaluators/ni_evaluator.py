@@ -12,6 +12,7 @@ from mttl.dataloader.ni_metrics import compute_metrics, compute_grouped_metrics
 from mttl.models.utils import transfer_batch_to_device
 from mttl.evaluators.base import mean_stderr
 
+
 def decode(preds, tokenizer):
     preds[preds == -100] = tokenizer.pad_token_id
     preds = tokenizer.batch_decode(
@@ -31,10 +32,10 @@ def compute_aggregation_and_maybe_save(
     print("======== Overall Metrics ========")
     for metric, value in results.items():
         print(f"{metric}: {value}")
-        all_results[f"{metric}_{track}_track"] = value
+        all_results[f"{metric}"] = value
 
     if "task_category" in eval_instances[instance_ids[0]]:
-        all_results['per_category']={}
+        all_results["per_category"] = {}
         categories = [
             "_".join(eval_instances[id]["task_category"].lower().split())
             for id in instance_ids
@@ -45,10 +46,10 @@ def compute_aggregation_and_maybe_save(
         print("======== Metrics per Category ========")
         for metric, value in results_per_category.items():
             print(f"{metric}: {value}")
-            all_results['per_category'][f"{metric}_{track}_track"] = value
+            all_results["per_category"][f"{metric}"] = value
 
     if "task_id" in eval_instances[instance_ids[0]]:
-        all_results['per_task'] = {}
+        all_results["per_task"] = {}
         tasks = [eval_instances[id]["task_id"] for id in instance_ids]
         results_per_task = compute_grouped_metrics(
             predictions, references, tasks, xlingual=(track == "xlingual")
@@ -56,7 +57,7 @@ def compute_aggregation_and_maybe_save(
         print("======== Metrics per Task ========")
         for metric, value in results_per_task.items():
             print(f"{metric}: {value}")
-            all_results['per_task'][f"{metric}_{track}_track"] = value
+            all_results["per_task"][f"{metric}"] = value
 
     if output_file:
         with open(output_file, "w") as fout:
@@ -113,12 +114,12 @@ class NIEvaluator(object):
             model = model.module
 
         all_predictions = []
-        task_names = []
+        all_task_names = []
         all_rougeL = []
 
         dataloader = self.datamodule.test_dataloader(subsample)
         if not self.pred_output_file_path is None:
-            path = re.sub(r'/[^/]*$', '', self.pred_output_file_path)
+            path = re.sub(r"/[^/]*$", "", self.pred_output_file_path)
             Path(path).mkdir(parents=True, exist_ok=True)
 
         pbar = tqdm.tqdm(
@@ -127,15 +128,17 @@ class NIEvaluator(object):
         )
         eval_instances = {}
         for step, batch in pbar:
-            task_name = batch.pop("task_names", None)
+            task_name = batch.pop("task_namess", None)
             batch.pop("input_texts", None)
             # we use labels texts here for evaluation, because some tokenizers do not skip
             # pad token when decoding, even if skip_special_tokens=True
             labels_texts = batch.pop("labels_full_seq", None)
             task_ids = batch.pop("task_identifiers", None)
             task_categories = batch.pop("task_categories", None)
+
             extra_kwargs = {}
             max_length = self.config.max_output_length  # default output length for NI
+
             for id, category, label_text, task_id in zip(
                 batch["instance_ids"], task_categories, labels_texts, task_ids
             ):
@@ -146,6 +149,7 @@ class NIEvaluator(object):
                     "task_category": category[0],
                     "task_id": task_id,
                 }
+
             if self.config.model_family == "gpt":
                 max_length += batch["input_ids"].shape[-1]
 
@@ -157,9 +161,7 @@ class NIEvaluator(object):
                     predictions = model.generate(
                         batch,
                         max_length=max_length,
-                        generation_config=model.generation_config
-                            if not self.config.use_old_gen_config
-                            else model.generation_config_old,
+                        generation_config=model.generation_config,
                         return_dict_in_generate=True,
                         output_scores=True,
                         **extra_kwargs,
@@ -178,25 +180,17 @@ class NIEvaluator(object):
             predictions = predictions.sequences
             if self.config.model_family == "gpt":
                 predictions = predictions[:, batch["input_ids"].shape[-1] :]
+
             predictions = decode(predictions, tokenizer)
-
             references = labels_texts
-
-            # If we are in a multiprocess environment, the last batch has duplicates
-            # if step == len(dataloader) - 1:
-            #     predictions = predictions[: len(dataloader.dataset) - samples_seen]
-            #     references = references[: len(dataloader.dataset) - samples_seen]
-            #     task_name = task_name[: len(dataloader.dataset) - samples_seen]
-            # else:
-            samples_seen += len(references)
-
+            
             all_predictions += predictions
-            task_names += task_name
+            all_task_names += task_names
 
             eval_metrics = compute_metrics(predictions, references, reduction="none")
             all_rougeL.append(np.mean(eval_metrics["rougeL"]))
             pbar.set_description(
-                f"Task: {task_name[0] if task_name else None}, rougeL: {np.mean(all_rougeL):.4f}"
+                f"Task: {task_names[0] if task_names else None}, rougeL: {np.mean(all_rougeL):.4f}"
             )
 
             # save generations to a file
@@ -205,7 +199,7 @@ class NIEvaluator(object):
                     for p, id_, tn, r, rouge in zip(
                         predictions,
                         batch["instance_ids"],
-                        task_name,
+                        task_names,
                         references,
                         eval_metrics["rougeL"],
                     ):
@@ -220,23 +214,22 @@ class NIEvaluator(object):
 
         instance_ids = [id for id, instance in eval_instances.items()]
         all_references = [eval_instances[id]["references"] for id in instance_ids]
-        eval_metrics = compute_metrics(
-            all_predictions, all_references
-        )
+        eval_metrics = compute_metrics(all_predictions, all_references)
 
         if was_train:
             model.train()
-            
+
         all_results = compute_aggregation_and_maybe_save(
             eval_metrics,
             all_predictions,
             all_references,
             eval_instances,
             track="default",
-            output_file=None #self.pred_output_file_path.replace(".jsonl", "_metrics.json"),
         )
-        all_results["all"]={}
-        all_results["all"]["mean"]=all_results["rougeL_default_track"]
+        all_results["all"] = {}
+        all_results["all"]["mean"] = all_results["rougeL"]
         if "per_task" in all_results:
-            all_results["all"]["stderr"] = mean_stderr([v for k, v in all_results["per_task"].items() if "rougeL" in k])
+            all_results["all"]["stderr"] = mean_stderr(
+                [v for k, v in all_results["per_task"].items() if "rougeL" in k]
+            )
         return all_results
