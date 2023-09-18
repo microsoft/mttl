@@ -35,7 +35,6 @@ class MMLUEvaluator(object):
             model.eval()
 
         tokenizer = self.datamodule.tokenizer
-        samples_seen = 0
 
         # DDP
         if hasattr(model, "module"):
@@ -89,10 +88,18 @@ class MMLUEvaluator(object):
             probs = (
                 torch.stack(
                     [
-                        logits[:, tokenizer("A", add_special_tokens=False).input_ids[-1]],
-                        logits[:, tokenizer("B", add_special_tokens=False).input_ids[-1]],
-                        logits[:, tokenizer("C", add_special_tokens=False).input_ids[-1]],
-                        logits[:, tokenizer("D", add_special_tokens=False).input_ids[-1]],
+                        logits[
+                            :, tokenizer("A", add_special_tokens=False).input_ids[-1]
+                        ],
+                        logits[
+                            :, tokenizer("B", add_special_tokens=False).input_ids[-1]
+                        ],
+                        logits[
+                            :, tokenizer("C", add_special_tokens=False).input_ids[-1]
+                        ],
+                        logits[
+                            :, tokenizer("D", add_special_tokens=False).input_ids[-1]
+                        ],
                     ],
                     dim=-1,
                 )
@@ -103,14 +110,6 @@ class MMLUEvaluator(object):
             )
             predictions = [{0: "A", 1: "B", 2: "C", 3: "D"}[p] for p in probs]
             references = labels_text
-
-            # If we are in a multiprocess environment, the last batch has duplicates
-            # if step == len(dataloader) - 1:
-            #     predictions = predictions[: len(dataloader.dataset) - samples_seen]
-            #     references = references[: len(dataloader.dataset) - samples_seen]
-            #     task_name = task_name[: len(dataloader.dataset) - samples_seen]
-            # else:
-            samples_seen += len(references)
 
             all_predictions += predictions
             all_references += references

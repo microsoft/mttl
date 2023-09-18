@@ -107,7 +107,6 @@ class NIEvaluator(object):
             model.eval()
 
         tokenizer = self.datamodule.tokenizer
-        samples_seen = 0
 
         # DDP
         if hasattr(model, "module"):
@@ -128,7 +127,7 @@ class NIEvaluator(object):
         )
         eval_instances = {}
         for step, batch in pbar:
-            task_name = batch.pop("task_namess", None)
+            task_names = batch.pop("task_names", None)
             batch.pop("input_texts", None)
             # we use labels texts here for evaluation, because some tokenizers do not skip
             # pad token when decoding, even if skip_special_tokens=True
@@ -183,7 +182,7 @@ class NIEvaluator(object):
 
             predictions = decode(predictions, tokenizer)
             references = labels_texts
-            
+
             all_predictions += predictions
             all_task_names += task_names
 

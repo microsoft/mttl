@@ -48,7 +48,7 @@ class AlpacaDataModule(LightningDataModule):
         self,
         config,
     ):
-        super().__init__() 
+        super().__init__()
         self.config = config
         self.tokenizer = get_tokenizer(config)
         self.collate_fn = DefaultCollator(
@@ -80,14 +80,14 @@ class AlpacaDataModule(LightningDataModule):
 
         self.train_dataset, self.dev_dataset = torch.utils.data.random_split(
             dataset,
-            [           
+            [
                 n_tr_samples,
                 len(dataset) - n_tr_samples,
             ],
             generator=rng,
         )
-        self.test_set = self.dev_dataset        
-        
+        self.test_set = self.dev_dataset
+
         print("Training steps:", len(self.train_dataloader()))
         print("Validation steps:", len(self.val_dataloader()))
 

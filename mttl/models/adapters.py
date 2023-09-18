@@ -6,8 +6,10 @@ import math
 class Adapter(nn.Module):
     @property
     def layer_name(self):
-        if not hasattr(self, '__layer_name__'):
-            raise ValueError("Layer name not set, dependency injection not done properly?")
+        if not hasattr(self, "__layer_name__"):
+            raise ValueError(
+                "Layer name not set, dependency injection not done properly?"
+            )
 
         return self.__layer_name__
 
@@ -38,7 +40,7 @@ class LoRA(Adapter):
             self.weight = layer.weight
 
         if hasattr(layer, "bias"):
-            self.bias = layer.bias        
+            self.bias = layer.bias
 
         self.create_for_layer(layer)
         self.reset_parameters()
@@ -53,25 +55,27 @@ class LoRA(Adapter):
 
     def foward_layer(self, input):
         dtype_input = input.dtype
-        dtype_layer=self.layer.weight.dtype
+        dtype_layer = self.layer.weight.dtype
         if dtype_input != dtype_layer and dtype_layer != torch.int8:
             input = input.to(dtype_layer)
-        out = self.layer(input) # downcast input to layer dtype
-        out = out.to(dtype_input) # upcast output to input dtype
+        out = self.layer(input)  # downcast input to layer dtype
+        out = out.to(dtype_input)  # upcast output to input dtype
         return out
-    
-    def forward_linear_(self, input, **kwargs):        
+
+    def forward_linear_(self, input, **kwargs):
         iput_dt = input.dtype
-        input = input.to(torch.float32) # upcast input
+        input = input.to(torch.float32)  # upcast input
         if self.training:
             self.training_steps += 1
-        adapter_out = torch.matmul(torch.matmul(input, self.lora_a), self.lora_b) * self.scaling
+        adapter_out = (
+            torch.matmul(torch.matmul(input, self.lora_a), self.lora_b) * self.scaling
+        )
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
-            
+
         output = self.foward_layer(input) + adapter_out
-        output = output.to(iput_dt) # downcast output if neeed
+        output = output.to(iput_dt)  # downcast output if neeed
         return output
 
     def reset_parameters(self):
@@ -109,7 +113,7 @@ class IA3(Adapter):
 class LN(Adapter):
     def __init__(self, config, layer):
         super().__init__()
-        
+
         self.out_features = layer.weight.size(0)
         self.weight = layer.weight
         self.variance_epsilon = layer.variance_epsilon
@@ -159,7 +163,7 @@ class SkilledLoRA(LoRA):
             self.forward_fn = self.forward_linear_
         else:
             raise NotImplementedError("SkilledLoRA only supports nn.Linear layers.")
-    
+
     def forward_linear_(self, input, weights):
         if self.training:
             self.training_steps += 1

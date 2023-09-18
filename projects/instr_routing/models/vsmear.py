@@ -99,7 +99,7 @@ class SMEARRouter(RoutingSelector):
         self.prior_router.bias.data.fill_(0)
 
         self.metrics = Metrics()
-    
+
     @torch.no_grad()
     def apply_center_update(self, routes):
         if self.training:
@@ -107,7 +107,7 @@ class SMEARRouter(RoutingSelector):
                 self.center * (1 - self.router_center_momentum)
                 + torch.mean(routes, dim=0, keepdim=True) * self.router_center_momentum
             )
-            
+
     def route_maybe_center(
         self, input, router, router_ln, temperature=1.0, center=False
     ):
@@ -260,11 +260,10 @@ class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
         else:
             self.selector = selector
 
-    
     def forward(self, input):
         iput_dt = input.dtype
         input = input.to(torch.float32)
-        
+
         task_id = self.routing_infos.task_ids
         repeat = input.size(0) // task_id.size(0)
 
@@ -476,8 +475,8 @@ class AuxRoutingLoRALinear_MergeAfterOP(SkilledLoRA_MergeLoraAfterOP, RoutingMix
 
     def forward(self, input):
         iput_dt = input.dtype
-        input = input.to(torch.float32) # upcast input
-        
+        input = input.to(torch.float32)  # upcast input
+
         task_id = self.routing_infos.task_ids
         repeat = input.size(0) // task_id.size(0)
 
@@ -492,8 +491,10 @@ class AuxRoutingLoRALinear_MergeAfterOP(SkilledLoRA_MergeLoraAfterOP, RoutingMix
             mixing_weights = torch.ones(
                 bs, self.n_splits, self.n_skills, device=input.device, dtype=input.dtype
             )
-        output = super(SkilledLoRA_MergeLoraAfterOP, self).forward(input, mixing_weights)
-        output = output.to(iput_dt) # downcast output
+        output = super(SkilledLoRA_MergeLoraAfterOP, self).forward(
+            input, mixing_weights
+        )
+        output = output.to(iput_dt)  # downcast output
         return output
 
 
@@ -519,6 +520,7 @@ class VSMEARRouterExperimentalXR1(SMEARRouter):
 
     def forward(self, routing_infos, input: torch.Tensor):
         return super().forward(routing_infos, input)
+
 
 @register_selector("smear_per_token")
 class VSMEARRouterExperimentalXR1(SMEARRouter):
@@ -559,6 +561,7 @@ def modify_with_vsmear_reg(transformer, config):
         raise NotImplementedError(
             f"Adapter type {config.adapter_type} not implemented for vsmear modifier."
         )
+
 
 @register_modifier("smear_xr1_pt")
 def modify_with_vsmear(transformer, config):
