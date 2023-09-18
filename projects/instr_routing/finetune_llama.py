@@ -17,6 +17,7 @@ from mttl.datamodule.platypus_module import PlatypusModule
 from mttl.datamodule.flan100k_module import Flan100kModule
 from mttl.utils import get_mlf_logger, setup_logging, logger
 from mttl.dist_utils import is_main_process
+from mttl.models.modifiers.routing import RoutingSelector
 
 # register models
 import models.vsmear  # noqa: F401
@@ -39,35 +40,36 @@ def remove_non_serializable(d):
             del d[k]
 
 
-def eval_superni(best_model, args, tb_logger, trainer, n_shot=0):
+def eval_superni(best_model, args, tb_logger, trainer, n_shot=0, sufix="", subsample=-1):
     from eval_ni import eval_ni
 
-    logger.info("Evaluating on super NI")
+    logger.info(f"Evaluating on super NI {sufix}")
     # all_results_original -- dict of results on sni eval obtained by running the original evaluate.py
     rougel_ni_all = eval_ni(
         args,
         best_model,
         nshot=n_shot,
+        subsample=subsample,
         max_input_length=-1,
         data_dir=os.environ["NI_DATA_DIR"],
     )
     rougel_ni = rougel_ni_all["all"]["mean"]
     if wandb.run is not None:
-        wandb.log({f"rouge_L_super_ni_nshot_{n_shot}sht": rougel_ni})
+        wandb.log({f"rouge_L_super_ni_nshot_{n_shot}sht{sufix}": rougel_ni})
         # per task
         data = [
             [label, val]
             for (label, val) in rougel_ni_all["per_task"].items()
             if "rougeL" in label
         ]
-        table = wandb.Table(data=data, columns=["task_sni", "mean_rougeL"])
+        table = wandb.Table(data=data, columns=["task_sni", f"mean_rougeL{n_shot}sht{sufix}"])
         wandb.log(
             {
-                f"sni_per_task_rougeL_{n_shot}sht": wandb.plot.bar(
+                f"sni_per_task_rougeL_{n_shot}sht{sufix}": wandb.plot.bar(
                     table,
                     "task_sni",
-                    "mean_rougeL",
-                    title=f"sni_per_task_rougeL_{n_shot}sht",
+                    f"mean_rougeL{n_shot}sht{sufix}",
+                    title=f"sni_per_task_rougeL_{n_shot}sht{sufix}",
                 )
             }
         )
@@ -77,25 +79,65 @@ def eval_superni(best_model, args, tb_logger, trainer, n_shot=0):
             for (label, val) in rougel_ni_all["per_category"].items()
             if "rougeL" in label
         ]
-        table2 = wandb.Table(data=data, columns=["category_sni", "mean_rougeL"])
+        table2 = wandb.Table(data=data, columns=["category_sni", f"mean_rougeL{n_shot}sht{sufix}"])
         wandb.log(
             {
-                f"sni_per_category_rougeL_{n_shot}sht": wandb.plot.bar(
+                f"sni_per_category_rougeL_{n_shot}sht{sufix}": wandb.plot.bar(
                     table2,
                     "category_sni",
-                    "mean_rougeL",
-                    title=f"sni_per_category_rougeL_{n_shot}sht",
+                    f"mean_rougeL{n_shot}sht{sufix}",
+                    title=f"sni_per_category_rougeL_{n_shot}sht{sufix}",
                 )
             }
         )
 
     if args.tensorboard:
         tb_logger.experiment.add_scalar(
-            f"tasks/sni_{n_shot}sht", rougel_ni, trainer.global_step
+            f"tasks/sni_{n_shot}sht{sufix}", rougel_ni, trainer.global_step
         )
-    with open(os.path.join(args.output_dir, f"sni_results_{n_shot}sht.json"), "w") as f:
+    with open(
+        os.path.join(args.output_dir, f"sni_results_{n_shot}sht{sufix}.json"), "w"
+    ) as f:
         json.dump(rougel_ni_all, f, indent=2)
-    logger.info("SuperNI RougeL_{}sht: {:.2f}".format(n_shot, rougel_ni))
+    logger.info("SuperNI RougeL_{}sht{}: {:.2f}".format(n_shot, sufix, rougel_ni))
+
+
+def eval_downstream(best_model, args, tb_logger, trainer, sufix="", subsample=-1):
+    if args.eval_mmlu:
+        from eval_mmlu import eval_mmlu
+
+        logger.info("Evaluating on MMLU")
+        em_mmlu_all = eval_mmlu(
+            args,
+            best_model,
+            subsample=subsample,
+            data_dir=os.environ["MMLU_DATA_DIR"],
+        )
+        mmlu_em = em_mmlu_all["all"]["mean"]
+        if wandb.run is not None:
+            wandb.log({f"mmlu_acc{sufix}": mmlu_em})
+            # report per task peformance
+            data = [[label, val["mean"]] for (label, val) in em_mmlu_all.items()]
+            table = wandb.Table(data=data, columns=["task", "mean_acc"])
+            wandb.log(
+                {
+                    f"mmlu_per_task_acc_{sufix}": wandb.plot.bar(
+                        table, "task", "mean_acc", title="mmlu_per_task_acc"
+                    )
+                }
+            )
+
+        if args.tensorboard:
+            tb_logger.experiment.add_scalar(
+                f"tasks/mmlu{sufix}", mmlu_em, trainer.global_step
+            )
+        with open(os.path.join(args.output_dir, "mmlu_results.json"), "w") as f:
+            json.dump(em_mmlu_all, f, indent=2)
+        logger.info("MMLU accuracy{}: {:.2f}".format(sufix, mmlu_em))
+
+    if args.eval_superni:
+        eval_superni(best_model, args, tb_logger, trainer, n_shot=0, sufix=sufix, subsample=subsample)
+        eval_superni(best_model, args, tb_logger, trainer, n_shot=2, sufix=sufix, subsample=subsample)
 
 
 def run_multitask(args):
@@ -210,15 +252,15 @@ def run_multitask(args):
     ckpt_path = "best" if path_best_model else "last"
 
     if args.load_in_8bit:
-        # to prevent final spike in valid loss, we first load the model and path is to the evaluator
-        # there is a bug with pl for 8bit model wjen calling .cuda() on it, to("cuda") works
+        # To prevent final spike in valid loss, we first load the model and path is to the evaluator
+        # There is a bug with pl for 8bit model when calling .cuda() on it, to("cuda") works however.
         best_model = CLM.load_from_checkpoint(
             path_best_model, tokenizer=dm.tokenizer
         ).to("cuda")
         trainer.validate(dataloaders=dm, model=best_model)
     else:
         trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
-
+    
     if is_main_process():
         if path_best_model:
             del module
@@ -233,41 +275,12 @@ def run_multitask(args):
             torch.cuda.empty_cache()
             best_model = module.to("cuda")
 
-        if args.eval_mmlu:
-            from eval_mmlu import eval_mmlu
-
-            logger.info("Evaluating on MMLU")
-            em_mmlu_all = eval_mmlu(
-                args,
-                best_model,
-                data_dir=os.environ["MMLU_DATA_DIR"],
-            )
-            mmlu_em = em_mmlu_all["all"]["mean"]
-            if wandb.run is not None:
-                wandb.log({"mmlu_acc": mmlu_em})
-                # report per task peformance
-                data = [[label, val["mean"]] for (label, val) in em_mmlu_all.items()]
-                table = wandb.Table(data=data, columns=["task", "mean_acc"])
-                wandb.log(
-                    {
-                        "mmlu_per_task_acc": wandb.plot.bar(
-                            table, "task", "mean_acc", title="mmlu_per_task_acc"
-                        )
-                    }
-                )
-
-            if args.tensorboard:
-                tb_logger.experiment.add_scalar(
-                    "tasks/mmlu", mmlu_em, trainer.global_step
-                )
-            with open(os.path.join(args.output_dir, "mmlu_results.json"), "w") as f:
-                json.dump(em_mmlu_all, f, indent=2)
-            logger.info("MMLU accuracy: {:.2f}".format(mmlu_em))
-
-        if args.eval_superni:
-            tb_logger = None if not args.tensorboard else tb_logger
-            eval_superni(best_model, args, tb_logger, trainer, n_shot=0)
-            eval_superni(best_model, args, tb_logger, trainer, n_shot=2)
+        tb_logger = None if not args.tensorboard else tb_logger
+        eval_downstream(best_model, args, tb_logger, trainer, sufix="")
+        # eval downstream with averaged model
+        success = best_model.model.switch_selector_to_average(selector_to_replace=RoutingSelector, config=args) if hasattr(best_model.model, "switch_selector_to_average") else False
+        if success and args.eval_avg:
+            eval_downstream(best_model, args, tb_logger, trainer, sufix="_avg_exps")
 
 
 if __name__ == "__main__":

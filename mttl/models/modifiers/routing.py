@@ -70,6 +70,7 @@ class RouterWrapper:
     @classmethod
     def switch_selector_to_average(cls, object, selector_to_replace, **kwargs):
         """Switches PolytroponSelector to AverageSelector."""
+        success = False
         for name, module in object.named_modules():
             for name, inner_mod in module.named_children():
                 if isinstance(inner_mod, selector_to_replace):
@@ -79,6 +80,8 @@ class RouterWrapper:
                         name,
                         AverageSelector(**kwargs),
                     )
+                    success = True
+        return success
 
     @classmethod
     def get_adapters(cls, object):

@@ -437,7 +437,7 @@ class AuxRoutingLoRALinear_MergeAfterOP(SkilledLoRA_MergeLoraAfterOP, RoutingMix
             self.routing_infos.repeat_interleave(repeat)
 
         if self.selector is not None:
-            mixing_weights = self.selector(self.routing_infos, input=input)
+            mixing_weights = self.selector(self.routing_infos, input=input).to(input.device)
         else:
             bs = input.size(0)
             mixing_weights = torch.ones(

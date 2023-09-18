@@ -38,6 +38,7 @@ class RoutingConfig(Config):
         self.eval_superni = False
         self.eval_mmlu = False
         self.eval_batches = -1
+        self.eval_avg = True
 
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
