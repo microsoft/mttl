@@ -5,7 +5,9 @@ from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 from datasets import load_dataset
-
+import json
+import tqdm
+import os
 import random
 import string
 from typing import Optional
@@ -100,7 +102,7 @@ class DataCollatorForNI(DefaultCollator):
 
             task_input = ""
             # add the input first.
-            task_input += "Now complete the following example -\n"
+            # task_input += "Now complete the following example -\n"
             task_input += f"Input: {instance['Instance']['input'].strip()}"
             if not task_input[-1] in string.punctuation:
                 task_input += "."
@@ -114,12 +116,12 @@ class DataCollatorForNI(DefaultCollator):
             definition = ""
             if add_task_definition:
                 if isinstance(instance["Definition"], list):
-                    definition = "Definition: " + instance["Definition"][0].strip()
+                    definition = "Task definition: " + instance["Definition"][0].strip()
                 else:
-                    definition = "Definition: " + instance["Definition"].strip()
+                    definition = "Task definition: " + instance["Definition"].strip()
                 if not definition[-1] in string.punctuation:
                     definition += "."
-                definition += "\n\n"
+                definition += "\n"
 
             # try to add positive examples.
             pos_examples = []
@@ -146,7 +148,7 @@ class DataCollatorForNI(DefaultCollator):
                         pos_example_str += "."
                     pos_example_str += "\n"
                 pos_example_str += "\n"
-                if (
+                if self.max_input_length < 0 or (
                     len(
                         self.tokenizer(
                             definition
@@ -210,7 +212,10 @@ class DataCollatorForNI(DefaultCollator):
                 + task_input
             )
             tokenized_source = self.tokenizer(source)["input_ids"]
-            if len(tokenized_source) <= self.max_input_length:
+            if (
+                len(tokenized_source) <= self.max_input_length
+                or self.max_input_length < 0
+            ):
                 sources.append(source)
             else:
                 tokenized_task_input = self.tokenizer(
@@ -228,23 +233,29 @@ class DataCollatorForNI(DefaultCollator):
 
         output_batch = {}
 
-        # Randomly select one reference if multiple are provided.
-        labels = [random.choice(ex["Instance"]["output"]) for ex in batch]
+        labels_full_seq = [ex["Instance"]["output"] for ex in batch]
+        labels_rand = [random.choice(ex["Instance"]["output"]) for ex in batch]
+        instance_ids = [ex["Instance"]["id"] for ex in batch]
+        task_categories = [ex["Categories"] for ex in batch]
+        task_identifiers = [ex["Task"] for ex in batch]
 
         output_batch = (
-            self.prepare_inputs_for_gpt_family(sources, labels)
+            self.prepare_inputs_for_gpt_family(sources, labels_rand)
             if self.model_family == "gpt"
-            else self.prepare_inputs_for_seq2seq_family(sources, labels)
+            else self.prepare_inputs_for_seq2seq_family(sources, labels_rand)
         )
 
-        task_names = [ex["Task"] for ex in batch]
-        output_batch["task_names"] = task_names
+        output_batch["task_names"] = task_identifiers
+        output_batch["task_identifiers"] = task_identifiers # sni task id like e.g. task1356_xlsum_title_generation
+        output_batch["task_categories"] = task_categories
         output_batch["task_ids"] = torch.LongTensor(
             [self.task_to_id[task] for task in task_names]
-        )
-        output_batch["labels_texts"] = labels
-        output_batch["hashes"] = [hash_example(i + o) for i, o in zip(sources, labels)]
+        ) # task ids potentially used in routing
+        output_batch["labels_texts"] = labels_rand
+        output_batch["labels_full_seq"] = labels_full_seq
+        output_batch["hashes"] = [hash_example(i + o) for i, o in zip(sources, labels_rand)]
         output_batch["instruction_hashes"] = [hash_example(i) for i in sources]
+        output_batch["instance_ids"] = instance_ids
         return output_batch
 
 
@@ -281,7 +292,7 @@ class NIOriginalDataModule(LightningDataModule):
             test_dataset = self.test_dataset.select(indices)
         else:
             test_dataset = self.test_dataset
-            
+
         return DataLoader(
             test_dataset,
             batch_size=self.config.predict_batch_size,
@@ -303,6 +314,28 @@ class NIOriginalDataModule(LightningDataModule):
         self.rng = np.random.RandomState(config.seed)
         self.tokenizer = get_tokenizer(config, for_generation=for_generation)
         self.setup_dataset()
+
+    def _check_test_references(self):
+        # make sure all test instances are in reference file
+        reference_file = os.path.join(self.data_dir, "test_references.jsonl")
+        eval_instances = {}
+        with open(reference_file) as fin:
+            for line in fin:
+                instance = json.loads(line)
+                # if track is not provided in the refernce file, we use set the track to `default` and use the default tokenizer in rouge-score.
+                if "track" not in instance:
+                    instance["track"] = "default"
+                eval_instances[instance["id"]] = instance
+        eval_ids = list(eval_instances.keys())
+        for element in tqdm.tqdm(
+            self.test_dataset,
+            desc="Checking test instances",
+            total=len(self.test_dataset),
+        ):
+            id = element["id"]
+            assert (
+                id in eval_ids
+            ), f"{id} not in test references, see https://github.com/allenai/natural-instructions/blob/master/eval/leaderboard/create_reference_file.py"
 
     def setup_dataset(self):
         filename = pkg_resources.resource_filename(
@@ -377,6 +410,8 @@ class NIOriginalDataModule(LightningDataModule):
         logger.info("Training examples: {}".format(len(self.train_dataset)))
         logger.info("Validation examples: {}".format(len(self.val_dataset)))
         logger.info("Test examples: {}".format(len(self.test_dataset)))
+
+        self._check_test_references()
 
 
 if __name__ == "__main__":
