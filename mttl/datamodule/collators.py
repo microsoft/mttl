@@ -128,7 +128,7 @@ class DefaultCollator:
             mask = mask[:, :-1]
             targets = torch.masked_fill(targets, ~mask, self.label_pad_token_id)
 
-        if hasattr(self.tokenizer, "enforces_eos") and self.tokenizer.enforces_eos:
+        if getattr(self.tokenizer, "mttl_enforces_eos", False):
             targets = self.enforce_eos(targets)
 
         output_batch["input_ids"] = tok_sources_plus_labels["input_ids"]
