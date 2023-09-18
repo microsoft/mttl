@@ -52,35 +52,19 @@ class LoRA(Adapter):
             self.forward_fn = self.forward_linear_
         else:
             raise NotImplementedError("LoRA only supports nn.Linear layers.")
-
-    def forward_layer(self, input):
-        # We cast the input to the layer's datatype.
-        # E.g. if the model is loaded in float16 fo evaluation, dtype_layer will be float16,
-        # but the input might be in float32 since router and loras operate in float32.
-        # we should not do any casting if we loaded the model in 8bit, all castign is done by bitsandbytes.
-        dtype_input = input.dtype
-        dtype_layer = self.layer.weight.dtype
-        if dtype_input != dtype_layer and dtype_layer != torch.int8:
-            input = input.to(dtype_layer)  # cast input to layer dtype
-        out = self.layer(input)
-        out = out.to(dtype_input)  # cast output back to input dtype
-        return out
-
+        
     def forward_linear_(self, input, **kwargs):
-        iput_dt = input.dtype
-        input = input.to(torch.float32)  # upcast input
+        layer_out = self.layer(input)
+        input_lora = input.to(self.lora_a.dtype)
         if self.training:
             self.training_steps += 1
         adapter_out = (
-            torch.matmul(torch.matmul(input, self.lora_a), self.lora_b) * self.scaling
+            torch.matmul(torch.matmul(input_lora, self.lora_a), self.lora_b) * self.scaling
         )
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
-
-        output = self.forward_layer(input) + adapter_out
-        output = output.to(iput_dt)  # downcast output if neeed
-        return output
+        return layer_out + adapter_out.to(input.dtype)
 
     def reset_parameters(self):
         gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
@@ -169,6 +153,9 @@ class SkilledLoRA(LoRA):
             raise NotImplementedError("SkilledLoRA only supports nn.Linear layers.")
 
     def forward_linear_(self, input, weights):
+
+        layer_out = self.layer(input)
+        input_lora = input.to(self.lora_a.dtype)
         if self.training:
             self.training_steps += 1
 
@@ -183,13 +170,13 @@ class SkilledLoRA(LoRA):
 
         A = A.reshape(bs, self.in_features, self.rank)
         B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
-        adapter_out = input.bmm(A).bmm(B) * self.scaling
+        adapter_out = input_lora.bmm(A).bmm(B) * self.scaling
 
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
 
-        return self.forward_layer(input) + adapter_out
+        return layer_out + adapter_out.to(input.dtype)
 
 
 class SkilledLoRA_MergeLoraAfterOP(SkilledLoRA):
@@ -205,12 +192,14 @@ class SkilledLoRA_MergeLoraAfterOP(SkilledLoRA):
         if not self.merge_after_op:
             return super().forward_linear_(input, weights)
 
+        layer_out = self.layer(input)
+        input_lora = input.to(self.lora_a.dtype)
         if self.training:
             self.training_steps += 1
 
         bs, _, _ = weights.size()
         adapter_out = torch.einsum(
-            "bsd,qkdr->bsqkr", (input, self.lora_a)
+            "bsd,qkdr->bsqkr", (input_lora, self.lora_a)
         )  # bs x n_splits x n_skills x rank")
         adapter_out = torch.einsum(
             "bsqkr,qkrd->bsqkd", (adapter_out, self.lora_b)
@@ -225,4 +214,4 @@ class SkilledLoRA_MergeLoraAfterOP(SkilledLoRA):
         if self.use_warmup:
             adapter_out = adapter_out * warmup
 
-        return self.forward_layer(input) + adapter_out
+        return layer_out + adapter_out.to(input.dtype)
