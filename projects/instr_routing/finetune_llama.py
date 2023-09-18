@@ -18,8 +18,6 @@ from mttl.datamodule.flan100k_module import Flan100kModule
 from mttl.utils import get_mlf_logger, setup_logging, logger
 from mttl.dist_utils import is_main_process
 
-torch.set_float32_matmul_precision("high")
-
 # register models
 import models.vsmear  # noqa: F401
 import models.softmoe  # noqa: F401
@@ -184,10 +182,9 @@ def run_multitask(args):
     callbacks.append(checkpoint_callback)
     callbacks.append(SelectorRoutingsLog(args))
     callbacks.append(SelectorMetricsLog())
-    callbacks.append(MiniProgress())
     if args.mmlu_callback:
         callbacks.append(MMLUCallback(5))
-        
+
     trainer = Trainer(
         devices=-1,
         accelerator="gpu",
