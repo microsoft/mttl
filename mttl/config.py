@@ -171,7 +171,7 @@ class Config:
         self.checkpoint_step = None  # load from checkpoint in format of global_stepX.pt
         self.backbone_checkpoint = None  # load the backbone from here
         self.train_batch_size = 8
-        self.predict_batch_size = 3
+        self.predict_batch_size = 32
         self.learning_rate = 1e-3
         self.warmup_proportion = 0.06
         self.trainable_param_names = ".*"

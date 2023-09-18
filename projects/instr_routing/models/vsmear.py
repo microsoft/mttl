@@ -5,7 +5,7 @@ import torch.nn as nn
 from enum import Enum
 
 import torch.nn.functional as F
-from mttl.models.adapters import SkilledLoRA, LoRA
+from mttl.models.adapters import SkilledLoRA, LoRA, SkilledLoRA_MergeLoraAfterOP
 from mttl.models.modifiers import modify_with_routing, register_modifier
 from mttl.models.modifiers.routing import (
     RouterWrapper,
@@ -15,43 +15,6 @@ from mttl.models.modifiers.routing import (
     register_selector,
 )
 from projects.instr_routing.models.clm import AugmentedRoutingInfo
-
-
-class SkilledLoRA_MergeLoraAfterOP(SkilledLoRA):
-    def __init__(
-        self,
-        config,
-        layer,
-    ):
-        super().__init__(config, layer)
-        self.merge_after_op = config.merge_after_op
-
-    def forward_linear_(self, input, weights):
-        if not self.merge_after_op:
-            return super().forward_linear_(input, weights)
-
-        if self.training:
-            self.training_steps += 1
-
-        bs, _, _ = weights.size()
-        adapter_out = torch.einsum(
-            "bsd,qkdr->bsqkr", (input, self.lora_a)
-        )  # bs x n_splits x n_skills x rank")
-        adapter_out = torch.einsum(
-            "bsqkr,qkrd->bsqkd", (adapter_out, self.lora_b)
-        )  # bs x seq x n_splits x n_skills x D
-        adapter_out = torch.einsum(
-            "bsqkd,bqk->bsd", (adapter_out, weights)
-        )  # bs x seq x n_splits x D
-        adapter_out *= (
-            self.scaling
-        )  # (adapter_out[0,:,:]*weights[0].unsqueeze(0).unsqueeze(-1)).sum(-2)[0][0] like adapter_out[0][0]
-        warmup = min(self.training_steps / 10_000, 1)
-        if self.use_warmup:
-            adapter_out = adapter_out * warmup
-
-        return self.foward_layer(input) + adapter_out
-
 
 class Metrics:
     def __init__(self) -> None:
@@ -334,8 +297,6 @@ class VSMEARRouterExperimental(VSMEARRouter):
             temperature=self.temperature,
             center=False,
         )
-        # padding_mask = routing_infos.pad_token_mask # 1 for everythin that is not a pad token, i.e. instuction, input, output
-        # inst_padding_mask = routing_infos.inst_token_mask # 1 for everything that is instruction
         if self.training:
             # during training :-)
             assert (
@@ -351,7 +312,7 @@ class VSMEARRouterExperimental(VSMEARRouter):
                 center=self.router_center_momentum > 0.0,
             )
             post_probs = F.softmax(post_routes, dim=-1)
-            prior_probs = F.softmax(prior_routes, dim=-1)  # output and teacher
+            prior_probs = F.softmax(prior_routes, dim=-1) 
 
             if self.xrouter_x4_target == "posterior":
                 target = post_routes * self.router_teacher_temperature
@@ -409,13 +370,6 @@ class VSMEARRouterOracle(VSMEARRouter):
             temperature=self.temperature,
             center=False,
         )
-        # padding_mask = routing_infos.pad_token_mask # 1 for everythin that is not a pad token, i.e. instuction, input, output
-        # inst_padding_mask = routing_infos.inst_token_mask # 1 for everything that is instruction
-        # if self.training:
-        # during training and eval route with posterior
-        # assert (
-        #     routing_infos.generation_mode is False
-        # ), "We are not expecting to be in generation mode during training."
 
         post_input = self.get_posterior_input(input, routing_infos)
         post_routes = self.route_maybe_center(
@@ -436,15 +390,6 @@ class VSMEARRouterOracle(VSMEARRouter):
         self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
         self.metrics["x_ent"] = x_ent
         self.auxiliary_loss = h_pri.sum() * 0.0
-
-        # else:
-        #     # during eval also route with posterior
-        #     prior_probs = routing_probs = F.softmax(prior_routes, dim=-1)
-        #     h_pri = -(prior_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
-
-        #     self.routings = prior_probs.detach().cpu()
-        #     self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
-        #     self.auxiliary_loss = h_pri.sum() * 0.0
         return routing_probs.unsqueeze(1)
 
 
@@ -531,7 +476,7 @@ class VSMEARRouterExperimentalXR1(SMEARRouter):
         return super().forward(routing_infos, input)
 
 
-# same as smear, but uses merging after the ouyter product
+# same as smear, but uses merging after the outer product
 @register_modifier("vsmear_xr1")
 def modify_with_vsmear_reg(transformer, config):
     config.router_selector = "vsmear_xr1"

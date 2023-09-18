@@ -186,3 +186,40 @@ class SkilledLoRA(LoRA):
             adapter_out = adapter_out * warmup
 
         return self.foward_layer(input) + adapter_out
+
+
+class SkilledLoRA_MergeLoraAfterOP(SkilledLoRA):
+    def __init__(
+        self,
+        config,
+        layer,
+    ):
+        super().__init__(config, layer)
+        self.merge_after_op = config.merge_after_op
+
+    def forward_linear_(self, input, weights):
+        if not self.merge_after_op:
+            return super().forward_linear_(input, weights)
+
+        if self.training:
+            self.training_steps += 1
+
+        bs, _, _ = weights.size()
+        adapter_out = torch.einsum(
+            "bsd,qkdr->bsqkr", (input, self.lora_a)
+        )  # bs x n_splits x n_skills x rank")
+        adapter_out = torch.einsum(
+            "bsqkr,qkrd->bsqkd", (adapter_out, self.lora_b)
+        )  # bs x seq x n_splits x n_skills x D
+        adapter_out = torch.einsum(
+            "bsqkd,bqk->bsd", (adapter_out, weights)
+        )  # bs x seq x n_splits x D
+        adapter_out *= (
+            self.scaling
+        )  # (adapter_out[0,:,:]*weights[0].unsqueeze(0).unsqueeze(-1)).sum(-2)[0][0] like adapter_out[0][0]
+        warmup = min(self.training_steps / 10_000, 1)
+        if self.use_warmup:
+            adapter_out = adapter_out * warmup
+
+        return self.foward_layer(input) + adapter_out
+
