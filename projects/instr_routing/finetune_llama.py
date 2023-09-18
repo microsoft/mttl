@@ -150,18 +150,29 @@ def run_multitask(args):
     path_best_model = trainer.checkpoint_callback.best_model_path
     ckpt_path = "best" if path_best_model else "last"
 
-    trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
+    if args.load_in_8bit:
+        # to prevent final spike in valid loss, we first load the model and path is to the evaluator
+        # there is a bug with pl for 8bit model wjen calling .cuda() on it, to("cuda") works
+        best_model = CLM.load_from_checkpoint(
+            path_best_model, tokenizer=dm.tokenizer
+        ).to("cuda")
+        trainer.validate(dataloaders=dm, model=best_model)
+    else:
+        trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
 
     if is_main_process():
         if path_best_model:
             del module
             torch.cuda.empty_cache()
+
             best_model = CLM.load_from_checkpoint(
-                path_best_model, tokenizer=dm.tokenizer
-            ).cuda()
+                path_best_model,
+                tokenizer=dm.tokenizer,
+                load_in_8bit=False,
+            ).to("cuda")
         else:
             torch.cuda.empty_cache()
-            best_model = module.cuda()
+            best_model = module.to("cuda")
 
         if args.eval_superni:
             from eval_ni import eval_ni
