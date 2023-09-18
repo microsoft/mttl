@@ -55,15 +55,15 @@ class LoRA(Adapter):
 
     def forward_layer(self, input):
         # We cast the input to the layer's datatype.
-        # E.g. if the model is loaded in float16 fo evaluation, dtype_layer will be float16, 
+        # E.g. if the model is loaded in float16 fo evaluation, dtype_layer will be float16,
         # but the input might be in float32 since router and loras operate in float32.
         # we should not do any casting if we loaded the model in 8bit, all castign is done by bitsandbytes.
         dtype_input = input.dtype
         dtype_layer = self.layer.weight.dtype
         if dtype_input != dtype_layer and dtype_layer != torch.int8:
-            input = input.to(dtype_layer) # cast input to layer dtype
-        out = self.layer(input)  
-        out = out.to(dtype_input)  # cast output back input dtype
+            input = input.to(dtype_layer)  # cast input to layer dtype
+        out = self.layer(input)
+        out = out.to(dtype_input)  # cast output back to input dtype
         return out
 
     def forward_linear_(self, input, **kwargs):
@@ -226,4 +226,3 @@ class SkilledLoRA_MergeLoraAfterOP(SkilledLoRA):
             adapter_out = adapter_out * warmup
 
         return self.forward_layer(input) + adapter_out
-
