@@ -16,6 +16,7 @@ from mttl.models.modifiers.routing import (
 )
 from projects.instr_routing.models.clm import AugmentedRoutingInfo
 
+
 class Metrics:
     def __init__(self) -> None:
         self.metrics = {}
@@ -312,7 +313,7 @@ class VSMEARRouterExperimental(VSMEARRouter):
                 center=self.router_center_momentum > 0.0,
             )
             post_probs = F.softmax(post_routes, dim=-1)
-            prior_probs = F.softmax(prior_routes, dim=-1) 
+            prior_probs = F.softmax(prior_routes, dim=-1)
 
             if self.xrouter_x4_target == "posterior":
                 target = post_routes * self.router_teacher_temperature
@@ -419,6 +420,10 @@ class AuxRoutingLoRALinear_MergeAfterOP(SkilledLoRA_MergeLoraAfterOP, RoutingMix
         self._metrics.clear()
 
     def forward(self, input):
+        # we follow the rule: upcast the inputs and downcast the outputs.
+        # when e.g. evaluating in float16, since Loras and router operate in floar32,
+        # we need to upcast the inputs and then downcast the outputs.
+        # In the adapter, we might need to downcast the adapter input back to the adapter's type (e.g. float16 if we loaded the model in float16)
         iput_dt = input.dtype
         input = input.to(torch.float32)  # upcast input
 
