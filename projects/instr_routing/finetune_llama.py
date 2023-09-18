@@ -26,7 +26,8 @@ import models.softmoe  # noqa: F401
 from models.monitors import SelectorMetricsLog, SelectorRoutingsLog
 from models.clm import CLM
 from config import RoutingConfig
-torch.set_float32_matmul_precision('high')
+
+torch.set_float32_matmul_precision("high")
 
 
 def remove_non_serializable(d):
@@ -38,6 +39,7 @@ def remove_non_serializable(d):
             remove_non_serializable(v)
         elif not json.dumps(v, default=lambda x: None):
             del d[k]
+
 
 def eval_superni(best_model, args, tb_logger, trainer, n_shot=0):
     from eval_ni import eval_ni
@@ -53,18 +55,42 @@ def eval_superni(best_model, args, tb_logger, trainer, n_shot=0):
     )
     rougel_ni = rougel_ni_all["all"]["mean"]
     if wandb.run is not None:
-        wandb.log({f"rouge_L_super_ni_nshot_{n_shot}sht": rougel_ni})                     
+        wandb.log({f"rouge_L_super_ni_nshot_{n_shot}sht": rougel_ni})
         # per task
-        data = [[label, val] for (label, val) in rougel_ni_all["per_task"].items() if "rougeL" in label]
-        table = wandb.Table(data=data, columns = ["task_sni", "mean_rougeL"])
-        wandb.log({f"sni_per_task_rougeL_{n_shot}sht" : wandb.plot.bar(table, "task_sni", "mean_rougeL",
-                                    title=f"sni_per_task_rougeL_{n_shot}sht")})
+        data = [
+            [label, val]
+            for (label, val) in rougel_ni_all["per_task"].items()
+            if "rougeL" in label
+        ]
+        table = wandb.Table(data=data, columns=["task_sni", "mean_rougeL"])
+        wandb.log(
+            {
+                f"sni_per_task_rougeL_{n_shot}sht": wandb.plot.bar(
+                    table,
+                    "task_sni",
+                    "mean_rougeL",
+                    title=f"sni_per_task_rougeL_{n_shot}sht",
+                )
+            }
+        )
         # per category
-        data = [[label, val] for (label, val) in rougel_ni_all["per_category"].items() if "rougeL" in label]
-        table2 = wandb.Table(data=data, columns = ["category_sni", "mean_rougeL"])
-        wandb.log({f"sni_per_category_rougeL_{n_shot}sht" : wandb.plot.bar(table2, "category_sni", "mean_rougeL",
-                                    title=f"sni_per_category_rougeL_{n_shot}sht")})
-        
+        data = [
+            [label, val]
+            for (label, val) in rougel_ni_all["per_category"].items()
+            if "rougeL" in label
+        ]
+        table2 = wandb.Table(data=data, columns=["category_sni", "mean_rougeL"])
+        wandb.log(
+            {
+                f"sni_per_category_rougeL_{n_shot}sht": wandb.plot.bar(
+                    table2,
+                    "category_sni",
+                    "mean_rougeL",
+                    title=f"sni_per_category_rougeL_{n_shot}sht",
+                )
+            }
+        )
+
     if args.tensorboard:
         tb_logger.experiment.add_scalar(
             f"tasks/sni_{n_shot}sht", rougel_ni, trainer.global_step
@@ -72,6 +98,7 @@ def eval_superni(best_model, args, tb_logger, trainer, n_shot=0):
     with open(os.path.join(args.output_dir, f"sni_results_{n_shot}sht.json"), "w") as f:
         json.dump(rougel_ni_all, f, indent=2)
     logger.info("SuperNI RougeL_{}sht: {:.2f}".format(n_shot, rougel_ni))
+
 
 def run_multitask(args):
     seed_everything(args.seed, workers=True)
@@ -164,8 +191,8 @@ def run_multitask(args):
     trainer = Trainer(
         devices=-1,
         accelerator="gpu",
-        logger=loggers,      
-        num_sanity_val_steps=5,  
+        logger=loggers,
+        num_sanity_val_steps=5,
         default_root_dir=args.output_dir,
         max_epochs=args.num_train_epochs,
         max_steps=args.total_steps + 1 if args.total_steps != -1 else -1,
@@ -179,7 +206,7 @@ def run_multitask(args):
         else args.precision,
         fast_dev_run=args.fast_dev_run,
         **kwargs,
-    ) 
+    )
     trainer.fit(module, dm)
 
     path_best_model = trainer.checkpoint_callback.best_model_path
@@ -197,7 +224,7 @@ def run_multitask(args):
 
     if is_main_process():
         if path_best_model:
-            del module   
+            del module
             torch.cuda.empty_cache()
 
             best_model = CLM.load_from_checkpoint(
@@ -208,7 +235,7 @@ def run_multitask(args):
         else:
             torch.cuda.empty_cache()
             best_model = module.to("cuda")
-        
+
         if args.eval_mmlu:
             from eval_mmlu import eval_mmlu
 
@@ -223,10 +250,15 @@ def run_multitask(args):
                 wandb.log({"mmlu_acc": mmlu_em})
                 # report per task peformance
                 data = [[label, val["mean"]] for (label, val) in em_mmlu_all.items()]
-                table = wandb.Table(data=data, columns = ["task", "mean_acc"])
-                wandb.log({"mmlu_per_task_acc" : wandb.plot.bar(table, "task", "mean_acc",
-                                            title="mmlu_per_task_acc")})
-                
+                table = wandb.Table(data=data, columns=["task", "mean_acc"])
+                wandb.log(
+                    {
+                        "mmlu_per_task_acc": wandb.plot.bar(
+                            table, "task", "mean_acc", title="mmlu_per_task_acc"
+                        )
+                    }
+                )
+
             if args.tensorboard:
                 tb_logger.experiment.add_scalar(
                     "tasks/mmlu", mmlu_em, trainer.global_step
@@ -234,7 +266,6 @@ def run_multitask(args):
             with open(os.path.join(args.output_dir, "mmlu_results.json"), "w") as f:
                 json.dump(em_mmlu_all, f, indent=2)
             logger.info("MMLU accuracy: {:.2f}".format(mmlu_em))
-        
 
         if args.eval_superni:
             tb_logger = None if not args.tensorboard else tb_logger
