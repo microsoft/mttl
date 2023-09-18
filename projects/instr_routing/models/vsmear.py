@@ -58,9 +58,10 @@ class SMEARRouter(RoutingSelector):
         self.router_center_momentum = self.config.router_center_momentum
         self.register_buffer("center", torch.zeros(1, self.n_skills))
 
-        # normal innit
-        self.prior_router.weight.data.normal_(mean=0.0, std=0.02)
-        self.prior_router.bias.data.fill_(0)
+        if self.config.smear_gaussian_init:
+            # normal innit
+            self.prior_router.weight.data.normal_(mean=0.0, std=0.02)
+            self.prior_router.bias.data.fill_(0)
 
         self.metrics = Metrics()
 
@@ -150,8 +151,9 @@ class VSMEARRouter(SMEARRouter):
             self.post_router_ln = nn.LayerNorm(in_d)
             self.post_router_ln.weight = nn.Parameter(torch.ones(in_d))
 
-            self.post_router.weight.data.normal_(mean=0.0, std=0.02)
-            self.post_router.bias.data.fill_(0)
+            if self.config.smear_gaussian_init:
+                self.post_router.weight.data.normal_(mean=0.0, std=0.02)
+                self.post_router.bias.data.fill_(0)
 
         self.router_teacher_ent_factor = self.config.router_teacher_ent_factor
         self.router_teacher_temperature = self.config.router_teacher_temperature

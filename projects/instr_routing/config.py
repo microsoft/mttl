@@ -47,6 +47,9 @@ class RoutingConfig(Config):
         # softmoe        
         self.use_causal_mask_for_D = True
         
+        #smear
+        self.smear_gaussian_init = False
+        
         # vsmear_x4        
         self.xrouter_x4_target = "prior"
         self.xrouter_x4target_detach = True
