@@ -12,7 +12,6 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from projects.instr_routing.finetune_llama import RoutingConfig
 from projects.instr_routing.models.clm import CLM
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
-from mttl.dataloader.ni_metrics_old import eval_instances
 
 import os
 import torch
@@ -48,18 +47,8 @@ def eval_ni(
         pred_output_file_path=output_file_path,
     )
     metrics = ni_evaluator.evaluate(model, subsample=subsample)
-    # evaluate generations file per category and write to the output directory
-    args = dict_to_dataclass(
-        {
-            "prediction_file": output_file_path,
-            "reference_file": os.environ["NI_DATA_DIR"] + "/test_references.jsonl",
-            "output_file": output_file_path.replace(".jsonl", "_metrics.json"),
-            "clean": 0,
-        }
-    )
-    all_results_old = eval_instances(args)
     torch.cuda.empty_cache()
-    return metrics, all_results_old
+    return metrics
 
 
 def load_hf_model(model_name):
@@ -186,7 +175,7 @@ def run_ni_eval(
             f"../tmp/instruction_learning/{model_name}/",
         ),
     )
-    rougel_ni_all, all_results_original = eval_ni(
+    rougel_ni_all = eval_ni(
         config, model, nshot=n_shots, subsample=subsample, max_input_length=-1
     )
     rougel_ni = rougel_ni_all["all"]["mean"]
@@ -194,9 +183,6 @@ def run_ni_eval(
     if wandb_proj:
         wandb.log({"rouge_L_super_ni": rougel_ni_all["all"]["mean"]})
         wandb.log({"rouge_L_super_ni_stderr": rougel_ni_all["all"]["stderr"]})
-        wandb.log(
-            {"rouge_L_super_ni[original]": all_results_original["rougeL_default_track"]}
-        )        
         # log all the function arguments to wandb
         wandb.config.update(
             {
@@ -218,7 +204,7 @@ def run_ni_eval(
         table2 = wandb.Table(data=data, columns = ["category_sni", "mean_rougeL"])
         wandb.log({f"sni_per_category_rougeL_{n_shots}sht" : wandb.plot.bar(table2, "category_sni", "mean_rougeL",
                                     title=f"sni_per_category_rougeL_{n_shots}sht")})
-    print(rougel_ni, all_results_original["rougeL_default_track"])
+    print(rougel_ni)
 
 
 if __name__ == "__main__":

@@ -44,7 +44,7 @@ def eval_superni(best_model, args, tb_logger, trainer, n_shot=0):
 
     logger.info("Evaluating on super NI")
     # all_results_original -- dict of results on sni eval obtained by running the original evaluate.py
-    rougel_ni_all, all_results_old = eval_ni(
+    rougel_ni_all = eval_ni(
         args,
         best_model,
         nshot=n_shot,
@@ -53,8 +53,7 @@ def eval_superni(best_model, args, tb_logger, trainer, n_shot=0):
     )
     rougel_ni = rougel_ni_all["all"]["mean"]
     if wandb.run is not None:
-        wandb.log({f"rouge_L_super_ni_nshot_{n_shot}sht": rougel_ni})    
-        wandb.log({f"rouge_L_super_ni[original]_{n_shot}sht": all_results_old["rougeL_default_track"]})                  
+        wandb.log({f"rouge_L_super_ni_nshot_{n_shot}sht": rougel_ni})                     
         # per task
         data = [[label, val] for (label, val) in rougel_ni_all["per_task"].items() if "rougeL" in label]
         table = wandb.Table(data=data, columns = ["task_sni", "mean_rougeL"])
