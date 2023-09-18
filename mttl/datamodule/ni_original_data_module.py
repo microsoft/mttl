@@ -233,7 +233,6 @@ class DataCollatorForNI(DefaultCollator):
 
         output_batch = {}
 
-           
         labels_full_seq = [ex["Instance"]["output"] for ex in batch]
         labels_rand = [random.choice(ex["Instance"]["output"]) for ex in batch]
         instance_ids = [ex["Instance"]["id"] for ex in batch]
