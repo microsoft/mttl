@@ -94,7 +94,9 @@ class RoutingLoRASoftMoe(nn.Module, RoutingMixin):
         return self.adapter.layer(input) + adapter_out
 
 
-def create_causal_prefix_mask(inst_padding_mask, padding_mask, device, bs, seq, padding_side='left'):
+def create_causal_prefix_mask(
+    inst_padding_mask, padding_mask, device, bs, seq, padding_side="left"
+):
     # inst_padding_mask - 1s only on the instruction part, everything else is 0
     # padding_mask - 1s on the instruction and output, pad tokens are 0
     if padding_side == "left":
@@ -104,16 +106,16 @@ def create_causal_prefix_mask(inst_padding_mask, padding_mask, device, bs, seq, 
         )  # start of instruction
         n_ones = inst_padding_mask.sum(dim=1).unsqueeze(-1)  # instruction length
         last_one_idx = first_one_idx + n_ones - 1  # b x 1 <- index of the last one
-    
-    elif padding_side=="right":
+
+    elif padding_side == "right":
         # Find the indices of the last occurrence of 1 along the last dimension
         n_ones = inst_padding_mask.sum(dim=1).unsqueeze(-1)  # instruction length
         last_one_idx = n_ones - 1  # b x 1 <- index of the last one
-    else:           
+    else:
         raise ValueError(f"padding_side {padding_side} not supported")
 
     # Expand dimensions of last_ones_indices to match the shape of B
-    expanded_indices = last_one_idx + 1    
+    expanded_indices = last_one_idx + 1
     expanded_indices = expanded_indices.expand(-1, seq)  # b x s
 
     expanded_indices_inverse = seq - expanded_indices  # length after last 1
@@ -144,20 +146,28 @@ class SoftMOEAdapter(SkilledLoRA):
         self.use_causal_mask_for_D = config.use_causal_mask_for_D
 
     def forward(self, input, weights, routing_infos, gen_mode):
-        #this assumes left padding
-        if self.training:   
+        # this assumes left padding
+        if self.training:
             self.training_steps += 1
         mixing_weights = weights
         bs, seq, n_skills = mixing_weights.size()
-        mixing_weights_tks = mixing_weights.unsqueeze(2).expand(-1, -1, seq, -1) # b x s x s x n_skills
+        mixing_weights_tks = mixing_weights.unsqueeze(2).expand(
+            -1, -1, seq, -1
+        )  # b x s x s x n_skills
         if self.use_causal_mask_for_D:
             # causal routing: aggreage over sequence length, then aggregate over experts
             if hasattr(routing_infos, "causal_mask"):
-                causal_mask = routing_infos.causal_mask # prevent recomputing at each layer
+                causal_mask = (
+                    routing_infos.causal_mask
+                )  # prevent recomputing at each layer
                 if gen_mode and input.shape[1] != causal_mask.shape[1]:
                     # repeat the last token along dim 1 and 2 to account for the newly generated and appended token
-                    causal_mask = torch.cat((causal_mask, causal_mask[:, -1:, :]), dim=1)
-                    causal_mask = torch.cat((causal_mask, causal_mask[:, :, -1:]), dim=2)
+                    causal_mask = torch.cat(
+                        (causal_mask, causal_mask[:, -1:, :]), dim=1
+                    )
+                    causal_mask = torch.cat(
+                        (causal_mask, causal_mask[:, :, -1:]), dim=2
+                    )
                     setattr(routing_infos, "causal_mask", causal_mask)
             else:
                 causal_mask = create_causal_prefix_mask(
@@ -179,7 +189,9 @@ class SoftMOEAdapter(SkilledLoRA):
             del causal_mask
         else:
             mixing_weight_causal = mixing_weights_tks
-        mixing_weight_causal = mixing_weight_causal.permute(0,3,1,2) # bs x n_skills x s x s
+        mixing_weight_causal = mixing_weight_causal.permute(
+            0, 3, 1, 2
+        )  # bs x n_skills x s x s
         D = torch.softmax(
             mixing_weight_causal, dim=-1
         )  # for ech token create a mixing distribution over previous tokens excluding the pad tokens
@@ -190,9 +202,13 @@ class SoftMOEAdapter(SkilledLoRA):
         # assert torch.isclose(D[0][-1].sum(), torch.tensor(1.0))
         # apply mixing along the sequence dimension
         input_mixed = torch.einsum(
-            "bsd,bkps->bkpd", (input, D) # this should be right, (input[0]*D[0][0][0].unsqueeze(-1)) should be same as input_mixed[0][0][0]
+            "bsd,bkps->bkpd",
+            (
+                input,
+                D,
+            ),  # this should be right, (input[0]*D[0][0][0].unsqueeze(-1)) should be same as input_mixed[0][0][0]
         )  # b x n_skills x s x D <- mixing after forward pass, for linear operation its the same as mixng before
-                        
+
         # apply Loras of all skills to the mixed input
         adapter_out = torch.einsum(
             "bksd,qkdr->bsqkr", (input_mixed, self.lora_a)
@@ -200,13 +216,11 @@ class SoftMOEAdapter(SkilledLoRA):
         adapter_out = torch.einsum(
             "bsqkr,qkrd->bsqkd", (adapter_out, self.lora_b)
         )  # bs x seq x n_splits x n_skills x D
-        assert self.n_splits == 1       
+        assert self.n_splits == 1
         adapter_out = adapter_out.squeeze(
             2
         )  # bs x seq x n_skills x D (D = output feaatures D)
-        
-        
-        
+
         # ^^ expert outputs
         # transform back into b x s x D: mix along expert dimension
         del input_mixed, D, mixing_weight_causal
@@ -214,7 +228,7 @@ class SoftMOEAdapter(SkilledLoRA):
 
         adapter_out = torch.einsum("bsk,bskd->bsd", (C, adapter_out))  # b x s x D
         adapter_out *= self.scaling
-           
+
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
