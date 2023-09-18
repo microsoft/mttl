@@ -187,7 +187,7 @@ def run_multitask(args):
     callbacks.append(MiniProgress())
     if args.mmlu_callback:
         callbacks.append(MMLUCallback(5))
-    # callbacks.append(NICallback())
+        
     trainer = Trainer(
         devices=-1,
         accelerator="gpu",
