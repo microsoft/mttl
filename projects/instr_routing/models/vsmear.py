@@ -244,7 +244,7 @@ class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
             mixing_weights = torch.ones(
                 bs, self.n_splits, self.n_skills, device=input.device, dtype=input.dtype
             )
-        output = SkilledLoRA.forward(self, input, mixing_weights)
+        output = SkilledLoRA.forward(self, input.to(iput_dt), mixing_weights)
         output = output.to(iput_dt)
         return output
 
@@ -444,7 +444,7 @@ class AuxRoutingLoRALinear_MergeAfterOP(SkilledLoRA_MergeLoraAfterOP, RoutingMix
                 bs, self.n_splits, self.n_skills, device=input.device, dtype=input.dtype
             )
         output = super(SkilledLoRA_MergeLoraAfterOP, self).forward(
-            input, mixing_weights
+            input.to(iput_dt), mixing_weights
         )
         output = output.to(iput_dt)  # downcast output
         return output
