@@ -74,7 +74,7 @@ def run_eval(args):
         login(token=args.hf_token_hub)
 
     # select dataloader
-    configuration = os.environ["MMLU_CONFIG"]
+    configuration = os.environ.get("MMLU_CONFIG", None)
     logger.info("MMLU Configuration: {}".format(configuration))
 
     if configuration == "random_5":
