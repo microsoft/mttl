@@ -40,14 +40,22 @@ class RoutingConfig(Config):
         self.eval_superni = False
         self.eval_mmlu = False
         self.eval_batches = -1
+        self.eval_avg = True
 
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
-        
-        # logging
+        # logging    
         self.selector_log_per_layer = True
-        # softmoe
-        self.use_causal_mask_for_D = False
+        self.mmlu_callback = True
+        # softmoe        
+        self.use_causal_mask_for_D = True
+        
+        #smear
+        self.smear_gaussian_init = False
+        
+        # vsmear_x4        
+        self.xrouter_x4_target = "prior"
+        self.xrouter_x4target_detach = True
 
     def post_init(self):
         if self.eval_mmlu and "MMLU_DATA_DIR" not in os.environ:

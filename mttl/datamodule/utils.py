@@ -1,6 +1,25 @@
-from transformers import AutoTokenizer, LlamaTokenizerFast
+from transformers import AutoTokenizer, LlamaTokenizerFast, LlamaTokenizer
 
 from mttl.utils import logger
+
+
+def tokenizer_enforces_eos(tokenizer):
+    test = "this is a long text seq that should be truncated"
+
+    # copy tokenizer with add_eos parameter set to True
+    old_add_eos = None
+
+    if hasattr(tokenizer, "add_eos_token"):
+        old_add_eos = tokenizer.add_eos_token
+        tokenizer.add_eos_token = True
+
+    token_ids = tokenizer(test, truncation=True, max_length=3)
+    enforce_eos = token_ids["input_ids"][-1] == tokenizer.eos_token_id    
+    
+    if old_add_eos is not None:
+        tokenizer.add_eos_token = old_add_eos
+
+    return enforce_eos
 
 
 def get_tokenizer(config, for_generation=False):
@@ -13,8 +32,7 @@ def get_tokenizer_with_args(
     model_name, model_family, padding_side="right", for_generation=False
 ):
     if "llama" in model_name:
-        tokenizer = LlamaTokenizerFast.from_pretrained(model_name)
-        tokenizer.model_max_length = int(1e9)
+        tokenizer.pad_token_id = 0 
         if not model_family == "gpt":
             raise ValueError(
                 "We detected a Llama model, but model_family != 'gpt', fix your config!"
@@ -23,8 +41,8 @@ def get_tokenizer_with_args(
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         tokenizer.model_max_length = int(1e9)
 
-    logger.warn("Setting padding side to {}".format(padding_side))
     tokenizer.padding_side = padding_side
+    logger.warn("Padding side is {}".format(tokenizer.padding_side))
 
     if model_family == "gpt":
         if for_generation:
@@ -34,6 +52,7 @@ def get_tokenizer_with_args(
             logger.warn(
                 "for_generation is True, setting padding_side for tokenizer to 'left'."
             )
+
             tokenizer.padding_side = "left"
 
         # do not add eos token, we will add it accordingly *if* needed.
@@ -45,4 +64,5 @@ def get_tokenizer_with_args(
         )
         tokenizer.pad_token_id = 0
 
+    tokenizer.mttl_enforces_eos = tokenizer_enforces_eos(tokenizer)
     return tokenizer

@@ -2,7 +2,7 @@ import torch
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 
-from mttl.datamodule.collators import DefaultCollator 
+from mttl.datamodule.collators import DefaultCollator
 from mttl.dataloader.flan_100k_dataset_reader import Flan100KDataset
 from transformers import AutoTokenizer
 
@@ -76,9 +76,7 @@ class Flan100kModule(LightningDataModule):
 
         # always use the same split for the dataset
         rng = torch.Generator().manual_seed(1234)
-        n_tr_samples = int(
-            len(dataset) * (1 - self.config.validation_portion)
-        )
+        n_tr_samples = int(len(dataset) * (1 - self.config.validation_portion))
 
         self.train_dataset, self.dev_dataset = torch.utils.data.random_split(
             dataset,

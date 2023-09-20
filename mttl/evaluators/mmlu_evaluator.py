@@ -37,7 +37,6 @@ class MMLUEvaluator(object):
             model.eval()
 
         tokenizer = self.datamodule.tokenizer
-        samples_seen = 0
 
         # DDP
         if hasattr(model, "module"):
@@ -89,10 +88,18 @@ class MMLUEvaluator(object):
             probs = (
                 torch.stack(
                     [
-                        logits[:, tokenizer("A", add_special_tokens=False).input_ids[-1]],
-                        logits[:, tokenizer("B", add_special_tokens=False).input_ids[-1]],
-                        logits[:, tokenizer("C", add_special_tokens=False).input_ids[-1]],
-                        logits[:, tokenizer("D", add_special_tokens=False).input_ids[-1]],
+                        logits[
+                            :, tokenizer("A", add_special_tokens=False).input_ids[-1]
+                        ],
+                        logits[
+                            :, tokenizer("B", add_special_tokens=False).input_ids[-1]
+                        ],
+                        logits[
+                            :, tokenizer("C", add_special_tokens=False).input_ids[-1]
+                        ],
+                        logits[
+                            :, tokenizer("D", add_special_tokens=False).input_ids[-1]
+                        ],
                     ],
                     dim=-1,
                 )

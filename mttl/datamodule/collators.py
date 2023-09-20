@@ -26,26 +26,58 @@ class DefaultCollator:
     model_family: str = "seq2seq"
     train_on_inputs: bool = False
 
+    def enforce_eos(self, targets):
+        # simulate the default behaviour of LLamatokenizer, when adding eos token and truncating: the last token must always be eos
+        # make sure the last token is eos
+        if self.tokenizer.padding_side == "left":
+            targets[(torch.arange(targets.shape[0]), -1)] = self.tokenizer.eos_token_id
+        else:
+            # make sure last token is eos if not -100
+            targets[(torch.arange(targets.shape[0]), -1)] = torch.where(
+                targets[(torch.arange(targets.shape[0]), -1)]
+                != self.label_pad_token_id,
+                self.tokenizer.eos_token_id,
+                self.label_pad_token_id,
+            )
+        return targets
+
     def prepare_inputs_for_seq2seq_family(self, sources, labels):
         output_batch = {}
-        tokenized_labels = self.tokenizer(
-            labels,
-            max_length=self.max_output_length,
-            padding=self.padding,
-            return_tensors=self.return_tensors,
-            truncation=True,
-        )
-        tokenized_sources = self.tokenizer(
-            sources,
-            max_length=self.max_input_length,
-            padding=self.padding,
-            return_tensors=self.return_tensors,
-            truncation=True,
-            pad_to_multiple_of=self.pad_to_multiple_of,
-        )
+        if self.max_input_length > 0:
+            tokenized_labels = (
+                self.tokenizer(
+                    labels,
+                    max_length=self.max_output_length,
+                    padding=self.padding,
+                    return_tensors=self.return_tensors,
+                    truncation=True,
+                )
+            )
+            tokenized_sources = self.tokenizer(
+                sources,
+                max_length=self.max_input_length,
+                padding=self.padding,
+                return_tensors=self.return_tensors,
+                truncation=True,
+                pad_to_multiple_of=self.pad_to_multiple_of,
+            )
+        else:
+            tokenized_labels = (
+                self.tokenizer(
+                    labels, padding="longest", return_tensors=self.return_tensors
+                )
+            )
+            tokenized_sources = self.tokenizer(
+                sources,
+                padding="longest",
+                return_tensors=self.return_tensors,
+                pad_to_multiple_of=self.pad_to_multiple_of,
+            )
         label_mask = tokenized_labels["attention_mask"].bool()
-        masked_labels = tokenized_labels["input_ids"].masked_fill(
-            ~label_mask, self.label_pad_token_id
+        masked_labels = (
+            tokenized_labels["input_ids"].masked_fill(
+                ~label_mask, self.label_pad_token_id
+            )
         )
         output_batch["input_ids"] = tokenized_sources["input_ids"]
         output_batch["attention_mask"] = tokenized_sources["attention_mask"]
@@ -65,13 +97,15 @@ class DefaultCollator:
                 return_tensors=self.return_tensors,
                 truncation=True,
             )
-            tok_sources_plus_labels = self.tokenizer(
-                [i + t for i, t in zip(sources, labels)],
-                max_length=self.max_input_length,
-                padding=self.padding,
-                return_tensors=self.return_tensors,
-                truncation=True,
-                pad_to_multiple_of=self.pad_to_multiple_of,
+            tok_sources_plus_labels = (
+                self.tokenizer(
+                    [i + t for i, t in zip(sources, labels)],
+                    max_length=self.max_input_length,
+                    padding=self.padding,
+                    return_tensors=self.return_tensors,
+                    truncation=True,
+                    pad_to_multiple_of=self.pad_to_multiple_of,
+                )
             )
         else:
             tokenized_sources = self.tokenizer(
@@ -79,17 +113,20 @@ class DefaultCollator:
                 padding="longest",
                 return_tensors=self.return_tensors,
             )
-            tok_sources_plus_labels = self.tokenizer(
-                [i + t for i, t in zip(sources, labels)],
-                padding="longest",
-                return_tensors=self.return_tensors,
-                pad_to_multiple_of=self.pad_to_multiple_of,
+            tok_sources_plus_labels = (
+                self.tokenizer(
+                    [i + t for i, t in zip(sources, labels)],
+                    padding="longest",
+                    return_tensors=self.return_tensors,
+                    pad_to_multiple_of=self.pad_to_multiple_of,
+                )
             )
+
         targets = tok_sources_plus_labels["input_ids"].clone()
         targets = torch.masked_fill(
             targets,
             ~tok_sources_plus_labels["attention_mask"].bool(),
-            self.label_pad_token_id
+            self.label_pad_token_id,
         )
 
         if not self.train_on_inputs:
@@ -111,7 +148,12 @@ class DefaultCollator:
             mask[(torch.arange(mask.shape[0]), offset)] = 1
             mask = mask.cumsum(dim=1).bool()
             mask = mask[:, :-1]
-            targets = torch.masked_fill(targets, ~mask, self.label_pad_token_id)
+            targets = (
+                torch.masked_fill(targets, ~mask, self.label_pad_token_id)
+            )
+
+        if getattr(self.tokenizer, "mttl_enforces_eos", False):
+            targets = self.enforce_eos(targets)
 
         output_batch["input_ids"] = tok_sources_plus_labels["input_ids"]
         output_batch["attention_mask"] = tok_sources_plus_labels["attention_mask"]

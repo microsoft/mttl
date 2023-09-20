@@ -49,7 +49,6 @@ class AlpacaDataModule(LightningDataModule):
         config,
     ):
         super().__init__()
-
         self.config = config
         self.tokenizer = get_tokenizer(config)
         self.collate_fn = DefaultCollator(

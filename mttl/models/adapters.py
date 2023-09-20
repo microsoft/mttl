@@ -117,17 +117,17 @@ class LoRA(Adapter):
             self.forward_fn = self.forward_linear_
         else:
             raise NotImplementedError("LoRA only supports nn.Linear layers.")
-
+        
     def forward_linear_(self, input, **kwargs):
         output = self.layer(input)
         if self.merged_with_layer:
             return output
         else:
+            input_lora = input.to(self.lora_a.dtype)
             adapter_out = (
-                torch.matmul(torch.matmul(input, self.lora_a), self.lora_b)
-                * self.scaling
+                torch.matmul(torch.matmul(input_lora, self.lora_a), self.lora_b) * self.scaling
             )
-            return output + adapter_out
+            return output + adapter_out.to(input.dtype)
 
     @classmethod
     def parallel_linear_forward(cls, input, loras):
@@ -239,9 +239,8 @@ class SkilledLoRA(LoRA):
             raise NotImplementedError("SkilledLoRA only supports nn.Linear layers.")
 
     def forward_linear_(self, input, weights):
-        if self.training:
-            self.training_steps += 1
-
+        layer_out = self.layer(input)
+        input_lora = input.to(self.lora_a.dtype)
         bs = input.size(0)
 
         # these are task ids
@@ -267,31 +266,8 @@ class SkilledLoRA(LoRA):
 
         A = A.view(bs, self.in_features, self.rank)
         B = B.view(bs, self.rank, self.out_features)
-        adapter_out = torch.bmm(torch.bmm(input, A), B) * self.scaling
-        return self.layer(input) + adapter_out
-
-
-class SkilledLoRAMergeAfter(SkilledLoRA):
-    def __init__(
-        self,
-        config,
-        layer,
-    ):
-        super().__init__(config, layer)
-
-    def forward_linear_(self, input, weights):
-        bs, _, _ = weights.size()
-        adapter_out = torch.einsum(
-            "bsd,qkdr->bsqkr", (input, self.lora_a)
-        )  # bs x n_splits x n_skills x rank")
-        adapter_out = torch.einsum(
-            "bsqkr,qkrd->bsqkd", (adapter_out, self.lora_b)
-        )  # bs x seq x n_splits x n_skills x D
-        adapter_out = torch.einsum(
-            "bsqkd,bqk->bsd", (adapter_out, weights)
-        )  # bs x seq x n_splits x D
-        adapter_out *= self.scaling
-        return self.layer(input) + adapter_out
+        adapter_out = input_lora.bmm(A).bmm(B) * self.scaling
+        return layer_out + adapter_out.to(input.dtype)
 
 
 class ExpertContainer(Adapter):
@@ -386,3 +362,36 @@ class ExpertContainer(Adapter):
         else:
             output = self.layer(input, **kwargs)
         return output
+
+
+class SkilledLoRA_MergeLoraAfterOP(SkilledLoRA):
+    def __init__(
+        self,
+        config,
+        layer,
+    ):
+        super().__init__(config, layer)
+        self.merge_after_op = config.merge_after_op
+
+    def forward_linear_(self, input, weights):
+        if not self.merge_after_op:
+            return super().forward_linear_(input, weights)
+
+        layer_out = self.layer(input)
+        input_lora = input.to(self.lora_a.dtype)
+
+        bs, _, _ = weights.size()
+        adapter_out = torch.einsum(
+            "bsd,qkdr->bsqkr", (input_lora, self.lora_a)
+        )  # bs x n_splits x n_skills x rank")
+        adapter_out = torch.einsum(
+            "bsqkr,qkrd->bsqkd", (adapter_out, self.lora_b)
+        )  # bs x seq x n_splits x n_skills x D
+        adapter_out = torch.einsum(
+            "bsqkd,bqk->bsd", (adapter_out, weights)
+        )  # bs x seq x n_splits x D
+        adapter_out *= (
+            self.scaling
+        )
+
+        return layer_out + adapter_out.to(input.dtype)
