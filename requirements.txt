@@ -8,7 +8,6 @@ wget
 tqdm
 pandas
 scikit-learn
-git+https://github.com/EleutherAI/lm-evaluation-harness.git
 sentencepiece
 torch_kmeans
 sentence-transformers

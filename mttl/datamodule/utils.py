@@ -32,7 +32,8 @@ def get_tokenizer_with_args(
     model_name, model_family, padding_side="right", for_generation=False
 ):
     if "llama" in model_name:
-        tokenizer.pad_token_id = 0 
+        tokenizer = LlamaTokenizer.from_pretrained(model_name)
+        tokenizer.pad_token_id = 0
         if not model_family == "gpt":
             raise ValueError(
                 "We detected a Llama model, but model_family != 'gpt', fix your config!"
