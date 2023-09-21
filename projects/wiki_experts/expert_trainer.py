@@ -50,8 +50,14 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
 
             model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
 
+        # FIX for enabling gradient of the auxiliary loss
         # enable gradient checkpointing for memory efficiency
+        from functools import partial
+
+        notfailing_checkpoint = partial(torch.utils.checkpoint.checkpoint, use_reentrant=False)
+        torch.utils.checkpoint.checkpoint = notfailing_checkpoint
         model.gradient_checkpointing_enable()
+        # FIX for enabling gradient of the auxiliary loss
 
     return model
 
