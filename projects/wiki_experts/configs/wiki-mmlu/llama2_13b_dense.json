@@ -1,8 +1,7 @@
 {
-    "lora_alpha": 16,
-    "lora_rank": 4,
+    "lora_alpha": 4,
+    "lora_rank": 1,
     "lora_dropout": 0.00,
-    "weight_decay": 0.00,
     "n_skills": 1,
     "model_modifier": "lora",
     "modify_modules": ".*mlp.*",  

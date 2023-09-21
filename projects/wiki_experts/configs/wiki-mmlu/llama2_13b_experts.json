@@ -1,17 +1,18 @@
 {
-    "num_train_epochs": 5,
+    "num_train_epochs": 3,
     "load_in_8bit": 1,
+    "weight_decay": 0.00,
     "learning_rate": 0.0003,
     "micro_batch_size": 1,
     "train_batch_size": 16,
-    "predict_batch_size": 2,
+    "predict_batch_size": 4,
     "max_input_length": 4096,
     "max_output_length": 4096,
     "model": "meta-llama/Llama-2-13b-hf",
     "model_family": "gpt",
     "optimizer": "adamw",
-    "eval_every": 100,
+    "eval_every": 0.5,
     "warmup_steps": 100,
-    "precision": "bf16-mixed",
+    "precision": "bf16",
     "dataset": "sordonia/wiki_mmlu_from_valid_all"
 }
