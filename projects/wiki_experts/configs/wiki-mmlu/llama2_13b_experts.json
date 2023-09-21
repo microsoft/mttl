@@ -12,6 +12,6 @@
     "optimizer": "adamw",
     "eval_every": 100,
     "warmup_steps": 100,
-    "precision": "bf16",
-    "dataset": "sordonia/wiki_mmlu_1M"
+    "precision": "bf16-mixed",
+    "dataset": "sordonia/wiki_mmlu_from_valid_all"
 }

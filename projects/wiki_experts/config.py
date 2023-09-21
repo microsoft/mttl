@@ -16,6 +16,7 @@ class ExpertConfig(Config):
         self.routing = "subject"
         self.load_module = None
         self.micro_batch_size = None
+        self.validation_portion = 0.03
 
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")

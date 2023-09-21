@@ -10,5 +10,5 @@
     "eval_every": 400,
     "warmup_steps": 100,
     "precision": "16",
-    "dataset": "sordonia/wiki_mmlu_1M"
+    "dataset": "sordonia/wiki_mmlu_from_valid_all"
 }

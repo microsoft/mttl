@@ -1,7 +1,7 @@
 {
     "lora_alpha": 16,
     "lora_rank": 4,
-    "lora_dropout": 0.05,
+    "lora_dropout": 0.00,
     "weight_decay": 0.00,
     "n_skills": 1,
     "model_modifier": "lora",

@@ -98,6 +98,7 @@ def run_multitask(args):
     )
 
     # initial validation!
+    trainer.validate(module, dm)
     trainer.fit(module, dm)
 
     # reload best model before pushing!
