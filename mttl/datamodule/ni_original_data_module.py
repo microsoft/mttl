@@ -101,8 +101,8 @@ class DataCollatorForNI(DefaultCollator):
                 add_explanation = self.add_explanation
 
             task_input = ""
+            task_input += "Now complete the following example -\n"
             # add the input first.
-            # task_input += "Now complete the following example -\n"
             task_input += f"Input: {instance['Instance']['input'].strip()}"
             if not task_input[-1] in string.punctuation:
                 task_input += "."
