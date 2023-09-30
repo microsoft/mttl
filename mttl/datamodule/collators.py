@@ -1,10 +1,28 @@
 from dataclasses import dataclass
+from pytorch_lightning import LightningDataModule
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PaddingStrategy
-from typing import List, Union, Optional
+from typing import Any, List, Union, Optional
 import torch
 
 from mttl.dataloader.data_utils import ExampleInfo
+from torch.utils.data import DataLoader
+
+from mttl.datamodule.utils import get_tokenizer
+
+
+@dataclass
+class DatasetConfig:
+    data_dir: str = None
+    model: str = None
+    padding_side: str = None
+    train_batch_size: int = None
+    predict_batch_size: int = None
+    max_input_length: int = None
+    max_output_length: int = None
+    validation_portion: float = None
+    model_family: str = "gpt"
+    train_on_inputs: bool = False
 
 
 @dataclass
@@ -176,3 +194,93 @@ class DefaultCollator:
         output_batch["instruction_hashes"] = instruction_hashes
         output_batch["task_ids"] = torch.LongTensor(task_ids)
         return output_batch
+
+
+class DefaultDataModule(LightningDataModule):
+    def train_dataloader(self):
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.config.train_batch_size,
+            shuffle=True,
+            num_workers=16,
+            pin_memory=True,
+            persistent_workers=True,
+            collate_fn=self.collate_fn,
+        )
+
+    def val_dataloader(self):
+        return DataLoader(
+            self.dev_dataset,
+            batch_size=self.config.predict_batch_size,
+            shuffle=False,
+            num_workers=16,
+            pin_memory=True,
+            persistent_workers=True,
+            collate_fn=self.collate_fn,
+        )
+
+    def test_dataloader(self):
+        return DataLoader(
+            self.test_dataset,
+            batch_size=self.config.predict_batch_size,
+            shuffle=False,
+            num_workers=16,
+            pin_memory=True,
+            persistent_workers=True,
+            collate_fn=self.collate_fn,
+        )
+
+    @property
+    def collate_fn(self):
+        return DefaultCollator(
+            tokenizer=self.tokenizer,
+            padding="longest",
+            max_input_length=self.config.max_input_length,
+            max_output_length=self.config.max_output_length,
+            pad_to_multiple_of=8,
+            return_tensors="pt",
+            model_family=self.config.model_family,
+            train_on_inputs=self.config.train_on_inputs,
+        )
+
+    def print_infos(self):
+        from mttl.utils import logger
+
+        logger.info("Training steps: %s" % len(self.train_dataloader()))
+        logger.info("Validation steps: %s" % len(self.val_dataloader()))
+
+    @property
+    def task_to_id(self):
+        return {}
+
+    def create_train_valid_split(self, dataset, validation_portion=None):
+        # always use the same split for the dataset
+        validation_portion = validation_portion or self.config.validation_portion
+
+        rng = torch.Generator().manual_seed(1234)
+        n_tr_samples = int(
+            len(dataset) * (1 - validation_portion)
+        )
+
+        train_dataset, dev_dataset = torch.utils.data.random_split(
+            dataset,
+            [
+                n_tr_samples,
+                len(dataset) - n_tr_samples,
+            ],
+            generator=rng,
+        )
+        return train_dataset, dev_dataset
+
+    def __init__(self, config: Union[DatasetConfig, Any]):
+        super().__init__()
+
+        self.config = config
+        self.tokenizer = get_tokenizer(config)
+        self.setup_dataset()
+
+    def setup(self, stage=None):
+        pass
+
+    def setup_dataset(self):
+        pass
