@@ -21,7 +21,7 @@ class Config:
                         os.getenv("CONFIG_PATH", default="configs"), filename
                     )
 
-                if not os.path.exists(filename):
+                if not os.path.exists(filename) and ".json" not in filename:
                     filename = filename + ".json"
 
                 self.update_kwargs(
