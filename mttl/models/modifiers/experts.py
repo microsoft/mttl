@@ -11,6 +11,7 @@ def add_expert_to_transformer(
     expert_weights,
     action="route",
     is_default=False,
+    load_only_layers=None,
 ):
     # create a shared container for the task id
     if not hasattr(transformer, "task_id_container"):
@@ -46,6 +47,22 @@ def add_expert_to_transformer(
                         for k, v in expert_weights.items()
                         if k.startswith(expert_container.__layer_name__)
                     }
+
+                    layer_num = int(expert_container.__layer_name__.split(".")[2])
+
+                    if load_only_layers:
+                        pos = load_only_layers.find("-")
+                        sel = int(load_only_layers.replace("-", ""))
+
+                        if pos == 0:
+                            # add until layer number excluded
+                            if layer_num >= sel:
+                                continue
+                        else:
+                            if layer_num < sel:
+                                continue
+
+                    logger.info("Adding expert to layer %s", expert_container.__layer_name__)
                     expert_container.add_expert(
                         expert_name,
                         expert_config,

@@ -57,7 +57,6 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
         notfailing_checkpoint = partial(torch.utils.checkpoint.checkpoint, use_reentrant=False)
         torch.utils.checkpoint.checkpoint = notfailing_checkpoint
         model.gradient_checkpointing_enable()
-        # FIX for enabling gradient of the auxiliary loss
 
     return model
 
@@ -79,7 +78,7 @@ class ExpertTrainer(EfficientCheckpointModule):
                 model_object = LlamaForCausalLM.from_pretrained(
                     self.hparams.model,
                     load_in_8bit=self.hparams.load_in_8bit,
-                    torch_dtype=torch.float32,
+                    torch_dtype=torch.float16,
                     device_map="auto",
                 )
             else:

@@ -32,12 +32,24 @@ def parse_experts_to_load(experts_to_load):
         experts_to_load = [experts_to_load]
 
     for expert in experts_to_load:
-        expert_path, _, action = expert.partition(":")
+        options = expert.split(":")
+        expert_path = options[0]
         expert_path, _, expert_name = expert_path.partition("=")
         all_paths = list(find_experts(expert_path)) or [expert_path]
 
-        if not action:
+        if not expert_name:
+            expert_name = None
+
+        if len(options) >= 2:
+            action = options[1]
+        else:
             action = "route"
+
+        if len(options) >= 3:
+            load_only_layers = options[2]
+        else:
+            load_only_layers = None
+
         is_default = "*" in action
         action = action.replace("*", "")
 
@@ -57,6 +69,7 @@ def parse_experts_to_load(experts_to_load):
                 "action": action,
                 "is_default": is_default,
                 "expert_name": expert_name,
+                "load_only_layers": load_only_layers,
             }
         )
     return kwargs

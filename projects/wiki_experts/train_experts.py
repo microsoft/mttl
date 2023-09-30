@@ -5,7 +5,7 @@ import pytorch_lightning as pl
 
 from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
-from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks import ModelCheckpoint, Callback
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -98,7 +98,6 @@ def run_multitask(args):
     )
 
     # initial validation!
-    trainer.validate(module, dm)
     trainer.fit(module, dm)
 
     # reload best model before pushing!

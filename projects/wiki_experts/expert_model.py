@@ -128,6 +128,7 @@ class MultiExpertModel(EfficientCheckpointModule):
         expert_name: str = None,
         action: str = "merge",
         is_default: bool = False,
+        load_only_layers: str = None,
     ):
         # load the expert weights
         import json
@@ -145,7 +146,9 @@ class MultiExpertModel(EfficientCheckpointModule):
         expert_config = ExpertConfig(
             kwargs=expert_checkpoint["hyper_parameters"], silent=True, raise_error=False
         )
-        if expert_config.expert_name is None:
+
+        expert_name = expert_name or expert_config.expert_name
+        if expert_name is None:
             if expert_config.finetune_task_name is not None:
                 expert_name = expert_config.finetune_task_name
             else:
@@ -177,6 +180,7 @@ class MultiExpertModel(EfficientCheckpointModule):
             expert_weights,
             action=action,
             is_default=is_default,
+            load_only_layers=load_only_layers,
         )
         if action != "merge":
             self.experts.append(expert_name)
