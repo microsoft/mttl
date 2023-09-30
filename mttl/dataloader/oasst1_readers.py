@@ -3,7 +3,6 @@ from datasets import load_dataset
 
 from mttl.dataloader.data_utils import ExampleInfo
 from mttl.utils import hash_example, logger
-from mttl.dataloader.platyplus_dataset_reader import PlatypusDataset
 
 
 class Oasst1Template:
@@ -65,7 +64,7 @@ class Oasst1Dataset(torch.utils.data.dataset.Dataset):
         return all_instructions
 
 
-class InverseOasst1Dataset(PlatypusDataset):
+class InverseOasst1Dataset(Oasst1Dataset):
     def __getitem__(self, key):
         entry = self.dataset[key]
 

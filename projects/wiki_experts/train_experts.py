@@ -6,11 +6,12 @@ import pytorch_lightning as pl
 from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint, Callback
+from mttl.datamodule.oasst1_module import OA1Config, OA1Module
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.datamodule.retrieval_lm_module import RetrievalLMDataModule
-from mttl.datamodule.platypus_module import PlatypusModule
+from mttl.datamodule.platypus_module import PlatypusModule, PlatypusConfig
 from mttl.utils import get_mlf_logger, setup_logging, logger
 
 from projects.wiki_experts.expert_trainer import ExpertTrainer
@@ -30,8 +31,35 @@ def run_multitask(args):
 
     # select dataloader
     model_class = ExpertTrainer
-    if args.dataset == "platypus":
-        dm = PlatypusModule(args)
+
+    if "platypus" in args.dataset:
+        config = PlatypusConfig(
+            model=args.model,
+            padding_side=args.padding_side,
+            train_batch_size=args.train_batch_size,
+            predict_batch_size=args.predict_batch_size,
+            max_input_length=args.max_input_length,
+            max_output_length=args.max_output_length,
+            validation_portion=args.validation_portion,
+            model_family=args.model_family,
+            train_on_inputs=False,
+            train_on_reverse=args.dataset == "inverse-platypus",
+        )
+        dm = PlatypusModule(config)
+    elif "oa1" in args.dataset:
+        config = OA1Config(
+            model=args.model,
+            padding_side=args.padding_side,
+            train_batch_size=args.train_batch_size,
+            predict_batch_size=args.predict_batch_size,
+            max_input_length=args.max_input_length,
+            max_output_length=args.max_output_length,
+            validation_portion=args.validation_portion,
+            model_family=args.model_family,
+            train_on_inputs=False,
+            train_on_reverse=args.dataset == "inverse-oa1",
+        )
+        dm = OA1Module(config)
     else:
         dm = RetrievalLMDataModule(args)
 
@@ -101,16 +129,14 @@ def run_multitask(args):
     trainer.fit(module, dm)
 
     # reload best model before pushing!
-    checkpoint = checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
+    checkpoint = (
+        checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
+    )
 
     if args.hf_repo_id and checkpoint:
         from expert_model import push_expert_to_hub
 
-        push_expert_to_hub(
-            checkpoint,
-            args.hf_repo_id,
-            auto_search=False
-        )
+        push_expert_to_hub(checkpoint, args.hf_repo_id, auto_search=False)
 
 
 if __name__ == "__main__":
