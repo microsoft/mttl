@@ -154,9 +154,8 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
                 model_family=ckpt["hyper_parameters"]["model_family"],
                 padding_side=ckpt["hyper_parameters"]["padding_side"],
             )
-            model_kwargs["tokenizer"] = tokenizer
 
-        model = cls(**ckpt["hyper_parameters"])
+        model = cls(**ckpt["hyper_parameters"], tokenizer=tokenizer)
         model.load_state_dict(ckpt["state_dict"], strict=False)
         return model
 
