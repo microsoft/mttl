@@ -146,7 +146,8 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
 
         tokenizer = model_kwargs.get("tokenizer", None)
         ckpt = torch.load(checkpoint_path, map_location="cpu")
-
+        ckpt["hyper_parameters"].update(**model_kwargs)
+    
         if tokenizer is None:
             tokenizer = get_tokenizer_with_args(
                 model_name=ckpt["hyper_parameters"]["model"],
@@ -155,7 +156,7 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
             )
             model_kwargs["tokenizer"] = tokenizer
 
-        model = cls(**ckpt["hyper_parameters"], **model_kwargs)
+        model = cls(**ckpt["hyper_parameters"])
         model.load_state_dict(ckpt["state_dict"], strict=False)
         return model
 
