@@ -137,11 +137,11 @@ def generate_answers_(
             f.write("\n")
 
 
-def load_vllm_model(path, dtype="float16"):
+def load_vllm_model(path, dtype="float16", tensor_parallel_size=4):
     llm = LLM(
         model=path,
         dtype=dtype,
-        tensor_parallel_size=4,
+        tensor_parallel_size=tensor_parallel_size,
     )
     return llm
 
