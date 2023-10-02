@@ -103,11 +103,17 @@ def generate_instructions_(
                 f.write("\n")
 
 
-def generate_answers_(llm, instruction_json):
+def generate_answers_(
+    llm,
+    instruction_json,
+    max_tokens=1024,
+    temperature=0.7,
+    top_p=0.9,
+):
     import json
 
     output_filename = instruction_json.replace(".json", "_answers.json")
-    sampling_params = SamplingParams(temperature=0.7, top_p=0.9, max_tokens=1024)
+    sampling_params = SamplingParams(temperature=temperature, top_p=top_p, max_tokens=max_tokens)
 
     with open(instruction_json, "r") as f:
         data = [json.loads(s) for s in f.readlines()]
@@ -127,7 +133,7 @@ def generate_answers_(llm, instruction_json):
         for output, instance in zip(outputs, data):
             instance["input"] = ""
             instance["response"] = output.outputs[0].text
-            json.dumps(instance)
+            f.write(json.dumps(instance))
             f.write("\n")
 
 
