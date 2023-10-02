@@ -139,6 +139,7 @@ def save_merged_model(mttl_ckpt_path, hf_path):
     if not model.hparams.model_modifier == "lora":
         raise NotImplementedError("Only LoRA models are supported.")
 
+    merged = []
     for name, module in model.model.named_modules():
         for c_name, child in module.named_children():
             if isinstance(child, LoRA):
@@ -148,9 +149,11 @@ def save_merged_model(mttl_ckpt_path, hf_path):
                     c_name,
                     child.layer,
                 )
-                logger.info("Merged LoRA layer: %s" % name)
+                merged.append(name)
 
+    logger.info("Merged LoRA layers: %s" % merged)
     logger.info("Saving merged model to: %s" % hf_path)
+
     model.model.save_pretrained(hf_path)
     logger.info("Saving tokenizer to: %s" % hf_path)
     model.tokenizer.save_pretrained(hf_path)
