@@ -53,9 +53,15 @@ def generate_instructions_(
                 for _ in range(n_samples_per_document):
                     sent = ""
                     start = np.random.randint(0, len(sentences))
+
                     while len(sent.split()) < 512:
                         sent += sentences[start] + ". "
                         start = (start + 1) % len(sentences)
+
+                    # avoid context too long errors
+                    if len(sent.split()) > 512:
+                        sent = " ".join(sent.split()[:512])
+
                     contexts.append(sent.strip())
 
         templated_contexts = [
@@ -74,11 +80,13 @@ def generate_instructions_(
             import json
 
             for output, context in zip(outputs, contexts):
-                json.dumps({
-                    "instruction": output.outputs[0].text,
-                    "context": context,
-                    "subject": topic,
-                })
+                f.write(
+                    json.dumps({
+                        "instruction": output.outputs[0].text,
+                        "context": context,
+                        "subject": topic,
+                    })
+                )
                 f.write("\n")
 
 
