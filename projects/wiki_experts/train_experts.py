@@ -6,10 +6,10 @@ import pytorch_lightning as pl
 from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint, Callback
-from mttl.datamodule.oasst1_module import OA1Config, OA1Module
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
+from mttl.datamodule.oasst1_module import OA1Config, OA1Module
 from mttl.datamodule.retrieval_lm_module import RetrievalLMDataModule
 from mttl.datamodule.platypus_module import PlatypusModule, PlatypusConfig
 from mttl.utils import get_mlf_logger, setup_logging, logger

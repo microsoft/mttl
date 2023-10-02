@@ -77,7 +77,7 @@ class ExpertTrainer(EfficientCheckpointModule):
                 model_object = LlamaForCausalLM.from_pretrained(
                     self.hparams.model,
                     load_in_8bit=self.hparams.load_in_8bit,
-                    torch_dtype=torch.float16,
+                    torch_dtype=torch.bfloat16,
                     device_map=getattr(self.hparams, "device_map", "auto"),
                 )
             else:

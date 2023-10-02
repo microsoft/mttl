@@ -109,15 +109,19 @@ class LoRA(Adapter):
     def create_for_layer(self, layer):
         if isinstance(layer, nn.Linear):
             self.lora_a = nn.Parameter(
-                torch.empty(layer.in_features, self.rank)
+                torch.empty(layer.in_features, self.rank).to(
+                    device=layer.weight.device
+                ),
             )
             self.lora_b = nn.Parameter(
-                torch.empty(self.rank, layer.out_features)
+                torch.empty(self.rank, layer.out_features).to(
+                    device=layer.weight.device
+                ),
             )
             self.forward_fn = self.forward_linear_
         else:
             raise NotImplementedError("LoRA only supports nn.Linear layers.")
-        
+
     def forward_linear_(self, input, **kwargs):
         output = self.layer(input)
         if self.merged_with_layer:
@@ -125,7 +129,8 @@ class LoRA(Adapter):
         else:
             input_lora = input.to(self.lora_a.dtype)
             adapter_out = (
-                torch.matmul(torch.matmul(input_lora, self.lora_a), self.lora_b) * self.scaling
+                torch.matmul(torch.matmul(input_lora, self.lora_a), self.lora_b)
+                * self.scaling
             )
             return output + adapter_out.to(input.dtype)
 
@@ -145,9 +150,9 @@ class LoRA(Adapter):
             [torch.FloatTensor([lora.scaling]) for lora in loras], dim=0
         ).to(device=lora_a.device)
         # (n_examples, seq_len, out_features)
-        adapter_out = torch.bmm(torch.bmm(input.to(dtype=lora_a.dtype), lora_a), lora_b) * scaling[
-            :, None, None
-        ].to(dtype=input.dtype)
+        adapter_out = torch.bmm(
+            torch.bmm(input.to(dtype=lora_a.dtype), lora_a), lora_b
+        ) * scaling[:, None, None].to(dtype=input.dtype)
 
         layer_out = loras[0].layer(input)
         return layer_out + adapter_out.to(dtype=layer_out.dtype)
@@ -178,7 +183,9 @@ class IA3(Adapter):
         ), f"IA3 can only be applied to torch.nn.Linear, but {layer} is {type(layer)}."
 
         self.layer = layer
-        self.multi_lora_b = nn.Parameter(torch.ones(layer.out_features))
+        self.multi_lora_b = nn.Parameter(
+            torch.ones(layer.out_features).to(device=self.layer.weight.device)
+        )
 
     def forward(self, input):
         return self.layer(input) * self.multi_lora_b
@@ -224,7 +231,7 @@ class SkilledLoRA(LoRA):
                     self.n_splits,
                     layer.in_features // self.n_splits,
                     self.rank,
-                )
+                ).to(device=self.weight.device)
             )
             self.lora_b = nn.Parameter(
                 torch.empty(
@@ -232,7 +239,7 @@ class SkilledLoRA(LoRA):
                     self.rank,
                     self.n_splits,
                     layer.out_features // self.n_splits,
-                )
+                ).to(device=self.weight.device)
             )
             self.forward_fn = self.forward_linear_
         else:
@@ -390,8 +397,6 @@ class SkilledLoRA_MergeLoraAfterOP(SkilledLoRA):
         adapter_out = torch.einsum(
             "bsqkd,bqk->bsd", (adapter_out, weights)
         )  # bs x seq x n_splits x D
-        adapter_out *= (
-            self.scaling
-        )
+        adapter_out *= self.scaling
 
         return layer_out + adapter_out.to(input.dtype)
