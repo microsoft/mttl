@@ -18,18 +18,31 @@ from mttl.dataloader.platypus_dataset_reader import InversePlatypusTemplate
 
 
 def generate_instructions_(
-    llm, n_samples_per_document=4, output_filename="generated.jsonl"
+    llm,
+    subject_names=SUB_10,
+    max_tokens=128,
+    temperature=0.7,
+    top_p=0.9,
+    num_contexts_per_document=4,
+    max_context_length=512,
+    output_filename="generated.jsonl"
 ):
+    """
+    To generate instructions, we take num_contexts_per_document chunks of length max_context_length from each document,
+    then sample 1 instruction from each chunk.
+
+    All instructions are appended as jsonl into output_filename.
+    """
     random_sample = True
     template = InversePlatypusTemplate()
-    sampling_params = SamplingParams(temperature=0.7, top_p=0.9, max_tokens=128)
+    sampling_params = SamplingParams(temperature=temperature, top_p=top_p, max_tokens=max_tokens)
     dataset = load_dataset("sordonia/wiki_mmlu_from_valid_all")["train"].to_pandas()
 
-    for topic in SUB_10:
-        topic_data = dataset[dataset["subject"] == topic]
+    for subject in subject_names:
+        subject_data = dataset[dataset["subject"] == subject]
 
         contexts = []
-        for text in tqdm.tqdm(topic_data["text"]):
+        for text in tqdm.tqdm(subject_data["text"]):
             sentences = text.split(".")
             sentences = [
                 sentence.strip().replace("\n", " ").replace("  ", " ")
@@ -45,22 +58,22 @@ def generate_instructions_(
                         contexts.append(sentence)
                         append = True
                     else:
-                        if len(contexts[-1].split()) + len(sentence.split()) < 512:
+                        if len(contexts[-1].split()) + len(sentence.split()) < max_context_length:
                             contexts[-1] += " " + sentence
                         else:
                             contexts.append(sentence)
             else:
-                for _ in range(n_samples_per_document):
+                for _ in range(num_contexts_per_document):
                     sent = ""
                     start = np.random.randint(0, len(sentences))
 
-                    while len(sent.split()) < 512:
+                    while len(sent.split()) < max_context_length:
                         sent += sentences[start] + ". "
                         start = (start + 1) % len(sentences)
 
                     # avoid context too long errors
-                    if len(sent.split()) > 512:
-                        sent = " ".join(sent.split()[:512])
+                    if len(sent.split()) > max_context_length:
+                        sent = " ".join(sent.split()[:max_context_length])
 
                     contexts.append(sent.strip())
 
@@ -84,7 +97,7 @@ def generate_instructions_(
                     json.dumps({
                         "instruction": output.outputs[0].text,
                         "context": context,
-                        "subject": topic,
+                        "subject": subject,
                     })
                 )
                 f.write("\n")
@@ -127,7 +140,7 @@ def load_vllm_model(path, dtype="float16"):
     return llm
 
 
-def save_merged_model(mttl_ckpt_path, hf_path):
+def save_merged_model(mttl_ckpt_path, hf_path="/tmp/merged"):
     from expert_trainer import ExpertTrainer
     from mttl.utils import logger
 
