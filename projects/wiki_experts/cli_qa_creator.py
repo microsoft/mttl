@@ -7,7 +7,7 @@ import gc
 
 from datasets import load_dataset
 from vllm import LLM, SamplingParams
-from mmlu_subject_configs import SUB_10
+from mmlu_subject_configs import SUB_10, SUB_10_LAST
 import click
 
 sys.path.append("../../")
@@ -137,7 +137,7 @@ def generate_answers_(
             f.write("\n")
 
 
-def load_vllm_model(path, dtype="float16", tensor_parallel_size=4):
+def load_vllm_model(path, dtype="float16", tensor_parallel_size=2):
     llm = LLM(
         model=path,
         dtype=dtype,
@@ -153,7 +153,7 @@ def save_merged_model(mttl_ckpt_path, hf_path="/tmp/merged"):
     model = ExpertTrainer.load_from_checkpoint(
         mttl_ckpt_path,
         load_in_8bit=False,
-        map_location={"": "cpu"},
+        device_map={"": "cpu"},
     )
     if not model.hparams.model_modifier == "lora":
         raise NotImplementedError("Only LoRA models are supported.")
