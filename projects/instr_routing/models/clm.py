@@ -100,6 +100,7 @@ class CLM(EfficientCheckpointModule):
                     load_in_8bit=load_in_8bit,
                     torch_dtype=torch.float32 if load_in_8bit else torch.float16,
                     device_map="auto",
+                    cache_dir=self.hparams.cache_dir
                 )
             else:
                 model_object = AutoModelForCausalLM.from_pretrained(self.hparams.model)
