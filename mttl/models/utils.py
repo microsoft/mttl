@@ -166,11 +166,13 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
         state_dict: Optional[dict] = None,
         save_function: Callable = torch.save,
         push_to_hub: bool = False,
+        save_full_model: bool = False,
         **kwargs,
     ):
         ckpt = self.state_dict()
 
-        self._delete_non_trainable_params(ckpt)
+        if not save_full_model:
+            self._delete_non_trainable_params(ckpt)
 
         hparams_allowed = {}
         # drop parameters which contain some strange datatypes as fsspec
