@@ -150,7 +150,7 @@ def save_merged_model(mttl_ckpt_path, hf_path="/tmp/merged"):
     from expert_trainer import ExpertTrainer
     from mttl.utils import logger
 
-    model = ExpertTrainer.load_from_checkpoint(
+    model = ExpertTrainer.from_pretrained(
         mttl_ckpt_path,
         load_in_8bit=False,
         device_map={"": "cpu"},
@@ -173,7 +173,7 @@ def save_merged_model(mttl_ckpt_path, hf_path="/tmp/merged"):
     logger.info("Merged LoRA layers: %s" % merged)
     logger.info("Saving merged model to: %s" % hf_path)
 
-    model.model.save_pretrained(hf_path)
+    model.model.save_pretrained(hf_path, save_full_model=True)
     logger.info("Saving tokenizer to: %s" % hf_path)
     model.tokenizer.save_pretrained(hf_path)
 

@@ -166,11 +166,13 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
         state_dict: Optional[dict] = None,
         save_function: Callable = torch.save,
         push_to_hub: bool = False,
+        save_full_model: bool = False,
         **kwargs,
     ):
         ckpt = self.state_dict()
 
-        self._delete_non_trainable_params(ckpt)
+        if not save_full_model:
+            self._delete_non_trainable_params(ckpt)
 
         hparams_allowed = {}
         # drop parameters which contain some strange datatypes as fsspec
@@ -200,6 +202,9 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
     def _delete_non_trainable_params(self, state_dict):
         if not hasattr(self, "_params_from_checkpoint"):
             self._params_from_checkpoint = set()
+
+        if not hasattr(self, "trainable_param_names"):
+            self.trainable_param_names = [n for n, p in self.named_parameters() if p.requires_grad]
 
         keys = [k for k in state_dict.keys()]
 
