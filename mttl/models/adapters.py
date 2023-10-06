@@ -200,7 +200,7 @@ class SkilledLoRA_MergeLoraAfterOP(SkilledLoRA):
         bs, _, _ = weights.size()
         adapter_out = torch.einsum(
             "bsd,qkdr->bsqkr", (input_lora, self.lora_a)
-        )  # bs x n_splits x n_skills x rank")
+        )  # bs seq x x n_splits x n_skills x rank
         adapter_out = torch.einsum(
             "bsqkr,qkrd->bsqkd", (adapter_out, self.lora_b)
         )  # bs x seq x n_splits x n_skills x D
