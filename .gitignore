@@ -152,5 +152,8 @@ results/
 lm_cache/
 /tmp/
 
+#
+projects/instr_routing/*
+
 # any file starting with _
 _*.*
