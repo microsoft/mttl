@@ -79,7 +79,7 @@ If you run into issues with protoc `TypeError: Descriptors cannot not be created
     pytest -vv tests
 
 ## Acknowledgements
-We relied on Derek Tam's open-source code for the dataloading and base T5 wrapper in pytorch-lightning for our encoder-decoder experiments. You can find the original code [here](https://github.com/r-three/t-few/tree/master)
+We relied on Derek Tam's open-source code for the dataloading and T5 lightning wrapper for our encoder-decoder experiments. You can find the original code [here](https://github.com/r-three/t-few/tree/master).
 
 
 ## Contributing
