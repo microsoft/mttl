@@ -201,6 +201,9 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
         if not hasattr(self, "_params_from_checkpoint"):
             self._params_from_checkpoint = set()
 
+        if not hasattr(self, "trainable_param_names"):
+            self.trainable_param_names = [n for n, p in self.named_parameters() if p.requires_grad]
+
         keys = [k for k in state_dict.keys()]
 
         # remove also parameters in the loss plugins, these need not be saved
