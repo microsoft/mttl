@@ -11,7 +11,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.datamodule.oasst1_module import OA1Config, OA1Module
 from mttl.datamodule.retrieval_lm_module import RetrievalLMDataModule
-from mttl.datamodule.platypus_module import PlatypusModule, PlatypusConfig
+from mttl.datamodule.platypus_module import PlatypusModule, PlatypusConfig, PlatypusQAModule
 from mttl.utils import get_mlf_logger, setup_logging, logger
 
 from projects.wiki_experts.expert_trainer import ExpertTrainer
@@ -32,7 +32,22 @@ def run_multitask(args):
     # select dataloader
     model_class = ExpertTrainer
 
-    if "platypus" in args.dataset:
+    if "qa" in args.dataset or "sub-10" in args.dataset:
+        config = PlatypusConfig(
+            model=args.model,
+            padding_side=args.padding_side,
+            train_batch_size=args.train_batch_size,
+            predict_batch_size=args.predict_batch_size,
+            max_input_length=args.max_input_length,
+            max_output_length=args.max_output_length,
+            validation_portion=args.validation_portion,
+            model_family=args.model_family,
+            train_on_inputs=False,
+            finetune_task_name=args.finetune_task_name,
+            dataset=args.dataset,
+        )
+        dm = PlatypusQAModule(config)
+    elif "platypus" in args.dataset:
         config = PlatypusConfig(
             model=args.model,
             padding_side=args.padding_side,

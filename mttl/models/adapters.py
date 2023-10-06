@@ -363,7 +363,6 @@ class ExpertContainer(Adapter):
                 else:
                     selected_expert = task_name
                 load_experts.append(self.experts[selected_expert])
-
             # assume all experts are loras
             output = LoRA.parallel_linear_forward(input, load_experts)
         else:

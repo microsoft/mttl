@@ -23,6 +23,8 @@ class DatasetConfig:
     validation_portion: float = None
     model_family: str = "gpt"
     train_on_inputs: bool = False
+    finetune_task_name: str = None
+    dataset: str = None
 
 
 @dataclass

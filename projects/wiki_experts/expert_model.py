@@ -10,43 +10,8 @@ from mttl.models.utils import (
 from mttl.models.utils import download_from_hub
 from mttl.models.modifiers.experts import add_expert_to_transformer
 from mttl.utils import get_checkpoint_path, logger
+from expert_trainer import ExpertTrainer
 from config import ExpertConfig
-
-
-def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
-    r"""
-    This method wraps the entire protocol for preparing a model before running a training. This includes:
-        1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
-        head to fp32
-
-    Args:
-        model, (`transformers.PreTrainedModel`):
-            The loaded model from `transformers`
-    """
-    loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(
-        model, "is_loaded_in_4bit", False
-    )
-
-    # cast all non INT8 parameters to fp32
-    for param in model.parameters():
-        if (param.dtype == torch.float16) or (param.dtype == torch.bfloat16):
-            param.data = param.data.to(torch.float32)
-
-    if loaded_in_kbit and use_gradient_checkpointing:
-        # For backward compatibility
-        if hasattr(model, "enable_input_require_grads"):
-            model.enable_input_require_grads()
-        else:
-
-            def make_inputs_require_grad(module, input, output):
-                output.requires_grad_(True)
-
-            model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
-
-        # enable gradient checkpointing for memory efficiency
-        model.gradient_checkpointing_enable()
-
-    return model
 
 
 def push_expert_to_hub(
@@ -92,34 +57,9 @@ def push_expert_to_hub(
     convert_and_push_to_hub(ckpt_path, repo_id, auto_search=False, use_last=False)
 
 
-class MultiExpertModel(EfficientCheckpointModule):
+class MultiExpertModel(ExpertTrainer):
     def __init__(self, **kwargs):
-        super().__init__()
-
-        # log hyperparameters
-        self.save_hyperparameters(ignore=["tokenizer", "model_object"])
-
-        self.tokenizer = kwargs["tokenizer"]
-        self.pad_token_id = self.tokenizer.pad_token_id
-        self.model: AutoModelForCausalLM = None
-
-        if "llama" in self.hparams.model:
-            model_object = LlamaForCausalLM.from_pretrained(
-                self.hparams.model,
-                load_in_8bit=self.hparams.load_in_8bit,
-                torch_dtype=torch.float32 if self.hparams.load_in_8bit else torch.float16,
-                device_map="auto",
-            )
-        else:
-            model_object = AutoModelForCausalLM.from_pretrained(self.hparams.model)
-
-        if model_object.config.vocab_size != len(self.tokenizer):
-            model_object.resize_token_embeddings(len(self.tokenizer))
-
-        if self.hparams.load_in_8bit:
-            model_object = prepare_model_for_kbit_training(model_object)
-
-        self.model = model_object
+        super().__init__(**kwargs)
         self.experts = []
 
     def load_expert(

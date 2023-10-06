@@ -18,6 +18,7 @@ def add_expert_to_transformer(
         transformer.task_id_container = {}
 
     total_layers = 0
+    added_layers = []
 
     for m_name, module in dict(transformer.named_modules()).items():
         if re.fullmatch(expert_config.modify_modules, m_name):
@@ -62,7 +63,7 @@ def add_expert_to_transformer(
                             if layer_num < sel:
                                 continue
 
-                    logger.info("Adding expert to layer %s", expert_container.__layer_name__)
+                    added_layers.append(expert_container.__layer_name__)
                     expert_container.add_expert(
                         expert_name,
                         expert_config,
@@ -70,4 +71,6 @@ def add_expert_to_transformer(
                         action=action,
                         is_default=is_default,
                     )
+
+    logger.info("Adding expert to layers %s", added_layers)
     return transformer

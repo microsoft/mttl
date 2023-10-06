@@ -119,7 +119,7 @@ def generate_answers_(
         data = [json.loads(s) for s in f.readlines()]
 
     requests = []
-    for instance in data:
+    for instance in tqdm.tqdm(data):
         context = instance["context"]
         instruction = instance["instruction"]
         requests.append(
@@ -193,7 +193,8 @@ def cli():
 @click.option("--model-path", type=str, required=True)
 @click.option("--instruction-json", type=str, required=True)
 def generate_answers(model_path, instruction_json):
-    llm = load_vllm_model(model_path)
+    save_merged_model(model_path, "/tmp/merged")
+    llm = load_vllm_model("/tmp/merged")
     generate_answers_(llm, instruction_json=instruction_json)
 
 
