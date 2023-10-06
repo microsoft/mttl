@@ -11,11 +11,16 @@ from mmlu_subject_configs import SUB_10, SUB_10_LAST
 import click
 
 sys.path.append("../../")
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.models.adapters import LoRA
 from mttl.utils import setup_logging
 from mttl.dataloader.platypus_dataset_reader import InversePlatypusTemplate
 
+
+def sample_icl_examples(dataset, n_icl):
+    dataset = dataset.shuffle()
+    return dataset[:n_icl]["input"]
 
 def generate_instructions_(
     llm,
@@ -25,7 +30,9 @@ def generate_instructions_(
     top_p=0.9,
     num_contexts_per_document=4,
     max_context_length=512,
-    output_filename="generated.jsonl"
+    output_filename="generated.jsonl",
+    in_context_source = "lukaemon/mmlu",
+    n_icl = 2,
 ):
     """
     To generate instructions, we take num_contexts_per_document chunks of length max_context_length from each document,
@@ -37,8 +44,12 @@ def generate_instructions_(
     template = InversePlatypusTemplate()
     sampling_params = SamplingParams(temperature=temperature, top_p=top_p, max_tokens=max_tokens)
     dataset = load_dataset("sordonia/wiki_mmlu_from_valid_all")["train"].to_pandas()
-
+    
     for subject in subject_names:
+
+        if n_icl > 0:
+            icl_dataset = load_dataset(in_context_source, subject)["validation"]
+            
         subject_data = dataset[dataset["subject"] == subject]
 
         contexts = []
@@ -82,10 +93,11 @@ def generate_instructions_(
                 {
                     "instruction": None,
                     "input": None,
+                    "icl_examples": sample_icl_examples(icl_dataset, n_icl) if n_icl > 0 else None,
                     "output": sentence,
                 }
             )
-            for sentence in contexts
+            for sentence in contexts[:10]
         ]
 
         outputs = llm.generate(templated_contexts, sampling_params, use_tqdm=True)
@@ -142,6 +154,7 @@ def load_vllm_model(path, dtype="float16", tensor_parallel_size=2):
         model=path,
         dtype=dtype,
         tensor_parallel_size=tensor_parallel_size,
+        gpu_memory_utilization=0.5
     )
     return llm
 
@@ -149,6 +162,12 @@ def load_vllm_model(path, dtype="float16", tensor_parallel_size=2):
 def save_merged_model(mttl_ckpt_path, hf_path="/tmp/merged"):
     from expert_trainer import ExpertTrainer
     from mttl.utils import logger
+    hf_path = os.path.join(hf_path, mttl_ckpt_path.replace("/", "_"))
+    if not os.path.exists(hf_path):
+        os.makedirs(hf_path)
+    else:
+        return hf_path
+    
 
     model = ExpertTrainer.from_pretrained(
         mttl_ckpt_path,
@@ -182,6 +201,7 @@ def save_merged_model(mttl_ckpt_path, hf_path="/tmp/merged"):
     del model
     gc.collect()
     torch.cuda.empty_cache()
+    return hf_path
 
 
 @click.group()
@@ -209,8 +229,8 @@ def generate_instructions(mttl_checkpoint, output_path):
 @click.option("--model-path", type=str, required=True)
 @click.option("--output-filename", type=str, required=True)
 def generate_instructions(model_path, output_filename):
-    save_merged_model(model_path, "/tmp/merged")
-    llm = load_vllm_model("/tmp/merged")
+    model_path = save_merged_model(model_path, "/home/v-oostapenko/mttl_out/models/merged")
+    llm = load_vllm_model(model_path, tensor_parallel_size=1)
     generate_instructions_(llm, output_filename=output_filename)
 
 

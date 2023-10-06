@@ -27,7 +27,14 @@ class InversePlatypusTemplate:
             dict_values["input"],
             dict_values["output"],
         )
-        return f"Below is a response to a task. Write an instruction that appropriately describes the response.\n\n### Response:\n{output}\n\n### Instruction:\n"
+        prompt="" 
+        if "icl_examples" in dict_values.keys():
+            icl_examples = dict_values["icl_examples"]
+            prompt +=  f"Below are some examples of instructions." 
+            for icl_example in icl_examples:
+                prompt += f"\n\n### Instruciton example:\n{icl_example}\n"
+        prompt +=f"\nBelow is a response to a task. Write an instruction that appropriately describes the response.\n\n### Response:\n{output}\n\n### Instruction:\n"
+        return prompt
 
 
 class PlatypusDataset(torch.utils.data.dataset.Dataset):
