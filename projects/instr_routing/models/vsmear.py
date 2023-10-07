@@ -5,7 +5,7 @@ import torch.nn as nn
 from enum import Enum
 
 import torch.nn.functional as F
-from mttl.models.adapters import SkilledLoRA
+from mttl.models.adapters import SkilledLoRA, LoRA, SkilledLoRA_MergeLoraAfterOP
 from mttl.models.modifiers import modify_with_routing, register_modifier
 from mttl.models.modifiers.routing import (
     RouterWrapper,
@@ -18,6 +18,23 @@ from mttl.models.modifiers.poly import PolytroponSelector
 from torch.distributions.categorical import Categorical
 from torch.distributions.kl import kl_divergence
 
+class Metrics:
+    def __init__(self) -> None:
+        self.metrics = {}
+
+    def add(self, key, value):
+        self.metrics[key] = value.detach().cpu()
+
+    def __setitem__(self, key, value):
+        self.add(key, value)
+
+    def clear(self):
+        self.metrics.clear()
+
+    def items(self):
+        return self.metrics.items()
+
+
 @register_selector("smear")
 class SMEARRouter(RoutingSelector):
     def __init__(self, config, in_d):
@@ -27,17 +44,23 @@ class SMEARRouter(RoutingSelector):
         self.in_d = in_d
         self.n_splits = config.n_splits
         self.temperature = config.router_temperature
+        self.normalize_weights = config.router_normalize_weights
         assert in_d % self.n_splits == 0
 
-        self.prior_router_weight = nn.Parameter(
-            torch.empty(self.n_splits, in_d // self.n_splits, config.n_skills)
-        )
-        self.prior_router_bias = nn.Parameter(
-            torch.empty(self.n_splits, config.n_skills)
-        )
-        bound = 1. / np.sqrt(in_d // self.n_splits)
-        self.prior_router_weight.data.uniform_(-bound, bound)
-        self.prior_router_bias.data.uniform_(-bound, bound)
+        # during generation we want to cache the input encoding
+        # because in successive generation steps, the input is going to be only the encoding for the last token
+        self._router_input_cache = None
+
+        self.prior_router = nn.Linear(in_d, config.n_skills * self.n_splits, bias=True)
+        # self.prior_router_weight = nn.Parameter(
+        #    torch.empty(self.n_splits, in_d // self.n_splits, config.n_skills)
+        #  )
+        # self.prior_router_bias = nn.Parameter(
+        #     torch.empty(self.n_splits, config.n_skills)
+        # )
+        # bound = 1. / np.sqrt(in_d // self.n_splits)
+        # self.prior_router_weight.data.uniform_(-bound, bound)
+        # self.prior_router_bias.data.uniform_(-bound, bound)
 
         self.prior_router_ln = None
         self.activation_cache = None
@@ -51,7 +74,14 @@ class SMEARRouter(RoutingSelector):
 
     def route(self, router_w: nn.Parameter, router_b: nn.Parameter, layer_norm: nn.LayerNorm, x, ln=False):
         x = x.reshape(x.size(0), self.n_splits, -1)
-        sim_scores = torch.einsum('bsd,sdk->bsk', x, router_w) + router_b.unsqueeze(0) 
+        router_w = router_w.view(router_w.size(0), self.in_d // self.n_splits, self.n_splits)
+        if router_b is None:
+            router_b = 0
+        else: 
+            router_b = router_b.view(1, self.n_splits, self.n_skills)
+
+        sim_scores = torch.einsum('bsd,sdk->bsk', x, router_w) + router_b.unsqueeze(0)
+ 
         return sim_scores / self.temperature
 
     def apply_mask_and_average(self, x, padding_mask):
@@ -65,7 +95,7 @@ class SMEARRouter(RoutingSelector):
             input = routing_infos.encoder_output
         inst_padding_mask = routing_infos.inst_token_mask
         prior_input = self.apply_mask_and_average(input, inst_padding_mask)
-        prior_routes = self.route(self.prior_router_weight, self.prior_router_bias, self.prior_router_ln, prior_input)
+        prior_routes = self.route(self.prior_router.weight, self.prior_router.bias, self.prior_router_ln, prior_input)
         routing_probs = F.softmax(prior_routes, dim=-1) # bs, n_splits, n_skills
 
         if self.activation_cache is None:
@@ -94,7 +124,12 @@ class VSMEARRouter(SMEARRouter):
 
         inst_padding_mask = routing_infos.inst_token_mask
         prior_input = self.apply_mask_and_average(input, inst_padding_mask)
-        prior_logits = self.route(self.prior_router_weight, self.prior_router_bias, self.prior_router_ln, prior_input)
+        prior_logits = self.route(
+            self.prior_router_weight, 
+            self.prior_router_bias,
+            self.prior_router_ln, 
+            prior_input
+        )
         prior_probs = F.softmax(prior_logits, -1)
         if repeat > 1:
             prior_logits = prior_logits.repeat_interleave(repeat, dim=0)
