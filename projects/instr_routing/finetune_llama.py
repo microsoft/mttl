@@ -24,6 +24,7 @@ import models.vsmear  # noqa: F401
 import models.softmoe  # noqa: F401
 from models.monitors import SelectorMetricsLog, SelectorRoutingsLog
 from models.clm import CLM
+from models.encdec import EncoderDecoder
 from config import RoutingConfig
 
 torch.set_float32_matmul_precision("high")
@@ -155,7 +156,13 @@ def run_multitask(args):
         raise NotImplementedError()
 
     # select dataloader
-    model_class = CLM
+    if args.model_family == 'encdec':
+        model_class = EncoderDecoder
+    elif args.model_family == 'gpt':
+        model_class = CLM
+    else:
+        raise ValueError('`model_class` should be `encdec` or `gpt`.')
+
     if args.dataset == "alpaca":
         dm = AlpacaDataModule(args)
     elif args.dataset == "platypus":
