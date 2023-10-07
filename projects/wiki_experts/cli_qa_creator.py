@@ -17,6 +17,10 @@ from mttl.models.adapters import LoRA
 from mttl.utils import setup_logging
 from mttl.dataloader.platypus_dataset_reader import InversePlatypusTemplate
 
+class OpenAI():
+    def __init__(self, model_name):
+        self.model_name = model_name 
+
 
 def sample_icl_examples(dataset, n_icl):
     dataset = dataset.shuffle()
@@ -228,7 +232,10 @@ def generate_instructions(mttl_checkpoint, output_path):
 @cli.command('geni')
 @click.option("--model-path", type=str, required=True)
 @click.option("--output-filename", type=str, required=True)
+
 def generate_instructions(model_path, output_filename):
+    if model_path in ["davinci_003"]:
+        llm = OpenAI(model_path)
     model_path = save_merged_model(model_path, "/home/v-oostapenko/mttl_out/models/merged")
     llm = load_vllm_model(model_path, tensor_parallel_size=1)
     generate_instructions_(llm, output_filename=output_filename)
