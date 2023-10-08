@@ -25,7 +25,8 @@ def generate_instructions_(
     top_p=0.9,
     num_contexts_per_document=4,
     max_context_length=512,
-    output_filename="generated.jsonl"
+    output_filename="generated.jsonl",
+    dataset="sordonia/wiki_mmlu_from_valid_all",
 ):
     """
     To generate instructions, we take num_contexts_per_document chunks of length max_context_length from each document,
@@ -33,10 +34,10 @@ def generate_instructions_(
 
     All instructions are appended as jsonl into output_filename.
     """
-    random_sample = True
+    random_sample = False
     template = InversePlatypusTemplate()
     sampling_params = SamplingParams(temperature=temperature, top_p=top_p, max_tokens=max_tokens)
-    dataset = load_dataset("sordonia/wiki_mmlu_from_valid_all")["train"].to_pandas()
+    dataset = load_dataset(dataset)["train"].to_pandas()
 
     for subject in subject_names:
         subject_data = dataset[dataset["subject"] == subject]
@@ -208,10 +209,12 @@ def generate_instructions(mttl_checkpoint, output_path):
 @cli.command('geni')
 @click.option("--model-path", type=str, required=True)
 @click.option("--output-filename", type=str, required=True)
-def generate_instructions(model_path, output_filename):
+@click.option("--dataset", type=str, required=True)
+@click.option("--tpsize", type=int, required=True, default=2)
+def generate_instructions(model_path, output_filename, dataset, tpsize):
     save_merged_model(model_path, "/tmp/merged")
-    llm = load_vllm_model("/tmp/merged")
-    generate_instructions_(llm, output_filename=output_filename)
+    llm = load_vllm_model("/tmp/merged", tensor_parallel_size=tpsize)
+    generate_instructions_(llm, output_filename=output_filename, dataset=dataset)
 
 
 if __name__ == '__main__':
