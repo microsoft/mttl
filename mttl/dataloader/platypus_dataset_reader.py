@@ -28,7 +28,7 @@ class InversePlatypusTemplate:
             dict_values["output"],
         )
         prompt="" 
-        if "icl_examples" in dict_values.keys():
+        if "icl_examples" in dict_values.keys() and dict_values["icl_examples"] is not None:
             icl_examples = dict_values["icl_examples"]
             prompt +=  f"Below are some examples of good instructions." 
             for icl_example in icl_examples:
