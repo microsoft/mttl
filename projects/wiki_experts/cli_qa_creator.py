@@ -4,12 +4,14 @@ import tqdm
 import numpy as np
 import os
 import gc
-
+import re
 from datasets import load_dataset
 from vllm import LLM, SamplingParams
+from dataclasses import dataclass, field
 from mmlu_subject_configs import SUB_10, SUB_10_LAST
 import click
 import random
+from abc import ABC, abstractmethod, abstractproperty
 
 sys.path.append("../../")
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -18,7 +20,7 @@ import openai
 from mttl.models.adapters import LoRA
 from mttl.utils import setup_logging
 from mttl.dataloader.platypus_dataset_reader import InversePlatypusTemplate
-
+from typing import List
 import time
 
 openai.api_key = os.getenv("AZURE_OPENAI_KEY")
@@ -27,6 +29,7 @@ openai.api_base = os.getenv(
 )  # your endpoint should look like the following https://YOUR_RESOURCE_NAME.openai.azure.com/
 openai.api_type = "azure"
 openai.api_version = "2023-05-15"  # this may change in the future
+
 
 def retry_with_exponential_backoff(
     func,
@@ -71,17 +74,53 @@ def retry_with_exponential_backoff(
 
     return wrapper
 
+class InstructionsGenerator(ABC):
+    @abstractproperty
+    def model_name(self):
+        pass
 
-class OpenAI:
-    def __init__(self, model_name="text-davinci-003", n=2):
-        self.n_instructions_per_context = n
-        self.model_name = model_name
-        self.sys_prompt = f"You are a helpful and precise assistant for generating instructions for given user responses.\
-                        \nYou are given some examples of valid instructions in the format ### Instruction example: <instruction>.\
-                        \nThen you are given a context that contains reponces for some instruction in the format ### Context: <response>.\
-                        \nYour task is to provide {self.n_instructions_per_context} new instructions to which the answer is contained in the context. Your instruction should be similar to the format of the example instructions.\
-                        \nFor each of the {self.n_instructions_per_context} instructions you provide, also generate a complete reponse that is contained in the context. Format your output as follows:  ### Instruction <i>: <your instruction> ### Response <i>: <response from the context>.\
-                        \nRemember, it is very important to keep your generated instruction as similar as possible in the format, style and length to the provided examples!!!"
+class InversePlatypusLLM(InstructionsGenerator,LLM):
+    def __init__(self, *args, **kwargs):
+        LLM.__init__(self, *args, **kwargs)
+        self.template = InversePlatypusTemplate()
+    @property
+    def model_name(self):
+        return self.llm_engine.model_config.model
+    
+    def generate_prompt(self, inputs):
+        return self.template.apply(inputs)
+
+    def generate(self, templated_contexts, sampling_params, **kwargs):
+        responses = super().generate(templated_contexts, sampling_params, **kwargs)
+        return [output.outputs[0].text for output in responses]
+    
+
+class OpenAI(InstructionsGenerator):
+    def __init__(self, model_name="text-davinci-003", n_gen_instructions_per_context=1, n_shot=2):
+        self.n_shot = n_shot
+        self.n_instructions_per_context = n_gen_instructions_per_context
+        self._model_name = model_name
+        if n_shot >0:
+            self.sys_prompt = f"You are a helpful and precise assistant for generating instructions for given user responses.\
+                            \nYou are given some examples of valid instructions in the format ### Instruction example: <instruction>.\
+                            \nThen you are given a context that contains reponces to some instruction in the format ### Context: <response>.\
+                            \nYour task is to provide {self.n_instructions_per_context} new instructions to which the answer is contained in the context. Your instruction should be similar to the format of the example instructions.\
+                            \nFor each of the {self.n_instructions_per_context} instructions you provide, also generate a complete reponse that is contained in the context. Format your output as follows:  ### Instruction <i>: <your instruction> ### Response <i>: <response from the context>.\
+                            \nRemember, it is very important to keep your generated instruction as similar as possible in the format, style and length to the provided examples!!!"
+        else:
+            self.sys_prompt = f"You are a helpful and precise assistant for generating instructions for given user responses.\
+                            \nYou are given a context that contains reponces to some instruction in the format ### Context: <response>.\
+                            \nYour task is to provide {self.n_instructions_per_context} new instructions to which the answer is contained in the context.\
+                            \nFor each of the {self.n_instructions_per_context} instructions you provide, also generate a complete reponse that is contained in the context. Format your output as follows:  ### Instruction <i>: <your instruction> ### Response <i>: <response from the context>."
+    @property
+    def model_name(self):
+        return self._model_name
+    
+    @dataclass
+    class Response:
+        outputs: List[str] = field(default_factory=list)
+        contexts: List[str] = field(default_factory=list)
+        responses: List[str] = field(default_factory=list)
 
     @retry_with_exponential_backoff
     def api_generation(
@@ -101,11 +140,49 @@ class OpenAI:
         time.sleep(3)  # Preventing rate limits
         return responses
 
+    def _apply_prompt_template(self, dict_values):
+        instruction, input, output = (
+            dict_values["instruction"],
+            dict_values["input"],
+            dict_values["output"],
+        )
+        prompt="" 
+        if "icl_examples" in dict_values.keys():
+            icl_examples = dict_values["icl_examples"]
+            for icl_example in icl_examples:
+                prompt += f"\n\n### Instruciton example:\n{icl_example}\n"
+        prompt +=f"\n\n### Context:\n{output}\n\n### Your response:\n"
+        return prompt        
+        
+    
+    def generate_prompt(self, inputs):
+        return self._apply_prompt_template(inputs)
+    
+    @staticmethod
+    def process_outputs(output):
+        errors: tuple = (ValueError,)
+        instructions = []
+        responses = []
+        outputs_split = re.split(r'### Instruction \d+:', output)
+        for out in outputs_split[1:]:
+            try:
+                if len(out)>0:
+                    instr, resp = re.split(r'### Response \d+:', out)
+                    instr.replace('#', '')
+                    resp.replace('#', '')
+                    instructions.append(instr.strip())
+                    responses.append(resp.strip())
+            except errors as e:
+                pass
+            except Exception as e:
+                raise e
+            
+        
+        return instructions, responses
+    
     def generate(self, templated_contexts, sampling_params, **kwargs):
-        results = []       
+        results = OpenAI.Response()
         for context in tqdm.tqdm(templated_contexts):
-            context = context.replace("\n\n### Response:", "\n\n### Context:")
-            context = context.replace("\n\n### Instruction:", "\n\n### Yoru response:")
             message = [
                 {"role": "system", "content": self.sys_prompt},
                 {
@@ -114,16 +191,31 @@ class OpenAI:
                 },
             ]
             response = self.api_generation(message)
-            results.append(response[0].choices[0]["message"]["content"])
+            output = response[0].choices[0]["message"]["content"]
+            instructions, responses = self.process_outputs(output)
+            for ins, resp in zip(instructions, responses):
+                results.outputs.append(ins)
+                results.contexts.append(context)
+                results.responses.append(resp)
+
+        return results
 
 
-def sample_icl_examples(dataset, n_icl):
+def sample_icl_examples(dataset, n_icl, use_options=True):
     dataset = dataset.shuffle()
-    return dataset[:n_icl]["input"]
+    examples = []
+    for i in range(n_icl):
+        example = dataset[i]["input"]
+        if use_options:
+            for ans_option in ["A", "B", "C", "D"]:
+                example += f" \n{ans_option}:" + dataset[i][ans_option]
+            example=example.strip()
+        examples.append(example)
+    return examples
 
 
 def generate_instructions_(
-    llm,
+    llm: InstructionsGenerator,
     subject_names=SUB_10,
     max_tokens=128,
     temperature=0.7,
@@ -133,6 +225,7 @@ def generate_instructions_(
     output_filename="generated.jsonl",
     in_context_source="lukaemon/mmlu",
     n_icl=2,
+    icl_use_out_options = True
 ):
     """
     To generate instructions, we take num_contexts_per_document chunks of length max_context_length from each document,
@@ -145,7 +238,7 @@ def generate_instructions_(
     sampling_params = SamplingParams(
         temperature=temperature, top_p=top_p, max_tokens=max_tokens
     )
-    dataset = load_dataset("sordonia/wiki_mmlu_from_valid_all")["train"].to_pandas()
+    dataset = load_dataset("sordonia/my-wiki_mmlu_from_valid_all")["train"].to_pandas()
 
     for subject in subject_names:
         if n_icl > 0:
@@ -193,30 +286,37 @@ def generate_instructions_(
                     contexts.append(sent.strip())
 
         templated_contexts = [
-            template.apply(
+            llm.generate_prompt(
                 {
                     "instruction": None,
                     "input": None,
-                    "icl_examples": sample_icl_examples(icl_dataset, n_icl)
+                    "icl_examples": sample_icl_examples(icl_dataset, n_icl, use_options=icl_use_out_options)
                     if n_icl > 0
                     else None,
                     "output": sentence,
                 }
-            )       
-            for sentence in contexts
+            )
+            for sentence in contexts[:10]
         ]
-
+        responses = None
         outputs = llm.generate(templated_contexts, sampling_params, use_tqdm=True)
+        if isinstance(llm, OpenAI):
+            contexts = outputs.contexts
+            responses = outputs.responses
+            outputs = outputs.outputs
+
         with open(output_filename, "a+") as f:
             import json
 
-            for output, context in zip(outputs, contexts):
+            for i, (output, context) in enumerate(zip(outputs, contexts)):
                 f.write(
                     json.dumps(
                         {
-                            "instruction": output.outputs[0].text,
+                            "instruction": output,
                             "context": context,
                             "subject": subject,
+                            "response": responses[i] if responses else None,
+                            "author": str(llm.model_name)
                         }
                     )
                 )
@@ -254,13 +354,14 @@ def generate_answers_(
 
         for output, instance in zip(outputs, data):
             instance["input"] = ""
-            instance["response"] = output.outputs[0].text
+            instance["response"] = (
+                output.outputs[0].text if not isinstance(output, str) else output
+            )
             f.write(json.dumps(instance))
             f.write("\n")
 
-
 def load_vllm_model(path, dtype="float16", tensor_parallel_size=2):
-    llm = LLM(
+    llm = InversePlatypusLLM(
         model=path,
         dtype=dtype,
         tensor_parallel_size=tensor_parallel_size,
@@ -338,15 +439,17 @@ def generate_instructions(mttl_checkpoint, output_path):
 @cli.command("geni")
 @click.option("--model-path", type=str, required=True)
 @click.option("--output-filename", type=str, required=True)
-def generate_instructions(model_path, output_filename):
+@click.option("--n_icl", type=int, required=False, default=2)
+@click.option("--icl-use-out-options", type=bool, required=False, default=True, help="if True, the output options of MMLU will be included into positive prompts examples.")
+def generate_instructions(model_path, output_filename, n_icl, icl_use_out_options):
     if model_path in ["gpt-35-turbo", "gpt-4"]:
-        llm = OpenAI(model_path)
+        llm = OpenAI(model_path, n_shot=n_icl)
     else:
         model_path = save_merged_model(
             model_path, "/home/v-oostapenko/mttl_out/models/merged"
         )
         llm = load_vllm_model(model_path, tensor_parallel_size=1)
-    generate_instructions_(llm, output_filename=output_filename)
+    generate_instructions_(llm, output_filename=output_filename, n_icl=n_icl, icl_use_out_options=icl_use_out_options)
 
 
 if __name__ == "__main__":
