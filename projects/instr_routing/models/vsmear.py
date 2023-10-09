@@ -92,7 +92,7 @@ class SMEARRouter(RoutingSelector):
         if router.bias is None:
             bias = 0.
         else:
-            bias = router.bias.view(self.n_splits, self.n_skills)
+            bias = router.bias.view(1, self.n_splits, self.n_skills)
 
         if self.normalize_weights:
             weight = weight / torch.norm(
