@@ -27,23 +27,24 @@ class InversePlatypusTemplate:
             dict_values["input"],
             dict_values["output"],
         )
-        prompt="" 
-        if "icl_examples" in dict_values.keys() and dict_values["icl_examples"] is not None:
+        prompt = ""
+        if (
+            "icl_examples" in dict_values.keys()
+            and dict_values["icl_examples"] is not None
+        ):
             icl_examples = dict_values["icl_examples"]
-            prompt +=  f"Below are some examples of good instructions." 
+            prompt += f"Below are some examples of good instructions."
             for icl_example in icl_examples:
                 prompt += f"\n\n### Example Instruciton:\n{icl_example}\n"
-        prompt +=f"\nBelow is a response to a task. Write an instruction that appropriately describes the response.\n\n### Response:\n{output}\n\n### Instruction:\n"
+        prompt += f"\nBelow is a response to a task. Write an instruction that appropriately describes the response.\n\n### Response:\n{output}\n\n### Instruction:\n"
         return prompt
 
 
 class PlatypusDataset(torch.utils.data.dataset.Dataset):
     def __init__(
-        self,
-        data_dir: str = None,
-        dataset_name: str = "garage-bAInd/Open-Platypus"
+        self, data_dir: str = None, dataset_name: str = "garage-bAInd/Open-Platypus"
     ):
-        super().__init__()     
+        super().__init__()
         self.dataset = load_dataset(dataset_name)["train"]
         logger.info(self[0])
 
@@ -54,7 +55,7 @@ class PlatypusDataset(torch.utils.data.dataset.Dataset):
         entry = self.dataset[key]
 
         source = PlatypusTemplate.apply(entry)
-        labels = entry['output']
+        labels = entry["output"]
         hash = hash_example(source)
         instruction_hash = hash_example(entry["instruction"])
 
@@ -84,7 +85,7 @@ class PlatypusQADataset(torch.utils.data.dataset.Dataset):
         dataset_name: str = None,
         filter_by_subject: str = None,
     ):
-        super().__init__()     
+        super().__init__()
 
         self.dataset = load_dataset(dataset_name)["train"]
 
@@ -105,7 +106,7 @@ class PlatypusQADataset(torch.utils.data.dataset.Dataset):
         entry = self.dataset[key]
 
         source = PlatypusTemplate.apply(entry)
-        labels = entry['output']
+        labels = entry["output"]
         hash = hash_example(source)
         instruction_hash = hash_example(entry["instruction"])
 
@@ -133,7 +134,7 @@ class InversePlatypusDataset(PlatypusDataset):
         entry = self.dataset[key]
 
         source = InversePlatypusTemplate.apply(entry)
-        labels = entry['instruction']
+        labels = entry["instruction"]
         hash = hash_example(source)
         instruction_hash = hash_example(entry["instruction"])
 
