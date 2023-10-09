@@ -240,7 +240,6 @@ class TaskVSMEARRouter(SMEARRouter):
 
     def __init__(self, config, in_d):
         super(RoutingSelector, self).__init__()
-        config.n_tasks = 100
         assert config.n_tasks > 0, '`TaskVSMEARRouter` must be used with multitask datasets.'
 
         self.config = config
