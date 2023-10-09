@@ -31,7 +31,6 @@ openai.api_base = os.getenv(
 openai.api_type = "azure"
 openai.api_version = "2023-05-15"  # this may change in the future
 
-
 def retry_with_exponential_backoff(
     func,
     initial_delay: float = 1,
@@ -75,7 +74,6 @@ def retry_with_exponential_backoff(
 
     return wrapper
 
-
 class InstructionsGenerator(ABC):
     @dataclass
     class Response:
@@ -88,7 +86,6 @@ class InstructionsGenerator(ABC):
     @abstractproperty
     def model_name(self):
         pass
-
 
 class InversePlatypusLLM(InstructionsGenerator, LLM):
     def __init__(self, *args, **kwargs):
@@ -114,7 +111,6 @@ class InversePlatypusLLM(InstructionsGenerator, LLM):
                 )
         return results
 
-
 class OpenAI(InstructionsGenerator):
     def __init__(
         self, model_name="text-davinci-003", n_gen_instructions_per_context=2, n_shot=2
@@ -124,17 +120,17 @@ class OpenAI(InstructionsGenerator):
         self.n_instructions_per_context = n_gen_instructions_per_context
         self._model_name = model_name
         assert n_shot > 0
-        self._sys_prompt = f"You are a helpful and precise assistant for generating instructions for given user responses."
+        self._sys_prompt = f"You are a helpful and precise assistant for generating instructions for a given context."
 
     def task_description(self, bs, icl):
         td = f"You are given a set of {bs} samples formated as json file. For each of theese samples, you are given a context in field 'context'.\
-            \nYour task is to provide {self.n_instructions_per_context} complete instructions to which the answer is contained in this context. Generated instructions must contains all the nccessary information to answer them without assuming access to the context.\
-            \nThe format, length and style of the instructions should be similar to the following instruction examples:"
+            \nYour task is to generate {self.n_instructions_per_context} self-contained instructions related to the context for each sample. Generated instructions must contains all the nccessary information to answer them without assuming access to the context.\
+            \nThe format, tone, length and style of the generated instructions should be similar to the following instruction examples:"
         for ex in icl:
             td += f"\n\n### Instruction example:\n{ex}\n"
 
-        td += f"\nFor each of the {self.n_instructions_per_context} instructions you generate, also provide a concise reponse that can be inferred from the 'context'.\
-            \nRemember, it is very important to keep the tone, format, style and length of tour generated instruction as similar as possible to the instruction examples previosuly provided.\
+        td += f"\nFor each of the {self.n_instructions_per_context} instructions per sample you generate, also provide a concise reponse.\
+            \nRemember, it is very important to keep the tone, format, style and length of tour generated instruction as similar as possible to the instruction examples.\
             \nYour output must be formatted as a valid json file. For each of {bs} samples in the input, inlcude an entry in your output with the key corresponding to the index of the sample. Each such entry must include the following fields: 'instructions': <list of your generated intructions>, 'responses: <list of your generated responses>'\
             \n Here is the json formatted input:\n"
         return td
@@ -256,7 +252,6 @@ class OpenAI(InstructionsGenerator):
 
         return results
 
-
 def sample_icl_examples(dataset, n_icl, use_options=True):
     dataset = dataset.shuffle()
     examples = []
@@ -299,6 +294,7 @@ def generate_instructions_(
     dataset = load_dataset("sordonia/my-wiki_mmlu_from_valid_all")["train"].to_pandas()
 
     for subject in subject_names:
+        print(f"Generating instructions for subject: {subject}")
         if n_icl > 0:
             icl_dataset = load_dataset(in_context_source, subject)["validation"]
 
