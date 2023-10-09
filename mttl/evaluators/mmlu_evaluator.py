@@ -11,11 +11,12 @@ from mttl.evaluators.base import compute_task_aggregation
 
 
 class MMLUEvaluator(object):
-    def __init__(self, config, data_dir=None, max_input_length=None, device="cuda"):
+    def __init__(self, config, data_dir=None, max_input_length=None, device="cuda", split="test"):
         from mttl.datamodule.mmlu_data_module import MMLUDataModule
 
         self.config = deepcopy(config)
         self.device = device
+        self.split = split
 
         if data_dir is None:
             data_dir = config.data_dir
@@ -47,7 +48,10 @@ class MMLUEvaluator(object):
         all_task_names = []
         all_EM = []
 
-        dataloader = self.datamodule.test_dataloader(subsample, shuffle)
+        if self.split == "test":
+            dataloader = self.datamodule.test_dataloader(subsample, shuffle)
+        else:
+            dataloader = self.datamodule.val_dataloader()
         pbar = tqdm.tqdm(
             enumerate(dataloader),
             total=len(dataloader),
