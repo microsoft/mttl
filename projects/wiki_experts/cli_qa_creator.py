@@ -8,28 +8,54 @@ import re
 import json
 from datasets import load_dataset
 from vllm import LLM, SamplingParams
+from vllm.model_executor.parallel_utils.parallel_state import destroy_model_parallel
 from dataclasses import dataclass, field
 from mmlu_subject_configs import SUB_10, SUB_10_LAST
 import click
 import random
 from abc import ABC, abstractmethod, abstractproperty
 
-sys.path.append("../../")
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import openai
 from mttl.models.adapters import LoRA
 from mttl.utils import setup_logging
-from mttl.dataloader.platypus_dataset_reader import InversePlatypusTemplate
+
 from typing import List
 import time
 
-openai.api_key = os.getenv("AZURE_OPENAI_KEY")
-openai.api_base = os.getenv(
-    "AZURE_OPENAI_ENDPOINT"
-)  # your endpoint should look like the following https://YOUR_RESOURCE_NAME.openai.azure.com/
-openai.api_type = "azure"
-openai.api_version = "2023-05-15"  # this may change in the future
+#############################################
+### PROMPTS for VLLM
+class InverseTemplate:  # generate instructions
+    @classmethod
+    def apply(self, dict_values):
+        output, context = (
+            dict_values["response"],
+            dict_values["context"],
+        )
+        prompt = ""
+        if context is not None:
+            prompt += "\n\n### Context:\n" + context
+
+        if (
+            "icl_examples" in dict_values.keys()
+            and dict_values["icl_examples"] is not None
+        ):
+            icl_examples = dict_values["icl_examples"]
+            prompt += f"\n\nBelow are some examples of good instructions."
+            for icl_example in icl_examples:
+                prompt += f"\n\n### Example Instruciton:\n{icl_example}\n"
+
+        prompt += f"\nBelow is a response to a task. Write an instruction that appropriately describes the response.\n\n### Response:\n{output}\n\n### Instruction:\n"
+        return prompt
+
+class Template:  # generate responses
+    @classmethod
+    def apply(self, dict_values):
+        context = dict_values["context"]
+        instruction = dict_values["instruction"]
+        return f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n### Context:\n{context}\n\n### Instruction:\n{instruction}\n\n### Response:\n"
+#############################################
 
 def retry_with_exponential_backoff(
     func,
@@ -74,6 +100,7 @@ def retry_with_exponential_backoff(
 
     return wrapper
 
+
 class InstructionsGenerator(ABC):
     @dataclass
     class Response:
@@ -86,18 +113,30 @@ class InstructionsGenerator(ABC):
     @abstractproperty
     def model_name(self):
         pass
+    
+    @abstractmethod
+    def generate_prompt_for_answer(self, inputs):
+        pass
+
+    @abstractmethod
+    def generate_reverse_prompt_for_instruction(self, inputs):
+        pass
 
 class InversePlatypusLLM(InstructionsGenerator, LLM):
     def __init__(self, *args, **kwargs):
         LLM.__init__(self, *args, **kwargs)
-        self.template = InversePlatypusTemplate()
+        self.inverse_template = InverseTemplate()
+        self.template = Template()
 
     @property
     def model_name(self):
         return self.llm_engine.model_config.model
 
-    def generate_reverse_prompt(self, inputs):
+    def generate_prompt_for_answer(self, inputs):
         return self.template.apply(inputs)
+
+    def generate_reverse_prompt_for_instruction(self, inputs):
+        return self.inverse_template.apply(inputs)
 
     def generate(self, templated_contexts, sampling_params, **kwargs):
         results = InstructionsGenerator.Response()
@@ -122,6 +161,13 @@ class OpenAI(InstructionsGenerator):
         assert n_shot > 0
         self._sys_prompt = f"You are a helpful and precise assistant for generating instructions for a given context."
 
+        openai.api_key = os.getenv("AZURE_OPENAI_KEY")
+        openai.api_base = os.getenv(
+            "AZURE_OPENAI_ENDPOINT"
+        )  # your endpoint should look like the following https://YOUR_RESOURCE_NAME.openai.azure.com/
+        openai.api_type = "azure"
+        openai.api_version = "2023-05-15"  # this may change in the future
+        
     def task_description(self, bs, icl):
         td = f"You are given a set of {bs} samples formated as json file. For each of theese samples, you are given a context in field 'context'.\
             \nYour task is to generate {self.n_instructions_per_context} self-contained instructions related to the context for each sample. Generated instructions must contains all the nccessary information to answer them without assuming access to the context.\
@@ -177,7 +223,10 @@ class OpenAI(InstructionsGenerator):
         prompt += f"\n\n### Context:\n{output}\n\n### Your response:\n"
         return prompt
 
-    def generate_reverse_prompt(self, inputs):
+    def generate_prompt_for_answer(self, inputs):
+        pass
+    
+    def generate_reverse_prompt_for_instruction(self, inputs):
         return self._apply_prompt_template(inputs)
 
     @staticmethod
@@ -252,6 +301,7 @@ class OpenAI(InstructionsGenerator):
 
         return results
 
+
 def sample_icl_examples(dataset, n_icl, use_options=True):
     dataset = dataset.shuffle()
     examples = []
@@ -264,6 +314,14 @@ def sample_icl_examples(dataset, n_icl, use_options=True):
             example = example.strip()
         examples.append(example)
     return examples
+
+
+def icl_examples_per_subject(subjects):
+    icl_examples = {}
+    for subject in subjects:
+        dst = load_dataset("lukaemon/mmlu", subject)["validation"]
+        icl_examples[subject] = dst
+    return icl_examples
 
 
 def generate_instructions_(
@@ -287,7 +345,6 @@ def generate_instructions_(
     All instructions are appended as jsonl into output_filename.
     """
     random_sample = True
-    template = InversePlatypusTemplate()
     sampling_params = SamplingParams(
         temperature=temperature, top_p=top_p, max_tokens=max_tokens
     )
@@ -343,16 +400,15 @@ def generate_instructions_(
             contexts = contexts[: int(len(contexts) * subset)]
 
         templated_contexts = [
-            llm.generate_reverse_prompt(
+            llm.generate_reverse_prompt_for_instruction(
                 {
-                    "instruction": None,
-                    "input": None,
+                    "context": None,
                     "icl_examples": sample_icl_examples(
                         icl_dataset, n_icl, use_options=icl_use_out_options
                     )
                     if n_icl > 0
                     else None,
-                    "output": sentence,
+                    "response": sentence,
                 }
             )
             for sentence in contexts
@@ -387,6 +443,68 @@ def generate_instructions_(
                     )
                 )
                 f.write("\n")
+    return output_filename
+
+
+def regenerate_instructions(
+    llm: InstructionsGenerator,
+    instruction_json,
+    max_tokens=1024,
+    temperature=0.7,
+    top_p=0.9,
+    n_icl=2,
+    sufix="_regen_instr_",
+    icl_use_out_options=True,
+):
+    """
+    Generate new instructions for given responses
+    """
+    import json
+
+    output_filename = instruction_json.replace(".json", f"{sufix}.json")
+    sampling_params = SamplingParams(
+        temperature=temperature, top_p=top_p, max_tokens=max_tokens
+    )
+
+    with open(instruction_json, "r") as f:
+        data = [json.loads(s) for s in f.readlines()]
+
+    icl_dst_per_subject = icl_examples_per_subject(SUB_10)
+
+    # data = data[:10]
+
+    requests = []
+    for instance in tqdm.tqdm(data):
+        context = instance["context"]
+        response = instance["response"]
+        requests.append(
+            llm.generate_reverse_prompt_for_instruction(
+                {
+                    "context": context,
+                    "icl_examples": sample_icl_examples(
+                        icl_dst_per_subject[instance["subject"]],
+                        n_icl,
+                        use_options=icl_use_out_options,
+                    )
+                    if n_icl > 0
+                    else None,
+                    "response": response,
+                }
+            )
+        )
+    del icl_dst_per_subject
+    outputs = llm.generate(requests, sampling_params, use_tqdm=True)
+    outputs = outputs.outputs
+    print("Writing to file\n")
+    with open(output_filename, "a+") as f:
+        import json
+
+        for output, instance in zip(outputs, data):
+            instance["instruction"] = output
+            f.write(json.dumps(instance))
+            f.write("\n")
+    print("Done")
+    return output_filename
 
 
 def generate_answers_(
@@ -408,10 +526,13 @@ def generate_answers_(
 
     requests = []
     for instance in tqdm.tqdm(data):
-        context = instance["context"]
-        instruction = instance["instruction"]
         requests.append(
-            f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n### Context:\n{context}\n\n### Instruction:\n{instruction}\n\n### Response:\n"
+            llm.generate_prompt_for_answer(
+                {
+                    "instruction": instance["instruction"],
+                    "context": instance["context"],
+                }
+            )
         )
 
     outputs = llm.generate(requests, sampling_params)
@@ -435,7 +556,12 @@ def generate_answers_(
     return output_filename
 
 
-def load_vllm_model(path, dtype="float16", tensor_parallel_size=2):
+def load_vllm_model(path, dtype="float16", tensor_parallel_size=2):    
+    gc.collect()
+    torch.cuda.empty_cache()
+    destroy_model_parallel()
+    gc.collect()
+    torch.cuda.empty_cache()
     llm = InversePlatypusLLM(
         model=path,
         dtype=dtype,
@@ -498,9 +624,13 @@ def cli():
 @cli.command("gena")
 @click.option("--model-path", type=str, required=True)
 @click.option("--instruction-json", type=str, required=True)
-def generate_answers(model_path, instruction_json):
+@click.option("--tmp_path", type=str, required=False, default="/tmp/merged")
+def generate_answers(model_path, instruction_json, tmp_path="/tmp/merged"):
+    if os.environ.get("AMLT_OUTPUT_DIR") is not None:
+        instruction_json = os.path.join(os.environ.get("AMLT_OUTPUT_DIR"), instruction_json)    
+        
     model_path = save_merged_model(
-        model_path, "/home/v-oostapenko/mttl_out/models/merged"
+        model_path, hf_path=tmp_path
     )
     llm = load_vllm_model(model_path, tensor_parallel_size=1)
     output_filename = generate_answers_(llm, instruction_json=instruction_json)
@@ -531,14 +661,19 @@ def generate_instructions(mttl_checkpoint, output_path):
     default=-1,
     help="if > 0, this portion of subjects' data is processed.",
 )
+@click.option("--tmp_path", type=str, required=False, default="/tmp/merged")
 def generate_instructions(
-    model_path, output_filename, n_icl, icl_use_out_options, subset_per_subject=-1
-):
+    model_path, output_filename, n_icl, icl_use_out_options, subset_per_subject=-1, tmp_path="/tmp/merged"
+):  
+    if os.environ.get("AMLT_OUTPUT_DIR") is not None:
+        output_filename = os.path.join(os.environ.get("AMLT_OUTPUT_DIR"), output_filename)
+    
+    
     if model_path in ["gpt-35-turbo", "gpt-4"]:
         llm = OpenAI(model_path, n_shot=n_icl)
     else:
         model_path = save_merged_model(
-            model_path, "/home/v-oostapenko/mttl_out/models/merged"
+            model_path, hf_path=tmp_path
         )
         llm = load_vllm_model(model_path, tensor_parallel_size=1)
     generate_instructions_(
@@ -548,6 +683,135 @@ def generate_instructions(
         icl_use_out_options=icl_use_out_options,
         subset=subset_per_subject,
     )
+
+
+@cli.command("regeni")
+@click.option("--model-path", type=str, required=True)
+@click.option("--instruction-json", type=str, required=True)
+@click.option("--n_icl", type=int, required=False, default=5)
+@click.option("--sufix", type=str, required=False, default="_regen_instr_")
+@click.option("--tmp_path", type=str, required=False, default="/tmp/merged")
+def generate_instructions_iter(model_path, instruction_json, n_icl, sufix="_regen_instr_", tmp_path="/tmp/merged"):
+    if os.environ.get("AMLT_OUTPUT_DIR") is not None:
+        instruction_json = os.path.join(os.environ.get("AMLT_OUTPUT_DIR"), instruction_json)    
+    
+    model_path = save_merged_model(
+        model_path, hf_path=tmp_path
+    )
+    llm = load_vllm_model(model_path, tensor_parallel_size=1)
+    regenerate_instructions(
+        llm,
+        instruction_json=instruction_json,
+        n_icl=n_icl,
+        sufix=sufix,
+    )
+
+
+def perform_iteration(model_path, model_path_inverse, instruction_json, n_icl, icl_use_out_options, iter):
+    # generate_instructions
+    print("Iteration %d\n" % iter)
+
+    llm = load_vllm_model(model_path_inverse, tensor_parallel_size=1)
+        
+    instruction_json = regenerate_instructions(
+        llm,
+        instruction_json=instruction_json,
+        n_icl=n_icl,
+        icl_use_out_options=icl_use_out_options,
+        sufix=f"_regen_instr_iter_{iter}",
+    )
+    del llm
+    
+    llm = load_vllm_model(model_path, tensor_parallel_size=1)
+    # generate answers
+    output_filename = generate_answers_(
+        llm,
+        instruction_json=instruction_json,
+    )
+    del llm
+    return output_filename
+
+
+@cli.command("iterative")
+@click.option("--model-path", type=str, required=True)
+@click.option("--model-path-inverse", type=str, required=True)
+@click.option("--output-filename", type=str, required=True)
+@click.option("--n_icl", type=int, required=False, default=5)
+@click.option(
+    "--icl-use-out-options",
+    type=bool,
+    required=False,
+    default=True,
+    help="if True, the output options of MMLU will be included into positive prompts examples.",
+)
+@click.option(
+    "--subset-per-subject",
+    type=float,
+    required=False,
+    default=-1,
+    help="if > 0, this portion of subjects' data is processed.",
+)
+@click.option("--n-iterations", type=int, required=False, default=1)    
+@click.option("--tmp_path", type=str, required=False, default="/tmp/merged")
+def generate_instructions_answers_iteratively(
+    model_path,
+    model_path_inverse,
+    output_filename,
+    n_icl,
+    icl_use_out_options,
+    subset_per_subject=-1,
+    n_iterations=1,
+    tmp_path="/tmp/merged"
+):
+    '''
+    Runnign this can result in OOM (due to reloading VLLM models)
+    Instead, use        
+    - python projects/wiki_experts/cli_qa_creator.py geni --output-filename=generated_platypus_icl5.jsonl --model-path=sordonia/llama2-13b-platypus-inverse --n_icl=5 
+    - python projects/wiki_experts/cli_qa_creator.py gena --instruction-json=generated_platypus_icl5.jsonl --model-path=sordonia/llama2-13b-platypus
+    - python projects/wiki_experts/cli_qa_creator.py regeni --instruction-json=generated_platypus_icl5_answers.jsonl --model-path=sordonia/llama2-13b-platypus-inverse --n_icl=5 --sufix '_iter1'
+    - python projects/wiki_experts/cli_qa_creator.py gena --instruction-json=generated_platypus_icl5_answers_iter1.jsonl --model-path=sordonia/llama2-13b-platypus
+    - python projects/wiki_experts/cli_qa_creator.py regeni --instruction-json=generated_platypus_icl5_answers_iter1_answers.jsonl --model-path=sordonia/llama2-13b-platypus-inverse --n_icl=5 --sufix '_iter2'
+    - python projects/wiki_experts/cli_qa_creator.py gena --instruction-json=generated_platypus_icl5_answers_iter1_answers_iter2.jsonl --model-path=sordonia/llama2-13b-platypus
+    - python projects/wiki_experts/cli_qa_creator.py regeni --instruction-json=generated_platypus_icl5_answers_iter1_answers_iter2_answers.jsonl --model-path=sordonia/llama2-13b-platypus-inverse --n_icl=5 --sufix '_iter3'
+    '''
+    assert n_iterations > 0
+    
+    model_path_inverse = save_merged_model(
+        model_path_inverse, hf_path=tmp_path
+    )    
+    model_path = save_merged_model(
+        model_path, hf_path=tmp_path
+    )
+    
+    
+    print(
+        f"Generating instructions and answers iteratively for {n_iterations} iterations\n"
+    )
+    print("Starting first iteration\n")
+    # first iterations
+    llm = load_vllm_model(model_path_inverse, tensor_parallel_size=1)
+    instruction_json = generate_instructions_(
+        llm,
+        output_filename=output_filename,
+        n_icl=n_icl,
+        icl_use_out_options=icl_use_out_options,
+        subset=subset_per_subject,
+    )
+    del llm
+    llm = load_vllm_model(model_path, tensor_parallel_size=1)
+
+    output_filename = generate_answers_(
+        llm,
+        instruction_json=instruction_json,
+    )
+    del llm
+    
+    
+    
+    for iter in range(n_iterations - 1):
+        output_filename = perform_iteration(
+            model_path, model_path_inverse, output_filename, n_icl, icl_use_out_options, iter
+        )
 
 
 if __name__ == "__main__":
