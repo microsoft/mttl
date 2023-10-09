@@ -157,3 +157,6 @@ projects/instr_routing/*
 
 # any file starting with __
 __*.*
+__*/*
+# any folder starting with __
+__*/
