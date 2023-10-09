@@ -155,5 +155,5 @@ lm_cache/
 #
 projects/instr_routing/*
 
-# any file starting with _
-_*.*
+# any file starting with __
+__*.*
