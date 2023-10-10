@@ -119,14 +119,6 @@ def sample_icl_examples(dataset, n_icl, use_options=True):
     return examples
 
 
-def icl_examples_per_subject(subjects):
-    icl_examples = {}
-    for subject in subjects:
-        dst = load_dataset("lukaemon/mmlu", subject)["validation"]
-        icl_examples[subject] = dst
-    return icl_examples
-
-
 def reject_output(output, finish_reason):
     # common error here is that instruxtions starts with BEGININPUT + some nonsense, let evoid it
     # usually, if the instruction is too long, its a bad one
@@ -144,7 +136,7 @@ def free_memory():
 def transform_seed_dataset(
     dataset_name="sordonia/my-wiki-latex_mmlu_from_valid_all",
     subjects="SUB_10",
-    icl_dataset_name="cais/mmlu",
+    icl_dataset_name="lukaemon/mmlu",
     icl_use_out_options=True,
     icl_examples=0,
     max_context_length=512,
@@ -260,7 +252,6 @@ def generate_instructions_(
     # do the heavy lifting
     outputs = llm.generate(templated_contexts, sampling_params, use_tqdm=True)
     responses = outputs.responses if len(outputs.responses) > 0 else None
-    contexts = outputs.contexts if len(outputs.contexts) > 0 else contexts
     finish_reasons = outputs.finish_reason
     outputs = outputs.outputs
 
@@ -470,9 +461,78 @@ def generate_instructions(
     dump_jsonl_dataset(instruction_dataset, output_filename)
 
 
-@cli.command("test")
-def test():
-    load_vllm_model("/tmp/merged")
+@cli.command("e2e")
+@click.option(
+    "--seed-dataset", type=str, default="sordonia/my-wiki-latex_mmlu_from_valid_all"
+)
+@click.option("--model-path", type=str, required=True)
+@click.option("--inverse-model-path", type=str, required=True)
+@click.option("--output-filename", type=str, required=True)
+@click.option("--n_icl", type=int, required=False, default=0)
+@click.option(
+    "--icl-use-out-options",
+    type=bool,
+    required=False,
+    default=True,
+    help="if True, the output options of MMLU will be included into positive prompts examples.",
+)
+@click.option(
+    "--subset",
+    type=float,
+    required=False,
+    default=1,
+    help="if > 0, this portion of subjects' data is processed.",
+)
+@click.option("--tmp_path", type=str, required=False, default="/tmp/merged")
+@click.option("--sub_names", type=str, required=False, default="SUB_10")
+@click.option("--num_iterations", type=int, required=False, default=1)
+def generate_instructions(
+    seed_dataset,
+    model_path,
+    inverse_model_path,
+    output_filename,
+    n_icl,
+    icl_use_out_options,
+    subset,
+    tmp_path,
+    sub_names,
+    num_iterations,
+):
+    if os.environ.get("AMLT_OUTPUT_DIR") is not None:
+        output_filename = os.path.join(
+            os.environ.get("AMLT_OUTPUT_DIR"), output_filename
+        )
+
+    # start dataset
+    prev_dataset = transform_seed_dataset(
+        seed_dataset,
+        subjects=sub_names,
+        icl_examples=n_icl,
+        icl_use_out_options=icl_use_out_options,
+        subset=subset,
+    )
+
+    for i in range(num_iterations):
+        if model_path in ["gpt-35-turbo", "gpt-4"] and i == 0:
+            llm = OpenAI(model_path)
+        else:
+            inverse_model_path = save_merged_model(inverse_model_path, hf_path=tmp_path)
+            llm = load_vllm_model(inverse_model_path)
+
+        instruction_dataset = generate_instructions_(
+            llm,
+            prev_dataset,
+        )
+        if model_path not in ["gpt-35-turbo", "gpt-4"]:
+            model_path = save_merged_model(model_path, hf_path=tmp_path)
+            llm = load_vllm_model(model_path)
+
+        answer_dataset = generate_answers_(
+            llm,
+            instruction_dataset,
+        )
+        dump_jsonl_dataset(answer_dataset, output_filename + "_%d.json")
+        prev_dataset = instruction_dataset
 
 
 if __name__ == "__main__":
