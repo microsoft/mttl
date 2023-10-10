@@ -10,6 +10,7 @@ from datasets import load_dataset
 from vllm import LLM, SamplingParams
 from vllm.model_executor.parallel_utils.parallel_state import destroy_model_parallel
 from dataclasses import dataclass, field
+from mttl.dataloader.platypus_dataset_reader import InversePlatypusTemplate
 from mmlu_subject_configs import SUB_10, SUB_10_LAST
 import click
 import random
@@ -26,7 +27,9 @@ import time
 
 #############################################
 ### PROMPTS for VLLM
-class InverseTemplate:  # generate instructions
+class InverseTemplate:
+    def __init__(self) -> None:
+        self.platy_template = InversePlatypusTemplate()
     @classmethod
     def apply(self, dict_values):
         output, context = (
@@ -36,17 +39,10 @@ class InverseTemplate:  # generate instructions
         prompt = ""
         if context is not None:
             prompt += "\n\n### Context:\n" + context
-
-        if (
-            "icl_examples" in dict_values.keys()
-            and dict_values["icl_examples"] is not None
-        ):
-            icl_examples = dict_values["icl_examples"]
-            prompt += f"\n\nBelow are some examples of good instructions."
-            for icl_example in icl_examples:
-                prompt += f"\n\n### Example Instruciton:\n{icl_example}\n"
-
-        prompt += f"\nBelow is a response to a task. Write an instruction that appropriately describes the response.\n\n### Response:\n{output}\n\n### Instruction:\n"
+        prompt += self.platy_template.apply({
+            "instruction": None,
+            "input": None,
+            "output": output})
         return prompt
 
 class Template:  # generate responses
