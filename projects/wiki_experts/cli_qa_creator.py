@@ -43,13 +43,21 @@ class InstructionsGenerator(ABC):
         cumulative_logprobs: List[float] = field(default_factory=list)
         finish_reason: List[str] = field(default_factory=list)
 
+    @abstractmethod
+    def generate(self, templated_contexts, sampling_params, **kwargs):
+        pass
+
     def generate_prompt_for_answer(self, instruction, context):
         return self.template.apply(instruction, context)
 
     def generate_reverse_prompt_for_instruction(
         self, output, context, icl_examples=None
     ):
-        return self.inverse_template.apply(output, context, icl_examples)
+        return self.inverse_template.apply(
+            output if output is not None else context,
+            context if output is not None else None,
+            icl_examples
+        )
 
 
 class InversePlatypusLLM(InstructionsGenerator, LLM):
@@ -64,7 +72,8 @@ class InversePlatypusLLM(InstructionsGenerator, LLM):
 
     def generate(self, templated_contexts, sampling_params, **kwargs):
         results = InstructionsGenerator.Response()
-        responses = super().generate(templated_contexts, sampling_params, **kwargs)
+        responses = LLM.generate(self, templated_contexts, sampling_params, **kwargs)
+
         for response in responses:
             if len(response.outputs[0].token_ids) > 0:
                 results.outputs.append(response.outputs[0].text)
@@ -180,6 +189,7 @@ def transform_seed_dataset(
 
             if i > len(subject_data["text"]) * float(subset):
                 print("Breaking early due to subset settings.")
+                break
 
         for context in contexts:
             converted_dataset.append(
@@ -231,16 +241,23 @@ def generate_instructions_(
     )
 
     def get_templated_context(entry):
-        if "response" in entry:
-            # this is not the first generation probably of this instruction
-            raise NotImplementedError("Not implemented yet.")
+        if "instruction" in entry:
+            raise NotImplementedError("Instructions are already generated.")
 
         return llm.generate_reverse_prompt_for_instruction(
-            output=entry["context"],
+            context=entry["context"],
+            output=entry["response"] if "response" in entry else None,
             icl_examples=entry["icl_examples"],
         )
 
     templated_contexts = [get_templated_context(entry) for entry in dataset]
+    
+    print("Example generation requests...")
+    for context in np.random.choice(templated_contexts, 5):
+        print(context)
+        print()
+
+    # do the heavy lifting
     outputs = llm.generate(templated_contexts, sampling_params, use_tqdm=True)
     responses = outputs.responses if len(outputs.responses) > 0 else None
     contexts = outputs.contexts if len(outputs.contexts) > 0 else contexts
@@ -451,6 +468,11 @@ def generate_instructions(
         seed_dataset,
     )
     dump_jsonl_dataset(instruction_dataset, output_filename)
+
+
+@cli.command("test")
+def test():
+    load_vllm_model("/tmp/merged")
 
 
 if __name__ == "__main__":
