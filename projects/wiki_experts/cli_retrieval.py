@@ -160,14 +160,19 @@ def do_create_dataset(docs_json, max_tokens, hub_name):
                 data[key].append(doc[key])
 
             # sub <math> for latex in wikipedia
-            data["text"][-1] = (
-                data["text"][-1]
-                .replace("&lt;math&gt;", "$")
-                .replace("&lt;/math&gt;", "$")
-            )
-            data["text"][-1] = data["text"][-1].replace(
-                '&lt;math display=\\"block\\"&gt;', "$"
-            )
+            for keyword in ["math chem", "math", "chem"]:
+                data["text"][-1] = (
+                    data["text"][-1]
+                    .replace(f"&lt;{keyword}&gt;", "$")
+                    .replace(f"&lt;/{keyword}&gt;", "$")
+                )
+                data["text"][-1] = data["text"][-1].replace(
+                    f'&lt;{keyword} display=\\"block\\"&gt;', "$"
+                )
+                data["text"][-1] = data["text"][-1].replace(
+                    f'&lt;{keyword} display=\\"inline\\"&gt;', "$"
+                )
+
             num_tokens += len(doc["text"].split())
 
             if num_tokens > max_tokens and max_tokens != -1:
@@ -221,7 +226,15 @@ def e2e(dataset, path, mmlu_split, hub_name):
     if not os.path.exists(path):
         make_index(dataset, path)
 
-    do_retrieval(path, mmlu_split, "/tmp/docs.json")
+    if not os.path.exists("/tmp/docs.json"):
+        do_retrieval(path, mmlu_split, "/tmp/docs.json")
+    else:
+        print("Trying to use cached retrieved documents !!!")
+
+        with open("/tmp/docs.json", "rt") as f:
+            documents_by_subject = json.load(f)
+            assert dataset == documents_by_subject["_index_infos"]["dataset_name"]
+
     do_create_dataset("/tmp/docs.json", max_tokens=-1, hub_name=hub_name)
 
 
