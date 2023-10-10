@@ -17,8 +17,6 @@ from mttl.models.modifiers.routing import (
 )
 from projects.instr_routing.models.clm import AugmentedRoutingInfo
 from mttl.models.modifiers.poly import PolytroponSelector
-from torch.distributions.categorical import Categorical
-from torch.distributions.kl import kl_divergence
 
 class Metrics:
     def __init__(self) -> None:
@@ -119,7 +117,9 @@ class SMEARRouter(RoutingSelector):
         so that we can use it to compute the prior routing probabilities.
         """
 
+        repeat = 1
         if getattr(routing_infos, 'encoder_output', None) is not None:
+            repeat = routing_infos.task_ids.size(0) // routing_infos.encoder_output.size(0)
             input = routing_infos.encoder_output
 
         router_input = routing_infos.inputs_cache_for_generation.get(self)
@@ -128,6 +128,9 @@ class SMEARRouter(RoutingSelector):
                 input,
                 routing_infos.inst_token_mask,  # only instruction is marked with 1
             )
+
+            router_input = router_input.repeat_interleave(repeat, dim=0) # no-op if repeat==1
+
             # if in generation mode, cache the input encoding for the next forward calls
             if routing_infos.generation_mode:
                 routing_infos.inputs_cache_for_generation[self] = router_input
@@ -260,8 +263,9 @@ class TaskVSMEARRouter(SMEARRouter):
         self.n_splits = 1
         self.split_dim = in_d
         self.n_tasks = self.n_skills = config.n_tasks
-        self.prior_router_ln = nn.LayerNorm(in_d)
-        self.prior_router_ln.weight = nn.Parameter(torch.ones(in_d))
+        self.prior_router_ln = nn.Identity()
+        # self.prior_router_ln = nn.LayerNorm(in_d)
+        # self.prior_router_ln.weight = nn.Parameter(torch.ones(in_d))
 
         self.adapter_splits, self.adapter_skills = config.n_splits, config.n_skills
 
@@ -285,6 +289,7 @@ class TaskVSMEARRouter(SMEARRouter):
             input = routing_infos.encoder_output
 
         prior_input = self._get_router_inputs(input, routing_infos)
+        bs = prior_input.size(0)
 
         # do not center the student, center only the teacher now
         prior_routes = self.route_maybe_center(
@@ -294,16 +299,18 @@ class TaskVSMEARRouter(SMEARRouter):
             temperature=self.temperature,
             center=False,
         )
-        prior_task_probs = F.softmax(prior_routes, dim=-1) #(bs, 1, n_tasks)
+        
+        prior_task_probs = F.softmax(prior_routes, dim=-1).view(bs, self.n_tasks) #(bs, n_tasks)
         task_skill_dist = self.posterior_router.view(-1, self.adapter_splits, self.adapter_skills).sigmoid()
-        task_skill_dist /= task_skill_dist.sum(-1, keepdim=True)
+        task_skill_dist = task_skill_dist / task_skill_dist.sum(-1, keepdim=True)
 
-        prior_probs = torch.einsum('bDt,tsk->bsk', prior_task_probs, task_skill_dist) 
+        prior_probs = torch.einsum('bt,tsk->bsk', prior_task_probs, task_skill_dist) 
         prior_log_probs = prior_probs.log()
         
         h_pri = -(prior_probs * prior_log_probs).sum(-1).mean()
+        h_task_pri = -(prior_task_probs * prior_task_probs.log()).sum(-1).mean()
         self.metrics["h_pri"] = h_pri / math.log(self.adapter_skills)
-        self.metrics["h_task_pri"] = h_pri / math.log(self.n_tasks)
+        self.metrics["h_task_pri"] = h_task_pri / math.log(self.n_tasks)
 
         if self.training:
             # during training :-)
@@ -318,7 +325,6 @@ class TaskVSMEARRouter(SMEARRouter):
             # compute auxiliary loss (KL divergence), KL = - H(posterior) + Xent(posterior, prior)
             h_post = -(post_probs * post_log_probs).sum(-1).mean()
             x_ent = -(post_probs * prior_log_probs).sum(-1).mean()
-            h_task_pri = -(prior_task_probs * prior_task_probs.log()).sum(-1).mean()
 
             self.routings = post_probs.detach().cpu()
             self.metrics["h_post"] = h_post / math.log(self.adapter_skills)
