@@ -247,7 +247,7 @@ class TaskVSMEARRouter(SMEARRouter):
             in_d, config.n_tasks
         )
 
-        self.task_posterior = nn.Parameter(
+        self.posterior_router = nn.Parameter(
             torch.empty((config.n_tasks, config.n_splits * config.n_skills)).uniform_(
                 -1e-3, 1e-3
             )
@@ -295,7 +295,7 @@ class TaskVSMEARRouter(SMEARRouter):
             center=False,
         )
         prior_task_probs = F.softmax(prior_routes, dim=-1) #(bs, 1, n_tasks)
-        task_skill_dist = self.task_posterior.view(-1, self.adapter_splits, self.adapter_skills).sigmoid()
+        task_skill_dist = self.posterior_router.view(-1, self.adapter_splits, self.adapter_skills).sigmoid()
         task_skill_dist /= task_skill_dist.sum(-1, keepdim=True)
 
         prior_probs = torch.einsum('bDt,tsk->bsk', prior_task_probs, task_skill_dist) 
