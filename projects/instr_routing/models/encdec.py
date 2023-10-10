@@ -13,7 +13,7 @@ from mttl.models.modifiers import modify_transformer
 from mttl.models.get_optimizer import get_optimizer
 from mttl.models.get_scheduler import get_scheduler
 from mttl.models.utils import EfficientCheckpointModule
-from mttl.models.modifiers.routing import RoutingInfo as BaseRoutingInfo
+from mttl.models.modifiers.routing import RoutingSelector, RoutingInfo as BaseRoutingInfo
 
 @dataclass
 class RoutingInfo(BaseRoutingInfo):
@@ -73,6 +73,18 @@ class EncoderDecoder(EfficientCheckpointModule):
                 task_id_container["routing_infos"].encoder_output = output.last_hidden_state
                 return output
             self.model.encoder.register_forward_hook(enc_fwd)
+    
+    def gather_auxiliary_losses(self):
+        # get some losses from the model if it is a router
+        aux_loss = []
+        for name, module in self.model.named_modules():
+            if isinstance(module, RoutingSelector) and hasattr(
+                module, "auxiliary_loss"
+            ):
+                aux_loss_mod = getattr(module, "auxiliary_loss", None)
+                if aux_loss_mod is not None:
+                    aux_loss.append(aux_loss_mod)
+        return aux_loss
 
     def add_loss_plugin(self, plugin):
         if self.loss_plugins is not None:
@@ -213,15 +225,10 @@ class EncoderDecoder(EfficientCheckpointModule):
             tensorboard_logs = {"loss": loss.item()}
 
         # get some losses from the model if it is a router
-        if hasattr(self.model, "get_routing_losses") and self.training:
-            aux_loss = list(
-                itertools.chain(*list(self.model.get_routing_losses().values()))
-            )
-            aux_loss = torch.cat(aux_loss).sum()  
-            self.model.clear_routing_losses()
-            self.model.clear_routing_metrics()
-            tensorboard_logs['aux_loss'] = aux_loss.item()
-            loss = loss + aux_loss
+        aux_loss = self.gather_auxiliary_losses()
+        aux_loss = torch.stack(aux_loss).mean() if len(aux_loss) else 0.0
+        tensorboard_logs['aux_loss'] = aux_loss.item()
+        loss = loss + aux_loss
 
         # log learning rate as well
         for i, pg in enumerate(self.optimizers().param_groups):
