@@ -480,6 +480,7 @@ def generate_instructions_(
 def regenerate_instructions(
     llm: InstructionsGenerator,
     instruction_json,
+    subject_names=SUB_10,
     max_tokens=1024,
     temperature=0.7,
     top_p=0.9,
@@ -500,7 +501,7 @@ def regenerate_instructions(
     with open(instruction_json, "r") as f:
         data = [json.loads(s) for s in f.readlines()]
 
-    icl_dst_per_subject = icl_examples_per_subject(SUB_10)
+    icl_dst_per_subject = icl_examples_per_subject(subject_names)
 
     # data = data[:10]
 
@@ -716,9 +717,12 @@ def generate_instructions(mttl_checkpoint, output_path):
     help="if > 0, this portion of subjects' data is processed.",
 )
 @click.option("--tmp_path", type=str, required=False, default="/tmp/merged")
+@click.option("--sub_names", type=str, required=False, default="SUB_10")
 def generate_instructions(
-    model_path, output_filename, n_icl, icl_use_out_options, subset_per_subject=-1, tmp_path="/tmp/merged"
-):  
+    model_path, output_filename, n_icl, icl_use_out_options, subset_per_subject=-1, tmp_path="/tmp/merged", sub_names="SUB_10"
+):     
+    sn = SUB_5 if sub_names =="SUB_5" else SUB_10
+    
     if os.environ.get("AMLT_OUTPUT_DIR") is not None:
         output_filename = os.path.join(os.environ.get("AMLT_OUTPUT_DIR"), output_filename)
     
@@ -733,6 +737,7 @@ def generate_instructions(
     generate_instructions_(
         llm,
         output_filename=output_filename,
+        subject_names=sn,
         n_icl=n_icl,
         icl_use_out_options=icl_use_out_options,
         subset=subset_per_subject,
@@ -745,9 +750,13 @@ def generate_instructions(
 @click.option("--n_icl", type=int, required=False, default=5)
 @click.option("--sufix", type=str, required=False, default="_regen_instr_iter_1")
 @click.option("--tmp_path", type=str, required=False, default="/tmp/merged")
-def generate_instructions_iter(model_path, instruction_json, n_icl, sufix="_regen_instr_iter_1", tmp_path="/tmp/merged"):
+@click.option("--sub_names", type=str, required=False, default="SUB_10")
+def generate_instructions_iter(model_path, instruction_json, n_icl, sufix="_regen_instr_iter_1", tmp_path="/tmp/merged", sub_names="SUB_10"):
     if os.environ.get("AMLT_OUTPUT_DIR") is not None:
         instruction_json = os.path.join(os.environ.get("AMLT_OUTPUT_DIR"), instruction_json)    
+    
+    sn = SUB_5 if sub_names =="SUB_5" else SUB_10
+    
     
     model_path = save_merged_model(
         model_path, hf_path=tmp_path
@@ -756,6 +765,7 @@ def generate_instructions_iter(model_path, instruction_json, n_icl, sufix="_rege
     regenerate_instructions(
         llm,
         instruction_json=instruction_json,
+        subject_names=sn,
         n_icl=n_icl,
         sufix=sufix,
     )
