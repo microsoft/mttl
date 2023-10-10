@@ -159,20 +159,6 @@ def do_create_dataset(docs_json, max_tokens, hub_name):
             for key in dataset_.features:
                 data[key].append(doc[key])
 
-            # sub <math> for latex in wikipedia
-            for keyword in ["math chem", "math", "chem"]:
-                data["text"][-1] = (
-                    data["text"][-1]
-                    .replace(f"&lt;{keyword}&gt;", "$")
-                    .replace(f"&lt;/{keyword}&gt;", "$")
-                )
-                data["text"][-1] = data["text"][-1].replace(
-                    f'&lt;{keyword} display=\\"block\\"&gt;', "$"
-                )
-                data["text"][-1] = data["text"][-1].replace(
-                    f'&lt;{keyword} display=\\"inline\\"&gt;', "$"
-                )
-
             num_tokens += len(doc["text"].split())
 
             if num_tokens > max_tokens and max_tokens != -1:
