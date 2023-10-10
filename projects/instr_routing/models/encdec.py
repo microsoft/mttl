@@ -226,7 +226,7 @@ class EncoderDecoder(EfficientCheckpointModule):
 
         # get some losses from the model if it is a router
         aux_loss = self.gather_auxiliary_losses()
-        aux_loss = torch.stack(aux_loss).mean() if len(aux_loss) else torch.zeros(1)
+        aux_loss = torch.stack(aux_loss).mean() if len(aux_loss) else torch.zeros(1).to(loss.device)
         tensorboard_logs['aux_loss'] = aux_loss.item()
         loss = loss + aux_loss
 
