@@ -10,14 +10,16 @@ from datasets import load_dataset
 from vllm import LLM, SamplingParams
 from vllm.model_executor.parallel_utils.parallel_state import destroy_model_parallel
 from dataclasses import dataclass, field
-from mttl.dataloader.platypus_dataset_reader import InversePlatypusTemplate
-from mmlu_subject_configs import SUB_10, SUB_10_LAST
+from mmlu_subject_configs import SUB_10, SUB_10_LAST, SUB_5
+from mmlu_subject_configs import SUB_1 as SUB_5
 import click
 import random
 from abc import ABC, abstractmethod, abstractproperty
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
+
+from mttl.dataloader.platypus_dataset_reader import InversePlatypusTemplate
 import openai
 from mttl.models.adapters import LoRA
 from mttl.utils import setup_logging
@@ -30,7 +32,7 @@ import time
 class InverseTemplate:
     def __init__(self) -> None:
         self.platy_template = InversePlatypusTemplate()
-    @classmethod
+    
     def apply(self, dict_values):
         output, context = (
             dict_values["response"],
@@ -38,10 +40,11 @@ class InverseTemplate:
         )
         prompt = ""
         if context is not None:
-            prompt += "\n\n### Context:\n" + context
+            prompt += "### Domain context:\n" + context + "\n\n"
         prompt += self.platy_template.apply({
             "instruction": None,
             "input": None,
+            "icl_examples": dict_values["icl_examples"] if "icl_examples" in dict_values.keys() else None,
             "output": output})
         return prompt
 
@@ -50,7 +53,11 @@ class Template:  # generate responses
     def apply(self, dict_values):
         context = dict_values["context"]
         instruction = dict_values["instruction"]
-        return f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n### Context:\n{context}\n\n### Instruction:\n{instruction}\n\n### Response:\n"
+        prompt = ""
+        # if len(context) > 0:
+        #     prompt +="Context:\n" + context + "\n\n"
+        prompt += f"Below is an instruction that describes a task. Write a response that appropriately completes the request. \n\n### Instruction:\n{instruction}\n\n### Response:"
+        return prompt
 #############################################
 
 def retry_with_exponential_backoff(
@@ -304,10 +311,11 @@ def sample_icl_examples(dataset, n_icl, use_options=True):
     for i in range(n_icl):
         example = dataset[i]["input"]
         if use_options:
-            example += " \nOptions:"
+            # example += " \nOptions:"
             for ans_option in ["A", "B", "C", "D"]:
-                example += f" \n{ans_option}:" + dataset[i][ans_option]
-            example = example.strip()
+                option = f"\n{ans_option}: " + dataset[i][ans_option]
+                example += option 
+            # example = example.strip()
         examples.append(example)
     return examples
 
@@ -322,7 +330,7 @@ def icl_examples_per_subject(subjects):
 
 def generate_instructions_(
     llm: InstructionsGenerator,
-    subject_names=SUB_10,
+    subject_names=SUB_5,
     max_tokens=128,
     temperature=0.7,
     top_p=0.9,
@@ -340,7 +348,7 @@ def generate_instructions_(
 
     All instructions are appended as jsonl into output_filename.
     """
-    random_sample = True
+    random_sample = False
     sampling_params = SamplingParams(
         temperature=temperature, top_p=top_p, max_tokens=max_tokens
     )
@@ -465,7 +473,7 @@ def regenerate_instructions(
     with open(instruction_json, "r") as f:
         data = [json.loads(s) for s in f.readlines()]
 
-    icl_dst_per_subject = icl_examples_per_subject(SUB_10)
+    icl_dst_per_subject = icl_examples_per_subject(SUB_5)
 
     # data = data[:10]
 
@@ -654,7 +662,7 @@ def generate_instructions(mttl_checkpoint, output_path):
     "--subset-per-subject",
     type=float,
     required=False,
-    default=-1,
+    default=0.1,
     help="if > 0, this portion of subjects' data is processed.",
 )
 @click.option("--tmp_path", type=str, required=False, default="/tmp/merged")

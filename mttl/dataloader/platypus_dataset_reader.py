@@ -33,9 +33,10 @@ class InversePlatypusTemplate:
             and dict_values["icl_examples"] is not None
         ):
             icl_examples = dict_values["icl_examples"]
-            prompt += f"Below are some examples of good instructions."
+            prompt += f"Here are some examples of good instructions that you should imitate:"
             for icl_example in icl_examples:
-                prompt += f"\n\n### Example Instruciton:\n{icl_example}\n"
+                prompt += f"\n### Instruction:\n{icl_example}"
+            prompt += "\n\n"
         prompt += f"\nBelow is a response to a task. Write an instruction that appropriately describes the response.\n\n### Response:\n{output}\n\n### Instruction:\n"
         return prompt
 
