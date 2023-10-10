@@ -346,7 +346,7 @@ def icl_examples_per_subject(subjects):
 
 def generate_instructions_(
     llm: InstructionsGenerator,
-    subject_names=SUB_5,
+    subject_names=SUB_10,
     max_tokens=128,
     temperature=0.7,
     top_p=0.9,
@@ -500,7 +500,7 @@ def regenerate_instructions(
     with open(instruction_json, "r") as f:
         data = [json.loads(s) for s in f.readlines()]
 
-    icl_dst_per_subject = icl_examples_per_subject(SUB_5)
+    icl_dst_per_subject = icl_examples_per_subject(SUB_10)
 
     # data = data[:10]
 
