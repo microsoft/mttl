@@ -132,16 +132,17 @@ def free_memory():
     os.system("ray stop --force")
 
 
-def create_qac_dataset(
+def transform_seed_dataset(
     dataset_name="sordonia/my-wiki-latex_mmlu_from_valid_all",
     subjects="SUB_10",
-    icl_dataset_name="lukaemon/mmlu",
+    icl_dataset_name="cais/mmlu",
     icl_use_out_options=True,
     icl_examples=0,
     max_context_length=512,
     subset=1,
 ):
-    """Convert a wiki dataset into a tuple of (instruction, context, subject)."""
+    """Convert a seed dataset into a tuple of (context, subject, icl_examples).
+    """
     dataset = load_dataset(dataset_name)["train"].to_pandas()
     converted_dataset = []
 
@@ -400,7 +401,7 @@ def generate_instructions(mttl_checkpoint, output_path):
 )
 @click.option("--model-path", type=str, required=True)
 @click.option("--output-filename", type=str, required=True)
-@click.option("--n_icl", type=int, required=False, default=5)
+@click.option("--n_icl", type=int, required=False, default=0)
 @click.option(
     "--icl-use-out-options",
     type=bool,
@@ -438,7 +439,7 @@ def generate_instructions(
         model_path = save_merged_model(model_path, hf_path=tmp_path)
         llm = load_vllm_model(model_path)
 
-    seed_dataset = create_qac_dataset(
+    seed_dataset = transform_seed_dataset(
         seed_dataset,
         subjects=sub_names,
         icl_examples=n_icl,
