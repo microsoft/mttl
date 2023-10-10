@@ -18,6 +18,7 @@ from mttl.models.modifiers.routing import (
 from projects.instr_routing.models.clm import AugmentedRoutingInfo
 from mttl.models.modifiers.poly import PolytroponSelector
 
+
 class Metrics:
     def __init__(self) -> None:
         self.metrics = {}
@@ -85,19 +86,17 @@ class SMEARRouter(RoutingSelector):
         input = router_ln(input)
         input = input.view(-1, self.n_splits, self.split_dim)
 
-        # weights : b s 
+        # weights : b s
         weight = router.weight.view(self.split_dim, self.n_splits, self.n_skills)
         if router.bias is None:
-            bias = 0.
+            bias = 0.0
         else:
             bias = router.bias.view(1, self.n_splits, self.n_skills)
 
         if self.normalize_weights:
-            weight = weight / torch.norm(
-                weight, p=2, dim=-1, keepdim=True
-            )
-        routes = torch.einsum('bsd,dsk->bsk', input, weight) + bias
-        if center: 
+            weight = weight / torch.norm(weight, p=2, dim=-1, keepdim=True)
+        routes = torch.einsum("bsd,dsk->bsk", input, weight) + bias
+        if center:
             self.apply_center_update(routes)
         # teacher centering and sharpening
         return (routes - self.center) / temperature
@@ -118,8 +117,10 @@ class SMEARRouter(RoutingSelector):
         """
 
         repeat = 1
-        if getattr(routing_infos, 'encoder_output', None) is not None:
-            repeat = routing_infos.task_ids.size(0) // routing_infos.encoder_output.size(0)
+        if getattr(routing_infos, "encoder_output", None) is not None:
+            repeat = routing_infos.task_ids.size(
+                0
+            ) // routing_infos.encoder_output.size(0)
             input = routing_infos.encoder_output
 
         router_input = routing_infos.inputs_cache_for_generation.get(self)
@@ -129,7 +130,9 @@ class SMEARRouter(RoutingSelector):
                 routing_infos.inst_token_mask,  # only instruction is marked with 1
             )
 
-            router_input = router_input.repeat_interleave(repeat, dim=0) # no-op if repeat==1
+            router_input = router_input.repeat_interleave(
+                repeat, dim=0
+            )  # no-op if repeat==1
 
             # if in generation mode, cache the input encoding for the next forward calls
             if routing_infos.generation_mode:
@@ -239,16 +242,16 @@ class VSMEARRouter(SMEARRouter):
 
 @register_selector("task_vsmear")
 class TaskVSMEARRouter(SMEARRouter):
-    """ Predict Task from Prior distribution """
+    """Predict Task from Prior distribution"""
 
     def __init__(self, config, in_d):
         super(RoutingSelector, self).__init__()
-        assert config.n_tasks > 0, '`TaskVSMEARRouter` must be used with multitask datasets.'
+        assert (
+            config.n_tasks > 0
+        ), "`TaskVSMEARRouter` must be used with multitask datasets."
 
         self.config = config
-        self.prior_router = nn.Linear(
-            in_d, config.n_tasks
-        )
+        self.prior_router = nn.Linear(in_d, config.n_tasks)
 
         self.posterior_router = nn.Parameter(
             torch.empty((config.n_tasks, config.n_splits * config.n_skills)).uniform_(
@@ -281,15 +284,17 @@ class TaskVSMEARRouter(SMEARRouter):
 
         self.metrics = Metrics()
 
-
     def forward(self, routing_infos: AugmentedRoutingInfo, input: torch.Tensor):
         self.metrics.clear()
 
-        if getattr(routing_infos, 'encoder_output', None) is not None:
+        if getattr(routing_infos, "encoder_output", None) is not None:
             input = routing_infos.encoder_output
 
         prior_input = self._get_router_inputs(input, routing_infos)
         bs = prior_input.size(0)
+
+        if self.config.task_vsmear_detach_prior_input:
+            prior_input = prior_input.detach()
 
         # do not center the student, center only the teacher now
         prior_routes = self.route_maybe_center(
@@ -299,14 +304,18 @@ class TaskVSMEARRouter(SMEARRouter):
             temperature=self.temperature,
             center=False,
         )
-        
-        prior_task_probs = F.softmax(prior_routes, dim=-1).view(bs, self.n_tasks) #(bs, n_tasks)
-        task_skill_dist = self.posterior_router.view(-1, self.adapter_splits, self.adapter_skills).sigmoid()
+
+        prior_task_probs = F.softmax(prior_routes, dim=-1).view(
+            bs, self.n_tasks
+        )  # (bs, n_tasks)
+        task_skill_dist = self.posterior_router.view(
+            -1, self.adapter_splits, self.adapter_skills
+        ).sigmoid()
         task_skill_dist = task_skill_dist / task_skill_dist.sum(-1, keepdim=True)
 
-        prior_probs = torch.einsum('bt,tsk->bsk', prior_task_probs, task_skill_dist) 
+        prior_probs = torch.einsum("bt,tsk->bsk", prior_task_probs, task_skill_dist)
         prior_log_probs = prior_probs.log()
-        
+
         h_pri = -(prior_probs * prior_log_probs).sum(-1).mean()
         h_task_pri = -(prior_task_probs * prior_task_probs.log()).sum(-1).mean()
         self.metrics["h_pri"] = h_pri / math.log(self.adapter_skills)
@@ -330,8 +339,10 @@ class TaskVSMEARRouter(SMEARRouter):
             self.metrics["h_post"] = h_post / math.log(self.adapter_skills)
             self.metrics["x_ent"] = x_ent
 
-            # TODO: use cross-entropy with task id as label 
-            self.auxiliary_loss = F.cross_entropy(prior_routes.flatten(0,1), routing_infos.task_ids)
+            # TODO: use cross-entropy with task id as label
+            self.auxiliary_loss = self.config.task_vsmear_aux_lambda * F.cross_entropy(
+                prior_routes.flatten(0, 1), routing_infos.task_ids
+            )
             routing_probs = post_probs
         else:
             routing_probs = prior_probs
@@ -393,6 +404,7 @@ def modify_with_vsmear(transformer, config):
     config.router_selector = "vsmear"
 
     return modify_with_smear(transformer, config)
+
 
 @register_modifier("task_vsmear")
 def modify_with_task_vsmear(transformer, config):
@@ -567,7 +579,9 @@ class AuxRoutingLoRALinear_MergeAfterOP(SkilledLoRA_MergeLoraAfterOP, RoutingMix
             self.routing_infos.repeat_interleave(repeat)
 
         if self.selector is not None:
-            mixing_weights = self.selector(self.routing_infos, input=input).to(input.device)
+            mixing_weights = self.selector(self.routing_infos, input=input).to(
+                input.device
+            )
         else:
             bs = input.size(0)
             mixing_weights = torch.ones(

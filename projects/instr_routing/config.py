@@ -55,6 +55,10 @@ class RoutingConfig(Config):
         self.xrouter_x4_target = "prior"
         self.xrouter_x4target_detach = True
 
+        # task vsmear
+        self.task_vsmear_detach_prior_input = False
+        self.task_vsmear_aux_lambda = 1.
+
     def post_init(self):
         if self.eval_mmlu and "MMLU_DATA_DIR" not in os.environ:
             raise ValueError("MMLU_DATA_DIR not set in env but eval_mmlu = True.")
