@@ -325,14 +325,13 @@ class TaskVSMEARRouter(SMEARRouter):
             self.metrics["x_ent"] = x_ent
 
             # TODO: use cross-entropy with task id as label 
-            breakpoint()
             self.auxiliary_loss = F.cross_entropy(prior_routes.flatten(0,1), routing_infos.task_ids)
+            routing_probs = post_probs
         else:
             routing_probs = prior_probs
             self.routings = prior_probs.detach().cpu()
             self.auxiliary_loss = h_pri.sum() * 0.0
         return routing_probs
-
 
 
 class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
