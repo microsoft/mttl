@@ -745,7 +745,7 @@ def generate_instructions(
 @click.option("--n_icl", type=int, required=False, default=5)
 @click.option("--sufix", type=str, required=False, default="_regen_instr_")
 @click.option("--tmp_path", type=str, required=False, default="/tmp/merged")
-def generate_instructions_iter(model_path, instruction_json, n_icl, sufix="_regen_instr_", tmp_path="/tmp/merged"):
+def generate_instructions_iter(model_path, instruction_json, n_icl, sufix="_regen_instr_iter_1", tmp_path="/tmp/merged"):
     if os.environ.get("AMLT_OUTPUT_DIR") is not None:
         instruction_json = os.path.join(os.environ.get("AMLT_OUTPUT_DIR"), instruction_json)    
     
