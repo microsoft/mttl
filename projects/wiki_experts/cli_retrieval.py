@@ -1,5 +1,6 @@
 from collections import defaultdict
 import json
+from typing import List
 import click
 import os
 import tqdm
@@ -7,6 +8,7 @@ import pyterrier as pt
 import tqdm
 import datasets
 from datasets import Dataset
+from dataclasses import dataclass
 
 
 os.environ["JAVA_HOME"] = "/usr/lib/jvm/java-11-openjdk-amd64"
@@ -35,17 +37,21 @@ def search(index, query):
 
 
 def get_dataset(dataset_name):
-    if dataset_name == "wikipedia":
+    import pandas as pd
+
+    if dataset_name == "sordonia/wikipedia-en":
+        dataset = datasets.load_dataset("sordonia/wikipedia-en")
+    elif dataset_name == "wikipedia":
         dataset = datasets.load_dataset("wikipedia", "20220301.en")
-    elif dataset_name == 'redpajama-sample':
+    elif dataset_name == "redpajama-sample":
         dataset = datasets.load_dataset("togethercomputer/RedPajama-Data-1T-Sample")
-    elif dataset_name == 'redpajama':
-        dataset = datasets.load_dataset("togethercomputer/RedPajama-Data-1T", 'default')
+    elif dataset_name == "redpajama":
+        dataset = datasets.load_dataset("togethercomputer/RedPajama-Data-1T", "default")
     return dataset
 
 
 def read_infos(index):
-    with open(index + '/infos.json', 'r') as f:
+    with open(index + "/infos.json", "r") as f:
         return json.load(f)
 
 
@@ -54,23 +60,21 @@ def make_index(dataset_name, path):
 
     dataset = get_dataset(dataset_name)
     iter_indexer = pt.IterDictIndexer(
-        path,
-        fields=['text'],
-        meta={'docno': 20},
-        meta_reverse=['docno'],
-        threads=24
+        path, fields=["text"], meta={"docno": 20}, meta_reverse=["docno"], threads=24
     )
 
     def aug_with_id():
-        for i, document in tqdm.tqdm(enumerate(dataset['train']), total=len(dataset['train'])):
-            data = {'docno': str(i), 'text': document['text']}
+        for i, document in tqdm.tqdm(
+            enumerate(dataset["train"]), total=len(dataset["train"])
+        ):
+            data = {"docno": str(i), "text": document["text"]}
             yield data
 
     document_iter = aug_with_id()
     iter_indexer.index(document_iter)
 
     with open(path + "/infos.json", "w") as f:
-        json.dump({'dataset_name': dataset_name}, f)
+        json.dump({"dataset_name": dataset_name}, f)
 
 
 def do_retrieval(index, split, docs_json):
@@ -79,13 +83,13 @@ def do_retrieval(index, split, docs_json):
 
     # group by subjects
     group_by_subject = defaultdict(list)
-    
+
     for split_ in split.split(","):
         for ex in mmlu[split_]:
             group_by_subject[ex["subject"]].append(ex["question"])
 
     # issue a query per subject
-    documents_by_subject = {'_index_infos': read_infos(index)}
+    documents_by_subject = {"_index_infos": read_infos(index)}
 
     for subject, questions in tqdm.tqdm(group_by_subject.items()):
         results = search(index, questions)
@@ -106,13 +110,17 @@ def do_retrieval(index, split, docs_json):
         print(f"Number of unique documents retrieved: {len(docscore)}")
 
         # dfq filter
-        docscore = {k: v for k, v in docscore.items() if v["dfq"] >= (2 if len(questions) > 100 else 0)}
+        docscore = {
+            k: v
+            for k, v in docscore.items()
+            if v["dfq"] >= (2 if len(questions) > 100 else 0)
+        }
         print(f"Number of documents after filtering: {len(docscore)}")
 
-        sorted_docscore = sorted(docscore.items(), key=lambda x: x[1]["score"], reverse=True)
-        print(
-            f"Top 10 documents: {sorted_docscore[:10]}"
+        sorted_docscore = sorted(
+            docscore.items(), key=lambda x: x[1]["score"], reverse=True
         )
+        print(f"Top 10 documents: {sorted_docscore[:10]}")
         documents_by_subject[subject] = sorted_docscore
 
         with open(docs_json, "w") as f:
@@ -123,8 +131,8 @@ def do_create_dataset(docs_json, max_tokens, hub_name):
     with open(docs_json, "rt") as f:
         documents_by_subject = json.load(f)
 
-    infos = documents_by_subject.pop('_index_infos')
-    dataset_ = get_dataset(infos['dataset_name'])['train']
+    infos = documents_by_subject.pop("_index_infos")
+    dataset_ = get_dataset(infos["dataset_name"])["train"]
 
     data = {
         "subject": [],
@@ -150,7 +158,17 @@ def do_create_dataset(docs_json, max_tokens, hub_name):
 
             for key in dataset_.features:
                 data[key].append(doc[key])
-            num_tokens += len(doc['text'].split())
+
+            # sub <math> for latex in wikipedia
+            data["text"][-1] = (
+                data["text"][-1]
+                .replace("&lt;math&gt;", "$")
+                .replace("&lt;/math&gt;", "$")
+            )
+            data["text"][-1] = data["text"][-1].replace(
+                '&lt;math display=\\"block\\"&gt;', "$"
+            )
+            num_tokens += len(doc["text"].split())
 
             if num_tokens > max_tokens and max_tokens != -1:
                 break
@@ -171,14 +189,14 @@ def cli():
     pass
 
 
-@cli.command('index')
+@cli.command("index")
 @click.option("--dataset")
 @click.option("--path")
 def index(dataset, path):
     make_index(dataset, path=path)
 
 
-@cli.command('retrieve')
+@cli.command("retrieve")
 @click.option("--index")
 @click.option("--split", help="MMLU split")
 @click.option("--docs_json")
@@ -186,7 +204,7 @@ def retrieve(index, split, docs_json):
     do_retrieval(index, split, docs_json)
 
 
-@cli.command('create_dataset')
+@cli.command("create_dataset")
 @click.option("--docs_json", type=str)
 @click.option("--hub_name", type=str)
 @click.option("--max_tokens", type=int, default=-1)
@@ -207,5 +225,5 @@ def e2e(dataset, path, mmlu_split, hub_name):
     do_create_dataset("/tmp/docs.json", max_tokens=-1, hub_name=hub_name)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     cli()
