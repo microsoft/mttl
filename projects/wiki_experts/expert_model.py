@@ -62,6 +62,23 @@ class MultiExpertModel(ExpertTrainer):
         super().__init__(**kwargs)
         self.experts = []
 
+    def load_from_graph_string(self, s):
+        from module_graph import ModuleGraph
+
+        graph = ModuleGraph.from_string(s)
+        for module_name, module_data in graph.create_modules(
+            base_hparams=self.hparams
+        ).items():
+            self.model = add_expert_to_transformer(
+                self.model,
+                module_name,
+                module_data.expert_config,
+                module_data.expert_weights,
+                action="route",
+                is_default=module_name == "default",
+            )
+            self.experts.append(module_name)
+
     def load_expert(
         self,
         expert_path: str,
@@ -70,42 +87,14 @@ class MultiExpertModel(ExpertTrainer):
         is_default: bool = False,
         load_only_layers: str = None,
     ):
-        # load the expert weights
-        import json
-        import os
+        from module_graph import load_expert
 
-        if os.path.isdir(expert_path):
-            expert_checkpoint = get_checkpoint_path(expert_path)
-        else:
-            expert_checkpoint = download_from_hub(expert_path)
-
-        logger.info(f"Loading expert from {expert_checkpoint}...")
-
-        expert_checkpoint = torch.load(expert_checkpoint, map_location="cpu")
-
-        expert_config = ExpertConfig(
-            kwargs=expert_checkpoint["hyper_parameters"], silent=True, raise_error=False
-        )
-
-        expert_name = expert_name or expert_config.expert_name
-        if expert_name is None:
-            if expert_config.finetune_task_name is not None:
-                expert_name = expert_config.finetune_task_name
-            else:
-                expert_name = os.path.basename(expert_path)
-            logger.info(
-                "Assigning expert name, not found in checkpoint: {}".format(expert_name)
-            )
-
-        expert_weights = expert_checkpoint["state_dict"]
-        expert_weights = {
-            k.replace("model.", "", 1): v for k, v in expert_weights.items()
-        }
-        if self.hparams.model != expert_config.model:
+        expert = load_expert(expert_path, expert_name=expert_name)
+        if self.hparams.model != expert.expert_config.model:
             raise ValueError(
                 "The expert has been trained on top of a different model!"
                 " Detected: {} - Expected: {}".format(
-                    expert_config.model, self.hparams.model
+                    expert.expert_config.model, self.hparams.model
                 )
             )
 
@@ -116,8 +105,8 @@ class MultiExpertModel(ExpertTrainer):
         self.model = add_expert_to_transformer(
             self.model,
             expert_name,
-            expert_config,
-            expert_weights,
+            expert.expert_config,
+            expert.expert_weights,
             action=action,
             is_default=is_default,
             load_only_layers=load_only_layers,
