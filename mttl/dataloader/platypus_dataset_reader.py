@@ -24,7 +24,7 @@ class InversePlatypusTemplate:
             prompt = f"Below is a response to a task. Write an instruction that appropriately describes the response.\n\n### Response:\n{output}\n\n### Instruction:\n"
 
         if icl_examples is not None:
-            icl_prompt = f"Here are some examples of good instructions that you should imitate:"
+            icl_prompt = f"Here are some examples of good instructions that you should imitate:\n"
             for icl_example in icl_examples:
                 icl_prompt += f"\n### Instruction:\n{icl_example}"
             icl_prompt += "\n\n"
