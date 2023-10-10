@@ -519,20 +519,28 @@ def generate_instructions(
             inverse_model_path = save_merged_model(inverse_model_path, hf_path=tmp_path)
             llm = load_vllm_model(inverse_model_path)
 
-        instruction_dataset = generate_instructions_(
-            llm,
-            prev_dataset,
-        )
+        if not os.path.exists(output_filename + "_inst_%d.json" % i):
+            instruction_dataset = generate_instructions_(
+                llm,
+                prev_dataset,
+            )
+            dump_jsonl_dataset(instruction_dataset, output_filename + "_inst_%d.json" % i)
+        else:
+            instruction_dataset = read_jsonl_dataset(output_filename + "_inst_%d.json" % i)
+
         if model_path not in ["gpt-35-turbo", "gpt-4"]:
             model_path = save_merged_model(model_path, hf_path=tmp_path)
             llm = load_vllm_model(model_path)
 
-        answer_dataset = generate_answers_(
-            llm,
-            instruction_dataset,
-        )
-        dump_jsonl_dataset(answer_dataset, output_filename + "_%d.json")
-        prev_dataset = instruction_dataset
+        if not os.path.exists(output_filename + "_%d.json" % i):
+            answer_dataset = generate_answers_(
+                llm,
+                instruction_dataset,
+            )
+            dump_jsonl_dataset(answer_dataset, output_filename + "_%d.json" % i)
+        else:
+            answer_dataset = read_jsonl_dataset(output_filename + "_%d.json" % i)
+        prev_dataset = answer_dataset
 
 
 if __name__ == "__main__":
