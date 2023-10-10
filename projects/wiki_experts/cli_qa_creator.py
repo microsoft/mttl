@@ -11,6 +11,7 @@ from vllm import LLM, SamplingParams
 from vllm.model_executor.parallel_utils.parallel_state import destroy_model_parallel
 from dataclasses import dataclass, field
 from mmlu_subject_configs import SUB_10, SUB_10_LAST, SUB_5
+
 # from mmlu_subject_configs import SUB_1 as SUB_5
 import click
 import random
@@ -27,8 +28,9 @@ from mttl.utils import setup_logging
 from typing import List
 import time
 
+
 def count_repeating_sentences(text):
-    sentences = re.split(r'[.!?]', text)
+    sentences = re.split(r"[.!?]", text)
     sentences = [s.strip() for s in sentences if len(s.strip()) > 0]
     unique_sentences = set(sentences)
     return len(sentences) - len(unique_sentences)
@@ -39,28 +41,39 @@ def count_repeating_sentences(text):
 class InverseTemplate:
     def __init__(self) -> None:
         self.platy_template = InversePlatypusTemplate()
-    
+
     def apply(self, dict_values):
         output, context = (
             dict_values["response"],
             dict_values["context"],
         )
         prompt = ""
-        if context is not None: # this is only for regenerating instructions
+        if context is not None:  # this is only for regenerating instructions
             # regeneration mode
             prompt += "### Domain context:\n" + context + "\n\n"
-            prompt += self.platy_template.apply({
-            "instruction": dict_values["instruction"],
-            "input": None,
-            "icl_examples": dict_values["icl_examples"] if "icl_examples" in dict_values.keys() else None,
-            "output": output})
-        else:   
-            prompt += self.platy_template.apply({
-                "instruction": None,
-                "input": None,
-                "icl_examples": dict_values["icl_examples"] if "icl_examples" in dict_values.keys() else None,
-                "output": output})
+            prompt += self.platy_template.apply(
+                {
+                    "instruction": dict_values["instruction"],
+                    "input": None,
+                    "icl_examples": dict_values["icl_examples"]
+                    if "icl_examples" in dict_values.keys()
+                    else None,
+                    "output": output,
+                }
+            )
+        else:
+            prompt += self.platy_template.apply(
+                {
+                    "instruction": None,
+                    "input": None,
+                    "icl_examples": dict_values["icl_examples"]
+                    if "icl_examples" in dict_values.keys()
+                    else None,
+                    "output": output,
+                }
+            )
         return prompt
+
 
 class Template:  # generate responses
     @classmethod
@@ -72,7 +85,10 @@ class Template:  # generate responses
         #     prompt +="Context:\n" + context + "\n\n"
         prompt += f"Below is an instruction that describes a task. Write a response that appropriately completes the request. \n\n### Instruction:\n{instruction}\n\n### Response:"
         return prompt
+
+
 #############################################
+
 
 def retry_with_exponential_backoff(
     func,
@@ -131,7 +147,7 @@ class InstructionsGenerator(ABC):
     @abstractproperty
     def model_name(self):
         pass
-    
+
     @abstractmethod
     def generate_prompt_for_answer(self, inputs):
         pass
@@ -139,6 +155,7 @@ class InstructionsGenerator(ABC):
     @abstractmethod
     def generate_reverse_prompt_for_instruction(self, inputs):
         pass
+
 
 class InversePlatypusLLM(InstructionsGenerator, LLM):
     def __init__(self, *args, **kwargs):
@@ -169,6 +186,7 @@ class InversePlatypusLLM(InstructionsGenerator, LLM):
                 results.finish_reason.append(response.outputs[0].finish_reason)
         return results
 
+
 class OpenAI(InstructionsGenerator):
     def __init__(
         self, model_name="text-davinci-003", n_gen_instructions_per_context=2, n_shot=2
@@ -186,7 +204,7 @@ class OpenAI(InstructionsGenerator):
         )  # your endpoint should look like the following https://YOUR_RESOURCE_NAME.openai.azure.com/
         openai.api_type = "azure"
         openai.api_version = "2023-05-15"  # this may change in the future
-        
+
     def task_description(self, bs, icl):
         td = f"You are given a set of {bs} samples formated as json file. For each of theese samples, you are given a context in field 'context'.\
             \nYour task is to generate {self.n_instructions_per_context} self-contained instructions related to the context for each sample. Generated instructions must contains all the nccessary information to answer them without assuming access to the context.\
@@ -244,7 +262,7 @@ class OpenAI(InstructionsGenerator):
 
     def generate_prompt_for_answer(self, inputs):
         pass
-    
+
     def generate_reverse_prompt_for_instruction(self, inputs):
         return self._apply_prompt_template(inputs)
 
@@ -330,7 +348,7 @@ def sample_icl_examples(dataset, n_icl, use_options=True):
             # example += " \nOptions:"
             for ans_option in ["A", "B", "C", "D"]:
                 option = f"\n{ans_option}: " + dataset[i][ans_option]
-                example += option 
+                example += option
             # example = example.strip()
         examples.append(example)
     return examples
@@ -445,15 +463,17 @@ def generate_instructions_(
             else None
         )
         finish_reasons = outputs.finish_reason
-        outputs = outputs.outputs   
+        outputs = outputs.outputs
 
         with open(output_filename, "a+") as f:
             import json
 
-            for i, (output, context, finish_reason) in enumerate(zip(outputs, contexts, finish_reasons)):                
+            for i, (output, context, finish_reason) in enumerate(
+                zip(outputs, contexts, finish_reasons)
+            ):
                 # common error here is that instruxtions starts with BEGININPUT + some nonsense, let evoid it
                 if "BEGININPUT" in output:
-                    continue        
+                    continue
                 if len(output.strip()) == 0:
                     continue
                 # usually, if the instruction is too long, its a bad one
@@ -512,7 +532,7 @@ def regenerate_instructions(
         response = instance["response"]
         requests.append(
             llm.generate_reverse_prompt_for_instruction(
-                {   
+                {
                     "instruction": instruction,
                     "context": context,
                     "icl_examples": sample_icl_examples(
@@ -530,7 +550,7 @@ def regenerate_instructions(
     outputs = llm.generate(requests, sampling_params, use_tqdm=True)
     finish_reasons = outputs.finish_reason
     outputs = outputs.outputs
-      
+
     print("Writing to file\n")
     with open(output_filename, "a+") as f:
         import json
@@ -538,7 +558,7 @@ def regenerate_instructions(
         for output, instance, finish_reason in zip(outputs, data, finish_reasons):
             # common error here is that instruxtions starts with BEGININPUT + some nonsense, let evoid it
             if "BEGININPUT" in output:
-                continue        
+                continue
             if len(output.strip()) == 0:
                 continue
             # usually, when instruction is too long, its a bad one
@@ -589,13 +609,12 @@ def generate_answers_(
 
         for output, instance, log_p, reason in zip(
             outputs, data, normalized_cumulative_logprobs, finish_reasons
-        ):  
-            
+        ):
             # common error here is that response contains some BEGININPUT stuff + some nonsense, let evoid it
             if "BEGININPUT" in output:
-                continue         
+                continue
             if len(output.strip()) == 0:
-                continue   
+                continue
             if reason != "stop":
                 continue
             # lets also evoid outputs that contains repetitions of the same sentence more than once
@@ -603,7 +622,7 @@ def generate_answers_(
             if n_rep > 0:
                 continue
             # instance["input"] = ""
-            instance["response"] = output    
+            instance["response"] = output
             instance["author_response"] = str(llm.model_name)
             instance["normalized_cumul_logprob_response"] = log_p
             f.write(json.dumps(instance))
@@ -611,7 +630,7 @@ def generate_answers_(
     return output_filename
 
 
-def load_vllm_model(path, dtype="float16", tensor_parallel_size=2):    
+def load_vllm_model(path, dtype="float16", tensor_parallel_size=2):
     gc.collect()
     torch.cuda.empty_cache()
     destroy_model_parallel()
@@ -682,11 +701,11 @@ def cli():
 @click.option("--tmp_path", type=str, required=False, default="/tmp/merged")
 def generate_answers(model_path, instruction_json, tmp_path="/tmp/merged"):
     if os.environ.get("AMLT_OUTPUT_DIR") is not None:
-        instruction_json = os.path.join(os.environ.get("AMLT_OUTPUT_DIR"), instruction_json)    
-        
-    model_path = save_merged_model(
-        model_path, hf_path=tmp_path
-    )
+        instruction_json = os.path.join(
+            os.environ.get("AMLT_OUTPUT_DIR"), instruction_json
+        )
+
+    model_path = save_merged_model(model_path, hf_path=tmp_path)
     llm = load_vllm_model(model_path, tensor_parallel_size=1)
     output_filename = generate_answers_(llm, instruction_json=instruction_json)
 
@@ -719,20 +738,25 @@ def generate_instructions(mttl_checkpoint, output_path):
 @click.option("--tmp_path", type=str, required=False, default="/tmp/merged")
 @click.option("--sub_names", type=str, required=False, default="SUB_10")
 def generate_instructions(
-    model_path, output_filename, n_icl, icl_use_out_options, subset_per_subject=-1, tmp_path="/tmp/merged", sub_names="SUB_10"
-):     
-    sn = SUB_5 if sub_names =="SUB_5" else SUB_10
-    
+    model_path,
+    output_filename,
+    n_icl,
+    icl_use_out_options,
+    subset_per_subject=-1,
+    tmp_path="/tmp/merged",
+    sub_names="SUB_10",
+):
+    sn = SUB_5 if sub_names == "SUB_5" else SUB_10
+
     if os.environ.get("AMLT_OUTPUT_DIR") is not None:
-        output_filename = os.path.join(os.environ.get("AMLT_OUTPUT_DIR"), output_filename)
-    
-    
+        output_filename = os.path.join(
+            os.environ.get("AMLT_OUTPUT_DIR"), output_filename
+        )
+
     if model_path in ["gpt-35-turbo", "gpt-4"]:
         llm = OpenAI(model_path, n_shot=n_icl)
     else:
-        model_path = save_merged_model(
-            model_path, hf_path=tmp_path
-        )
+        model_path = save_merged_model(model_path, hf_path=tmp_path)
         llm = load_vllm_model(model_path, tensor_parallel_size=1)
     generate_instructions_(
         llm,
@@ -751,16 +775,22 @@ def generate_instructions(
 @click.option("--sufix", type=str, required=False, default="_regen_instr_iter_1")
 @click.option("--tmp_path", type=str, required=False, default="/tmp/merged")
 @click.option("--sub_names", type=str, required=False, default="SUB_10")
-def generate_instructions_iter(model_path, instruction_json, n_icl, sufix="_regen_instr_iter_1", tmp_path="/tmp/merged", sub_names="SUB_10"):
+def generate_instructions_iter(
+    model_path,
+    instruction_json,
+    n_icl,
+    sufix="_regen_instr_iter_1",
+    tmp_path="/tmp/merged",
+    sub_names="SUB_10",
+):
     if os.environ.get("AMLT_OUTPUT_DIR") is not None:
-        instruction_json = os.path.join(os.environ.get("AMLT_OUTPUT_DIR"), instruction_json)    
-    
-    sn = SUB_5 if sub_names =="SUB_5" else SUB_10
-    
-    
-    model_path = save_merged_model(
-        model_path, hf_path=tmp_path
-    )
+        instruction_json = os.path.join(
+            os.environ.get("AMLT_OUTPUT_DIR"), instruction_json
+        )
+
+    sn = SUB_5 if sub_names == "SUB_5" else SUB_10
+
+    model_path = save_merged_model(model_path, hf_path=tmp_path)
     llm = load_vllm_model(model_path, tensor_parallel_size=1)
     regenerate_instructions(
         llm,
@@ -771,12 +801,14 @@ def generate_instructions_iter(model_path, instruction_json, n_icl, sufix="_rege
     )
 
 
-def perform_iteration(model_path, model_path_inverse, instruction_json, n_icl, icl_use_out_options, iter):
+def perform_iteration(
+    model_path, model_path_inverse, instruction_json, n_icl, icl_use_out_options, iter
+):
     # generate_instructions
     print("Iteration %d\n" % iter)
 
     llm = load_vllm_model(model_path_inverse, tensor_parallel_size=1)
-        
+
     instruction_json = regenerate_instructions(
         llm,
         instruction_json=instruction_json,
@@ -785,7 +817,7 @@ def perform_iteration(model_path, model_path_inverse, instruction_json, n_icl, i
         sufix=f"_regen_instr_iter_{iter}",
     )
     del llm
-    
+
     llm = load_vllm_model(model_path, tensor_parallel_size=1)
     # generate answers
     output_filename = generate_answers_(
@@ -815,7 +847,7 @@ def perform_iteration(model_path, model_path_inverse, instruction_json, n_icl, i
     default=-1,
     help="if > 0, this portion of subjects' data is processed.",
 )
-@click.option("--n-iterations", type=int, required=False, default=1)    
+@click.option("--n-iterations", type=int, required=False, default=1)
 @click.option("--tmp_path", type=str, required=False, default="/tmp/merged")
 def generate_instructions_answers_iteratively(
     model_path,
@@ -825,29 +857,24 @@ def generate_instructions_answers_iteratively(
     icl_use_out_options,
     subset_per_subject=-1,
     n_iterations=1,
-    tmp_path="/tmp/merged"
+    tmp_path="/tmp/merged",
 ):
-    '''
+    """
     Runnign this can result in OOM (due to reloading VLLM models)
-    Instead, use        
-    - python projects/wiki_experts/cli_qa_creator.py geni --output-filename=generated_platypus_icl5.jsonl --model-path=sordonia/llama2-13b-platypus-inverse --n_icl=5 
+    Instead, use
+    - python projects/wiki_experts/cli_qa_creator.py geni --output-filename=generated_platypus_icl5.jsonl --model-path=sordonia/llama2-13b-platypus-inverse --n_icl=5
     - python projects/wiki_experts/cli_qa_creator.py gena --instruction-json=generated_platypus_icl5.jsonl --model-path=sordonia/llama2-13b-platypus
     - python projects/wiki_experts/cli_qa_creator.py regeni --instruction-json=generated_platypus_icl5_answers.jsonl --model-path=sordonia/llama2-13b-platypus-inverse --n_icl=5 --sufix '_iter1'
     - python projects/wiki_experts/cli_qa_creator.py gena --instruction-json=generated_platypus_icl5_answers_iter1.jsonl --model-path=sordonia/llama2-13b-platypus
     - python projects/wiki_experts/cli_qa_creator.py regeni --instruction-json=generated_platypus_icl5_answers_iter1_answers.jsonl --model-path=sordonia/llama2-13b-platypus-inverse --n_icl=5 --sufix '_iter2'
     - python projects/wiki_experts/cli_qa_creator.py gena --instruction-json=generated_platypus_icl5_answers_iter1_answers_iter2.jsonl --model-path=sordonia/llama2-13b-platypus
     - python projects/wiki_experts/cli_qa_creator.py regeni --instruction-json=generated_platypus_icl5_answers_iter1_answers_iter2_answers.jsonl --model-path=sordonia/llama2-13b-platypus-inverse --n_icl=5 --sufix '_iter3'
-    '''
+    """
     assert n_iterations > 0
-    
-    model_path_inverse = save_merged_model(
-        model_path_inverse, hf_path=tmp_path
-    )    
-    model_path = save_merged_model(
-        model_path, hf_path=tmp_path
-    )
-    
-    
+
+    model_path_inverse = save_merged_model(model_path_inverse, hf_path=tmp_path)
+    model_path = save_merged_model(model_path, hf_path=tmp_path)
+
     print(
         f"Generating instructions and answers iteratively for {n_iterations} iterations\n"
     )
@@ -869,12 +896,15 @@ def generate_instructions_answers_iteratively(
         instruction_json=instruction_json,
     )
     del llm
-    
-    
-    
+
     for iter in range(n_iterations - 1):
         output_filename = perform_iteration(
-            model_path, model_path_inverse, output_filename, n_icl, icl_use_out_options, iter
+            model_path,
+            model_path_inverse,
+            output_filename,
+            n_icl,
+            icl_use_out_options,
+            iter,
         )
 
 
