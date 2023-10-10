@@ -392,7 +392,9 @@ def generate_instructions_(
 
                     while len(sent.split()) < max_context_length:
                         sent += sentences[start] + ". "
-                        start = (start + 1) % len(sentences)
+                        start += 1
+                        if start >= len(sentences):
+                            break
 
                     # avoid context too long errors
                     if len(sent.split()) > max_context_length:
