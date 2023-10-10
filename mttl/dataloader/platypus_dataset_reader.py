@@ -37,8 +37,13 @@ class InversePlatypusTemplate:
             for icl_example in icl_examples:
                 prompt += f"\n### Instruction:\n{icl_example}"
             prompt += "\n\n"
-        prompt += f"\nBelow is a response to a task. Write an instruction that appropriately describes the response.\n\n### Response:\n{output}\n\n### Instruction:\n"
-        return prompt
+        if instruction is None:
+            prompt += f"\nBelow is a response to a task. Write an instruction that appropriately describes the response.\n\n### Response:\n{output}\n\n### Instruction:\n"
+            return prompt
+        else:
+            # treat instruction as old instructions that we want to impove
+            prompt += f"\nBelow is an old instruction and a response to a task. Write a better instruction that appropriately describes the response.\n\n### Old instruction:\n{instruction}\n\n### Response:\n{output}\n\n### Instruction:\n"
+            return prompt
 
 
 class PlatypusDataset(torch.utils.data.dataset.Dataset):

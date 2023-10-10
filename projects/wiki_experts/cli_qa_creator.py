@@ -11,7 +11,7 @@ from vllm import LLM, SamplingParams
 from vllm.model_executor.parallel_utils.parallel_state import destroy_model_parallel
 from dataclasses import dataclass, field
 from mmlu_subject_configs import SUB_10, SUB_10_LAST, SUB_5
-from mmlu_subject_configs import SUB_1 as SUB_5
+# from mmlu_subject_configs import SUB_1 as SUB_5
 import click
 import random
 from abc import ABC, abstractmethod, abstractproperty
@@ -27,6 +27,13 @@ from mttl.utils import setup_logging
 from typing import List
 import time
 
+def count_repeating_sentences(text):
+    sentences = re.split(r'[.!?]', text)
+    sentences = [s.strip() for s in sentences if len(s.strip()) > 0]
+    unique_sentences = set(sentences)
+    return len(sentences) - len(unique_sentences)
+
+
 #############################################
 ### PROMPTS for VLLM
 class InverseTemplate:
@@ -39,13 +46,20 @@ class InverseTemplate:
             dict_values["context"],
         )
         prompt = ""
-        if context is not None:
+        if context is not None: # this is only for regenerating instructions
+            # regeneration mode
             prompt += "### Domain context:\n" + context + "\n\n"
-        prompt += self.platy_template.apply({
-            "instruction": None,
+            prompt += self.platy_template.apply({
+            "instruction": dict_values["instruction"],
             "input": None,
             "icl_examples": dict_values["icl_examples"] if "icl_examples" in dict_values.keys() else None,
             "output": output})
+        else:   
+            prompt += self.platy_template.apply({
+                "instruction": None,
+                "input": None,
+                "icl_examples": dict_values["icl_examples"] if "icl_examples" in dict_values.keys() else None,
+                "output": output})
         return prompt
 
 class Template:  # generate responses
@@ -112,6 +126,7 @@ class InstructionsGenerator(ABC):
         responses: List[str] = field(default_factory=list)
         cumulative_logprobs: List[float] = field(default_factory=list)
         inst_index_for_context: List[int] = field(default_factory=list)
+        finish_reason: List[str] = field(default_factory=list)
 
     @abstractproperty
     def model_name(self):
@@ -151,6 +166,7 @@ class InversePlatypusLLM(InstructionsGenerator, LLM):
                     response.outputs[0].cumulative_logprob
                     / (len(response.outputs[0].token_ids) + 1e-10)
                 )
+                results.finish_reason.append(response.outputs[0].finish_reason)
         return results
 
 class OpenAI(InstructionsGenerator):
@@ -428,12 +444,21 @@ def generate_instructions_(
             if len(outputs.inst_index_for_context) > 0
             else None
         )
-        outputs = outputs.outputs
+        finish_reasons = outputs.finish_reason
+        outputs = outputs.outputs   
 
         with open(output_filename, "a+") as f:
             import json
 
-            for i, (output, context) in enumerate(zip(outputs, contexts)):
+            for i, (output, context, finish_reason) in enumerate(zip(outputs, contexts, finish_reasons)):                
+                # common error here is that instruxtions starts with BEGININPUT + some nonsense, let evoid it
+                if "BEGININPUT" in output:
+                    continue        
+                if len(output.strip()) == 0:
+                    continue
+                # usually, if the instruction is too long, its a bad one
+                if finish_reason != "stop":
+                    continue
                 f.write(
                     json.dumps(
                         {
@@ -481,11 +506,13 @@ def regenerate_instructions(
 
     requests = []
     for instance in tqdm.tqdm(data):
+        instruction = instance["instruction"]
         context = instance["context"]
         response = instance["response"]
         requests.append(
             llm.generate_reverse_prompt_for_instruction(
-                {
+                {   
+                    "instruction": instruction,
                     "context": context,
                     "icl_examples": sample_icl_examples(
                         icl_dst_per_subject[instance["subject"]],
@@ -500,12 +527,22 @@ def regenerate_instructions(
         )
     del icl_dst_per_subject
     outputs = llm.generate(requests, sampling_params, use_tqdm=True)
+    finish_reasons = outputs.finish_reason
     outputs = outputs.outputs
+      
     print("Writing to file\n")
     with open(output_filename, "a+") as f:
         import json
 
-        for output, instance in zip(outputs, data):
+        for output, instance, finish_reason in zip(outputs, data, finish_reasons):
+            # common error here is that instruxtions starts with BEGININPUT + some nonsense, let evoid it
+            if "BEGININPUT" in output:
+                continue        
+            if len(output.strip()) == 0:
+                continue
+            # usually, when instruction is too long, its a bad one
+            if finish_reason != "stop":
+                continue
             instance["instruction"] = output
             f.write(json.dumps(instance))
             f.write("\n")
@@ -543,18 +580,29 @@ def generate_answers_(
 
     outputs = llm.generate(requests, sampling_params)
     normalized_cumulative_logprobs = outputs.cumulative_logprobs
+    finish_reasons = outputs.finish_reason
     outputs = outputs.outputs
 
     with open(output_filename, "a+") as f:
         import json
 
-        for output, instance, log_p in zip(
-            outputs, data, normalized_cumulative_logprobs
-        ):
+        for output, instance, log_p, reason in zip(
+            outputs, data, normalized_cumulative_logprobs, finish_reasons
+        ):  
+            
+            # common error here is that response contains some BEGININPUT stuff + some nonsense, let evoid it
+            if "BEGININPUT" in output:
+                continue         
+            if len(output.strip()) == 0:
+                continue   
+            if reason != "stop":
+                continue
+            # lets also evoid outputs that contains repetitions of the same sentence more than once
+            n_rep = count_repeating_sentences(output)
+            if n_rep > 0:
+                continue
             # instance["input"] = ""
-            instance["response"] = (
-                output.outputs[0].text if not isinstance(output, str) else output
-            )
+            instance["response"] = output    
             instance["author_response"] = str(llm.model_name)
             instance["normalized_cumul_logprob_response"] = log_p
             f.write(json.dumps(instance))
@@ -664,7 +712,7 @@ def generate_instructions(mttl_checkpoint, output_path):
     "--subset-per-subject",
     type=float,
     required=False,
-    default=0.1,
+    default=1,
     help="if > 0, this portion of subjects' data is processed.",
 )
 @click.option("--tmp_path", type=str, required=False, default="/tmp/merged")
