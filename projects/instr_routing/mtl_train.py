@@ -35,7 +35,6 @@ def run_multitask(args):
     
     # select dataloader
     if args.dataset == "t0":
-        model_class = EncoderDecoder
         dm = T0PretrainDataModule(args)
     else:
         raise NotImplementedError('only multitask dataset supported for now is t0')
@@ -78,6 +77,8 @@ def run_multitask(args):
     # get metric monitors for models
     callbacks = get_monitors(args)
     callbacks.append(ProgressCallback())
+    callbacks.append(SelectorRoutingsLog(args))
+    callbacks.append(SelectorMetricsLog())
 
     monitor = "val/loss"
     mode = "min"
