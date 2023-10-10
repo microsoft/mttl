@@ -251,7 +251,7 @@ class TaskVSMEARRouter(SMEARRouter):
         ), "`TaskVSMEARRouter` must be used with multitask datasets."
 
         self.config = config
-        self.prior_router = nn.Linear(in_d, config.n_tasks)
+        self.prior = nn.Linear(in_d, config.n_tasks)
 
         self.posterior_router = nn.Parameter(
             torch.empty((config.n_tasks, config.n_splits * config.n_skills)).uniform_(
@@ -266,7 +266,7 @@ class TaskVSMEARRouter(SMEARRouter):
         self.n_splits = 1
         self.split_dim = in_d
         self.n_tasks = self.n_skills = config.n_tasks
-        self.prior_router_ln = nn.Identity()
+        self.prior_ln = nn.Identity()
         # self.prior_router_ln = nn.LayerNorm(in_d)
         # self.prior_router_ln.weight = nn.Parameter(torch.ones(in_d))
 
@@ -279,8 +279,8 @@ class TaskVSMEARRouter(SMEARRouter):
 
         if config.smear_gaussian_init:
             # normal innit
-            self.prior_router.weight.data.normal_(mean=0.0, std=0.02)
-            self.prior_router.bias.data.fill_(0)
+            self.prior.weight.data.normal_(mean=0.0, std=0.02)
+            self.prior.bias.data.fill_(0)
 
         self.metrics = Metrics()
 
@@ -299,8 +299,8 @@ class TaskVSMEARRouter(SMEARRouter):
         # do not center the student, center only the teacher now
         prior_routes = self.route_maybe_center(
             prior_input,
-            self.prior_router,
-            self.prior_router_ln,
+            self.prior,
+            self.prior_ln,
             temperature=self.temperature,
             center=False,
         )
