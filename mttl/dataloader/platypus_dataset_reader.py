@@ -7,42 +7,29 @@ from mttl.utils import hash_example, logger
 
 class PlatypusTemplate:
     @classmethod
-    def apply(self, dict_values):
-        instruction, input, output = (
-            dict_values["instruction"],
-            dict_values["input"],
-            dict_values["output"],
-        )
+    def apply(self, instruction, input):
         if len(input) > 0:
-            return f"Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.\n\n### Instruction:\n{instruction}\n\n### Input:\n{input}\n\n### Response:\n"
+            prompt = f"Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.\n\n### Instruction:\n{instruction}\n\n### Input:\n{input}\n\n### Response:\n"
         else:
-            return f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n### Instruction:\n{instruction}\n\n### Response:\n"
+            prompt = f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n### Instruction:\n{instruction}\n\n### Response:\n"
+        return prompt            
 
 
 class InversePlatypusTemplate:
     @classmethod
-    def apply(self, dict_values):
-        instruction, input, output = (
-            dict_values["instruction"],
-            dict_values["input"],
-            dict_values["output"],
-        )
-        prompt = ""
-        if (
-            "icl_examples" in dict_values.keys()
-            and dict_values["icl_examples"] is not None
-        ):
-            icl_examples = dict_values["icl_examples"]
-            prompt += f"Here are some examples of good instructions that you should imitate:"
-            for icl_example in icl_examples:
-                prompt += f"\n### Instruction:\n{icl_example}"
-            prompt += "\n\n"
-        if instruction is None:
-            prompt += f"\nBelow is a response to a task. Write an instruction that appropriately describes the response.\n\n### Response:\n{output}\n\n### Instruction:\n"
-            return prompt
+    def apply(self, output, input=None, icl_examples=None):
+        if input is not None and len(input):
+            prompt = f"Below is a response to a task, paired with an input that provides further context. Write an instruction that appropriately describes the response.\n\n### Input:\n{input}\n\n### Response:\n{output}\n\n### Instruction:\n"
         else:
-            # treat instruction as old instructions that we want to impove
-            prompt += f"\nBelow is an old instruction and a response to a task. Write a better instruction that appropriately describes the response.\n\n### Old instruction:\n{instruction}\n\n### Response:\n{output}\n\n### Instruction:\n"
+            prompt = f"Below is a response to a task. Write an instruction that appropriately describes the response.\n\n### Response:\n{output}\n\n### Instruction:\n"
+
+        if icl_examples is not None:
+            icl_prompt = f"Here are some examples of good instructions that you should imitate:\n"
+            for icl_example in icl_examples:
+                icl_prompt += f"\n### Instruction:\n{icl_example}"
+            icl_prompt += "\n\n"
+            return icl_prompt + prompt
+        else:
             return prompt
 
 
@@ -60,7 +47,9 @@ class PlatypusDataset(torch.utils.data.dataset.Dataset):
     def __getitem__(self, key):
         entry = self.dataset[key]
 
-        source = PlatypusTemplate.apply(entry)
+        source = PlatypusTemplate.apply(
+            entry["instruction"], entry["input"]
+        )
         labels = entry["output"]
         hash = hash_example(source)
         instruction_hash = hash_example(entry["instruction"])
@@ -111,7 +100,7 @@ class PlatypusQADataset(torch.utils.data.dataset.Dataset):
     def __getitem__(self, key):
         entry = self.dataset[key]
 
-        source = PlatypusTemplate.apply(entry)
+        source = PlatypusTemplate.apply(entry["instruction"], entry.get("input"))
         labels = entry["output"]
         hash = hash_example(source)
         instruction_hash = hash_example(entry["instruction"])
@@ -139,7 +128,9 @@ class InversePlatypusDataset(PlatypusDataset):
     def __getitem__(self, key):
         entry = self.dataset[key]
 
-        source = InversePlatypusTemplate.apply(entry)
+        source = InversePlatypusTemplate.apply(
+            entry["output"], entry.get("input"), entry.get("icl_examples")
+        )
         labels = entry["instruction"]
         hash = hash_example(source)
         instruction_hash = hash_example(entry["instruction"])
