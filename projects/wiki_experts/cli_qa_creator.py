@@ -601,7 +601,7 @@ def e2e(
 
 @cli.command("upload")
 @click.option("--dataset-path", type=str, required=True)
-@click.option("--hf-destinatin", type=str, required=False, default=None)
+@click.option("--hf-destination", type=str, required=False, default=None)
 def upload_to_hf(dataset_path, hf_destination=None):
     return upload_to_hf_(dataset_path, hf_destination=hf_destination)
 
