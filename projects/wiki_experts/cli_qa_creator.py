@@ -154,21 +154,21 @@ class OpenAI(InstructionsGenerator):
         @classmethod        
         def apply(cls, output, input=None, icl_examples=None):
             task_description = f"You are a helpful assistant.\
-                \nYour task is to generate instructions for a given domain context and examples of good instrucitons"
+                \nYour task is to generate instructions for a given domain context."
             if icl_examples is not None:
-                task_description += "\nFirst, you are given examples of good instructions. Your geneated instructions should imitate the style, tone and length of these examples."
-            task_description += "\nYou are given some domain context. Your instructions should be appropriate for this context, the reply to the instructions should be contained in the domain context."
-            
-            if icl_examples is not None:
+                task_description += "\nFirst, you are given examples of good instructions. Your geneated instructions must imitate the style, tone and length of these examples."
+
                 icl_prompt = f"\n\n Here are some examples of good instructions that you should imitate:\n"
                 for icl_example in icl_examples:
                     icl_prompt += f"\n### Instruction:\n{icl_example}"
                 icl_prompt += "\n\n"
+
+            task_description += "\nYou are given some domain context. Your instructions should be appropriate for this context, the reply to the instructions should be contained in this domain context."
             
             task_description+="\n\nHere is the domain context:"
-            task_description+=f"\n\m{output}"           
+            task_description+=f"\n\m{output}"              
             
-            task_description += f"Write an instruction that is appropriate for this context. \n\n### Instruction:\n"
+            task_description += f"\nWrite an instruction that is appropriate for this context. \n\n### Instruction:\n"
 
             return task_description
     
