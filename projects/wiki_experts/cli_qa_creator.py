@@ -578,6 +578,7 @@ def generate_instructions(
 @click.option("--num_iterations", type=int, required=False, default=1)
 @click.option("--max_documents_per_subject", type=int, required=False, default=1e6)
 @click.option("--upload_to_hub", type=bool, required=False, default=False)
+@click.option("--pagesize", type=int, required=False, default=512)
 def e2e(
     seed_dataset,
     model_setting,
