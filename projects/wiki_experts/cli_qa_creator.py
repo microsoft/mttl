@@ -664,7 +664,7 @@ def e2e(
 
     if upload_to_hub:
         print("Uploading the final dataset to HuggingFace Hub...")
-        upload_to_hf_(answ_filename, setting)
+        upload_to_hf_(answ_filename, setting=setting)
 
 
 @cli.command("upload")
