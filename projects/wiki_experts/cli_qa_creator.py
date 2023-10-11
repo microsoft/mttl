@@ -521,6 +521,7 @@ def generate_instructions(
 @click.option("--sub_names", type=str, required=False, default="SUB_10")
 @click.option("--num_iterations", type=int, required=False, default=1)
 @click.option("--max_documents_per_subject", type=int, required=False, default=1e6)
+@click.option("--upload_to_hub", type=bool, required=False, default=False)
 def e2e(
     seed_dataset,
     model_path,
@@ -533,11 +534,14 @@ def e2e(
     sub_names,
     num_iterations,
     max_documents_per_subject,
+    upload_to_hub=False,
 ):
     if os.environ.get("AMLT_OUTPUT_DIR") is not None:
         output_filename = os.path.join(
             os.environ.get("AMLT_OUTPUT_DIR"), output_filename
         )
+    if upload_to_hub:
+        assert os.environ.get("HUGGING_FACE_HUB_TOKEN_WRITE") is not None, "Please set HUGGING_FACE_HUB_TOKEN_WRITE env variable."
 
     # start dataset
     prev_dataset = transform_seed_dataset(
@@ -587,7 +591,39 @@ def e2e(
         else:
             answer_dataset = read_jsonl_dataset(answ_filename)
         prev_dataset = answer_dataset
+        
+    if upload_to_hub:
+        print("Uploading the final dataset to HuggingFace Hub...")
+        upload_to_hf_(answ_filename)
 
+@cli.command("upload")
+@click.option("--dataset-path", type=str, required=True)
+@click.option("--hf-destinatin", type=str, required=False, default=None)
+def upload_to_hf(dataset_path, hf_destinatin=None):
+    return upload_to_hf_(dataset_path, hf_destinatin=hf_destinatin) 
+
+def upload_to_hf_(dataset_path, hf_destinatin=None):
+    import pandas as pd
+    from datasets import DatasetDict
+    import huggingface_hub
+    
+    huggingface_hub.login(token=os.environ.get("HUGGING_FACE_HUB_TOKEN_WRITE"))
+    
+    if hf_destinatin is None:
+        dts_name = dataset_path.split("/")[-1].replace(".json", "")
+        hf_user = huggingface_hub.whoami()["name"]
+        hf_destinatin = f"{hf_user}/{dts_name}"
+    
+    dataset = load_dataset("json", data_files=dataset_path)["train"]
+    pd = dataset.to_pandas()
+    subjects = pd["subject"].unique()
+    
+    dts_per_subject = DatasetDict()
+    for sub in subjects:
+        dts_subject = dataset.filter(lambda x: x["subject"] == sub)
+        dts_per_subject[sub] = dts_subject
+    
+    dts_per_subject.push_to_hub(hf_destinatin, token = os.environ.get("HUGGING_FACE_HUB_TOKEN_WRITE"))
 
 if __name__ == "__main__":
     cli()
