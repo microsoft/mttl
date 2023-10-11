@@ -45,16 +45,16 @@ class ModelSetting:
 class Setting:
     model_setting_name: str
     max_context_length: int
-    subset: float
     icl_examples: int
     icl_dataset_name: str
     max_documents_per_subject: int
+    max_contexts_per_subject: int
     icl_use_out_options: bool
     seed_dataset: str
     subjects: str
 
     def get_ds_name(self, iter_signature=""):
-        return f"{self.model_setting_name}_icl{self.icl_examples}_subset{self.subset}_maxD{self.max_documents_per_subject}_{iter_signature}.jsonl"
+        return f"{self.model_setting_name}_icl{self.icl_examples}_maxD{self.max_documents_per_subject}_maxC{self.max_contexts_per_subject}_{iter_signature}.jsonl"
 
 
 MODEL_SETTINGS = {
@@ -233,7 +233,7 @@ def transform_seed_dataset(
     icl_examples=0,
     max_context_length=512,
     max_documents_per_subject=1e6,
-    subset=1,
+    max_contexts_per_subject=1e6,
     **kwargs,
 ):
     """
@@ -291,12 +291,12 @@ def transform_seed_dataset(
                 for context in document_contexts
             )
 
-            if i > len(subject_data["text"]) * float(subset):
-                print("Breaking early due to subset settings.")
+            if len(subject_contexts) > max_contexts_per_subject:
+                print("Breaking early due to max_contexts_per_subject settings. ", len(subject_contexts))
                 break
 
             if i > max_documents_per_subject:
-                print("Breaking early due to max_documents_per_subject settings.")
+                print("Breaking early due to max_documents_per_subject settings. ", len(subject_contexts))
                 break
 
         print(
@@ -538,13 +538,6 @@ def generate_instructions(mttl_checkpoint, output_path):
     default=True,
     help="if True, the output options of MMLU will be included into positive prompts examples.",
 )
-@click.option(
-    "--subset",
-    type=float,
-    required=False,
-    default=1,
-    help="if > 0, this portion of subjects' data is processed.",
-)
 @click.option("--tmp_path", type=str, required=False, default="/tmp/merged")
 @click.option("--sub_names", type=str, required=False, default="SUB_10")
 def generate_instructions(
@@ -553,7 +546,6 @@ def generate_instructions(
     output_filename,
     n_icl,
     icl_use_out_options,
-    subset,
     tmp_path,
     sub_names,
 ):
@@ -573,7 +565,6 @@ def generate_instructions(
         subjects=sub_names,
         icl_examples=n_icl,
         icl_use_out_options=icl_use_out_options,
-        subset=subset,
     )
     instruction_dataset = generate_instructions_(
         llm,
@@ -596,17 +587,11 @@ def generate_instructions(
     default=True,
     help="if True, the output options of MMLU will be included into positive prompts examples.",
 )
-@click.option(
-    "--subset",
-    type=float,
-    required=False,
-    default=1,
-    help="if > 0, this portion of subjects' data is processed.",
-)
 @click.option("--tmp_path", type=str, required=False, default="/tmp/merged")
 @click.option("--sub_names", type=str, required=False, default="SUB_10")
 @click.option("--num_iterations", type=int, required=False, default=1)
 @click.option("--max_documents_per_subject", type=int, required=False, default=1e6)
+@click.option("--max_contexts_per_subject", type=int, required=False, default=1e6)
 @click.option("--upload_to_hub", type=bool, required=False, default=False)
 @click.option("--pagesize", type=int, required=False, default=512)
 def e2e(
@@ -615,22 +600,22 @@ def e2e(
     output_path,
     n_icl,
     icl_use_out_options,
-    subset,
     tmp_path,
     sub_names,
     num_iterations,
     max_documents_per_subject,
-    upload_to_hub=False,
+    max_contexts_per_subject,
+    upload_to_hub = False,
     pagesize: int = 512,
 ):
     inverse_model_path, model_path = MODEL_SETTINGS[model_setting].model_paths
     setting = Setting(
         model_setting_name=model_setting,
         max_context_length=pagesize,
-        subset=subset,
         icl_examples=n_icl,
         icl_dataset_name="lukaemon/mmlu",
         max_documents_per_subject=max_documents_per_subject,
+        max_contexts_per_subject=max_contexts_per_subject,
         icl_use_out_options=icl_use_out_options,
         seed_dataset=seed_dataset,
         subjects=sub_names,
@@ -658,9 +643,9 @@ def e2e(
             llm = load_vllm_model(inverse_model_path)
 
         inst_filename = os.path.join(
-            output_path, setting.get_ds_name("inst_%d.jsonl" % i)
+            output_path, setting.get_ds_name("inst_%d" % i)
         )
-        answ_filename = os.path.join(output_path, setting.get_ds_name("%d.jsonl" % i))
+        answ_filename = os.path.join(output_path, setting.get_ds_name("%d" % i))
 
         if not os.path.exists(inst_filename):
             instruction_dataset = generate_instructions_(
@@ -727,9 +712,11 @@ def upload_to_hf_(dataset_path, hf_destination=None, setting: Setting = None):
 
         api = HfApi()
         setting_dict = setting.__dict__
+
         with open("/tmp/readme.txt", "w") as f:
             for k, v in setting_dict.items():
                 f.write(f"## {k}: {v}\n")
+
         api.upload_file(
             path_or_fileobj="/tmp/readme.txt",
             path_in_repo="README.md",
