@@ -599,20 +599,20 @@ def e2e(
 @cli.command("upload")
 @click.option("--dataset-path", type=str, required=True)
 @click.option("--hf-destinatin", type=str, required=False, default=None)
-def upload_to_hf(dataset_path, hf_destinatin=None):
-    return upload_to_hf_(dataset_path, hf_destinatin=hf_destinatin) 
+def upload_to_hf(dataset_path, hf_destination=None):
+    return upload_to_hf_(dataset_path, hf_destination=hf_destination) 
 
-def upload_to_hf_(dataset_path, hf_destinatin=None):
+def upload_to_hf_(dataset_path, hf_destination=None):
     import pandas as pd
     from datasets import DatasetDict
     import huggingface_hub
     
     huggingface_hub.login(token=os.environ.get("HUGGING_FACE_HUB_TOKEN_WRITE"))
     
-    if hf_destinatin is None:
+    if hf_destination is None:
         dts_name = dataset_path.split("/")[-1].replace(".json", "")
         hf_user = huggingface_hub.whoami()["name"]
-        hf_destinatin = f"{hf_user}/{dts_name}"
+        hf_destination = f"{hf_user}/{dts_name}"
     
     dataset = load_dataset("json", data_files=dataset_path)["train"]
     pd = dataset.to_pandas()
@@ -623,7 +623,7 @@ def upload_to_hf_(dataset_path, hf_destinatin=None):
         dts_subject = dataset.filter(lambda x: x["subject"] == sub)
         dts_per_subject[sub] = dts_subject
     
-    dts_per_subject.push_to_hub(hf_destinatin, token = os.environ.get("HUGGING_FACE_HUB_TOKEN_WRITE"))
+    dts_per_subject.push_to_hub(hf_destination, token = os.environ.get("HUGGING_FACE_HUB_TOKEN_WRITE"))
 
 if __name__ == "__main__":
     cli()
