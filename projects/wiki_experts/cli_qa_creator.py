@@ -80,10 +80,14 @@ class InversePlatypusLLM(InstructionsGenerator, LLM):
     def generate(self, templated_contexts, sampling_params, **kwargs):
         results = InstructionsGenerator.Response()
 
+        # we explicitly add requests here, so that we can keep track of the request id
         for request_id, context in enumerate(templated_contexts):
             self.llm_engine.add_request(str(request_id), context, sampling_params)
         responses = self._run_engine(use_tqdm=True)
 
+        # we need to do a bit of kung-fu here, given that there might be *less* or *more* responses
+        # than the number of requests, e.g. if there are generation errors. Therefore, we build a dictionary
+        # of responses based on the request id.
         responses_dict = {r.request_id: r for r in responses}
         for request_id, context in enumerate(templated_contexts):
             if (
