@@ -531,6 +531,7 @@ def generate_instructions(
             instruction_dataset = read_jsonl_dataset(output_filename + "_inst_%d.json" % i)
 
         if model_path not in ["gpt-35-turbo", "gpt-4"]:
+            del llm
             model_path = save_merged_model(model_path, hf_path=tmp_path)
             llm = load_vllm_model(model_path)
 
