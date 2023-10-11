@@ -31,6 +31,35 @@ from mttl.utils import setup_logging
 INVALID_RESPONSE = object()
 
 
+@dataclass
+class ModelSetting:
+    inverse_model_path: str
+    model_path: str
+
+
+@dataclass
+class Setting:
+    model_setting_name: str
+    pagesize: int
+    subset: float
+    icl_examples: int
+    max_documents_per_subject: int
+    icl_use_out_options: bool
+    seed_dataset: str
+    subjects: str
+
+    def get_ds_name(self, iter_signature):
+        return f"{self.model_setting_name}_icl{self.icl_examples}_subset{self.subset}_maxD{self.max_documents_per_subject}_{iter_signature}.jsonl"
+
+
+MODEL_SETTINGS = {
+    "platy": ModelSetting(
+        inverse_model_path="sordonia/llama2-13b-platypus-inverse",
+        model_path="sordonia/llama2-13b-platypus",
+    )
+}
+
+
 def count_repeating_sentences(text):
     sentences = re.split(r"[.!?]", text)
     sentences = [s.strip() for s in sentences if len(s.strip()) > 0]
@@ -175,6 +204,7 @@ def transform_seed_dataset(
     max_context_length=512,
     max_documents_per_subject=1e6,
     subset=1,
+    **kwargs,
 ):
     """
     Convert a seed dataset into a tuple of (context, subject, icl_examples).
@@ -298,12 +328,10 @@ def generate_instructions_(
     )
 
     def get_templated_context(entry):
-        return (
-            llm.generate_reverse_prompt_for_instruction(
-                context=entry["context"],
-                output=entry["response"] if "response" in entry else None,
-                icl_examples=entry["icl_examples"],
-            )
+        return llm.generate_reverse_prompt_for_instruction(
+            context=entry["context"],
+            output=entry["response"] if "response" in entry else None,
+            icl_examples=entry["icl_examples"],
         )
 
     templated_contexts = [get_templated_context(entry) for entry in dataset]
@@ -317,7 +345,9 @@ def generate_instructions_(
     assert len(result.outputs) == len(templated_contexts)
 
     new_dataset = []
-    for (entry, instruction, finish_reason) in zip(dataset, result.outputs, result.finish_reason):
+    for entry, instruction, finish_reason in zip(
+        dataset, result.outputs, result.finish_reason
+    ):
         if reject_output(instruction, finish_reason):
             continue
 
@@ -526,9 +556,8 @@ def generate_instructions(
 @click.option(
     "--seed-dataset", type=str, default="sordonia/my-wiki-latex_mmlu_from_valid_all"
 )
-@click.option("--model-path", type=str, required=True)
-@click.option("--inverse-model-path", type=str, required=True)
-@click.option("--output-filename", type=str, required=True)
+@click.option("--model_setting", type=str, required=True)
+@click.option("--output_path", type=str, required=True)
 @click.option("--n_icl", type=int, required=False, default=0)
 @click.option(
     "--icl-use-out-options",
@@ -551,9 +580,8 @@ def generate_instructions(
 @click.option("--upload_to_hub", type=bool, required=False, default=False)
 def e2e(
     seed_dataset,
-    model_path,
-    inverse_model_path,
-    output_filename,
+    model_setting,
+    output_path,
     n_icl,
     icl_use_out_options,
     subset,
@@ -562,25 +590,32 @@ def e2e(
     num_iterations,
     max_documents_per_subject,
     upload_to_hub=False,
+    pagesize: int = 512,
 ):
-    if os.environ.get("AMLT_OUTPUT_DIR") is not None:
-        output_filename = os.path.join(
-            os.environ.get("AMLT_OUTPUT_DIR"), output_filename
-        )
+    model_seting = MODEL_SETTINGS[model_setting]
+    inverse_model_path, model_path = (
+        model_seting.inverse_model_path,
+        model_seting.model_path,
+    )
+    setting = Setting(
+        model_setting_name=model_setting,
+        pagesize=pagesize,
+        subset=subset,
+        icl_examples=n_icl,
+        max_documents_per_subject=max_documents_per_subject,
+        icl_use_out_options=icl_use_out_options,
+        seed_dataset=seed_dataset,
+        subjects=sub_names,
+    )
+
+    output_path = os.environ.get("AMLT_OUTPUT_DIR", output_path)
     if upload_to_hub:
         assert (
             os.environ.get("HF_TOKEN") is not None
         ), "Please set HF_TOKEN env variable."
 
     # start dataset
-    prev_dataset = transform_seed_dataset(
-        seed_dataset,
-        subjects=sub_names,
-        icl_examples=n_icl,
-        icl_use_out_options=icl_use_out_options,
-        subset=subset,
-        max_documents_per_subject=max_documents_per_subject,
-    )
+    prev_dataset = transform_seed_dataset(**setting.__dict__)
 
     llm = None
     for i in range(num_iterations):
@@ -594,8 +629,11 @@ def e2e(
             del llm
             llm = load_vllm_model(inverse_model_path)
 
-        inst_filename = output_filename.replace(".jsonl", "_inst_%d.jsonl" % i)
-        answ_filename = output_filename.replace(".jsonl", "_%d.jsonl" % i)
+        inst_filename = os.path.join(
+            output_path, setting.get_ds_name("inst_%d.jsonl" % i)
+        )
+        answ_filename = os.path.join(output_path, setting.get_ds_name("%d.jsonl" % i))
+
         if not os.path.exists(inst_filename):
             instruction_dataset = generate_instructions_(
                 llm,
@@ -623,7 +661,7 @@ def e2e(
 
     if upload_to_hub:
         print("Uploading the final dataset to HuggingFace Hub...")
-        upload_to_hf_(answ_filename)
+        upload_to_hf_(answ_filename, setting)
 
 
 @cli.command("upload")
@@ -633,7 +671,7 @@ def upload_to_hf(dataset_path, hf_destination=None):
     return upload_to_hf_(dataset_path, hf_destination=hf_destination)
 
 
-def upload_to_hf_(dataset_path, hf_destination=None):
+def upload_to_hf_(dataset_path, hf_destination=None, setting: Setting = None):
     import pandas as pd
     from datasets import DatasetDict
     import huggingface_hub
@@ -656,6 +694,22 @@ def upload_to_hf_(dataset_path, hf_destination=None):
         dts_per_subject[sub] = dts_subject
 
     dts_per_subject.push_to_hub(hf_destination, token=hf_token)
+    if setting is not None:
+        from huggingface_hub import HfApi
+
+        api = HfApi()
+        setting_dict = setting.__dict__
+        with open("/tmp/readme.txt", "w") as f:
+            for k, v in setting_dict.items():
+                f.write(f"## {k}: {v}\n")
+        api.upload_file(
+            path_or_fileobj="/tmp/readme.txt",
+            path_in_repo="README.md",
+            repo_id=hf_destination,
+            repo_type="dataset",
+            token=hf_token,
+        )
+        os.remove("/tmp/readme.txt")
 
 
 if __name__ == "__main__":
