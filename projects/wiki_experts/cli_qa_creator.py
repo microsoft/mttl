@@ -57,7 +57,7 @@ class InstructionsGenerator(ABC):
         return self.inverse_template.apply(
             output if output is not None else context,
             context if output is not None else None,
-            icl_examples
+            icl_examples,
         )
 
 
@@ -102,7 +102,9 @@ class OpenAI(InstructionsGenerator):
         pbar = tqdm.tqdm(range(len(templated_contexts) // 20))
         for context in range(0, len(templated_contexts), 20):
             batch = templated_contexts[context : context + 20]
-            outputs += self.operator.generate(batch, max_tokens=sampling_params.max_tokens)
+            outputs += self.operator.generate(
+                batch, max_tokens=sampling_params.max_tokens
+            )
             pbar.update(len(batch))
         return results
 
@@ -144,8 +146,7 @@ def transform_seed_dataset(
     max_context_length=512,
     subset=1,
 ):
-    """Convert a seed dataset into a tuple of (context, subject, icl_examples).
-    """
+    """Convert a seed dataset into a tuple of (context, subject, icl_examples)."""
     dataset = load_dataset(dataset_name)["train"].to_pandas()
     converted_dataset = []
 
@@ -158,13 +159,17 @@ def transform_seed_dataset(
             icl_dataset = load_dataset(icl_dataset_name, subject)["validation"]
 
         contexts = []
-        for i, text in enumerate(tqdm.tqdm(subject_data["text"])):
+        num_contexts_per_doc = [0]
+        for i, text in enumerate(
+            tqdm.tqdm(subject_data["text"], desc=f"Processing {subject}...")
+        ):
             sentences = text.split(".")
             sentences = [
                 sentence.strip().replace("\n", " ").replace("  ", " ")
                 for sentence in sentences
                 if len(sentence.strip()) > 0
             ]
+
             # new document
             append = False
             for sentence in sentences:
@@ -180,10 +185,22 @@ def transform_seed_dataset(
                         contexts[-1] += " " + sentence
                     else:
                         contexts.append(sentence)
+            num_contexts_per_doc.append(len(contexts))
 
             if i > len(subject_data["text"]) * float(subset):
                 print("Breaking early due to subset settings.")
                 break
+
+        num_contexts_per_doc = [
+            num_contexts_per_doc[i] - num_contexts_per_doc[i - 1]
+            for i in range(1, len(num_contexts_per_doc))
+        ]
+        print(
+            "Contexts per document (Avg/Min/Max):",
+            np.mean(num_contexts_per_doc),
+            np.min(num_contexts_per_doc),
+            np.max(num_contexts_per_doc),
+        )
 
         for context in contexts:
             converted_dataset.append(
@@ -235,9 +252,6 @@ def generate_instructions_(
     )
 
     def get_templated_context(entry):
-        if "instruction" in entry:
-            raise NotImplementedError("Instructions are already generated.")
-
         return llm.generate_reverse_prompt_for_instruction(
             context=entry["context"],
             output=entry["response"] if "response" in entry else None,
@@ -245,7 +259,7 @@ def generate_instructions_(
         )
 
     templated_contexts = [get_templated_context(entry) for entry in dataset]
-    
+
     print("Example generation requests...")
     for context in np.random.choice(templated_contexts, 5):
         print(context)
@@ -331,8 +345,8 @@ def load_vllm_model(path, dtype="float16"):
     llm = InversePlatypusLLM(
         model=path,
         dtype=dtype,
-        tensor_parallel_size=int(os.environ.get('VLLM_TPSIZE', 1)),
-        gpu_memory_utilization=float(os.environ.get('VLLM_GPU_MEM', 0.5)),
+        tensor_parallel_size=int(os.environ.get("VLLM_TPSIZE", 1)),
+        gpu_memory_utilization=float(os.environ.get("VLLM_GPU_MEM", 0.5)),
     )
     return llm
 
@@ -514,35 +528,43 @@ def generate_instructions(
         subset=subset,
     )
 
+    llm = None
     for i in range(num_iterations):
         if model_path in ["gpt-35-turbo", "gpt-4"] and i == 0:
             llm = OpenAI(model_path)
         else:
-            inverse_model_path = save_merged_model(inverse_model_path, hf_path=tmp_path)
+            if i == 0:
+                inverse_model_path = save_merged_model(
+                    inverse_model_path, hf_path=tmp_path
+                )
+            del llm
             llm = load_vllm_model(inverse_model_path)
 
-        if not os.path.exists(output_filename + "_inst_%d.json" % i):
+        inst_filename = output_filename.replace(".jsonl", "_inst_%d.jsonl" % i)
+        answ_filename = output_filename.replace(".jsonl", "_%d.jsonl" % i)
+        if not os.path.exists(inst_filename):
             instruction_dataset = generate_instructions_(
                 llm,
                 prev_dataset,
             )
-            dump_jsonl_dataset(instruction_dataset, output_filename + "_inst_%d.json" % i)
+            dump_jsonl_dataset(instruction_dataset, inst_filename)
         else:
-            instruction_dataset = read_jsonl_dataset(output_filename + "_inst_%d.json" % i)
+            instruction_dataset = read_jsonl_dataset(inst_filename)
 
         if model_path not in ["gpt-35-turbo", "gpt-4"]:
+            if i == 0:
+                model_path = save_merged_model(model_path, hf_path=tmp_path)
             del llm
-            model_path = save_merged_model(model_path, hf_path=tmp_path)
             llm = load_vllm_model(model_path)
 
-        if not os.path.exists(output_filename + "_%d.json" % i):
+        if not os.path.exists(answ_filename):
             answer_dataset = generate_answers_(
                 llm,
                 instruction_dataset,
             )
-            dump_jsonl_dataset(answer_dataset, output_filename + "_%d.json" % i)
+            dump_jsonl_dataset(answer_dataset, answ_filename)
         else:
-            answer_dataset = read_jsonl_dataset(output_filename + "_%d.json" % i)
+            answer_dataset = read_jsonl_dataset(answ_filename)
         prev_dataset = answer_dataset
 
 
