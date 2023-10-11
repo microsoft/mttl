@@ -40,12 +40,14 @@ class ModelSetting:
     def model_paths(self):
         return self.inverse_model_path, self.model_path
 
+
 @dataclass
 class Setting:
     model_setting_name: str
     max_context_length: int
     subset: float
     icl_examples: int
+    icl_dataset_name: str
     max_documents_per_subject: int
     icl_use_out_options: bool
     seed_dataset: str
@@ -560,7 +562,7 @@ def generate_instructions(
     "--seed-dataset", type=str, default="sordonia/my-wiki-latex_mmlu_from_valid_all"
 )
 @click.option("--model_setting", type=str, required=True)
-@click.option("--output_path", type=str, required=True)
+@click.option("--output_path", type=str, required=False, default="")
 @click.option("--n_icl", type=int, required=False, default=0)
 @click.option(
     "--icl-use-out-options",
