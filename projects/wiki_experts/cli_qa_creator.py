@@ -144,9 +144,14 @@ def transform_seed_dataset(
     icl_use_out_options=True,
     icl_examples=0,
     max_context_length=512,
+    max_documents_per_subject=500,
+    dfq_weighting=True,
     subset=1,
 ):
-    """Convert a seed dataset into a tuple of (context, subject, icl_examples)."""
+    """
+    Convert a seed dataset into a tuple of (context, subject, icl_examples).
+    """
+
     dataset = load_dataset(dataset_name)["train"].to_pandas()
     converted_dataset = []
 
@@ -155,14 +160,21 @@ def transform_seed_dataset(
 
     for subject in subjects:
         subject_data = dataset[dataset["subject"] == subject]
+        subject_data.sort_values(by="dfq", ascending=False, inplace=True)
+
         if icl_examples > 0:
             icl_dataset = load_dataset(icl_dataset_name, subject)["validation"]
 
-        contexts = []
+        subject_contexts = []
         num_contexts_per_doc = [0]
-        for i, text in enumerate(
-            tqdm.tqdm(subject_data["text"], desc=f"Processing {subject}...")
+
+        for i in tqdm.tqdm(
+            range(len(subject_data)),
+            desc=f"Processing {subject}..."
         ):
+            document = subject_data.iloc[i]
+            text = document["text"]
+
             sentences = text.split(".")
             sentences = [
                 sentence.strip().replace("\n", " ").replace("  ", " ")
@@ -171,30 +183,31 @@ def transform_seed_dataset(
             ]
 
             # new document
-            append = False
+            document_contexts = []
             for sentence in sentences:
                 sentence = sentence + "."
-                if not append:
-                    contexts.append(sentence)
-                    append = True
+                if not document_contexts:
+                    document_contexts.append(sentence)
                 else:
                     if (
-                        len(contexts[-1].split()) + len(sentence.split())
+                        len(document_contexts[-1].split()) + len(sentence.split())
                         < max_context_length
                     ):
-                        contexts[-1] += " " + sentence
+                        document_contexts[-1] += " " + sentence
                     else:
-                        contexts.append(sentence)
-            num_contexts_per_doc.append(len(contexts))
+                        document_contexts.append(sentence)
+
+            num_contexts_per_doc.append(len(document_contexts))
+            subject_contexts.extend(document_contexts * (int(document["dfq"]) if dfq_weighting else 1))
 
             if i > len(subject_data["text"]) * float(subset):
                 print("Breaking early due to subset settings.")
                 break
+            
+            if i > max_documents_per_subject:
+                print("Breaking early due to max_documents_per_subject settings.")
+                break
 
-        num_contexts_per_doc = [
-            num_contexts_per_doc[i] - num_contexts_per_doc[i - 1]
-            for i in range(1, len(num_contexts_per_doc))
-        ]
         print(
             "Contexts per document (Avg/Min/Max):",
             np.mean(num_contexts_per_doc),
@@ -202,7 +215,7 @@ def transform_seed_dataset(
             np.max(num_contexts_per_doc),
         )
 
-        for context in contexts:
+        for context in subject_contexts:
             converted_dataset.append(
                 {
                     "context": context,
