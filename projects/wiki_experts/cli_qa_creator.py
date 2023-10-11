@@ -28,6 +28,9 @@ from mttl.models.openai import GPT
 from mttl.utils import setup_logging
 
 
+INVALID_RESPONSE = object()
+
+
 def count_repeating_sentences(text):
     sentences = re.split(r"[.!?]", text)
     sentences = [s.strip() for s in sentences if len(s.strip()) > 0]
@@ -38,9 +41,8 @@ def count_repeating_sentences(text):
 class InstructionsGenerator(ABC):
     @dataclass
     class Response:
-        outputs: List[str] = field(default_factory=list)
         contexts: List[str] = field(default_factory=list)
-        responses: List[str] = field(default_factory=list)
+        outputs: List[str] = field(default_factory=list)
         cumulative_logprobs: List[float] = field(default_factory=list)
         finish_reason: List[str] = field(default_factory=list)
 
@@ -54,6 +56,10 @@ class InstructionsGenerator(ABC):
     def generate_reverse_prompt_for_instruction(
         self, output, context, icl_examples=None
     ):
+        """
+        We provide the context as output (response) if and only if a response is not
+        present. Otherwise, we provide the context as context in addition to the previously generated response.
+        """
         return self.inverse_template.apply(
             output if output is not None else context,
             context if output is not None else None,
@@ -73,16 +79,28 @@ class InversePlatypusLLM(InstructionsGenerator, LLM):
 
     def generate(self, templated_contexts, sampling_params, **kwargs):
         results = InstructionsGenerator.Response()
-        responses = LLM.generate(self, templated_contexts, sampling_params, **kwargs)
 
-        for response in responses:
-            if len(response.outputs[0].token_ids) > 0:
+        for request_id, context in enumerate(templated_contexts):
+            self.llm_engine.add_request(str(request_id), context, sampling_params)
+        responses = self._run_engine(use_tqdm=True)
+
+        responses_dict = {r.request_id: r for r in responses}
+        for request_id, context in enumerate(templated_contexts):
+            if (
+                str(request_id) in responses_dict
+                and len(responses_dict[str(request_id)].outputs[0].token_ids) > 0
+            ):
+                response = responses_dict[str(request_id)]
                 results.outputs.append(response.outputs[0].text)
                 results.cumulative_logprobs.append(
                     response.outputs[0].cumulative_logprob
                     / (len(response.outputs[0].token_ids) + 1e-10)
                 )
                 results.finish_reason.append(response.outputs[0].finish_reason)
+            else:
+                results.outputs.append(INVALID_RESPONSE)
+                results.cumulative_logprobs.append(np.inf)
+                results.finish_reason.append("invalid")
         return results
 
 
@@ -126,7 +144,12 @@ def reject_output(output, finish_reason):
     # common error here is that instruxtions starts with BEGININPUT + some nonsense, let evoid it
     # usually, if the instruction is too long, its a bad one
     # or if it stopped due to max tokens
-    return "BEGININPUT" in output or not output.strip() or finish_reason != "stop"
+    return (
+        output is INVALID_RESPONSE
+        or "BEGININPUT" in output
+        or not output.strip()
+        or finish_reason != "stop"
+    )
 
 
 def free_memory():
@@ -222,6 +245,7 @@ def transform_seed_dataset(
         for context in subject_contexts:
             converted_dataset.append(
                 {
+                    "id": str(len(converted_dataset)),
                     "context": context["text"],
                     "docno": str(context["docno"]),
                     "subject": subject,
@@ -270,10 +294,12 @@ def generate_instructions_(
     )
 
     def get_templated_context(entry):
-        return llm.generate_reverse_prompt_for_instruction(
-            context=entry["context"],
-            output=entry["response"] if "response" in entry else None,
-            icl_examples=entry["icl_examples"],
+        return (
+            llm.generate_reverse_prompt_for_instruction(
+                context=entry["context"],
+                output=entry["response"] if "response" in entry else None,
+                icl_examples=entry["icl_examples"],
+            )
         )
 
     templated_contexts = [get_templated_context(entry) for entry in dataset]
@@ -283,28 +309,24 @@ def generate_instructions_(
         print(context)
         print()
 
-    # do the heavy lifting
-    outputs = llm.generate(templated_contexts, sampling_params, use_tqdm=True)
-    responses = outputs.responses if len(outputs.responses) > 0 else None
-    finish_reasons = outputs.finish_reason
-    outputs = outputs.outputs
+    result = llm.generate(templated_contexts, sampling_params)
+    assert len(result.outputs) == len(templated_contexts)
 
     new_dataset = []
-    for i, (entry, output, finish_reason) in enumerate(
-        zip(dataset, outputs, finish_reasons)
-    ):
-        if reject_output(output, finish_reason):
+    for (entry, instruction, finish_reason) in zip(dataset, result.outputs, result.finish_reason):
+        if reject_output(instruction, finish_reason):
             continue
 
         copied_entry = copy.deepcopy(entry)
         copied_entry.update(
             {
-                "instruction": output,
-                "response": responses[i] if responses else None,
+                "instruction": instruction,
                 "author_instr": str(llm.model_name),
             }
         )
         new_dataset.append(copied_entry)
+
+    print("Created a new instruction dataset of size:", len(new_dataset))
     return new_dataset
 
 
@@ -328,33 +350,34 @@ def generate_answers_(
             )
         )
 
-    outputs = llm.generate(requests, sampling_params)
-    normalized_cumulative_logprobs = outputs.cumulative_logprobs
-    finish_reasons = outputs.finish_reason
-    outputs = outputs.outputs
+    result = llm.generate(requests, sampling_params)
+    assert len(result.outputs) == len(requests)
 
     new_dataset = []
-    for output, entry, log_p, reason in zip(
-        outputs, dataset, normalized_cumulative_logprobs, finish_reasons
+    for entry, response, log_p, reason in zip(
+        dataset, result.outputs, result.cumulative_logprobs, result.finish_reason
     ):
         import copy
 
-        if reject_output(output, reason):
+        if reject_output(response, reason):
             continue
+
         # lets also avoid outputs that contains repetitions of the same sentence more than once
-        n_rep = count_repeating_sentences(output)
+        n_rep = count_repeating_sentences(response)
         if n_rep > 0:
             continue
 
         entry = copy.deepcopy(entry)
         entry.update(
             {
-                "response": output,
+                "response": response,
                 "author_response": str(llm.model_name),
                 "normalized_cumul_logprob_response": log_p,
             }
         )
         new_dataset.append(entry)
+
+    print("Created a new answer dataset of size:", len(new_dataset))
     return new_dataset
 
 
