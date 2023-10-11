@@ -1,3 +1,4 @@
+import time
 import torch
 import sys
 import tqdm
@@ -131,6 +132,7 @@ def free_memory():
     torch.cuda.empty_cache()
     destroy_model_parallel()
     os.system("ray stop --force")
+    time.sleep(3)
 
 
 def transform_seed_dataset(
