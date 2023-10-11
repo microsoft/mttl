@@ -569,8 +569,8 @@ def e2e(
         )
     if upload_to_hub:
         assert (
-            os.environ.get("HUGGING_FACE_HUB_TOKEN_WRITE") is not None
-        ), "Please set HUGGING_FACE_HUB_TOKEN_WRITE env variable."
+            os.environ.get("HF_TOKEN") is not None
+        ), "Please set HF_TOKEN env variable."
 
     # start dataset
     prev_dataset = transform_seed_dataset(
