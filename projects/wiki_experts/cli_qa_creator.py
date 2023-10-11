@@ -40,7 +40,7 @@ class ModelSetting:
 @dataclass
 class Setting:
     model_setting_name: str
-    pagesize: int
+    max_context_length: int
     subset: float
     icl_examples: int
     max_documents_per_subject: int
@@ -48,7 +48,7 @@ class Setting:
     seed_dataset: str
     subjects: str
 
-    def get_ds_name(self, iter_signature):
+    def get_ds_name(self, iter_signature=""):
         return f"{self.model_setting_name}_icl{self.icl_examples}_subset{self.subset}_maxD{self.max_documents_per_subject}_{iter_signature}.jsonl"
 
 
@@ -599,7 +599,7 @@ def e2e(
     )
     setting = Setting(
         model_setting_name=model_setting,
-        pagesize=pagesize,
+        max_context_length=pagesize,
         subset=subset,
         icl_examples=n_icl,
         max_documents_per_subject=max_documents_per_subject,
