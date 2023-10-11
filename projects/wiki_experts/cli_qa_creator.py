@@ -144,7 +144,7 @@ def transform_seed_dataset(
     icl_use_out_options=True,
     icl_examples=0,
     max_context_length=512,
-    max_documents_per_subject=500,
+    max_documents_per_subject=10,
     dfq_weighting=True,
     subset=1,
 ):
@@ -168,10 +168,7 @@ def transform_seed_dataset(
         subject_contexts = []
         num_contexts_per_doc = [0]
 
-        for i in tqdm.tqdm(
-            range(len(subject_data)),
-            desc=f"Processing {subject}..."
-        ):
+        for i in tqdm.tqdm(range(len(subject_data)), desc=f"Processing {subject}..."):
             document = subject_data.iloc[i]
             text = document["text"]
 
@@ -198,12 +195,19 @@ def transform_seed_dataset(
                         document_contexts.append(sentence)
 
             num_contexts_per_doc.append(len(document_contexts))
-            subject_contexts.extend(document_contexts * (int(document["dfq"]) if dfq_weighting else 1))
+            subject_contexts.extend(
+                {
+                    "text": context,
+                    "docno": str(document["docno"]),
+                }
+                for context in document_contexts
+                * (int(document["dfq"]) if dfq_weighting else 1)
+            )
 
             if i > len(subject_data["text"]) * float(subset):
                 print("Breaking early due to subset settings.")
                 break
-            
+
             if i > max_documents_per_subject:
                 print("Breaking early due to max_documents_per_subject settings.")
                 break
@@ -218,7 +222,8 @@ def transform_seed_dataset(
         for context in subject_contexts:
             converted_dataset.append(
                 {
-                    "context": context,
+                    "context": context["text"],
+                    "docno": str(context["docno"]),
                     "subject": subject,
                     "icl_examples": sample_icl_examples(
                         icl_dataset, icl_examples, use_options=icl_use_out_options
