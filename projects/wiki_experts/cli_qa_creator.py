@@ -143,10 +143,35 @@ class InversePlatypusLLM(InstructionsGenerator, LLM):
 
 
 class OpenAI(InstructionsGenerator):
-    def __init__(self, model_name="text-davinci-003"):
+    def __init__(self, model_name="text-davinci-003", api_type="openai", use_platy_templates=False):
         self._model_name = model_name
-        self.operator = GPT.create_lm(model_name=self.model_name)
+        self.operator = GPT.create_lm(model_name=self.model_name, api_type=api_type)
+        self.inverse_template = InversePlatypusTemplate() if use_platy_templates else OpenAI.OAITemplate()
+        self.template = PlatypusTemplate()
+            
 
+    class OAITemplate:
+        @classmethod        
+        def apply(cls, output, input=None, icl_examples=None):
+            task_description = f"You are a helpful assistant.\
+                \nYour task is to generate instructions for a given domain context and examples of good instrucitons"
+            if icl_examples is not None:
+                task_description += "\nFirst, you are given examples of good instructions. Your geneated instructions should imitate the style, tone and length of these examples."
+            task_description += "\nYou are given some domain context. Your instructions should be appropriate for this context, the reply to the instructions should be contained in the domain context."
+            
+            if icl_examples is not None:
+                icl_prompt = f"\n\n Here are some examples of good instructions that you should imitate:\n"
+                for icl_example in icl_examples:
+                    icl_prompt += f"\n### Instruction:\n{icl_example}"
+                icl_prompt += "\n\n"
+            
+            task_description+="\n\nHere is the domain context:"
+            task_description+=f"\n\m{output}"           
+            
+            task_description += f"Write an instruction that is appropriate for this context. \n\n### Instruction:\n"
+
+            return task_description
+    
     @property
     def model_name(self):
         return self._model_name
@@ -161,7 +186,7 @@ class OpenAI(InstructionsGenerator):
             outputs += self.operator.generate(
                 batch, max_tokens=sampling_params.max_tokens
             )
-            pbar.update(len(batch))
+            pbar.update(1)
         return results
 
 
@@ -537,8 +562,8 @@ def generate_instructions(
             os.environ.get("AMLT_OUTPUT_DIR"), output_filename
         )
 
-    if model_path in ["gpt-35-turbo", "gpt-4"]:
-        llm = OpenAI(model_path)
+    if model_path in GPT.AVAILABLE_MODELS:
+        llm = OpenAI(model_path, api_type="azure")
     else:
         model_path = save_merged_model(model_path, hf_path=tmp_path)
         llm = load_vllm_model(model_path)
@@ -623,7 +648,7 @@ def e2e(
     llm = None
     for i in range(num_iterations):
         if model_path in ["gpt-35-turbo", "gpt-4"] and i == 0:
-            llm = OpenAI(model_path)
+            llm = OpenAI(model_path, api_type="azure")
         else:
             if i == 0:
                 inverse_model_path = save_merged_model(
@@ -664,7 +689,7 @@ def e2e(
 
     if upload_to_hub:
         print("Uploading the final dataset to HuggingFace Hub...")
-        upload_to_hf_(answ_filename, setting)
+        upload_to_hf_(answ_filename, setting=setting)
 
 
 @cli.command("upload")
