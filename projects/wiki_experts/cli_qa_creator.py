@@ -603,6 +603,7 @@ def e2e(
         max_context_length=pagesize,
         subset=subset,
         icl_examples=n_icl,
+        icl_dataset_name="lukaemon/mmlu",
         max_documents_per_subject=max_documents_per_subject,
         icl_use_out_options=icl_use_out_options,
         seed_dataset=seed_dataset,
