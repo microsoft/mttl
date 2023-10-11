@@ -130,10 +130,12 @@ def reject_output(output, finish_reason):
 
 
 def free_memory():
+    from ray import shutdown
+
     gc.collect()
     torch.cuda.empty_cache()
     destroy_model_parallel()
-    os.system("ray stop --force")
+    shutdown()
     time.sleep(3)
 
 
@@ -144,8 +146,7 @@ def transform_seed_dataset(
     icl_use_out_options=True,
     icl_examples=0,
     max_context_length=512,
-    max_documents_per_subject=10,
-    dfq_weighting=True,
+    max_documents_per_subject=1e6,
     subset=1,
 ):
     """
@@ -201,7 +202,6 @@ def transform_seed_dataset(
                     "docno": str(document["docno"]),
                 }
                 for context in document_contexts
-                * (int(document["dfq"]) if dfq_weighting else 1)
             )
 
             if i > len(subject_data["text"]) * float(subset):
@@ -520,7 +520,8 @@ def generate_instructions(
 @click.option("--tmp_path", type=str, required=False, default="/tmp/merged")
 @click.option("--sub_names", type=str, required=False, default="SUB_10")
 @click.option("--num_iterations", type=int, required=False, default=1)
-def generate_instructions(
+@click.option("--max_documents_per_subject", type=int, required=False, default=1e6)
+def e2e(
     seed_dataset,
     model_path,
     inverse_model_path,
@@ -531,6 +532,7 @@ def generate_instructions(
     tmp_path,
     sub_names,
     num_iterations,
+    max_documents_per_subject,
 ):
     if os.environ.get("AMLT_OUTPUT_DIR") is not None:
         output_filename = os.path.join(
@@ -544,6 +546,7 @@ def generate_instructions(
         icl_examples=n_icl,
         icl_use_out_options=icl_use_out_options,
         subset=subset,
+        max_documents_per_subject=max_documents_per_subject,
     )
 
     llm = None
