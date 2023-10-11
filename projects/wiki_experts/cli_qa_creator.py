@@ -611,7 +611,7 @@ def upload_to_hf_(dataset_path, hf_destination=None):
     from datasets import DatasetDict
     import huggingface_hub
 
-    hf_token = os.environ.get("HUGGING_FACE_HUB_TOKEN_WRITE")
+    hf_token = os.environ.get("HF_TOKEN")
     huggingface_hub.login(token=hf_token)
 
     if hf_destination is None:
