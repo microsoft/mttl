@@ -25,7 +25,7 @@ from mttl.dataloader.platypus_dataset_reader import (
 )
 from mttl.models.adapters import LoRA
 from mttl.models.openai import GPT
-from mttl.utils import setup_logging
+from mttl.utils import setup_logging, retry_with_exponential_backoff
 
 
 INVALID_RESPONSE = object()
@@ -691,14 +691,17 @@ def upload_to_hf_(dataset_path, hf_destination=None, setting: Setting = None):
         with open("/tmp/readme.txt", "w") as f:
             for k, v in setting_dict.items():
                 f.write(f"## {k}: {v}\n")
-
-        api.upload_file(
-            path_or_fileobj="/tmp/readme.txt",
-            path_in_repo="README.md",
-            repo_id=hf_destination,
-            repo_type="dataset",
-            token=hf_token,
-        )
+                
+        @retry_with_exponential_backoff(errors=huggingface_hub.utils._errors.HfHubHTTPError)
+        def upload():
+            api.upload_file(
+                path_or_fileobj="/tmp/readme.txt",
+                path_in_repo="README.md",
+                repo_id=hf_destination,
+                repo_type="dataset",
+                token=hf_token,
+            )
+        upload()
         os.remove("/tmp/readme.txt")
 
 
