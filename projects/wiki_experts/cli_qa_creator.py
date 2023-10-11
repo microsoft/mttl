@@ -633,9 +633,9 @@ def e2e(
             llm = load_vllm_model(inverse_model_path)
 
         inst_filename = os.path.join(
-            output_path, setting.get_ds_name("inst_%d.jsonl" % i)
+            output_path, setting.get_ds_name("inst_%d" % i)
         )
-        answ_filename = os.path.join(output_path, setting.get_ds_name("%d.jsonl" % i))
+        answ_filename = os.path.join(output_path, setting.get_ds_name("%d" % i))
 
         if not os.path.exists(inst_filename):
             instruction_dataset = generate_instructions_(
