@@ -36,6 +36,9 @@ class ModelSetting:
     inverse_model_path: str
     model_path: str
 
+    @property
+    def model_paths(self):
+        return self.inverse_model_path, self.model_path
 
 @dataclass
 class Setting:
@@ -593,11 +596,7 @@ def e2e(
     upload_to_hub=False,
     pagesize: int = 512,
 ):
-    model_seting = MODEL_SETTINGS[model_setting]
-    inverse_model_path, model_path = (
-        model_seting.inverse_model_path,
-        model_seting.model_path,
-    )
+    inverse_model_path, model_path = MODEL_SETTINGS[model_setting].model_paths
     setting = Setting(
         model_setting_name=model_setting,
         max_context_length=pagesize,
