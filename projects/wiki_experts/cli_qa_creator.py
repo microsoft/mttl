@@ -610,7 +610,7 @@ def upload_to_hf_(dataset_path, hf_destination=None):
     huggingface_hub.login(token=os.environ.get("HUGGING_FACE_HUB_TOKEN_WRITE"))
     
     if hf_destination is None:
-        dts_name = dataset_path.split("/")[-1].replace(".json", "")
+        dts_name = dataset_path.split("/")[-1].replace(".jsonl", "")
         hf_user = huggingface_hub.whoami()["name"]
         hf_destination = f"{hf_user}/{dts_name}"
     
