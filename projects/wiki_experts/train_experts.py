@@ -14,8 +14,8 @@ from mttl.datamodule.retrieval_lm_module import RetrievalLMDataModule
 from mttl.datamodule.platypus_module import PlatypusModule, PlatypusConfig, PlatypusQAModule
 from mttl.utils import get_mlf_logger, setup_logging, logger
 
-from projects.wiki_experts.expert_trainer import ExpertTrainer
-from projects.wiki_experts.config import ExpertConfig
+from projects.wiki_experts.src.expert_trainer import ExpertTrainer
+from projects.wiki_experts.src.config import ExpertConfig
 
 
 def run_multitask(args):
@@ -150,7 +150,7 @@ def run_multitask(args):
     )
 
     if args.hf_repo_id and checkpoint:
-        from expert_model import push_expert_to_hub
+        from projects.wiki_experts.src.expert_model import push_expert_to_hub
 
         push_expert_to_hub(checkpoint, args.hf_repo_id, auto_search=False)
 
