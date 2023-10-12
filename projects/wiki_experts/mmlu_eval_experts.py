@@ -108,6 +108,7 @@ def run_eval(args):
     mmlu = MMLUEvaluator(
         args,
         data_dir=os.environ["MMLU_DATA_DIR"],
+        split=args.mmlu_test_split,
     )
     module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
 
@@ -115,6 +116,8 @@ def run_eval(args):
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:
             module.load_expert(**expert_kwargs)
+    elif args.module_graph is not None:
+        module.load_from_graph_string(args.module_graph)
 
     module.to("cuda")
     scores = mmlu.evaluate(module, subsample)
