@@ -149,25 +149,89 @@ class InversePlatypusLLM(InstructionsGenerator, LLM):
 
 
 class OpenAI(InstructionsGenerator):
-    def __init__(self, model_name="text-davinci-003"):
+    def __init__(
+        self,
+        model_name="text-davinci-003",
+        api_type="openai",
+        use_platy_templates=False,
+        provide_response=True,
+    ):
         self._model_name = model_name
-        self.operator = GPT.create_lm(model_name=self.model_name)
+        self.provide_response = provide_response
+        self.operator = GPT.create_lm(model_name=self.model_name, api_type=api_type)
+        self.inverse_template = (
+            InversePlatypusTemplate()
+            if use_platy_templates
+            else OpenAI.OAITemplate(provide_response)
+        )
+        self.template = PlatypusTemplate()
+
+    class OAITemplate:
+        def __init__(self, provide_response) -> None:
+            self.provide_response = provide_response
+
+        def apply(self, output, input=None, icl_examples=None):
+            task_description = (
+                "\nYour task is to generate clear, comprehensive, and precise instructions."
+            )
+            if icl_examples is not None:
+                task_description += f"\n\n Here are examples of good instructions that you should imitate:\n"
+                for icl_example in icl_examples:
+                    task_description += f"\n### Instruction:\n{icl_example}"
+                task_description += "\n\n"
+
+            task_description += "\n\nDomain context:"
+            task_description += f"\n\n{output}"
+            
+            task_description += (
+                "\nWrite an instruction suitable for the given context. "
+                "Ensure it's complete, precise, and stands alone, without relying on provided context."
+            )
+            
+            if icl_examples is not None:
+                task_description +=  " Strive to match the style, tone, and length of the previous examples."
+            if self.provide_response:
+                task_description += "\nRemember to also provide a consise response to the generated instruction.\
+                    Format your ourput as follows: ### Instrution: <your instruction> ### Response: <your response>."
+            # task_description += "\n\nYour response:\n"
+
+            return task_description
 
     @property
     def model_name(self):
         return self._model_name
 
+    def split_insruction_output(self, outputs):
+        responses = []
+        for e in outputs:
+            try:
+                if "Response:" in e:
+                    response = e.split("Response:")[1].strip()
+                else:
+                    responses.append((INVALID_RESPONSE,INVALID_RESPONSE))
+                    continue
+                instruction =e.split("Response:")[0]
+                if "Instruction:" in instruction:
+                    instruction = instruction.split("Instruction:")[1].strip()
+                responses.append((instruction.replace("#", ""), response.replace("#", "")))
+            except:
+                responses.append((INVALID_RESPONSE,INVALID_RESPONSE))
+        return responses
+
     def generate(self, templated_contexts, sampling_params, **kwargs):
-        outputs = []
         results = InstructionsGenerator.Response()
 
         pbar = tqdm.tqdm(range(len(templated_contexts) // 20))
         for context in range(0, len(templated_contexts), 20):
             batch = templated_contexts[context : context + 20]
-            outputs += self.operator.generate(
+            output = self.operator.generate(
                 batch, max_tokens=sampling_params.max_tokens
             )
-            pbar.update(len(batch))
+            if self.provide_response:
+                output = self.split_insruction_output(output)
+            results.outputs += output
+            results.finish_reason+=["stop"]*len(output)
+            pbar.update(1)
         return results
 
 
@@ -185,6 +249,8 @@ def sample_icl_examples(dataset, n_icl, use_options=True):
 
 
 def reject_output(output, finish_reason):
+    if isinstance(output, tuple):
+        output = output[0]
     # common error here is that instruxtions starts with BEGININPUT + some nonsense, let evoid it
     # usually, if the instruction is too long, its a bad one
     # or if it stopped due to max tokens
@@ -359,7 +425,7 @@ def generate_instructions_(
         print()
 
     result = llm.generate(templated_contexts, sampling_params)
-    assert len(result.outputs) == len(templated_contexts)
+    assert len(result.outputs) == len(templated_contexts) == len(result.finish_reason)
 
     new_dataset = []
     for entry, instruction, finish_reason in zip(
@@ -371,10 +437,18 @@ def generate_instructions_(
         copied_entry = copy.deepcopy(entry)
         copied_entry.update(
             {
-                "instruction": instruction,
+                "instruction": instruction
+                if isinstance(instruction, str)
+                else instruction[0],
                 "author_instr": str(llm.model_name),
             }
         )
+        if isinstance(instruction, tuple):
+            copied_entry.update(
+                {
+                    "response": instruction[1],
+                }
+            )
         new_dataset.append(copied_entry)
 
     print("Created a new instruction dataset of size:", len(new_dataset))
@@ -527,6 +601,7 @@ def generate_instructions(mttl_checkpoint, output_path):
 )
 @click.option("--tmp_path", type=str, required=False, default="/tmp/merged")
 @click.option("--sub_names", type=str, required=False, default="SUB_10")
+@click.option("--max_documents_per_subject", type=int, required=False, default=1e6)
 def generate_instructions(
     seed_dataset,
     model_path,
@@ -535,14 +610,15 @@ def generate_instructions(
     icl_use_out_options,
     tmp_path,
     sub_names,
+    max_documents_per_subject,
 ):
     if os.environ.get("AMLT_OUTPUT_DIR") is not None:
         output_filename = os.path.join(
             os.environ.get("AMLT_OUTPUT_DIR"), output_filename
         )
 
-    if model_path in ["gpt-35-turbo", "gpt-4"]:
-        llm = OpenAI(model_path)
+    if model_path in GPT.AVAILABLE_MODELS:
+        llm = OpenAI(model_path, api_type="azure")
     else:
         model_path = save_merged_model(model_path, hf_path=tmp_path)
         llm = load_vllm_model(model_path)
@@ -552,6 +628,7 @@ def generate_instructions(
         subjects=sub_names,
         icl_examples=n_icl,
         icl_use_out_options=icl_use_out_options,
+        max_documents_per_subject=max_documents_per_subject,
     )
     instruction_dataset = generate_instructions_(
         llm,
@@ -623,7 +700,7 @@ def e2e(
     llm = None
     for i in range(num_iterations):
         if model_path in ["gpt-35-turbo", "gpt-4"] and i == 0:
-            llm = OpenAI(model_path)
+            llm = OpenAI(model_path, api_type="azure")
         else:
             if i == 0:
                 inverse_model_path = save_merged_model(

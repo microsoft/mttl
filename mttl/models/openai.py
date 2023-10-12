@@ -48,7 +48,7 @@ class GPT:
         "any",
     ]
 
-    def __init__(self, model_name="text-davinci-003", **generation_options):
+    def __init__(self, model_name="text-davinci-003", api_type="openai", **generation_options):
         if model_name not in self.AVAILABLE_MODELS:
             raise ValueError(
                 f"model_name should be one of: {','.join(self.AVAILABLE_MODELS)}"
@@ -67,7 +67,14 @@ class GPT:
             self.encoder = tiktoken.encoding_for_model("text-davinci-003")
         else:
             self.encoder = tiktoken.encoding_for_model(self.engine)
+            
         openai.api_version = os.environ.get("OPENAI_API_VERSION")
+        if api_type == "azure":
+            openai.api_type = "azure"            
+            openai.api_key = os.getenv("AZURE_OPENAI_KEY")
+            openai.api_base = os.getenv("AZURE_OPENAI_ENDPOINT") # your endpoint should look like the following https://YOUR_RESOURCE_NAME.openai.azure.com/
+            openai.api_version = os.getenv("AZURE_API_VERSION")
+            self.engine = self.engine.replace(".","")
 
     def encode(self, string):
         return self.encoder.encode(string)
@@ -275,7 +282,7 @@ class GPT:
         generation_options = self.generation_options.copy()
         generation_options.update(**kwargs)
 
-        if self.engine in ("gpt-3.5-turbo", "gpt-4", "gpt-4-32k", "gpt-4-0613", "any"):
+        if self.engine in ("gpt-3.5-turbo","gpt-35-turbo", "gpt-4", "gpt-4-32k", "gpt-4-0613", "any"):
             if "return_logprobs" in generation_options:
                 del generation_options["return_logprobs"]
 
