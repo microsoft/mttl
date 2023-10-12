@@ -1,5 +1,5 @@
 import torch
-from datasets import load_dataset
+from datasets import load_dataset, concatenate_datasets, get_dataset_config_names
 
 from mttl.dataloader.data_utils import ExampleInfo
 from mttl.utils import hash_example, logger
@@ -7,8 +7,8 @@ from mttl.utils import hash_example, logger
 
 class PlatypusTemplate:
     @classmethod
-    def apply(self, instruction, input):
-        if len(input) > 0:
+    def apply(self, instruction, input=None):
+        if input is not None and len(input) > 0:
             prompt = f"Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.\n\n### Instruction:\n{instruction}\n\n### Input:\n{input}\n\n### Response:\n"
         else:
             prompt = f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n### Instruction:\n{instruction}\n\n### Response:\n"
@@ -82,16 +82,15 @@ class PlatypusQADataset(torch.utils.data.dataset.Dataset):
     ):
         super().__init__()
 
-        self.dataset = load_dataset(dataset_name)["train"]
-
-        task_names = set(list(self.dataset["subject"]))
         if filter_by_subject is not None:
-            task_subset = sorted(filter_by_subject.split(","))
-            if any(task not in task_names for task in task_subset):
-                raise ValueError("Unknown subject name.")
+            task_names = sorted(filter_by_subject.split(","))
+        else:
+            task_names = get_dataset_config_names(dataset_name)
 
-            task_names = task_subset
-            self.dataset = self.dataset.filter(lambda x: x["subject"] in task_names)
+        datasets_ = []
+        for task_name in task_names:
+            datasets_.append(load_dataset(dataset_name, split=task_name))
+        self.dataset = concatenate_datasets(datasets_)
         logger.info(self[0])
 
     def __len__(self):
@@ -101,7 +100,7 @@ class PlatypusQADataset(torch.utils.data.dataset.Dataset):
         entry = self.dataset[key]
 
         source = PlatypusTemplate.apply(entry["instruction"], entry.get("input"))
-        labels = entry["output"]
+        labels = entry["response"] if "response" in entry else entry["output"]
         hash = hash_example(source)
         instruction_hash = hash_example(entry["instruction"])
 

@@ -16,7 +16,9 @@ from abc import ABC, abstractmethod
 from vllm import LLM, SamplingParams
 from vllm.model_executor.parallel_utils.parallel_state import destroy_model_parallel
 
+
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
+
 
 import mmlu_subject_configs  # noqa
 from mttl.dataloader.platypus_dataset_reader import (
@@ -271,11 +273,17 @@ def transform_seed_dataset(
             )
 
             if len(subject_contexts) > max_contexts_per_subject:
-                print("Breaking early due to max_contexts_per_subject settings. ", len(subject_contexts))
+                print(
+                    "Breaking early due to max_contexts_per_subject settings. ",
+                    len(subject_contexts),
+                )
                 break
 
             if i > max_documents_per_subject:
-                print("Breaking early due to max_documents_per_subject settings. ", len(subject_contexts))
+                print(
+                    "Breaking early due to max_documents_per_subject settings. ",
+                    len(subject_contexts),
+                )
                 break
 
         print(
@@ -584,7 +592,7 @@ def e2e(
     num_iterations,
     max_documents_per_subject,
     max_contexts_per_subject,
-    upload_to_hub = False,
+    upload_to_hub=False,
     pagesize: int = 512,
 ):
     if max_contexts_per_subject == -1:
@@ -624,9 +632,7 @@ def e2e(
             del llm
             llm = load_vllm_model(inverse_model_path)
 
-        inst_filename = os.path.join(
-            output_path, setting.get_ds_name("inst_%d" % i)
-        )
+        inst_filename = os.path.join(output_path, setting.get_ds_name("inst_%d" % i))
         answ_filename = os.path.join(output_path, setting.get_ds_name("%d" % i))
 
         if not os.path.exists(inst_filename):
@@ -698,8 +704,10 @@ def upload_to_hf_(dataset_path, hf_destination=None, setting: Setting = None):
         with open("/tmp/readme.txt", "w") as f:
             for k, v in setting_dict.items():
                 f.write(f"## {k}: {v}\n")
-                
-        @retry_with_exponential_backoff(errors=huggingface_hub.utils._errors.HfHubHTTPError)
+
+        @retry_with_exponential_backoff(
+            errors=huggingface_hub.utils._errors.HfHubHTTPError
+        )
         def upload():
             api.upload_file(
                 path_or_fileobj="/tmp/readme.txt",
@@ -708,6 +716,7 @@ def upload_to_hf_(dataset_path, hf_destination=None, setting: Setting = None):
                 repo_type="dataset",
                 token=hf_token,
             )
+
         upload()
         os.remove("/tmp/readme.txt")
 
