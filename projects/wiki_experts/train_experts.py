@@ -32,7 +32,8 @@ def run_multitask(args):
     # select dataloader
     model_class = ExpertTrainer
 
-    if "qa" in args.dataset or "sub-10" in args.dataset:
+    if args.dataset.startswith("qa-"):
+        args.dataset = args.dataset.replace("qa-", "")
         config = PlatypusConfig(
             model=args.model,
             padding_side=args.padding_side,
