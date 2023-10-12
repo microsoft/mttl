@@ -54,6 +54,10 @@ class Setting:
     subjects: str
 
     def get_ds_name(self, iter_signature=""):
+        if self.max_contexts_per_subject >= 1e6:
+            self.max_contexts_per_subject = -1
+        if self.max_documents_per_subject >= 1e6:
+            self.max_documents_per_subject = -1
         return f"{self.model_setting_name}_icl{self.icl_examples}_maxD{self.max_documents_per_subject}_maxC{self.max_contexts_per_subject}_{iter_signature}.jsonl"
 
 
@@ -583,6 +587,9 @@ def e2e(
     upload_to_hub = False,
     pagesize: int = 512,
 ):
+    if max_contexts_per_subject == -1:
+        max_contexts_per_subject = np.inf
+
     inverse_model_path, model_path = MODEL_SETTINGS[model_setting].model_paths
     setting = Setting(
         model_setting_name=model_setting,
