@@ -14,7 +14,9 @@ class ExpertConfig(Config):
 
         self.expert_name = None
         self.routing = "subject"
+        self.mmlu_test_split = "test"
         self.load_module = None
+        self.module_graph = None
         self.micro_batch_size = None
         self.validation_portion = 0.03
 

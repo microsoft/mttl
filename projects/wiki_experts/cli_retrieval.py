@@ -212,7 +212,15 @@ def e2e(dataset, path, mmlu_split, hub_name):
     if not os.path.exists(path):
         make_index(dataset, path)
 
-    do_retrieval(path, mmlu_split, "/tmp/docs.json")
+    if not os.path.exists("/tmp/docs.json"):
+        do_retrieval(path, mmlu_split, "/tmp/docs.json")
+    else:
+        print("Trying to use cached retrieved documents !!!")
+
+        with open("/tmp/docs.json", "rt") as f:
+            documents_by_subject = json.load(f)
+            assert dataset == documents_by_subject["_index_infos"]["dataset_name"]
+
     do_create_dataset("/tmp/docs.json", max_tokens=-1, hub_name=hub_name)
 
 
