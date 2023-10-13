@@ -145,11 +145,11 @@ class OpenAI:
     ):
         results = Response()
 
-        pbar = tqdm.tqdm(range(len(templated_contexts) // 20))
+        pbar = tqdm.tqdm(range(len(templated_contexts)))
         for context in range(0, len(templated_contexts), 20):
             batch = templated_contexts[context : context + 20]
             output = self.operator.generate(batch, max_tokens=max_tokens)
             results.outputs += output
             results.finish_reason += ["stop"] * len(output)
-            pbar.update(1)
+            pbar.update(len(batch))
         return results

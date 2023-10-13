@@ -178,7 +178,7 @@ class FactsTransformModel(TransformModel):
             )
 
         outputs = llm.generate(templated_contexts, **kwargs)
-        for entry, output in zip(prev_dataset, outputs.output):
+        for entry, output in zip(prev_dataset, outputs.outputs):
             sentences = [s.lstrip("- ") for s in output.split('\n')]
             entry["facts"] = " ".join(sentences)
 
