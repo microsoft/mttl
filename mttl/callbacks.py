@@ -14,7 +14,7 @@ from mttl.utils import Averager, logger
 
 
 class MMLUCallback(cb.Callback):
-    def __init__(self, eval_every, every_val_epochs=1, **kwargs):
+    def __init__(self, eval_every, every_val_epochs=1, split="test", **kwargs):
         super().__init__()
 
         self.val_epoch = 0
@@ -22,6 +22,7 @@ class MMLUCallback(cb.Callback):
         self.every_val_epochs = every_val_epochs
         self.eval_kwargs = kwargs
         self.evaluator = None
+        self.split = split
 
     def on_train_batch_start(
         self, trainer, pl_module, batch: Any, batch_idx: int
@@ -29,8 +30,6 @@ class MMLUCallback(cb.Callback):
         if trainer.global_step == 0:
             metrics = self.eval_mmlu(pl_module)
             self.log_metrics(metrics, pl_module)
-            metrics_val = self.eval_mmlu(pl_module, eval_split=True)
-            self.log_metrics(metrics_val, pl_module, split="val")
 
         return super().on_train_batch_start(trainer, pl_module, batch, batch_idx)
 
@@ -45,31 +44,29 @@ class MMLUCallback(cb.Callback):
             self.val_epoch += 1
             metrics = self.eval_mmlu(pl_module)
             self.log_metrics(metrics, pl_module)
-            metrics_val = self.eval_mmlu(pl_module, eval_split=True)
-            self.log_metrics(metrics_val, pl_module, split="val")
 
         return super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
 
-    def log_metrics(self, metrics, pl_module: pl.LightningModule, split="test"):
+    def log_metrics(self, metrics, pl_module: pl.LightningModule):
         pl_module.log(
-            f"downstream_{split}/mmlu",
+            f"downstream_{self.split}/mmlu",
             metrics["all"]["mean"],
             on_step=True,
         )
         for t, v in metrics.items():
             pl_module.log(
-                f"downstream_{split}/mmlu_{t}",
+                f"downstream_{self.split}/mmlu_{t}",
                 v["mean"],
                 on_step=True,
             )
 
-    def eval_mmlu(self, pl_module, eval_split=False):
+    def eval_mmlu(self, pl_module):
         from mttl.evaluators import MMLUEvaluator
 
         if self.evaluator is None:
             self.evaluator = MMLUEvaluator(
                 pl_module.hparams,
-                split="test" if not eval_split else "val",
+                split=self.split,
                 **self.eval_kwargs,
             )
         metrics = self.evaluator.evaluate(pl_module)

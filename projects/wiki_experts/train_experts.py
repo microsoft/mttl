@@ -12,7 +12,11 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from mttl.callbacks import MMLUCallback
 from mttl.datamodule.oasst1_module import OA1Config, OA1Module
 from mttl.datamodule.retrieval_lm_module import RetrievalLMDataModule
-from mttl.datamodule.platypus_module import PlatypusModule, PlatypusConfig, PlatypusQAModule
+from mttl.datamodule.platypus_module import (
+    PlatypusModule,
+    PlatypusConfig,
+    PlatypusQAModule,
+)
 from mttl.utils import get_mlf_logger, setup_logging, logger
 
 from projects.wiki_experts.expert_trainer import ExpertTrainer
@@ -86,9 +90,7 @@ def run_multitask(args):
     # legit logging
     loggers = []
     if os.environ.get("WANDB_API_KEY") or args.wandb_project:
-        project = (
-            "wiki_experts" if args.wandb_project is None else args.wandb_project
-        )
+        project = "wiki_experts" if args.wandb_project is None else args.wandb_project
         args.exp_name = "dev_run" if args.exp_name is None else args.exp_name
         project = os.environ.get("WANDB_PROJECT", project)
         exp_name = os.environ.get("AMLT_JOB_NAME", args.exp_name)
@@ -112,7 +114,7 @@ def run_multitask(args):
 
     # get metric monitors for models
     callbacks = []
-    
+
     monitor = "downstream_val/mmlu"
     mode = "max"
 
@@ -138,8 +140,9 @@ def run_multitask(args):
     elif val_check_interval > args.total_steps and args.total_steps != -1:
         val_check_interval = args.total_steps
 
-    callbacks.append(MMLUCallback(eval_every=val_check_interval))
-    
+    callbacks.append(MMLUCallback(eval_every=val_check_interval, split="test"))
+    callbacks.append(MMLUCallback(eval_every=val_check_interval, split="val"))
+
     trainer = Trainer(
         devices=-1,
         accelerator="gpu",
