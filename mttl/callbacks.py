@@ -18,40 +18,34 @@ class MMLUCallback(cb.Callback):
         self.val_epoch = 0
         self.every_val_epochs = every_val_epochs
         self.eval_kwargs = kwargs
-    
+
     def on_train_start(self, trainer, pl_module) -> None:
         metrics = self.eval_mmlu(pl_module)
         # log directly with wandb at the start of training
         if wandb.run is not None:
             wandb.log(
                 {
-                    **{
-                        f"val_se/mmlu_{t}": v["mean"]
-                        for t, v in metrics.items()
-                    },
+                    **{f"val_se/mmlu_{t}": v["mean"] for t, v in metrics.items()},
                 },
                 step=trainer.global_step,
-                commit=True
-            )        
-        
+                commit=True,
+            )
+
         return super().on_train_start(trainer, pl_module)
-    
+
     def on_train_end(self, trainer, pl_module) -> None:
         metrics = self.eval_mmlu(pl_module)
         # log directly with wandb at the end of training
         if wandb.run is not None:
             wandb.log(
                 {
-                    **{
-                        f"val_se/mmlu_{t}": v["mean"]
-                        for t, v in metrics.items()
-                    },
+                    **{f"val_se/mmlu_{t}": v["mean"] for t, v in metrics.items()},
                 },
                 step=trainer.global_step,
-                commit=True
-            )        
+                commit=True,
+            )
         return super().on_train_end(trainer, pl_module)
-    
+
     def eval_mmlu(self, pl_module):
         from mttl.evaluators import MMLUEvaluator
 
@@ -60,11 +54,9 @@ class MMLUCallback(cb.Callback):
             data_dir=os.environ["MMLU_DATA_DIR"],
             **self.eval_kwargs,
         )
-        metrics = evaluator.evaluate(
-            pl_module
-        )
+        metrics = evaluator.evaluate(pl_module)
         return metrics
-    
+
     def on_validation_epoch_end(self, trainer, pl_module) -> None:
         self.val_epoch += 1
 
@@ -81,7 +73,7 @@ class MMLUCallback(cb.Callback):
             on_epoch=True,
             prog_bar=True,
         )
-        for t,v in metrics.items():        
+        for t, v in metrics.items():
             pl_module.log(
                 f"val/mmlu_{t}",
                 v["mean"],
@@ -93,14 +85,12 @@ class MMLUCallback(cb.Callback):
         if wandb.run is not None:
             wandb.log(
                 {
-                    **{
-                        f"val_se/mmlu_{t}": v["mean"]
-                        for t, v in metrics.items()
-                    },
+                    **{f"val_se/mmlu_{t}": v["mean"] for t, v in metrics.items()},
                 },
                 step=trainer.global_step,
-                commit=True
+                commit=True,
             )
+
 
 class NICallback(cb.Callback):
     def __init__(self, every_val_epochs=1, **kwargs):
@@ -160,16 +150,13 @@ class MiniProgress(cb.ProgressBar):
     ) -> None:
         self.time_end = time.time()
         metrics = self.get_metrics(trainer, pl_module)
-        metrics = {
-            k: v for k, v in metrics.items()
-        }
+        metrics = {k: v for k, v in metrics.items()}
         it_per_sec = 1 / (self.time_end - self.time_start)
 
         # num total steps will be min of num_training_batches and max_steps
         if trainer.max_steps > -1:
             num_total_steps = min(
-                trainer.num_training_batches * trainer.max_epochs,
-                trainer.max_steps
+                trainer.num_training_batches * trainer.max_epochs, trainer.max_steps
             )
         else:
             num_total_steps = (
@@ -210,9 +197,7 @@ class MiniProgress(cb.ProgressBar):
     ) -> None:
         self.time_end = time.time()
         metrics = self.get_metrics(trainer, pl_module)
-        metrics = {
-            k: v for k, v in metrics.items()
-        }
+        metrics = {k: v for k, v in metrics.items()}
         metrics["it/s"] = 1.0 / (self.time_end - self.time_start)
         for k, v in metrics.items():
             metrics[k] = "{:.2f}".format(v) if isinstance(v, float) else v
