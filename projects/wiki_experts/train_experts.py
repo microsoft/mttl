@@ -112,8 +112,9 @@ def run_multitask(args):
 
     # get metric monitors for models
     callbacks = []
-    monitor = "val/loss"
-    mode = "min"
+    
+    monitor = "downstream_val/mmlu"
+    mode = "max"
 
     model_name = args.model.replace("/", "_")
     exp_name = os.environ.get("AMLT_JOB_NAME", args.exp_name)

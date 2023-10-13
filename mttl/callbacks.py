@@ -27,8 +27,11 @@ class MMLUCallback(cb.Callback):
         self, trainer, pl_module, batch: Any, batch_idx: int
     ) -> None:
         if trainer.global_step == 0:
-            metrics = self.eval_mmlu(pl_module)
+            # metrics = self.eval_mmlu(pl_module)
+            metrics = {"all": {"mean": 0.0}}
             self.log_metrics(metrics, pl_module)
+            metrics_val = self.eval_mmlu(pl_module, split="val")
+            self.log_metrics(metrics_val, pl_module, split="val")
 
         return super().on_train_batch_start(trainer, pl_module, batch, batch_idx)
 
@@ -41,31 +44,36 @@ class MMLUCallback(cb.Callback):
             and self.val_epoch % self.every_val_epochs == 0
         ) or batch_idx == len(trainer.train_dataloader) - 1:
             self.val_epoch += 1
-            metrics = self.eval_mmlu(pl_module)
+            # metrics = self.eval_mmlu(pl_module)
+            metrics = {"all": {"mean": 0.0}}
             self.log_metrics(metrics, pl_module)
+            metrics_val = self.eval_mmlu(pl_module, split="val")
+            self.log_metrics(metrics_val, pl_module, split="val")
+            
 
         return super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
 
-    def log_metrics(self, metrics, pl_module: pl.LightningModule):
+    def log_metrics(self, metrics, pl_module: pl.LightningModule, split="test"):
         pl_module.log(
-            "val/mmlu",
+            f"downstream_{split}/mmlu",
             metrics["all"]["mean"],
             on_step=True,
         )
         for t, v in metrics.items():
             pl_module.log(
-                f"val/mmlu_{t}",
+                f"downstream_{split}/mmlu_{t}",
                 v["mean"],
                 on_step=True,
             )
 
-    def eval_mmlu(self, pl_module):
+    def eval_mmlu(self, pl_module, split = "test"):
         from mttl.evaluators import MMLUEvaluator
 
         if self.evaluator is None:
             self.evaluator = MMLUEvaluator(
                 pl_module.hparams,
                 data_dir=os.environ["MMLU_DATA_DIR"],
+                split = split,
                 **self.eval_kwargs,
             )
         metrics = self.evaluator.evaluate(pl_module)
