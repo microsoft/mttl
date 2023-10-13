@@ -10,7 +10,6 @@ from src.data_transforms.utils import (
     upload_to_hf_,
 )
 import numpy as np
-import jsonpickle
 from src import mmlu_subject_configs
 from datasets import load_dataset
 import tqdm
@@ -29,7 +28,9 @@ Here is the paragraph:
 {}
 
 Now state facts about the paragraph:
-""".format(context)
+""".format(
+            context
+        )
         return template
 
 
@@ -173,14 +174,12 @@ class FactsTransformModel(TransformModel):
 
         templated_contexts = []
         for line in prev_dataset:
-            templated_contexts.append(
-                self.template.apply(line["context"])
-            )
+            templated_contexts.append(self.template.apply(line["context"]))
 
         outputs = llm.generate(templated_contexts, **kwargs)
 
         for entry, output in zip(prev_dataset, outputs.outputs):
-            sentences = [s.lstrip("- ") for s in output.split('\n')]
+            sentences = [s.lstrip("- ") for s in output.split("\n")]
             entry["facts"] = sentences
 
         dataset = {}
@@ -196,11 +195,13 @@ class FactsTransformModel(TransformModel):
         # flatten the dataset
         prev_dataset = []
         for docno, entry in dataset.items():
-            prev_dataset.append({
-                "docno": docno,
-                "facts": "\n".join(entry["facts"]),
-                "subject": entry["subject"],
-            })
+            prev_dataset.append(
+                {
+                    "docno": docno,
+                    "facts": "\n".join(entry["facts"]),
+                    "subject": entry["subject"],
+                }
+            )
 
         with open(self.get_dataset_name(), "w") as f:
             for i, line in enumerate(prev_dataset):

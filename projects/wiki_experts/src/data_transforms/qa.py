@@ -4,12 +4,16 @@ import os
 from datasets import load_dataset
 import tqdm
 
-from mttl.dataloader.platypus_dataset_reader import InversePlatypusTemplate, PlatypusTemplate
+from mttl.dataloader.platypus_dataset_reader import (
+    InversePlatypusTemplate,
+    PlatypusTemplate,
+)
 from mttl.utils import logger
 
 from src.data_transforms.base import (
     TransformConfig,
     DataTransformTemplate,
+    TransformModel,
 )
 from src.data_transforms.engines import (
     OpenAI,
@@ -90,14 +94,16 @@ class OAITemplate:
 
         task_description += "\n\nDomain context:"
         task_description += f"\n\n{output}"
-        
+
         task_description += (
             "\nWrite an instruction suitable for the given context. "
             "Ensure it's complete, precise, and stands alone, without relying on provided context."
         )
 
         if icl_examples is not None:
-            task_description +=  " Strive to match the style, tone, and length of the previous examples."
+            task_description += (
+                " Strive to match the style, tone, and length of the previous examples."
+            )
 
         task_description += "\nRemember to also provide a concise response to the generated instruction.\
             Format your ourput as follows: ### Instruction: <your instruction> ### Response: <your response>."
@@ -156,7 +162,7 @@ class MMLUICLSampler:
         self.use_options = use_options
 
     def sample(self, num_examples, subject):
-        dataset = dataset[subject].shuffle()
+        dataset = self.dataset[subject].shuffle()
         examples = []
         for i in range(num_examples):
             example = dataset[i]["input"]
@@ -168,7 +174,7 @@ class MMLUICLSampler:
         return examples
 
 
-class QATransformModel:
+class QATransformModel(TransformModel):
     """Transform a dataset of documents into a question answering dataset."""
 
     def __init__(
