@@ -1,8 +1,11 @@
 import datetime
 import time
 import sys, os
-from typing import Any
+from typing import Any, Optional
+from pytorch_lightning.utilities.types import STEP_OUTPUT
+import wandb
 
+import pytorch_lightning as pl
 from pytorch_lightning import callbacks as cb
 from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
 
@@ -11,40 +14,62 @@ from mttl.utils import Averager, logger
 
 
 class MMLUCallback(cb.Callback):
-    def __init__(self, every_val_epochs=1, **kwargs):
+    def __init__(self, eval_every, every_val_epochs=1, **kwargs):
         super().__init__()
 
         self.val_epoch = 0
+        self.eval_every = eval_every
         self.every_val_epochs = every_val_epochs
         self.eval_kwargs = kwargs
+        self.evaluator = None
 
-    def on_validation_epoch_end(self, trainer, pl_module) -> None:
-        self.val_epoch += 1
-
+    def on_train_batch_start(
+        self, trainer, pl_module, batch: Any, batch_idx: int
+    ) -> None:
         if trainer.global_step == 0:
-            return
+            metrics = self.eval_mmlu(pl_module)
+            self.log_metrics(metrics, pl_module, trainer)
 
-        if self.val_epoch % self.every_val_epochs != 0:
-            return
+        return super().on_train_batch_start(trainer, pl_module, batch, batch_idx)
 
-        from mttl.evaluators import MMLUEvaluator
+    def on_train_batch_end(
+        self, trainer, pl_module, outputs: STEP_OUTPUT, batch: Any, batch_idx: int
+    ) -> None:
+        if (
+            trainer.global_step != 0 and
+            trainer.global_step % self.eval_every == 0
+            and self.val_epoch % self.every_val_epochs == 0
+        ) or batch_idx == len(trainer.train_dataloader) - 1:
+            self.val_epoch += 1
+            metrics = self.eval_mmlu(pl_module)
+            self.log_metrics(metrics, pl_module)
 
-        evaluator = MMLUEvaluator(
-            pl_module.hparams,
-            data_dir=os.environ["MMLU_DATA_DIR"],
-            **self.eval_kwargs,
-        )
-        metrics = evaluator.evaluate(
-            pl_module,
-            subsample=10,
-        )
+        return super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
+
+    def log_metrics(self, metrics, pl_module: pl.LightningModule):
         pl_module.log(
             "val/mmlu",
             metrics["all"]["mean"],
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
+            on_step=True,
         )
+        for t, v in metrics.items():
+            pl_module.log(
+                f"val/mmlu_{t}",
+                v["mean"],
+                on_step=True,
+            )
+
+    def eval_mmlu(self, pl_module):
+        from mttl.evaluators import MMLUEvaluator
+
+        if self.evaluator is None:
+            self.evaluator = MMLUEvaluator(
+                pl_module.hparams,
+                data_dir=os.environ["MMLU_DATA_DIR"],
+                **self.eval_kwargs,
+            )
+        metrics = self.evaluator.evaluate(pl_module)
+        return metrics
 
 
 class NICallback(cb.Callback):
@@ -105,16 +130,13 @@ class MiniProgress(cb.ProgressBar):
     ) -> None:
         self.time_end = time.time()
         metrics = self.get_metrics(trainer, pl_module)
-        metrics = {
-            k: v for k, v in metrics.items()
-        }
+        metrics = {k: v for k, v in metrics.items()}
         it_per_sec = 1 / (self.time_end - self.time_start)
 
         # num total steps will be min of num_training_batches and max_steps
         if trainer.max_steps > -1:
             num_total_steps = min(
-                trainer.num_training_batches * trainer.max_epochs,
-                trainer.max_steps
+                trainer.num_training_batches * trainer.max_epochs, trainer.max_steps
             )
         else:
             num_total_steps = (
@@ -155,9 +177,7 @@ class MiniProgress(cb.ProgressBar):
     ) -> None:
         self.time_end = time.time()
         metrics = self.get_metrics(trainer, pl_module)
-        metrics = {
-            k: v for k, v in metrics.items()
-        }
+        metrics = {k: v for k, v in metrics.items()}
         metrics["it/s"] = 1.0 / (self.time_end - self.time_start)
         for k, v in metrics.items():
             metrics[k] = "{:.2f}".format(v) if isinstance(v, float) else v
