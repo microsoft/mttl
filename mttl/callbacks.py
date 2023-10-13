@@ -14,7 +14,7 @@ from mttl.utils import Averager, logger
 
 class MMLUCallback(cb.Callback):
     def __init__(
-        self, eval_every, every_val_epochs=1, max_input_length=None, eval_split="test"
+        self, eval_every, every_val_epochs=1, split="test", max_input_length=None
     ):
         super().__init__()
 
@@ -22,8 +22,8 @@ class MMLUCallback(cb.Callback):
         self.eval_every = eval_every
         self.every_val_epochs = every_val_epochs
         self.max_input_length = max_input_length
-        self.eval_split = eval_split
         self.evaluator = None
+        self.split = split
 
     def on_train_batch_start(
         self, trainer, pl_module, batch: Any, batch_idx: int
@@ -56,10 +56,15 @@ class MMLUCallback(cb.Callback):
         return super().on_validation_epoch_end(trainer, pl_module)
 
     def log_metrics(self, metrics, pl_module: pl.LightningModule):
-        pl_module.log("val/mmlu", metrics["all"]["mean"], on_step=True, prog_bar=True)
+        pl_module.log(
+            f"{self.split}/mmlu",
+            metrics["all"]["mean"],
+            on_step=True,
+            prog_bar=True,
+        )
         for t, v in metrics.items():
             pl_module.log(
-                f"val/mmlu_{t}",
+                f"{self.split}/mmlu_{t}",
                 v["mean"],
                 on_step=True,
             )
@@ -81,7 +86,7 @@ class MMLUCallback(cb.Callback):
             )
             self.evaluator = MMLUEvaluator(
                 mmlu_data_config,
-                split=self.eval_split,
+                split=self.split,
             )
 
         metrics = self.evaluator.evaluate(pl_module)

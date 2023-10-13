@@ -123,8 +123,9 @@ def run_multitask(args):
 
     # get metric monitors for models
     callbacks = []
-    monitor = "val/loss"
-    mode = "min"
+
+    monitor = "downstream_val/mmlu"
+    mode = "max"
 
     model_name = args.model.replace("/", "_")
     exp_name = os.environ.get("AMLT_JOB_NAME", args.exp_name)
@@ -148,7 +149,8 @@ def run_multitask(args):
     elif val_check_interval > args.total_steps and args.total_steps != -1:
         val_check_interval = args.total_steps
 
-    callbacks.append(MMLUCallback(eval_split="valid", eval_every=val_check_interval))
+    callbacks.append(MMLUCallback(eval_every=val_check_interval, split="test"))
+    callbacks.append(MMLUCallback(eval_every=val_check_interval, split="val"))
 
     trainer = Trainer(
         devices=-1,
