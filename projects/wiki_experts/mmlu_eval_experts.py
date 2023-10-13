@@ -107,7 +107,6 @@ def run_eval(args):
 
     mmlu = MMLUEvaluator(
         args,
-        data_dir=os.environ["MMLU_DATA_DIR"],
         split=args.mmlu_test_split,
     )
     module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
