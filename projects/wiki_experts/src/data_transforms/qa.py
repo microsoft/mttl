@@ -3,14 +3,10 @@ import numpy as np
 import os
 from datasets import load_dataset
 import tqdm
+
 from mttl.dataloader.platypus_dataset_reader import InversePlatypusTemplate, PlatypusTemplate
-
-
 from mttl.utils import logger
-from projects.wiki_experts.src.data_transforms.templates import (
-    QAPlatyInstructionGenerationTemplate,
-    QAPlatyResponseGenerationTemplate,
-)
+
 from src.data_transforms.base import (
     TransformConfig,
     DataTransformTemplate,
