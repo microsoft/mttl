@@ -42,7 +42,6 @@ def run_multitask(args):
     if "qa" in args.dataset:
         config = PlatypusConfig(
             model=args.model,
-            padding_side=args.padding_side,
             train_batch_size=args.train_batch_size,
             predict_batch_size=args.predict_batch_size,
             max_input_length=args.max_input_length,
@@ -68,7 +67,6 @@ def run_multitask(args):
     elif "platypus" in args.dataset:
         config = PlatypusConfig(
             model=args.model,
-            padding_side=args.padding_side,
             train_batch_size=args.train_batch_size,
             predict_batch_size=args.predict_batch_size,
             max_input_length=args.max_input_length,
@@ -82,7 +80,6 @@ def run_multitask(args):
     elif "oa1" in args.dataset:
         config = OA1Config(
             model=args.model,
-            padding_side=args.padding_side,
             train_batch_size=args.train_batch_size,
             predict_batch_size=args.predict_batch_size,
             max_input_length=args.max_input_length,
@@ -151,7 +148,7 @@ def run_multitask(args):
     elif val_check_interval > args.total_steps and args.total_steps != -1:
         val_check_interval = args.total_steps
 
-    callbacks.append(MMLUCallback(split="valid", eval_every=val_check_interval))
+    callbacks.append(MMLUCallback(eval_split="valid", eval_every=val_check_interval))
 
     trainer = Trainer(
         devices=-1,

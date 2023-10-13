@@ -1,9 +1,8 @@
 import datetime
 import time
 import sys, os
-from typing import Any, Optional
+from typing import Any
 from pytorch_lightning.utilities.types import STEP_OUTPUT
-import wandb
 
 import pytorch_lightning as pl
 from pytorch_lightning import callbacks as cb
@@ -29,7 +28,7 @@ class MMLUCallback(cb.Callback):
     def on_train_batch_start(
         self, trainer, pl_module, batch: Any, batch_idx: int
     ) -> None:
-        if trainer.global_step == 0:
+        if batch_idx == 0:
             metrics = self.eval_mmlu(pl_module)
             self.log_metrics(metrics, pl_module)
 
@@ -39,10 +38,10 @@ class MMLUCallback(cb.Callback):
         self, trainer, pl_module, outputs: STEP_OUTPUT, batch: Any, batch_idx: int
     ) -> None:
         if (
-            trainer.global_step != 0
-            and trainer.global_step % self.eval_every == 0
-            and self.val_epoch % self.every_val_epochs == 0
-        ) or batch_idx == len(trainer.train_dataloader) - 1:
+            (batch_idx != 0 and batch_idx % self.eval_every == 0)
+            or self.val_epoch % self.every_val_epochs == 0
+            or batch_idx == len(trainer.train_dataloader) - 1
+        ):
             self.val_epoch += 1
             metrics = self.eval_mmlu(pl_module)
             self.log_metrics(metrics, pl_module)
@@ -50,11 +49,7 @@ class MMLUCallback(cb.Callback):
         return super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
 
     def log_metrics(self, metrics, pl_module: pl.LightningModule):
-        pl_module.log(
-            "val/mmlu",
-            metrics["all"]["mean"],
-            on_step=True,
-        )
+        pl_module.log("val/mmlu", metrics["all"]["mean"], on_step=True, prog_bar=True)
         for t, v in metrics.items():
             pl_module.log(
                 f"val/mmlu_{t}",
@@ -68,10 +63,12 @@ class MMLUCallback(cb.Callback):
 
         if self.evaluator is None:
             mmlu_data_config = MMLUDataConfig(
-                predict_batch_size=pl_module.hparams.eval_batch_size,
+                model=pl_module.hparams.model,
+                predict_batch_size=pl_module.hparams.predict_batch_size,
                 max_input_length=pl_module.hparams.max_input_length
                 if self.max_input_length is None
                 else self.max_input_length,
+                max_output_length=pl_module.hparams.max_input_length,  # not necessary
                 model_family=pl_module.hparams.model_family,
                 finetune_task_name=pl_module.hparams.finetune_task_name,
             )

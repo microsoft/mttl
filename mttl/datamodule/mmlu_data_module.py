@@ -109,16 +109,15 @@ class MMLUDataModule(DefaultDataModule):
         )
 
     def __init__(self, config: MMLUDataConfig, for_generation=False):
-        self.for_generation = for_generation
-
         if os.environ.get(self.DATA_ENV) is None:
             raise ValueError(
                 f"Environment variable {self.DATA_ENV} is not set. "
                 "Please set it to the directory containing the MMLU dataset."
             )
 
-        super().__init__(config)
+        super().__init__(config, for_generation=for_generation)
 
+    @property
     def collate_fn(self):
         return DataCollatorForMMLU(
             tokenizer=self.tokenizer,
@@ -131,11 +130,19 @@ class MMLUDataModule(DefaultDataModule):
             task_to_id=self.task_to_id,
         )
 
+    @property
+    def task_names(self):
+        return self._task_names
+
+    @property
+    def task_to_id(self):
+        return self._task_to_id
+
     def setup_dataset(self, stage=None):
         filename = pkg_resources.resource_filename(
             __name__, "../dataloader/mmlu_dataset.py"
         )
-        dataset = load_dataset(filename, data_dir=self.data_dir)
+        dataset = load_dataset(filename, data_dir=os.environ[self.DATA_ENV])
 
         task_names = set(dataset["train"]["Task"])
         task_names = task_names.union(set(dataset["validation"]["Task"]))
@@ -148,8 +155,8 @@ class MMLUDataModule(DefaultDataModule):
                 raise ValueError("Unknown task name in finetune_task_name")
             task_names = task_subset
 
-        self.task_names = sorted(list(task_names))
-        self.task_to_id = {task: i for i, task in enumerate(self.task_names)}
+        self._task_names = sorted(list(task_names))
+        self._task_to_id = {task: i for i, task in enumerate(self._task_names)}
 
         if task_subset is not None:
             self.train_dataset = dataset["train"].filter(
