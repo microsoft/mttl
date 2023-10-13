@@ -33,7 +33,7 @@ Now state facts about the paragraph:
 
 @dataclass
 class FactsTransformConfig(TransformConfig):
-    model_name: str = "gpt-3.5-turbo"
+    model_name: str = "text-davinci-003"
     max_contexts_per_subject: int = -1
     max_documents_per_subject: int = -1
     max_context_length: int = 128

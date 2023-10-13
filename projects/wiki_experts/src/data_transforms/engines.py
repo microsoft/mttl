@@ -132,10 +132,9 @@ class OpenAI:
     def __init__(
         self,
         model_name="text-davinci-003",
-        api_type="openai",
     ):
         self._model_name = model_name
-        self.operator = GPT.create_lm(model_name=self.model_name, api_type=api_type)
+        self.operator = GPT.create_lm(model_name=self.model_name)
 
     @property
     def model_name(self):
