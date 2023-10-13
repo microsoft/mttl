@@ -14,13 +14,16 @@ from mttl.utils import Averager, logger
 
 
 class MMLUCallback(cb.Callback):
-    def __init__(self, eval_every, every_val_epochs=1, **kwargs):
+    def __init__(
+        self, eval_every, every_val_epochs=1, max_input_length=None, eval_split="test"
+    ):
         super().__init__()
 
         self.val_epoch = 0
         self.eval_every = eval_every
         self.every_val_epochs = every_val_epochs
-        self.eval_kwargs = kwargs
+        self.max_input_length = max_input_length
+        self.eval_split = eval_split
         self.evaluator = None
 
     def on_train_batch_start(
@@ -36,8 +39,8 @@ class MMLUCallback(cb.Callback):
         self, trainer, pl_module, outputs: STEP_OUTPUT, batch: Any, batch_idx: int
     ) -> None:
         if (
-            trainer.global_step != 0 and
-            trainer.global_step % self.eval_every == 0
+            trainer.global_step != 0
+            and trainer.global_step % self.eval_every == 0
             and self.val_epoch % self.every_val_epochs == 0
         ) or batch_idx == len(trainer.train_dataloader) - 1:
             self.val_epoch += 1
@@ -61,12 +64,22 @@ class MMLUCallback(cb.Callback):
 
     def eval_mmlu(self, pl_module):
         from mttl.evaluators import MMLUEvaluator
+        from mttl.datamodule.mmlu_data_module import MMLUDataConfig
 
         if self.evaluator is None:
-            self.evaluator = MMLUEvaluator(
-                pl_module.hparams,
-                **self.eval_kwargs,
+            mmlu_data_config = MMLUDataConfig(
+                predict_batch_size=pl_module.hparams.eval_batch_size,
+                max_input_length=pl_module.hparams.max_input_length
+                if self.max_input_length is None
+                else self.max_input_length,
+                model_family=pl_module.hparams.model_family,
+                finetune_task_name=pl_module.hparams.finetune_task_name,
             )
+            self.evaluator = MMLUEvaluator(
+                mmlu_data_config,
+                split=self.eval_split,
+            )
+
         metrics = self.evaluator.evaluate(pl_module)
         return metrics
 

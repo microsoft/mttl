@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from mttl.utils import logger
 from mttl.datamodule.utils import get_tokenizer
-from mttl.datamodule.collators import DefaultCollator
+from mttl.datamodule.collators import DatasetConfig, DefaultCollator, DefaultDataModule
 
 
 @dataclass
@@ -80,30 +80,12 @@ class DataCollatorForMMLU(DefaultCollator):
         return output_batch
 
 
-class MMLUDataModule(LightningDataModule):
+class MMLUDataConfig(DatasetConfig):
+    pass
+
+
+class MMLUDataModule(DefaultDataModule):
     DATA_ENV = "MMLU_DATA_DIR"
-
-    def train_dataloader(self):
-        return DataLoader(
-            self.train_dataset,
-            batch_size=self.config.train_batch_size,
-            shuffle=True,
-            num_workers=16,
-            pin_memory=True,
-            persistent_workers=True,
-            collate_fn=self.collate_fn,
-        )
-
-    def val_dataloader(self):
-        return DataLoader(
-            self.dev_dataset,
-            batch_size=self.config.predict_batch_size,
-            shuffle=False,
-            num_workers=16,
-            pin_memory=True,
-            persistent_workers=True,
-            collate_fn=self.collate_fn,
-        )
 
     def test_dataloader(self, subsample=None, shuffle=False):
         if subsample is not None and subsample > 0:
@@ -126,23 +108,28 @@ class MMLUDataModule(LightningDataModule):
             collate_fn=self.collate_fn,
         )
 
-    def __init__(self, config, data_dir=None, for_generation=False):
-        super().__init__()
-
-        if data_dir == "from_env":
-            self.data_dir = os.environ.get(self.DATA_ENV, None)
-            if self.data_dir is None:
-                raise ValueError(
-                    f"Environment variable {self.DATA_ENV} is not set. "
-                    "Please set it to the directory containing the MMLU dataset."
-                )
-        else:
-            self.data_dir = data_dir or config.data_dir
-        self.config = config
+    def __init__(self, config: MMLUDataConfig, for_generation=False):
         self.for_generation = for_generation
-        self.tokenizer = get_tokenizer(config, for_generation=for_generation)
-        self.rng = np.random.RandomState(config.seed)
-        self.setup_dataset()
+
+        if os.environ.get(self.DATA_ENV) is None:
+            raise ValueError(
+                f"Environment variable {self.DATA_ENV} is not set. "
+                "Please set it to the directory containing the MMLU dataset."
+            )
+
+        super().__init__(config)
+
+    def collate_fn(self):
+        return DataCollatorForMMLU(
+            tokenizer=self.tokenizer,
+            padding="longest",
+            max_input_length=self.config.max_input_length,
+            max_output_length=self.config.max_output_length,
+            pad_to_multiple_of=8,
+            return_tensors="pt",
+            model_family="seq2seq" if self.for_generation else self.config.model_family,
+            task_to_id=self.task_to_id,
+        )
 
     def setup_dataset(self, stage=None):
         filename = pkg_resources.resource_filename(
@@ -163,17 +150,6 @@ class MMLUDataModule(LightningDataModule):
 
         self.task_names = sorted(list(task_names))
         self.task_to_id = {task: i for i, task in enumerate(self.task_names)}
-
-        self.collate_fn = DataCollatorForMMLU(
-            tokenizer=self.tokenizer,
-            padding="longest",
-            max_input_length=self.config.max_input_length,
-            max_output_length=self.config.max_output_length,
-            pad_to_multiple_of=8,
-            return_tensors="pt",
-            model_family="seq2seq" if self.for_generation else self.config.model_family,
-            task_to_id=self.task_to_id,
-        )
 
         if task_subset is not None:
             self.train_dataset = dataset["train"].filter(

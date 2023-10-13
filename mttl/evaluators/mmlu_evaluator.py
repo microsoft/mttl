@@ -7,28 +7,20 @@ import numpy as np
 import pytorch_lightning as pl
 
 from mttl.dataloader.ni_metrics import compute_metrics
+from mttl.datamodule.mmlu_data_module import MMLUDataConfig
 from mttl.models.utils import transfer_batch_to_device
 from mttl.evaluators.base import compute_task_aggregation
 
 
 class MMLUEvaluator(object):
-    def __init__(self, config, max_input_length=None, device="cuda", split="test"):
+    def __init__(self, mmlu_data_config, device="cuda", split="test"):
         from mttl.datamodule.mmlu_data_module import MMLUDataModule
 
-        self.config = deepcopy(config)
         self.device = device
         self.split = split
+        self.config = mmlu_data_config
 
-        if max_input_length is not None:
-            self.config.max_input_length = max_input_length
-
-        self.data_dir = os.environ["MMLU_DATA_DIR"]
-        self.datamodule = MMLUDataModule(
-            self.config,
-            data_dir=self.data_dir,
-            for_generation=True
-        )
-        self.datamodule.setup("test")
+        self.datamodule = MMLUDataModule(self.config, for_generation=True)
 
     def evaluate(self, model, subsample=-1, shuffle=False):
         was_train = model.training
