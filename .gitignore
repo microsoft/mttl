@@ -156,7 +156,9 @@ lm_cache/
 projects/instr_routing/*
 
 # any file starting with __
-__*.*
-__*/*
+_*.*
+_*/*
 # any folder starting with __
-__*/
+_*/
+!__init__.py
+!*/__init__.py
