@@ -29,7 +29,7 @@ class MMLUCallback(cb.Callback):
         if trainer.global_step == 0:
             metrics = self.eval_mmlu(pl_module)
             self.log_metrics(metrics, pl_module)
-            metrics_val = self.eval_mmlu(pl_module, split="val")
+            metrics_val = self.eval_mmlu(pl_module, eval_split=True)
             self.log_metrics(metrics_val, pl_module, split="val")
 
         return super().on_train_batch_start(trainer, pl_module, batch, batch_idx)
@@ -45,7 +45,7 @@ class MMLUCallback(cb.Callback):
             self.val_epoch += 1
             metrics = self.eval_mmlu(pl_module)
             self.log_metrics(metrics, pl_module)
-            metrics_val = self.eval_mmlu(pl_module, split="val")
+            metrics_val = self.eval_mmlu(pl_module, eval_split=True)
             self.log_metrics(metrics_val, pl_module, split="val")
 
         return super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
@@ -63,13 +63,13 @@ class MMLUCallback(cb.Callback):
                 on_step=True,
             )
 
-    def eval_mmlu(self, pl_module, split="test"):
+    def eval_mmlu(self, pl_module, eval_split=False):
         from mttl.evaluators import MMLUEvaluator
 
         if self.evaluator is None:
             self.evaluator = MMLUEvaluator(
                 pl_module.hparams,
-                split=split,
+                split="test" if not eval_split else "val",
                 **self.eval_kwargs,
             )
         metrics = self.evaluator.evaluate(pl_module)
