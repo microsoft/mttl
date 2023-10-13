@@ -54,9 +54,6 @@ class GPT:
                 f"model_name should be one of: {','.join(self.AVAILABLE_MODELS)}"
             )
 
-        # when computing logp, use 10% of the target tokens as burn-in
-        # to eval the log-likelihood of the full sentence
-        self.logp_target_burnin = 0.1
         self.generation_options = generation_options
         self.engine = model_name
         self.api_type = os.environ.get("OPENAI_API_TYPE", "openai")
@@ -68,14 +65,8 @@ class GPT:
             self.encoder = tiktoken.encoding_for_model("text-davinci-003")
         else:
             self.encoder = tiktoken.encoding_for_model(self.engine)
-            
+
         openai.api_version = os.environ.get("OPENAI_API_VERSION")
-        if self.api_type == "azure":
-            openai.api_type = "azure"            
-            openai.api_key = os.getenv("AZURE_OPENAI_KEY")
-            openai.api_base = os.getenv("AZURE_OPENAI_ENDPOINT") # your endpoint should look like the following https://YOUR_RESOURCE_NAME.openai.azure.com/
-            openai.api_version = os.getenv("AZURE_API_VERSION")
-            self.engine = self.engine.replace(".","")
 
     def encode(self, string):
         return self.encoder.encode(string)
