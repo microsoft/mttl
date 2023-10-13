@@ -165,9 +165,7 @@ class OpenAI(InstructionsGenerator):
             self.provide_response = provide_response
 
         def apply(self, output, input=None, icl_examples=None):
-            task_description = (
-                "\nYour task is to generate clear, comprehensive, and precise instructions."
-            )
+            task_description = "\nYour task is to generate clear, comprehensive, and precise instructions."
             if icl_examples is not None:
                 task_description += f"\n\n Here are examples of good instructions that you should imitate:\n"
                 for icl_example in icl_examples:
@@ -176,17 +174,17 @@ class OpenAI(InstructionsGenerator):
 
             task_description += "\n\nDomain context:"
             task_description += f"\n\n{output}"
-            
+
             task_description += (
                 "\nWrite an instruction suitable for the given context. "
                 "Ensure it's complete, precise, and stands alone, without relying on provided context."
             )
-            
+
             if icl_examples is not None:
-                task_description +=  " Strive to match the style, tone, and length of the previous examples."
+                task_description += " Strive to match the style, tone, and length of the previous examples."
             if self.provide_response:
-                task_description += "\nRemember to also provide a consise response to the generated instruction.\
-                    Format your ourput as follows: ### Instrution: <your instruction> ### Response: <your response>."
+                task_description += "\nRemember to also provide a concise response to the generated instruction.\
+                    Format your output as follows: ### Instruction: <your instruction> ### Response: <your response>."
             # task_description += "\n\nYour response:\n"
 
             return task_description
@@ -195,21 +193,23 @@ class OpenAI(InstructionsGenerator):
     def model_name(self):
         return self._model_name
 
-    def split_insruction_output(self, outputs):
+    def split_instruction_output(self, outputs):
         responses = []
         for e in outputs:
             try:
                 if "Response:" in e:
                     response = e.split("Response:")[1].strip()
                 else:
-                    responses.append((INVALID_RESPONSE,INVALID_RESPONSE))
+                    responses.append((INVALID_RESPONSE, INVALID_RESPONSE))
                     continue
-                instruction =e.split("Response:")[0]
+                instruction = e.split("Response:")[0]
                 if "Instruction:" in instruction:
                     instruction = instruction.split("Instruction:")[1].strip()
-                responses.append((instruction.replace("#", ""), response.replace("#", "")))
+                responses.append(
+                    (instruction.replace("#", ""), response.replace("#", ""))
+                )
             except:
-                responses.append((INVALID_RESPONSE,INVALID_RESPONSE))
+                responses.append((INVALID_RESPONSE, INVALID_RESPONSE))
         return responses
 
     def generate(self, templated_contexts, sampling_params, **kwargs):
@@ -222,9 +222,9 @@ class OpenAI(InstructionsGenerator):
                 batch, max_tokens=sampling_params.max_tokens
             )
             if self.provide_response:
-                output = self.split_insruction_output(output)
+                output = self.split_instruction_output(output)
             results.outputs += output
-            results.finish_reason+=["stop"]*len(output)
+            results.finish_reason += ["stop"] * len(output)
             pbar.update(1)
         return results
 
