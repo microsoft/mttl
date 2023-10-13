@@ -2,6 +2,7 @@ import datetime
 import time
 import sys, os
 from typing import Any
+import wandb
 
 from pytorch_lightning import callbacks as cb
 from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
@@ -17,16 +18,41 @@ class MMLUCallback(cb.Callback):
         self.val_epoch = 0
         self.every_val_epochs = every_val_epochs
         self.eval_kwargs = kwargs
-
-    def on_validation_epoch_end(self, trainer, pl_module) -> None:
-        self.val_epoch += 1
-
-        if trainer.global_step == 0:
-            return
-
-        if self.val_epoch % self.every_val_epochs != 0:
-            return
-
+    
+    def on_train_start(self, trainer, pl_module) -> None:
+        metrics = self.eval_mmlu(pl_module)
+        # log directly with wandb at the start of training
+        if wandb.run is not None:
+            wandb.log(
+                {
+                    **{
+                        f"val_se/mmlu_{t}": v["mean"]
+                        for t, v in metrics.items()
+                    },
+                },
+                step=trainer.global_step,
+                commit=True
+            )        
+        
+        return super().on_train_start(trainer, pl_module)
+    
+    def on_train_end(self, trainer, pl_module) -> None:
+        metrics = self.eval_mmlu(pl_module)
+        # log directly with wandb at the end of training
+        if wandb.run is not None:
+            wandb.log(
+                {
+                    **{
+                        f"val_se/mmlu_{t}": v["mean"]
+                        for t, v in metrics.items()
+                    },
+                },
+                step=trainer.global_step,
+                commit=True
+            )        
+        return super().on_train_end(trainer, pl_module)
+    
+    def eval_mmlu(self, pl_module):
         from mttl.evaluators import MMLUEvaluator
 
         evaluator = MMLUEvaluator(
@@ -35,9 +61,19 @@ class MMLUCallback(cb.Callback):
             **self.eval_kwargs,
         )
         metrics = evaluator.evaluate(
-            pl_module,
-            subsample=10,
+            pl_module
         )
+        return metrics
+    
+    def on_validation_epoch_end(self, trainer, pl_module) -> None:
+        self.val_epoch += 1
+
+        if trainer.global_step == 0:
+            return
+
+        if self.val_epoch % self.every_val_epochs != 0:
+            return
+        metrics = self.eval_mmlu(pl_module)
         pl_module.log(
             "val/mmlu",
             metrics["all"]["mean"],
@@ -45,7 +81,26 @@ class MMLUCallback(cb.Callback):
             on_epoch=True,
             prog_bar=True,
         )
-
+        for t,v in metrics.items():        
+            pl_module.log(
+                f"val/mmlu_{t}",
+                v["mean"],
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+            )
+        # log directly with wandb
+        if wandb.run is not None:
+            wandb.log(
+                {
+                    **{
+                        f"val_se/mmlu_{t}": v["mean"]
+                        for t, v in metrics.items()
+                    },
+                },
+                step=trainer.global_step,
+                commit=True
+            )
 
 class NICallback(cb.Callback):
     def __init__(self, every_val_epochs=1, **kwargs):

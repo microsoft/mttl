@@ -9,6 +9,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint, Callback
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
+from mttl.callbacks import MMLUCallback
 from mttl.datamodule.oasst1_module import OA1Config, OA1Module
 from mttl.datamodule.retrieval_lm_module import RetrievalLMDataModule
 from mttl.datamodule.platypus_module import PlatypusModule, PlatypusConfig, PlatypusQAModule
@@ -84,6 +85,20 @@ def run_multitask(args):
 
     # legit logging
     loggers = []
+    if os.environ.get("WANDB_API_KEY") or args.wandb_project:
+        project = (
+            "wiki_experts" if args.wandb_project is None else args.wandb_project
+        )
+        args.exp_name = "dev_run" if args.exp_name is None else args.exp_name
+        project = os.environ.get("WANDB_PROJECT", project)
+        exp_name = os.environ.get("AMLT_JOB_NAME", args.exp_name)
+        exp_name += f"_{args.finetune_task_name}"
+        wandb_logger = pl.loggers.WandbLogger(
+            project=project,
+            name=exp_name,  # , config=args_
+        )
+        wandb_logger.experiment.save("*.py")
+        loggers.append(wandb_logger)
 
     mlf_logger = get_mlf_logger()
     if mlf_logger:
@@ -122,6 +137,8 @@ def run_multitask(args):
     elif val_check_interval > args.total_steps and args.total_steps != -1:
         val_check_interval = args.total_steps
 
+    callbacks.append(MMLUCallback())
+    
     trainer = Trainer(
         devices=-1,
         accelerator="gpu",
