@@ -71,8 +71,9 @@ class QATransformModel():
 
     def get_dataset_name(self, iter_signature=""):
         args = [
-            f"{self.config.model_setting}",
+            f"qa-{self.config.model_setting}",
             f"icl{self.config.icl_examples}",
+            f"clen{self.config.max_context_length}",
             f"maxD{self.config.max_documents_per_subject}",
             f"maxC{self.config.max_contexts_per_subject}",
             f"{iter_signature}.jsonl",
