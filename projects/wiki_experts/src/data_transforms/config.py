@@ -57,10 +57,6 @@ class QATransformConfig(AutoConfig):
     temperature: float = 0.7
     max_documents_per_subject: float = -1
     max_contexts_per_subject: float = -1
-
-
-@dataclass
-class QAForMMLUConfig(QATransformConfig):
     icl_examples: int = 0
     icl_dataset: str = "lukaemon/mmlu"
     icl_split: str = "validation"

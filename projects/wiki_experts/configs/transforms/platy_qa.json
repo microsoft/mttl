@@ -1,5 +1,5 @@
 {
-    "type": "QAForMMLUConfig",
+    "type": "QATransformConfig",
     "model_setting": "platy",
     "icl_examples": 0,
     "icl_dataset": "lukaemon/mmlu",
