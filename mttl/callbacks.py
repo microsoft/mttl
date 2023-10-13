@@ -5,7 +5,7 @@ from typing import Any
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 import pytorch_lightning as pl
-from pytorch_lightning import callbacks as cb
+from pytorch_lightning import LightningModule, Trainer, callbacks as cb
 from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
 
 
@@ -37,16 +37,23 @@ class MMLUCallback(cb.Callback):
     def on_train_batch_end(
         self, trainer, pl_module, outputs: STEP_OUTPUT, batch: Any, batch_idx: int
     ) -> None:
-        if (
-            (batch_idx != 0 and batch_idx % self.eval_every == 0)
-            or self.val_epoch % self.every_val_epochs == 0
-            or batch_idx == len(trainer.train_dataloader) - 1
-        ):
-            self.val_epoch += 1
+        if (batch_idx != 0 and batch_idx % self.eval_every == 0) or batch_idx == len(
+            trainer.train_dataloader
+        ) - 1:
             metrics = self.eval_mmlu(pl_module)
             self.log_metrics(metrics, pl_module)
 
         return super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
+
+    def on_validation_epoch_end(
+        self, trainer: Trainer, pl_module: LightningModule
+    ) -> None:
+        if self.val_epoch % self.every_val_epochs == 0:
+            metrics = self.eval_mmlu(pl_module)
+            self.log_metrics(metrics, pl_module)
+
+        self.val_epoch += 1
+        return super().on_validation_epoch_end(trainer, pl_module)
 
     def log_metrics(self, metrics, pl_module: pl.LightningModule):
         pl_module.log("val/mmlu", metrics["all"]["mean"], on_step=True, prog_bar=True)

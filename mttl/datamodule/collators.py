@@ -208,6 +208,7 @@ class DefaultDataModule(LightningDataModule):
             pin_memory=True,
             persistent_workers=True,
             collate_fn=self.collate_fn,
+            drop_last=False,
         )
 
     def test_dataloader(self):
@@ -219,6 +220,7 @@ class DefaultDataModule(LightningDataModule):
             pin_memory=True,
             persistent_workers=True,
             collate_fn=self.collate_fn,
+            drop_last=False,
         )
 
     @property

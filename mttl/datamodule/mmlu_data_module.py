@@ -124,7 +124,6 @@ class MMLUDataModule(DefaultDataModule):
             padding="longest",
             max_input_length=self.config.max_input_length,
             max_output_length=self.config.max_output_length,
-            pad_to_multiple_of=8,
             return_tensors="pt",
             model_family="seq2seq" if self.for_generation else self.config.model_family,
             task_to_id=self.task_to_id,

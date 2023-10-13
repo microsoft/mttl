@@ -22,7 +22,10 @@ def transfer_batch_to_device(batch, device):
 
 
 def convert_and_push_to_hub(
-    ckpt_path, repo_id, auto_search=True, use_last=False,
+    ckpt_path,
+    repo_id,
+    auto_search=True,
+    use_last=False,
 ) -> None:
     """Searches into local path for the checkpoint with lowest validation loss,
     then uploads that.
@@ -147,7 +150,7 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
         tokenizer = model_kwargs.get("tokenizer", None)
         ckpt = torch.load(checkpoint_path, map_location="cpu")
         ckpt["hyper_parameters"].update(**model_kwargs)
-    
+
         if tokenizer is None:
             tokenizer = get_tokenizer_with_args(
                 model_name=ckpt["hyper_parameters"]["model"],
@@ -204,7 +207,9 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
             self._params_from_checkpoint = set()
 
         if not hasattr(self, "trainable_param_names"):
-            self.trainable_param_names = [n for n, p in self.named_parameters() if p.requires_grad]
+            self.trainable_param_names = [
+                n for n, p in self.named_parameters() if p.requires_grad
+            ]
 
         keys = [k for k in state_dict.keys()]
 
@@ -214,6 +219,7 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
         for _, plugin in self.loss_plugins.items():
             plugin_param_keys.update(plugin.state_dict().keys())
 
+        deleted = []
         for key in keys:
             # we can safely avoid dumping this parameter if it is both
             # not in the trainable parameters and was not loaded from checkpoint
@@ -222,7 +228,8 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
                 and not (key in self._params_from_checkpoint)
             ) or key in plugin_param_keys:
                 del state_dict[key]
-                logger.info("Deleting from state dict: {}".format(key))
+                deleted.append(key)
+        logger.info("Deleted from state dict: {}".format(deleted))
 
     def on_save_checkpoint(self, ckpt):
         self._delete_non_trainable_params(ckpt["state_dict"])
