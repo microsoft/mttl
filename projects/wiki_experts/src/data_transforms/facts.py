@@ -1,3 +1,4 @@
+import json
 from projects.wiki_experts.src.data_transforms.engines import AutoEngine
 from src.data_transforms.base import (
     DataTransformTemplate,
@@ -9,6 +10,7 @@ from src.data_transforms.utils import (
     upload_to_hf_,
 )
 import numpy as np
+import jsonpickle
 from src import mmlu_subject_configs
 from datasets import load_dataset
 import tqdm
@@ -167,12 +169,22 @@ class FactsTransformModel(TransformModel):
 
         # start dataset
         prev_dataset = self.get_seed_dataset_(dataset_name, filter_subjects)
-        llm = AutoEngine.from_path(self.config.model_name, api_type="openai")
+        llm = AutoEngine.from_path(self.config.model_name)
 
         templated_contexts = []
         for line in prev_dataset:
             templated_contexts.append(
                 self.template.apply(line["context"])
             )
+
         outputs = llm.generate(templated_contexts, **kwargs)
-        breakpoint()
+        for entry, output in zip(prev_dataset, outputs.output):
+            sentences = [s.lstrip("- ") for s in output.split('\n')]
+            entry["facts"] = " ".join(sentences)
+
+        with open(self.get_dataset_name(), "w") as f:
+            for i, line in enumerate(prev_dataset):
+                f.write(json.dumps(line) + "\n")
+
+        if upload_to_hub:
+            upload_to_hf_(self.get_dataset_name())
