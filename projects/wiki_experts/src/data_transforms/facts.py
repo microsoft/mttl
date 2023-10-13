@@ -54,7 +54,7 @@ class FactsTransformModel(TransformModel):
 
     def get_dataset_name(self):
         args = [
-            f"facts-{self.config.model_setting}",
+            f"facts-{self.config.model_name}",
             f"clen{self.config.max_context_length}",
             f"maxD{self.config.max_documents_per_subject}",
             f"maxC{self.config.max_contexts_per_subject}.jsonl",
@@ -178,13 +178,33 @@ class FactsTransformModel(TransformModel):
             )
 
         outputs = llm.generate(templated_contexts, **kwargs)
+
         for entry, output in zip(prev_dataset, outputs.outputs):
             sentences = [s.lstrip("- ") for s in output.split('\n')]
-            entry["facts"] = " ".join(sentences)
+            entry["facts"] = sentences
+
+        dataset = {}
+        for entry in prev_dataset:
+            docno = entry["docno"]
+            entry.pop("context")
+            entry.pop("id")
+            if docno not in dataset:
+                dataset[docno] = entry
+            else:
+                dataset[docno]["facts"].extend(entry["facts"])
+
+        # flatten the dataset
+        prev_dataset = []
+        for docno, entry in dataset.items():
+            prev_dataset.append({
+                "docno": docno,
+                "facts": "\n".join(entry["facts"]),
+                "subject": entry["subject"],
+            })
 
         with open(self.get_dataset_name(), "w") as f:
             for i, line in enumerate(prev_dataset):
                 f.write(json.dumps(line) + "\n")
 
         if upload_to_hub:
-            upload_to_hf_(self.get_dataset_name())
+            upload_to_hf_(self.get_dataset_name(), configuration=self.config)
