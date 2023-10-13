@@ -6,6 +6,8 @@ import json
 class TransformConfig:
     @classmethod
     def from_path(cls, config_path):
+        from projects.wiki_experts.src.data_transforms.qa import QATransformConfig  # noqa
+        from projects.wiki_experts.src.data_transforms.facts import FactsTransformConfig  # noqa
         import json
 
         with open(config_path, "r") as f:
@@ -17,6 +19,7 @@ class TransformConfig:
     def save(self, config_path):
         config = self.__dict__
         config["type"] = self.__class__.__name__
+
         with open(config_path, "r") as f:
             json.dump(config, f)
 
@@ -45,6 +48,9 @@ class TransformModel:
             QATransformModel,
             QATransformConfig,
         )
+        from projects.wiki_experts.src.data_transforms.facts import (
+            FactsTransformConfig, FactsTransformModel
+        )
 
         if type(transform_config) == QATransformConfig:
             if transform_config.icl_examples > 0:
@@ -54,3 +60,5 @@ class TransformModel:
                     transform_config.icl_use_options,
                 )
             return QATransformModel(transform_config)
+        elif type(transform_config) == FactsTransformConfig:
+            return FactsTransformModel(transform_config)

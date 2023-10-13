@@ -4,6 +4,7 @@ from src.data_transforms.base import (
     TransformConfig,
     TransformModel,
 )
+from dataclasses import dataclass
 from src.data_transforms.utils import (
     upload_to_hf_,
 )
@@ -30,6 +31,7 @@ Now state facts about the paragraph:
         return template
 
 
+@dataclass
 class FactsTransformConfig(TransformConfig):
     model_name: str = "gpt-3.5-turbo"
     max_contexts_per_subject: int = -1
@@ -165,7 +167,7 @@ class FactsTransformModel(TransformModel):
 
         # start dataset
         prev_dataset = self.get_seed_dataset_(dataset_name, filter_subjects)
-        llm = AutoEngine.create_lm(self.config.model_name, api_type="openai")
+        llm = AutoEngine.from_path(self.config.model_name, api_type="openai")
 
         templated_contexts = []
         for line in prev_dataset:

@@ -142,7 +142,7 @@ class OpenAI:
         return self._model_name
 
     def generate(
-        self, templated_contexts, max_tokens, top_p=1.0, temperature=0.0, **kwargs
+        self, templated_contexts, max_tokens=1024, top_p=1.0, temperature=0.0, **kwargs
     ):
         results = Response()
 

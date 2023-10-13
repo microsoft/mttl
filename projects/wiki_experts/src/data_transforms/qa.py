@@ -209,7 +209,6 @@ class QATransformModel:
         self,
         dataset_name,
         filter_subjects,
-        num_iterations=1,
         upload_to_hub=False,
         output_path="./generated.jsonl",
     ):
@@ -222,7 +221,7 @@ class QATransformModel:
         # start dataset
         prev_dataset = self.get_seed_dataset_(dataset_name, filter_subjects)
 
-        for i in range(num_iterations):
+        for i in range(self.config.num_iterations):
             inst_filename = os.path.join(
                 output_path, self.get_dataset_name("inst_%d" % i)
             )

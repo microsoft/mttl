@@ -27,11 +27,11 @@ def transform(
     output_path,
     upload_to_hub=False,
 ):
-    from src.data_transforms.config import AutoConfig
-    from src.data_transforms.data_transforms import AutoTransform
+    from src.data_transforms.base import TransformConfig
+    from src.data_transforms.base import TransformModel
 
-    config = AutoConfig.from_path(config)
-    transform = AutoTransform.from_config(config)
+    config = TransformConfig.from_path(config)
+    transform = TransformModel.from_config(config)
 
     output_path = os.environ.get("AMLT_OUTPUT_DIR", output_path)
     if upload_to_hub:
@@ -42,7 +42,6 @@ def transform(
     transform.transform(
         seed_dataset,
         filter_subjects=subjects,
-        num_iterations=config.num_iterations,
         output_path=output_path,
         upload_to_hub=upload_to_hub,
     )
