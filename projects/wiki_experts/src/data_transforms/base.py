@@ -1,0 +1,52 @@
+from abc import abstractmethod
+from typing import Dict, List
+import json
+
+
+class TransformConfig:
+    @classmethod
+    def from_path(cls, config_path):
+        import json
+
+        with open(config_path, "r") as f:
+            config = json.load(f)
+
+        type = config.pop("type")
+        return eval(type)(**config)
+
+    def save(self, config_path):
+        config = self.__dict__
+        config["type"] = self.__class__.__name__
+        with open(config_path, "r") as f:
+            json.dump(config, f)
+
+
+class DataTransformTemplate():
+    @abstractmethod
+    def post_process_generation(self, output):
+        pass
+
+
+class TransformModel:
+    icl_sampler = None
+
+    @abstractmethod
+    def transform(self, dataset_name, **options) -> List[Dict]:
+        pass
+
+    @classmethod
+    def from_config(cls, transform_config: TransformConfig):
+        from projects.wiki_experts.src.data_transforms.qa import (
+            MMLUICLSampler,
+            QATransformModel,
+            QATransformConfig,
+        )
+
+        if type(transform_config) == QATransformConfig:
+            if transform_config.icl_examples > 0:
+                cls.icl_sampler = MMLUICLSampler(
+                    transform_config.icl_dataset,
+                    transform_config.icl_split,
+                    transform_config.icl_use_options,
+                )
+            return QATransformModel(transform_config)

@@ -1,13 +1,19 @@
+from dataclasses import dataclass
 import numpy as np
 import os
 from datasets import load_dataset
 import tqdm
+from mttl.dataloader.platypus_dataset_reader import InversePlatypusTemplate, PlatypusTemplate
 
 
 from mttl.utils import logger
-from src.data_transforms.config import (
-    QA_MODEL_SETTINGS,
-    QATransformConfig,
+from projects.wiki_experts.src.data_transforms.templates import (
+    QAPlatyInstructionGenerationTemplate,
+    QAPlatyResponseGenerationTemplate,
+)
+from src.data_transforms.base import (
+    TransformConfig,
+    DataTransformTemplate,
 )
 from src.data_transforms.engines import (
     OpenAI,
@@ -16,12 +22,126 @@ from src.data_transforms.engines import (
 )
 from src import mmlu_subject_configs
 from src.data_transforms.utils import (
+    INVALID_RESPONSE,
     read_jsonl_dataset,
     dump_jsonl_dataset,
     upload_to_hf_,
     reject_output,
     count_repeating_sentences,
 )
+
+
+class QAPlatyInstructionGenerationTemplate(DataTransformTemplate):
+    @classmethod
+    def apply(cls, output, context=None, icl_examples=None):
+        """
+        We provide the context as output (response) if and only if a response is not
+        present. Otherwise, we provide the context as context in addition to the previously generated response.
+        """
+        return InversePlatypusTemplate.apply(
+            output if output is not None else context,
+            input if output is not None else None,
+            icl_examples,
+        )
+
+    def post_process_generation(self, output):
+        return {"instruction": output}
+
+
+class QAPlatyResponseGenerationTemplate(PlatypusTemplate):
+    @classmethod
+    def apply(cls, instruction, context=None):
+        return PlatypusTemplate.apply(instruction, input=context)
+
+    def post_process_generation(self, output):
+        return {"response": output}
+
+
+class OAITemplate:
+    def post_process_generation(self, output):
+        try:
+            if "Response:" in output:
+                response = output.split("Response:")[1].strip()
+            else:
+                raise
+
+            instruction = output.split("Response:")[0]
+            if "Instruction:" in instruction:
+                instruction = instruction.split("Instruction:")[1].strip()
+                data = {
+                    "instruction": instruction.replace("#", ""),
+                    "response": response.replace("#", ""),
+                }
+            else:
+                raise
+        except:
+            data = {"instruction": INVALID_RESPONSE, "response": INVALID_RESPONSE}
+        return data
+
+    @classmethod
+    def apply(cls, output, input=None, icl_examples=None):
+        task_description = (
+            "\nYour task is to generate clear, comprehensive, and precise instructions."
+        )
+        if icl_examples is not None:
+            task_description += f"\n\n Here are examples of good instructions that you should imitate:\n"
+            for icl_example in icl_examples:
+                task_description += f"\n### Instruction:\n{icl_example}"
+            task_description += "\n\n"
+
+        task_description += "\n\nDomain context:"
+        task_description += f"\n\n{output}"
+        
+        task_description += (
+            "\nWrite an instruction suitable for the given context. "
+            "Ensure it's complete, precise, and stands alone, without relying on provided context."
+        )
+
+        if icl_examples is not None:
+            task_description +=  " Strive to match the style, tone, and length of the previous examples."
+
+        task_description += "\nRemember to also provide a concise response to the generated instruction.\
+            Format your ourput as follows: ### Instruction: <your instruction> ### Response: <your response>."
+        return task_description
+
+
+@dataclass
+class QAModelSetting:
+    inverse_model_path: str
+    model_path: str
+    instruction_template: str
+    response_template: str
+
+    @property
+    def model_paths(self):
+        return self.inverse_model_path, self.model_path
+
+
+QA_MODEL_SETTINGS = {
+    "platy": QAModelSetting(
+        inverse_model_path="sordonia/llama2-13b-platypus-inverse",
+        model_path="sordonia/llama2-13b-platypus",
+        instruction_template=QAPlatyInstructionGenerationTemplate(),
+        response_template=QAPlatyResponseGenerationTemplate(),
+    )
+}
+
+
+@dataclass
+class QATransformConfig(TransformConfig):
+    model_setting: str
+    max_context_length: int = 512
+    max_tokens_instruction: int = 128
+    max_tokens_response: int = 1024
+    top_p: float = 0.9
+    num_iterations: int = 1
+    temperature: float = 0.7
+    max_documents_per_subject: float = -1
+    max_contexts_per_subject: float = -1
+    icl_examples: int = 0
+    icl_dataset: str = "lukaemon/mmlu"
+    icl_split: str = "validation"
+    icl_use_options: str = True
 
 
 class MMLUICLSampler:
@@ -49,7 +169,7 @@ class MMLUICLSampler:
         return examples
 
 
-class QATransformModel():
+class QATransformModel:
     """Transform a dataset of documents into a question answering dataset."""
 
     def __init__(
