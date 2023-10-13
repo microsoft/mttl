@@ -7,12 +7,18 @@ from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint, Callback
 
+
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.callbacks import MMLUCallback
 from mttl.datamodule.oasst1_module import OA1Config, OA1Module
 from mttl.datamodule.retrieval_lm_module import RetrievalLMDataModule
-from mttl.datamodule.platypus_module import PlatypusModule, PlatypusConfig, PlatypusQAModule
+from mttl.datamodule.facts_lm_module import FactsLMConfig, FactsLMDataModule
+from mttl.datamodule.platypus_module import (
+    PlatypusModule,
+    PlatypusConfig,
+    PlatypusQAModule,
+)
 from mttl.utils import get_mlf_logger, setup_logging, logger
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
@@ -33,8 +39,7 @@ def run_multitask(args):
     # select dataloader
     model_class = ExpertTrainer
 
-    if args.dataset.startswith("qa-"):
-        args.dataset = args.dataset.replace("qa-", "")
+    if "qa" in args.dataset:
         config = PlatypusConfig(
             model=args.model,
             padding_side=args.padding_side,
@@ -49,6 +54,17 @@ def run_multitask(args):
             dataset=args.dataset,
         )
         dm = PlatypusQAModule(config)
+    elif "facts" in args.dataset:
+        config = FactsLMConfig(
+            model=args.model,
+            train_batch_size=args.train_batch_size,
+            predict_batch_size=args.predict_batch_size,
+            max_input_length=args.max_input_length,
+            validation_portion=args.validation_portion,
+            finetune_task_name=args.finetune_task_name,
+            dataset=args.dataset,
+        )
+        dm = FactsLMDataModule(config)
     elif "platypus" in args.dataset:
         config = PlatypusConfig(
             model=args.model,
@@ -78,7 +94,7 @@ def run_multitask(args):
         )
         dm = OA1Module(config)
     else:
-        dm = RetrievalLMDataModule(args)
+        raise ValueError(f"Unknown dataset {args.dataset}")
 
     args.n_tasks = len(dm.task_to_id) if hasattr(dm, "task_to_id") else 0
     module = model_class(**vars(args), tokenizer=dm.tokenizer)
@@ -86,9 +102,7 @@ def run_multitask(args):
     # legit logging
     loggers = []
     if os.environ.get("WANDB_API_KEY") or args.wandb_project:
-        project = (
-            "wiki_experts" if args.wandb_project is None else args.wandb_project
-        )
+        project = "wiki_experts" if args.wandb_project is None else args.wandb_project
         args.exp_name = "dev_run" if args.exp_name is None else args.exp_name
         project = os.environ.get("WANDB_PROJECT", project)
         exp_name = os.environ.get("AMLT_JOB_NAME", args.exp_name)
@@ -138,7 +152,7 @@ def run_multitask(args):
         val_check_interval = args.total_steps
 
     callbacks.append(MMLUCallback(**vars(args)))
-    
+
     trainer = Trainer(
         devices=-1,
         accelerator="gpu",

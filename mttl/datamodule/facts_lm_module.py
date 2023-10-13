@@ -4,6 +4,7 @@ import numpy as np
 from datasets import load_dataset, get_dataset_split_names, concatenate_datasets
 from typing import Optional
 from dataclasses import dataclass
+from mttl.datamodule.platypus_module import PlatypusConfig
 from mttl.datamodule.collators import DefaultDataModule
 
 from mttl.utils import logger
@@ -18,6 +19,11 @@ class FactsCollator:
         output_batch["attention_mask"] = torch.ones_like(output_batch["input_ids"])
         output_batch["labels"] = torch.stack(batch, 0)
         return output_batch
+
+
+@dataclass
+class FactsLMConfig(PlatypusConfig):
+    pass
 
 
 class FactsLMDataModule(DefaultDataModule):
@@ -41,8 +47,12 @@ class FactsLMDataModule(DefaultDataModule):
         for example in self.dataset:
             facts = example["facts"]
             facts = facts.split("\n")
-            train_facts.extend(facts[: int(0.95 * len(facts))])
-            valid_facts.extend(facts[int(0.95 * len(facts)) :])
+            train_facts.extend(
+                facts[: -int(self.config.validation_portion * len(facts))]
+            )
+            valid_facts.extend(
+                facts[-int(self.config.validation_portion * len(facts)) :]
+            )
 
         train_facts = "\n".join(train_facts)
         valid_facts = "\n".join(valid_facts)
@@ -54,6 +64,7 @@ class FactsLMDataModule(DefaultDataModule):
             torch.tensor(train_tokenized[i : i + self.config.max_input_length])
             for i in range(0, len(train_tokenized), self.config.max_input_length)
         ]
+
         train_data[-1] = torch.concatenate(
             (
                 train_data[-2][-self.config.max_input_length + len(train_data[-1]) :],
