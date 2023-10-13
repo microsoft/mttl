@@ -27,8 +27,7 @@ class MMLUCallback(cb.Callback):
         self, trainer, pl_module, batch: Any, batch_idx: int
     ) -> None:
         if trainer.global_step == 0:
-            # metrics = self.eval_mmlu(pl_module)
-            metrics = {"all": {"mean": 0.0}}
+            metrics = self.eval_mmlu(pl_module)
             self.log_metrics(metrics, pl_module)
             metrics_val = self.eval_mmlu(pl_module, split="val")
             self.log_metrics(metrics_val, pl_module, split="val")
@@ -44,8 +43,7 @@ class MMLUCallback(cb.Callback):
             and self.val_epoch % self.every_val_epochs == 0
         ) or batch_idx == len(trainer.train_dataloader) - 1:
             self.val_epoch += 1
-            # metrics = self.eval_mmlu(pl_module)
-            metrics = {"all": {"mean": 0.0}}
+            metrics = self.eval_mmlu(pl_module)
             self.log_metrics(metrics, pl_module)
             metrics_val = self.eval_mmlu(pl_module, split="val")
             self.log_metrics(metrics_val, pl_module, split="val")

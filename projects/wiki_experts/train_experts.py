@@ -138,7 +138,7 @@ def run_multitask(args):
     elif val_check_interval > args.total_steps and args.total_steps != -1:
         val_check_interval = args.total_steps
 
-    callbacks.append(MMLUCallback(eval_every=args.eval_every))
+    callbacks.append(MMLUCallback(eval_every=val_check_interval))
     
     trainer = Trainer(
         devices=-1,
