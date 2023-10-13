@@ -22,8 +22,12 @@ class TransformConfig:
 
 
 class DataTransformTemplate():
-    @abstractmethod
-    def post_process_generation(self, output):
+    @classmethod
+    def apply(cls, *args, **kwargs) -> str:
+        pass
+
+    @classmethod
+    def post_process_generation(cls, output):
         pass
 
 

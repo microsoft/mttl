@@ -85,7 +85,7 @@ class LLMEngine(LLM):
     def __init__(self, model, temp_path="/tmp/merged", **options):
         # merge adapters -- if needed --
         path = save_merged_model(model, hf_path=temp_path)
-        options['model'] = path
+        options["model"] = path
 
         LLM.__init__(self, **options)
 
@@ -97,9 +97,7 @@ class LLMEngine(LLM):
         results = Response()
 
         sampling_params = SamplingParams(
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_tokens
+            temperature=temperature, top_p=top_p, max_tokens=max_tokens
         )
 
         # we explicitly add requests here, so that we can keep track of the request id
@@ -135,25 +133,23 @@ class OpenAI:
         self,
         model_name="text-davinci-003",
         api_type="openai",
-        provide_response=True,
     ):
         self._model_name = model_name
-        self.provide_response = provide_response
         self.operator = GPT.create_lm(model_name=self.model_name, api_type=api_type)
 
     @property
     def model_name(self):
         return self._model_name
 
-    def generate(self, templated_contexts, max_tokens, top_p=1., temperature=0., **kwargs):
+    def generate(
+        self, templated_contexts, max_tokens, top_p=1.0, temperature=0.0, **kwargs
+    ):
         results = Response()
 
         pbar = tqdm.tqdm(range(len(templated_contexts) // 20))
         for context in range(0, len(templated_contexts), 20):
             batch = templated_contexts[context : context + 20]
-            output = self.operator.generate(
-                batch, max_tokens=max_tokens
-            )
+            output = self.operator.generate(batch, max_tokens=max_tokens)
             results.outputs += output
             results.finish_reason += ["stop"] * len(output)
             pbar.update(1)

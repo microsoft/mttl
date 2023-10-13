@@ -40,7 +40,8 @@ class QAPlatyInstructionGenerationTemplate(DataTransformTemplate):
             icl_examples,
         )
 
-    def post_process_generation(self, output):
+    @classmethod
+    def post_process_generation(cls, output):
         return {"instruction": output}
 
 
@@ -49,12 +50,14 @@ class QAPlatyResponseGenerationTemplate(PlatypusTemplate):
     def apply(cls, instruction, context=None):
         return PlatypusTemplate.apply(instruction, input=context)
 
-    def post_process_generation(self, output):
+    @classmethod
+    def post_process_generation(cls, output):
         return {"response": output}
 
 
 class OAITemplate:
-    def post_process_generation(self, output):
+    @classmethod
+    def post_process_generation(cls, output):
         try:
             if "Response:" in output:
                 response = output.split("Response:")[1].strip()
