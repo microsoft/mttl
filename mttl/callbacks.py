@@ -27,7 +27,7 @@ class MMLUCallback(cb.Callback):
     def on_train_batch_start(
         self, trainer, pl_module, batch: Any, batch_idx: int
     ) -> None:
-        if trainer.global_step == 0:
+        if batch_idx == 0:
             metrics = self.eval_mmlu(pl_module)
             self.log_metrics(metrics, pl_module)
 
