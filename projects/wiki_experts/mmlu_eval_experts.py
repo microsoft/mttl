@@ -101,7 +101,6 @@ def run_eval(args):
 
     mmlu = MMLUEvaluator(
         args,
-        data_dir=os.environ["MMLU_DATA_DIR"],
         split=args.mmlu_test_split,
     )
     module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
@@ -122,7 +121,7 @@ def run_eval(args):
         json.dump(scores, f)
 
     logger.info("MMLU Accuracy: {}".format(scores["all"]["mean"]))
-    for t,v in scores:
+    for t, v in scores:
         logger.info("MMLU Accuracy {}: {}".format(t, v["mean"]))
     del module, mmlu
 
