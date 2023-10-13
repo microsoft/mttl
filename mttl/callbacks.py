@@ -50,23 +50,23 @@ class MMLUCallback(cb.Callback):
     ) -> None:
         if self.val_epoch % self.every_val_epochs == 0:
             metrics = self.eval_mmlu(pl_module)
-            self.log_metrics(metrics, pl_module)
+            self.log_metrics(metrics, pl_module, on_step=False)
 
         self.val_epoch += 1
         return super().on_validation_epoch_end(trainer, pl_module)
 
-    def log_metrics(self, metrics, pl_module: pl.LightningModule):
+    def log_metrics(self, metrics, pl_module: pl.LightningModule, on_step=True):
         pl_module.log(
             f"{self.split}/mmlu",
             metrics["all"]["mean"],
-            on_step=True,
+            on_step=on_step,
             prog_bar=True,
         )
         for t, v in metrics.items():
             pl_module.log(
                 f"{self.split}/mmlu_{t}",
                 v["mean"],
-                on_step=True,
+                on_step=on_step,
             )
 
     def eval_mmlu(self, pl_module):
