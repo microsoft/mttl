@@ -1,5 +1,6 @@
 from collections import defaultdict
 from copy import deepcopy
+import os
 import tqdm
 import torch
 import numpy as np
@@ -11,20 +12,17 @@ from mttl.evaluators.base import compute_task_aggregation
 
 
 class MMLUEvaluator(object):
-    def __init__(self, config, data_dir=None, max_input_length=None, device="cuda", split="test"):
+    def __init__(self, config, max_input_length=None, device="cuda", split="test"):
         from mttl.datamodule.mmlu_data_module import MMLUDataModule
 
         self.config = deepcopy(config)
         self.device = device
         self.split = split
 
-        if data_dir is None:
-            data_dir = config.data_dir
-
         if max_input_length is not None:
             self.config.max_input_length = max_input_length
 
-        self.data_dir = data_dir
+        self.data_dir = os.environ["MMLU_DATA_DIR"]
         self.datamodule = MMLUDataModule(
             self.config,
             data_dir=self.data_dir,

@@ -72,8 +72,6 @@ class MMLUCallback(cb.Callback):
         if self.evaluator is None:
             self.evaluator = MMLUEvaluator(
                 pl_module.hparams,
-                data_dir=os.environ["MMLU_DATA_DIR"],
-                split = split,
                 **self.eval_kwargs,
             )
         metrics = self.evaluator.evaluate(pl_module)
