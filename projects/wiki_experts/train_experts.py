@@ -124,7 +124,7 @@ def run_multitask(args):
     # get metric monitors for models
     callbacks = []
 
-    monitor = "downstream_val/mmlu"
+    monitor = "val/mmlu"
     mode = "max"
 
     model_name = args.model.replace("/", "_")
