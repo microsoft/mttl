@@ -110,9 +110,6 @@ class ExpertTrainer(EfficientCheckpointModule):
             else:
                 model_object = AutoModelForCausalLM.from_pretrained(self.hparams.model)
 
-            if model_object.config.vocab_size != len(self.tokenizer):
-                model_object.resize_token_embeddings(len(self.tokenizer))
-
             if self.hparams.load_in_8bit:
                 model_object = prepare_model_for_kbit_training(model_object)
 
@@ -162,28 +159,6 @@ class ExpertTrainer(EfficientCheckpointModule):
 
         del outputs, shift_logits, shift_labels
         return loss
-
-    def on_save_checkpoint(self, ckpt):
-        if not hasattr(self, "_params_from_checkpoint"):
-            self._params_from_checkpoint = set()
-
-        # remove also parameters in the loss plugins, these need not be saved
-        # (auxiliary parameters for the losses)
-        plugin_param_keys = set()
-        for _, plugin in self.loss_plugins.items():
-            plugin_param_keys.update(plugin.state_dict().keys())
-
-        keys = [k for k in ckpt["state_dict"].keys()]
-
-        for key in keys:
-            # we can safely avoid dumping this parameter if it is both
-            # not in the trainable parameters and was not loaded from checkpoint
-            if (
-                not (key in self.trainable_param_names)
-                and not (key in self._params_from_checkpoint)
-            ) or key in plugin_param_keys:
-                del ckpt["state_dict"][key]
-                print("Deleting from state dict:", key)
 
     def training_step(self, batch, _):
         loss = self.forward(batch)

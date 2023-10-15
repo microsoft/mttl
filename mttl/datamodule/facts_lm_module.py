@@ -23,7 +23,7 @@ class FactsCollator:
 
 @dataclass
 class FactsLMConfig(PlatypusConfig):
-    pass
+    text_field: str = "facts"
 
 
 class FactsLMDataModule(DefaultDataModule):
@@ -44,47 +44,36 @@ class FactsLMDataModule(DefaultDataModule):
 
         train_facts = []
         valid_facts = []
+
         for example in self.dataset:
-            facts = example["facts"]
-            facts = facts.split("\n")
+            facts = example[self.config.text_field]
+            facts = self.tokenizer(facts)["input_ids"]
             train_facts.extend(
                 facts[: -int(self.config.validation_portion * len(facts))]
+                + [self.tokenizer.eos_token_id]
             )
             valid_facts.extend(
                 facts[-int(self.config.validation_portion * len(facts)) :]
+                + [self.tokenizer.eos_token_id]
             )
 
-        train_facts = "\n".join(train_facts)
-        valid_facts = "\n".join(valid_facts)
+        def form_dataset(data):
+            data = [
+                torch.tensor(data[i : i + self.config.max_input_length])
+                for i in range(0, len(data), self.config.max_input_length)
+            ]
+            if len(data) > 1:
+                data[-1] = torch.concatenate(
+                    (
+                        data[-2][-self.config.max_input_length + len(data[-1]) :],
+                        data[-1],
+                    )
+                )
+            return torch.stack(data, 0)
 
-        # split into chunks
-        train_tokenized = self.tokenizer(train_facts)["input_ids"]
-        valid_tokenized = self.tokenizer(valid_facts)["input_ids"]
-        train_data = [
-            torch.tensor(train_tokenized[i : i + self.config.max_input_length])
-            for i in range(0, len(train_tokenized), self.config.max_input_length)
-        ]
-
-        train_data[-1] = torch.concatenate(
-            (
-                train_data[-2][-self.config.max_input_length + len(train_data[-1]) :],
-                train_data[-1],
-            )
-        )
-        valid_data = [
-            torch.tensor(valid_tokenized[i : i + self.config.max_input_length])
-            for i in range(0, len(valid_tokenized), self.config.max_input_length)
-        ]
-        valid_data[-1] = torch.concatenate(
-            (
-                valid_data[-2][-self.config.max_input_length + len(valid_data[-1]) :],
-                valid_data[-1],
-            )
-        )
-
-        self.train_dataset = torch.utils.data.TensorDataset(torch.stack(train_data, 0))
+        self.train_dataset = torch.utils.data.TensorDataset(form_dataset(train_facts))
         self.dev_dataset = self.test_dataset = torch.utils.data.TensorDataset(
-            torch.stack(valid_data, 0)
+            form_dataset(valid_facts)
         )
 
         logger.info("Training examples: {}".format(len(self.train_dataset)))
