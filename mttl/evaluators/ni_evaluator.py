@@ -187,7 +187,8 @@ class NIEvaluator(object):
             all_task_names += task_names
 
             eval_metrics = compute_metrics(predictions, references, reduction="none")
-            all_rougeL.append(np.mean(eval_metrics["rougeL"]))
+            all_rougeL.extend(eval_metrics["rougeL"])
+
             pbar.set_description(
                 f"Task: {task_names[0] if task_names else None}, rougeL: {np.mean(all_rougeL):.4f}"
             )
