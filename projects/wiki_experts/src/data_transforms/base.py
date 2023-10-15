@@ -6,8 +6,15 @@ import json
 class TransformConfig:
     @classmethod
     def from_path(cls, config_path):
-        from projects.wiki_experts.src.data_transforms.qa import QATransformConfig  # noqa
-        from projects.wiki_experts.src.data_transforms.facts import FactsTransformConfig  # noqa
+        from projects.wiki_experts.src.data_transforms.qa import (
+            QATransformConfig,
+        )  # noqa
+        from projects.wiki_experts.src.data_transforms.facts import (
+            FactsTransformConfig,
+        )  # noqa
+        from projects.wiki_experts.src.data_transforms.facts import (
+            IDTransformConfig,
+        )  # noqa
         import json
 
         with open(config_path, "r") as f:
@@ -24,7 +31,7 @@ class TransformConfig:
             json.dump(config, f)
 
 
-class DataTransformTemplate():
+class DataTransformTemplate:
     @classmethod
     def apply(cls, *args, **kwargs) -> str:
         pass
@@ -49,7 +56,10 @@ class TransformModel:
             QATransformConfig,
         )
         from projects.wiki_experts.src.data_transforms.facts import (
-            FactsTransformConfig, FactsTransformModel
+            FactsTransformConfig,
+            FactsTransformModel,
+            IDTransformConfig,
+            IDTransformModel,
         )
 
         if type(transform_config) == QATransformConfig:
@@ -62,3 +72,5 @@ class TransformModel:
             return QATransformModel(transform_config)
         elif type(transform_config) == FactsTransformConfig:
             return FactsTransformModel(transform_config)
+        elif type(transform_config) == IDTransformConfig:
+            return IDTransformModel(transform_config)

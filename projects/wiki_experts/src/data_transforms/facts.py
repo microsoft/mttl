@@ -34,12 +34,125 @@ Now state facts about the paragraph:
         return template
 
 
+class FactsICLTemplate(DataTransformTemplate):
+    @classmethod
+    def apply(cls, context):
+        template = """Your task is to extract facts from the following paragraph. Facts should be conveyed with short, concise sentences, each ending with a period and separated by a newline.
+Example:
+- Fact 1.
+- Fact 2.
+
+Facts should be as independent as possible, for example, resolve pronouns like "she", "it", "he", "them", "they" to entity they refer to.
+Example:
+- The Congress of the Philippines is the national legislature of the Philippines.
+- The Congress of the Philippines is bicameral, composed of the House of Representatives and the Senate.
+
+Example:
+- Many important problems are undecidable.
+- No effective method for determining membership can exist for undecidable problems.
+
+Here is the paragraph:
+
+{}
+
+Rewrite the paragraph into a sequences of facts or [EMPTY] if no relevant facts are contained therein:
+""".format(
+            context
+        )
+        return template
+
+
+@dataclass
+class IDTransformConfig(TransformConfig):
+    max_context_length: int = 128
+    max_documents_per_subject: int = -1
+
+
 @dataclass
 class FactsTransformConfig(TransformConfig):
     model_name: str = "text-davinci-003"
     max_contexts_per_subject: int = -1
     max_documents_per_subject: int = -1
     max_context_length: int = 128
+
+
+class IDTransformModel(TransformModel):
+    """Just a naive ID transform, where we just take the top N documents for each subject."""
+
+    def __init__(
+        self,
+        config: IDTransformConfig,
+    ):
+        self.config = config
+
+    def get_dataset_name(self):
+        args = [
+            f"id-maxD{self.config.max_documents_per_subject}",
+        ]
+        return "_".join(args)
+
+    def get_seed_dataset_(self, dataset_name, filter_subjects, **options):
+        """
+        Convert a seed dataset of retrieved content into a tuple of (context, subject, icl_examples).
+        """
+        dataset = load_dataset(dataset_name)["train"].to_pandas()
+        converted_dataset = []
+
+        if type(filter_subjects) == str:
+            filter_subject = getattr(mmlu_subject_configs, filter_subjects)
+
+        for subject in filter_subject:
+            subject_data = dataset[dataset["subject"] == subject]
+            subject_data.sort_values(by="dfq", ascending=False, inplace=True)
+
+            for i in tqdm.tqdm(
+                range(len(subject_data)), desc=f"Processing {subject}..."
+            ):
+                document = subject_data.iloc[i]
+                text = document["text"]
+
+                converted_dataset.append(
+                    {
+                        "text": text,
+                        "docno": str(document["docno"]),
+                        "subject": subject,
+                    }
+                )
+
+                if (
+                    self.config.max_documents_per_subject > 0
+                    and i > self.config.max_documents_per_subject
+                ):
+                    print(
+                        "Breaking early due to max_documents_per_subject settings. ",
+                        i,
+                    )
+                    break
+        return converted_dataset
+
+    def transform(
+        self,
+        dataset_name,
+        filter_subjects,
+        upload_to_hub=False,
+        output_path="./generated.jsonl",
+        **kwargs,
+    ):
+        output_path = os.environ.get("AMLT_OUTPUT_DIR", output_path)
+        if upload_to_hub:
+            assert (
+                os.environ.get("HF_TOKEN") is not None
+            ), "Please set HF_TOKEN env variable."
+
+        # start dataset
+        prev_dataset = self.get_seed_dataset_(dataset_name, filter_subjects)
+
+        with open(self.get_dataset_name(), "w") as f:
+            for i, line in enumerate(prev_dataset):
+                f.write(json.dumps(line) + "\n")
+
+        if upload_to_hub:
+            upload_to_hf_(self.get_dataset_name(), configuration=self.config)
 
 
 class FactsTransformModel(TransformModel):
@@ -179,7 +292,12 @@ class FactsTransformModel(TransformModel):
         outputs = llm.generate(templated_contexts, **kwargs)
 
         for entry, output in zip(prev_dataset, outputs.outputs):
-            sentences = [s.lstrip("- ") for s in output.split("\n")]
+            if output.strip() == "[EMPTY]":
+                sentences = []
+            else:
+                sentences = [
+                    s.lstrip("- ") for s in output.split("\n") if "[EMPTY]" not in s
+                ]
             entry["facts"] = sentences
 
         dataset = {}
@@ -187,6 +305,7 @@ class FactsTransformModel(TransformModel):
             docno = entry["docno"]
             entry.pop("context")
             entry.pop("id")
+
             if docno not in dataset:
                 dataset[docno] = entry
             else:

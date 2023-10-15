@@ -75,7 +75,7 @@ def run_multitask(args):
             dataset=args.dataset,
         )
         dm = PlatypusQAModule(config)
-    elif "facts" in args.dataset:
+    elif "facts" in args.dataset or "id" in args.dataset:
         config = FactsLMConfig(
             model=args.model,
             train_batch_size=args.train_batch_size,
@@ -84,6 +84,7 @@ def run_multitask(args):
             validation_portion=args.validation_portion,
             finetune_task_name=args.finetune_task_name,
             dataset=args.dataset,
+            text_field="facts" if "facts" in args.dataset else "text",
         )
         dm = FactsLMDataModule(config)
     elif "platypus" in args.dataset:
@@ -214,6 +215,7 @@ def run_multitask(args):
     checkpoint = (
         checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
     )
+
     # perform final eval on MMLU
     if checkpoint:
         module = model_class.load_from_checkpoint(checkpoint).to("cuda")
