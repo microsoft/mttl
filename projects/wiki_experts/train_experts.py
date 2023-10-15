@@ -52,16 +52,19 @@ def eval_mmlu(module, args, base_perf=None):
     for t, v in scores.items():
         logger.info("MMLU Accuracy {}: {}".format(t, v["mean"]))
     # super hard to log with pllogger here
+    improvement = None
+    if base_perf is not None:
+        improvement = {
+            m: scores[m]["mean"] - base_perf[m]["mean"]
+            for m in scores
+            if m in base_perf
+        }
     if wandb.run is not None:
         wandb.log({"downstream_best/mmlu_test_best_model": scores["all"]["mean"]})
         scores.pop("all")
         for t, v in scores.items():
             wandb.log({"downstream_best/mmlu_test_best_model_" + t: v["mean"]})
-    if base_perf is not None:
-        improvement = {m: scores[m]["mean"] - base_perf[m]["mean"] for m in scores}
-        if wandb.run is not None:
-            wandb.log({"downstream_best/mmlu_test_improvement": improvement["all"]})
-            improvement.pop("all")
+        if improvement is not None:
             for t, v in improvement.items():
                 wandb.log(
                     {"downstream_best/mmlu_test_improvement_" + t: improvement[t]}
