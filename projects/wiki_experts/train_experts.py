@@ -125,6 +125,8 @@ def run_multitask(args):
     # legit logging
     loggers = []
     if os.environ.get("WANDB_API_KEY") or args.wandb_project:
+        import wandb
+
         project = "wiki_experts" if args.wandb_project is None else args.wandb_project
         args.exp_name = "dev_run" if args.exp_name is None else args.exp_name
         project = os.environ.get("WANDB_PROJECT", project)
@@ -133,6 +135,7 @@ def run_multitask(args):
         wandb_logger = pl.loggers.WandbLogger(
             project=project,
             name=exp_name,  # , config=args_
+            settings=wandb.Settings(start_method="fork"),
         )
         wandb_logger.experiment.save("*.py")
         loggers.append(wandb_logger)
