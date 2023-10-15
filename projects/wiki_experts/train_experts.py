@@ -223,7 +223,7 @@ def run_multitask(args):
     # perform final eval on MMLU
     if checkpoint:
         module = model_class.load_from_checkpoint(checkpoint).to("cuda")
-        eval_mmlu(module, args, module.log)
+        eval_mmlu(module, args, logger_function=module.log)
 
     if args.hf_repo_id and checkpoint:
         from projects.wiki_experts.src.expert_model import push_expert_to_hub
