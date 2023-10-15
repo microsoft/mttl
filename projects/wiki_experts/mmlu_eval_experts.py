@@ -121,7 +121,7 @@ def run_eval(args):
         json.dump(scores, f)
 
     logger.info("MMLU Accuracy: {}".format(scores["all"]["mean"]))
-    for t, v in scores:
+    for t, v in scores.items():
         logger.info("MMLU Accuracy {}: {}".format(t, v["mean"]))
     del module, mmlu
 

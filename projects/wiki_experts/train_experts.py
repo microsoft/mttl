@@ -11,6 +11,8 @@ from pytorch_lightning.callbacks import ModelCheckpoint, Callback
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.callbacks import MMLUCallback
+from mttl.evaluators import MMLUEvaluator
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from mttl.datamodule.oasst1_module import OA1Config, OA1Module
 from mttl.datamodule.retrieval_lm_module import RetrievalLMDataModule
 from mttl.datamodule.facts_lm_module import FactsLMConfig, FactsLMDataModule
@@ -23,6 +25,25 @@ from mttl.utils import get_mlf_logger, setup_logging, logger
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
+
+
+def eval_mmlu(module, args):
+    mmlu = MMLUEvaluator(
+        args,
+        split=args.mmlu_test_split,
+    )
+    scores = mmlu.evaluate(module)
+    logger.info("MMLU Accuracy: {}".format(scores["all"]["mean"]))
+    for t, v in scores.items():
+        logger.info("MMLU Accuracy {}: {}".format(t, v["mean"]))
+
+    module.log(
+        f"{args.mmlu_test_split}/final_mmlu",
+        scores["all"]["mean"],
+        on_step=True,
+    )
+    for t, v in scores.items():
+        module.log(f"{args.mmlu_test_split}/final_mmlu_{t}", v["mean"], on_step=True)
 
 
 def run_multitask(args):
@@ -40,6 +61,11 @@ def run_multitask(args):
     model_class = ExpertTrainer
 
     if "qa" in args.dataset:
+        args.dataset = (
+            args.dataset.split("/")[0].replace("qa-", "")
+            + "/"
+            + args.dataset.split("/")[1]
+        )
         config = PlatypusConfig(
             model=args.model,
             train_batch_size=args.train_batch_size,
@@ -124,7 +150,8 @@ def run_multitask(args):
     # get metric monitors for models
     callbacks = []
 
-    monitor = "val/mmlu"
+    # monitor = "val/loss"
+    monitor = "downstream/val/mmlu"
     mode = "max"
 
     model_name = args.model.replace("/", "_")
@@ -152,6 +179,13 @@ def run_multitask(args):
     callbacks.append(MMLUCallback(eval_every=val_check_interval, split="test"))
     callbacks.append(MMLUCallback(eval_every=val_check_interval, split="val"))
 
+    if args.es_patience > 0:
+        callbacks.append(
+            EarlyStopping(
+                monitor=monitor, patience=args.es_patience, mode=mode, verbose=True
+            )
+        )
+
     trainer = Trainer(
         devices=-1,
         accelerator="gpu",
@@ -178,6 +212,10 @@ def run_multitask(args):
     checkpoint = (
         checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
     )
+    # perform final eval on MMLU
+    if checkpoint:
+        module = model_class.load_from_checkpoint(checkpoint).to("cuda")
+        eval_mmlu(module, args)
 
     if args.hf_repo_id and checkpoint:
         from projects.wiki_experts.src.expert_model import push_expert_to_hub
