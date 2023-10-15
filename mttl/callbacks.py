@@ -7,16 +7,17 @@ from pytorch_lightning.utilities.types import STEP_OUTPUT
 import pytorch_lightning as pl
 from pytorch_lightning import LightningModule, Trainer, callbacks as cb
 from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
+from torch.optim import Optimizer
 
 
 from mttl.utils import Averager, logger
 
 
 class MMLUCallback(cb.Callback):
-    def __init__(self, eval_every, split="test", max_input_length=None):
+    def __init__(self, eval_every_opt_step=1, split="test", max_input_length=None):
         super().__init__()
 
-        self.eval_every = eval_every
+        self.eval_every_opt_step = eval_every_opt_step
         self.max_input_length = max_input_length
         self.evaluator = None
         self.split = split
@@ -24,25 +25,13 @@ class MMLUCallback(cb.Callback):
         # debug
         self.eval_mmlu_count = 0
 
-    def on_train_batch_start(
-        self, trainer, pl_module, batch: Any, batch_idx: int
+    def on_before_optimizer_step(
+        self, trainer: Trainer, pl_module: LightningModule, optimizer: Optimizer
     ) -> None:
-        if batch_idx == 0 and trainer.global_step == 0:
+        if trainer.global_step % self.eval_every_opt_step == 0:
             metrics = self.eval_mmlu(pl_module)
             self.log_metrics(metrics, pl_module)
-
-        return super().on_train_batch_start(trainer, pl_module, batch, batch_idx)
-
-    def on_train_batch_end(
-        self, trainer, pl_module, outputs: STEP_OUTPUT, batch: Any, batch_idx: int
-    ) -> None:
-        if (batch_idx != 0 and batch_idx % self.eval_every == 0) or batch_idx == len(
-            trainer.train_dataloader
-        ) - 1:
-            metrics = self.eval_mmlu(pl_module)
-            self.log_metrics(metrics, pl_module)
-
-        return super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
+        return super().on_before_optimizer_step(trainer, pl_module, optimizer)
 
     def log_metrics(self, metrics, pl_module: pl.LightningModule, on_step=True):
         pl_module.log(
@@ -51,6 +40,7 @@ class MMLUCallback(cb.Callback):
             on_step=on_step,
             prog_bar=True,
         )
+        metrics.pop("all")
         for t, v in metrics.items():
             pl_module.log(
                 f"downstream/{self.split}/mmlu_{t}",
