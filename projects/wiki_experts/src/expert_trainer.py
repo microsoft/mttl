@@ -76,7 +76,31 @@ class ExpertTrainer(EfficientCheckpointModule):
         self.accumulate_metrics_batch = defaultdict(list)
 
         if kwargs.get("model_object") is None:
-            if "llama" in self.hparams.model:
+            checkpoint = kwargs.get("checkpoint")
+            if checkpoint is not None:
+                from mttl.models.adapters import LoRA
+
+                module = ExpertTrainer.from_pretrained(
+                    checkpoint,
+                    load_in_8bit=self.hparams.load_in_8bit,
+                    device_map=getattr(self.hparams, "device_map", "auto"),
+                )
+                if module.hparams.model_modifier == "lora":
+                    model_object = module.model
+                    merged = []
+                    for name, named_module in model_object.named_modules():
+                        for c_name, child in named_module.named_children():
+                            if isinstance(child, LoRA):
+                                child.merge_with_layer()
+                                setattr(
+                                    named_module,
+                                    c_name,
+                                    child.layer,
+                                )
+                                merged.append(name)
+                    logger.info("Merged LoRA layers: %s" % merged)
+
+            elif "llama" in self.hparams.model:
                 model_object = LlamaForCausalLM.from_pretrained(
                     self.hparams.model,
                     load_in_8bit=self.hparams.load_in_8bit,
