@@ -27,7 +27,7 @@ from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
 
 
-def eval_mmlu(module, args):
+def eval_mmlu(module, args, logger_function):
     mmlu = MMLUEvaluator(
         args,
         split=args.mmlu_test_split,
@@ -37,13 +37,15 @@ def eval_mmlu(module, args):
     for t, v in scores.items():
         logger.info("MMLU Accuracy {}: {}".format(t, v["mean"]))
 
-    module.log(
+    logger_function(
         f"{args.mmlu_test_split}/final_mmlu",
         scores["all"]["mean"],
         on_step=True,
     )
     for t, v in scores.items():
-        module.log(f"{args.mmlu_test_split}/final_mmlu_{t}", v["mean"], on_step=True)
+        logger_function(
+            f"{args.mmlu_test_split}/final_mmlu_{t}", v["mean"], on_step=True
+        )
 
 
 def run_multitask(args):
@@ -153,7 +155,6 @@ def run_multitask(args):
     # get metric monitors for models
     callbacks = []
 
-    # monitor = "val/loss"
     criteria = {
         "downstream/val/mmlu": "max",
         "val/loss": "min",
@@ -222,7 +223,7 @@ def run_multitask(args):
     # perform final eval on MMLU
     if checkpoint:
         module = model_class.load_from_checkpoint(checkpoint).to("cuda")
-        eval_mmlu(module, args)
+        eval_mmlu(module, args, module.log)
 
     if args.hf_repo_id and checkpoint:
         from projects.wiki_experts.src.expert_model import push_expert_to_hub

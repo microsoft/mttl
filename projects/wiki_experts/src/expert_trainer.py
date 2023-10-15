@@ -77,7 +77,7 @@ class ExpertTrainer(EfficientCheckpointModule):
 
         if kwargs.get("model_object") is None:
             checkpoint = kwargs.get("checkpoint")
-            if checkpoint is not None:
+            if checkpoint is not None and checkpoint != "None":
                 from mttl.models.adapters import LoRA
 
                 module = ExpertTrainer.from_pretrained(
