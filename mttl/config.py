@@ -3,8 +3,11 @@ import os
 import ast
 import argparse
 from string import Template
+from typing import Dict
 
 from mttl.utils import logger
+from transformers import TrainingArguments
+from dataclasses import dataclass
 
 
 class Config:
@@ -147,7 +150,6 @@ class Config:
 
     def _set_defaults(self):
         self.cache_dir = os.getenv("CACHE_DIR", "./cache")
-        self.free_up_space = False
 
         # Data config
         self.dataset = None

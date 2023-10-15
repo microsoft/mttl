@@ -42,11 +42,12 @@ class MMLUEvaluator(object):
             dataloader = self.datamodule.test_dataloader(subsample, shuffle)
         else:
             dataloader = self.datamodule.val_dataloader()
+
         pbar = tqdm.tqdm(
             enumerate(dataloader),
             total=len(dataloader),
         )
-        for step, batch in pbar:
+        for _, batch in pbar:
             task_names = batch.get("task_names", None)
             labels_text = batch.pop("labels_texts", None)
             extra_kwargs = {}
@@ -58,7 +59,7 @@ class MMLUEvaluator(object):
 
             batch = transfer_batch_to_device(batch, self.device)
             with torch.no_grad():
-                if isinstance(model, pl.LightningModule):
+                if isinstance(model, pl.LightningModule) or hasattr(model, "hparams"):
                     predictions = model.generate(
                         batch,
                         max_length=max_length,

@@ -28,9 +28,6 @@ class EncoderDecoder(EfficientCheckpointModule):
             self.model = AutoModelForSeq2SeqLM.from_pretrained(
                 self.args.model, cache_dir=self.args.cache_dir
             )
-            # free-up temporary space
-            if self.args.free_up_space:
-                os.system(f"/bin/rm -rf {self.args.cache_dir}")
 
             if "t5" or "T0" in self.args.model:
                 self.pad_token_id = self.tokenizer.pad_token_id
