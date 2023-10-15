@@ -102,6 +102,7 @@ class MMLUEvaluator(object):
                 .cpu()
                 .numpy()
             )
+
             predictions = [{0: "A", 1: "B", 2: "C", 3: "D"}[p] for p in probs]
             references = labels_text
 
@@ -110,10 +111,10 @@ class MMLUEvaluator(object):
             all_task_names += task_names
 
             eval_metrics = compute_metrics(
-                predictions, [[r] for r in references], reduction="mean"
+                predictions, [[r] for r in references], reduction="none"
             )
 
-            all_EM.append(eval_metrics["exact_match"])
+            all_EM.extend(eval_metrics["exact_match"])
             pbar.set_description(
                 f"Task: {task_names[0] if task_names else None}, EM: {np.mean(all_EM):.4f}"
             )

@@ -5,6 +5,7 @@ import torch
 import copy
 from collections import defaultdict
 from torch import nn
+from mttl.models.llama_patch import replace_attn_with_flash_attn
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.routing import RoutingInfo, RoutingSelector
 from transformers import AutoModelForCausalLM, LlamaForCausalLM
@@ -53,7 +54,9 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
         # enable gradient checkpointing for memory efficiency
         from functools import partial
 
-        notfailing_checkpoint = partial(torch.utils.checkpoint.checkpoint, use_reentrant=False)
+        notfailing_checkpoint = partial(
+            torch.utils.checkpoint.checkpoint, use_reentrant=False
+        )
         torch.utils.checkpoint.checkpoint = notfailing_checkpoint
         model.gradient_checkpointing_enable()
 
@@ -92,6 +95,9 @@ class ExpertTrainer(EfficientCheckpointModule):
             self.model = modify_transformer(model_object, self.hparams)
         else:
             self.model = kwargs.get("model_object")
+
+        # replace w flash attn!
+        replace_attn_with_flash_attn(self.model)
 
         self.loss_plugins = nn.ModuleDict({})
         self.test_results = []
@@ -160,9 +166,7 @@ class ExpertTrainer(EfficientCheckpointModule):
         total_loss = loss
 
         self.log("train/loss", loss, on_step=True, prog_bar=True)
-        self.log(
-            "train/total_loss", total_loss, on_step=True, prog_bar=True
-        )
+        self.log("train/total_loss", total_loss, on_step=True, prog_bar=True)
         for i, pg in enumerate(self.optimizers().optimizer.param_groups):
             self.log(f"train/lr_{i}", pg["lr"])
         return total_loss
@@ -182,11 +186,11 @@ class ExpertTrainer(EfficientCheckpointModule):
 
         self._inference_outputs.clear()
         self.log("val/loss", losses.mean(), on_epoch=True, prog_bar=True)
-        
+
     @property
     def generation_config(self):
         return self.model.generation_config
-    
+
     def generate(
         self,
         batch,
@@ -197,5 +201,7 @@ class ExpertTrainer(EfficientCheckpointModule):
                 batch
             )
 
-        generations = self.model.generate(inputs=batch["input_ids"], **kwargs)
+        generations = self.model.generate(
+            inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
+        )
         return generations
