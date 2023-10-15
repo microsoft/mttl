@@ -1,0 +1,13 @@
+{
+    "type": "QATransformConfig",
+    "model_setting": "platy",
+    "icl_examples": 0,
+    "icl_dataset": "lukaemon/mmlu",
+    "icl_split": "validation",
+    "icl_use_options": true,
+    "num_iterations": 1,
+    "max_context_length": 128,
+    "max_tokens_instruction": 128,
+    "max_tokens_response": 1024,
+    "max_contexts_per_subject": 5000
+}

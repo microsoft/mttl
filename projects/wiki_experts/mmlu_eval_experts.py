@@ -1,13 +1,7 @@
 import os
 import sys
-import json
-import torch
-import wandb
-import logging
-import pytorch_lightning as pl
 from huggingface_hub import login
-from pytorch_lightning import Trainer, seed_everything
-from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning import seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -15,8 +9,8 @@ from mttl.evaluators import MMLUEvaluator
 from mttl.utils import setup_logging, logger
 
 # register models
-from projects.wiki_experts.expert_model import MultiExpertModel
-from projects.wiki_experts.config import ExpertConfig
+from projects.wiki_experts.src.expert_model import MultiExpertModel
+from projects.wiki_experts.src.config import ExpertConfig
 
 
 def parse_experts_to_load(experts_to_load):
@@ -127,7 +121,7 @@ def run_eval(args):
         json.dump(scores, f)
 
     logger.info("MMLU Accuracy: {}".format(scores["all"]["mean"]))
-    for t,v in scores:
+    for t, v in scores.items():
         logger.info("MMLU Accuracy {}: {}".format(t, v["mean"]))
     del module, mmlu
 

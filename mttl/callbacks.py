@@ -1,12 +1,11 @@
 import datetime
 import time
 import sys, os
-from typing import Any, Optional
+from typing import Any
 from pytorch_lightning.utilities.types import STEP_OUTPUT
-import wandb
 
 import pytorch_lightning as pl
-from pytorch_lightning import callbacks as cb
+from pytorch_lightning import LightningModule, Trainer, callbacks as cb
 from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
 
 
@@ -14,13 +13,15 @@ from mttl.utils import Averager, logger
 
 
 class MMLUCallback(cb.Callback):
-    def __init__(self, eval_every, every_val_epochs=1, split="test", **kwargs):
+    def __init__(
+        self, eval_every, every_val_epochs=1, split="test", max_input_length=None
+    ):
         super().__init__()
 
         self.val_epoch = 0
         self.eval_every = eval_every
         self.every_val_epochs = every_val_epochs
-        self.eval_kwargs = kwargs
+        self.max_input_length = max_input_length
         self.evaluator = None
         self.split = split
 
@@ -36,39 +37,58 @@ class MMLUCallback(cb.Callback):
     def on_train_batch_end(
         self, trainer, pl_module, outputs: STEP_OUTPUT, batch: Any, batch_idx: int
     ) -> None:
-        if (
-            trainer.global_step != 0
-            and trainer.global_step % self.eval_every == 0
-            and self.val_epoch % self.every_val_epochs == 0
-        ) or batch_idx == len(trainer.train_dataloader) - 1:
-            self.val_epoch += 1
+        if (batch_idx != 0 and batch_idx % self.eval_every == 0) or batch_idx == len(
+            trainer.train_dataloader
+        ) - 1:
             metrics = self.eval_mmlu(pl_module)
             self.log_metrics(metrics, pl_module)
 
         return super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
 
-    def log_metrics(self, metrics, pl_module: pl.LightningModule):
+    def on_validation_epoch_end(
+        self, trainer: Trainer, pl_module: LightningModule
+    ) -> None:
+        if self.val_epoch % self.every_val_epochs == 0:
+            metrics = self.eval_mmlu(pl_module)
+            self.log_metrics(metrics, pl_module, on_step=False)
+
+        self.val_epoch += 1
+        return super().on_validation_epoch_end(trainer, pl_module)
+
+    def log_metrics(self, metrics, pl_module: pl.LightningModule, on_step=True):
         pl_module.log(
-            f"downstream_{self.split}/mmlu",
+            f"downstream/{self.split}/mmlu",
             metrics["all"]["mean"],
-            on_step=True,
+            on_step=on_step,
+            prog_bar=True,
         )
         for t, v in metrics.items():
             pl_module.log(
-                f"downstream_{self.split}/mmlu_{t}",
+                f"downstream/{self.split}/mmlu_{t}",
                 v["mean"],
-                on_step=True,
+                on_step=on_step,
             )
 
     def eval_mmlu(self, pl_module):
         from mttl.evaluators import MMLUEvaluator
+        from mttl.datamodule.mmlu_data_module import MMLUDataConfig
 
         if self.evaluator is None:
-            self.evaluator = MMLUEvaluator(
-                pl_module.hparams,
-                split=self.split,
-                **self.eval_kwargs,
+            mmlu_data_config = MMLUDataConfig(
+                model=pl_module.hparams.model,
+                predict_batch_size=pl_module.hparams.predict_batch_size,
+                max_input_length=pl_module.hparams.max_input_length
+                if self.max_input_length is None
+                else self.max_input_length,
+                max_output_length=pl_module.hparams.max_input_length,  # not necessary
+                model_family=pl_module.hparams.model_family,
+                finetune_task_name=pl_module.hparams.finetune_task_name,
             )
+            self.evaluator = MMLUEvaluator(
+                mmlu_data_config,
+                split=self.split,
+            )
+
         metrics = self.evaluator.evaluate(pl_module)
         return metrics
 

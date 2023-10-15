@@ -4,7 +4,7 @@ from typing import Dict
 
 from mttl.models.utils import download_from_hub
 from mttl.utils import get_checkpoint_path, logger
-from projects.wiki_experts.config import ExpertConfig
+from projects.wiki_experts.src.config import ExpertConfig
 from dataclasses import dataclass
 
 

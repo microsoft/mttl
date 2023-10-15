@@ -13,18 +13,18 @@ from mttl.datamodule.utils import get_tokenizer
 
 @dataclass
 class DatasetConfig:
+    dataset: str = None
     data_dir: str = None
     model: str = None
-    padding_side: str = None
     train_batch_size: int = None
     predict_batch_size: int = None
     max_input_length: int = None
     max_output_length: int = None
     validation_portion: float = None
+    padding_side: str = "right"
     model_family: str = "gpt"
     train_on_inputs: bool = False
     finetune_task_name: str = None
-    dataset: str = None
 
 
 @dataclass
@@ -63,15 +63,14 @@ class DefaultCollator:
 
     def prepare_inputs_for_seq2seq_family(self, sources, labels):
         output_batch = {}
+
         if self.max_input_length > 0:
-            tokenized_labels = (
-                self.tokenizer(
-                    labels,
-                    max_length=self.max_output_length,
-                    padding=self.padding,
-                    return_tensors=self.return_tensors,
-                    truncation=True,
-                )
+            tokenized_labels = self.tokenizer(
+                labels,
+                max_length=self.max_output_length,
+                padding=self.padding,
+                return_tensors=self.return_tensors,
+                truncation=True,
             )
             tokenized_sources = self.tokenizer(
                 sources,
@@ -82,10 +81,8 @@ class DefaultCollator:
                 pad_to_multiple_of=self.pad_to_multiple_of,
             )
         else:
-            tokenized_labels = (
-                self.tokenizer(
-                    labels, padding="longest", return_tensors=self.return_tensors
-                )
+            tokenized_labels = self.tokenizer(
+                labels, padding="longest", return_tensors=self.return_tensors
             )
             tokenized_sources = self.tokenizer(
                 sources,
@@ -94,10 +91,8 @@ class DefaultCollator:
                 pad_to_multiple_of=self.pad_to_multiple_of,
             )
         label_mask = tokenized_labels["attention_mask"].bool()
-        masked_labels = (
-            tokenized_labels["input_ids"].masked_fill(
-                ~label_mask, self.label_pad_token_id
-            )
+        masked_labels = tokenized_labels["input_ids"].masked_fill(
+            ~label_mask, self.label_pad_token_id
         )
         output_batch["input_ids"] = tokenized_sources["input_ids"]
         output_batch["attention_mask"] = tokenized_sources["attention_mask"]
@@ -117,15 +112,13 @@ class DefaultCollator:
                 return_tensors=self.return_tensors,
                 truncation=True,
             )
-            tok_sources_plus_labels = (
-                self.tokenizer(
-                    [i + t for i, t in zip(sources, labels)],
-                    max_length=self.max_input_length,
-                    padding=self.padding,
-                    return_tensors=self.return_tensors,
-                    truncation=True,
-                    pad_to_multiple_of=self.pad_to_multiple_of,
-                )
+            tok_sources_plus_labels = self.tokenizer(
+                [i + t for i, t in zip(sources, labels)],
+                max_length=self.max_input_length,
+                padding=self.padding,
+                return_tensors=self.return_tensors,
+                truncation=True,
+                pad_to_multiple_of=self.pad_to_multiple_of,
             )
         else:
             tokenized_sources = self.tokenizer(
@@ -133,13 +126,11 @@ class DefaultCollator:
                 padding="longest",
                 return_tensors=self.return_tensors,
             )
-            tok_sources_plus_labels = (
-                self.tokenizer(
-                    [i + t for i, t in zip(sources, labels)],
-                    padding="longest",
-                    return_tensors=self.return_tensors,
-                    pad_to_multiple_of=self.pad_to_multiple_of,
-                )
+            tok_sources_plus_labels = self.tokenizer(
+                [i + t for i, t in zip(sources, labels)],
+                padding="longest",
+                return_tensors=self.return_tensors,
+                pad_to_multiple_of=self.pad_to_multiple_of,
             )
 
         targets = tok_sources_plus_labels["input_ids"].clone()
@@ -168,9 +159,7 @@ class DefaultCollator:
             mask[(torch.arange(mask.shape[0]), offset)] = 1
             mask = mask.cumsum(dim=1).bool()
             mask = mask[:, :-1]
-            targets = (
-                torch.masked_fill(targets, ~mask, self.label_pad_token_id)
-            )
+            targets = torch.masked_fill(targets, ~mask, self.label_pad_token_id)
 
         if getattr(self.tokenizer, "mttl_enforces_eos", False):
             targets = self.enforce_eos(targets)
@@ -219,6 +208,7 @@ class DefaultDataModule(LightningDataModule):
             pin_memory=True,
             persistent_workers=True,
             collate_fn=self.collate_fn,
+            drop_last=False,
         )
 
     def test_dataloader(self):
@@ -230,6 +220,7 @@ class DefaultDataModule(LightningDataModule):
             pin_memory=True,
             persistent_workers=True,
             collate_fn=self.collate_fn,
+            drop_last=False,
         )
 
     @property
@@ -252,6 +243,10 @@ class DefaultDataModule(LightningDataModule):
         logger.info("Validation steps: %s" % len(self.val_dataloader()))
 
     @property
+    def task_names(self):
+        return []
+
+    @property
     def task_to_id(self):
         return {}
 
@@ -260,9 +255,7 @@ class DefaultDataModule(LightningDataModule):
         validation_portion = validation_portion or self.config.validation_portion
 
         rng = torch.Generator().manual_seed(1234)
-        n_tr_samples = int(
-            len(dataset) * (1 - validation_portion)
-        )
+        n_tr_samples = int(len(dataset) * (1 - validation_portion))
 
         train_dataset, dev_dataset = torch.utils.data.random_split(
             dataset,
@@ -274,11 +267,12 @@ class DefaultDataModule(LightningDataModule):
         )
         return train_dataset, dev_dataset
 
-    def __init__(self, config: Union[DatasetConfig, Any]):
+    def __init__(self, config: Union[DatasetConfig, Any], for_generation=False):
         super().__init__()
 
         self.config = config
-        self.tokenizer = get_tokenizer(config)
+        self.for_generation = for_generation
+        self.tokenizer = get_tokenizer(config, for_generation=for_generation)
         self.setup_dataset()
 
     def setup(self, stage=None):

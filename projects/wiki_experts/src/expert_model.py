@@ -1,17 +1,10 @@
 import torch
 
 from mttl.models.modifiers.routing import RoutingInfo
-from transformers import AutoModelForCausalLM, LlamaForCausalLM
 
-from mttl.models.utils import (
-    EfficientCheckpointModule,
-)
-
-from mttl.models.utils import download_from_hub
 from mttl.models.modifiers.experts import add_expert_to_transformer
-from mttl.utils import get_checkpoint_path, logger
-from expert_trainer import ExpertTrainer
-from config import ExpertConfig
+from mttl.utils import logger
+from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 
 
 def push_expert_to_hub(
@@ -63,7 +56,7 @@ class MultiExpertModel(ExpertTrainer):
         self.experts = []
 
     def load_from_graph_string(self, s):
-        from module_graph import ModuleGraph
+        from projects.wiki_experts.src.graph.module_graph import ModuleGraph
 
         graph = ModuleGraph.from_string(s)
         for module_name, module_data in graph.create_modules(
@@ -87,7 +80,7 @@ class MultiExpertModel(ExpertTrainer):
         is_default: bool = False,
         load_only_layers: str = None,
     ):
-        from module_graph import load_expert
+        from projects.wiki_experts.src.graph.module_graph import load_expert
 
         expert = load_expert(expert_path, expert_name=expert_name)
         if self.hparams.model != expert.expert_config.model:

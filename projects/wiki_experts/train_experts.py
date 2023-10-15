@@ -7,11 +7,15 @@ from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint, Callback
 
+
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.callbacks import MMLUCallback
+from mttl.evaluators import MMLUEvaluator
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from mttl.datamodule.oasst1_module import OA1Config, OA1Module
 from mttl.datamodule.retrieval_lm_module import RetrievalLMDataModule
+from mttl.datamodule.facts_lm_module import FactsLMConfig, FactsLMDataModule
 from mttl.datamodule.platypus_module import (
     PlatypusModule,
     PlatypusConfig,
@@ -19,8 +23,27 @@ from mttl.datamodule.platypus_module import (
 )
 from mttl.utils import get_mlf_logger, setup_logging, logger
 
-from projects.wiki_experts.expert_trainer import ExpertTrainer
-from projects.wiki_experts.config import ExpertConfig
+from projects.wiki_experts.src.expert_trainer import ExpertTrainer
+from projects.wiki_experts.src.config import ExpertConfig
+
+
+def eval_mmlu(module, args):
+    mmlu = MMLUEvaluator(
+        args,
+        split=args.mmlu_test_split,
+    )
+    scores = mmlu.evaluate(module)
+    logger.info("MMLU Accuracy: {}".format(scores["all"]["mean"]))
+    for t, v in scores.items():
+        logger.info("MMLU Accuracy {}: {}".format(t, v["mean"]))
+
+    module.log(
+        f"{args.mmlu_test_split}/final_mmlu",
+        scores["all"]["mean"],
+        on_step=True,
+    )
+    for t, v in scores.items():
+        module.log(f"{args.mmlu_test_split}/final_mmlu_{t}", v["mean"], on_step=True)
 
 
 def run_multitask(args):
@@ -37,11 +60,14 @@ def run_multitask(args):
     # select dataloader
     model_class = ExpertTrainer
 
-    if args.dataset.startswith("qa-"):
-        args.dataset = args.dataset.replace("qa-", "")
+    if "qa" in args.dataset:
+        args.dataset = (
+            args.dataset.split("/")[0].replace("qa-", "")
+            + "/"
+            + args.dataset.split("/")[1]
+        )
         config = PlatypusConfig(
             model=args.model,
-            padding_side=args.padding_side,
             train_batch_size=args.train_batch_size,
             predict_batch_size=args.predict_batch_size,
             max_input_length=args.max_input_length,
@@ -53,10 +79,20 @@ def run_multitask(args):
             dataset=args.dataset,
         )
         dm = PlatypusQAModule(config)
+    elif "facts" in args.dataset:
+        config = FactsLMConfig(
+            model=args.model,
+            train_batch_size=args.train_batch_size,
+            predict_batch_size=args.predict_batch_size,
+            max_input_length=args.max_input_length,
+            validation_portion=args.validation_portion,
+            finetune_task_name=args.finetune_task_name,
+            dataset=args.dataset,
+        )
+        dm = FactsLMDataModule(config)
     elif "platypus" in args.dataset:
         config = PlatypusConfig(
             model=args.model,
-            padding_side=args.padding_side,
             train_batch_size=args.train_batch_size,
             predict_batch_size=args.predict_batch_size,
             max_input_length=args.max_input_length,
@@ -70,7 +106,6 @@ def run_multitask(args):
     elif "oa1" in args.dataset:
         config = OA1Config(
             model=args.model,
-            padding_side=args.padding_side,
             train_batch_size=args.train_batch_size,
             predict_batch_size=args.predict_batch_size,
             max_input_length=args.max_input_length,
@@ -82,7 +117,7 @@ def run_multitask(args):
         )
         dm = OA1Module(config)
     else:
-        dm = RetrievalLMDataModule(args)
+        raise ValueError(f"Unknown dataset {args.dataset}")
 
     args.n_tasks = len(dm.task_to_id) if hasattr(dm, "task_to_id") else 0
     module = model_class(**vars(args), tokenizer=dm.tokenizer)
@@ -115,7 +150,8 @@ def run_multitask(args):
     # get metric monitors for models
     callbacks = []
 
-    monitor = "downstream_val/mmlu"
+    # monitor = "val/loss"
+    monitor = "downstream/val/mmlu"
     mode = "max"
 
     model_name = args.model.replace("/", "_")
@@ -143,6 +179,13 @@ def run_multitask(args):
     callbacks.append(MMLUCallback(eval_every=val_check_interval, split="test"))
     callbacks.append(MMLUCallback(eval_every=val_check_interval, split="val"))
 
+    if args.es_patience > 0:
+        callbacks.append(
+            EarlyStopping(
+                monitor=monitor, patience=args.es_patience, mode=mode, verbose=True
+            )
+        )
+
     trainer = Trainer(
         devices=-1,
         accelerator="gpu",
@@ -169,9 +212,13 @@ def run_multitask(args):
     checkpoint = (
         checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
     )
+    # perform final eval on MMLU
+    if checkpoint:
+        module = model_class.load_from_checkpoint(checkpoint).to("cuda")
+        eval_mmlu(module, args)
 
     if args.hf_repo_id and checkpoint:
-        from expert_model import push_expert_to_hub
+        from projects.wiki_experts.src.expert_model import push_expert_to_hub
 
         push_expert_to_hub(checkpoint, args.hf_repo_id, auto_search=False)
 
