@@ -6,8 +6,8 @@ import pytorch_lightning as pl
 
 from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
-from pytorch_lightning.callbacks import ModelCheckpoint, Callback
-
+from pytorch_lightning.callbacks import ModelCheckpoint
+import json
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -26,6 +26,20 @@ from mttl.utils import get_mlf_logger, setup_logging, logger
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
+
+
+class SimpleLogger(pl.loggers.logger.DummyLogger):
+    def __init__(self, output_dir):
+        self.output_file = os.path.join(output_dir, "metrics.json")
+        self.metrics = []
+
+    def log_metrics(self, metrics, step=None):
+        metrics["step"] = step
+        self.metrics.append(metrics)
+
+        with open(self.output_file, "w") as f:
+            for metric in self.metrics:
+                f.write(json.dumps(metric) + "\n")
 
 
 def eval_mmlu(module, args):
@@ -145,7 +159,7 @@ def run_multitask(args):
         tb_logger = pl.loggers.TensorBoardLogger(save_dir=args.output_dir)
         loggers.append(tb_logger)
 
-    loggers.append(pl.loggers.CSVLogger(save_dir=args.output_dir, name="csv_metrics"))
+    loggers.append(SimpleLogger(args.output_dir))
 
     # get metric monitors for models
     callbacks = []
@@ -193,12 +207,12 @@ def run_multitask(args):
         devices=-1,
         accelerator="gpu",
         logger=loggers,
+        log_every_n_steps=1,
         num_sanity_val_steps=0,
         default_root_dir=args.output_dir,
         max_epochs=args.num_train_epochs,
         max_steps=args.total_steps + 1 if args.total_steps != -1 else -1,
         gradient_clip_val=args.max_grad_norm,
-        log_every_n_steps=20,
         strategy=args.compute_strategy if args.compute_strategy else "auto",
         callbacks=callbacks,
         accumulate_grad_batches=args.gradient_accumulation_steps,
