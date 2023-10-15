@@ -57,14 +57,14 @@ class MMLUCallback(cb.Callback):
 
     def log_metrics(self, metrics, pl_module: pl.LightningModule, on_step=True):
         pl_module.log(
-            f"{self.split}/mmlu",
+            f"downstream/{self.split}/mmlu",
             metrics["all"]["mean"],
             on_step=on_step,
             prog_bar=True,
         )
         for t, v in metrics.items():
             pl_module.log(
-                f"{self.split}/mmlu_{t}",
+                f"downstream/{self.split}/mmlu_{t}",
                 v["mean"],
                 on_step=on_step,
             )
