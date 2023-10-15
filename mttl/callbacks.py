@@ -1,6 +1,7 @@
 import datetime
 import time
 import sys, os
+import copy
 from typing import Any
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
@@ -32,8 +33,9 @@ class MMLUCallback(cb.Callback):
     ) -> None:
         if trainer.global_step % self.eval_every_opt_step == 0:
             metrics = self.eval_mmlu(pl_module)
+            if self.base_perf is None:
+                self.base_perf = copy.deepcopy(metrics)
             self.log_metrics(metrics, pl_module)
-            self.base_perf = metrics if self.base_perf is None else self.base_perf
 
         return super().on_before_optimizer_step(trainer, pl_module, optimizer)
 
