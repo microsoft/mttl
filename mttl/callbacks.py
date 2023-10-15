@@ -13,14 +13,10 @@ from mttl.utils import Averager, logger
 
 
 class MMLUCallback(cb.Callback):
-    def __init__(
-        self, eval_every, every_val_epochs=1, split="test", max_input_length=None
-    ):
+    def __init__(self, eval_every, split="test", max_input_length=None):
         super().__init__()
 
-        self.val_epoch = 0
         self.eval_every = eval_every
-        self.every_val_epochs = every_val_epochs
         self.max_input_length = max_input_length
         self.evaluator = None
         self.split = split
