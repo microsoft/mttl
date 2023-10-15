@@ -154,8 +154,12 @@ def run_multitask(args):
     callbacks = []
 
     # monitor = "val/loss"
-    monitor = "downstream/val/mmlu"
-    mode = "max"
+    criteria = {
+        "downstream/val/mmlu": "max",
+        "val/loss": "min",
+    }
+    monitor = args.selection_criteria
+    mode = criteria[monitor]
 
     model_name = args.model.replace("/", "_")
     exp_name = os.environ.get("AMLT_JOB_NAME", args.exp_name)
