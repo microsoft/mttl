@@ -195,8 +195,8 @@ def run_multitask(args):
         elif val_check_interval > args.total_steps and args.total_steps != -1:
             val_check_interval = args.total_steps
 
-    callbacks.append(MMLUCallback(split="test"))
-    callbacks.append(MMLUCallback(split="val"))
+    callbacks.append(MMLUCallback(val_check_interval, split="test"))
+    callbacks.append(MMLUCallback(val_check_interval, split="val"))
 
     if args.es_patience > 0:
         callbacks.append(
