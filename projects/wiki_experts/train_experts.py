@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import wandb
 import pytorch_lightning as pl
 
 from huggingface_hub import login
@@ -27,7 +28,7 @@ from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
 
 
-def eval_mmlu(module, args, logger_function):
+def eval_mmlu(module, args):
     mmlu = MMLUEvaluator(
         args,
         split=args.mmlu_test_split,
@@ -36,16 +37,9 @@ def eval_mmlu(module, args, logger_function):
     logger.info("MMLU Accuracy: {}".format(scores["all"]["mean"]))
     for t, v in scores.items():
         logger.info("MMLU Accuracy {}: {}".format(t, v["mean"]))
-
-    logger_function(
-        f"{args.mmlu_test_split}/final_mmlu",
-        scores["all"]["mean"],
-        on_step=True,
-    )
-    for t, v in scores.items():
-        logger_function(
-            f"{args.mmlu_test_split}/final_mmlu_{t}", v["mean"], on_step=True
-        )
+    # super hard to log with pllogger here
+    if wandb.run is not None:
+        wandb.log({"downstream/mmlu_test_best_model": scores["all"]["mean"]})
 
 
 def run_multitask(args):
@@ -223,7 +217,7 @@ def run_multitask(args):
     # perform final eval on MMLU
     if checkpoint:
         module = model_class.load_from_checkpoint(checkpoint).to("cuda")
-        eval_mmlu(module, args, logger_function=module.log)
+        eval_mmlu(module, args)
 
     if args.hf_repo_id and checkpoint:
         from projects.wiki_experts.src.expert_model import push_expert_to_hub

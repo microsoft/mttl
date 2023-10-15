@@ -25,10 +25,13 @@ class MMLUCallback(cb.Callback):
         self.evaluator = None
         self.split = split
 
+        # debug
+        self.eval_mmlu_count = 0
+
     def on_train_batch_start(
         self, trainer, pl_module, batch: Any, batch_idx: int
     ) -> None:
-        if batch_idx == 0:
+        if batch_idx == 0 and trainer.global_step == 0:
             metrics = self.eval_mmlu(pl_module)
             self.log_metrics(metrics, pl_module)
 
@@ -45,16 +48,6 @@ class MMLUCallback(cb.Callback):
 
         return super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
 
-    def on_validation_epoch_end(
-        self, trainer: Trainer, pl_module: LightningModule
-    ) -> None:
-        if self.val_epoch % self.every_val_epochs == 0:
-            metrics = self.eval_mmlu(pl_module)
-            self.log_metrics(metrics, pl_module, on_step=False)
-
-        self.val_epoch += 1
-        return super().on_validation_epoch_end(trainer, pl_module)
-
     def log_metrics(self, metrics, pl_module: pl.LightningModule, on_step=True):
         pl_module.log(
             f"downstream/{self.split}/mmlu",
@@ -69,9 +62,13 @@ class MMLUCallback(cb.Callback):
                 on_step=on_step,
             )
 
-    def eval_mmlu(self, pl_module):
+    def eval_mmlu(self, pl_module, debug=False):
         from mttl.evaluators import MMLUEvaluator
         from mttl.datamodule.mmlu_data_module import MMLUDataConfig
+
+        if debug:
+            self.eval_mmlu_count += 1
+            return {"all": {"mean": self.eval_mmlu_count}}
 
         if self.evaluator is None:
             mmlu_data_config = MMLUDataConfig(
