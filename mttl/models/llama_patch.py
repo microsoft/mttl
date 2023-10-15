@@ -1,8 +1,9 @@
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 import torch
 from torch import nn
 import warnings
+
 import transformers
 from transformers.models.llama.modeling_llama import (
     apply_rotary_pos_emb,
@@ -20,17 +21,11 @@ try:
         flash_attn_func,
     )
     from flash_attn.bert_padding import unpad_input, pad_input
-except Exception:
-    raise ModuleNotFoundError(
-        "Please install FlashAttention first, e.g., with pip install flash-attn --no-build-isolation, Learn more at https://github.com/Dao-AILab/flash-attention#installation-and-features"
-    )
-
-try:
     from einops import rearrange
+
+    flash_attn_disabled = False
 except Exception:
-    raise ModuleNotFoundError(
-        "Please install einops first, e.g., with pip install einops"
-    )
+    flash_attn_disabled = True
 
 
 def compute_flash_attention(flash_attn, q, k, v, attention_mask=None, head_mask=None):
@@ -234,18 +229,29 @@ def llama_forward_with_flash_attn(
 
 
 def replace_attn_with_flash_attn(module):
-    from flash_attn.modules.mha import FlashSelfAttention
-    from functools import partial
+    from mttl.utils import logger
 
-    cuda_major, cuda_minor = torch.cuda.get_device_capability()
-    if cuda_major < 8:
-        print(
-            "Flash attention is only supported on Ampere or Hopper GPU during training due to head dim > 64 backward."
-            "ref: https://github.com/HazyResearch/flash-attention/issues/190#issuecomment-1523359593"
+    if flash_attn_disabled:
+        logger.warn(
+            "FlashAttention not found, skipping replacing attn with flash attn."
         )
+    else:
+        from flash_attn.modules.mha import FlashSelfAttention
+        from functools import partial
 
-    for name, module in module.named_modules():
-        if isinstance(module, transformers.models.llama.modeling_llama.LlamaAttention):
-            flash_attn = FlashSelfAttention(causal=True)
-            module.old_forward = module.forward
-            module.forward = partial(llama_forward_with_flash_attn, module, flash_attn)
+        cuda_major, cuda_minor = torch.cuda.get_device_capability()
+        if cuda_major < 8:
+            print(
+                "Flash attention is only supported on Ampere or Hopper GPU during training due to head dim > 64 backward."
+                "ref: https://github.com/HazyResearch/flash-attention/issues/190#issuecomment-1523359593"
+            )
+
+        for name, module in module.named_modules():
+            if isinstance(
+                module, transformers.models.llama.modeling_llama.LlamaAttention
+            ):
+                flash_attn = FlashSelfAttention(causal=True)
+                module.old_forward = module.forward
+                module.forward = partial(
+                    llama_forward_with_flash_attn, module, flash_attn
+                )
