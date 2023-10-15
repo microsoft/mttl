@@ -22,6 +22,8 @@ class MMLUCallback(cb.Callback):
         self.evaluator = None
         self.split = split
 
+        # save first MMLU value
+        self.base_perf = None
         # debug
         self.eval_mmlu_count = 0
 
@@ -31,6 +33,8 @@ class MMLUCallback(cb.Callback):
         if trainer.global_step % self.eval_every_opt_step == 0:
             metrics = self.eval_mmlu(pl_module)
             self.log_metrics(metrics, pl_module)
+            self.base_perf = metrics if self.base_perf is None else self.base_perf
+
         return super().on_before_optimizer_step(trainer, pl_module, optimizer)
 
     def log_metrics(self, metrics, pl_module: pl.LightningModule, on_step=True):

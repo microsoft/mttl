@@ -42,7 +42,7 @@ class SimpleLogger(pl.loggers.logger.DummyLogger):
                 f.write(json.dumps(metric) + "\n")
 
 
-def eval_mmlu(module, args):
+def eval_mmlu(module, args, base_perf=None):
     mmlu = MMLUEvaluator(
         args,
         split=args.mmlu_test_split,
@@ -53,7 +53,19 @@ def eval_mmlu(module, args):
         logger.info("MMLU Accuracy {}: {}".format(t, v["mean"]))
     # super hard to log with pllogger here
     if wandb.run is not None:
-        wandb.log({"downstream/mmlu_test_best_model": scores["all"]["mean"]})
+        wandb.log({"downstream_best/mmlu_test_best_model": scores["all"]["mean"]})
+        scores.pop("all")
+        for t, v in scores.items():
+            wandb.log({"downstream_best/mmlu_test_best_model_" + t: v["mean"]})
+    if base_perf is not None:
+        improvement = {m: scores[m]["mean"] - base_perf[m]["mean"] for m in scores}
+        if wandb.run is not None:
+            wandb.log({"downstream_best/mmlu_test_improvement": improvement["all"]})
+            improvement.pop("all")
+            for t, v in improvement.items():
+                wandb.log(
+                    {"downstream_best/mmlu_test_improvement_" + t: improvement[t]}
+                )
 
 
 def run_multitask(args):
@@ -195,8 +207,9 @@ def run_multitask(args):
         elif val_check_interval > args.total_steps and args.total_steps != -1:
             val_check_interval = args.total_steps
 
-    callbacks.append(MMLUCallback(val_check_interval, split="test"))
-    callbacks.append(MMLUCallback(val_check_interval, split="val"))
+    mmlu_test_cb = MMLUCallback(args.eval_every, split="test")
+    mmmlu_val_cb = MMLUCallback(args.eval_every, split="val")
+    callbacks += [mmlu_test_cb, mmmlu_val_cb]
 
     if args.es_patience > 0:
         callbacks.append(
@@ -235,7 +248,7 @@ def run_multitask(args):
     # perform final eval on MMLU
     if checkpoint:
         module = model_class.load_from_checkpoint(checkpoint).to("cuda")
-        eval_mmlu(module, args)
+        eval_mmlu(module, args, mmlu_test_cb.base_perf)
 
     if args.hf_repo_id and checkpoint:
         from projects.wiki_experts.src.expert_model import push_expert_to_hub
