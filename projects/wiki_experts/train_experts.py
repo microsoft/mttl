@@ -188,10 +188,12 @@ def run_multitask(args):
     val_check_interval = args.eval_every
     if val_check_interval == -1:
         val_check_interval = None
-    elif val_check_interval > len(dm.train_dataloader()):
-        val_check_interval = len(dm.train_dataloader())
-    elif val_check_interval > args.total_steps and args.total_steps != -1:
-        val_check_interval = args.total_steps
+    else:
+        val_check_interval = args.gradient_accumulation_steps * args.eval_every
+        if val_check_interval > len(dm.train_dataloader()):
+            val_check_interval = len(dm.train_dataloader())
+        elif val_check_interval > args.total_steps and args.total_steps != -1:
+            val_check_interval = args.total_steps
 
     callbacks.append(MMLUCallback(eval_every=val_check_interval, split="test"))
     callbacks.append(MMLUCallback(eval_every=val_check_interval, split="val"))

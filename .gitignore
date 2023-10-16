@@ -162,3 +162,5 @@ _*/*
 _*/
 !__init__.py
 !*/__init__.py
+*/my_configs/*
+my_configs
