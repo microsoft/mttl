@@ -254,7 +254,6 @@ class DefaultDataModule(LightningDataModule):
         # always use the same split for the dataset
         validation_portion = validation_portion or self.config.validation_portion
 
-        rng = torch.Generator().manual_seed(1234)
         n_tr_samples = int(len(dataset) * (1 - validation_portion))
 
         train_dataset, dev_dataset = torch.utils.data.random_split(
@@ -263,14 +262,17 @@ class DefaultDataModule(LightningDataModule):
                 n_tr_samples,
                 len(dataset) - n_tr_samples,
             ],
-            generator=rng,
+            generator=self.rng,
         )
         return train_dataset, dev_dataset
 
-    def __init__(self, config: Union[DatasetConfig, Any], for_generation=False):
+    def __init__(
+        self, config: Union[DatasetConfig, Any], for_generation=False, val_mixin=None
+    ):
         super().__init__()
-
+        self.rng = torch.Generator().manual_seed(1234)
         self.config = config
+        self.val_mixin = val_mixin
         self.for_generation = for_generation
         self.tokenizer = get_tokenizer(config, for_generation=for_generation)
         self.setup_dataset()

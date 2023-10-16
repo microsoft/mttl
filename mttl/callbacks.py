@@ -13,9 +13,17 @@ from torch.optim import Optimizer
 
 from mttl.utils import Averager, logger
 
+DEBUG = False
+
 
 class MMLUCallback(cb.Callback):
-    def __init__(self, eval_every_opt_step=1, split="test", max_input_length=None):
+    def __init__(
+        self,
+        eval_every_opt_step=1,
+        split="test",
+        max_input_length=None,
+        checkpoint_oracle=True,
+    ):
         super().__init__()
 
         self.eval_every_opt_step = eval_every_opt_step
@@ -25,8 +33,30 @@ class MMLUCallback(cb.Callback):
 
         # save first MMLU value
         self.base_perf = None
+        # save best perf
+        self._best_perf = None
+        # checkpointing
+        self.do_checkpoint = checkpoint_oracle
+        self._checkpoint_now = False
+        self._prev_checkpoint = None
         # debug
         self.eval_mmlu_count = 0
+
+    @property
+    def best_perf(self):
+        return self._best_perf
+
+    @best_perf.setter
+    def best_perf(self, value):
+        if self._best_perf is None:
+            self._best_perf = value
+            self._checkpoint_now = True
+        else:
+            if value["all"]["mean"] > self._best_perf["all"]["mean"]:
+                self._checkpoint_now = True
+            for (k1, v1), (k2, v2) in zip(self._best_perf.items(), value.items()):
+                if v2["mean"] > v1["mean"]:
+                    self._best_perf[k1] = v2
 
     def on_before_optimizer_step(
         self, trainer: Trainer, pl_module: LightningModule, optimizer: Optimizer
@@ -35,18 +65,48 @@ class MMLUCallback(cb.Callback):
             metrics = self.eval_mmlu(pl_module)
             if self.base_perf is None:
                 self.base_perf = copy.deepcopy(metrics)
+            self.best_perf = copy.deepcopy(metrics)
+            self.maybe_checkpoint_now(trainer)
             self.log_metrics(metrics, pl_module)
 
         return super().on_before_optimizer_step(trainer, pl_module, optimizer)
 
+    def maybe_checkpoint_now(self, trainer):
+        if self.do_checkpoint:
+            dir_name = trainer.checkpoint_callback.dirpath
+            filename = (
+                trainer.checkpoint_callback.filename.split("{")[0]
+                + f"mmlu_{self.split}_oracle"
+                + f"{self.best_perf['all']['mean']:.004f}.ckpt"
+            )
+            ckpt_path = os.path.join(dir_name, filename)
+            trainer.save_checkpoint(ckpt_path)
+            if self._prev_checkpoint is not None:
+                os.remove(self._prev_checkpoint)
+            self._prev_checkpoint = ckpt_path
+        self._checkpoint_now = False
+
+    def on_validation_epoch_end(
+        self, trainer: Trainer, pl_module: LightningModule
+    ) -> None:
+        # log best and base perf
+        if self.base_perf is not None:
+            for t, v in self.base_perf.items():
+                pl_module.log(
+                    f"downstream_init/{self.split}/mmlu_{t}",
+                    v["mean"],
+                    on_epoch=True,
+                )
+        if self.best_perf is not None:
+            for t, v in self.best_perf.items():
+                pl_module.log(
+                    f"downstream_best/{self.split}/oracle/mmlu_{t}",
+                    v["mean"],
+                    on_epoch=True,
+                )
+        return super().on_validation_epoch_end(trainer, pl_module)
+
     def log_metrics(self, metrics, pl_module: pl.LightningModule, on_step=True):
-        pl_module.log(
-            f"downstream/{self.split}/mmlu",
-            metrics["all"]["mean"],
-            on_step=on_step,
-            prog_bar=True,
-        )
-        metrics.pop("all")
         for t, v in metrics.items():
             pl_module.log(
                 f"downstream/{self.split}/mmlu_{t}",
@@ -54,11 +114,11 @@ class MMLUCallback(cb.Callback):
                 on_step=on_step,
             )
 
-    def eval_mmlu(self, pl_module, debug=False):
+    def eval_mmlu(self, pl_module):
         from mttl.evaluators import MMLUEvaluator
         from mttl.datamodule.mmlu_data_module import MMLUDataConfig
 
-        if debug:
+        if DEBUG:
             self.eval_mmlu_count += 1
             return {"all": {"mean": self.eval_mmlu_count}}
 
@@ -78,7 +138,7 @@ class MMLUCallback(cb.Callback):
                 split=self.split,
             )
 
-        metrics = self.evaluator.evaluate(pl_module)
+        metrics = self.evaluator.evaluate(pl_module, subsample=10)
         return metrics
 
 

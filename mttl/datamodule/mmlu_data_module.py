@@ -92,7 +92,9 @@ class MMLUDataModule(DefaultDataModule):
             from mttl.datamodule import take_n_examples_per_task
 
             indices = take_n_examples_per_task(
-                list(self.test_dataset["Task"]), n=subsample, rng=self.rng
+                list(self.test_dataset["Task"]),
+                n=subsample,
+                rng=self.rng if isinstance(self.rng, np.random.RandomState) else None,
             )
             test_dataset = self.test_dataset.select(indices)
         else:

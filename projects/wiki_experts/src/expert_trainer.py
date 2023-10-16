@@ -180,7 +180,7 @@ class ExpertTrainer(EfficientCheckpointModule):
     def on_validation_epoch_end(self):
         from itertools import chain
 
-        outputs = self._inference_outputs
+        outputs = self._inference_outputsx
         losses = torch.cat([out[0] for out in outputs], 0)
 
         self._inference_outputs.clear()

@@ -1,6 +1,11 @@
 import torch
-from datasets import load_dataset, concatenate_datasets, get_dataset_config_names
-
+from datasets import (
+    load_dataset,
+    concatenate_datasets,
+    get_dataset_config_names,
+    Dataset,
+)
+import numpy as np
 from mttl.dataloader.data_utils import ExampleInfo
 from mttl.utils import hash_example, logger
 
@@ -12,7 +17,7 @@ class PlatypusTemplate:
             prompt = f"Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.\n\n### Instruction:\n{instruction}\n\n### Input:\n{input}\n\n### Response:\n"
         else:
             prompt = f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n### Instruction:\n{instruction}\n\n### Response:\n"
-        return prompt            
+        return prompt
 
 
 class InversePlatypusTemplate:
@@ -47,9 +52,7 @@ class PlatypusDataset(torch.utils.data.dataset.Dataset):
     def __getitem__(self, key):
         entry = self.dataset[key]
 
-        source = PlatypusTemplate.apply(
-            entry["instruction"], entry["input"]
-        )
+        source = PlatypusTemplate.apply(entry["instruction"], entry["input"])
         labels = entry["output"]
         hash = hash_example(source)
         instruction_hash = hash_example(entry["instruction"])
@@ -73,12 +76,46 @@ class PlatypusDataset(torch.utils.data.dataset.Dataset):
         return all_instructions
 
 
+def preprocess(mix_in: Dataset):
+    import pandas as pd
+
+    if mix_in is None:
+        return None
+    mapping = {
+        "Task": "subject",
+        "Input": "instruction",
+        "Output": "response",
+    }
+    new_dsts = {}
+    unique_subjects = np.unique(mix_in["Task"])
+    for subject in unique_subjects:
+        samples = []
+        for sample in mix_in.filter(lambda x: x["Task"] == subject):
+            new_sample = {mapping[k]: v for k, v in sample["Instance"].items()}
+            new_sample["subject"] = subject
+            samples.append(new_sample)
+            positive_examples = sample["Positive Examples"]
+            example_samples = positive_examples.split("\n\n")
+            for ex in example_samples:
+                if len(ex) == 0:
+                    continue
+                ex = {
+                    "instruction": ex.split("\nAnswer:")[0],
+                    "response": ex.split("\nAnswer:")[1],
+                }
+                if ex not in samples:
+                    samples.append(ex)
+        new_dsts[subject] = Dataset.from_pandas(pd.DataFrame(data=samples))
+    return new_dsts
+
+
 class PlatypusQADataset(torch.utils.data.dataset.Dataset):
     def __init__(
         self,
         data_dir: str = None,
         dataset_name: str = None,
         filter_by_subject: str = None,
+        val_mixin: Dataset = None,
     ):
         super().__init__()
 
@@ -91,6 +128,17 @@ class PlatypusQADataset(torch.utils.data.dataset.Dataset):
         for task_name in task_names:
             datasets_.append(load_dataset(dataset_name, split=task_name))
         self.dataset = concatenate_datasets(datasets_)
+        self.val_mixin = preprocess(val_mixin)
+        self.mixin_idxs = None
+        if self.val_mixin is not None:
+            if filter_by_subject is not None:
+                val_mixins = [self.val_mixin[sub] for sub in task_names]
+            else:
+                val_mixins = [v for k, v in self.val_mixin.items()]
+            self.val_mixin = concatenate_datasets(val_mixins)
+            self.dataset = concatenate_datasets([self.dataset, self.val_mixin])
+            len_mixin = len(self.val_mixin)
+            self.mixin_idxs = torch.arange(len(self.dataset))[-len_mixin:]
         logger.info(self[0])
 
     def __len__(self):
