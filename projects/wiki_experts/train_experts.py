@@ -30,16 +30,16 @@ from projects.wiki_experts.src.config import ExpertConfig
 
 class SimpleLogger(pl.loggers.logger.DummyLogger):
     def __init__(self, output_dir):
+        self.metrics = {}
         self.output_file = os.path.join(output_dir, "metrics.json")
-        self.metrics = []
 
     def log_metrics(self, metrics, step=None):
-        metrics["step"] = step
-        self.metrics.append(metrics)
-
+        for k, v in metrics.items():
+            if k not in self.metrics:
+                self.metrics[k] = []
+            self.metrics[k].append({"step": step, "value": v})
         with open(self.output_file, "w") as f:
-            for metric in self.metrics:
-                f.write(json.dumps(metric) + "\n")
+            json.dump(self.metrics, f)
 
 
 def eval_mmlu(module, args):
