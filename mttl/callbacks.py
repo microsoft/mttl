@@ -76,13 +76,16 @@ class MMLUCallback(cb.Callback):
             dir_name = trainer.checkpoint_callback.dirpath
             filename = (
                 trainer.checkpoint_callback.filename.split("{")[0]
-                + f"mmlu_{self.split}_oracle"
+                + f"mmlu_{self.split}_oracle/"
                 + f"{self.best_perf['all']['mean']:.004f}.ckpt"
             )
             ckpt_path = os.path.join(dir_name, filename)
             trainer.save_checkpoint(ckpt_path)
             if self._prev_checkpoint is not None:
-                os.remove(self._prev_checkpoint)
+                try:
+                    os.remove(self._prev_checkpoint)
+                except:
+                    pass
             self._prev_checkpoint = ckpt_path
         self._checkpoint_now = False
 
