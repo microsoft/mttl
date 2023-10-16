@@ -18,13 +18,14 @@ def modify_with_soft_prompt(transformer, config, layer_type):
         transformer, PreTrainedModel
     ), "Transformer must be a PreTrainedModel."
 
-    old_enc_fwd = transformer.encoder.forward
-    old_dec_fwd = transformer.decoder.forward
+    for param in transformer.parameters():
+        param.requires_grad = False
+
     task_id_container = transformer.task_id_container
 
     input_embeddings = transformer.get_input_embeddings()
     config.vocab_embed_dim = input_embeddings.embedding_dim
-    config.soft_prompt_length = 20
+    config.soft_prompt_length = 100
 
     soft_prompt = layer_type(
         config=config,
@@ -83,50 +84,54 @@ def modify_with_soft_prompt(transformer, config, layer_type):
             kwargs["encoder_attention_mask"] = enc_attn_mask
 
         return old_dec_fwd(*args, **kwargs)
-
+    
     def forward_wrapper(*args, **kwargs):
         # get `input_ids`
+        assert len(args) <= 1, "should have at most `input_ids`"
 
-        breakpoint()
-        assert args == (), "Only supports forward pass with named arguments."
-
-        if "encoder_outputs" in kwargs:
-            return old_fwd(*args, **kwargs)
-
-        input_ids = kwargs["input_ids"]
+        if len(args) == 1:
+            input_ids = args[0]
+        else:
+            input_ids = kwargs.pop("input_ids")
+        
         attention_mask = kwargs.get("attention_mask", None)
+        input_embeds = transformer.get_input_embeddings()(input_ids)
 
-        embeddings = transformer.get_input_embeddings()(input_ids)
+        soft_prompts = soft_prompt(input_ids)
 
-        if attention_mask is not None:
-            print("hello")
-            # kwargs['attention_mask'] = attention_mask
+        # preprend the soft prompt
+        input_embeds = torch.cat((soft_prompts, input_embeds), dim=1)
 
-        # get embeddings from soft prompt
-        # concat with input_ids
-        # kwargs["input_ids"] = torch.cat([embeddings, kwargs["input_ids"]], dim=-1)
+        # expand the attention mask
+        attention_mask = torch.cat(
+            (torch.ones_like(soft_prompts[:, :, 0]), attention_mask), dim=1
+        )
 
-        # call the original forward pass
-        out = old_fwd(*args, **kwargs)
+        kwargs["attention_mask"] = attention_mask
+        kwargs["inputs_embeds"] = input_embeds
+
+        out = old_fwd(*(), **kwargs)
+
+        # We need to remove remove the soft prompt so as to preserve 
+        # alignment with the labels
+        out.logits = out.logits[:, config.soft_prompt_length:, :]
+
+        # TODO: are we missing something else ?
+
         return out
 
-    # replace the forward pass
-    # transformer.forward = forward_wrapper
-    transformer.encoder.forward = encoder_forward_wrapper
-    transformer.decoder.forward = decoder_forward_wrapper
+    if hasattr(transformer, 'encoder'):
+        # seq-2-seq model
+        old_enc_fwd = transformer.encoder.forward
+        old_dec_fwd = transformer.decoder.forward
+        transformer.encoder.forward = encoder_forward_wrapper
+        transformer.decoder.forward = decoder_forward_wrapper
+    else:
+        # decoder-only model 
+        old_fwd = transformer.forward
+        transformer.forward = forward_wrapper 
 
     return transformer
-
-    # fetch the vocab layer
-    embed_tokens = transformer.model.get_input_embeddings()
-
-    wrapper = soft_prompt_cls(embed_tokens, config)
-
-    # replace the vocab layer
-    transformer.model.embed_tokens = wrapper
-
-    return transformer
-
 
 @register_modifier("soft_propmpt_routing")
 def modify_with_soft_prompt_routing(transformer, config):
@@ -146,12 +151,12 @@ class SoftPrompt(nn.Module):
         self.embed_dim = config.vocab_embed_dim
         self.prompt_length = config.soft_prompt_length
 
+        base_input_embeddings = base_input_embeddings.cpu()
         self.embedding = nn.Embedding(self.prompt_length, self.embed_dim)
 
         # initialize from the base model
-        mean, std = base_input_embeddings.weight.mean(
-            0
-        ), base_input_embeddings.weight.std(0)
+        mean = base_input_embeddings.weight.mean(0)
+        std = base_input_embeddings.weight.std(0)
 
         # TODO: Revisit this initialization
         new_weight = torch.randn_like(self.embedding.weight) * (std / 2) + mean
