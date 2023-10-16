@@ -82,31 +82,28 @@ class OAITemplate:
         return data
 
     @classmethod
-    def apply(cls, output, input=None, icl_examples=None):
-        task_description = (
-            "\nYour task is to generate clear, comprehensive, and precise instructions."
-        )
+    def apply(cls, context, output, icl_examples=None):
+        task_description = "\nYour task is to generate a clear, comprehensive and context-independent instruction that can be followed without relying on external information."
         if icl_examples is not None:
-            task_description += f"\n\n Here are examples of good instructions that you should imitate:\n"
+            task_description += f"\n\n Here are examples of some good, strive to match the style, tone, and length of these examples:\n"
             for icl_example in icl_examples:
                 task_description += f"\n### Instruction:\n{icl_example}"
             task_description += "\n\n"
 
-        task_description += "\n\nDomain context:"
-        task_description += f"\n\n{output}"
-
         task_description += (
-            "\nWrite an instruction suitable for the given context. "
-            "Ensure it's complete, precise, and stands alone, without relying on provided context."
+            "\n\nYour instruction should be grounded in the follwoing context:"
         )
+        task_description += f"\n\n{context}"
 
-        if icl_examples is not None:
-            task_description += (
-                " Strive to match the style, tone, and length of the previous examples."
-            )
+        # task_description += (
+        #     "\nWrite an instruction suitable for this given context. "
+        #     "Ensure it's complete, precise, and stands alone, without relying on provided context."
+        # )
 
-        task_description += "\nRemember to also provide a concise response to the generated instruction.\
-            Format your ourput as follows: ### Instruction: <your instruction> ### Response: <your response>."
+        task_description += "\Also provide a concise response to the generated instruction.\
+            \nRemember, your should generate one instruction reponse pair. Your instruction should be clear and comprehensive and should be suitable for the given context. Your instruction must be complete, meaning that is must contain all the neccessary context to follow.\
+            \nPlease follow these guidelines when generating instructions and answers. Your role is vital in maintaining high standards of communication effectiveness.\
+            \nFormat your ourput as follows: ### Instruction: <your instruction> ### Response: <your response>."
         return task_description
 
 
@@ -128,7 +125,13 @@ QA_MODEL_SETTINGS = {
         model_path="sordonia/llama2-13b-platypus",
         instruction_template=QAPlatyInstructionGenerationTemplate(),
         response_template=QAPlatyResponseGenerationTemplate(),
-    )
+    ),
+    "openai": QAModelSetting(
+        inverse_model_path="gpt-35-turbo",
+        model_path="gpt-35-turbo",
+        instruction_template=OAITemplate(),
+        response_template=OAITemplate(),
+    ),
 }
 
 
