@@ -11,10 +11,11 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.callbacks import MMLUCallback, MiniProgress
+from mttl.callbacks import MMLUCallback, MiniProgress, NICallback
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.platypus_module import PlatypusModule
 from mttl.datamodule.flan100k_module import Flan100kModule
+from mttl.datamodule.ni_original_data_module import NIOriginalDataModule
 from mttl.utils import get_mlf_logger, setup_logging, logger
 from mttl.dist_utils import is_main_process
 from mttl.models.modifiers.routing import RoutingSelector
@@ -169,6 +170,8 @@ def run_multitask(args):
         dm = PlatypusModule(args)
     elif args.dataset == "flan100k":
         dm = Flan100kModule(args)
+    elif args.dataset == "ni":
+        dm = NIOriginalDataModule(args)
     else:
         raise NotImplementedError()
 
@@ -233,6 +236,7 @@ def run_multitask(args):
     callbacks.append(SelectorMetricsLog())
     if args.mmlu_callback:
         callbacks.append(MMLUCallback(5))
+        callbacks.append(NICallback(5))
 
     trainer = Trainer(
         devices=-1,
