@@ -42,13 +42,14 @@ class SimpleLogger(pl.loggers.logger.DummyLogger):
             json.dump(self.metrics, f)
 
 
-def eval_mmlu(module, args, base_perf=None):
+def eval_mmlu(module, args, base_perf=None, chkpt_crit="val/loss"):
     mmlu = MMLUEvaluator(
         args,
         split=args.mmlu_test_split,
     )
     scores = mmlu.evaluate(module)
-    logger.info("MMLU Accuracy: {}".format(scores["all"]["mean"]))
+    print(f"Evaluating final checkpoint with selection criteria {chkpt_crit}")
+    logger.info("Final MMLU Accuracy: {}".format(scores["all"]["mean"]))
     for t, v in scores.items():
         logger.info("MMLU Accuracy {}: {}".format(t, v["mean"]))
     # super hard to log with pllogger here
@@ -60,14 +61,20 @@ def eval_mmlu(module, args, base_perf=None):
             if m in base_perf
         }
     if wandb.run is not None:
-        wandb.log({"downstream_best/test/es/mmlu_": scores["all"]["mean"]})
+        # perf of the final selected checkpoint (val/loss)
+        wandb.log(
+            {f"downstream_best/test/es_{chkpt_crit}/mmlu_": scores["all"]["mean"]}
+        )
         scores.pop("all")
         for t, v in scores.items():
-            wandb.log({"downstream_best/test/es/mmlu_" + t: v["mean"]})
+            wandb.log({f"downstream_best/test/es_{chkpt_crit}//mmlu_" + t: v["mean"]})
         if improvement is not None:
             for t, v in improvement.items():
                 wandb.log(
-                    {"downstream_best/test/es/mmlu_improvement_" + t: improvement[t]}
+                    {
+                        f"downstream_best/test/es_{chkpt_crit}/mmlu_improvement_"
+                        + t: improvement[t]
+                    }
                 )
 
 
@@ -241,10 +248,14 @@ def run_multitask(args):
         checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
     )
 
-    # perform final eval on MMLU
+    # perform final evals on MMLU
+    # for oracle
+
+    # for best model selected with mmlu/val
+
     if checkpoint:
         module = model_class.load_from_checkpoint(checkpoint).to("cuda")
-        eval_mmlu(module, args, mmlu_test_cb.base_perf)
+        eval_mmlu(module, args, mmlu_test_cb.base_perf, chkpt_crit=monitor)
 
     if args.hf_repo_id and checkpoint:
         from projects.wiki_experts.src.expert_model import push_expert_to_hub
