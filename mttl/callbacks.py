@@ -141,7 +141,7 @@ class MMLUCallback(cb.Callback):
                 split=self.split,
             )
 
-        metrics = self.evaluator.evaluate(pl_module, subsample=10)
+        metrics = self.evaluator.evaluate(pl_module)
         return metrics
 
 
