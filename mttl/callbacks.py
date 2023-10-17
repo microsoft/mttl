@@ -43,6 +43,10 @@ class MMLUCallback(cb.Callback):
         self.eval_mmlu_count = 0
 
     @property
+    def last_chkpt(self):
+        return self._prev_checkpoint
+
+    @property
     def best_perf(self):
         return self._best_perf
 

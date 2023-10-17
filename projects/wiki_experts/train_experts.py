@@ -61,18 +61,15 @@ def eval_mmlu(module, args, base_perf=None, chkpt_crit="val/loss"):
             if m in base_perf
         }
     if wandb.run is not None:
-        # perf of the final selected checkpoint (val/loss)
-        wandb.log(
-            {f"downstream_best/test/es_{chkpt_crit}/mmlu_": scores["all"]["mean"]}
-        )
-        scores.pop("all")
         for t, v in scores.items():
-            wandb.log({f"downstream_best/test/es_{chkpt_crit}//mmlu_" + t: v["mean"]})
+            wandb.log(
+                {f"downstream_estoped/crit_{chkpt_crit}/test_mmlu_" + t: v["mean"]}
+            )
         if improvement is not None:
             for t, v in improvement.items():
                 wandb.log(
                     {
-                        f"downstream_best/test/es_{chkpt_crit}/mmlu_improvement_"
+                        f"downstream_estoped/crit_{chkpt_crit}/test_mmlu_improvement_"
                         + t: improvement[t]
                     }
                 )
@@ -250,8 +247,18 @@ def run_multitask(args):
 
     # perform final evals on MMLU
     # for oracle
+    module_test_oracle = model_class.load_from_checkpoint(mmlu_test_cb.last_chkpt).to(
+        "cuda"
+    )
+    eval_mmlu(
+        module_test_oracle, args, mmlu_test_cb.base_perf, chkpt_crit="test_mmlu_oracle"
+    )
 
     # for best model selected with mmlu/val
+    module_valid_oracle = model_class.load_from_checkpoint(mmmlu_val_cb.last_chkpt).to(
+        "cuda"
+    )
+    eval_mmlu(module_valid_oracle, args, mmlu_test_cb.base_perf, chkpt_crit="val_mmlu")
 
     if checkpoint:
         module = model_class.load_from_checkpoint(checkpoint).to("cuda")
