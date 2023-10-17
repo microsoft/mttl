@@ -238,16 +238,15 @@ class PolySoftPrompt(nn.Module):
                 self.prompt_length,
             )
         ) * (std.view(1, -1, 1) / 2) + mean.view(1, -1, 1)
-        # split dim according to `n_splits`
 
+        # split dim according to `n_splits`
         embedding = embedding.reshape(
             config.n_skills,
             config.n_splits,
             self.embed_dim // config.n_splits,
             self.prompt_length,
-        ).transpose(
-            0, 1
-        )  # (n_splits, n_skills, dim, prompt_length)
+        ).transpose(0, 1)  # (n_splits, n_skills, dim, prompt_length)
+
         self.embedding = nn.Parameter(embedding)
 
     def forward(self, input_ids, *args, **kwargs):
