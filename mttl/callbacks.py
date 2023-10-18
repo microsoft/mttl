@@ -85,11 +85,8 @@ class MMLUCallback(cb.Callback):
             )
             ckpt_path = os.path.join(dir_name, filename)
             trainer.save_checkpoint(ckpt_path)
-            if self._prev_checkpoint is not None:
-                try:
-                    os.remove(self._prev_checkpoint)
-                except:
-                    pass
+            if self._prev_checkpoint is not None and ckpt_path != self._prev_checkpoint:
+                os.remove(self._prev_checkpoint)
             self._prev_checkpoint = ckpt_path
         self._checkpoint_now = False
 
