@@ -76,7 +76,7 @@ class MMLUCallback(cb.Callback):
         return super().on_before_optimizer_step(trainer, pl_module, optimizer)
 
     def maybe_checkpoint_now(self, trainer):
-        if self.do_checkpoint:
+        if self.do_checkpoint and self._checkpoint_now:
             dir_name = trainer.checkpoint_callback.dirpath
             filename = (
                 trainer.checkpoint_callback.filename.split("{")[0]
