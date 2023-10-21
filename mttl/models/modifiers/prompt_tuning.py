@@ -8,7 +8,7 @@ from transformers.modeling_utils import PreTrainedModel
 from functools import partial
 from mttl.models.modifiers.poly import PolytroponSelector
 
-SoftPromptRouting = None
+PromptTuningRouting = None
 
 
 def modify_with_soft_prompt_cls(transformer, config, layer_type):
@@ -35,12 +35,12 @@ def modify_with_soft_prompt_cls(transformer, config, layer_type):
         base_input_embeddings=input_embeddings,
     )
 
-    return DecoderSoftPromptWrapper(
+    return DecoderPromptTuningWrapper(
         config=config, transformer=transformer, soft_prompt=soft_prompt
     )
 
 
-class DecoderSoftPromptWrapper(torch.nn.Module):
+class DecoderPromptTuningWrapper(torch.nn.Module):
     def __init__(self, config, transformer, soft_prompt):
         super().__init__()
         self.transformer = transformer
@@ -181,16 +181,16 @@ class DecoderSoftPromptWrapper(torch.nn.Module):
         return model_kwargs
 
 
-@register_modifier("soft_prompt")
+@register_modifier("prompt_tuning")
 def modify_with_soft_prompt_routing(transformer, config):
-    return modify_with_soft_prompt_cls(transformer, config, SoftPrompt)
+    return modify_with_soft_prompt_cls(transformer, config, PromptTuning)
 
 
-@register_modifier("poly_soft_prompt")
+@register_modifier("poly_prompt_tuning")
 def modify_with_soft_prompt_routing(transformer, config):
-    return modify_with_soft_prompt_cls(transformer, config, PolySoftPrompt)
+    return modify_with_soft_prompt_cls(transformer, config, PolyPromptTuning)
 
-class SoftPrompt(nn.Module):
+class PromptTuning(nn.Module):
     def __init__(self, base_input_embeddings, config, *args, **kwargs):
         super().__init__()
 
@@ -214,7 +214,7 @@ class SoftPrompt(nn.Module):
         return self.embedding.weight.unsqueeze(0).expand(bs, -1, -1)
 
 
-class PolySoftPrompt(nn.Module):
+class PolyPromptTuning(nn.Module):
     def __init__(self, base_input_embeddings, config, task_id_ptr, *args, **kwargs):
         super().__init__()
 

@@ -59,6 +59,10 @@ class RoutingConfig(Config):
         self.task_vsmear_detach_prior_input = False
         self.task_vsmear_aux_lambda = 1.
 
+        # soft prompts
+        self.soft_prompt_length = 10
+        self.patch_last_k_layers = None
+
     def post_init(self):
         if self.eval_mmlu and "MMLU_DATA_DIR" not in os.environ:
             raise ValueError("MMLU_DATA_DIR not set in env but eval_mmlu = True.")
