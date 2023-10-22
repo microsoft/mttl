@@ -4,6 +4,7 @@ import json
 import wandb
 import pytorch_lightning as pl
 
+import torch
 from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -240,25 +241,32 @@ def run_multitask(args):
     # initial validation!
     trainer.fit(module, dm)
 
-    # reload best model before pushing!
-    checkpoint = (
-        checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
-    )
-
     # perform final evals on MMLU
     # for oracle
+    del module
+    torch.cuda.empty_cache()
+
     module_test_oracle = model_class.load_from_checkpoint(mmlu_test_cb.last_chkpt).to(
         "cuda"
     )
     eval_mmlu(
         module_test_oracle, args, mmlu_test_cb.base_perf, chkpt_crit="test_mmlu_oracle"
     )
+    del module_test_oracle
+    torch.cuda.empty_cache()
 
     # for best model selected with mmlu/val
     module_valid_oracle = model_class.load_from_checkpoint(mmmlu_val_cb.last_chkpt).to(
         "cuda"
     )
     eval_mmlu(module_valid_oracle, args, mmlu_test_cb.base_perf, chkpt_crit="val_mmlu")
+    del module_valid_oracle
+    torch.cuda.empty_cache()
+
+    # reload best model before pushing!
+    checkpoint = (
+        checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
+    )
 
     if checkpoint:
         module = model_class.load_from_checkpoint(checkpoint).to("cuda")
