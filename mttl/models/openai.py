@@ -457,10 +457,9 @@ class GPT:
         output_logprobs = []
         context_logprobs = []
 
-        burn_in = 0
         for context, token_log_probs in zip(contexts, log_probs):
             num_tokens_prompt = len(self.encoder.encode(context))
-            target_log_probs = token_log_probs[num_tokens_prompt + burn_in :]
+            target_log_probs = token_log_probs[num_tokens_prompt:]
             context_log_probs = token_log_probs[1:num_tokens_prompt]
 
             if len(target_log_probs) == 0:
