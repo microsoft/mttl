@@ -4,6 +4,7 @@ import json
 import wandb
 import pytorch_lightning as pl
 
+import torch
 from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -42,13 +43,14 @@ class SimpleLogger(pl.loggers.logger.DummyLogger):
             json.dump(self.metrics, f)
 
 
-def eval_mmlu(module, args, base_perf=None):
+def eval_mmlu(module, args, base_perf=None, chkpt_crit="val/loss"):
     mmlu = MMLUEvaluator(
         args,
         split=args.mmlu_test_split,
     )
     scores = mmlu.evaluate(module)
-    logger.info("MMLU Accuracy: {}".format(scores["all"]["mean"]))
+    print(f"Evaluating final checkpoint with selection criteria {chkpt_crit}")
+    logger.info("Final MMLU Accuracy: {}".format(scores["all"]["mean"]))
     for t, v in scores.items():
         logger.info("MMLU Accuracy {}: {}".format(t, v["mean"]))
     # super hard to log with pllogger here
@@ -60,14 +62,17 @@ def eval_mmlu(module, args, base_perf=None):
             if m in base_perf
         }
     if wandb.run is not None:
-        wandb.log({"downstream_best/mmlu_test_best_model": scores["all"]["mean"]})
-        scores.pop("all")
         for t, v in scores.items():
-            wandb.log({"downstream_best/mmlu_test_best_model_" + t: v["mean"]})
+            wandb.log(
+                {f"downstream_estoped/crit_{chkpt_crit}/test_mmlu_" + t: v["mean"]}
+            )
         if improvement is not None:
             for t, v in improvement.items():
                 wandb.log(
-                    {"downstream_best/mmlu_test_improvement_" + t: improvement[t]}
+                    {
+                        f"downstream_estoped/crit_{chkpt_crit}/test_mmlu_improvement_"
+                        + t: improvement[t]
+                    }
                 )
 
 
@@ -84,6 +89,12 @@ def run_multitask(args):
 
     # select dataloader
     model_class = ExpertTrainer
+    # add MMLU val data to validaiton set
+    val_mixin = None
+    if args.expand_val_set_w_downstream:
+        from mttl.datamodule.mmlu_data_module import MMLUDataModule
+
+        val_mixin = MMLUDataModule(args).dev_dataset
 
     if "qa" in args.dataset:
         args.dataset = (
@@ -103,7 +114,7 @@ def run_multitask(args):
             finetune_task_name=args.finetune_task_name,
             dataset=args.dataset,
         )
-        dm = PlatypusQAModule(config)
+        dm = PlatypusQAModule(config, val_mixin=val_mixin)
     elif "facts" in args.dataset or "id" in args.dataset:
         config = FactsLMConfig(
             model=args.model,
@@ -150,14 +161,13 @@ def run_multitask(args):
 
     # legit logging
     loggers = []
+    exp_name = os.environ.get("AMLT_JOB_NAME", args.exp_name)
     if os.environ.get("WANDB_API_KEY") or args.wandb_project:
         import wandb
 
         project = "wiki_experts" if args.wandb_project is None else args.wandb_project
         args.exp_name = "dev_run" if args.exp_name is None else args.exp_name
         project = os.environ.get("WANDB_PROJECT", project)
-        exp_name = os.environ.get("AMLT_JOB_NAME", args.exp_name)
-        exp_name += f"_{args.finetune_task_name}"
         wandb_logger = pl.loggers.WandbLogger(
             project=project,
             name=exp_name,  # , config=args_
@@ -179,20 +189,15 @@ def run_multitask(args):
     # get metric monitors for models
     callbacks = []
 
-    criteria = {
-        "downstream/val/mmlu": "max",
-        "val/loss": "min",
-    }
-    monitor = args.selection_criteria
-    mode = criteria[monitor]
+    monitor = "val/loss"
+    mode = "min"
 
     model_name = args.model.replace("/", "_")
-    exp_name = os.environ.get("AMLT_JOB_NAME", args.exp_name)
 
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.output_dir,
         monitor=monitor,
-        filename=f"{model_name}" + f"_{exp_name}" + "-{" + monitor + ":.004f}",
+        filename=f"{model_name}" + "-{" + monitor + ":.004f}",
         save_top_k=1,
         save_last=True,
         save_weights_only=True,  # make checkpoints smaller
@@ -210,16 +215,9 @@ def run_multitask(args):
         elif val_check_interval > args.total_steps and args.total_steps != -1:
             val_check_interval = args.total_steps
 
-    mmlu_test_cb = MMLUCallback(args.eval_every, split="test")
-    mmmlu_val_cb = MMLUCallback(args.eval_every, split="val")
+    mmlu_test_cb = MMLUCallback(args.eval_every, split="test", checkpoint_oracle=True)
+    mmmlu_val_cb = MMLUCallback(args.eval_every, split="val", checkpoint_oracle=True)
     callbacks += [mmlu_test_cb, mmmlu_val_cb]
-
-    if args.es_patience > 0:
-        callbacks.append(
-            EarlyStopping(
-                monitor=monitor, patience=args.es_patience, mode=mode, verbose=True
-            )
-        )
 
     trainer = Trainer(
         devices=-1,
@@ -243,15 +241,36 @@ def run_multitask(args):
     # initial validation!
     trainer.fit(module, dm)
 
+    # perform final evals on MMLU
+    # for oracle
+    del module
+    torch.cuda.empty_cache()
+
+    module_test_oracle = model_class.load_from_checkpoint(mmlu_test_cb.last_chkpt).to(
+        "cuda"
+    )
+    eval_mmlu(
+        module_test_oracle, args, mmlu_test_cb.base_perf, chkpt_crit="test_mmlu_oracle"
+    )
+    del module_test_oracle
+    torch.cuda.empty_cache()
+
+    # for best model selected with mmlu/val
+    module_valid_oracle = model_class.load_from_checkpoint(mmmlu_val_cb.last_chkpt).to(
+        "cuda"
+    )
+    eval_mmlu(module_valid_oracle, args, mmlu_test_cb.base_perf, chkpt_crit="val_mmlu")
+    del module_valid_oracle
+    torch.cuda.empty_cache()
+
     # reload best model before pushing!
     checkpoint = (
         checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
     )
 
-    # perform final eval on MMLU
     if checkpoint:
         module = model_class.load_from_checkpoint(checkpoint).to("cuda")
-        eval_mmlu(module, args, mmlu_test_cb.base_perf)
+        eval_mmlu(module, args, mmlu_test_cb.base_perf, chkpt_crit=monitor)
 
     if args.hf_repo_id and checkpoint:
         from projects.wiki_experts.src.expert_model import push_expert_to_hub

@@ -185,6 +185,13 @@ class ExpertTrainer(EfficientCheckpointModule):
 
         self._inference_outputs.clear()
         self.log("val/loss", losses.mean(), on_epoch=True, prog_bar=True)
+        # log also the best val/loss sofar
+        if self.best_val_result is None:
+            self.best_val_result = losses.mean()
+        else:
+            if losses.mean() < self.best_val_result:
+                self.best_val_result = losses.mean()
+                self.log("val/best_loss", losses.mean(), on_epoch=True, prog_bar=True)
 
     @property
     def generation_config(self):

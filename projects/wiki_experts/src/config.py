@@ -20,8 +20,7 @@ class ExpertConfig(Config):
         self.micro_batch_size = None
         self.validation_portion = 0.03
 
-        self.es_patience = -1
-        self.selection_criteria = "val/loss"
+        self.expand_val_set_w_downstream = True
 
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
