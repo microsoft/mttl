@@ -126,13 +126,14 @@ def llama_adapter_attention(
     else:
         past_key_value = None
 
-    adapter_weights = torch.matmul(query_states, adapter_k.transpose(2, 3)) / math.sqrt(
-        self.head_dim
-    )
+    adapter_weights = torch.matmul(
+        query_states, adapter_k.transpose(2, 3).type_as(query_states)
+    ) / math.sqrt(self.head_dim)
 
     adapter_weights = self.adapter.gate * F.softmax(
         adapter_weights, dim=-1, dtype=torch.float32
     ).type_as(query_states)
+
     adapter_output = torch.matmul(adapter_weights, adapter_v)
     """ Adapter End  """
 
