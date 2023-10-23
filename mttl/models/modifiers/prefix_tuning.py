@@ -18,6 +18,7 @@ from transformers.models.llama.modeling_llama import (
     LlamaForCausalLM,
 )
 
+
 def llama_adapter_attention(
     self,
     hidden_states: torch.Tensor,
@@ -50,7 +51,7 @@ def llama_adapter_attention(
     if past_key_value is not None:
         # `past_key_value` should always also cache the adapter k,v
         past_k, past_v, adapter_k, adapter_v = past_key_value
-        kv_seq_len += past_k.size(-2)#  + adapter_k.size(-2)
+        kv_seq_len += past_k.size(-2)  #  + adapter_k.size(-2)
     else:
         adapter_k = adapter_v = None
 
@@ -62,22 +63,17 @@ def llama_adapter_attention(
     if past_key_value is not None:
         key_states = torch.cat([past_k, key_states], dim=2)
         value_states = torch.cat([past_v, value_states], dim=2)
-    
-    # TODO: add gating mechanism
-    # figure out how to merge the adapter stuff with the underlying attention
-    # support adding to the top K layers
-    # figure out how poly fits into all this
 
     # Typically saved here, before repeat_kv. if `num_key_value_groups` > 1, need to adjust
     # past_key_value = (key_states, value_states) if use_cache else None
 
-    assert self.num_key_value_groups == 1, 'how to handle this for adapter?'
+    assert self.num_key_value_groups == 1, "how to handle this for adapter?"
     key_states = repeat_kv(key_states, self.num_key_value_groups)
     value_states = repeat_kv(value_states, self.num_key_value_groups)
 
-    attn_weights = torch.matmul(
-        query_states, key_states.transpose(2, 3)
-    ) / math.sqrt(self.head_dim)
+    attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(
+        self.head_dim
+    )
 
     if attn_weights.size() != (bsz, self.num_heads, q_len, kv_seq_len):
         raise ValueError(
@@ -93,9 +89,9 @@ def llama_adapter_attention(
         attn_weights = attn_weights + attention_mask
 
     # upcast attention to fp32
-    attn_weights = nn.functional.softmax(
-        attn_weights, dim=-1, dtype=torch.float32
-    ).to(query_states.dtype)
+    attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(
+        query_states.dtype
+    )
     attn_output = torch.matmul(attn_weights, value_states)
 
     if attn_output.size() != (bsz, self.num_heads, q_len, self.head_dim):
@@ -104,58 +100,71 @@ def llama_adapter_attention(
             f" {attn_output.size()}"
         )
 
-    """ Adapter Start """ 
+    def type_safe_linear(input, linear_layer):
+        dtype_input = input.dtype
+        input = input.type(linear_layer.weight.dtype)
+        output = linear_layer(input)
+        return output.type(dtype_input)
+
+    """ Adapter Start """
     # adapter not precomputed, so we compute it
     if adapter_k is None:
         adapter = self.adapter()
         adapter_k = (
-            self.k_proj(adapter)
+            type_safe_linear(adapter, self.k_proj)
             .view(bsz, self.soft_prompt_length, self.num_key_value_heads, self.head_dim)
-            .transpose(1, 2) # bs, n_heads, len, d_head
+            .transpose(1, 2)  # bs, n_heads, len, d_head
         )
         adapter_v = (
-            self.v_proj(adapter)
+            type_safe_linear(adapter, self.v_proj)
             .view(bsz, self.soft_prompt_length, self.num_key_value_heads, self.head_dim)
             .transpose(1, 2)
         )
-    """ Adapter End  """ 
 
-    if use_cache: 
+    if use_cache:
         past_key_value = (key_states, value_states, adapter_k, adapter_v)
     else:
         past_key_value = None
 
-    adapter_weights = torch.matmul(
-        query_states, adapter_k.transpose(2, 3)
-    ) / math.sqrt(self.head_dim)
-    adapter_weights = self.adapter.gate * F.softmax(adapter_weights, dim=-1) # .type_as(xq)
+    adapter_weights = torch.matmul(query_states, adapter_k.transpose(2, 3)) / math.sqrt(
+        self.head_dim
+    )
+
+    adapter_weights = self.adapter.gate * F.softmax(
+        adapter_weights, dim=-1, dtype=torch.float32
+    ).type_as(query_states)
     adapter_output = torch.matmul(adapter_weights, adapter_v)
-    """ Adapter End """ 
+    """ Adapter End  """
 
     # merge and reshape
+    # print(adapter_output.abs().sum())
     attn_output = attn_output + adapter_output
     attn_output = attn_output.transpose(1, 2).contiguous()
     attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)
 
     # NOTE: not applying positional embedding on these ones.
-    assert self.config.pretraining_tp == 1, 'see `modeling_llama.py` to add support'  
-    
+    assert self.config.pretraining_tp == 1, "see `modeling_llama.py` to add support"
+
     if not output_attentions:
         attn_weights = None
 
     return attn_output, attn_weights, past_key_value
+
 
 class LlamaAdapter(nn.Module):
     def __init__(self, config, attn_layer, task_id_ptr):
         super().__init__()
         self.task_id_ptr = task_id_ptr
         self.gate = torch.nn.Parameter(torch.zeros(1, attn_layer.num_heads, 1, 1))
-        self.adapter_query = nn.Embedding(config.soft_prompt_length, attn_layer.hidden_size)
+        self.adapter_query = nn.Embedding(
+            config.soft_prompt_length, attn_layer.hidden_size
+        )
 
-    # get adapter 
+    # get adapter
     def forward(self):
-        bsz = self.task_id_ptr['routing_infos'].task_ids.size(0)
+        bsz = self.task_id_ptr["routing_infos"].task_ids.size(0)
         return self.adapter_query.weight.unsqueeze(0).expand(bsz, -1, -1)
+
 
 class PolyLlamaAdapter(nn.Module):
     def __init__(self, config, attn_layer, task_id_ptr):
@@ -170,28 +179,29 @@ class PolyLlamaAdapter(nn.Module):
         )
         self.gate = torch.nn.Parameter(torch.zeros(1, attn_layer.num_heads, 1, 1))
 
-    # get adapter 
+    # get adapter
     def forward(self):
         weight = self.adapter_query.weight.reshape(
             self.n_skills, self.prompt_len, self.n_splits, -1
         )
-        mixing_weights = self.selector(self.task_id_ptr['routing_infos'])
-        out = torch.einsum('klsd,bsk->blsd', weight, mixing_weights)
+        mixing_weights = self.selector(self.task_id_ptr["routing_infos"])
+        out = torch.einsum("klsd,bsk->blsd", weight, mixing_weights)
 
         return out.flatten(-2)
 
 
 def modify_with_prefix_tuning_cls(transformer, config, layer_type):
-    """ Wrap attention layer with additonal tokens
-    """
+    """Wrap attention layer with additonal tokens"""
 
     assert isinstance(
         transformer, PreTrainedModel
     ), "Transformer must be a PreTrainedModel."
 
-    assert isinstance(transformer, LlamaForCausalLM), "Only Llama Model supported for now."
+    assert isinstance(
+        transformer, LlamaForCausalLM
+    ), "Only Llama Model supported for now."
     task_id_ptr = transformer.task_id_container
-    
+
     for param in transformer.parameters():
         param.requires_grad = False
 
@@ -200,7 +210,9 @@ def modify_with_prefix_tuning_cls(transformer, config, layer_type):
         attn_layer.soft_prompt_length = config.soft_prompt_length
         attn_layer.forward = partial(llama_adapter_attention, attn_layer)
         attn_layer.adapter = layer_type(config, attn_layer, task_id_ptr)
-        assert attn_layer.num_heads == attn_layer.num_key_value_heads, 'which to pick for gate?'
+        assert (
+            attn_layer.num_heads == attn_layer.num_key_value_heads
+        ), "which to pick for gate?"
 
     if config.patch_last_k_layers == -1:
         layers_to_patch = transformer.model.layers
@@ -212,9 +224,11 @@ def modify_with_prefix_tuning_cls(transformer, config, layer_type):
 
     return transformer
 
+
 @register_modifier("prefix_tuning")
 def modify_with_prefix_tuning(transformer, config):
     return modify_with_prefix_tuning_cls(transformer, config, LlamaAdapter)
+
 
 @register_modifier("poly_prefix_tuning")
 def modify_with_poly_prefix_tuning(transformer, config):

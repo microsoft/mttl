@@ -27,7 +27,6 @@ def modify_with_soft_prompt_cls(transformer, config, layer_type):
 
     input_embeddings = transformer.get_input_embeddings()
     config.vocab_embed_dim = input_embeddings.embedding_dim
-    config.soft_prompt_length = 100
 
     soft_prompt = layer_type(
         config=config,
@@ -117,7 +116,7 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
 
             """ 1. Add soft prompt output """
             # create container
-            output = input_embeds.new_zeros(bs, soft_prompt_len + seq_len, embed_dim)
+            output = soft_prompt.new_zeros(bs, soft_prompt_len + seq_len, embed_dim)
             device = output.device
 
             # copy the soft prompt, padding left
