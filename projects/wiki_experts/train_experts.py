@@ -26,7 +26,7 @@ from mttl.datamodule.platypus_module import (
 from mttl.utils import get_mlf_logger, setup_logging, logger
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
-from projects.wiki_experts.src.config import ExpertConfig, parse_experts_to_load
+from projects.wiki_experts.src.config import ExpertConfig
 
 
 class SimpleLogger(pl.loggers.logger.DummyLogger):
