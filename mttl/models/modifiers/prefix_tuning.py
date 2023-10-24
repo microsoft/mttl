@@ -29,7 +29,6 @@ def llama_adapter_attention(
     use_cache: bool = False,
     padding_mask: Optional[torch.LongTensor] = None,
     adapter: Optional[torch.Tensor] = None,
-    gate: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
     bsz, q_len, _ = hidden_states.size()
 
@@ -130,7 +129,7 @@ def llama_adapter_attention(
         query_states, adapter_k.transpose(2, 3).type_as(query_states)
     ) / math.sqrt(self.head_dim)
 
-    adapter_weights = self.adapter.gate * F.softmax(
+    adapter_weights = self.adapter.adapter_gate * F.softmax(
         adapter_weights, dim=-1, dtype=torch.float32
     ).type_as(query_states)
 
@@ -140,7 +139,7 @@ def llama_adapter_attention(
     # merge and reshape
     attn_output = attn_output + adapter_output
     attn_output = attn_output.transpose(1, 2).contiguous()
-    attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)   
+    attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)
 
     # NOTE: not applying positional embedding on these ones.
     assert self.config.pretraining_tp == 1, "see `modeling_llama.py` to add support"
@@ -149,6 +148,10 @@ def llama_adapter_attention(
     if not output_attentions:
         attn_weights = None
 
+    if torch.isnan(attn_output).any() or torch.isinf(attn_output).any():
+        breakpoint()
+        xx = 1
+
     return attn_output, attn_weights, past_key_value
 
 
@@ -156,7 +159,9 @@ class LlamaAdapter(nn.Module):
     def __init__(self, config, attn_layer, task_id_ptr):
         super().__init__()
         self.task_id_ptr = task_id_ptr
-        self.gate = torch.nn.Parameter(torch.zeros(1, attn_layer.num_heads, 1, 1))
+        self.adapter_gate = torch.nn.Parameter(
+            torch.zeros(1, attn_layer.num_heads, 1, 1)
+        )
         self.adapter_query = nn.Embedding(
             config.soft_prompt_length, attn_layer.hidden_size
         )
@@ -178,7 +183,9 @@ class PolyLlamaAdapter(nn.Module):
         self.adapter_query = nn.Embedding(
             config.n_skills * config.soft_prompt_length, attn_layer.hidden_size
         )
-        self.gate = torch.nn.Parameter(torch.zeros(1, attn_layer.num_heads, 1, 1))
+        self.adapter_gate = torch.nn.Parameter(
+            torch.zeros(1, attn_layer.num_heads, 1, 1)
+        )
 
     # get adapter
     def forward(self):

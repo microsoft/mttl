@@ -140,10 +140,10 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
             output.scatter_(
                 dim=1,
                 index=input_embeds_idx.unsqueeze(-1).expand(-1, -1, embed_dim),
-                src=input_embeds,
+                src=input_embeds.type_as(output),
             )
 
-            model_kwargs["inputs_embeds"] = output
+            model_kwargs["inputs_embeds"] = output.type_as(input_embeds)
             model_kwargs["input_ids"] = None
 
             """ 2. Adjust Decoder Attention Mask """
@@ -189,6 +189,7 @@ def modify_with_soft_prompt_routing(transformer, config):
 def modify_with_soft_prompt_routing(transformer, config):
     return modify_with_soft_prompt_cls(transformer, config, PolyPromptTuning)
 
+
 class PromptTuning(nn.Module):
     def __init__(self, base_input_embeddings, config, *args, **kwargs):
         super().__init__()
@@ -198,19 +199,19 @@ class PromptTuning(nn.Module):
         self.prompt_length = config.soft_prompt_length
 
         base_input_embeddings = base_input_embeddings.cpu()
-        self.embedding = nn.Embedding(self.prompt_length, self.embed_dim)
+        self.prompt_embedding = nn.Embedding(self.prompt_length, self.embed_dim)
 
         # initialize from the base model
         mean = base_input_embeddings.weight.mean(0)
         std = base_input_embeddings.weight.std(0)
 
         # TODO: Revisit this initialization
-        new_weight = torch.randn_like(self.embedding.weight) * (std / 2) + mean
-        self.embedding.weight.data.copy_(new_weight)
+        new_weight = torch.randn_like(self.prompt_embedding.weight) * (std / 2) + mean
+        self.prompt_embedding.weight.data.copy_(new_weight)
 
     def forward(self, input_ids, *args, **kwargs):
         bs, seq_len = input_ids.size()
-        return self.embedding.weight.unsqueeze(0).expand(bs, -1, -1)
+        return self.prompt_embedding.weight.unsqueeze(0).expand(bs, -1, -1)
 
 
 class PolyPromptTuning(nn.Module):
@@ -244,9 +245,11 @@ class PolyPromptTuning(nn.Module):
             config.n_splits,
             self.embed_dim // config.n_splits,
             self.prompt_length,
-        ).transpose(0, 1)  # (n_splits, n_skills, dim, prompt_length)
+        ).transpose(
+            0, 1
+        )  # (n_splits, n_skills, dim, prompt_length)
 
-        self.embedding = nn.Parameter(embedding)
+        self.prompt_embedding = nn.Parameter(embedding)
 
     def forward(self, input_ids, *args, **kwargs):
         bs, _ = input_ids.size()
@@ -258,9 +261,9 @@ class PolyPromptTuning(nn.Module):
         if weights.ndim == 1:
             raise NotImplementedError()
             # use indexing!
-            # embed = self.embedding[:, weights.long(), :]
+            # embed = self.prompt_embedding[:, weights.long(), :]
         else:
-            embed = torch.einsum("bqs,qsdl->blqd", (weights, self.embedding))
+            embed = torch.einsum("bqs,qsdl->blqd", (weights, self.prompt_embedding))
 
         embed = embed.reshape(bs, self.prompt_length, self.embed_dim)
         return embed
