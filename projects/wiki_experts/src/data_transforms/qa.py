@@ -3,6 +3,8 @@ import numpy as np
 import os
 from datasets import load_dataset
 import tqdm
+import json
+import re
 
 from mttl.dataloader.platypus_dataset_reader import (
     InversePlatypusTemplate,
@@ -33,7 +35,7 @@ from src.data_transforms.utils import (
 
 class QAPlatyInstructionGenerationTemplate(DataTransformTemplate):
     @classmethod
-    def apply(cls, output, context=None, icl_examples=None):
+    def apply(cls, output, context=None, icl_examples=None, **kwargs):
         """
         We provide the context as output (response) if and only if a response is not
         present. Otherwise, we provide the context as context in addition to the previously generated response.
@@ -82,7 +84,7 @@ class OAITemplate:
         return data
 
     @classmethod
-    def apply(cls, context, output, icl_examples=None):
+    def apply(cls, context, output, icl_examples=None, **kwargs):
         task_description = "\nYour task is to generate a clear, comprehensive and context-independent instruction that can be followed without relying on external information."
         if icl_examples is not None:
             task_description += f"\n\n Here are examples of some good, strive to match the style, tone, and length of these examples:\n"
@@ -104,6 +106,95 @@ class OAITemplate:
             \nRemember, your should generate one instruction reponse pair. Your instruction should be clear and comprehensive and should be suitable for the given context. Your instruction must be complete, meaning that is must contain all the neccessary context to follow.\
             \nPlease follow these guidelines when generating instructions and answers. Your role is vital in maintaining high standards of communication effectiveness.\
             \nFormat your ourput as follows: ### Instruction: <your instruction> ### Response: <your response>."
+        return task_description
+
+
+class OAITemplate_Batched:
+    """
+    Creates multiple instruction - response pairs per context
+    """
+
+    @classmethod
+    def transform_to_valid_list(cls, output):
+        output = output + ">" if output[-1] != ">" else output
+        output = output.replace("\n", " ")
+        output = output.replace('"', "'")
+        output = f"[{output}]"
+
+        output = re.sub(r"\d?\.?\s*<\s*#", '"#', output)
+        output = re.sub(r"\d?\.?\s*<\s*Instruction", '"Instruction', output)
+        output = re.sub(r"<\s*\d?\.?\s*Instruction", '"Instruction', output)
+
+        output = re.sub(r">,?\.?\s*\"#", '","#', output)
+        output = re.sub(r">,?\.?\s*\"Instruction", '","Instruction', output)
+
+        output = re.sub(r">,?\.?\s*]", '"]', output)  # end of the string
+        return output
+
+    @classmethod
+    def post_process_generation(cls, output):
+        try:
+            import copy
+
+            originalk_out = copy.deepcopy(output)
+            output = cls.transform_to_valid_list(output)
+            outputs = eval(output)
+        except Exception as e:
+            return {"instruction": INVALID_RESPONSE, "response": INVALID_RESPONSE}
+        responses = []
+        for o in outputs:
+            try:
+                if "Response:" in o:
+                    response = re.split(r"Response\s*\d*:", o)[1].strip()
+                else:
+                    raise
+
+                instruction = o.split("Response:")[0]
+                instruction = re.split(r"Instruction\s*\d*:", instruction)[1].strip()
+                data = {
+                    "instruction": instruction.replace("#", ""),
+                    "response": response.replace("#", ""),
+                }
+            except Exception as e:
+                data = {"instruction": INVALID_RESPONSE, "response": INVALID_RESPONSE}
+            responses.append(data)
+        return responses
+
+    @classmethod
+    def apply(cls, context, output, domain, icl_examples=None):
+        domain = domain.replace("_", " ")
+        batch_size = "five"
+        task_description = f"\nYour task is to come up with a set of {batch_size} instructions paired with ground truth response about the {domain} domain. These task instructions will be given to a GPT model and we will evaluate the GPT model for completing the instructions."
+        task_description += f"\nTo ensure a diverse set of instructions, please adhere to the following requirements:\
+        \n1. Try not to repeat the verb for each instruction to maximize diversity.\
+        \n2. The language used for the instruction also should be diverse. For example, you should combine questions with imperative instructions.\
+        \n3. The type of instructions should be diverse. Include diverse types of tasks like open-ended generation, classification, editing, etc.\
+        \n4. A GPT language model should be able to complete the instruction. For example, do not ask the assistant to create any visual or audio output. For another example, do not ask the assistant to wake you up at 5pm or set a reminder because it cannot perform any action."
+        # \n5. The instructions should be in English.\
+        # task_description+="\n5. To increase diversity, include instructions with an input. The input field should\
+        # contain a specific example provided for the instruction. It should involve realistic data and\
+        # should not contain simple placeholders. The input should provide substantial content to make\
+        # the instruction challenging."
+        task_description += f"\n5. The instructions should be 1 to 3 sentences long. Either an imperative sentence or a question is permitted.\
+        \n6. Ensure diverse tasks are covered in the instructions and inputs, while focusing on the {domain} domain.\
+        \n7. Provide a ground truth response for each of the 10 generated instruction.\
+        \n8. Ensure that each instruction is complete, containing all the necessary context for successful execution."
+
+        task_description += (
+            "\n9. Your instruction must be grounded in the follwoing context:"
+        )
+        task_description += f"\n\n{context}"
+
+        if icl_examples is not None:
+            task_description += f"\n10. Strive to match the style, tone, and length of these examples of good instructions:\n"
+            for icl_example in icl_examples:
+                task_description += f"\n### Instruction:\n{icl_example}"
+
+            task_description += "\n\n"
+
+        task_description += f"Output format: please format your generated instructions and responses as a list, where each pair of instruction and response is enclosed in angle brackets < and >, and formated as: < ### Instruction: [generated instruction], ### Response: [response] >.\
+            \nPlease follow these guidelines carefully when generating instructions and responses. Your role is vital in maintaining high standards of communication effectiveness."
+        task_description += "\nYour output in the required format:"
         return task_description
 
 
@@ -131,6 +222,12 @@ QA_MODEL_SETTINGS = {
         model_path="gpt-35-turbo",
         instruction_template=OAITemplate(),
         response_template=OAITemplate(),
+    ),
+    "openai_batched": QAModelSetting(
+        inverse_model_path="gpt-35-turbo",
+        model_path="gpt-35-turbo",
+        instruction_template=OAITemplate_Batched(),
+        response_template=OAITemplate_Batched(),
     ),
 }
 
@@ -287,6 +384,7 @@ class QATransformModel(TransformModel):
                 context=entry["context"],
                 output=entry["response"] if "response" in entry else None,
                 icl_examples=entry["icl_examples"],
+                domain=entry["subject"],
             )
 
         templated_contexts = [get_templated_context(entry) for entry in dataset]
@@ -311,17 +409,30 @@ class QATransformModel(TransformModel):
             dataset, result.outputs, result.finish_reason
         ):
             data = self.instruction_template.post_process_generation(instruction)
-            if reject_output(data["instruction"], finish_reason):
-                continue
+            if isinstance(data, list):
+                for d in data:
+                    if reject_output(d["instruction"], finish_reason):
+                        continue
+                    copied_entry = copy.deepcopy(entry)
+                    copied_entry.update(
+                        {
+                            "author_instr": str(llm.model_name),
+                        }
+                    )
+                    copied_entry.update(d)
+                    new_dataset.append(copied_entry)
+            else:
+                if reject_output(data["instruction"], finish_reason):
+                    continue
 
-            copied_entry = copy.deepcopy(entry)
-            copied_entry.update(
-                {
-                    "author_instr": str(llm.model_name),
-                }
-            )
-            copied_entry.update(data)
-            new_dataset.append(copied_entry)
+                copied_entry = copy.deepcopy(entry)
+                copied_entry.update(
+                    {
+                        "author_instr": str(llm.model_name),
+                    }
+                )
+                copied_entry.update(data)
+                new_dataset.append(copied_entry)
 
         print("Created a new instruction dataset of size:", len(new_dataset))
         return new_dataset
@@ -438,6 +549,9 @@ class QATransformModel(TransformModel):
                         "Breaking early due to max_contexts_per_subject settings. ",
                         len(subject_contexts),
                     )
+                    subject_contexts = subject_contexts[
+                        : self.config.max_contexts_per_subject
+                    ]
                     break
 
                 if (
