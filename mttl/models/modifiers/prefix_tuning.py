@@ -89,7 +89,7 @@ def llama_adapter_attention(
         attn_weights = attn_weights + attention_mask
 
     # upcast attention to fp32
-    attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(
+    attn_weights = F.softmax(attn_weights, dim=-1, dtype=torch.float32).to(
         query_states.dtype
     )
     attn_output = torch.matmul(attn_weights, value_states)
@@ -134,17 +134,17 @@ def llama_adapter_attention(
         adapter_weights, dim=-1, dtype=torch.float32
     ).type_as(query_states)
 
-    adapter_output = torch.matmul(adapter_weights, adapter_v)
+    adapter_output = torch.matmul(adapter_weights, adapter_v).type_as(attn_output)
     """ Adapter End  """
 
     # merge and reshape
-    # print(adapter_output.abs().sum())
     attn_output = attn_output + adapter_output
     attn_output = attn_output.transpose(1, 2).contiguous()
-    attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)
+    attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)   
 
     # NOTE: not applying positional embedding on these ones.
     assert self.config.pretraining_tp == 1, "see `modeling_llama.py` to add support"
+    attn_output = self.o_proj(attn_output)
 
     if not output_attentions:
         attn_weights = None
