@@ -168,7 +168,7 @@ class OAITemplate_Batched:
         task_description += f"\nTo ensure a diverse set of instructions, please adhere to the following requirements:\
         \n1. Try not to repeat the verb for each instruction to maximize diversity.\
         \n2. The language used for the instruction also should be diverse. For example, you should combine questions with imperative instructions.\
-        \n3. The type of instructions should be diverse. Include diverse types of tasks like open-ended generation, classification, editing, etc.\
+        \n3. The type of instructions should be diverse. Include diverse types of tasks like open-ended generation, multiple choice, classification, editing, etc.\
         \n4. A GPT language model should be able to complete the instruction. For example, do not ask the assistant to create any visual or audio output. For another example, do not ask the assistant to wake you up at 5pm or set a reminder because it cannot perform any action."
         # \n5. The instructions should be in English.\
         # task_description+="\n5. To increase diversity, include instructions with an input. The input field should\
