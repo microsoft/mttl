@@ -151,9 +151,17 @@ class OAITemplate_Batched:
 
                 instruction = o.split("Response:")[0]
                 instruction = re.split(r"Instruction\s*\d*:", instruction)[1].strip()
+                instruction = instruction.replace("#", "")
+                response = response.replace("#", "")
+                if instruction.endswith(" ,"):
+                    instruction = instruction[:-2]
+                if response.endswith(" ,"):
+                    response = response[:-2]
+                instruction = instruction.strip()
+                response = response.strip()
                 data = {
-                    "instruction": instruction.replace("#", ""),
-                    "response": response.replace("#", ""),
+                    "instruction": instruction,
+                    "response": response,
                 }
             except Exception as e:
                 data = {"instruction": INVALID_RESPONSE, "response": INVALID_RESPONSE}
