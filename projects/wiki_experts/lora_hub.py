@@ -206,7 +206,6 @@ if __name__ == "__main__":
 
     setup_logging()
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    os.environ["MTTL_TEMP"] = "/home/v-oostapenko/mttl_out/models/merged/"
 
     config = ExpertConfig()
     config.model = "meta-llama/Llama-2-13b-hf"
