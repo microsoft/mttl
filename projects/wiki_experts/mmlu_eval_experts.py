@@ -99,6 +99,8 @@ def run_eval(args):
     else:
         subsample = None
 
+    print(args.finetune_task_name, args.load_module, args.checkpoint)
+
     mmlu = MMLUEvaluator(
         args,
         split=args.mmlu_test_split,
