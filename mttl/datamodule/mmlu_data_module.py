@@ -28,6 +28,7 @@ class DataCollatorForMMLU(DefaultCollator):
     return_tensors: str = "pt"
     model_family: str = "seq2seq"
     task_to_id: dict = None
+    do_tokenize: bool = True
 
     def __call__(self, batch, return_tensors=None):
         if return_tensors is None:
@@ -62,11 +63,14 @@ class DataCollatorForMMLU(DefaultCollator):
 
         # Remove multiple spaces, which mess with tiktoken
         labels = [instance["Instance"]["Output"] for instance in batch]
-        output_batch = (
-            self.prepare_inputs_for_gpt_family(sources, labels)
-            if self.model_family == "gpt"
-            else self.prepare_inputs_for_seq2seq_family(sources, labels)
-        )
+        if self.do_tokenize:
+            output_batch = (
+                self.prepare_inputs_for_gpt_family(sources, labels)
+                if self.model_family == "gpt"
+                else self.prepare_inputs_for_seq2seq_family(sources, labels)
+            )
+        else:
+            output_batch = {}
 
         task_names = [instance["Task"] for instance in batch]
         output_batch["task_names"] = task_names
@@ -77,6 +81,7 @@ class DataCollatorForMMLU(DefaultCollator):
             )
 
         output_batch["labels_texts"] = labels
+        output_batch["sources_texts"] = sources
         return output_batch
 
 
@@ -86,6 +91,28 @@ class MMLUDataConfig(DatasetConfig):
 
 class MMLUDataModule(DefaultDataModule):
     DATA_ENV = "MMLU_DATA_DIR"
+
+    def val_dataloader(self, shuffle=False, do_tokenize=True):
+        collator = DataCollatorForMMLU(
+            tokenizer=self.tokenizer,
+            padding="longest",
+            max_input_length=self.config.max_input_length,
+            max_output_length=self.config.max_output_length,
+            return_tensors="pt",
+            model_family="seq2seq" if self.for_generation else self.config.model_family,
+            task_to_id=self.task_to_id,
+            do_tokenize=do_tokenize,
+        )
+
+        return DataLoader(
+            self.dev_dataset,
+            batch_size=self.config.predict_batch_size,
+            shuffle=shuffle,
+            num_workers=16,
+            pin_memory=True,
+            persistent_workers=True,
+            collate_fn=collator,
+        )
 
     def test_dataloader(self, subsample=None, shuffle=False):
         if subsample is not None and subsample > 0:
@@ -171,7 +198,8 @@ class MMLUDataModule(DefaultDataModule):
             )
         else:
             self.train_dataset = dataset["train"]
-            self.test_dataset = self.dev_dataset = dataset["test"]
+            self.test_dataset = dataset["test"]
+            self.dev_dataset = dataset["validation"]
 
         logger.info("Training examples: {}".format(len(self.train_dataset)))
         logger.info("Test examples: {}".format(len(self.test_dataset)))

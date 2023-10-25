@@ -334,10 +334,16 @@ class ExpertContainer(Adapter):
         if is_default:
             self.default_expert_name = name
 
+    def merge_with_layer(self):
+        assert (
+            len(self.experts) == 0
+        ), "Cannot proceed with merging experts. Probably because some experts were added with action 'route'."
+        return
+
     def forward(self, input, **kwargs):
         task_names = self.info_container["routing_infos"].task_names
 
-        if (
+        if task_names and (
             any(task_name not in self.experts for task_name in task_names)
             and not self.default_expert_name
             and len(self.experts)
