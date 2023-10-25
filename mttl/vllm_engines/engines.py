@@ -58,7 +58,7 @@ class LLMEngineMMLU(LLM):
 
         LLM.__init__(
             self,
-            gpu_memory_utilization=0.85,
+            gpu_memory_utilization=0.8,
             disable_log_stats=False,
             swap_space=10,
             **options,

@@ -43,14 +43,19 @@ base_dir_tempalte = (
 
 
 def get_module_gaph(module_graph):
-    try:
-        tasks = eval(module_graph)
-        # module graph is a list of tasks
-    except:
+    if isinstance(module_graph, dict):
+        s = ""
+        tasks_to_module = {}
+        for subject, mapping in module_graph.items():
+            tasks_to_module[subject] = Template(mapping)
+            s += mapping
+        return s, tasks_to_module
+    else:
         if module_graph in ["SUB_10"]:
             tasks = getattr(mmlu_subject_configs, module_graph)
         else:
             return module_graph
+
     s = ""
     tasks_to_module = {}
     for i, subject in enumerate(tasks):
