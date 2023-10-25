@@ -200,7 +200,7 @@ def load_expert(
     # load the expert weights
     import os
 
-    if os.path.isdir(expert_path):
+    if os.path.isfile(expert_path):
         expert_checkpoint = get_checkpoint_path(expert_path)
     else:
         expert_checkpoint = download_from_hub(expert_path)

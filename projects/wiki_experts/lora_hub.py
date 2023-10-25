@@ -10,128 +10,30 @@ from functools import partial
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.datamodule.platypus_module import (
-    PlatypusModule,
-)
-from src.graph.module_graph import ModuleGraph
-from mttl.models.adapters import LoRA
+from mttl.dataloader.ni_metrics import compute_metrics
+from mttl.evaluators.base import compute_task_aggregation
 
-from collections import OrderedDict
 from src.config import ExpertConfig
 from huggingface_hub import login
 from src.expert_model import MultiExpertModel
-from mttl.models.adapters import ExpertContainer
-from vllm import LLM, SamplingParams
-from mttl.datamodule.collators import DefaultDataModule, DatasetConfig
-from src.data_transforms.engines import free_memory
+from mttl.datamodule.collators import DefaultDataModule
 from mttl.utils import logger, setup_logging
+from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
 
 
-def save_merged_model(model, hf_path="/tmp/merged"):
-    if os.path.exists(hf_path):
-        return hf_path
-
-    merged = []
-    for name, module in model.model.named_modules():
-        for c_name, child in module.named_children():
-            if isinstance(child, LoRA) or isinstance(child, ExpertContainer):
-                child.merge_with_layer()
-                setattr(
-                    module,
-                    c_name,
-                    child.layer,
-                )
-                merged.append(name)
-
-    logger.info("Merged LoRA layers: %s" % merged)
-    logger.info("Saving merged model to: %s" % hf_path)
-
-    model.model.save_pretrained(hf_path, save_full_model=True)
-    logger.info("Saving tokenizer to: %s" % hf_path)
-    model.tokenizer.save_pretrained(hf_path)
-    return hf_path
-
-
-class _LLMEngineMMLU(LLM):
-    def __init__(self, model, temp_path="/tmp/merged", **options):
-        # merge adapters -- if needed --
-        path = save_merged_model(model, hf_path=temp_path)
-        options["model"] = path
-
-        LLM.__init__(
-            self, gpu_memory_utilization=0.8, disable_log_stats=False, **options
-        )
-
-    def get_losses(
-        self,
-        dataloader: DataLoader,
-        top_p,
-        temperature,
-        max_tokens,
-        tokenizer,
-        **kwargs,
-    ):
-        labels = {}
-        logprobs_for = 20
-        sampling_params = SamplingParams(
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_tokens,
-            logprobs=logprobs_for,
-        )
-        target_to_id = OrderedDict(
-            {
-                "A": tokenizer("A", add_special_tokens=False).input_ids[-1],
-                "B": tokenizer("B", add_special_tokens=False).input_ids[-1],
-                "C": tokenizer("C", add_special_tokens=False).input_ids[-1],
-                "D": tokenizer("D", add_special_tokens=False).input_ids[-1],
-            }
-        )
-
-        # we explicitly add requests here, so that we can keep track of the request id
-        for request_id, batch in enumerate(
-            tqdm.tqdm(dataloader, total=len(dataloader))
-        ):
-            for context, label in zip(batch["sources_texts"], batch["labels_texts"]):
-                self.llm_engine.add_request(str(request_id), context, sampling_params)
-                labels[str(request_id)] = label
-        responses = self._run_engine(use_tqdm=True)
-        responses_dict = {r.request_id: r for r in responses}
-        # for each sample, for each token a list of logprobs of the logprobs_for most likely tokens
-        gt = []
-        pedictions = []
-        pedictions_log_probs = []
-        for r_id, response in responses_dict.items():
-            gt.append(target_to_id[labels[r_id]])
-            pedictions_log_probs.append(-torch.inf)
-            pedictions.append(-100)
-            logprobs_first_tok = response.outputs[0].logprobs[0]
-            for _, tok_id in target_to_id.items():
-                if (
-                    tok_id in logprobs_first_tok
-                    and logprobs_first_tok[tok_id] > pedictions_log_probs[-1]
-                ):
-                    pedictions[-1] = tok_id
-                    pedictions_log_probs[-1] = logprobs_first_tok[tok_id]
-        acc = sum([1 if gt[i] == pedictions[i] else 0 for i in range(len(gt))]) / len(
-            gt
-        )
-        return acc
-
-
-def mmlu_get_loss(model, dm: PlatypusModule, graph_string, use_vllm=True):
+def mmlu_get_loss(model, dm: DefaultDataModule, graph_string, use_vllm=True):
     # use gpu if available
     train_loss = 0
     if use_vllm:
         # use vllm
         model_hash = hashlib.sha256()
         model_hash.update(f"{graph_string}_{model.model.__class__}".encode())
-        model = _LLMEngineMMLU(
+        model = LLMEngineMMLU(
             model,
             temp_path=f"{os.environ.get('MTTL_TEMP','/tmp/merged')}/{model_hash.hexdigest()}/",
         )
-        dataloader: DataLoader = dm.val_dataloader(do_tokenize=False)
-        acc = model.get_losses(
+        dataloader: DataLoader = dm.val_dataloader()
+        all_predictions, all_references, all_task_names = model.eval(
             dataloader,
             top_p=0.9,
             temperature=0.9,
@@ -140,7 +42,17 @@ def mmlu_get_loss(model, dm: PlatypusModule, graph_string, use_vllm=True):
         )
         del model
         free_memory()
-        return acc * -1.0
+
+        eval_metrics = compute_metrics(
+            all_predictions, [[r] for r in all_references], reduction="none"
+        )
+        return (
+            compute_task_aggregation(all_task_names, eval_metrics["exact_match"])[
+                "all"
+            ]["mean"]
+            * -1.0
+        )
+
     else:
         dataloader: DataLoader = dm.val_dataloader()
         with torch.no_grad():
@@ -226,7 +138,7 @@ if __name__ == "__main__":
         abstract_algebra -> linear(sordonia/expert_llama2_13b_security_studies:$weght2);"
     )
 
-    dm = MMLUDataModule(config, for_generation=True)
+    dm = MMLUDataModule(config, for_generation=True, do_tokenize=False)
 
     model_class = MultiExpertModel
     module = model_class(**vars(config), tokenizer=dm.tokenizer)

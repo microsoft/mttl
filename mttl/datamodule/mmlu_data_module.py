@@ -92,28 +92,6 @@ class MMLUDataConfig(DatasetConfig):
 class MMLUDataModule(DefaultDataModule):
     DATA_ENV = "MMLU_DATA_DIR"
 
-    def val_dataloader(self, shuffle=False, do_tokenize=True):
-        collator = DataCollatorForMMLU(
-            tokenizer=self.tokenizer,
-            padding="longest",
-            max_input_length=self.config.max_input_length,
-            max_output_length=self.config.max_output_length,
-            return_tensors="pt",
-            model_family="seq2seq" if self.for_generation else self.config.model_family,
-            task_to_id=self.task_to_id,
-            do_tokenize=do_tokenize,
-        )
-
-        return DataLoader(
-            self.dev_dataset,
-            batch_size=self.config.predict_batch_size,
-            shuffle=shuffle,
-            num_workers=16,
-            pin_memory=True,
-            persistent_workers=True,
-            collate_fn=collator,
-        )
-
     def test_dataloader(self, subsample=None, shuffle=False):
         if subsample is not None and subsample > 0:
             from mttl.datamodule import take_n_examples_per_task
@@ -137,7 +115,8 @@ class MMLUDataModule(DefaultDataModule):
             collate_fn=self.collate_fn,
         )
 
-    def __init__(self, config: MMLUDataConfig, for_generation=False):
+    def __init__(self, config: MMLUDataConfig, for_generation=False, do_tokenize=True):
+        self.do_tokenize = do_tokenize
         if os.environ.get(self.DATA_ENV) is None:
             raise ValueError(
                 f"Environment variable {self.DATA_ENV} is not set. "
@@ -156,6 +135,7 @@ class MMLUDataModule(DefaultDataModule):
             return_tensors="pt",
             model_family="seq2seq" if self.for_generation else self.config.model_family,
             task_to_id=self.task_to_id,
+            do_tokenize=self.do_tokenize,
         )
 
     @property

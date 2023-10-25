@@ -3,6 +3,7 @@ from copy import deepcopy
 import os
 import tqdm
 import torch
+import hashlib
 import numpy as np
 import pytorch_lightning as pl
 
@@ -10,17 +11,46 @@ from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.datamodule.mmlu_data_module import MMLUDataConfig
 from mttl.models.utils import transfer_batch_to_device
 from mttl.evaluators.base import compute_task_aggregation
+from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
 
 
 class MMLUEvaluator(object):
-    def __init__(self, mmlu_data_config, device="cuda", split="test"):
+    def __init__(self, mmlu_data_config, device="cuda", split="test", use_vllm=False):
         from mttl.datamodule.mmlu_data_module import MMLUDataModule
 
         self.device = device
         self.split = split
         self.config = mmlu_data_config
 
-        self.datamodule = MMLUDataModule(self.config, for_generation=True)
+        self.datamodule = MMLUDataModule(
+            self.config, for_generation=True, do_tokenize=not use_vllm
+        )
+        self.use_vllm = use_vllm
+
+    def eval_vllm(self, model, generation_config, subsample, shuffle):
+        model_hash = hashlib.sha256()
+        model_hash.update(f"{model.hparams}_{model.model.__class__}".encode())
+
+        model = LLMEngineMMLU(
+            model,
+            temp_path=f"{os.environ.get('MTTL_TEMP','/tmp/merged')}/{model_hash.hexdigest()}/",
+        )
+
+        if self.split == "test":
+            dataloader = self.datamodule.test_dataloader(subsample, shuffle)
+        else:
+            dataloader = self.datamodule.val_dataloader()
+
+        all_predictions, all_references, all_task_names = model.eval(
+            dataloader, generation_config, self.datamodule.tokenizer
+        )
+        model.free_memory()
+        free_memory()
+        del model
+        eval_metrics = compute_metrics(
+            all_predictions, [[r] for r in all_references], reduction="none"
+        )
+        return compute_task_aggregation(all_task_names, eval_metrics["exact_match"])
 
     def evaluate(self, model, subsample=-1, shuffle=False):
         was_train = model.training
@@ -28,6 +58,14 @@ class MMLUEvaluator(object):
             model.eval()
 
         tokenizer = self.datamodule.tokenizer
+
+        if self.use_vllm:
+            return self.eval_vllm(
+                model,
+                generation_config=model.generation_config,
+                subsample=subsample,
+                shuffle=shuffle,
+            )
 
         # DDP
         if hasattr(model, "module"):

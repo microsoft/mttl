@@ -5,6 +5,7 @@ import math
 from torch.autograd import Function
 from torch.nn.modules.module import Module
 import bitsandbytes as bnb
+from abc import ABC, abstractmethod
 
 
 class Adapter(nn.Module):
@@ -18,7 +19,13 @@ class Adapter(nn.Module):
         return self.__layer_name__
 
 
-class LoRA(Adapter):
+class MergableAdapter(ABC):
+    @abstractmethod
+    def merge_with_layer(self):
+        pass
+
+
+class LoRA(Adapter, MergableAdapter):
     def __init__(
         self,
         config,
@@ -277,7 +284,7 @@ class SkilledLoRA(LoRA):
         return layer_out + adapter_out.to(input.dtype)
 
 
-class ExpertContainer(Adapter):
+class ExpertContainer(Adapter, MergableAdapter):
     def __init__(
         self,
         config,
