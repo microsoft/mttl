@@ -8,8 +8,8 @@ from string import Template
 from torch.utils.data import DataLoader
 from functools import partial
 
-sys.path.append("/home/v-oostapenko/dev/mttl")
-sys.path.append("/home/v-oostapenko/dev/mttl/projects/wiki_experts/")
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
+
 from mttl.datamodule.platypus_module import (
     PlatypusModule,
 )
@@ -140,7 +140,7 @@ def mmlu_get_loss(model, dm: PlatypusModule, graph_string, use_vllm=True):
         )
         del model
         free_memory()
-        return acc
+        return acc * -1.0
     else:
         dataloader: DataLoader = dm.val_dataloader()
         with torch.no_grad():
