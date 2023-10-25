@@ -1,7 +1,10 @@
 import re
 import torch
 from typing import Dict
+import sys
+import os
 
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 from mttl.models.utils import download_from_hub
 from mttl.utils import get_checkpoint_path, logger
 from projects.wiki_experts.src.config import ExpertConfig
@@ -77,7 +80,7 @@ class LinearNode(OperatorNode):
 
         for node in self.children:
             instantiation.append(node.instantiate(*args, **kwargs)[0])
-    
+
         # now, merge with a given importance weight
         assert len(instantiation) == len(self.weights)
 
@@ -234,6 +237,10 @@ if __name__ == "__main__":
     C -> linear(B:0.5);
     default -> C
     """
+    s = """
+    security_studies -> linear(sordonia/expert_llama2_13b_security_studies:1);
+    """
+
     graph = ModuleGraph.from_string(s)
     print(graph)
     print(graph.roots)
