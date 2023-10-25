@@ -21,6 +21,17 @@ class FactsCollator:
         return output_batch
 
 
+def _load_dataset(dataset, split):
+    dataset = load_dataset(dataset)
+    if split in dataset:
+        return dataset[split]
+
+    dataset = dataset["train"]
+    # filter "subject" column
+    dataset = dataset.filter(lambda x: x["subject"] == split)
+    return dataset
+
+
 @dataclass
 class FactsLMConfig(PlatypusConfig):
     text_field: str = "facts"
@@ -39,7 +50,7 @@ class FactsLMDataModule(DefaultDataModule):
 
         datasets_ = []
         for task_name in task_names:
-            datasets_.append(load_dataset(self.config.dataset, split=task_name))
+            datasets_.append(_load_dataset(self.config.dataset, split=task_name))
         self.dataset = concatenate_datasets(datasets_)
 
         train_facts = []
