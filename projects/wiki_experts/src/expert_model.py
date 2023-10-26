@@ -55,10 +55,7 @@ class MultiExpertModel(ExpertTrainer):
         super().__init__(**kwargs)
         self.experts = []
 
-    def load_from_graph_string(self, s, action="route"):
-        from projects.wiki_experts.src.graph.module_graph import ModuleGraph
-
-        graph = ModuleGraph.from_string(s)
+    def load_from_graph(self, graph, action="route"):
         for module_name, module_data in graph.create_modules(
             base_hparams=self.hparams
         ).items():
@@ -71,6 +68,12 @@ class MultiExpertModel(ExpertTrainer):
                 is_default=module_name == "default",
             )
             self.experts.append(module_name)
+
+    def load_from_graph_string(self, s, action="route"):
+        from projects.wiki_experts.src.graph.module_graph import ModuleGraph
+
+        graph = ModuleGraph.from_string(s)
+        self.load_from_graph(graph, action=action)
 
     def load_expert(
         self,

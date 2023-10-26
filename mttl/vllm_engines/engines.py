@@ -1,4 +1,3 @@
-from typing import List
 import numpy as np
 import torch
 import gc
@@ -6,9 +5,8 @@ import tqdm
 import time
 import os
 import copy
-from torch.utils.data import DataLoader
-from dataclasses import dataclass, field
 
+from torch.utils.data import DataLoader
 from vllm import LLM, SamplingParams
 from vllm.model_executor.parallel_utils.parallel_state import destroy_model_parallel
 from mttl.utils import logger
@@ -16,11 +14,24 @@ from mttl.models.adapters import MergableAdapter
 
 
 def save_merged_model(model, hf_path="/tmp/merged"):
+    """This assumes the model is on CPU. Creates a copy of the model and merges all adapters
+    if needed. Then saves the model to the given path.
+    """
+    for _, p in model.named_parameters():
+        if p.device != torch.device("cpu"):
+            raise ValueError("Model must be on CPU to merge adapters.")
+
+    if not hasattr(model, "model"):
+        raise ValueError("Model must have a `model` attribute, a HuggingFace model.")
+
+    # if path already exists, we don't need to do anything
     if os.path.exists(hf_path):
         return hf_path
 
     merged = []
-    for name, module in model.model.named_modules():
+    model_copy = copy.deepcopy(model.model)
+
+    for name, module in model_copy.named_modules():
         for c_name, child in module.named_children():
             if isinstance(child, MergableAdapter):
                 child.merge_with_layer()
@@ -34,9 +45,11 @@ def save_merged_model(model, hf_path="/tmp/merged"):
     logger.info("Merged layers: %s" % merged)
     logger.info("Saving merged model to: %s" % hf_path)
 
-    model.model.save_pretrained(hf_path, save_full_model=True)
+    model_copy.save_pretrained(hf_path, save_full_model=True)
+
     logger.info("Saving tokenizer to: %s" % hf_path)
     model.tokenizer.save_pretrained(hf_path)
+
     return hf_path
 
 
@@ -55,15 +68,12 @@ class LLMEngineMMLU(LLM):
         # merge adapters -- if needed --
         model = copy.deepcopy(model)
         path = save_merged_model(model, hf_path=temp_path)
-        del model
-        free_memory()
 
         self.path = path
         options["model"] = path
 
         LLM.__init__(
             self,
-            disable_log_stats=False,
             **options,
         )
 

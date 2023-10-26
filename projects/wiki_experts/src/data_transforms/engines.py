@@ -5,6 +5,7 @@ import gc
 import tqdm
 import time
 import os
+import aiohttp
 from dataclasses import dataclass, field
 
 from vllm import LLM, SamplingParams
@@ -13,6 +14,7 @@ from vllm.model_executor.parallel_utils.parallel_state import destroy_model_para
 from mttl.models.adapters import LoRA
 from mttl.models.openai import GPT
 from src.data_transforms.utils import INVALID_RESPONSE
+from mttl.utils import retry_with_exponential_backoff
 
 
 @dataclass
@@ -148,7 +150,15 @@ class OpenAI:
         pbar = tqdm.tqdm(range(len(templated_contexts)))
         for context in range(0, len(templated_contexts), 20):
             batch = templated_contexts[context : context + 20]
-            output = self.operator.generate(batch, max_tokens=max_tokens)
+            for _ in range(10):
+                try:
+                    output = self.operator.generate(batch, max_tokens=max_tokens)
+                    break
+                except Exception as e:
+                    print(e)
+                    print("retrying...")
+                    time.sleep(2)
+                    continue
             results.outputs += output
             results.finish_reason += ["stop"] * len(output)
             pbar.update(len(batch))

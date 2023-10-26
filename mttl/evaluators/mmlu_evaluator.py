@@ -1,5 +1,3 @@
-from collections import defaultdict
-from copy import deepcopy
 import os
 import tqdm
 import torch
@@ -8,10 +6,22 @@ import numpy as np
 import pytorch_lightning as pl
 
 from mttl.dataloader.ni_metrics import compute_metrics
-from mttl.datamodule.mmlu_data_module import MMLUDataConfig
 from mttl.models.utils import transfer_batch_to_device
 from mttl.evaluators.base import compute_task_aggregation
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
+
+
+def swap_model(model, state=None):
+    """Swap the model to and from CPU."""
+    if state is None:
+        state = {}
+    for n, p in model.named_parameters():
+        if n in state:
+            p.to(state[n])
+        else:
+            state[n] = p.device
+            p.data = p.data.cpu()
+    return state
 
 
 class MMLUEvaluator(object):
@@ -31,9 +41,12 @@ class MMLUEvaluator(object):
         model_hash = hashlib.sha256()
         model_hash.update(f"{model.hparams}_{model.model.__class__}".encode())
 
-        model = LLMEngineMMLU(
+        # move the model to CPU as VLLM loads its own version of the model
+        state = swap_model(model)
+
+        vllm_model = LLMEngineMMLU(
             model,
-            temp_path=f"{os.environ.get('MTTL_TEMP','/tmp/merged')}/{model_hash.hexdigest()}/",
+            temp_path=f"{os.environ.get('MTTL_TEMP', '/tmp/merged')}/{model_hash.hexdigest()}/",
         )
 
         if self.split == "test":
@@ -41,11 +54,16 @@ class MMLUEvaluator(object):
         else:
             dataloader = self.datamodule.val_dataloader()
 
-        all_predictions, all_references, all_task_names = model.eval(
+        all_predictions, all_references, all_task_names = vllm_model.eval(
             dataloader, generation_config, self.datamodule.tokenizer
         )
-        model.free_memory()
-        del model
+
+        vllm_model.free_memory()
+        del vllm_model
+
+        # move the model back to GPU
+        swap_model(model, state)
+
         eval_metrics = compute_metrics(
             all_predictions, [[r] for r in all_references], reduction="none"
         )
