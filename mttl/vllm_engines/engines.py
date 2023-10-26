@@ -84,14 +84,16 @@ class LLMEngine(LLM):
         ), "Either model or model_path must be given."
         # merge adapters -- if needed --
         path = save_merged_model(model, model_path, hf_path=temp_path)
-
-        self.path = path
         options["model"] = path
 
         LLM.__init__(
             self,
             **options,
         )
+
+        if os.path.exists(path):
+            # remvoe directory
+            os.system("rm -rf %s" % path)
 
     @property
     def model_name(self):
@@ -156,9 +158,3 @@ class LLMEngineMMLU(LLMEngine):
                     _all_predictions[-1] = prediction
         del self.llm_engine
         return _all_predictions, _all_references, _all_task_names
-
-    def free_memory(self):
-        if os.path.exists(self.path):
-            # remvoe directory
-            os.system("rm -rf %s" % self.path)
-        free_memory()
