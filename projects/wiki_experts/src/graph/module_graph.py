@@ -27,6 +27,9 @@ class Node:
         self.children = []
         self._cached_instantiation = None
 
+    def get_name(self, **kwargs):
+        return self.name
+
     @classmethod
     def from_args(cls, name, graph, args=None):
         return Node(name)
@@ -76,12 +79,16 @@ class OperatorNode(Node):
 class LinearNode(OperatorNode):
     @classmethod
     def from_args(cls, name, graph, args=None):
+        variable_names = re.findall(r"\$([a-zA-Z_][a-zA-Z0-9_]*)", name)
+        for i, var_name in enumerate(variable_names):
+            # replace variable names with their position
+            name = re.sub(f"\${var_name}", f"${i}", name, count=1)
         node = LinearNode(name)
         node.weights = {}
         node.variables = []
 
         node_args_pairs = args.split(",")
-        for pair in node_args_pairs:
+        for i, pair in enumerate(node_args_pairs):
             child_name, weight = pair.split(":")
             node.children.append(graph.get_or_create_node(child_name.strip()))
             # node.weights.append(float(weight.strip()))
@@ -89,9 +96,18 @@ class LinearNode(OperatorNode):
             if "$" not in weight:
                 node.weights[child_name] = float(weight)
             else:
-                node.variables.append(f"{name}:{child_name}")
+                node.variables.append(f"{name}:{i}")
 
         return node
+
+    def get_name(self, **kwargs):
+        if len(kwargs) == 0 or len(self.variables) == 0 or "$" not in self.name:
+            return self.name
+        name = self.name
+        for i, v in enumerate(self.variables):
+            name = name.replace(f"${i}", str(kwargs[v]))
+
+        return name
 
     def instantiate(self, *args, **kwargs):
         if self._cached_instantiation is not None:
@@ -107,11 +123,11 @@ class LinearNode(OperatorNode):
         assert len(instantiation) == len(self.weights) + len(self.variables)
 
         merged_weights = {}
-        for name, expert in instantiation.items():
+        for i, (name, expert) in enumerate(instantiation.items()):
             if name in self.weights:
                 weight = self.weights[name]
             else:
-                param_name = f"{self.name}:{name}"
+                param_name = f"{self.name}:{i}"
                 weight = kwargs.get(param_name, None)
                 assert (
                     weight is not None
@@ -150,7 +166,7 @@ class ModuleGraph:
             self.nodes[node_name] = node_class.from_args(node_name, self, args)
         return self.nodes[node_name]
 
-    def dumps(self):
+    def dumps(self, **kwargs):
         graph_str = []
         for node_name, node in self.nodes.items():
             if not node.children:
@@ -158,7 +174,9 @@ class ModuleGraph:
             if isinstance(node, OperatorNode):
                 continue
             graph_str.append(
-                "{} -> {}".format(node_name, ", ".join([n.name for n in node.children]))
+                "{} -> {}".format(
+                    node_name, ", ".join([n.get_name(**kwargs) for n in node.children])
+                )
             )
         return "; ".join(graph_str)
 
@@ -274,9 +292,9 @@ if __name__ == "__main__":
     C -> linear(B:0.5);
     default -> C
     """
-    s = """
-    security_studies -> linear(sordonia/expert_llama2_13b_security_studies:1);    
-    security_studies2 -> linear(sordonia/expert_llama2_13b_security_studies:$weight);
+    s = """    
+    security_studies -> linear(sordonia/expert_llama2_13b_security_studies:5,sordonia/llama2-13b-platypus:$weight);
+    security_studies2 -> linear(sordonia/expert_llama2_13b_security_studies:1);    
     security_studies3 -> linear(sordonia/expert_llama2_13b_security_studies:$weight_blabla);
     """
 
@@ -287,4 +305,5 @@ if __name__ == "__main__":
     print(graph.dumps())
     vars = graph.get_varaibles()
     print(vars)
+    print(graph.dumps(**{v: i for i, v in enumerate(vars)}))
     print(graph.create_modules(**{v: 1 for v in vars}).keys())
