@@ -3,9 +3,13 @@ import sys
 import glob
 import copy
 import torch
+import wandb
 import numpy as np
+import pandas as pd
 from huggingface_hub import login
+from collections import defaultdict
 from pytorch_lightning import seed_everything
+from lora_hub import RoutingOptimizer
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -129,17 +133,81 @@ def parse_experts_to_load(experts_to_load):
     return kwargs
 
 
+def log_wandb(scores, prefix):
+    if wandb.run is not None:
+        for t, v in scores.items():
+            wandb.log({f"{prefix}/on_{t}/test_mmlu": v["mean"]})
+
+
+def init_wandb_logger(args):
+    if args.wandb_project is None:
+        args.wandb_project = os.environ.get("WANDB_PROJECT", "MMLU_ninja_merge")
+    if args.wandb_project:
+        run_name = os.getenv("AMLT_JOB_NAME", f"{args.model}")
+        wandb.init(
+            project=args.wandb_project,
+            name=run_name,
+            config=args,
+        )
+
+
+def _setup_logging(args):
+    logger.info("Args: {}".format(args.to_json()))
+    setup_logging(args.output_dir)
+    init_wandb_logger(args)
+
+
+def produce_transfer_matrix(args, subject_to_module):
+    """
+    Eval each module on each subject
+    """
+    transfer_table = {}
+    use_vllm = True
+    for module_for_subject, graph_to_eval in subject_to_module.items():
+        result = {}
+        for subject_eval_on, _ in subject_to_module.items():
+            # select dataloader
+            graph = graph_to_eval.substitute({f"weight_{module_for_subject}": 1.0})
+            config_copy = copy.deepcopy(args)
+            config_copy.finetune_task_name = subject_eval_on
+            mmlu = MMLUEvaluator(
+                config_copy, split=config_copy.mmlu_test_split, use_vllm=use_vllm
+            )
+            module = MultiExpertModel(
+                **vars(config_copy),
+                tokenizer=mmlu.datamodule.tokenizer,
+                device_map="cpu" if use_vllm else "auto",
+            )
+            module.load_from_graph_string(graph, action="merge")
+            scores = mmlu.evaluate(module)
+
+            result[subject_eval_on] = scores[subject_eval_on]["mean"]
+            scores.pop("all")
+            log_wandb(scores, module_for_subject)
+            logger.info(
+                f"Scores on of {module_for_subject} for {subject_eval_on}:", scores
+            )
+            transfer_table[module_for_subject] = result
+    transfer_matrix = pd.DataFrame.from_dict(transfer_table)
+    if wandb.run is not None:
+        tbl = wandb.Table(data=transfer_matrix)
+        wandb.log({"transfer_matrix": tbl})
+    return transfer_matrix
+
+
 def run_eval(args):
     seed_everything(args.seed, workers=True)
-    # get directory of the current file
-    setup_logging(args.output_dir)
-    logger.info("Args: {}".format(args.to_json()))
-
+    _setup_logging(args)
     if args.hf_token_hub:
         login(token=args.hf_token_hub)
 
-    module_graph, tasks_to_module = get_module_gaph(args.module_graph)
+    module_graph, subject_to_module = get_module_gaph(args.module_graph)
     print(module_graph)
+
+    # 1. How good is the merging optimization procedure? Can we find a routing that is equivalent or better than oracle? (How does it compare to join training?)
+    # transfer_matrix:pd.DataFrame = produce_transfer_matrix(args, subject_to_module)
+
+    routing_optimizer = RoutingOptimizer(subject_to_module)
 
     # We can do:
     #   - in-distribution evaluation: test sets we consider are the test sets of the tasks we have experts for
@@ -156,27 +224,9 @@ def run_eval(args):
 
     # Given the modules lets first eval all of them on each other's test sets -> get a tansfe matix
     #
-    use_vllm = True
-    for subject_to_eval, graph_to_eval in tasks_to_module.items():
-        for subject_eval_on, _ in tasks_to_module.items():
-            # select dataloader
-            graph = graph_to_eval.substitute({f"weight_{subject_to_eval}": 1.0})
-            config_copy = copy.deepcopy(args)
-            config_copy.finetune_task_name = subject_eval_on
-            mmlu = MMLUEvaluator(
-                config_copy, split=config_copy.mmlu_test_split, use_vllm=use_vllm
-            )
-            module = MultiExpertModel(
-                **vars(config_copy),
-                tokenizer=mmlu.datamodule.tokenizer,
-                device_map="cpu" if use_vllm else "auto",
-            )
 
-            module.load_from_graph_string(graph, action="merge")
-            scores = mmlu.evaluate(module)
-            print(scores)
-
-    # then for each of the in-domain datasets, we optimize the merging procedure and see if we can get the right routing
+    # Then for each of the subjects for which we have the module, we optimize the merging procedure and see if we can get the right routing.
+    # Can we get beyong expert performance with the right routing? The right module is there in the population.
 
 
 if __name__ == "__main__":
