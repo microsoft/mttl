@@ -153,10 +153,10 @@ class OAITemplate_Batched:
                 instruction = re.split(r"Instruction\s*\d*:", instruction)[1].strip()
                 instruction = instruction.replace("#", "")
                 response = response.replace("#", "")
-                if instruction.endswith(" ,"):
-                    instruction = instruction[:-2]
-                if response.endswith(" ,"):
-                    response = response[:-2]
+                if instruction.endswith(","):
+                    instruction = instruction[:-1]
+                if response.endswith(","):
+                    response = response[:-1]
                 instruction = instruction.strip()
                 response = response.strip()
                 data = {
