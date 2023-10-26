@@ -96,7 +96,7 @@ class LinearNode(OperatorNode):
             if "$" not in weight:
                 node.weights[child_name] = float(weight)
             else:
-                node.variables.append(f"{name}:{i}")
+                node.variables.append(f"{name}[{i}]")
 
         return node
 
@@ -113,10 +113,10 @@ class LinearNode(OperatorNode):
         if self._cached_instantiation is not None:
             return self._cached_instantiation
 
-        instantiation = []
+        instantiation = {}
         first_module = None
         for node in self.children:
-            instantiation.append(node.instantiate(*args, **kwargs)[0])
+            instantiation[node.name] = node.instantiate(*args, **kwargs)[0]
             first_module = (
                 instantiation[node.name] if first_module is None else first_module
             )
@@ -129,7 +129,7 @@ class LinearNode(OperatorNode):
             if name in self.weights:
                 weight = self.weights[name]
             else:
-                param_name = f"{self.name}:{i}"
+                param_name = f"{self.name}[{i}]"
                 weight = kwargs.get(param_name, None)
                 assert (
                     weight is not None
@@ -307,5 +307,13 @@ if __name__ == "__main__":
     print(graph.dumps())
     vars = graph.get_varaibles()
     print(vars)
+    print(
+        graph.dumps(
+            **{
+                "linear(sordonia/expert_llama2_13b_security_studies:5,sordonia/llama2-13b-platypus:$0)[1]": 0,
+                "linear(sordonia/expert_llama2_13b_security_studies:$0)[0]": 1,
+            }
+        )
+    )
     print(graph.dumps(**{v: i for i, v in enumerate(vars)}))
     print(graph.create_modules(**{v: 1 for v in vars}).keys())
