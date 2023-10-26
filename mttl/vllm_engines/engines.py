@@ -5,6 +5,7 @@ import gc
 import tqdm
 import time
 import os
+import copy
 from torch.utils.data import DataLoader
 from dataclasses import dataclass, field
 
@@ -52,15 +53,17 @@ def free_memory():
 class LLMEngineMMLU(LLM):
     def __init__(self, model, temp_path="/tmp/merged", **options):
         # merge adapters -- if needed --
+        model = copy.deepcopy(model)
         path = save_merged_model(model, hf_path=temp_path)
+        del model
+        free_memory()
+
         self.path = path
         options["model"] = path
 
         LLM.__init__(
             self,
-            gpu_memory_utilization=0.8,
             disable_log_stats=False,
-            swap_space=10,
             **options,
         )
 

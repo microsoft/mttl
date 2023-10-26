@@ -45,7 +45,6 @@ class MMLUEvaluator(object):
             dataloader, generation_config, self.datamodule.tokenizer
         )
         model.free_memory()
-        free_memory()
         del model
         eval_metrics = compute_metrics(
             all_predictions, [[r] for r in all_references], reduction="none"
