@@ -124,7 +124,7 @@ class RoutingOptimizer:
             get_vars,
         ):
             graph_vars = get_vars(weights)
-            logger.info(f"Loading {graph_string} into the model")
+            logger.info(f"Testing weights {weights}.")
             model = copy.deepcopy(basemodel)
             model.load_from_graph(self.module_graph, action="merge", **graph_vars)
             # minimize the metric
