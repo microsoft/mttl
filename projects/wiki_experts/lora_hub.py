@@ -10,6 +10,7 @@ from functools import partial
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
+from typing import Union, Callable
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators.base import compute_task_aggregation
 
@@ -18,6 +19,7 @@ from huggingface_hub import login
 from src.expert_model import MultiExpertModel
 from mttl.datamodule.collators import DefaultDataModule
 from mttl.utils import logger, setup_logging
+from src.graph.module_graph import GraphTemplate
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
 
 
@@ -26,6 +28,7 @@ def mmlu_get_loss(model, dm: DefaultDataModule, graph_string, use_vllm=True):
     train_loss = 0
     if use_vllm:
         # use vllm
+        generation_config = model.generation_config
         model_hash = hashlib.sha256()
         model_hash.update(f"{graph_string}_{model.model.__class__}".encode())
         model = LLMEngineMMLU(
@@ -35,9 +38,7 @@ def mmlu_get_loss(model, dm: DefaultDataModule, graph_string, use_vllm=True):
         dataloader: DataLoader = dm.val_dataloader()
         all_predictions, all_references, all_task_names = model.eval(
             dataloader,
-            top_p=0.9,
-            temperature=0.9,
-            max_tokens=100,
+            generation_config=generation_config,
             tokenizer=dm.tokenizer,
         )
         del model
@@ -79,38 +80,67 @@ def default_l1_regularization(weights):
     return 0.05 * sum_of_squares
 
 
-def get_score(
-    weights, dm, template: Template, basemodel: MultiExpertModel, get_loss, get_regular
-):
-    graph_string = template.safe_substitute(weght1=weights[0], weght2=weights[1])
-    logger.info(f"Loading {graph_string} into the model")
-    basemodel.load_from_graph_string(graph_string, action="merge")
-    # minimize the metric
-    loss = get_loss(basemodel, dm, graph_string)
-    # L1 regularization term
-    metric_val = loss + get_regular(weights)
-    return metric_val
+class RoutingOptimizer:
+    def __init__(
+        self,
+        model: MultiExpertModel,
+        graph_template: GraphTemplate,
+        dm: DefaultDataModule,
+        get_loss: Callable,
+        budget=5,
+    ) -> None:
+        self.model: MultiExpertModel = model
+        self.graph_template = graph_template
+        self.K = len(self.graph_template.parameters)
 
+        self.parametrization = ng.p.Array(
+            init=[0] * self.K,
+            upper=[1.5] * self.K,
+            lower=[-1.5] * self.K,
+        )
+        self.dm = dm
+        self.optimizer = ng.optimizers.NGOpt(
+            parametrization=self.parametrization, budget=budget
+        )
+        self.get_loss = get_loss
 
-def main(s: Template, dm: DefaultDataModule, model):
-    _get_score = partial(
-        get_score,
-        dm=dm,
-        template=s,
-        get_loss=mmlu_get_loss,
-        basemodel=model,
-        get_regular=default_l1_regularization,
-    )
+    def assemble_graph_string(self, weights: list):
+        s = {}
+        for p, w in zip(self.graph_template.parameters, list(weights)):
+            s[p] = w
+        return self.graph_template.to_graph_string(s)
 
-    instrum = ng.p.Array(
-        init=[0] * 2,
-        upper=[1.5] * 2,
-        lower=[-1.5] * 2,
-    )
+    def optimize(
+        self,
+    ):
+        def get_score(
+            weights,
+            dm,
+            basemodel: MultiExpertModel,
+            get_loss,
+            get_regular,
+            assemble_graph,
+        ):
+            graph_string = assemble_graph(weights)
+            logger.info(f"Loading {graph_string} into the model")
+            basemodel.load_from_graph_string(graph_string, action="merge")
+            # minimize the metric
+            loss = get_loss(basemodel, dm, graph_string)
+            # L1 regularization term
+            metric_val = loss + get_regular(weights)
+            return metric_val
 
-    optimizer = ng.optimizers.NGOpt(parametrization=instrum, budget=2)
-    recommendation = optimizer.minimize(_get_score)
-    print(recommendation.value)
+        _get_score = partial(
+            get_score,
+            dm=self.dm,
+            get_loss=self.get_loss,
+            basemodel=self.model,
+            get_regular=default_l1_regularization,
+            assemble_graph=self.assemble_graph_string,
+        )
+        recommendation = self.optimizer.minimize(_get_score)
+        logger.info(recommendation.value)
+        return recommendation
 
 
 if __name__ == "__main__":
@@ -133,14 +163,22 @@ if __name__ == "__main__":
     config.predict_batch_size = 1
     config.finetune_task_name = "abstract_algebra"
 
-    s = Template(
-        "security_studies -> linear(sordonia/expert_llama2_13b_security_studies:$weght1);\
-        abstract_algebra -> linear(sordonia/expert_llama2_13b_security_studies:$weght2);"
+    graph_string = Template(
+        "security_studies -> linear(sordonia/expert_llama2_13b_security_studies:$weight);\
+                    abstract_algebra -> linear(sordonia/expert_llama2_13b_security_studies:$weight);"
     )
+    graph_template = GraphTemplate(graph_string)
 
     dm = MMLUDataModule(config, for_generation=True, do_tokenize=False)
 
     model_class = MultiExpertModel
-    module = model_class(**vars(config), tokenizer=dm.tokenizer)
+    module = model_class(**vars(config), tokenizer=dm.tokenizer, device_map="cpu")
 
-    main(s, dm=dm, model=module)
+    optimizer = RoutingOptimizer(
+        model=module,
+        graph_template=graph_template,
+        dm=dm,
+        get_loss=mmlu_get_loss,
+        budget=2,
+    )
+    recommendation = optimizer.optimize()
