@@ -115,8 +115,9 @@ class GraphTemplate:
     The purpose of the class is to dynamically generate module graphs with different weights
     """
 
-    def __init__(self, template: Template):
-        modules = template.template.split(";")
+    def __init__(self, template: Union[Template, str]):
+        template = template.template if isinstance(template, Template) else template
+        modules = template.split(";")
         self.name_to_modulestring = {}
         self.name_to_parameters = defaultdict(list)
         self._parameters = []

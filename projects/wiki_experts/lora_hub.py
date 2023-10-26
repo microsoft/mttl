@@ -1,6 +1,7 @@
 import sys
 import os
 import tqdm
+import copy
 import torch
 import hashlib
 import nevergrad as ng
@@ -123,7 +124,8 @@ class RoutingOptimizer:
         ):
             graph_string = assemble_graph(weights)
             logger.info(f"Loading {graph_string} into the model")
-            basemodel.load_from_graph_string(graph_string, action="merge")
+            model = copy.deepcopy(basemodel)
+            model.load_from_graph_string(graph_string, action="merge")
             # minimize the metric
             loss = get_loss(basemodel, dm, graph_string)
             # L1 regularization term
@@ -163,10 +165,8 @@ if __name__ == "__main__":
     config.predict_batch_size = 1
     config.finetune_task_name = "abstract_algebra"
 
-    graph_string = Template(
-        "security_studies -> linear(sordonia/expert_llama2_13b_security_studies:$weight);\
+    graph_string = "security_studies -> linear(sordonia/expert_llama2_13b_security_studies:$weight);\
                     abstract_algebra -> linear(sordonia/expert_llama2_13b_security_studies:$weight);"
-    )
     graph_template = GraphTemplate(graph_string)
 
     dm = MMLUDataModule(config, for_generation=True, do_tokenize=False)
