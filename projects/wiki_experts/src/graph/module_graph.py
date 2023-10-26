@@ -113,11 +113,13 @@ class LinearNode(OperatorNode):
         if self._cached_instantiation is not None:
             return self._cached_instantiation
 
-        instantiation = {}
-        main_node = None
+        instantiation = []
+        first_module = None
         for node in self.children:
-            instantiation[node.name] = node.instantiate(*args, **kwargs)[0]
-            main_node = instantiation[node.name] if main_node is None else main_node
+            instantiation.append(node.instantiate(*args, **kwargs)[0])
+            first_module = (
+                instantiation[node.name] if first_module is None else first_module
+            )
 
         # now, merge with a given importance weight
         assert len(instantiation) == len(self.weights) + len(self.variables)
@@ -142,7 +144,7 @@ class LinearNode(OperatorNode):
 
         return [
             Expert(
-                expert_config=main_node.expert_config,
+                expert_config=first_module.expert_config,
                 expert_weights=merged_weights,
             )
         ]
