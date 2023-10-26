@@ -58,7 +58,7 @@ class MMLUEvaluator(object):
             dataloader, generation_config, self.datamodule.tokenizer
         )
 
-        vllm_model.free_memory()
+        free_memory()
         del vllm_model
 
         # move the model back to GPU
