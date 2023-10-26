@@ -3,12 +3,16 @@ import torch
 from typing import Dict
 import sys
 import os
+import re
+from string import Template
+from collections import defaultdict
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 from mttl.models.utils import download_from_hub
 from mttl.utils import get_checkpoint_path, logger
 from projects.wiki_experts.src.config import ExpertConfig
 from dataclasses import dataclass
+from typing import Union
 
 
 @dataclass
@@ -104,6 +108,49 @@ class LinearNode(OperatorNode):
         return "linear({})".format(
             ", ".join(["{}:{}".format(n, w) for n, w in zip(self.nodes, self.weights)])
         )
+
+
+class GraphTemplate:
+    """
+    The purpose of the class is to dynamically generate module graphs with different weights
+    """
+
+    def __init__(self, template: Template):
+        modules = template.template.split(";")
+        self.name_to_modulestring = {}
+        self.name_to_parameters = defaultdict(list)
+        self._parameters = []
+        template = ""
+        for t in modules:
+            if len(t.strip()) > 0:
+                module_name = t.split("->")[0].strip()
+                module_string = t.strip()
+                variables = re.findall(r"\$([a-zA-Z_][a-zA-Z0-9_]*)", module_string)
+
+                # extract parameters from module_string: everythin that starts with $
+                for i, v in enumerate(variables):
+                    # change variable to follow pattern $weight_{module_name}_{i}
+                    new_v = f"weight_{module_name}_{i}"
+                    self.name_to_parameters[module_name].append(new_v)
+                    self._parameters.append(new_v)
+                    module_string = module_string.replace(v, new_v)
+                template += f"{module_string};"
+                self.name_to_modulestring[module_name] = module_string
+        self.template = Template(template)
+
+    @property
+    def parameters(self):
+        return self._parameters
+
+    def to_graph_string(self, d: dict):
+        return self.template.substitute(d)
+
+    def to_graph(self, d: dict):
+        template = self.to_graph_string(d)
+        return ModuleGraph.from_string(template)
+
+    def __len__(self):
+        return len(self.name_to_modulestring.keys())
 
 
 class ModuleGraph:
