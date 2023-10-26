@@ -55,9 +55,9 @@ class MultiExpertModel(ExpertTrainer):
         super().__init__(**kwargs)
         self.experts = []
 
-    def load_from_graph(self, graph, action="route"):
+    def load_from_graph(self, graph, action="route", **kwargs):
         for module_name, module_data in graph.create_modules(
-            base_hparams=self.hparams
+            base_hparams=self.hparams, **kwargs
         ).items():
             self.model = add_expert_to_transformer(
                 self.model,

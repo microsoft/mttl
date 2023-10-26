@@ -31,6 +31,16 @@ class Node:
     def from_args(cls, name, graph, args=None):
         return Node(name)
 
+    def collect_variables(self):
+        vars = []
+        if hasattr(self, "variables"):
+            vars += self.variables
+        if not self.children:
+            return vars
+        for child in self.children:
+            vars += child.collect_variables()
+        return vars
+
     def instantiate(self, *args, **kwargs):
         if self._cached_instantiation is not None:
             return self._cached_instantiation
@@ -67,29 +77,46 @@ class LinearNode(OperatorNode):
     @classmethod
     def from_args(cls, name, graph, args=None):
         node = LinearNode(name)
-        node.weights = []
+        node.weights = {}
+        node.variables = []
 
         node_args_pairs = args.split(",")
         for pair in node_args_pairs:
             child_name, weight = pair.split(":")
             node.children.append(graph.get_or_create_node(child_name.strip()))
-            node.weights.append(float(weight.strip()))
+            # node.weights.append(float(weight.strip()))
+            weight = weight.strip()
+            if "$" not in weight:
+                node.weights[child_name] = float(weight)
+            else:
+                node.variables.append(f"{name}:{child_name}")
+
         return node
 
     def instantiate(self, *args, **kwargs):
         if self._cached_instantiation is not None:
             return self._cached_instantiation
 
-        instantiation = []
-
+        instantiation = {}
+        main_node = None
         for node in self.children:
-            instantiation.append(node.instantiate(*args, **kwargs)[0])
+            instantiation[node.name] = node.instantiate(*args, **kwargs)[0]
+            main_node = instantiation[node.name] if main_node is None else main_node
 
         # now, merge with a given importance weight
-        assert len(instantiation) == len(self.weights)
+        assert len(instantiation) == len(self.weights) + len(self.variables)
 
         merged_weights = {}
-        for expert, weight in zip(instantiation, self.weights):
+        for name, expert in instantiation.items():
+            if name in self.weights:
+                weight = self.weights[name]
+            else:
+                param_name = f"{self.name}:{name}"
+                weight = kwargs.get(param_name, None)
+                assert (
+                    weight is not None
+                ), f"Must pass the weight for node {param_name} to be able to instantiate"
+
             for k, v in expert.expert_weights.items():
                 value = v * torch.tensor(weight, dtype=v.dtype)
                 if k in merged_weights:
@@ -99,7 +126,7 @@ class LinearNode(OperatorNode):
 
         return [
             Expert(
-                expert_config=instantiation[0].expert_config,
+                expert_config=main_node.expert_config,
                 expert_weights=merged_weights,
             )
         ]
@@ -108,50 +135,6 @@ class LinearNode(OperatorNode):
         return "linear({})".format(
             ", ".join(["{}:{}".format(n, w) for n, w in zip(self.nodes, self.weights)])
         )
-
-
-class GraphTemplate:
-    """
-    The purpose of the class is to dynamically generate module graphs with different weights
-    """
-
-    def __init__(self, template: Union[Template, str]):
-        template = template.template if isinstance(template, Template) else template
-        modules = template.split(";")
-        self.name_to_modulestring = {}
-        self.name_to_parameters = defaultdict(list)
-        self._parameters = []
-        template = ""
-        for t in modules:
-            if len(t.strip()) > 0:
-                module_name = t.split("->")[0].strip()
-                module_string = t.strip()
-                variables = re.findall(r"\$([a-zA-Z_][a-zA-Z0-9_]*)", module_string)
-
-                # extract parameters from module_string: everythin that starts with $
-                for i, v in enumerate(variables):
-                    # change variable to follow pattern $weight_{module_name}_{i}
-                    new_v = f"weight_{module_name}_{i}"
-                    self.name_to_parameters[module_name].append(new_v)
-                    self._parameters.append(new_v)
-                    module_string = module_string.replace(v, new_v)
-                template += f"{module_string};"
-                self.name_to_modulestring[module_name] = module_string
-        self.template = Template(template)
-
-    @property
-    def parameters(self):
-        return self._parameters
-
-    def to_graph_string(self, d: dict):
-        return self.template.substitute(d)
-
-    def to_graph(self, d: dict):
-        template = self.to_graph_string(d)
-        return ModuleGraph.from_string(template)
-
-    def __len__(self):
-        return len(self.name_to_modulestring.keys())
 
 
 class ModuleGraph:
@@ -240,6 +223,12 @@ class ModuleGraph:
             root_modules[root.name] = root.instantiate(*args, **kwargs)[0]
         return root_modules
 
+    def get_varaibles(self):
+        variables = []
+        for root in self.roots:
+            variables += root.collect_variables()
+        return variables
+
 
 def load_expert(
     expert_path: str,
@@ -286,7 +275,9 @@ if __name__ == "__main__":
     default -> C
     """
     s = """
-    security_studies -> linear(sordonia/expert_llama2_13b_security_studies:1);
+    security_studies -> linear(sordonia/expert_llama2_13b_security_studies:1);    
+    security_studies2 -> linear(sordonia/expert_llama2_13b_security_studies:$weight);
+    security_studies3 -> linear(sordonia/expert_llama2_13b_security_studies:$weight_blabla);
     """
 
     graph = ModuleGraph.from_string(s)
@@ -294,4 +285,6 @@ if __name__ == "__main__":
     print(graph.roots)
     print(graph.leaves)
     print(graph.dumps())
-    print(graph.create_modules().keys())
+    vars = graph.get_varaibles()
+    print(vars)
+    print(graph.create_modules(**{v: 1 for v in vars}).keys())

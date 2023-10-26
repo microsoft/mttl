@@ -5,7 +5,7 @@ import copy
 import torch
 import hashlib
 import nevergrad as ng
-from string import Template
+
 from torch.utils.data import DataLoader
 from functools import partial
 
@@ -20,7 +20,7 @@ from huggingface_hub import login
 from src.expert_model import MultiExpertModel
 from mttl.datamodule.collators import DefaultDataModule
 from mttl.utils import logger, setup_logging
-from src.graph.module_graph import GraphTemplate
+from src.graph.module_graph import ModuleGraph
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
 
 
@@ -85,14 +85,15 @@ class RoutingOptimizer:
     def __init__(
         self,
         model: MultiExpertModel,
-        graph_template: GraphTemplate,
+        module_graph: ModuleGraph,
         dm: DefaultDataModule,
         get_loss: Callable,
         budget=5,
     ) -> None:
         self.model: MultiExpertModel = model
-        self.graph_template = graph_template
-        self.K = len(self.graph_template.parameters)
+        self.module_graph = module_graph
+        self.varaibles = module_graph.get_varaibles()
+        self.K = len(self.varaibles)
 
         self.parametrization = ng.p.Array(
             init=[0] * self.K,
@@ -105,11 +106,11 @@ class RoutingOptimizer:
         )
         self.get_loss = get_loss
 
-    def assemble_graph_string(self, weights: list):
+    def get_graph_vars(self, weights: list):
         s = {}
-        for p, w in zip(self.graph_template.parameters, list(weights)):
+        for p, w in zip(self.varaibles, list(weights)):
             s[p] = w
-        return self.graph_template.to_graph_string(s)
+        return s
 
     def optimize(
         self,
@@ -120,12 +121,12 @@ class RoutingOptimizer:
             basemodel: MultiExpertModel,
             get_loss,
             get_regular,
-            assemble_graph,
+            get_vars,
         ):
-            graph_string = assemble_graph(weights)
+            graph_vars = get_vars(weights)
             logger.info(f"Loading {graph_string} into the model")
             model = copy.deepcopy(basemodel)
-            model.load_from_graph_string(graph_string, action="merge")
+            model.load_from_graph(self.module_graph, action="merge", **graph_vars)
             # minimize the metric
             loss = get_loss(basemodel, dm, graph_string)
             # L1 regularization term
@@ -138,7 +139,7 @@ class RoutingOptimizer:
             get_loss=self.get_loss,
             basemodel=self.model,
             get_regular=default_l1_regularization,
-            assemble_graph=self.assemble_graph_string,
+            get_vars=self.get_graph_vars,
         )
         recommendation = self.optimizer.minimize(_get_score)
         logger.info(recommendation.value)
@@ -166,8 +167,9 @@ if __name__ == "__main__":
     config.finetune_task_name = "abstract_algebra"
 
     graph_string = "security_studies -> linear(sordonia/expert_llama2_13b_security_studies:$weight);\
-                    abstract_algebra -> linear(sordonia/expert_llama2_13b_security_studies:$weight);"
-    graph_template = GraphTemplate(graph_string)
+                    abstract_algebra -> linear(sordonia/expert_llama2_13b_security_studies:$weight);\
+                    abstract_algebra2 -> linear(sordonia/expert_llama2_13b_security_studies:2);"
+    graph = ModuleGraph.from_string(graph_string)
 
     dm = MMLUDataModule(config, for_generation=True, do_tokenize=False)
 
@@ -176,9 +178,10 @@ if __name__ == "__main__":
 
     optimizer = RoutingOptimizer(
         model=module,
-        graph_template=graph_template,
+        module_graph=graph,
         dm=dm,
         get_loss=mmlu_get_loss,
         budget=2,
     )
     recommendation = optimizer.optimize()
+    print(recommendation)
