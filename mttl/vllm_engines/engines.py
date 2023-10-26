@@ -11,12 +11,26 @@ from vllm import LLM, SamplingParams
 from vllm.model_executor.parallel_utils.parallel_state import destroy_model_parallel
 from mttl.utils import logger
 from mttl.models.adapters import MergableAdapter
+from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 
 
-def save_merged_model(model, hf_path="/tmp/merged"):
-    """This assumes the model is on CPU. Creates a copy of the model and merges all adapters
+def save_merged_model(model, model_path, hf_path="/tmp/merged"):
+    """
+    This prioritizes model_path: if both model and model_path are given, it loads model from model_path.
+    For the model, this assumes the model is on CPU. Creates a copy of the model and merges all adapters
     if needed. Then saves the model to the given path.
     """
+
+    if model_path:
+        logger.info("Model path is given. Loading model from: %s" % model_path)
+
+        model = ExpertTrainer.from_pretrained(
+            model_path,
+            load_in_8bit=False,
+            device_map={"": "cpu"},
+        )
+        hf_path = os.path.join(hf_path, model_path.replace("/", "_"))
+
     for _, p in model.named_parameters():
         if p.device != torch.device("cpu"):
             raise ValueError("Model must be on CPU to merge adapters.")
@@ -63,11 +77,13 @@ def free_memory():
     time.sleep(3)
 
 
-class LLMEngineMMLU(LLM):
-    def __init__(self, model, temp_path="/tmp/merged", **options):
+class LLMEngine(LLM):
+    def __init__(self, model=None, model_path=None, temp_path="/tmp/merged", **options):
+        assert (
+            model is not None or model_path is not None
+        ), "Either model or model_path must be given."
         # merge adapters -- if needed --
-        model = copy.deepcopy(model)
-        path = save_merged_model(model, hf_path=temp_path)
+        path = save_merged_model(model, model_path, hf_path=temp_path)
 
         self.path = path
         options["model"] = path
@@ -77,6 +93,12 @@ class LLMEngineMMLU(LLM):
             **options,
         )
 
+    @property
+    def model_name(self):
+        return self.llm_engine.model_config.model
+
+
+class LLMEngineMMLU(LLMEngine):
     def eval(
         self,
         dataloader: DataLoader,
