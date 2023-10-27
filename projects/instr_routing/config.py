@@ -63,6 +63,8 @@ class RoutingConfig(Config):
         # soft prompts
         self.soft_prompt_length = 10
         self.patch_last_k_layers = -1
+        self.soft_prompt_mlp_dim = None
+        self.soft_prompt_hidden_dim = None
 
     def post_init(self):
         if self.eval_mmlu and "MMLU_DATA_DIR" not in os.environ:

@@ -20,7 +20,8 @@ def modify_transformer(transformer, config):
     import mttl.models.modifiers.poly  # noqa: F401
     import mttl.models.modifiers.routing  # noqa: F401
     import mttl.models.modifiers.prompt_tuning # noqa: F401
-    import mttl.models.modifiers.prefix_tuning # noqa: F401
+    import mttl.models.modifiers.llama_adapter # noqa: F401
+    # import mttl.models.modifiers.prefix_tuning # noqa: F401
 
     # create a shared container for the task id 
     transformer.task_id_container = {}

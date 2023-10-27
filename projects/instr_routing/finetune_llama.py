@@ -310,7 +310,6 @@ def run_multitask(args):
             best_model = CLM.load_from_checkpoint(
                 path_best_model,
                 tokenizer=dm.tokenizer,
-                load_in_8bit=False,
             ).to("cuda")
         else:
             torch.cuda.empty_cache()
