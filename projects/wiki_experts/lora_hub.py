@@ -24,7 +24,13 @@ from src.graph.module_graph import ModuleGraph
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
 
 
-def mmlu_get_loss(model, dm: DefaultDataModule, graph_string, use_vllm=True):
+def mmlu_get_loss(
+    model: MultiExpertModel,
+    tokenizer,
+    dataloader: DataLoader,
+    graph_string,
+    use_vllm=True,
+):
     # use gpu if available
     train_loss = 0
     if use_vllm:
@@ -36,11 +42,10 @@ def mmlu_get_loss(model, dm: DefaultDataModule, graph_string, use_vllm=True):
             model,
             temp_path=f"{os.environ.get('MTTL_TEMP','/tmp/merged')}/{model_hash.hexdigest()}/",
         )
-        dataloader: DataLoader = dm.val_dataloader()
         all_predictions, all_references, all_task_names = model.eval(
             dataloader,
             generation_config=generation_config,
-            tokenizer=dm.tokenizer,
+            tokenizer=tokenizer,
         )
         del model
         free_memory()
@@ -56,7 +61,6 @@ def mmlu_get_loss(model, dm: DefaultDataModule, graph_string, use_vllm=True):
         )
 
     else:
-        dataloader: DataLoader = dm.val_dataloader()
         with torch.no_grad():
             device = "cuda" if torch.cuda.is_available() else "cpu"
             for _, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
@@ -86,7 +90,7 @@ class RoutingOptimizer:
         self,
         model: MultiExpertModel,
         module_graph: ModuleGraph,
-        dm: DefaultDataModule,
+        dataloader: DataLoader,
         get_loss: Callable,
         budget=5,
     ) -> None:
@@ -100,7 +104,7 @@ class RoutingOptimizer:
             upper=[1.5] * self.K,
             lower=[-1.5] * self.K,
         )
-        self.dm = dm
+        self.dataloader = dataloader
         self.optimizer = ng.optimizers.NGOpt(
             parametrization=self.parametrization, budget=budget
         )
@@ -117,7 +121,7 @@ class RoutingOptimizer:
     ):
         def get_score(
             weights,
-            dm,
+            dataloader,
             basemodel: MultiExpertModel,
             get_loss,
             get_regular,
@@ -129,14 +133,19 @@ class RoutingOptimizer:
             model = copy.deepcopy(basemodel)
             model.load_from_graph(self.module_graph, action="merge", **graph_vars)
             # minimize the metric
-            loss = get_loss(basemodel, dm, graph_string)
+            loss = get_loss(
+                model=model,
+                tokenizer=model.tokenizer,
+                dataloader=dataloader,
+                graph_string=graph_string,
+            )
             # L1 regularization term
             metric_val = loss + get_regular(weights)
             return metric_val
 
         _get_score = partial(
             get_score,
-            dm=self.dm,
+            dataloader=self.dataloader,
             get_loss=self.get_loss,
             basemodel=self.model,
             get_regular=default_l1_regularization,
@@ -144,7 +153,10 @@ class RoutingOptimizer:
         )
         recommendation = self.optimizer.minimize(_get_score)
         logger.info(recommendation.value)
-        return recommendation
+
+        best_vars = self.get_graph_vars(recommendation.value)
+        best_graph = self.module_graph.dumps(**best_vars)
+        return recommendation.value, best_graph
 
 
 if __name__ == "__main__":
@@ -180,7 +192,7 @@ if __name__ == "__main__":
     optimizer = RoutingOptimizer(
         model=module,
         module_graph=graph,
-        dm=dm,
+        dataloader=dm.test_dataloader(),
         get_loss=mmlu_get_loss,
         budget=2,
     )
