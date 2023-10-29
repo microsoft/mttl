@@ -41,6 +41,8 @@ def save_merged_model(model, model_path, hf_path="/tmp/merged"):
     # if path already exists, we don't need to do anything
     if os.path.exists(hf_path):
         return hf_path
+    else:
+        os.makedirs(hf_path)
 
     merged = []
     model_copy = copy.deepcopy(model.model)
