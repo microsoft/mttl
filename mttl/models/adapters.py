@@ -6,6 +6,7 @@ from torch.autograd import Function
 from torch.nn.modules.module import Module
 import bitsandbytes as bnb
 from abc import ABC, abstractmethod
+from typing import Dict
 
 
 class Adapter(nn.Module):
@@ -283,17 +284,49 @@ class SkilledLoRA(LoRA):
         adapter_out = input_lora.bmm(A).bmm(B) * self.scaling
         return layer_out + adapter_out.to(input.dtype)
 
+    @classmethod
+    def weighted_merge_forward(cls, input, loras, weights, merge_after=False):
+        """
+        Meging loras into one loa accroding to the weights
+        """
+        if any([lora.merged_with_layer for lora in loras]):
+            raise ValueError("Cannot parallelize merged loras.")
+        if len(set([lora.layer for lora in loras])) > 1:
+            raise ValueError("Cannot parallelize loras applied to different layers.")
+
+        # (n_skills, in_features, rank)
+        lora_a = torch.stack([lora.lora_a for lora in loras], dim=0)
+        # (n_skills, rank, out_features)
+        lora_b = torch.stack([lora.lora_b for lora in loras], dim=0)
+        # (n_examples,)
+        scaling = torch.cat(
+            [torch.FloatTensor([lora.scaling]) for lora in loras], dim=0
+        ).to(device=lora_a.device)
+        weights = torch.stack([weight.squeeze() for weight in weights], dim=0)
+        if merge_after:
+            adapter_out_A = torch.einsum("bsd,kdr->bskr", (input, lora_a))
+            adapter_out_B = torch.einsum("bskr,krd->bskd", (adapter_out_A, lora_b))
+            adapter_out = (
+                torch.einsum("bskd,k->bsd", (adapter_out_B, weights)) * scaling.mean()
+            )
+        else:
+            # merge lors according to the weights, As and Bs seperately
+            A = torch.einsum("s,sdr->dr", (weights, lora_a))
+            B = torch.einsum("s,srd->rd", (weights, lora_b))
+
+            # (n_examples, seq_len, out_features)
+            adapter_out = torch.matmul(torch.matmul(input, A), B) * scaling.mean()
+        layer_out = loras[0].layer(input)
+        return layer_out + adapter_out.to(dtype=layer_out.dtype)
+
 
 class ExpertContainer(Adapter, MergableAdapter):
-    def __init__(
-        self,
-        config,
-        task_id_container,
-        layer,
-    ):
+    def __init__(self, config, task_id_container, layer, selector=None):
         super().__init__()
         self.config = config
         self.layer = layer
+        self._selector_constructor = selector
+        self.selector = None
 
         if not isinstance(self.layer, nn.Linear):
             raise ValueError(
@@ -304,6 +337,11 @@ class ExpertContainer(Adapter, MergableAdapter):
         self.default_expert_name = None
         self.merged_expert_names = []
         self.experts = nn.ModuleDict({})
+
+    def init_router(self):
+        self.selector = self._selector_constructor(
+            self.config, list(self.experts.keys())
+        )
 
     def add_expert(
         self,
@@ -347,8 +385,47 @@ class ExpertContainer(Adapter, MergableAdapter):
         ), "Cannot proceed with merging experts. Probably because some experts were added with action 'route'."
         return
 
+    def weighted_route(self, input, task_weights):
+        load_experts = []
+        weights = []
+
+        for task_name, weight in task_weights.items():
+            load_experts.append(self.experts[task_name])
+            weights.append(weight)
+        # assume all experts are loras
+        output = SkilledLoRA.weighted_merge_forward(
+            input, load_experts, weights, merge_after=True
+        )
+
+        return output
+
+    def oracle_route(self, input, task_names):
+        load_experts = []
+
+        for task_name in task_names:
+            if task_name not in self.experts:
+                if not self.default_expert_name:
+                    raise ValueError(
+                        "The expert for this task {} does not exists. Consider setting a default expert!".format(
+                            task_name
+                        )
+                    )
+                else:
+                    selected_expert = self.default_expert_name
+            else:
+                selected_expert = task_name
+            load_experts.append(self.experts[selected_expert])
+        # assume all experts are loras
+        output = LoRA.parallel_linear_forward(input, load_experts)
+        return output
+
+    def route_with_selector(self, input):
+        weights: Dict = self.selector(input)
+        return self.weighted_route(input, weights)
+
     def forward(self, input, **kwargs):
         task_names = self.info_container["routing_infos"].task_names
+        task_weights = self.info_container["routing_infos"].task_weights
 
         if task_names and (
             any(task_name not in self.experts for task_name in task_names)
@@ -360,25 +437,20 @@ class ExpertContainer(Adapter, MergableAdapter):
             )
 
         # if it has some routing experts *and* task names, then we can route
+        ##################
+        #### routing #####
         if len(self.experts) and task_names is not None:
-            load_experts = []
-
-            for task_name in task_names:
-                if task_name not in self.experts:
-                    if not self.default_expert_name:
-                        raise ValueError(
-                            "The expert for this task {} does not exists. Consider setting a default expert!".format(
-                                task_name
-                            )
-                        )
-                    else:
-                        selected_expert = self.default_expert_name
-                else:
-                    selected_expert = task_name
-                load_experts.append(self.experts[selected_expert])
-            # assume all experts are loras
-            output = LoRA.parallel_linear_forward(input, load_experts)
+            # route according to task name
+            output = self.oracle_route(input, task_names)
+        elif len(self.experts) and task_weights is not None:
+            # route according to learnebale weights
+            output = self.weighted_route(input, task_weights)
+        elif len(self.experts):
+            assert self.selector is not None, "selector is not defined"
+            output = self.route_with_selector(input)
         else:
+            ##########
+            ## no experts -- no routing, experts were merged into the layer
             output = self.layer(input, **kwargs)
         return output
 

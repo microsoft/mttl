@@ -22,6 +22,10 @@ class ExpertConfig(Config):
 
         self.expand_val_set_w_downstream = True
 
+        self.n_ng_iterations = 2
+
+        self.expert_routing = None
+
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
 
