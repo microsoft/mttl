@@ -11,7 +11,7 @@ from functools import partial
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from typing import Union, Callable
+from typing import Union, Callable, List, Dict
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators.base import compute_task_aggregation
 
@@ -89,14 +89,16 @@ class RoutingOptimizer:
     def __init__(
         self,
         model: MultiExpertModel,
-        module_graph: ModuleGraph,
+        modules: Dict,
         dataloader: DataLoader,
         get_loss: Callable,
         budget=5,
+        task_name="new_task",
     ) -> None:
+        self.task_name = task_name
         self.model: MultiExpertModel = model
-        self.module_graph = module_graph
-        self.varaibles = module_graph.get_varaibles()
+        self.module_graph: ModuleGraph = self.construct_graph(modules)
+        self.varaibles = self.module_graph.get_varaibles()
         self.K = len(self.varaibles)
 
         self.parametrization = ng.p.Array(
@@ -109,6 +111,14 @@ class RoutingOptimizer:
             parametrization=self.parametrization, budget=budget
         )
         self.get_loss = get_loss
+
+    def construct_graph(self, modules_to_dest: Dict):
+        s = f"{self.task_name} -> linear("
+        for i, (name, destination) in enumerate(modules_to_dest.items()):
+            s += f"{destination}:${i},"
+        s = s[:-1] + ")"
+        graph = ModuleGraph.from_string(s)
+        return graph
 
     def get_graph_vars(self, weights: list):
         s = {}
@@ -179,22 +189,25 @@ if __name__ == "__main__":
     config.predict_batch_size = 1
     config.finetune_task_name = "abstract_algebra"
 
-    graph_string = "security_studies -> linear(sordonia/expert_llama2_13b_security_studies:$weight);\
-                    abstract_algebra -> linear(sordonia/expert_llama2_13b_security_studies:$weight);\
-                    abstract_algebra2 -> linear(sordonia/expert_llama2_13b_security_studies:2);"
-    graph = ModuleGraph.from_string(graph_string)
+    modules_2_dest = {
+        "security_studies": "sordonia/expert_llama2_13b_security_studies",
+        "platy": "sordonia/llama2-13b-platypus",
+    }
+    use_vllm = False
+    dm = MMLUDataModule(config, for_generation=use_vllm, do_tokenize=not use_vllm)
+    module = MultiExpertModel(
+        **vars(config), tokenizer=dm.tokenizer, device_map="cpu" if use_vllm else "auto"
+    )
 
-    dm = MMLUDataModule(config, for_generation=True, do_tokenize=False)
-
-    model_class = MultiExpertModel
-    module = model_class(**vars(config), tokenizer=dm.tokenizer, device_map="cpu")
+    _mmlu_get_loss = partial(mmlu_get_loss, use_vllm=use_vllm)
 
     optimizer = RoutingOptimizer(
         model=module,
-        module_graph=graph,
+        modules=modules_2_dest,
         dataloader=dm.test_dataloader(),
-        get_loss=mmlu_get_loss,
+        get_loss=_mmlu_get_loss,
         budget=2,
+        task_name=config.finetune_task_name,
     )
     recommendation = optimizer.optimize()
     print(recommendation)

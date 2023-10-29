@@ -57,7 +57,7 @@ class MultiExpertModel(ExpertTrainer):
         self.experts = []
         self.expert_routing = kwargs.get("expert_routing", None)
         self.router: GlobalRouter = None
-        if self.expert_routing.startswith("global"):
+        if self.expert_routing and self.expert_routing.startswith("global"):
             self.router = MULTI_EXPERT_ROUTERS[self.expert_routing](self.hparams)
 
     def init_router(self):
@@ -84,7 +84,7 @@ class MultiExpertModel(ExpertTrainer):
                 action=action,
                 is_default=module_name == "default",
                 selector=MULTI_EXPERT_ROUTERS[self.expert_routing]
-                if self.expert_routing.startswith("local")
+                if self.expert_routing and self.expert_routing.startswith("local")
                 else None,
             )
             self.experts.append(module_name)
