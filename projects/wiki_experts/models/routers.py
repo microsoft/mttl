@@ -8,7 +8,7 @@ from typing import Any, Dict
 import torch.nn.functional as F
 from mttl.models.modifiers.experts import add_expert_to_transformer
 from mttl.models.adapters import SkilledLoRA, LoRA, SkilledLoRA_MergeLoraAfterOP
-from abc import abstractmethod, ABCMeta
+from abc import abstractmethod, ABCMeta, abstractproperty
 
 MULTI_EXPERT_ROUTERS = {}
 
@@ -30,19 +30,42 @@ class GlobalRouter:
     def init(self, expert_names, **kwargs):
         pass
 
+    @abstractmethod
+    def get_routing_weights(self):
+        pass
+
+    @abstractproperty
+    def name(self):
+        pass
+
+
+class LocalRouter:
+    @abstractmethod
+    def forward(self, input, **kwargs):
+        pass
+
+    @abstractmethod
+    def get_routing_weights(self):
+        pass
+
+    @abstractproperty
+    def name(self):
+        pass
+
 
 @register_multi_expert_selector("local_softmax")
-class Local_Multi_ExpertRouter(torch.nn.Module):
+class Local_Multi_ExpertRouter(torch.nn.Module, LocalRouter):
     """
-    Implements routing at the level of the full model: the routing weights shared accross all layers
+    Implements routing at a per-layer level: the routing weights shared accross all layers of the model
     """
 
     # TODO: implement more complex versions of this router: one that ha smore params, that takes also the inputs ad routes, etc.
-    def __init__(self, config, expert_names):
+    def __init__(self, config, expert_names, routed_layer_name=None):
         super().__init__()
         self.config = config
         self.activtion = torch.nn.Softmax(dim=-1)
         self.expert_names = expert_names
+        self.routed_layer_name = routed_layer_name
         self._merging_weights = torch.nn.parameter.Parameter(
             torch.ones(len(expert_names)), requires_grad=True
         )
@@ -50,9 +73,17 @@ class Local_Multi_ExpertRouter(torch.nn.Module):
         self._merging_weights.data.normal_(mean=0.0, std=0.02)
         self._is_initialized = True
 
+    @property
+    def name(self):
+        return f"local_softmax_{self.routed_layer_name}"
+
     def forward(self, input, **kwargs):
         weights = self.activtion(self._merging_weights)
         return {k: v for k, v in zip(self.expert_names, weights)}
+
+    def get_routing_weights(self):
+        weights = self.activtion(self._merging_weights)
+        return {k: v.cpu().item() for k, v in zip(self.expert_names, weights)}
 
 
 @register_multi_expert_selector("global_softmax")
@@ -64,6 +95,7 @@ class Global_Multi_ExpertRouter(torch.nn.Module, GlobalRouter):
     def __init__(self, config):
         super().__init__()
         self.config = config
+        name = "global_softmax"
         self._is_initialized = False
         self.activtion = torch.nn.Softmax(dim=-1)
 
@@ -81,108 +113,9 @@ class Global_Multi_ExpertRouter(torch.nn.Module, GlobalRouter):
         weights = self.activtion(self._merging_weights)
         return {k: v for k, v in zip(self.expert_names, weights)}
 
-
-class RouterExpertContainer(Adapter, MergableAdapter):
-    def __init__(
-        self,
-        config,
-        task_id_container,
-        layer,
-    ):
-        super().__init__()
-        self.config = config
-        self.layer = layer
-
-        if not isinstance(self.layer, nn.Linear):
-            raise ValueError(
-                "Expert containers for layers other than nn.Linear have not been implemented."
-            )
-
-        self.info_container = task_id_container
-        self.default_expert_name = None
-        self.merged_expert_names = []
-        self.experts = nn.ModuleDict({})
-
-    def add_expert(
-        self,
-        name: str,
-        expert_config: Any,
-        expert_weights: Dict[str, torch.Tensor],
-        action="merge",
-        is_default=False,
-    ) -> None:
-        if name in self.experts:
-            raise ValueError("An expert with name {} already exists.".format(name))
-
-        if is_default and action == "merge":
-            raise ValueError(
-                "Cannot set is_default if this expert is merged, change to 'route'."
-            )
-
-        # hack this for now, but build a proper config for each module
-        if expert_config.model_modifier == "lora":
-            expert_module = LoRA(expert_config, self.layer)
-            expert_module.load_lora_weights(expert_weights)
-        else:
-            raise NotImplementedError("ExpertContainer only supports LoRA experts.")
-
-        if action == "merge":
-            # weight is merged with layer so we can discard it now
-            if expert_config.model_modifier == "lora":
-                expert_module.merge_with_layer()
-                self.merged_expert_names.append(name)
-            else:
-                raise NotImplementedError("Merging experts only supports LoRA experts.")
-        else:
-            # we keep track of the expert weights
-            self.experts[name] = expert_module
-        if is_default:
-            self.default_expert_name = name
-
-    def merge_with_layer(self):
-        assert (
-            len(self.experts) == 0
-        ), "Cannot proceed with merging experts. Probably because some experts were added with action 'route'."
-        return
-
-    def forward(self, input, **kwargs):
-        task_names = self.info_container["routing_infos"].task_names
-
-        if task_names and (
-            any(task_name not in self.experts for task_name in task_names)
-            and not self.default_expert_name
-            and len(self.experts)
-        ):
-            raise ValueError(
-                "Experts for all tasks have not been loaded! Set a default expert?"
-            )
-
-        # if it has some routing experts *and* task names, then we can route
-        ##################
-        #### routing #####
-        if len(self.experts) and task_names is not None:
-            load_experts = []
-
-            for task_name in task_names:
-                if task_name not in self.experts:
-                    if not self.default_expert_name:
-                        raise ValueError(
-                            "The expert for this task {} does not exists. Consider setting a default expert!".format(
-                                task_name
-                            )
-                        )
-                    else:
-                        selected_expert = self.default_expert_name
-                else:
-                    selected_expert = task_name
-                load_experts.append(self.experts[selected_expert])
-            # assume all experts are loras
-            output = LoRA.parallel_linear_forward(input, load_experts)
-        else:
-            ##########
-            ## no experts, experts were merged into the layer
-            output = self.layer(input, **kwargs)
-        return output
+    def get_routing_weights(self):
+        weights = self.activtion(self._merging_weights)
+        return {k: v.cpu().item() for k, v in zip(self.expert_names, weights)}
 
 
 # # same as smear, but uses merging after the ouyter product

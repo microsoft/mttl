@@ -3,35 +3,21 @@ import re
 
 import sys
 import json
-import wandb
-import pytorch_lightning as pl
-
 import torch
+import pytorch_lightning as pl
 from huggingface_hub import login
-from src.graph.module_graph import ModuleGraph
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 import json
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
-from mttl.callbacks import MMLUCallback
-from mttl.evaluators import MMLUEvaluator
+from projects.wiki_experts.src.graph.module_graph import ModuleGraph
 from mttl.datamodule.mmlu_data_module import MMLUDataModule
-from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-from mttl.datamodule.oasst1_module import OA1Config, OA1Module
-from mttl.datamodule.retrieval_lm_module import RetrievalLMDataModule
-from mttl.datamodule.facts_lm_module import FactsLMConfig, FactsLMDataModule
-from mttl.datamodule.platypus_module import (
-    PlatypusModule,
-    PlatypusConfig,
-    PlatypusQAModule,
-)
 from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.utils import get_mlf_logger, setup_logging, logger
-
-from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
+from typing import List
 
 
 class SimpleLogger(pl.loggers.logger.DummyLogger):
@@ -48,47 +34,36 @@ class SimpleLogger(pl.loggers.logger.DummyLogger):
             json.dump(self.metrics, f)
 
 
-def run_multitask(args):
+def run_m_weights_learning(args, dm, loggers: List = []):
     seed_everything(args.seed, workers=True)
-
     # get directory of the current file
     setup_logging(args.output_dir)
-
+    args.trainable_param_names = ".*_merging_weights.*"
     logger.info("Args: {}".format(args.to_json()))
 
     if args.hf_token_hub:
         login(token=args.hf_token_hub)
 
-    # select dataloader
-    from mmlu_exper_merge_nevergrad import get_module_graph
-
-    module_graph, subject_to_module = get_module_graph(args.module_graph)
-    module_graph = re.sub(r"\$([a-zA-Z_][a-zA-Z0-9_]*)", "1", module_graph)
-    graph = ModuleGraph.from_string(module_graph)
-
-    # add MMLU val data to validaiton set
-    dm = MMLUDataModule(args, for_generation=False, do_tokenize=True)
-    args.n_tasks = len(dm.task_to_id) if hasattr(dm, "task_to_id") else 0
-    dm.train_dataset = dm.dev_dataset
     # legit logging
-    loggers = []
     exp_name = os.environ.get("AMLT_JOB_NAME", args.exp_name)
-    # if os.environ.get("WANDB_API_KEY") or args.wandb_project:
-    #     import wandb
+    if len(loggers) == 0:
+        loggers = []
+        if os.environ.get("WANDB_API_KEY") or args.wandb_project:
+            import wandb
 
-    #     project = "wiki_experts" if args.wandb_project is None else args.wandb_project
-    #     args.exp_name = "dev_run" if args.exp_name is None else args.exp_name
-    #     project = os.environ.get("WANDB_PROJECT", project)
-    #     wandb_logger = pl.loggers.WandbLogger(
-    #         project=project,
-    #         name=exp_name,  # , config=args_
-    #         settings=wandb.Settings(start_method="fork"),
-    #     )
-    #     wandb_logger.experiment.save("*.py")
-    #     loggers.append(wandb_logger)
-
+            project = (
+                "wiki_experts" if args.wandb_project is None else args.wandb_project
+            )
+            args.exp_name = "dev_run" if args.exp_name is None else args.exp_name
+            project = os.environ.get("WANDB_PROJECT", project)
+            wandb_logger = pl.loggers.WandbLogger(
+                project=project,
+                name=exp_name,  # , config=args_
+                settings=wandb.Settings(start_method="fork"),
+            )
+            wandb_logger.experiment.save("*.py")
+            loggers.append(wandb_logger)
     module = MultiExpertModel(**vars(args), tokenizer=dm.tokenizer)
-    module.load_from_graph(graph, action="route")
     module.to("cuda")
     ##############################
 
@@ -107,7 +82,6 @@ def run_multitask(args):
 
     monitor = "train/loss"
     mode = "min"
-
     model_name = args.model.replace("/", "_")
 
     checkpoint_callback = ModelCheckpoint(
@@ -121,15 +95,7 @@ def run_multitask(args):
     )
     callbacks.append(checkpoint_callback)
 
-    val_check_interval = args.eval_every
-    if val_check_interval == -1:
-        val_check_interval = None
-    else:
-        val_check_interval = args.gradient_accumulation_steps * args.eval_every
-        if val_check_interval > len(dm.train_dataloader()):
-            val_check_interval = len(dm.train_dataloader())
-        elif val_check_interval > args.total_steps and args.total_steps != -1:
-            val_check_interval = args.total_steps
+    val_check_interval = None
 
     trainer = Trainer(
         devices=-1,
@@ -153,7 +119,30 @@ def run_multitask(args):
     # initial validation!
     trainer.fit(module, dm)
 
+    checkpoint = (
+        checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
+    )
+    del module
+    torch.cuda.empty_cache()
+    module = MultiExpertModel.load_from_checkpoint(checkpoint)
+    weights = module.get_router_weights()
+    del module
+    torch.cuda.empty_cache()
+    return weights, checkpoint
+
 
 if __name__ == "__main__":
     args = ExpertConfig.parse()
-    run_multitask(args)
+    from utils import get_module_graph
+
+    module_graph, subject_to_module = get_module_graph(args.module_graph)
+    module_graph = re.sub(r"\$([a-zA-Z_][a-zA-Z0-9_]*)", "1", module_graph)
+    args.module_graph = module_graph
+    # add MMLU val data to validaiton set
+    dm = MMLUDataModule(args, for_generation=False, do_tokenize=True)
+    args.n_tasks = len(dm.task_to_id) if hasattr(dm, "task_to_id") else 0
+    args.num_train_epochs = 1
+    dm.train_dataset = dm.dev_dataset
+
+    weights, checkpoint = run_m_weights_learning(args, dm=dm)
+    print(weights, checkpoint)

@@ -303,6 +303,9 @@ class SkilledLoRA(LoRA):
             [torch.FloatTensor([lora.scaling]) for lora in loras], dim=0
         ).to(device=lora_a.device)
         weights = torch.stack([weight.squeeze() for weight in weights], dim=0)
+        layer_out = loras[0].layer(input)
+        # make sure input is in the same dtype as lora. By default it is likley to be in float16 (if we lad LLama model in float16). Butloas here can be in float32
+        input = input.to(dtype=lora_a.dtype)
         if merge_after:
             adapter_out_A = torch.einsum("bsd,kdr->bskr", (input, lora_a))
             adapter_out_B = torch.einsum("bskr,krd->bskd", (adapter_out_A, lora_b))
@@ -316,7 +319,6 @@ class SkilledLoRA(LoRA):
 
             # (n_examples, seq_len, out_features)
             adapter_out = torch.matmul(torch.matmul(input, A), B) * scaling.mean()
-        layer_out = loras[0].layer(input)
         return layer_out + adapter_out.to(dtype=layer_out.dtype)
 
 
@@ -340,7 +342,9 @@ class ExpertContainer(Adapter, MergableAdapter):
 
     def init_router(self):
         self.selector = self._selector_constructor(
-            self.config, list(self.experts.keys())
+            self.config,
+            list(self.experts.keys()),
+            routed_layer_name=self.__layer_name__,
         )
 
     def add_expert(
