@@ -22,6 +22,7 @@ from mttl.datamodule.collators import DefaultDataModule
 from mttl.utils import logger, setup_logging
 from src.graph.module_graph import ModuleGraph
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
+from mttl.evaluators import MMLUEvaluator
 
 
 def mmlu_get_loss(
@@ -30,6 +31,7 @@ def mmlu_get_loss(
     dataloader: DataLoader,
     graph_string,
     use_vllm=True,
+    use_loss=False,
 ):
     # use gpu if available
     train_loss = 0
@@ -61,20 +63,26 @@ def mmlu_get_loss(
         )
 
     else:
-        with torch.no_grad():
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            for _, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
-                batch = {
-                    k: v.to(device)
-                    for k, v in batch.items()
-                    if isinstance(v, torch.Tensor)
-                }
-                with torch.no_grad():
-                    loss = model(batch)
-                train_loss += loss.detach().float()
-        loss = train_loss.float()
-        # average loss over the number of examples
-        return float(loss) / len(dataloader.dataset)
+        if use_loss:
+            with torch.no_grad():
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                for _, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
+                    batch = {
+                        k: v.to(device)
+                        for k, v in batch.items()
+                        if isinstance(v, torch.Tensor)
+                    }
+                    with torch.no_grad():
+                        loss = model(batch)
+                    train_loss += loss.detach().float()
+            loss = train_loss.float()
+            # average loss over the number of examples
+            return float(loss) / len(dataloader.dataset)
+        else:
+            # using accuracy
+            mmlu_evaluator = MMLUEvaluator(model.hparams, split="test", use_vllm=False)
+            scores = mmlu_evaluator.evaluate(model, dataloader=dataloader)
+            return scores["all"]["mean"] * -1.0
 
 
 def default_l1_regularization(weights):
@@ -89,7 +97,7 @@ class RoutingOptimizer:
     def __init__(
         self,
         model: MultiExpertModel,
-        modules: Dict,
+        modules_2_dest: Dict,
         dataloader: DataLoader,
         get_loss: Callable,
         budget=5,
@@ -97,7 +105,7 @@ class RoutingOptimizer:
     ) -> None:
         self.task_name = task_name
         self.model: MultiExpertModel = model
-        self.module_graph: ModuleGraph = self.construct_graph(modules)
+        self.module_graph: ModuleGraph = self.construct_graph(modules_2_dest)
         self.varaibles = self.module_graph.get_varaibles()
         self.K = len(self.varaibles)
 
@@ -203,7 +211,7 @@ if __name__ == "__main__":
 
     optimizer = RoutingOptimizer(
         model=module,
-        modules=modules_2_dest,
+        modules_2_dest=modules_2_dest,
         dataloader=dm.test_dataloader(),
         get_loss=_mmlu_get_loss,
         budget=2,

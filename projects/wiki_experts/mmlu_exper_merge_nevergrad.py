@@ -6,6 +6,7 @@ import torch
 import wandb
 import numpy as np
 import pandas as pd
+import seaborn as sns
 from functools import partial
 from huggingface_hub import login
 from collections import defaultdict
@@ -52,7 +53,7 @@ def get_module_graph(module_graph):
         s = ""
         tasks_to_module = {}
         for subject, mapping in module_graph.items():
-            tasks_to_module[subject] = Template(mapping)
+            tasks_to_module[subject] = mapping
             s += mapping
         return s, tasks_to_module
     else:
@@ -73,7 +74,7 @@ def get_module_graph(module_graph):
         file = files[best_idx]
 
         mapping = f"{subject} -> linear({file}:$weight_{subject});"
-        tasks_to_module[subject] = Template(mapping)
+        tasks_to_module[subject] = file
         s += mapping
     return s, tasks_to_module
 
@@ -137,7 +138,7 @@ def parse_experts_to_load(experts_to_load):
 def log_wandb(scores, prefix):
     if wandb.run is not None:
         for t, v in scores.items():
-            wandb.log({f"{prefix}/on_{t}/test_mmlu": v["mean"]})
+            wandb.log({f"{prefix}_on_{t}_test_mmlu": v["mean"]})
 
 
 def init_wandb_logger(args):
@@ -158,17 +159,16 @@ def _setup_logging(args):
     init_wandb_logger(args)
 
 
-def produce_transfer_matrix(args, subject_to_module):
+def produce_transfer_matrix(args, subject_to_module, use_vllm=True):
     """
     Eval each module on each subject
     """
     transfer_table = {}
-    use_vllm = True
-    for module_for_subject, graph_to_eval in subject_to_module.items():
+    for module_for_subject, module_dest in subject_to_module.items():
         result = {}
         for subject_eval_on, _ in subject_to_module.items():
             # select dataloader
-            graph = graph_to_eval.substitute({f"weight_{module_for_subject}": 1.0})
+            graph = f"{module_for_subject} -> linear({module_dest}:1.0)"
             config_copy = copy.deepcopy(args)
             config_copy.finetune_task_name = subject_eval_on
             mmlu = MMLUEvaluator(
@@ -193,6 +193,13 @@ def produce_transfer_matrix(args, subject_to_module):
     if wandb.run is not None:
         tbl = wandb.Table(data=transfer_matrix)
         wandb.log({"transfer_matrix": tbl})
+        wandb.log(
+            {
+                "transfer_matrix": wandb.Image(
+                    sns.heatmap(transfer_matrix, annot=True, linewidth=0.5).get_figure()
+                )
+            }
+        )
     try:
         del module
         free_memory()
@@ -206,48 +213,64 @@ def run_eval(args: ExpertConfig):
     _setup_logging(args)
     if args.hf_token_hub:
         login(token=args.hf_token_hub)
-
-    module_graph, subject_to_module = get_module_graph(args.module_graph)
+    use_vllm = args.use_vllm
+    _, module_2_dest = get_module_graph(args.module_graph)
 
     # 1. How good is the merging optimization procedure? Can we find a routing that is equivalent or better than oracle? (How does it compare to join training?)
 
     # Get oracle perf + cross-task transfer
-    # transfer_matrix:pd.DataFrame = produce_transfer_matrix(args, subject_to_module)
-    # print("Transfer matrix", transfer_matrix)
+    transfer_matrix: pd.DataFrame = produce_transfer_matrix(
+        args, module_2_dest, use_vllm=use_vllm
+    )
+    print("Transfer matrix", transfer_matrix)
 
     # we use the test-sets of each of the modules in the population and see if we can find the right routing or perform better than the oracle
     # we directly use tes-set for search, i.e. its an oracle!
-    model_class = MultiExpertModel
 
-    dm = MMLUDataModule(args, for_generation=True, do_tokenize=False)
-    module = model_class(**vars(args), tokenizer=dm.tokenizer, device_map="cpu")
-
-    for task in subject_to_module.keys():
+    dm = MMLUDataModule(args, for_generation=use_vllm, do_tokenize=not use_vllm)
+    module = MultiExpertModel(
+        **vars(args), tokenizer=dm.tokenizer, device_map="cpu" if use_vllm else "auto"
+    )
+    get_loss_function = partial(mmlu_get_loss, use_vllm=use_vllm)
+    best_weights_matrix = {}
+    for task in module_2_dest.keys():
         logger.info(f"Optimizing for {task} for {args.n_ng_iterations} iterations")
         config_copy = copy.deepcopy(args)
         config_copy.finetune_task_name = task
-
-        graph = ModuleGraph.from_string(module_graph)
-        dm = MMLUDataModule(config_copy, for_generation=True, do_tokenize=False)
+        dm = MMLUDataModule(
+            config_copy, for_generation=use_vllm, do_tokenize=not use_vllm
+        )
 
         optimizer = RoutingOptimizer(
             model=module,
-            module_graph=graph,
+            modules_2_dest=module_2_dest,
             dataloader=dm.test_dataloader(),
-            get_loss=mmlu_get_loss,
+            get_loss=get_loss_function,
             budget=config_copy.n_ng_iterations,
         )
         best_weights, best_graph_string = optimizer.optimize()
+        best_weights = best_weights.tolist()
         logger.info("Found best weights: {}".format(best_weights))
         logger.info("Found best graph: {}".format(best_graph_string))
         if wandb.run is not None:
             wandb.log(
                 {
-                    f"{task}/best_weight_{t}": v
-                    for t, v in zip(subject_to_module.keys(), best_weights)
+                    f"best_weight/{task}:{t}": v
+                    for t, v in zip(module_2_dest.keys(), best_weights)
                 }
             )
-
+            wandb.log(
+                {
+                    f"best_weight_{task}": wandb.Image(
+                        sns.barplot(
+                            x=list(module_2_dest.keys()), y=best_weights
+                        ).get_figure()
+                    )
+                }
+            )
+        best_weights_matrix[task] = {
+            t: v for t, v in zip(module_2_dest.keys(), best_weights)
+        }
         # test model with these weights
         graph = ModuleGraph.from_string(best_graph_string)
         model_copy = copy.deepcopy(module)
@@ -258,11 +281,25 @@ def run_eval(args: ExpertConfig):
         scores = mmlu.evaluate(model_copy)
         scores.pop("all")
         log_wandb(
-            scores, f"{task}_optimal_graph/"
+            scores, f"ng_optimal/{task}_optimal_graph/"
         )  # TODO: log this also as a table and potentially as a barchart
         logger.info(f"Scores on of {task} with graph {best_graph_string}:", scores)
         del model_copy
         free_memory()
+
+    best_weights_matrix = pd.DataFrame.from_dict(best_weights_matrix)
+    if wandb.run is not None:
+        tbl_bw = wandb.Table(data=best_weights_matrix)
+        wandb.log({"best_weights_matrix": tbl_bw})
+        wandb.log(
+            {
+                "best_weights_matrix": wandb.Image(
+                    sns.heatmap(
+                        best_weights_matrix, annot=True, linewidth=0.5
+                    ).get_figure()
+                )
+            }
+        )
 
     # We can do:
     #   - in-distribution evaluation: test sets we consider are the test sets of the tasks we have experts for
