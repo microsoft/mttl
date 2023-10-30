@@ -63,7 +63,7 @@ def run_eval(args: ExpertConfig):
 
     # we use the test-sets of each of the modules in the population and see if we can find the right routing or perform better than the oracle
     # we directly use tes-set for search, i.e. its an oracle!
-
+    args.module_graph = None
     dm = MMLUDataModule(args, for_generation=use_vllm, do_tokenize=not use_vllm)
     module = MultiExpertModel(
         **vars(args), tokenizer=dm.tokenizer, device_map="cpu" if use_vllm else "auto"

@@ -18,7 +18,7 @@ from train_multi_expert_weights import run_m_weights_learning
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
-from projects.wiki_experts.lora_hub import RoutingOptimizer, mmlu_get_loss
+from projects.wiki_experts.models.routers import MULTI_EXPERT_ROUTERS  # noqa
 from mttl.evaluators import MMLUEvaluator
 from mttl.utils import setup_logging, logger
 from projects.wiki_experts.src.graph.module_graph import ModuleGraph
@@ -152,7 +152,7 @@ def run_eval(args: ExpertConfig):
         config_copy.finetune_task_name = task
         config_copy.learning_rate = 5e-4
         config_copy.weight_decay = 0.09
-        config_copy.num_train_epochs = 5
+        config_copy.num_train_epochs = 1
         config_copy.precision = "32-true"
         config_copy.trainable_param_names = ".*_merging_weights.*"
 
@@ -163,7 +163,7 @@ def run_eval(args: ExpertConfig):
         dm.train_dataset = dm.dev_dataset
         weights, checkpoint = run_m_weights_learning(config_copy, dm, loggers=loggers)
         log_weights(weights, task)
-        use_vllm = False
+        use_vllm = False  # would need to merge with the learned weights to use vllm here, maybe TODO
         module = MultiExpertModel.load_from_checkpoint(checkpoint)
         if not use_vllm:
             module = module.to("cuda")

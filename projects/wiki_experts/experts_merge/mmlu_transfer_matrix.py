@@ -12,7 +12,6 @@ from functools import partial
 from huggingface_hub import login
 from collections import defaultdict
 from pytorch_lightning import seed_everything
-from lora_hub import RoutingOptimizer, mmlu_get_loss
 from utils import get_module_graph
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -63,6 +62,7 @@ def produce_transfer_matrix(args, subject_to_module, use_vllm=True):
             graph = f"{module_for_subject} -> linear({module_dest}:1.0)"
             config_copy = copy.deepcopy(args)
             config_copy.finetune_task_name = subject_eval_on
+            config_copy.module_graph = None
             mmlu = MMLUEvaluator(
                 config_copy, split=config_copy.mmlu_test_split, use_vllm=use_vllm
             )
@@ -78,7 +78,7 @@ def produce_transfer_matrix(args, subject_to_module, use_vllm=True):
             all = scores.pop("all")
             log_wandb(scores, f"transfer/{module_for_subject}")
             logger.info(
-                f"Scores on of {module_for_subject} for {subject_eval_on}: {all[    'mean']}"
+                f"Scores on of {module_for_subject} for {subject_eval_on}: {all['mean']}"
             )
             transfer_table[module_for_subject] = result
     transfer_matrix = pd.DataFrame.from_dict(transfer_table)
