@@ -376,10 +376,14 @@ class ExpertContainer(Adapter, MergableAdapter):
             self.default_expert_name = name
 
     def merge_with_layer(self):
-        assert (
-            len(self.experts) == 0
-        ), "Cannot proceed with merging experts. Probably because some experts were added with action 'route'."
-        return
+        if len(self.experts) > 0:
+            for name, expert_module in self.experts.items():
+                assert isinstance(
+                    expert_module, LoRA
+                ), "Only LoRA experts can be merged with the layer for now."
+                expert_module.merge_with_layer()
+                self.merged_expert_names.append(name)
+                self.experts.pop(name)
 
     def weighted_route(self, input, task_weights):
         """
