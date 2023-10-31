@@ -307,10 +307,10 @@ class SkilledLoRA(LoRA):
         # make sure input is in the same dtype as lora. By default it is likley to be in float16 (if we lad LLama model in float16). Butloas here can be in float32
         input = input.to(dtype=lora_a.dtype)
         if merge_after:
-            adapter_out_A = torch.einsum("bsd,kdr->bskr", (input, lora_a))
-            adapter_out_B = torch.einsum("bskr,krd->bskd", (adapter_out_A, lora_b))
+            adapter_out_a = torch.einsum("bsd,kdr->bskr", (input, lora_a))
+            adapter_out_b = torch.einsum("bskr,krd->bskd", (adapter_out_a, lora_b))
             adapter_out = (
-                torch.einsum("bskd,k->bsd", (adapter_out_B, weights)) * scaling.mean()
+                torch.einsum("bskd,k->bsd", (adapter_out_b, weights)) * scaling.mean()
             )
         else:
             # merge lors according to the weights, As and Bs seperately
