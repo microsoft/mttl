@@ -107,8 +107,10 @@ class RouterWrapper:
 class RoutingSelector(nn.Module):
     @property
     def layer_name(self):
-        if not hasattr(self, '__layer_name__'):
-            raise ValueError("Layer name not available, dependency injection not done properly?")
+        if not hasattr(self, "__layer_name__"):
+            raise ValueError(
+                "Layer name not available, dependency injection not done properly?"
+            )
 
         return self.__layer_name__
 
@@ -153,14 +155,17 @@ class RoutingInfo:
     instruction_hashes: List[str] = None
     example_ids: List[int] = None
     labels: torch.Tensor = None
+    task_weights: torch.nn.ParameterDict = None
 
     @classmethod
     def from_batch(cls, batch: dict, **kwargs):
         task_ids = batch.get("task_ids").long() if "task_ids" in batch else None
         task_names = batch.get("task_names", None)
+        task_weights = batch.get("task_weights", None)
         ri = cls(
             task_ids=task_ids,
             task_names=task_names,
+            task_weights=task_weights,
             hashes=batch.get("hashes", None),
             example_ids=batch.get("example_ids", None),
             instruction_hashes=batch.get("instruction_hashes", None),

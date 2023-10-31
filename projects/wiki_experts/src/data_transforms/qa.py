@@ -17,10 +17,10 @@ from src.data_transforms.base import (
     DataTransformTemplate,
     TransformModel,
 )
+from mttl.vllm_engines.engines import free_memory
 from src.data_transforms.engines import (
     OpenAI,
     AutoEngine,
-    free_memory,
 )
 from src import mmlu_subject_configs
 from src.data_transforms.utils import (

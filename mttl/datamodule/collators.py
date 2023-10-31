@@ -184,6 +184,8 @@ class DefaultCollator:
         output_batch["hashes"] = hashes
         output_batch["instruction_hashes"] = instruction_hashes
         output_batch["task_ids"] = torch.LongTensor(task_ids)
+        output_batch["source_texts"] = sources
+        output_batch["label_texts"] = labels
         return output_batch
 
 

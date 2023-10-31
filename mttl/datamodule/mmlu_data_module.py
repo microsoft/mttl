@@ -77,6 +77,7 @@ class DataCollatorForMMLU(DefaultCollator):
             )
 
         output_batch["labels_texts"] = labels
+        output_batch["sources_texts"] = sources
         return output_batch
 
 
@@ -171,7 +172,8 @@ class MMLUDataModule(DefaultDataModule):
             )
         else:
             self.train_dataset = dataset["train"]
-            self.test_dataset = self.dev_dataset = dataset["test"]
+            self.test_dataset = dataset["test"]
+            self.dev_dataset = dataset["validation"]
 
         logger.info("Training examples: {}".format(len(self.train_dataset)))
         logger.info("Test examples: {}".format(len(self.test_dataset)))

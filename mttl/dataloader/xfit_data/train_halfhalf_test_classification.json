@@ -1,5 +1,0 @@
-{
-    "train": ["ade_corpus_v2-dosage", "biomrc", "blimp-ellipsis_n_bar_2", "blimp-sentential_negation_npi_scope", "commonsense_qa", "crows_pairs", "duorc", "hellaswag", "kilt_zsre", "lama-google_re", "lama-squad", "math_qa", "numer_sense", "openbookqa", "piqa", "proto_qa", "quartz-no_knowledge", "race-high", "reddit_tifu-tldr", "ropes", "sciq", "wiki_bio", "discovery", "emotion", "ethos-disability", "ethos-sexual_orientation", "glue-cola", "glue-mnli", "glue-mrpc", "glue-qqp", "glue-rte", "glue-wnli", "hatexplain", "health_fact", "imdb", "paws", "scicite", "sick", "sms_spam", "superglue-rte", "superglue-wsc", "tweet_eval-emotion", "tweet_eval-offensive", "tweet_eval-sentiment", "tweet_eval-stance_hillary"],
-    "dev": ["tweet_eval-stance_feminist", "ethos-national_origin", "tweet_eval-hate", "ag_news", "amazon_polarity", "hate_speech18", "poem_sentiment", "climate_fever", "medical_questions_pairs", "tweet_eval-stance_atheism"],
-    "test": ["superglue-cb", "dbpedia_14", "wiki_qa", "emo", "yelp_polarity", "ethos-religion", "financial_phrasebank", "tab_fact", "anli", "ethos-race"]
-}
