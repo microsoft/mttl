@@ -202,7 +202,7 @@ if __name__ == "__main__":
         "platy": "sordonia/llama2-13b-platypus",
     }
     use_vllm = False
-    dm = MMLUDataModule(config, for_generation=use_vllm, do_tokenize=not use_vllm)
+    dm = MMLUDataModule(config, for_generation=use_vllm)
     module = MultiExpertModel(
         **vars(config), tokenizer=dm.tokenizer, device_map="cpu" if use_vllm else "auto"
     )

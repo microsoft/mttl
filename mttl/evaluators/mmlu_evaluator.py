@@ -32,9 +32,7 @@ class MMLUEvaluator(object):
         self.split = split
         self.config = mmlu_data_config
 
-        self.datamodule = MMLUDataModule(
-            self.config, for_generation=True, do_tokenize=not use_vllm
-        )
+        self.datamodule = MMLUDataModule(self.config, for_generation=True)
         self.use_vllm = use_vllm
 
     def eval_vllm(self, model, generation_config, subsample, shuffle):

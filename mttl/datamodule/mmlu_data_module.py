@@ -28,7 +28,6 @@ class DataCollatorForMMLU(DefaultCollator):
     return_tensors: str = "pt"
     model_family: str = "seq2seq"
     task_to_id: dict = None
-    do_tokenize: bool = True
 
     def __call__(self, batch, return_tensors=None):
         if return_tensors is None:
@@ -63,14 +62,11 @@ class DataCollatorForMMLU(DefaultCollator):
 
         # Remove multiple spaces, which mess with tiktoken
         labels = [instance["Instance"]["Output"] for instance in batch]
-        if self.do_tokenize:
-            output_batch = (
-                self.prepare_inputs_for_gpt_family(sources, labels)
-                if self.model_family == "gpt"
-                else self.prepare_inputs_for_seq2seq_family(sources, labels)
-            )
-        else:
-            output_batch = {}
+        output_batch = (
+            self.prepare_inputs_for_gpt_family(sources, labels)
+            if self.model_family == "gpt"
+            else self.prepare_inputs_for_seq2seq_family(sources, labels)
+        )
 
         task_names = [instance["Task"] for instance in batch]
         output_batch["task_names"] = task_names
@@ -115,8 +111,7 @@ class MMLUDataModule(DefaultDataModule):
             collate_fn=self.collate_fn,
         )
 
-    def __init__(self, config: MMLUDataConfig, for_generation=False, do_tokenize=True):
-        self.do_tokenize = do_tokenize
+    def __init__(self, config: MMLUDataConfig, for_generation=False):
         if os.environ.get(self.DATA_ENV) is None:
             raise ValueError(
                 f"Environment variable {self.DATA_ENV} is not set. "
@@ -135,7 +130,6 @@ class MMLUDataModule(DefaultDataModule):
             return_tensors="pt",
             model_family="seq2seq" if self.for_generation else self.config.model_family,
             task_to_id=self.task_to_id,
-            do_tokenize=self.do_tokenize,
         )
 
     @property
