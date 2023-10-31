@@ -1,4 +1,5 @@
 from enum import Enum
+import hashlib
 import os
 from typing import Any, Callable, Optional, Union
 from pytorch_lightning import LightningModule
@@ -69,6 +70,11 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
 
         self.loss_plugins = {}
         self.save_if_loaded = kwargs.get("save_if_loaded", True)
+
+    def get_hash(self):
+        model_hash = hashlib.sha256()
+        model_hash.update(f"{self.hparams}".encode())
+        return model_hash.hexdigest()
 
     @classmethod
     def from_pretrained(
