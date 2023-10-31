@@ -106,7 +106,7 @@ class RoutingOptimizer:
         self.task_name = task_name
         self.model: MultiExpertModel = model
         self.module_graph: ModuleGraph = self.construct_graph(modules_2_dest)
-        self.varaibles = self.module_graph.get_varaibles()
+        self.varaibles = self.module_graph.get_variables()
         self.K = len(self.varaibles)
 
         self.parametrization = ng.p.Array(
