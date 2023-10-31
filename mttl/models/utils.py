@@ -96,7 +96,9 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
         if pretrained_model_name_or_path is not None:
             pretrained_model_name_or_path = str(pretrained_model_name_or_path)
 
-            if os.path.isfile(pretrained_model_name_or_path):
+            if os.path.isfile(pretrained_model_name_or_path) or os.path.isdir(
+                pretrained_model_name_or_path
+            ):
                 resolved_archive_file = get_checkpoint_path(
                     pretrained_model_name_or_path
                 )

@@ -327,8 +327,7 @@ class ExpertContainer(Adapter, MergableAdapter):
         super().__init__()
         self.config = config
         self.layer = layer
-        self._selector_constructor = selector
-        self.selector = None
+        self.selector = selector
 
         if not isinstance(self.layer, nn.Linear):
             raise ValueError(
@@ -339,13 +338,6 @@ class ExpertContainer(Adapter, MergableAdapter):
         self.default_expert_name = None
         self.merged_expert_names = []
         self.experts = nn.ModuleDict({})
-
-    def init_router(self):
-        self.selector = self._selector_constructor(
-            self.config,
-            list(self.experts.keys()),
-            routed_layer_name=self.__layer_name__,
-        )
 
     def add_expert(
         self,
@@ -390,6 +382,9 @@ class ExpertContainer(Adapter, MergableAdapter):
         return
 
     def weighted_route(self, input, task_weights):
+        """
+        Route all examples according to the weights given in the weights dictionary: expert_name -> weight
+        """
         load_experts = []
         weights = []
 
@@ -403,7 +398,10 @@ class ExpertContainer(Adapter, MergableAdapter):
 
         return output
 
-    def oracle_route(self, input, task_names):
+    def route_with_task_name(self, input, task_names):
+        """
+        Route according to the task name information
+        """
         load_experts = []
 
         for task_name in task_names:
@@ -423,13 +421,8 @@ class ExpertContainer(Adapter, MergableAdapter):
         output = LoRA.parallel_linear_forward(input, load_experts)
         return output
 
-    def route_with_selector(self, input):
-        weights: Dict = self.selector(input)
-        return self.weighted_route(input, weights)
-
     def forward(self, input, **kwargs):
         task_names = self.info_container["routing_infos"].task_names
-        task_weights = self.info_container["routing_infos"].task_weights
 
         if task_names and (
             any(task_name not in self.experts for task_name in task_names)
@@ -441,19 +434,16 @@ class ExpertContainer(Adapter, MergableAdapter):
             )
 
         # if it has some routing experts *and* task names, then we can route
-        ##################
-        #### routing #####
-        if len(self.experts) and task_names is not None:
-            # route according to task name
-            output = self.oracle_route(input, task_names)
-        elif len(self.experts) and task_weights is not None:
-            # route according to learnebale weights
-            output = self.weighted_route(input, task_weights)
-        elif len(self.experts):
-            assert self.selector is not None, "selector is not defined"
-            output = self.route_with_selector(input)
+        if len(self.experts) and self.selector is None:
+            assert (
+                task_names is not None
+            ), "Task names are not given: set router or merge experts into the layer."
+            output = self.route_with_task_name(input, task_names)
+        elif len(self.experts) and self.selector is not None:
+            weights: Dict = self.selector(input)
+            output = self.weighted_route(input, weights)
         else:
-            ##########
+            ###############################################################
             ## no experts -- no routing, experts were merged into the layer
             output = self.layer(input, **kwargs)
         return output

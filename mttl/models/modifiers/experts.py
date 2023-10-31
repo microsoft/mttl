@@ -3,8 +3,36 @@ import re
 from mttl.models.adapters import ExpertContainer
 from mttl.utils import logger
 
+from projects.wiki_experts.models.routers import MULTI_EXPERT_ROUTERS
+
+
+def get_selector(config, **kwargs):
+    if config.expert_routing:
+        if config.expert_routing not in MULTI_EXPERT_ROUTERS:
+            raise ValueError(f"Cannot find selector: {config.expert_routing}")
+        return MULTI_EXPERT_ROUTERS[config.expert_routing](config, **kwargs)
+    else:
+        return None
+
+
+def _extract_identifier(string, match_on="coder"):
+    """Returns a unique identifier for the "chunk" of layers sharing the
+    same underlying selector
+    # e.g. 'block' : 'encoder.block.0.layer.0.SelfAttention' -> 'encoder.block.0'
+    """
+    pattern_map = {
+        "coarsegrained": None,
+        "layerwise": "layer",
+    }
+    assert match_on in pattern_map.keys()
+    if match_on == "finegrained":
+        return string
+    if match_on == "coarsegrained":
+        return ""
+
 
 def add_expert_to_transformer(
+    config,
     transformer,
     expert_name,
     expert_config,
@@ -12,7 +40,7 @@ def add_expert_to_transformer(
     action="route",
     is_default=False,
     load_only_layers=None,
-    selector=None,
+    selectors={},
 ):
     # create a shared container for the task id
     if not hasattr(transformer, "task_id_container"):
@@ -26,6 +54,14 @@ def add_expert_to_transformer(
             for c_name, layer in dict(module.named_children()).items():
                 if re.fullmatch(expert_config.modify_layers, c_name):
                     total_layers += 1
+                    layer_name = f"{m_name}.{c_name}"
+                    identifier = _extract_identifier(
+                        layer_name, config.router_granularity
+                    )
+                    if identifier not in selectors.keys():
+                        selectors[identifier] = get_selector(config)
+                        selectors[identifier].__layer_name__ = identifier + ".selector"
+                    rotuter = selectors.get(identifier, None)
 
                     if type(layer) != ExpertContainer:
                         # create an expert lora container
@@ -33,9 +69,9 @@ def add_expert_to_transformer(
                             expert_config,
                             transformer.task_id_container,
                             layer,
-                            selector,
+                            rotuter,
                         )
-                        expert_container.__layer_name__ = f"{m_name}.{c_name}"
+                        expert_container.__layer_name__ = layer_name
                         setattr(
                             module,
                             c_name,
