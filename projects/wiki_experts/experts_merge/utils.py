@@ -12,7 +12,7 @@ sys.path.append(
 )
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 from src import mmlu_subject_configs
-from local_modules import base_dir_tempalte
+from projects.wiki_experts.experts_merge.local_modules import base_dir_tempalte
 from mttl.utils import logger
 
 

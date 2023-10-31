@@ -3,11 +3,8 @@ import torch
 import torch.nn as nn
 from enum import Enum
 
-from mttl.models.adapters import Adapter, MergableAdapter
 from typing import Any, Dict
 import torch.nn.functional as F
-from mttl.models.modifiers.experts import add_expert_to_transformer
-from mttl.models.adapters import SkilledLoRA, LoRA, SkilledLoRA_MergeLoraAfterOP
 from abc import abstractmethod, ABCMeta, abstractproperty
 from mttl.global_vars import EPS
 

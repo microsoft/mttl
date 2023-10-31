@@ -91,50 +91,6 @@ def _setup_logging(args):
     wandb_logger = init_wandb_logger(args)
     return wandb_logger
 
-
-def produce_transfer_matrix(args, subject_to_module):
-    """
-    Eval each module on each subject
-    """
-    transfer_table = {}
-    use_vllm = True
-    for module_for_subject, graph_to_eval in subject_to_module.items():
-        result = {}
-        for subject_eval_on, _ in subject_to_module.items():
-            # select dataloader
-            graph = graph_to_eval.substitute({f"weight_{module_for_subject}": 1.0})
-            config_copy = copy.deepcopy(args)
-            config_copy.finetune_task_name = subject_eval_on
-            mmlu = MMLUEvaluator(
-                config_copy, split=config_copy.mmlu_test_split, use_vllm=use_vllm
-            )
-            module = MultiExpertModel(
-                **vars(config_copy),
-                tokenizer=mmlu.datamodule.tokenizer,
-                device_map="cpu" if use_vllm else "auto",
-            )
-            module.load_from_graph_string(graph, action="merge")
-            scores = mmlu.evaluate(module)
-
-            result[subject_eval_on] = scores[subject_eval_on]["mean"]
-            all = scores.pop("all")
-            log_wandb(scores, f"transfer/{module_for_subject}")
-            logger.info(
-                f"Scores on of {module_for_subject} for {subject_eval_on}:", all["mean"]
-            )
-            transfer_table[module_for_subject] = result
-    transfer_matrix = pd.DataFrame.from_dict(transfer_table)
-    if wandb.run is not None:
-        tbl = wandb.Table(data=transfer_matrix)
-        wandb.log({"transfer_matrix": tbl})
-    try:
-        del module
-        free_memory()
-    except:
-        pass
-    return transfer_matrix
-
-
 def run_eval(args: ExpertConfig):
     seed_everything(args.seed, workers=True)
     wandb_logger = _setup_logging(args)
@@ -154,7 +110,7 @@ def run_eval(args: ExpertConfig):
         config_copy.weight_decay = 0.09
         config_copy.num_train_epochs = 1
         config_copy.precision = "32-true"
-        config_copy.trainable_param_names = ".*_merging_weights.*"
+        config_copy.trainable_param_names = '.*module_logits.*|.*selector.*'
 
         module_graph = re.sub(r"\$([a-zA-Z_][a-zA-Z0-9_]*)", "1", module_graph)
         config_copy.module_graph = module_graph

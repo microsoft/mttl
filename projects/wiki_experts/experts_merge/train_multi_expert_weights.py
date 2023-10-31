@@ -38,7 +38,6 @@ def run_m_weights_learning(args, dm, loggers: List = []):
     seed_everything(args.seed, workers=True)
     # get directory of the current file
     setup_logging(args.output_dir)
-    args.trainable_param_names = ".*_merging_weights.*"
     logger.info("Args: {}".format(args.to_json()))
 
     if args.hf_token_hub:
