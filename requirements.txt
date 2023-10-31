@@ -20,7 +20,6 @@ matplotlib
 accelerate
 peft
 openai
-nomic
 ray
 shortuuid
 matplotlib
