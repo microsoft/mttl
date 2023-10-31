@@ -5,6 +5,11 @@ from mttl.models.modifiers.routing import RoutingInfo
 from mttl.models.modifiers.experts import add_expert_to_transformer
 from mttl.utils import logger
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
+from projects.wiki_experts.models.routers import (
+    MULTI_EXPERT_ROUTERS,
+    GlobalRouter,
+    LocalRouter,
+)
 
 
 def push_expert_to_hub(
@@ -54,10 +59,40 @@ class MultiExpertModel(ExpertTrainer):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.experts = []
+        self.expert_routing = kwargs.get("expert_routing", None)
+        self.router: GlobalRouter = None
+        if self.expert_routing and self.expert_routing.startswith("global"):
+            self.router = MULTI_EXPERT_ROUTERS[self.expert_routing](self.hparams)
+        if self.hparams["module_graph"] is not None:
+            self.load_from_graph_string(self.hparams["module_graph"])
 
-    def load_from_graph(self, graph, action="route"):
+    def init_router(self):
+        if self.expert_routing is not None:
+            if self.router:
+                # init global router
+                self.router.init(self.experts)
+            else:
+                # init local (per expert container) routers
+                for _, module in dict(self.model.named_modules()).items():
+                    for _, layer in dict(module.named_children()).items():
+                        if hasattr(layer, "init_router"):
+                            layer.init_router()
+
+    def get_router_weights(self):
+        if self.expert_routing is not None:
+            if self.router:
+                return {self.router.name: self.router.get_routing_weights()}
+            else:
+                weights = {}
+                for _, module in dict(self.model.named_modules()).items():
+                    for _, layer in dict(module.named_children()).items():
+                        if isinstance(layer, LocalRouter):
+                            weights[layer.name] = layer.get_routing_weights()
+                return weights
+
+    def load_from_graph(self, graph, action="route", **kwargs):
         for module_name, module_data in graph.create_modules(
-            base_hparams=self.hparams
+            base_hparams=self.hparams, **kwargs
         ).items():
             self.model = add_expert_to_transformer(
                 self.model,
@@ -66,8 +101,12 @@ class MultiExpertModel(ExpertTrainer):
                 module_data.expert_weights,
                 action=action,
                 is_default=module_name == "default",
+                selector=MULTI_EXPERT_ROUTERS[self.expert_routing]
+                if self.expert_routing and self.expert_routing.startswith("local")
+                else None,
             )
             self.experts.append(module_name)
+        self.init_router()
 
     def load_from_graph_string(self, s, action="route"):
         from projects.wiki_experts.src.graph.module_graph import ModuleGraph
@@ -109,6 +148,15 @@ class MultiExpertModel(ExpertTrainer):
         )
         if action != "merge":
             self.experts.append(expert_name)
+
+    def forward(self, batch, reduction="mean"):
+        if self.router:
+            weights = self.router()
+            # make sure we route according to the learnable rouer and not the task ids
+            batch["task_weights"] = weights
+        if self.expert_routing is not None:
+            batch["task_names"] = None
+        return super().forward(batch, reduction)
 
     @property
     def generation_config(self):
@@ -162,6 +210,8 @@ class MultiExpertModel(ExpertTrainer):
         scores = torch.stack(scores, 0)
         expert_indices = scores.argmin(0)
         return [self.experts[i] for i in expert_indices]
+
+    # def forward(self, batch, reduction="mean"):
 
     def generate(
         self,

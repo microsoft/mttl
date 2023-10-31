@@ -12,6 +12,7 @@ def add_expert_to_transformer(
     action="route",
     is_default=False,
     load_only_layers=None,
+    selector=None,
 ):
     # create a shared container for the task id
     if not hasattr(transformer, "task_id_container"):
@@ -32,6 +33,7 @@ def add_expert_to_transformer(
                             expert_config,
                             transformer.task_id_container,
                             layer,
+                            selector,
                         )
                         expert_container.__layer_name__ = f"{m_name}.{c_name}"
                         setattr(

@@ -5,13 +5,13 @@ import copy
 import torch
 import hashlib
 import nevergrad as ng
-from string import Template
+
 from torch.utils.data import DataLoader
 from functools import partial
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from typing import Union, Callable
+from typing import Union, Callable, List, Dict
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators.base import compute_task_aggregation
 
@@ -20,11 +20,19 @@ from huggingface_hub import login
 from src.expert_model import MultiExpertModel
 from mttl.datamodule.collators import DefaultDataModule
 from mttl.utils import logger, setup_logging
-from src.graph.module_graph import GraphTemplate
+from src.graph.module_graph import ModuleGraph
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
+from mttl.evaluators import MMLUEvaluator
 
 
-def mmlu_get_loss(model, dm: DefaultDataModule, graph_string, use_vllm=True):
+def mmlu_get_loss(
+    model: MultiExpertModel,
+    tokenizer,
+    dataloader: DataLoader,
+    graph_string,
+    use_vllm=True,
+    use_loss=False,
+):
     # use gpu if available
     train_loss = 0
     if use_vllm:
@@ -36,11 +44,10 @@ def mmlu_get_loss(model, dm: DefaultDataModule, graph_string, use_vllm=True):
             model,
             temp_path=f"{os.environ.get('MTTL_TEMP','/tmp/merged')}/{model_hash.hexdigest()}/",
         )
-        dataloader: DataLoader = dm.val_dataloader()
         all_predictions, all_references, all_task_names = model.eval(
             dataloader,
             generation_config=generation_config,
-            tokenizer=dm.tokenizer,
+            tokenizer=tokenizer,
         )
         del model
         free_memory()
@@ -56,21 +63,26 @@ def mmlu_get_loss(model, dm: DefaultDataModule, graph_string, use_vllm=True):
         )
 
     else:
-        dataloader: DataLoader = dm.val_dataloader()
-        with torch.no_grad():
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            for _, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
-                batch = {
-                    k: v.to(device)
-                    for k, v in batch.items()
-                    if isinstance(v, torch.Tensor)
-                }
-                with torch.no_grad():
-                    loss = model(batch)
-                train_loss += loss.detach().float()
-        loss = train_loss.float()
-        # average loss over the number of examples
-        return float(loss) / len(dataloader.dataset)
+        if use_loss:
+            with torch.no_grad():
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                for _, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
+                    batch = {
+                        k: v.to(device)
+                        for k, v in batch.items()
+                        if isinstance(v, torch.Tensor)
+                    }
+                    with torch.no_grad():
+                        loss = model(batch)
+                    train_loss += loss.detach().float()
+            loss = train_loss.float()
+            # average loss over the number of examples
+            return float(loss) / len(dataloader.dataset)
+        else:
+            # using accuracy
+            mmlu_evaluator = MMLUEvaluator(model.hparams, split="test", use_vllm=False)
+            scores = mmlu_evaluator.evaluate(model, dataloader=dataloader)
+            return scores["all"]["mean"] * -1.0
 
 
 def default_l1_regularization(weights):
@@ -85,64 +97,84 @@ class RoutingOptimizer:
     def __init__(
         self,
         model: MultiExpertModel,
-        graph_template: GraphTemplate,
-        dm: DefaultDataModule,
+        modules_2_dest: Dict,
+        dataloader: DataLoader,
         get_loss: Callable,
         budget=5,
+        task_name="new_task",
     ) -> None:
+        self.task_name = task_name
         self.model: MultiExpertModel = model
-        self.graph_template = graph_template
-        self.K = len(self.graph_template.parameters)
+        self.module_graph: ModuleGraph = self.construct_graph(modules_2_dest)
+        self.varaibles = self.module_graph.get_varaibles()
+        self.K = len(self.varaibles)
 
         self.parametrization = ng.p.Array(
             init=[0] * self.K,
             upper=[1.5] * self.K,
             lower=[-1.5] * self.K,
         )
-        self.dm = dm
+        self.dataloader = dataloader
         self.optimizer = ng.optimizers.NGOpt(
             parametrization=self.parametrization, budget=budget
         )
         self.get_loss = get_loss
 
-    def assemble_graph_string(self, weights: list):
+    def construct_graph(self, modules_to_dest: Dict):
+        s = f"{self.task_name} -> linear("
+        for i, (name, destination) in enumerate(modules_to_dest.items()):
+            s += f"{destination}:${i},"
+        s = s[:-1] + ")"
+        graph = ModuleGraph.from_string(s)
+        return graph
+
+    def get_graph_vars(self, weights: list):
         s = {}
-        for p, w in zip(self.graph_template.parameters, list(weights)):
+        for p, w in zip(self.varaibles, list(weights)):
             s[p] = w
-        return self.graph_template.to_graph_string(s)
+        return s
 
     def optimize(
         self,
     ):
         def get_score(
             weights,
-            dm,
+            dataloader,
             basemodel: MultiExpertModel,
             get_loss,
             get_regular,
-            assemble_graph,
+            get_vars,
         ):
-            graph_string = assemble_graph(weights)
-            logger.info(f"Loading {graph_string} into the model")
+            graph_vars = get_vars(weights)
+            graph_string = self.module_graph.dumps(**graph_vars)
+            logger.info(f"Testing weights {graph_string} into the model")
             model = copy.deepcopy(basemodel)
-            model.load_from_graph_string(graph_string, action="merge")
+            model.load_from_graph(self.module_graph, action="merge", **graph_vars)
             # minimize the metric
-            loss = get_loss(basemodel, dm, graph_string)
+            loss = get_loss(
+                model=model,
+                tokenizer=model.tokenizer,
+                dataloader=dataloader,
+                graph_string=graph_string,
+            )
             # L1 regularization term
             metric_val = loss + get_regular(weights)
             return metric_val
 
         _get_score = partial(
             get_score,
-            dm=self.dm,
+            dataloader=self.dataloader,
             get_loss=self.get_loss,
             basemodel=self.model,
             get_regular=default_l1_regularization,
-            assemble_graph=self.assemble_graph_string,
+            get_vars=self.get_graph_vars,
         )
         recommendation = self.optimizer.minimize(_get_score)
         logger.info(recommendation.value)
-        return recommendation
+
+        best_vars = self.get_graph_vars(recommendation.value)
+        best_graph = self.module_graph.dumps(**best_vars)
+        return recommendation.value, best_graph
 
 
 if __name__ == "__main__":
@@ -165,20 +197,25 @@ if __name__ == "__main__":
     config.predict_batch_size = 1
     config.finetune_task_name = "abstract_algebra"
 
-    graph_string = "security_studies -> linear(sordonia/expert_llama2_13b_security_studies:$weight);\
-                    abstract_algebra -> linear(sordonia/expert_llama2_13b_security_studies:$weight);"
-    graph_template = GraphTemplate(graph_string)
+    modules_2_dest = {
+        "security_studies": "sordonia/expert_llama2_13b_security_studies",
+        "platy": "sordonia/llama2-13b-platypus",
+    }
+    use_vllm = False
+    dm = MMLUDataModule(config, for_generation=use_vllm, do_tokenize=not use_vllm)
+    module = MultiExpertModel(
+        **vars(config), tokenizer=dm.tokenizer, device_map="cpu" if use_vllm else "auto"
+    )
 
-    dm = MMLUDataModule(config, for_generation=True, do_tokenize=False)
-
-    model_class = MultiExpertModel
-    module = model_class(**vars(config), tokenizer=dm.tokenizer, device_map="cpu")
+    _mmlu_get_loss = partial(mmlu_get_loss, use_vllm=use_vllm)
 
     optimizer = RoutingOptimizer(
         model=module,
-        graph_template=graph_template,
-        dm=dm,
-        get_loss=mmlu_get_loss,
+        modules_2_dest=modules_2_dest,
+        dataloader=dm.test_dataloader(),
+        get_loss=_mmlu_get_loss,
         budget=2,
+        task_name=config.finetune_task_name,
     )
     recommendation = optimizer.optimize()
+    print(recommendation)

@@ -274,6 +274,8 @@ class Config:
         """
         self.router_granularity = "finegrained"  # router granularity
         self.router_selector = None  # router selector
+        self.router_weight_decay = None  # router weight decay
+        self.router_learning_rate = None
 
         # Polytropon related hyper-parameters
         self.n_splits = 1  # number of splits for poly-s

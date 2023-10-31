@@ -69,7 +69,7 @@ class MMLUEvaluator(object):
         )
         return compute_task_aggregation(all_task_names, eval_metrics["exact_match"])
 
-    def evaluate(self, model, subsample=-1, shuffle=False):
+    def evaluate(self, model, subsample=-1, shuffle=False, dataloader=None):
         was_train = model.training
         if was_train:
             model.eval()
@@ -93,10 +93,11 @@ class MMLUEvaluator(object):
         all_task_names = []
         all_EM = []
 
-        if self.split == "test":
-            dataloader = self.datamodule.test_dataloader(subsample, shuffle)
-        else:
-            dataloader = self.datamodule.val_dataloader()
+        if dataloader is None:
+            if self.split == "test":
+                dataloader = self.datamodule.test_dataloader(subsample, shuffle)
+            else:
+                dataloader = self.datamodule.val_dataloader()
 
         pbar = tqdm.tqdm(
             enumerate(dataloader),
