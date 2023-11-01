@@ -11,10 +11,7 @@ import hashlib
 from mttl.dataloader.xfit_task_descriptions import DESCRIPTIONS
 from mttl.dataloader.xfit_metrics import METRICS
 from mttl.dataloader.data_utils import ExampleInfo
-from mttl.utils import hash_example
-
-
-logger = logging.getLogger(__name__)
+from mttl.utils import hash_example, logger
 
 
 class XFitTaskDataset(torch.utils.data.dataset.Dataset):
@@ -22,56 +19,13 @@ class XFitTaskDataset(torch.utils.data.dataset.Dataset):
         self,
         task_name,
         examples,
-        tokenizer,
-        max_input_length,
-        max_output_length,
         task_id=0,
-        pretokenize=True,
     ):
         super().__init__()
 
         self.task_name = task_name
         self.task_id = task_id
         self.examples = examples
-        self.tokenizer = tokenizer
-        self.max_input_length = max_input_length
-        self.max_output_length = max_output_length
-        self.pretokenize = pretokenize
-
-        if pretokenize:
-            self._pretokenize()
-
-    def _pretokenize(self):
-        inputs, outputs, hashes = zip(*self.examples)
-
-        # flatten outputs for tokenization
-        flat_outputs = []
-        for output in outputs:
-            flat_outputs.extend(output)
-
-        inputs = self.tokenizer(
-            list(inputs),
-            truncation=True,
-            padding="max_length",
-            max_length=self.max_input_length,
-            return_tensors="pt",
-        ).input_ids.squeeze(0)
-        flat_outputs = self.tokenizer(
-            flat_outputs,
-            truncation=True,
-            padding="max_length",
-            max_length=self.max_output_length,
-            return_tensors="pt",
-        ).input_ids.squeeze(0)
-
-        # unflatten outputs
-        i = 0
-        outputs_ = []
-        for output in outputs:
-            outputs_.append(flat_outputs[i : i + len(output)])
-            i += len(output)
-
-        self.examples = list(zip(inputs, outputs_, hashes))
 
     def __len__(self):
         return len(self.examples)
@@ -79,27 +33,14 @@ class XFitTaskDataset(torch.utils.data.dataset.Dataset):
     def __getitem__(self, key):
         input, outputs, hash = self.examples[key]
         output_idx = np.random.randint(len(outputs))
-
-        if self.pretokenize:
-            tok_input, tok_output = (input, outputs[output_idx])
-        else:
-            tok_input = self.tokenizer(
-                input,
-                truncation=True,
-                padding="max_length",
-                max_length=self.max_input_length,
-                return_tensors="pt",
-            ).input_ids.squeeze(0)
-            tok_output = self.tokenizer(
-                outputs[output_idx],
-                truncation=True,
-                padding="max_length",
-                max_length=self.max_output_length,
-                return_tensors="pt",
-            ).input_ids.squeeze(0)
+        input, output = (input, outputs[output_idx])
 
         return ExampleInfo(
-            tok_input, tok_output, self.task_id, hash, example_id=key,
+            input,
+            output,
+            self.task_id,
+            hash,
+            example_id=key,
         )
 
 
@@ -171,7 +112,6 @@ class XFitDatasetReader(object):
         append_another_bos=False,
         use_task_descriptions=False,
     ) -> Iterator[Tuple[str, str]]:
-
         input, outputs = instance
         if use_task_descriptions:
             description = DESCRIPTIONS[task_name]
@@ -193,8 +133,8 @@ class XFitDatasetReader(object):
     def __init__(
         self,
         data_path,
-        tokenizer,
         tasks,
+        tokenizer,
         task_prefix=None,
         task2id=None,
         example2id=None,
@@ -205,8 +145,8 @@ class XFitDatasetReader(object):
         do_lowercase=False,
         append_another_bos=False,
     ):
-        self.data_path = data_path
         self.tokenizer = tokenizer
+        self.data_path = data_path
         self.tasks = sorted(tasks)
         self.task_prefix = task_prefix
         task_string = ",".join([self.data_path] + self.tasks).encode("utf8")
@@ -255,11 +195,7 @@ class XFitDatasetReader(object):
             task_dataset = XFitTaskDataset(
                 task["task_name"],
                 formatted_examples,
-                self.tokenizer,
-                self.max_input_length,
-                self.max_output_length,
                 self.task2id[task["task_name"]],
-                pretokenize=True,
             )
             datasets.append(task_dataset)
         return datasets

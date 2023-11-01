@@ -7,37 +7,10 @@ from transformers import AutoTokenizer
 from typing import List
 
 from mttl.utils import get_ni_tasks_from_file, trim_batch, hash_example
+from mttl.datamodule.utils import get_tokenizer
 from mttl.datamodule import IndexConcatDataset
-from mttl.dataloader.data_utils import ExampleInfo
+from mttl.datamodule.collators import DefaultCollator
 from mttl.dataloader.ni_dataset_readers import NIDatasetReader
-
-
-class CollateWrapperFn:
-    def __init__(
-        self,
-        pad_token_id,
-    ):
-        self.pad_token_id = pad_token_id
-
-    def __call__(self, batch: List[ExampleInfo]):
-        input_ids = [b.input_ids for b in batch]
-        target_ids = [b.target_ids for b in batch]
-        hashes = [b.hash for b in batch]
-        task_ids = [b.task_id for b in batch]
-        instruction_hashes = [b.instruction_hash for b in batch]
-
-        task_ids = torch.LongTensor(task_ids)
-        input_ids = trim_batch(torch.stack(input_ids, 0), self.pad_token_id)
-        target_ids = trim_batch(torch.stack(target_ids, 0), self.pad_token_id)
-
-        output_batch = {
-            "input_ids": input_ids,
-            "target_ids": target_ids,
-            "task_ids": task_ids,
-            "hashes": hashes,
-            "instruction_hashes": instruction_hashes,
-        }
-        return output_batch
 
 
 class NIDataModule(LightningDataModule):
@@ -49,27 +22,29 @@ class NIDataModule(LightningDataModule):
             pin_memory=True,
             persistent_workers=True,
             shuffle=True,
-            collate_fn=CollateWrapperFn(self.pad_token_id),
+            collate_fn=self.collate_fn,
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self, shuffle=False):
         return DataLoader(
             self.val_dataset,
             batch_size=self.config.predict_batch_size,
             num_workers=16,
             pin_memory=True,
+            shuffle=shuffle,
             persistent_workers=True,
-            collate_fn=CollateWrapperFn(self.pad_token_id),
+            collate_fn=self.collate_fn,
         )
 
-    def test_dataloader(self):
+    def test_dataloader(self, shuffle=False):
         return DataLoader(
             self.test_dataset,
             batch_size=self.config.predict_batch_size,
             num_workers=16,
+            shuffle=shuffle,
             pin_memory=True,
             persistent_workers=True,
-            collate_fn=CollateWrapperFn(self.pad_token_id),
+            collate_fn=self.collate_fn,
         )
 
     def __init__(self, config):
@@ -88,10 +63,16 @@ class NIDataModule(LightningDataModule):
 
         self.dataset_reader: NIDatasetReader = None
         self.id2task = dict((k, v) for v, k in self.task2id.items())
-        self.tokenizer = AutoTokenizer.from_pretrained(config.model)
-        self.tokenizer.model_max_length = config.max_input_length
-        self.pad_token_id = self.tokenizer.pad_token_id
 
+        self.tokenizer = get_tokenizer(config)
+        self.collate_fn = DefaultCollator(
+            tokenizer=self.tokenizer,
+            max_input_length=config.max_input_length,
+            max_output_length=config.max_output_length,
+            pad_to_multiple_of=8,
+            return_tensors="pt",
+            model_family=config.model_family,
+        )
         if config.embeddings_path:
             self.task_embed_path = config.embeddings_path
         else:
@@ -115,7 +96,7 @@ class NIDataModule(LightningDataModule):
 
     def setup(self, stage="fit", val_examples_per_task=None, test_examples_per_task=None):
         self.dataset_reader = NIDatasetReader(
-            self.config.train_dir,
+            self.config.data_dir,
             self.tokenizer,
             tasks=self.tasks,
             task2id=self.task2id,

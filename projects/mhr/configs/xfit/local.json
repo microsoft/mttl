@@ -1,9 +1,0 @@
-{
-    "dataset": "xfit",
-    "train_dir": "$XFIT_DATA_DIR",
-    "custom_tasks_splits": "./dataloader/xfit_data/random.json",
-    "precision": 32,
-    "total_steps": 100,
-    "train_batch_size": 8,
-    "model": "t5-small",
-}

@@ -10,7 +10,6 @@ import logging
 import hashlib
 import glob
 
-from transformers import AutoTokenizer
 from mttl.dataloader.ni_metrics import compute_ni_metrics
 from mttl.dataloader.data_utils import ExampleInfo
 from mttl.utils import hash_example
@@ -24,82 +23,25 @@ class NITaskDataset(torch.utils.data.dataset.Dataset):
         self,
         task_name,
         examples,
-        tokenizer: AutoTokenizer,
-        max_input_length,
-        max_output_length,
         task_id=0,
-        pretokenize=False,
     ):
         super().__init__()
 
         self.task_name = task_name
         self.task_id = task_id
         self.examples = examples
-        self.tokenizer = tokenizer
-        self.max_input_length = max_input_length
-        self.max_output_length = max_output_length
-        self.pretokenize = pretokenize
-
-        if pretokenize:
-            self._pretokenize()
-
-    def _pretokenize(self):
-        inputs, outputs, instructions = zip(*self.examples)
-
-        inputs_ids = self.tokenizer(
-            list(inputs),
-            truncation=True,
-            padding="max_length",
-            max_length=self.max_input_length,
-            return_tensors="pt",
-        ).input_ids
-        outputs_ids = self.tokenizer(
-            list(outputs),
-            truncation=True,
-            padding="max_length",
-            max_length=self.max_output_length,
-            return_tensors="pt",
-        ).input_ids
-
-        input_hashes = [hash_example(i) for i in inputs]
-        instruction_hashes = [hash_example(i) for i in instructions]
-
-        self.examples = list(zip(
-            inputs_ids,
-            outputs_ids,
-            input_hashes,
-            instruction_hashes,
-        ))
 
     def __len__(self):
         return len(self.examples)
 
     def __getitem__(self, key):
-        if self.pretokenize:
-            tok_input, tok_output, input_hash, instruction_hash = self.examples[key]
-        else:
-            input, output, instruction = self.examples[key]
-            tok_input = self.tokenizer(
-                input,
-                truncation=True,
-                padding="max_length",
-                max_length=self.max_input_length,
-                return_tensors="pt",
-            ).input_ids.squeeze(0)
-            tok_output = self.tokenizer(
-                output,
-                truncation=True,
-                padding="max_length",
-                max_length=self.max_output_length,
-                return_tensors="pt",
-            ).input_ids.squeeze(0)
-
-            input_hash = hash_example(input)
-            instruction_hash = hash_example(instruction)
+        input, output, instruction = self.examples[key]
+        input_hash = hash_example(input)
+        instruction_hash = hash_example(instruction)
 
         ex_info = ExampleInfo(
-            tok_input,
-            tok_output,
+            input,
+            output,
             self.task_id,
             input_hash,
             example_id=key,
@@ -294,11 +236,7 @@ class NIDatasetReader(object):
             task_dataset = NITaskDataset(
                 task["task_name"],
                 formatted_examples,
-                self.tokenizer,
-                self.max_input_length,
-                self.max_output_length,
                 task_id=self.task2id[task["task_name"]],
-                pretokenize=False,
             )
             datasets.append(task_dataset)
         return datasets

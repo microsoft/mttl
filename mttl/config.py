@@ -4,9 +4,10 @@ import ast
 import argparse
 from string import Template
 
+from mttl.utils import logger
+
 
 class Config:
-
     def __init__(self, filenames=None, kwargs=None, raise_error=True):
         # Stores personalization of the config file in a dict (json serializable)
         self._updated_kwargs = {}
@@ -23,12 +24,16 @@ class Config:
         if kwargs:
             self.update_kwargs(kwargs, raise_error=raise_error)
 
+        self.post_init()
         self.save_config(self.output_dir)
+
+    def post_init(self):
+        pass
 
     def was_overridden(self, key):
         return key in self._updated_kwargs
 
-    def was_default(self, key):
+    def was_default(self, key):   
         return key not in self._updated_kwargs
 
     def update_kwargs(self, kwargs, eval=True, raise_error=True):
@@ -40,16 +45,14 @@ class Config:
                     v = v
             else:
                 v = v
+
             if not hasattr(self, k) and raise_error:
                 raise ValueError(f"{k} is not in the config")
 
             if eval:
-                print("Overwriting {} to {}".format(k, v))
+                logger.warn("Overwriting {} to {}".format(k, v))
 
-            if k == 'finegrained':
-                k = 'poly_granularity'
-                v = 'finegrained' if v else 'coarsegrained'
-            elif k in ['train_dir', 'output_dir']:
+            if k in ['data_dir', 'output_dir']:
                 # this raises an error if the env. var does not exist
                 v = Template(v).substitute(os.environ)
 
@@ -80,47 +83,75 @@ class Config:
         with open(os.path.join(output_dir, "config.json"), "w+") as fout:
             fout.write(self.to_json())
             fout.write("\n")
-        
-    @classmethod    
-    def parse(cls, extra_kwargs=None, raise_error=True):
+
+    @classmethod
+    def parse(
+        cls,
+        extra_kwargs=None,
+        raise_error=True,
+        parent=None,
+        return_parser=False,
+        c=None,
+    ):
         import itertools
 
-        parser = argparse.ArgumentParser()
-        parser.add_argument("-c", "--config_files", required=False)
-        parser.add_argument("-k", "--kwargs", nargs="*", action='append')
-        args = parser.parse_args()
-
+        # dont do it if called from jupyter notebook
+        if c is None:
+            parser = (
+                argparse.ArgumentParser(parents=[parent])
+                if parent
+                else argparse.ArgumentParser()
+            )
+            parser.add_argument("-c", "--config_files", required=False)
+            parser.add_argument("-k", "--kwargs", nargs="*", action="append")
+            args = parser.parse_args()
+        else:
+            args = argparse.Namespace()
+            args.kwargs = None
+            args.config_files = c
         kwargs = {}
         if args.kwargs:
             kwargs_opts = list(itertools.chain(*args.kwargs))
             for value in kwargs_opts:
-                key, _, value = value.partition('=')
+                key, _, value = value.partition("=")
                 kwargs[key] = value
+
         args.kwargs = kwargs
         if extra_kwargs:
             args.kwargs.update(extra_kwargs)
 
-        config = cls(args.config_files, args.kwargs, raise_error=raise_error)
+        config = cls(
+            filenames=args.config_files, kwargs=args.kwargs, raise_error=raise_error
+        )
 
-        print(config.to_json())
+        if return_parser:
+            return config, args
         return config
 
     def _set_defaults(self):
         self.cache_dir = os.getenv("CACHE_DIR", "./cache")
         self.free_up_space = False
+
         # Data config
         self.dataset = None
         self.custom_tasks_splits = None
-        self.train_dir = os.getenv("TRAIN_DIR", "/tmp/")
+
+        self.data_dir = os.getenv("TRAIN_DIR", "/tmp/")
         self.output_dir = os.getenv("OUTPUT_DIR", "./output")
+
         self.finetune_task_name = None
         self.example_to_ids_path = None  # path to clustering of data
         self.embeddings_path = None
+        
+        # NI related configs
         self.use_task_descriptions = False  # Use task descriptions
+        self.max_num_instances_per_task = 100  # Max instances per training task (applies to NI)
         self.num_pos_examples = 0  # Use some few-shot examples if possible (applies to NI)
+
         self.task_prefix = None    # xfit has task prefixes detailing # of shots, seed, etc; this is automatically filled in at fine-tuning time
         self.exp_name = None
         self.wandb_project = None
+        self.padding_side = "right"
         self.max_input_length = 512
         self.max_output_length = 64
         self.num_beams = 4
@@ -128,11 +159,13 @@ class Config:
         self.do_lowercase = False
         self.freeze_embeds = False
 
+        # T0 related configs
         self.use_t0_templates_as_tasks = False     # if True, then t0 consists of 313 tasks, otherwise 38
         self.use_t0_few_shot_training_set = False  # if True, then use 100 examples per task during training + 100 examples per validation task
 
         # Training config
         self.compute_strategy = None
+        self.padding_side = "right"
         self.scheduler = "linear_decay_with_warmup"
         self.checkpoint = None  # load from checkpoint
         self.checkpoint_step = None  # load from checkpoint in format of global_stepX.pt
@@ -176,38 +209,48 @@ class Config:
         self.finetune_type = None     # ["F", "A", "Z", "MuZ", "Poly", "PolyRand"]
         self.finetune_skip_es = False  # skip early stopping while fine-tuning
         self.finetune_use_last_checkpoint = False  # use always the best valid_perf checkpoint if available
+
         self.model = None
+        self.model_family = None      # model family, either "gpt" or "encdec"
+
         self.precision = "32"
         self.monitor_grad_alignment_on = None
 
         self.model_modifier = None
-        self.lora_randb_init = False
+        self.adapter_type = None
+
         self.lora_rank = 16
+        self.lora_dropout = 0.
         self.lora_init_scale = 0.01
-        self.lora_scaling_rank = 0
-        self.lora_kaiming_init = False
+        self.lora_alpha = 1.
         self.lora_warmup = False
-        self.lora_modules = self.patch_modules = None
-        self.lora_layers = self.patch_layers = None
+        self.lora_init_b_random = False
+        self.lora_dropout = 0.
+
+        # n-skills for router-based methods
         self.n_skills = 8
         self.n_tasks = None
 
-        # Polytropon related hyper-parameters
-        self.n_splits = 1                      # number of splits for poly-s
-        self.poly_selector = "poly"            # poly, poly_cluster
-        self.poly_selector_cluster_temp = 1.0  # temperature for the cluster selector
-        self.poly_average_correction = False   # correct the poly average
-        self.poly_use_shared_skill = False     # use one skill shared by all tasks
+        # which modules to modify and which layers for adapters
+        self.modify_modules = None
+        self.modify_layers = None
 
         """
-        poly_granularity : how granular is the module selection :
+        router_granularity : how granular is the module selection
         coarsegrained : 1 single selector across all linear layers
         coderwise : 2 selectors (1 for encoder, 1 for decoder)
         blockwise : 1 selector for each block of K attention layers (and layernorm)
         layerwise : 1 selector for each attention layer (and layernorm)
         finegrained : 1 selector for every linear layer
         """
-        self.poly_granularity = 'finegrained'
+        self.router_granularity = 'finegrained'  # router granularity
+        self.router_selector = None              # router selector
+        
+        # Polytropon related hyper-parameters
+        self.n_splits = 1                        # number of splits for poly-s
+        self.router_selector_cluster_temp = 1.0  # temperature for the cluster selector
+        self.poly_average_correction = False     # correct the poly average
+        self.poly_use_shared_skill = False       # use one skill shared by all tasks
 
         self.module_logits_relaxed_bernoulli = True
         self.module_logits_straight_through = False

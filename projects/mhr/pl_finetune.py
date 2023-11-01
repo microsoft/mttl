@@ -7,13 +7,12 @@ import pytorch_lightning as pl
 from pytorch_lightning import Trainer, seed_everything
 
 from mttl.callbacks import ProgressCallback
-from mttl.datamodule.ni_data_module import NIFinetuneDataModule
-from mttl.datamodule.xfit_data_module import XFitFinetuneDataModule
+from mttl.datamodule.ni_original_data_module import NIOriginalDataModule
 from mttl.datamodule.t0_data_module import T0FinetuneDataModule
 from mttl.models.encoder_decoder import Finetuner
 from mttl.models.monitors import get_monitors
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
-from mttl.utils import CustomModelCheckpoint, get_checkpoint_path, get_mlf_logger
+from mttl.utils import CustomModelCheckpoint, get_checkpoint_path, get_mlf_logger, setup_logging
 from mttl.config import Config
 
 # When loading a checkpoint for evaluation, which args from old checkpoint
@@ -34,11 +33,11 @@ ARGS_TO_OVERWRITE = [
     "module_logits_straight_through",
     "poly_use_shared_skill",
     "poly_average_correction",
-    "poly_selector",
-    "poly_granularity",
+    "router_selector",
+    "router_granularity",
     "lora_rank",
-    "lora_modules",
-    "lora_layers",
+    "modify_modules",
+    "modify_layers",
     "model_modifier",
     "use_task_descriptions",
     "trainable_param_names",
@@ -80,7 +79,7 @@ def finetune(args, use_mlf=True, do_zs=True):
     switch_to_avg_modules = False
     skip_load_skills = False
 
-    if args.dataset in ["ni", "xfit"]:
+    if args.dataset in ["ni"]:
         finetuner_cls = Finetuner
     else:
         finetuner_cls = T0EncoderDecoder
@@ -110,10 +109,8 @@ def finetune(args, use_mlf=True, do_zs=True):
 
     # data
     monitor = "val/metric_perf"
-    if args.dataset == "xfit":
-        dm = XFitFinetuneDataModule(args)
-    elif args.dataset == "ni":
-        dm = NIFinetuneDataModule(args)
+    if args.dataset == "ni":
+        dm = NIOriginalDataModule(args)
     elif args.dataset == "t0":
         dm = T0FinetuneDataModule(args)
 
@@ -141,7 +138,7 @@ def finetune(args, use_mlf=True, do_zs=True):
 
         if not args.finetune_skip_es:
             ckpt_callback = CustomModelCheckpoint(
-                dirpath="/tmp/",
+                dirpath="/tmp/sni/",
                 monitor=monitor,
                 filename=f"{args.model}"
                 + "-{epoch:02d}-"
@@ -178,7 +175,7 @@ def finetune(args, use_mlf=True, do_zs=True):
         if args.finetune_skip_es:
             check_val_every_n_epoch = 10000
         else:
-            check_val_every_n_epoch = 10 if args.dataset in ["ni", "xfit"] else 50
+            check_val_every_n_epoch = 10 if args.dataset in ["ni"] else 50
 
         trainer = Trainer(
             enable_checkpointing=not args.finetune_skip_es,
@@ -192,7 +189,7 @@ def finetune(args, use_mlf=True, do_zs=True):
             gradient_clip_val=args.max_grad_norm,
             log_every_n_steps=10,
             check_val_every_n_epoch=check_val_every_n_epoch,
-            strategy=None if not args.compute_strategy else args.compute_strategy,
+            strategy="auto" if not args.compute_strategy else args.compute_strategy,
             limit_val_batches=1.0,
             limit_train_batches=1.0,
             precision=int(args.precision)
@@ -220,20 +217,16 @@ def finetune(args, use_mlf=True, do_zs=True):
     results = fit_and_test(zero_shot=do_zs)
 
     # remove all eventual checkpoints
-    os.system(f'find /tmp/ -name "*.ckpt" -type f -delete')
-    os.system(f'find /tmp/ -name "*.pt" -type f -delete')
+    os.system(f'find /tmp/sni/ -name "*.ckpt" -type f -delete')
+    os.system(f'find /tmp/sni/ -name "*.pt" -type f -delete')
     return results
 
 
 def finetune_ni(args, seeds=[13, 42, 58], use_mlf=True, do_zs=True):
     all_results = []
 
-    train_dir, spl = os.path.split(args.train_dir.rstrip("/"))
-    seed, num_examples = spl.split("-")
-
     for seed in seeds:
         args.seed = seed
-        args.train_dir = os.path.join(train_dir, f"{seed}-{num_examples}")
 
         # use mlf logger only for the first seed, otw it will complain for duplicated hps
         results = finetune(
@@ -280,51 +273,11 @@ def finetune_t0(args, seeds=[42, 1024, 0], use_mlf=True, do_zs=True):
     return df
 
 
-def finetune_xfit(args, use_mlf=True, do_zs=True):
-    args.task_name = args.finetune_task_name
-    args.task_dir = os.path.join(args.train_dir, args.task_name)
-    files = sorted(os.listdir(args.task_dir))
-
-    prefixes = []
-    for filename in files:
-        if not filename.endswith(".tsv"):
-            continue
-
-        prefix = "_".join(filename.split("_")[:-1])
-        if prefix not in prefixes:
-            prefixes.append(prefix)
-
-    # large tasks, speeds up fine-tuning a bit
-    prefixes = prefixes[:3]
-
-    args.n_subtasks = len(prefixes)
-
-    print("Fine-tuning the following samples: {}".format(prefixes))
-
-    all_results = []
-    for i, prefix in enumerate(prefixes):
-        args.task_prefix = prefix
-
-        print(f"Running ... prefix={prefix}")
-        results = finetune(args, use_mlf=(i == 0 and use_mlf), do_zs=do_zs)
-        for result in results:
-            result["prefix"] = prefix
-        all_results.extend(results)
-
-    # whatever
-    print(all_results)
-
-    df = pd.DataFrame.from_dict(all_results)
-    df.to_csv(os.path.join(args.output_dir, "result.csv"))
-    return df
-
-
 if __name__ == "__main__":
     args = Config.parse()
+    setup_logging(args.output_dir)
 
-    if args.dataset == "xfit":
-        finetune_xfit(args)
-    elif args.dataset == "ni":
+    if args.dataset == "ni":
         finetune_ni(args)
     elif args.dataset == "t0":
         finetune_t0(args)

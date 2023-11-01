@@ -5,33 +5,30 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 from mttl.online_eval import NIOnlineZeroShot, T0OnlineZeroShot
 from mttl.callbacks import ProgressCallback
-from mttl.datamodule.ni_data_module import NIPretrainDataModule
-from mttl.datamodule.xfit_data_module import XFitPretrainDataModule
+from mttl.datamodule.ni_original_data_module import NIOriginalDataModule
 from mttl.datamodule.t0_data_module import T0PretrainDataModule
 from mttl.models.encoder_decoder import EncoderDecoder
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.models.monitors import get_monitors
-from mttl.utils import get_mlf_logger
+from mttl.utils import get_mlf_logger, logger, setup_logging
 from mttl.config import Config
 
 
 def run_multitask(args):
     seed_everything(args.seed, workers=True)
+    setup_logging(args.output_dir)
 
     # select dataloader
-    if args.dataset == "xfit":
+    if args.dataset == "ni":
         model_class = EncoderDecoder
-        dm = XFitPretrainDataModule(args)
-    elif args.dataset == "ni":
-        model_class = EncoderDecoder
-        dm = NIPretrainDataModule(args)
+        dm = NIOriginalDataModule(args)
     elif args.dataset == "t0":
         model_class = T0EncoderDecoder
         dm = T0PretrainDataModule(args)
     else:
         raise NotImplementedError()
 
-    args.n_tasks = len(dm.task2id)
+    args.n_tasks = len(dm.task_to_id)
 
     if args.checkpoint is not None:
         from mttl.utils import get_checkpoint_path
@@ -73,7 +70,7 @@ def run_multitask(args):
     monitor = "val/loss"
     mode = "min"
 
-    if args.dataset in ["ni", "xfit"]:
+    if args.dataset in ["ni"]:
         if args.early_stop_on_zero_shot and not args.ni_online_eval:
             raise NotImplementedError("Specify online zero-shot if early stopping on zero shot.")
 

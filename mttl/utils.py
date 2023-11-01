@@ -1,7 +1,8 @@
+from collections import defaultdict
 import glob
 import json
 import logging
-
+import os
 import numpy as np
 import torch
 import torch.nn as nn
@@ -13,7 +14,7 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_info
 from torch.autograd.function import Function
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("mttl")
 
 
 def hash_example(example):
@@ -34,16 +35,14 @@ def label_smoothed_nll_loss(
     """From fairseq"""
     if target.dim() == lprobs.dim() - 1:
         target = target.unsqueeze(-1)
+
+    pad_mask = target.eq(ignore_index)
+    # because otherwise we gather -100 :-(
+    target.masked_fill_(pad_mask, 0)
     nll_loss = -lprobs.gather(dim=-1, index=target)
     smooth_loss = -lprobs.sum(dim=-1, keepdim=True)
-
-    if ignore_index is not None:
-        pad_mask = target.eq(ignore_index)
-        nll_loss.masked_fill_(pad_mask, 0.0)
-        smooth_loss.masked_fill_(pad_mask, 0.0)
-    else:
-        nll_loss = nll_loss.squeeze(-1)
-        smooth_loss = smooth_loss.squeeze(-1)
+    nll_loss.masked_fill_(pad_mask, 0.0)
+    smooth_loss.masked_fill_(pad_mask, 0.0)
 
     if reduction == "mean":
         nll_loss = nll_loss.sum()
@@ -121,14 +120,53 @@ def get_example_to_ids(filename):
     return package
 
 
-def average_dicts(list_of_dicts):
-    out = list_of_dicts[0]
-    for item in list_of_dicts[1:]:
-        assert len(item) == len(out)
-        for k, v in item.items():
-            out[k] += v
+class Averager:
+    def __init__(self, weight: float = 1):
+        self.weight = weight
+        self.total = {}
 
-    return {k: v / len(list_of_dicts) for (k, v) in out.items()}
+    def update(self, stats):
+        for key, value in stats.items():
+            if key not in self.total:
+                self.total[key] = value
+            else:
+                self.total[key] = self.total[key] * self.weight + value * (1 - self.weight)
+        return self.total
+
+
+def agg_dicts(list_of_dicts, agg="mean", tag=False):
+    """Aggregate a list of dicts by taking the aggregate of each key.
+
+    Could be "min", "max", or "mean".
+    """
+    out = {}
+    for curr_dict in list_of_dicts:
+        for k, v in curr_dict.items():
+            if tag:
+                k = f"{agg}_{k}"
+            if k not in out:
+                # clone the variable so that we don't modify the original
+                out[k] = v.clone() if isinstance(v, torch.Tensor) else v
+            else:
+                if agg == "min":
+                    # take minimum between tensors
+                    out[k] = (
+                        torch.minimum(out[k], v)
+                        if isinstance(v, torch.Tensor)
+                        else min(out[k], v)
+                    )
+                elif agg == "max":
+                    out[k] = (
+                        torch.maximum(out[k], v)
+                        if isinstance(v, torch.Tensor)
+                        else max(out[k], v)
+                    )
+                else:
+                    out[k] += v
+    if agg == "mean":
+        for k, v in out.items():
+            out[k] = v / len(list_of_dicts)
+    return out
 
 
 class CustomModelCheckpoint(pl.callbacks.ModelCheckpoint):
@@ -234,9 +272,11 @@ def get_checkpoint_path(path, step=None, use_last=False):
 
     if use_last:
         # search for last.ckpt
-        match = [m for m in match if 'last.ckpt' in m]
+        match = [m for m in match if "last.ckpt" in m]
         if len(match) != 1:
-            raise ValueError("last.ckpt not found or found multiple (?) in the list of checkpoints!")
+            raise ValueError(
+                "last.ckpt not found or found multiple (?) in the list of checkpoints!"
+            )
         return match[0]
 
     if len(match) > 1:
@@ -286,6 +326,25 @@ def get_checkpoint_path(path, step=None, use_last=False):
     return path
 
 
+def setup_logging(log_dir: str = None):
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)s --> %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        level=logging.INFO,
+    )
+    logger.setLevel(logging.INFO)
+    logging.getLogger("openai").setLevel(logging.WARNING)
+
+    if log_dir:
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        logger.addHandler(logging.FileHandler(os.path.join(log_dir, "log.txt")))
+        logger.info(
+            "New experiment, log will be at %s",
+            os.path.join(log_dir, "log.txt"),
+        )
+
+
 class MemEfficientLoRA(Function):
     @staticmethod
     # bias is an optional argument
@@ -303,7 +362,6 @@ class MemEfficientLoRA(Function):
 
     @staticmethod
     def backward(ctx, O_grad):
-
         bs, L, O = O_grad.size()
 
         input, A, B, skills = ctx.saved_tensors

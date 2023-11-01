@@ -1,4 +1,0 @@
-{
-    "learning_rate": 5e-5,
-    "trainable_param_names": ".*"
-}

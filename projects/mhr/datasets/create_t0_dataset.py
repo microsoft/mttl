@@ -25,7 +25,7 @@ def main(output_path):
 
     t0_config = Config(
         filenames=[],
-        kwargs={"dataset": "t0", "train_dir": output_path, "model": "google/t5-xl-lm-adapt"}
+        kwargs={"dataset": "t0", "data_dir": output_path, "model": "google/t5-xl-lm-adapt"}
     )
     # this will create all the required data in the correct path
     T0PretrainDataModule(t0_config).setup()
