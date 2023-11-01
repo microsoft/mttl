@@ -1,5 +1,7 @@
-import os
 import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import os
+
 import torch
 import torch.nn.functional as F
 from pytorch_lightning import seed_everything
@@ -8,8 +10,6 @@ from projects.instr_routing.config import RoutingConfig
 from mttl.models.modifiers.routing import RoutingInfo
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.prompt_tuning import PromptTuning
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def test_llama_adapter():
