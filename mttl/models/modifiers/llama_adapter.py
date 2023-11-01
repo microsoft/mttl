@@ -109,16 +109,20 @@ def llama_adapter_attention(
     # adapter not precomputed, so we compute it
     if adapter_k is None:
         adapter = self.adapter()
-        adapter_k = (
-            type_safe_linear(adapter, self.k_proj)
-            .view(bsz, self.soft_prompt_length, self.num_key_value_heads, self.head_dim)
-            .transpose(1, 2)  # bs, n_heads, len, d_head
-        )
-        adapter_v = (
-            type_safe_linear(adapter, self.v_proj)
-            .view(bsz, self.soft_prompt_length, self.num_key_value_heads, self.head_dim)
-            .transpose(1, 2)
-        )
+        if self.adapter.learn_kv:
+            adapter_k, adapter_v = adapter.chunk(2, dim=-1)
+        else:
+            adapter_k = type_safe_linear(adapter, self.k_proj)
+            adapter_v = type_safe_linear(adapter, self.v_proj)
+
+        adapter_k = adapter_k.view(
+            bsz, self.soft_prompt_length, self.num_key_value_heads, self.head_dim
+        ).transpose(
+            1, 2
+        )  # bs, n_heads, len, d_head
+        adapter_v = adapter_v.view(
+            bsz, self.soft_prompt_length, self.num_key_value_heads, self.head_dim
+        ).transpose(1, 2)
 
     if use_cache:
         past_key_value = (key_states, value_states, adapter_k, adapter_v)
@@ -148,35 +152,36 @@ def llama_adapter_attention(
     if not output_attentions:
         attn_weights = None
 
-    if torch.isnan(attn_output).any() or torch.isinf(attn_output).any():
-        breakpoint()
-        xx = 1
-
     return attn_output, attn_weights, past_key_value
 
 
 class LlamaAdapter(nn.Module):
-    def __init__(self, config, attn_layer, task_id_ptr):
+    def __init__(self, config, attn_layer, task_id_ptr, **kwargs):
         super().__init__()
         self.task_id_ptr = task_id_ptr
         self.adapter_gate = torch.nn.Parameter(
             torch.zeros(1, attn_layer.num_heads, 1, 1)
         )
-        self.adapter_query = nn.Embedding(
-            config.soft_prompt_length, attn_layer.hidden_size
-        )
+        self.learn_kv = config.soft_prompt_learn_kv
+
+        if config.soft_prompt_learn_kv:
+            out_dim = attn_layer.hidden_size * 2
+        else:
+            out_dim = attn_layer.hidden_size
+
+        self.adapter_query = nn.Embedding(config.soft_prompt_length, out_dim)
 
     # get adapter
     def forward(self):
         bsz = self.task_id_ptr["routing_infos"].task_ids.size(0)
         return self.adapter_query.weight.unsqueeze(0).expand(bsz, -1, -1)
 
-class MLPLlamaAdapter(nn.Module):
-    shared_adapter_mlp = None
 
-    def __init__(self, config, attn_layer, task_id_ptr):
+class MLPLlamaAdapter(nn.Module):
+    def __init__(self, mlp, config, attn_layer, task_id_ptr, **kwargs):
         super().__init__()
         self.task_id_ptr = task_id_ptr
+        self.learn_kv = config.soft_prompt_learn_kv
         self.adapter_gate = torch.nn.Parameter(
             torch.zeros(1, attn_layer.num_heads, 1, 1)
         )
@@ -184,32 +189,33 @@ class MLPLlamaAdapter(nn.Module):
             config.soft_prompt_length, config.soft_prompt_mlp_dim
         )
 
-        if MLPLlamaAdapter.shared_adapter_mlp is None:
-            self.shared_adapter_mlp = nn.Sequential(
-                nn.Linear(config.soft_prompt_mlp_dim, config.soft_prompt_hidden_dim), 
-                nn.ReLU(), 
-                nn.Linear(config.soft_prompt_hidden_dim, attn_layer.hidden_size)
-            )
-            MLPLlamaAdapter.shared_adapter_mlp = self.mlp
+        self.shared_adapter_mlp = mlp
 
     # get adapter
     def forward(self):
         bsz = self.task_id_ptr["routing_infos"].task_ids.size(0)
-        mlp_input = self.adapter_query.weight 
-        out = MLPLlamaAdapter.shared_adapter_mlp(mlp_input)
+        mlp_input = self.adapter_query.weight
+        out = self.shared_adapter_mlp(mlp_input)
         return out.unsqueeze(0).expand(bsz, -1, -1)
 
 
 class PolyLlamaAdapter(nn.Module):
-    def __init__(self, config, attn_layer, task_id_ptr):
+    def __init__(self, config, attn_layer, task_id_ptr, **kwargs):
         super().__init__()
         # TODO: build polytropon selector
         self.selector = PolytroponSelector(config)
+        self.learn_kv = config.soft_prompt_learn_kv
         self.n_skills, self.n_splits = config.n_skills, config.n_splits
         self.prompt_len = config.soft_prompt_length
         self.task_id_ptr = task_id_ptr
+
+        if config.soft_prompt_learn_kv:
+            out_dim = attn_layer.hidden_size * 2
+        else:
+            out_dim = attn_layer.hidden_size
+
         self.adapter_query = nn.Embedding(
-            config.n_skills * config.soft_prompt_length, attn_layer.hidden_size
+            config.n_skills * config.soft_prompt_length, out_dim
         )
         self.adapter_gate = torch.nn.Parameter(
             torch.zeros(1, attn_layer.num_heads, 1, 1)
@@ -263,7 +269,22 @@ def modify_with_llama_adapter_cls(transformer, config, layer_type):
 
 @register_modifier("mlp_llama_adapter")
 def modify_with_llama_adapter(transformer, config):
-    return modify_with_llama_adapter_cls(transformer, config, MLPLlamaAdapter)
+
+    if config.soft_prompt_learn_kv:
+        out_dim = transformer.config.hidden_size * 2
+    else:
+        out_dim = transformer.config.hidden_size
+
+    shared_adapter_mlp = nn.Sequential(
+        nn.Linear(config.soft_prompt_mlp_dim, config.soft_prompt_hidden_dim),
+        nn.ReLU(),
+        nn.Linear(config.soft_prompt_hidden_dim, out_dim),
+    )
+
+    mlp_llama_adapter = partial(MLPLlamaAdapter, shared_adapter_mlp)
+
+    return modify_with_llama_adapter_cls(transformer, config, mlp_llama_adapter)
+
 
 @register_modifier("llama_adapter")
 def modify_with_llama_adapter(transformer, config):
