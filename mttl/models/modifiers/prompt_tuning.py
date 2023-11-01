@@ -189,9 +189,11 @@ def modify_with_soft_prompt_routing(transformer, config):
 def modify_with_soft_prompt_routing(transformer, config):
     return modify_with_soft_prompt_cls(transformer, config, PolyPromptTuning)
 
+
 @register_modifier("alpha_prompt_tuning")
 def modify_with_soft_prompt_routing(transformer, config):
     return modify_with_soft_prompt_cls(transformer, config, AlphaPromptTuning)
+
 
 class PromptTuning(nn.Module):
     def __init__(self, base_input_embeddings, config, *args, **kwargs):
@@ -216,6 +218,7 @@ class PromptTuning(nn.Module):
         bs, seq_len = input_ids.size()
         return self.prompt_embedding.weight.unsqueeze(0).expand(bs, -1, -1)
 
+
 class AlphaPromptTuning(nn.Module):
     def __init__(self, base_input_embeddings, config, task_id_ptr, *args, **kwargs):
         super().__init__()
@@ -238,13 +241,18 @@ class AlphaPromptTuning(nn.Module):
 
     def forward(self, input_ids, *args, **kwargs):
         # build input for polytropon
-        bs = self.task_id_ptr['routing_infos'].task_ids.size(0)
-        embeds = self.base_input_embeddings.view(self.num_tokens, self.n_splits, self.dim_per_split)
-        self.task_id_ptr['routing_infos'].task_ids.fill_(0)
-        mixing_weights = self.prompt_mixer(self.task_id_ptr['routing_infos'])
-        mixing_weights = mixing_weights.view(bs, self.prompt_length, self.n_splits, self.num_tokens)
-        mixed = torch.einsum('BLSV,VSD->BLSD', (mixing_weights, embeds))
+        bs = self.task_id_ptr["routing_infos"].task_ids.size(0)
+        embeds = self.base_input_embeddings.view(
+            self.num_tokens, self.n_splits, self.dim_per_split
+        )
+        self.task_id_ptr["routing_infos"].task_ids.fill_(0)
+        mixing_weights = self.prompt_mixer(self.task_id_ptr["routing_infos"])
+        mixing_weights = mixing_weights.view(
+            bs, self.prompt_length, self.n_splits, self.num_tokens
+        )
+        mixed = torch.einsum("BLSV,VSD->BLSD", (mixing_weights, embeds))
         return mixed.reshape(bs, self.prompt_length, -1)
+
 
 class PolyPromptTuning(nn.Module):
     def __init__(self, base_input_embeddings, config, task_id_ptr, *args, **kwargs):
@@ -263,13 +271,17 @@ class PolyPromptTuning(nn.Module):
         std = base_input_embeddings.weight.std(0)
 
         # TODO: Revisit this initialization
-        embedding = torch.randn(
-            (
-                config.n_skills,
-                self.embed_dim,
-                self.prompt_length,
+        embedding = (
+            torch.randn(
+                (
+                    config.n_skills,
+                    self.embed_dim,
+                    self.prompt_length,
+                )
             )
-        ) * (std.view(1, -1, 1) / 2) + mean.view(1, -1, 1)
+            * (std.view(1, -1, 1) / 2)
+            + mean.view(1, -1, 1)
+        )
 
         # split dim according to `n_splits`
         embedding = embedding.reshape(
