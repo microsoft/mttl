@@ -14,7 +14,7 @@ from mttl.models.modifiers.poly import PolytroponSelector
 from transformers.models.llama.modeling_llama import (
     LlamaAttention,
     apply_rotary_pos_emb,
-    repeat_kv,
+    # repeat_kv,
     LlamaForCausalLM,
 )
 
@@ -67,8 +67,8 @@ def llama_adapter_attention(
     # past_key_value = (key_states, value_states) if use_cache else None
 
     assert self.num_key_value_groups == 1, "how to handle this for adapter?"
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    # key_states = repeat_kv(key_states, self.num_key_value_groups)
+    # value_states = repeat_kv(value_states, self.num_key_value_groups)
 
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(
         self.head_dim
@@ -243,7 +243,7 @@ def modify_with_llama_adapter_cls(transformer, config, layer_type):
         transformer, LlamaForCausalLM
     ), "Only Llama Model supported for now."
     task_id_ptr = transformer.task_id_container
-
+    
     for param in transformer.parameters():
         param.requires_grad = False
 
