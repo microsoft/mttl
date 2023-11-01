@@ -1,7 +1,7 @@
+import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import os
 import torch
 from pytorch_lightning import seed_everything
 from transformers import AutoTokenizer
