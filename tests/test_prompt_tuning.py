@@ -1,5 +1,6 @@
 import os
 import sys
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
@@ -91,7 +92,3 @@ def test_llama_adapter():
     output = new_model(**batch)
     loss = masked_cross_entropy(output.logits, labels, batch["attention_mask"])
     assert round(loss.item(), 4) == 6.0662
-
-
-if __name__ == "__main__":
-    test_llama_adapter()

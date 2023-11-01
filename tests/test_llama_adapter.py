@@ -1,5 +1,6 @@
 import os
 import sys
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
@@ -78,7 +79,3 @@ def test_llama_adapter():
     # Test Base Llama model
     output = new_model(**batch)
     assert round(output.loss.item(), 4) == 6.0815
-
-
-if __name__ == "__main__":
-    test_llama_adapter()
