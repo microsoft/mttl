@@ -157,13 +157,15 @@ class LoRA(Adapter, MergableAdapter):
         scaling = torch.cat(
             [torch.FloatTensor([lora.scaling]) for lora in loras], dim=0
         ).to(device=lora_a.device)
-        # (n_examples, seq_len, out_features)
-        adapter_out = torch.bmm(
-            torch.bmm(input.to(dtype=lora_a.dtype), lora_a), lora_b
-        ) * scaling[:, None, None].to(dtype=input.dtype)
 
+        # (n_examples, seq_len, out_features)
         layer_out = loras[0].layer(input)
-        return layer_out + adapter_out.to(dtype=layer_out.dtype)
+        input_lora = input.to(loras[0].lora_a.dtype)
+
+        adapter_out = (
+            torch.bmm(torch.bmm(input_lora, lora_a), lora_b) * scaling[:, None, None]
+        )
+        return layer_out + adapter_out.to(dtype=input.dtype)
 
     def reset_parameters(self):
         gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))

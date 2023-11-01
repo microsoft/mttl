@@ -20,15 +20,11 @@ def _extract_identifier(string, match_on="coder"):
     same underlying selector
     # e.g. 'block' : 'encoder.block.0.layer.0.SelfAttention' -> 'encoder.block.0'
     """
-    pattern_map = {
-        "coarsegrained": None,
-        "layerwise": "layer",
-    }
-    assert match_on in pattern_map.keys()
     if match_on == "finegrained":
         return string
     if match_on == "coarsegrained":
         return ""
+    return string
 
 
 def add_expert_to_transformer(
@@ -55,13 +51,6 @@ def add_expert_to_transformer(
                 if re.fullmatch(expert_config.modify_layers, c_name):
                     total_layers += 1
                     layer_name = f"{m_name}.{c_name}"
-                    identifier = _extract_identifier(
-                        layer_name, config.router_granularity
-                    )
-                    if identifier not in selectors.keys():
-                        selectors[identifier] = get_selector(config)
-                        selectors[identifier].__layer_name__ = identifier + ".selector"
-                    rotuter = selectors.get(identifier, None)
 
                     if type(layer) != ExpertContainer:
                         # create an expert lora container
@@ -69,7 +58,6 @@ def add_expert_to_transformer(
                             expert_config,
                             transformer.task_id_container,
                             layer,
-                            rotuter,
                         )
                         expert_container.__layer_name__ = layer_name
                         setattr(

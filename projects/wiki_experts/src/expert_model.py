@@ -1,11 +1,12 @@
 import torch
+from mttl.models.adapters import ExpertContainer
 
 from mttl.models.modifiers.routing import RoutingInfo
 
 from mttl.models.modifiers.experts import add_expert_to_transformer
 from mttl.utils import logger
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
-from projects.wiki_experts.models.routers import MULTI_EXPERT_ROUTERS, Router
+from projects.wiki_experts.models.routers import Router
 from typing import Dict
 
 
@@ -55,10 +56,9 @@ def push_expert_to_hub(
 class MultiExpertModel(ExpertTrainer):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+
         self.selectors: Dict[str, Router] = {}
         self.experts = []
-        if self.hparams["module_graph"] is not None:
-            self.load_from_graph_string(self.hparams["module_graph"])
 
     def get_router_weights(self):
         weights = {}
@@ -70,6 +70,7 @@ class MultiExpertModel(ExpertTrainer):
         for module_name, module_data in graph.create_modules(
             base_hparams=self.hparams, **kwargs
         ).items():
+            print("Loading module: {}".format(module_name))
             self.model = add_expert_to_transformer(
                 self.hparams,
                 self.model,
@@ -81,6 +82,7 @@ class MultiExpertModel(ExpertTrainer):
                 selectors=self.selectors,
             )
             self.experts.append(module_name)
+
         for _, selector in self.selectors.items():
             selector.resize_module_logits(self.experts)
 
