@@ -46,6 +46,35 @@ class MMLUCallback(cb.Callback):
             prog_bar=True,
         )
 
+    def on_after_backward(self, *args, **kwargs):
+        self.val_epoch += 1
+        
+        trainer, pl_module = args
+        
+        if trainer.global_step < 1:
+            return
+
+        if self.val_epoch % self.every_val_epochs != 0:
+            return
+
+        from mttl.evaluators import MMLUEvaluator
+
+        evaluator = MMLUEvaluator(
+            pl_module.hparams,
+            data_dir=os.environ["MMLU_DATA_DIR"],
+            **self.eval_kwargs,
+        )
+        metrics = evaluator.evaluate(
+            pl_module,
+            subsample=10,
+        )
+        pl_module.log(
+            "val/mmlu",
+            metrics["all"]["mean"],
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
 
 class NICallback(cb.Callback):
     def __init__(self, every_val_epochs=1, **kwargs):

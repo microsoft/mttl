@@ -227,9 +227,17 @@ def modify_with_routing(transformer, config, layer_type, optional_wrapper=None):
                     )
 
                     if identifier not in selectors.keys():
+                        # Special case when you have a decoder layer in an enc-dec model
+                        if not ('encoder' in m_name) and config.model_family == "encdec":
+                            from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
+                            assert isinstance(transformer, T5ForConditionalGeneration)
+                            in_d = transformer.config.d_model
+                        else:
+                            in_d = layer.in_features
+
                         selectors[identifier] = get_selector(
                             config,
-                            in_d=layer.in_features,
+                            in_d=in_d,
                         )
                         selectors[identifier].__layer_name__ = layer_name + ".selector"
 

@@ -39,6 +39,7 @@ class RoutingConfig(Config):
         self.eval_mmlu = False
         self.eval_batches = -1
         self.eval_avg = True
+        self.validate_after_training = True
 
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
@@ -54,6 +55,17 @@ class RoutingConfig(Config):
         # vsmear_x4        
         self.xrouter_x4_target = "prior"
         self.xrouter_x4target_detach = True
+
+        # task vsmear
+        self.task_vsmear_detach_prior_input = False
+        self.task_vsmear_aux_lambda = 1.
+
+        # soft prompts
+        self.soft_prompt_length = 10
+        self.patch_last_k_layers = -1
+        self.soft_prompt_mlp_dim = None
+        self.soft_prompt_hidden_dim = None
+        self.soft_prompt_learn_kv = False
 
     def post_init(self):
         if self.eval_mmlu and "MMLU_DATA_DIR" not in os.environ:

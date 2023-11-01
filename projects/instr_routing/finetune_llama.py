@@ -11,10 +11,11 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.callbacks import MMLUCallback, MiniProgress
+from mttl.callbacks import MMLUCallback, MiniProgress, NICallback
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.platypus_module import PlatypusModule
 from mttl.datamodule.flan100k_module import Flan100kModule
+from mttl.datamodule.ni_original_data_module import NIOriginalDataModule
 from mttl.utils import get_mlf_logger, setup_logging, logger
 from mttl.dist_utils import is_main_process
 from mttl.models.modifiers.routing import RoutingSelector
@@ -24,7 +25,9 @@ import models.vsmear  # noqa: F401
 import models.softmoe  # noqa: F401
 from models.monitors import SelectorMetricsLog, SelectorRoutingsLog
 from models.clm import CLM
+from models.encdec import EncoderDecoder
 from config import RoutingConfig
+from mttl.models.monitors import get_monitors
 
 torch.set_float32_matmul_precision("high")
 
@@ -40,7 +43,9 @@ def remove_non_serializable(d):
             del d[k]
 
 
-def eval_superni(best_model, args, tb_logger, trainer, n_shot=0, sufix="", subsample=-1):
+def eval_superni(
+    best_model, args, tb_logger, trainer, n_shot=0, sufix="", subsample=-1
+):
     from eval_ni import eval_ni
 
     logger.info(f"Evaluating on super NI {sufix}")
@@ -62,7 +67,9 @@ def eval_superni(best_model, args, tb_logger, trainer, n_shot=0, sufix="", subsa
             for (label, val) in rougel_ni_all["per_task"].items()
             if "rougeL" in label
         ]
-        table = wandb.Table(data=data, columns=["task_sni", f"mean_rougeL{n_shot}sht{sufix}"])
+        table = wandb.Table(
+            data=data, columns=["task_sni", f"mean_rougeL{n_shot}sht{sufix}"]
+        )
         wandb.log(
             {
                 f"sni_per_task_rougeL_{n_shot}sht{sufix}": wandb.plot.bar(
@@ -79,7 +86,9 @@ def eval_superni(best_model, args, tb_logger, trainer, n_shot=0, sufix="", subsa
             for (label, val) in rougel_ni_all["per_category"].items()
             if "rougeL" in label
         ]
-        table2 = wandb.Table(data=data, columns=["category_sni", f"mean_rougeL{n_shot}sht{sufix}"])
+        table2 = wandb.Table(
+            data=data, columns=["category_sni", f"mean_rougeL{n_shot}sht{sufix}"]
+        )
         wandb.log(
             {
                 f"sni_per_category_rougeL_{n_shot}sht{sufix}": wandb.plot.bar(
@@ -136,8 +145,24 @@ def eval_downstream(best_model, args, tb_logger, trainer, sufix="", subsample=-1
         logger.info("MMLU accuracy{}: {:.2f}".format(sufix, mmlu_em))
 
     if args.eval_superni:
-        eval_superni(best_model, args, tb_logger, trainer, n_shot=0, sufix=sufix, subsample=subsample)
-        eval_superni(best_model, args, tb_logger, trainer, n_shot=2, sufix=sufix, subsample=subsample)
+        eval_superni(
+            best_model,
+            args,
+            tb_logger,
+            trainer,
+            n_shot=0,
+            sufix=sufix,
+            subsample=subsample,
+        )
+        eval_superni(
+            best_model,
+            args,
+            tb_logger,
+            trainer,
+            n_shot=2,
+            sufix=sufix,
+            subsample=subsample,
+        )
 
 
 def run_multitask(args):
@@ -155,13 +180,21 @@ def run_multitask(args):
         raise NotImplementedError()
 
     # select dataloader
-    model_class = CLM
+    if args.model_family == "encdec":
+        model_class = EncoderDecoder
+    elif args.model_family == "gpt":
+        model_class = CLM
+    else:
+        raise ValueError("`model_class` should be `encdec` or `gpt`.")
+
     if args.dataset == "alpaca":
         dm = AlpacaDataModule(args)
     elif args.dataset == "platypus":
         dm = PlatypusModule(args)
     elif args.dataset == "flan100k":
         dm = Flan100kModule(args)
+    elif args.dataset == "ni":
+        dm = NIOriginalDataModule(args)
     else:
         raise NotImplementedError()
 
@@ -196,6 +229,7 @@ def run_multitask(args):
     loggers.append(pl.loggers.CSVLogger(save_dir=args.output_dir, name="csv_metrics"))
 
     kwargs = {"val_check_interval": args.eval_every} if args.eval_every else {}
+    kwargs["limit_val_batches"] = 10
 
     # get metric monitors for models
     callbacks = []
@@ -226,6 +260,11 @@ def run_multitask(args):
     callbacks.append(SelectorMetricsLog())
     if args.mmlu_callback:
         callbacks.append(MMLUCallback(5))
+        callbacks.append(NICallback(5))
+
+    monitors = get_monitors(args)
+    if len(monitors) > 0:
+        callbacks += monitors
 
     trainer = Trainer(
         devices=-1,
@@ -251,16 +290,18 @@ def run_multitask(args):
     path_best_model = trainer.checkpoint_callback.best_model_path
     ckpt_path = "best" if path_best_model else "last"
 
-    if args.load_in_8bit:
-        # To prevent final spike in valid loss, we first load the model and path is to the evaluator
-        # There is a bug with pl for 8bit model when calling .cuda() on it, to("cuda") works however.
-        best_model = CLM.load_from_checkpoint(
-            path_best_model, tokenizer=dm.tokenizer
-        ).to("cuda")
-        trainer.validate(dataloaders=dm, model=best_model)
-    else:
-        trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
-    
+    if args.validate_after_training:
+        if args.load_in_8bit:
+            # To prevent final spike in valid loss, we first load the model and path is to the evaluator
+            # There is a bug with pl for 8bit model when calling .cuda() on it, to("cuda") works however.
+            best_model = CLM.load_from_checkpoint(
+                path_best_model, tokenizer=dm.tokenizer
+            )
+            best_model = best_model.to("cuda")
+            trainer.validate(dataloaders=dm, model=best_model)
+        else:
+            trainer.validate(dataloaders=dm, ckpt_path=ckpt_path)
+
     if is_main_process():
         if path_best_model:
             del module
@@ -269,7 +310,6 @@ def run_multitask(args):
             best_model = CLM.load_from_checkpoint(
                 path_best_model,
                 tokenizer=dm.tokenizer,
-                load_in_8bit=False,
             ).to("cuda")
         else:
             torch.cuda.empty_cache()
@@ -278,7 +318,13 @@ def run_multitask(args):
         tb_logger = None if not args.tensorboard else tb_logger
         eval_downstream(best_model, args, tb_logger, trainer, sufix="")
         # eval downstream with averaged model
-        success = best_model.model.switch_selector_to_average(selector_to_replace=RoutingSelector, config=args) if hasattr(best_model.model, "switch_selector_to_average") else False
+        success = (
+            best_model.model.switch_selector_to_average(
+                selector_to_replace=RoutingSelector, config=args
+            )
+            if hasattr(best_model.model, "switch_selector_to_average")
+            else False
+        )
         if success and args.eval_avg:
             eval_downstream(best_model, args, tb_logger, trainer, sufix="_avg_exps")
 

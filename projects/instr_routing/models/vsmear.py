@@ -1,5 +1,6 @@
 import math
 import torch
+import numpy as np
 import copy
 import torch.nn as nn
 from enum import Enum
@@ -15,6 +16,7 @@ from mttl.models.modifiers.routing import (
     register_selector,
 )
 from projects.instr_routing.models.clm import AugmentedRoutingInfo
+from mttl.models.modifiers.poly import PolytroponSelector
 
 
 class Metrics:
@@ -43,20 +45,24 @@ class SMEARRouter(RoutingSelector):
         self.in_d = in_d
         self.n_skills = config.n_skills
         self.n_splits = config.n_splits
+        self.split_dim = in_d // self.n_splits
         self.temperature = config.router_temperature
         self.normalize_weights = config.router_normalize_weights
-        assert self.n_splits == 1
+        assert in_d % self.n_splits == 0
 
         # during generation we want to cache the input encoding
         # because in successive generation steps, the input is going to be only the encoding for the last token
         self._router_input_cache = None
 
-        self.prior_router = nn.Linear(in_d, config.n_skills * self.n_splits, bias=True)
+        # TODO: check if this view messes up the initialization
+        self.prior_router = nn.Linear(
+            self.split_dim, self.n_splits * self.n_skills, bias=True
+        )
         self.prior_router_ln = nn.LayerNorm(in_d)
         self.prior_router_ln.weight = nn.Parameter(torch.ones(in_d))
 
         self.router_center_momentum = self.config.router_center_momentum
-        self.register_buffer("center", torch.zeros(1, self.n_skills))
+        self.register_buffer("center", torch.zeros(self.n_splits, self.n_skills))
 
         if self.config.smear_gaussian_init:
             # normal innit
@@ -78,13 +84,18 @@ class SMEARRouter(RoutingSelector):
     ):
         """Computes routes for the teacher / posterior."""
         input = router_ln(input)
-        if self.normalize_weights:
-            weights = router.weight / torch.norm(
-                router.weight, p=2, dim=-1, keepdim=True
-            )
-            routes = F.linear(input, weights, None)
+        input = input.view(-1, self.n_splits, self.split_dim)
+
+        # weights : b s
+        weight = router.weight.view(self.split_dim, self.n_splits, self.n_skills)
+        if router.bias is None:
+            bias = 0.0
         else:
-            routes = F.linear(input, router.weight, router.bias)
+            bias = router.bias.view(1, self.n_splits, self.n_skills)
+
+        if self.normalize_weights:
+            weight = weight / torch.norm(weight, p=2, dim=-1, keepdim=True)
+        routes = torch.einsum("bsd,dsk->bsk", input, weight) + bias
         if center:
             self.apply_center_update(routes)
         # teacher centering and sharpening
@@ -104,12 +115,25 @@ class SMEARRouter(RoutingSelector):
         Therefore, at the first forward call (context encoding), we need to cache the input encodings
         so that we can use it to compute the prior routing probabilities.
         """
+
+        repeat = 1
+        if getattr(routing_infos, "encoder_output", None) is not None:
+            repeat = routing_infos.task_ids.size(
+                0
+            ) // routing_infos.encoder_output.size(0)
+            input = routing_infos.encoder_output
+
         router_input = routing_infos.inputs_cache_for_generation.get(self)
         if router_input is None:
             router_input = self.apply_mask_and_average(
                 input,
                 routing_infos.inst_token_mask,  # only instruction is marked with 1
             )
+
+            router_input = router_input.repeat_interleave(
+                repeat, dim=0
+            )  # no-op if repeat==1
+
             # if in generation mode, cache the input encoding for the next forward calls
             if routing_infos.generation_mode:
                 routing_infos.inputs_cache_for_generation[self] = router_input
@@ -131,7 +155,7 @@ class SMEARRouter(RoutingSelector):
         h_pri = -(routing_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
         self.routings = routing_probs.detach().cpu()
         self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
-        return routing_probs.unsqueeze(1)
+        return routing_probs
 
 
 @register_selector("vsmear")
@@ -181,7 +205,7 @@ class VSMEARRouter(SMEARRouter):
         if self.training:
             # during training :-)
             assert (
-                routing_infos.generation_mode is False
+                not routing_infos.generation_mode
             ), "We are not expecting to be in generation mode during training."
 
             post_input = self.get_posterior_input(input, routing_infos)
@@ -213,7 +237,118 @@ class VSMEARRouter(SMEARRouter):
             self.routings = prior_probs.detach().cpu()
             self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
             self.auxiliary_loss = h_pri.sum() * 0.0
-        return routing_probs.unsqueeze(1)
+        return routing_probs
+
+
+@register_selector("task_vsmear")
+class TaskVSMEARRouter(SMEARRouter):
+    """Predict Task from Prior distribution"""
+
+    def __init__(self, config, in_d):
+        super(RoutingSelector, self).__init__()
+        assert (
+            config.n_tasks > 0
+        ), "`TaskVSMEARRouter` must be used with multitask datasets."
+
+        self.config = config
+        self.prior = nn.Linear(in_d, config.n_tasks)
+
+        self.posterior_router = nn.Parameter(
+            torch.empty((config.n_tasks, config.n_splits * config.n_skills)).uniform_(
+                -1e-3, 1e-3
+            )
+        )
+
+        # during generation we want to cache the input encoding
+        # because in successive generation steps, the input is going to be only the encoding for the last token
+        self._router_input_cache = None
+
+        self.n_splits = 1
+        self.split_dim = in_d
+        self.n_tasks = self.n_skills = config.n_tasks
+        self.prior_ln = nn.Identity()
+        # self.prior_router_ln = nn.LayerNorm(in_d)
+        # self.prior_router_ln.weight = nn.Parameter(torch.ones(in_d))
+
+        self.adapter_splits, self.adapter_skills = config.n_splits, config.n_skills
+
+        self.temperature = config.router_temperature
+        self.normalize_weights = config.router_normalize_weights
+        self.router_center_momentum = config.router_center_momentum
+        self.register_buffer("center", torch.zeros(1, config.n_tasks))
+
+        if config.smear_gaussian_init:
+            # normal innit
+            self.prior.weight.data.normal_(mean=0.0, std=0.02)
+            self.prior.bias.data.fill_(0)
+
+        self.metrics = Metrics()
+
+    def forward(self, routing_infos: AugmentedRoutingInfo, input: torch.Tensor):
+        self.metrics.clear()
+
+        if getattr(routing_infos, "encoder_output", None) is not None:
+            input = routing_infos.encoder_output
+
+        prior_input = self._get_router_inputs(input, routing_infos)
+        bs = prior_input.size(0)
+
+        if self.config.task_vsmear_detach_prior_input:
+            prior_input = prior_input.detach()
+
+        # do not center the student, center only the teacher now
+        prior_routes = self.route_maybe_center(
+            prior_input,
+            self.prior,
+            self.prior_ln,
+            temperature=self.temperature,
+            center=False,
+        )
+
+        prior_task_probs = F.softmax(prior_routes, dim=-1).view(
+            bs, self.n_tasks
+        )  # (bs, n_tasks)
+        task_skill_dist = self.posterior_router.view(
+            -1, self.adapter_splits, self.adapter_skills
+        ).sigmoid()
+        task_skill_dist = task_skill_dist / task_skill_dist.sum(-1, keepdim=True)
+
+        prior_probs = torch.einsum("bt,tsk->bsk", prior_task_probs, task_skill_dist)
+        prior_log_probs = prior_probs.log()
+
+        h_pri = -(prior_probs * prior_log_probs).sum(-1).mean()
+        h_task_pri = -(prior_task_probs * prior_task_probs.clamp(min=1e-30).log()).sum(-1).mean()
+        self.metrics["h_pri"] = h_pri / math.log(self.adapter_skills)
+        self.metrics["h_task_pri"] = h_task_pri / math.log(self.n_tasks)
+
+        if self.training:
+            # during training :-)
+            assert (
+                not routing_infos.generation_mode
+            ), "We are not expecting to be in generation mode during training."
+
+            # Do a MHR forward pass
+            post_probs = task_skill_dist[routing_infos.task_ids]
+            post_log_probs = post_probs.log()
+
+            # compute auxiliary loss (KL divergence), KL = - H(posterior) + Xent(posterior, prior)
+            h_post = -(post_probs * post_log_probs).sum(-1).mean()
+            x_ent = -(post_probs * prior_log_probs).sum(-1).mean()
+
+            self.routings = post_probs.detach().cpu()
+            self.metrics["h_post"] = h_post / math.log(self.adapter_skills)
+            self.metrics["x_ent"] = x_ent
+
+            # TODO: use cross-entropy with task id as label
+            self.auxiliary_loss = self.config.task_vsmear_aux_lambda * F.cross_entropy(
+                prior_routes.flatten(0, 1), routing_infos.task_ids
+            )
+            routing_probs = post_probs
+        else:
+            routing_probs = prior_probs
+            self.routings = prior_probs.detach().cpu()
+            self.auxiliary_loss = h_pri.sum() * 0.0
+        return routing_probs
 
 
 class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
@@ -271,6 +406,13 @@ def modify_with_vsmear(transformer, config):
     return modify_with_smear(transformer, config)
 
 
+@register_modifier("task_vsmear")
+def modify_with_task_vsmear(transformer, config):
+    config.router_selector = "task_vsmear"
+
+    return modify_with_smear(transformer, config)
+
+
 @register_selector("vsmear_xr4")
 class VSMEARRouterExperimental(VSMEARRouter):
     def __init__(self, config, in_d):
@@ -303,7 +445,7 @@ class VSMEARRouterExperimental(VSMEARRouter):
         if self.training:
             # during training :-)
             assert (
-                routing_infos.generation_mode is False
+                not routing_infos.generation_mode
             ), "We are not expecting to be in generation mode during training."
 
             post_input = self.get_posterior_input(input, routing_infos)
@@ -437,7 +579,9 @@ class AuxRoutingLoRALinear_MergeAfterOP(SkilledLoRA_MergeLoraAfterOP, RoutingMix
             self.routing_infos.repeat_interleave(repeat)
 
         if self.selector is not None:
-            mixing_weights = self.selector(self.routing_infos, input=input).to(input.device)
+            mixing_weights = self.selector(self.routing_infos, input=input).to(
+                input.device
+            )
         else:
             bs = input.size(0)
             mixing_weights = torch.ones(
