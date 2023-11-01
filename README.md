@@ -1,3 +1,5 @@
+[![Tests](https://github.com/pclucas14/lucas_mttl/actions/workflows/tests.yml/badge.svg)](https://github.com/pclucas14/lucas_mttl/actions/workflows/tests.yml)
+
 # MTTL
 
 MTTL - Multi-Task Transfer Learning
@@ -77,6 +79,9 @@ If you run into issues with protoc `TypeError: Descriptors cannot not be created
 
     pip install -e ".[test]"
     pytest -vv tests
+
+## Acknowledgements
+We relied on Derek Tam's open-source code for the dataloading and T5 lightning wrapper for our encoder-decoder experiments. You can find the original code [here](https://github.com/r-three/t-few/tree/master).
 
 
 ## Contributing

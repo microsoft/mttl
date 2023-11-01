@@ -28,9 +28,13 @@ class RoutingConfig(Config):
             False  # l2 normalize cluster centroids before routing
         )
 
-        self.router_kl_factor = 1.  # factor for the posterior entropy term in the vsmear router
+        self.router_kl_factor = (
+            1.0  # factor for the posterior entropy term in the vsmear router
+        )
         self.router_kl_func = "kl"
-        self.router_center_momentum = 0.   # centering momentum a-la DINO_v2, if 0. don't use centering
+        self.router_center_momentum = (
+            0.0  # centering momentum a-la DINO_v2, if 0. don't use centering
+        )
         self.router_shared_weights = True  # share weights between teacher and student
 
         self.fast_dev_run = False
@@ -41,21 +45,33 @@ class RoutingConfig(Config):
         self.eval_mmlu = False
         self.eval_batches = -1
         self.eval_avg = True
+        self.validate_after_training = True
 
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
-        # logging    
+        # logging
         self.selector_log_per_layer = True
         self.mmlu_callback = True
-        # softmoe        
+        # softmoe
         self.use_causal_mask_for_D = True
-        
-        #smear
+
+        # smear
         self.smear_gaussian_init = False
-        
-        # vsmear_x4        
+
+        # vsmear_x4
         self.xrouter_x4_target = "prior"
         self.xrouter_x4target_detach = True
+
+        # task vsmear
+        self.task_vsmear_detach_prior_input = False
+        self.task_vsmear_aux_lambda = 1.0
+
+        # soft prompts
+        self.soft_prompt_length = 10
+        self.patch_last_k_layers = -1
+        self.soft_prompt_mlp_dim = None
+        self.soft_prompt_hidden_dim = None
+        self.soft_prompt_learn_kv = False
 
     def post_init(self):
         if self.eval_mmlu and "MMLU_DATA_DIR" not in os.environ:

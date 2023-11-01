@@ -35,7 +35,9 @@ class AugmentedRoutingInfo(RoutingInfo):
     inst_token_mask: torch.Tensor = None
     # layer_name -> tensor, holds the encoding for the instruction during generation
     # this is needed because the instruction is not passed as input during generation of subsequent tokens
-    inputs_cache_for_generation: Dict[object, torch.Tensor] = field(default_factory=dict)
+    inputs_cache_for_generation: Dict[object, torch.Tensor] = field(
+        default_factory=dict
+    )
 
 
 def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
@@ -72,12 +74,16 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
         # enable gradient checkpointing for memory efficiency
         from functools import partial
 
-        notfailing_checkpoint = partial(torch.utils.checkpoint.checkpoint, use_reentrant=False)
+        notfailing_checkpoint = partial(
+            torch.utils.checkpoint.checkpoint, use_reentrant=False
+        )
         torch.utils.checkpoint.checkpoint = notfailing_checkpoint
         model.gradient_checkpointing_enable()
         # FIX for enabling gradient of the auxiliary loss
 
     return model
+
+
 class CLM(EfficientCheckpointModule):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -99,6 +105,7 @@ class CLM(EfficientCheckpointModule):
                     load_in_8bit=load_in_8bit,
                     torch_dtype=torch.float32 if load_in_8bit else torch.float16,
                     device_map="auto",
+                    cache_dir=self.hparams.cache_dir,
                 )
             else:
                 model_object = AutoModelForCausalLM.from_pretrained(self.hparams.model)
@@ -127,7 +134,7 @@ class CLM(EfficientCheckpointModule):
         gen_config = self.model.generation_config
         gen_config.do_sample = False
         gen_config.temperature = 0.7
-        gen_config.max_new_tokens=128
+        gen_config.max_new_tokens = 128
         return gen_config
 
     def gather_auxiliary_losses(self):
