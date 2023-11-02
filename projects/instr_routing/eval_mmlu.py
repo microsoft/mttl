@@ -19,6 +19,9 @@ def eval_mmlu(
 
 
 if __name__ == "__main__":
+    import sys
+
+    sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
     from config import RoutingConfig
     from huggingface_hub import login
 
@@ -27,7 +30,7 @@ if __name__ == "__main__":
 
     config = RoutingConfig.parse(extra_kwargs={"eval_superni": False})
 
-    config.model = "meta-llama/Llama-2-7b-hf"
+    config.model = "EleutherAI/gpt-neo-125m"
     config.load_in_8bit = True
     config.model_family = "gpt"
     config.data_dir = os.environ["MMLU_DATA_DIR"]
