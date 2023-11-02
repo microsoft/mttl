@@ -244,7 +244,7 @@ class MMLUDataset(datasets.GeneratorBasedBuilder):
                             i,
                             label,
                             prompt_def,
-                            include_answer=True,
+                            include_answer=False,
                             augment_with_prompts=self.config.augment_with_prompts,
                             augment_with_options=self.config.augment_with_option_permutations,
                         )
