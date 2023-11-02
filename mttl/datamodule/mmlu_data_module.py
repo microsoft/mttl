@@ -87,17 +87,27 @@ def augment_prompts(dataset):
     def _augment_prompts(example):
         augmented_examples = copy.deepcopy(example)
         for i, instance in enumerate(example["Instance"]):
-            augmented_examples["Task"].append(example["Task"][i])
-
             input = instance["Input"]
 
+            if len(re.findall(r"\n[ABCD]\. .*", input)) > 4:
+                continue
+
+            input = "Question:\n" + input
+
+            options = re.findall(r"\n[ABCD]\. .*\nAnswer:", input, re.DOTALL)
+
+            input = input.replace(options[0], "\nChoices:\n" + options[0])
+
             augmented_examples["Instance"].append(
-                {"Input": new_input, "Output": new_output}
+                {"Input": input, "Output": instance["Output"]}
             )
             augmented_examples["Positive Examples"].append(
                 example["Positive Examples"][i]
             )
-            augmented_examples["Definition"].append(example["Definition"][i])
+            augmented_examples["Definition"].append("")
+            augmented_examples["Task"].append(example["Task"][i])
+
+        return augmented_examples
 
     return dataset.map(_augment_prompts, batched=True)
 
@@ -267,7 +277,6 @@ class MMLUDataModule(DefaultDataModule):
             logger.info(
                 f"Augmented MMLU test dataset by permuting options from length {len(dataset['test'])} to {len(self.test_dataset)}"
             )
-            self.test_dataset = augment_prompts(self.test_dataset)
 
         logger.info("Training examples: {}".format(len(self.train_dataset)))
         logger.info("Test examples: {}".format(len(self.test_dataset)))
