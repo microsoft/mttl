@@ -3,7 +3,7 @@
 import pandas as pd
 import os
 import datasets
-
+import copy
 from mttl.utils import logger
 
 
@@ -47,13 +47,76 @@ def format_example(df, idx, include_answer=True):
     return prompt
 
 
+def format_example_with_augmentation(
+    df,
+    idx,
+    label,
+    prompt_def,
+    include_answer,
+    augment_with_prompts,
+    augment_with_options,
+):
+    """
+    Using AI Harness prompt format discussed here: https://huggingface.co/blog/evaluating-mmlu-leaderboard
+    This prepends "Choices:" keyword and "Question:" prefix
+
+    Also creates varaitns with the right answer at varying positions in the option list
+    """
+    k = df.shape[1] - 2
+
+    def create_prompt_standard(options, prefix="", sufix=""):
+        prompt = prefix + df.iloc[idx, 0] + sufix
+        for j in range(k):
+            prompt += "\n{}. {}".format(choices[j], options[j])
+        prompt += "\nAnswer:"
+        if include_answer:
+            prompt += " {}\n\n".format(df.iloc[idx, k + 1])
+        return prompt
+
+    options = [df.iloc[idx, j + 1] for j in range(k)]
+
+    if augment_with_prompts:
+        prompt = create_prompt_standard(
+            options, prefix="Question:\n", sufix="\nChoices:"
+        )
+        yield prompt, label, ""
+
+    if augment_with_options:
+        labe_idx = choices.index(label)
+        for j, choice in enumerate(choices):
+            if labe_idx == j:
+                continue
+            _options = options.copy()
+            # put the right answer in j's option
+            _options[j], _options[labe_idx] = _options[labe_idx], _options[j]
+            _label = choice
+            prompt = create_prompt_standard(_options)
+            # print(options, "------->", _options, labe_idx, j, _label)
+            yield prompt, _label, prompt_def
+            if augment_with_prompts:
+                prompt = create_prompt_standard(
+                    _options, prefix="Question:\n", sufix="\nChoices:"
+                )
+                yield prompt, _label, ""
+
+
 class MMLUConfig(datasets.BuilderConfig):
-    def __init__(self, *args, data_dir=None, task_dir=None, max_num_instances_per_task=None, max_num_instances_per_eval_task=None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        data_dir=None,
+        task_dir=None,
+        max_num_instances_per_task=None,
+        max_num_instances_per_eval_task=None,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self.data_dir: str = data_dir
         self.task_dir: str = task_dir if task_dir else data_dir
         self.max_num_instances_per_task: int = max_num_instances_per_task
         self.max_num_instances_per_eval_task: int = max_num_instances_per_eval_task
+        self.augment_with_prompts: bool = True
+        self.augment_with_option_permutations: bool = True
 
 
 class MMLUDataset(datasets.GeneratorBasedBuilder):
@@ -73,7 +136,7 @@ class MMLUDataset(datasets.GeneratorBasedBuilder):
                     "Task": datasets.Value("string"),
                     "Instance": {
                         "Input": datasets.Value("string"),
-                        "Output": datasets.Value("string")
+                        "Output": datasets.Value("string"),
                     },
                     "Positive Examples": datasets.Value("string"),
                     "Definition": datasets.Value("string"),
@@ -83,34 +146,39 @@ class MMLUDataset(datasets.GeneratorBasedBuilder):
             homepage=_HOMEPAGE,
             citation=_CITATION,
         )
-    
+
     def _split_generators(self, dl_manager):
         """Returns SplitGenerators."""
         return [
             datasets.SplitGenerator(
                 name=datasets.Split.TRAIN,
                 gen_kwargs={
-                    "data_dir": self.config.task_dir, 
+                    "data_dir": self.config.task_dir,
                     "subset": "auxiliary_train",
                     "max_num_instances_per_task": self.config.max_num_instances_per_task,
-                }),
+                },
+            ),
             datasets.SplitGenerator(
                 name=datasets.Split.VALIDATION,
                 gen_kwargs={
-                    "data_dir": self.config.task_dir, 
+                    "data_dir": self.config.task_dir,
                     "subset": "val",
                     "max_num_instances_per_task": self.config.max_num_instances_per_task,
-                }),
+                },
+            ),
             datasets.SplitGenerator(
                 name=datasets.Split.TEST,
                 gen_kwargs={
-                    "data_dir": self.config.task_dir, 
+                    "data_dir": self.config.task_dir,
                     "subset": "test",
                     "max_num_instances_per_task": self.config.max_num_instances_per_eval_task,
-                }),
+                },
+            ),
         ]
-    
-    def _generate_examples(self, data_dir=None, subset=None, max_num_instances_per_task=None, ntrain=5):
+
+    def _generate_examples(
+        self, data_dir=None, subset=None, max_num_instances_per_task=None, ntrain=5
+    ):
         subjects = sorted(
             [
                 fn.split(f"_{subset}.csv")[0]
@@ -126,13 +194,23 @@ class MMLUDataset(datasets.GeneratorBasedBuilder):
             if subset != "auxiliary_train":
                 dev_df = pd.read_csv(
                     os.path.join(data_dir, "dev", subject + "_dev.csv"), header=None
-                )[: ntrain]
+                )[:ntrain]
             test_df = pd.read_csv(
-                os.path.join(data_dir, subset, subject + (f"_{subset}" if subset != 'auxiliary_train' else '') + ".csv"), header=None
+                os.path.join(
+                    data_dir,
+                    subset,
+                    subject
+                    + (f"_{subset}" if subset != "auxiliary_train" else "")
+                    + ".csv",
+                ),
+                header=None,
             )
 
             for i in range(test_df.shape[0]):
-                if max_num_instances_per_task is not None and max_num_instances_per_task >= 0:
+                if (
+                    max_num_instances_per_task is not None
+                    and max_num_instances_per_task >= 0
+                ):
                     if i > max_num_instances_per_task:
                         break
 
@@ -145,16 +223,39 @@ class MMLUDataset(datasets.GeneratorBasedBuilder):
                     for k in range(ntrain):
                         prompt_pos += format_example(dev_df, k)
                 else:
-                    prompt_pos = ''
-                
+                    prompt_pos = ""
+
                 label = test_df.iloc[i, test_df.shape[1] - 1]
 
-                instance = {'Task': subject,
-                            'Instance': {
-                                'Input': prompt_end,
-                                'Output': label,
-                            },
-                            'Definition': prompt_def,
-                            'Positive Examples': prompt_pos,
-                            }
+                instance = {
+                    "Task": subject,
+                    "Instance": {
+                        "Input": prompt_end,
+                        "Output": label,
+                    },
+                    "Definition": prompt_def,
+                    "Positive Examples": prompt_pos,
+                }
                 yield f"{subject}_{i}", instance
+                if subset != "auxiliary_train":
+                    for j, (_prompt_end, _label, _prompt_def) in enumerate(
+                        format_example_with_augmentation(
+                            test_df,
+                            i,
+                            label,
+                            prompt_def,
+                            include_answer=True,
+                            augment_with_prompts=self.config.augment_with_prompts,
+                            augment_with_options=self.config.augment_with_option_permutations,
+                        )
+                    ):
+                        instance = {
+                            "Task": subject,
+                            "Instance": {
+                                "Input": _prompt_end,
+                                "Output": _label,
+                            },
+                            "Definition": _prompt_def,
+                            "Positive Examples": prompt_pos,
+                        }
+                        yield f"{subject}_{i}_aug_{j}", instance

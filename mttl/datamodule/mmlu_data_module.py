@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import os
+import itertools
 import pkg_resources
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
@@ -8,13 +9,114 @@ from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PaddingStrategy
 from typing import Union, Optional
-
+import re
+import copy
 from datasets import load_dataset
 from dataclasses import dataclass
 
+from collections import defaultdict
 from mttl.utils import logger
 from mttl.datamodule.utils import get_tokenizer
 from mttl.datamodule.collators import DatasetConfig, DefaultCollator, DefaultDataModule
+
+
+#################################################
+# Dataset aumgentation, implemented in the MMLU dataset
+# Keeping these in case we want to augment in the data module
+CHOICES = ["A", "B", "C", "D"]
+
+
+def permute_options(dataset):
+    def permute_options_fn(example):
+        augmented_examples = copy.deepcopy(example)
+
+        for i, instance in enumerate(example["Instance"]):
+            input = instance["Input"]
+            output = instance["Output"]
+            output_idx = CHOICES.index(output)
+            options = re.findall(r"\n[ABCD]\. .*", input)
+            if len(options) > 4:
+                continue
+            for j in range(len(options)):
+                new_options = options.copy()
+
+                # put the correct answer in the jth position
+                new_options[j], new_options[output_idx] = (
+                    new_options[output_idx],
+                    new_options[j],
+                )
+
+                # keep letter order
+                new_options[j] = re.sub(
+                    r"\n[ABCD]\.", f"\n{CHOICES[j]}.", new_options[j]
+                )
+                new_options[output_idx] = re.sub(
+                    r"\n[ABCD]\.", f"\n{CHOICES[output_idx]}.", new_options[output_idx]
+                )
+                # new correct answer is at jth position
+                new_output = CHOICES[j]
+                assert re.sub(r"\n[ABCD]\.", "", options[output_idx]) == re.sub(
+                    r"\n[ABCD]\.", "", new_options[j]
+                ), "options not swapped correctly"
+                # put options back into input
+                _options = "".join(new_options) + "\nAnswer:"
+                try:
+                    to_replace = re.findall(
+                        r"\n[ABCD]\. .*\nAnswer:", input, re.DOTALL
+                    )[0]
+                    new_input = input.replace(to_replace, _options)
+                except:
+                    pass
+
+                augmented_examples["Task"].append(example["Task"][i])
+                augmented_examples["Instance"].append(
+                    {"Input": new_input, "Output": new_output}
+                )
+                augmented_examples["Positive Examples"].append(
+                    example["Positive Examples"][i]
+                )
+                augmented_examples["Definition"].append(example["Definition"][i])
+
+        return augmented_examples
+
+    return dataset.map(permute_options_fn, batched=True)
+
+
+def augment_prompts(dataset):
+    """
+    Inclusing prompts as discussed here: https://huggingface.co/blog/evaluating-mmlu-leaderboard
+    Will only use AI Harness version of removing the prompt and adding Question: and Choices:
+    """
+
+    def _augment_prompts(example):
+        augmented_examples = copy.deepcopy(example)
+        for i, instance in enumerate(example["Instance"]):
+            input = instance["Input"]
+
+            if len(re.findall(r"\n[ABCD]\. .*", input)) > 4:
+                continue
+
+            input = "Question:\n" + input
+
+            options = re.findall(r"\n[ABCD]\. .*\nAnswer:", input, re.DOTALL)
+
+            input = input.replace(options[0], "\nChoices:\n" + options[0])
+
+            augmented_examples["Instance"].append(
+                {"Input": input, "Output": instance["Output"]}
+            )
+            augmented_examples["Positive Examples"].append(
+                example["Positive Examples"][i]
+            )
+            augmented_examples["Definition"].append("")
+            augmented_examples["Task"].append(example["Task"][i])
+
+        return augmented_examples
+
+    return dataset.map(_augment_prompts, batched=True)
+
+
+#################################################
 
 
 @dataclass

@@ -243,7 +243,7 @@ class ModuleGraph:
             root_modules[root.name] = root.instantiate(*args, **kwargs)[0]
         return root_modules
 
-    def get_varaibles(self):
+    def get_variables(self):
         variables = []
         for root in self.roots:
             variables += root.collect_variables()
@@ -305,7 +305,7 @@ if __name__ == "__main__":
     print(graph.roots)
     print(graph.leaves)
     print(graph.dumps())
-    vars = graph.get_varaibles()
+    vars = graph.get_variables()
     print(vars)
     print(
         graph.dumps(
