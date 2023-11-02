@@ -301,14 +301,6 @@ class MMLUDataset(datasets.GeneratorBasedBuilder):
                             augment_with_options=self.config.augment_with_option_permutations,
                         )
                     ):
-                        print("#" * 100)
-                        print(_prompt_end)
-                        print("-----")
-                        print(_label)
-                        print("-----")
-                        print(_prompt_def)
-                        print("-----")
-                        print(_prompt_pos)
                         instance = {
                             "Task": subject,
                             "Instance": {
