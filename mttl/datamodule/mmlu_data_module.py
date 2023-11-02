@@ -19,6 +19,10 @@ from mttl.utils import logger
 from mttl.datamodule.utils import get_tokenizer
 from mttl.datamodule.collators import DatasetConfig, DefaultCollator, DefaultDataModule
 
+
+#################################################
+# Dataset aumgentation, implemented in the MMLU dataset
+# Keeping these in case we want to augment in the data module
 CHOICES = ["A", "B", "C", "D"]
 
 
@@ -110,6 +114,9 @@ def augment_prompts(dataset):
         return augmented_examples
 
     return dataset.map(_augment_prompts, batched=True)
+
+
+#################################################
 
 
 @dataclass
@@ -269,14 +276,6 @@ class MMLUDataModule(DefaultDataModule):
             self.train_dataset = dataset["train"]
             self.test_dataset = dataset["test"]
             self.dev_dataset = dataset["validation"]
-
-        self.config.augment_mmlu = 1
-        if self.config.augment_mmlu:
-            logger.info(f"Augmenting MMLU test and valid dataset...")
-            self.test_dataset = permute_options(self.test_dataset)
-            logger.info(
-                f"Augmented MMLU test dataset by permuting options from length {len(dataset['test'])} to {len(self.test_dataset)}"
-            )
 
         logger.info("Training examples: {}".format(len(self.train_dataset)))
         logger.info("Test examples: {}".format(len(self.test_dataset)))

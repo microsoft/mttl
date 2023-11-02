@@ -3,7 +3,7 @@
 import pandas as pd
 import os
 import datasets
-
+import copy
 from mttl.utils import logger
 
 
@@ -47,33 +47,57 @@ def format_example(df, idx, include_answer=True):
     return prompt
 
 
-def format_example_with_ai_harness_prompt(
-    df, idx, label, include_answer, augment_with_prompts, augment_with_options
+def format_example_with_augmentation(
+    df,
+    idx,
+    label,
+    prompt_def,
+    include_answer,
+    augment_with_prompts,
+    augment_with_options,
 ):
-    prompt = df.iloc[idx, 0]
+    """
+    Using AI Harness prompt format discussed here: https://huggingface.co/blog/evaluating-mmlu-leaderboard
+    This prepends "Choices:" keyword and "Question:" prefix
+
+    Also creates varaitns with the right answer at varying positions in the option list
+    """
     k = df.shape[1] - 2
-    for j in range(k):
-        prompt += "\n{}. {}".format(choices[j], df.iloc[idx, j + 1])
-    prompt += "\nAnswer:"
-    if include_answer:
-        prompt += " {}\n\n".format(df.iloc[idx, k + 1])
-    return prompt
 
+    def create_prompt_standard(options, prefix="", sufix=""):
+        prompt = prefix + df.iloc[idx, 0] + sufix
+        for j in range(k):
+            prompt += "\n{}. {}".format(choices[j], options[j])
+        prompt += "\nAnswer:"
+        if include_answer:
+            prompt += " {}\n\n".format(df.iloc[idx, k + 1])
+        return prompt
 
-# def format_example_with_ai_harness_prompt(df, idx, include_answer=True):
-#     '''
-#     Using AI Harness prompt format discussed here: https://huggingface.co/blog/evaluating-mmlu-leaderboard
-#     This prepends "Choices:" keyword and "Question:" prefix
-#     '''
-#     prompt = "Question:\n" + df.iloc[idx, 0]
-#     prompt+= "\nChoices:"
-#     k = df.shape[1] - 2
-#     for j in range(k):
-#         prompt += "\n{}. {}".format(choices[j], df.iloc[idx, j + 1])
-#     prompt += "\nAnswer:"
-#     if include_answer:
-#         prompt += " {}\n\n".format(df.iloc[idx, k + 1])
-#     return prompt
+    options = [df.iloc[idx, j + 1] for j in range(k)]
+
+    if augment_with_prompts:
+        prompt = create_prompt_standard(
+            options, prefix="Question:\n", sufix="\nChoices:"
+        )
+        yield prompt, label, ""
+
+    if augment_with_options:
+        labe_idx = choices.index(label)
+        for j, choice in enumerate(choices):
+            if labe_idx == j:
+                continue
+            _options = options.copy()
+            # put the right answer in j's option
+            _options[j], _options[labe_idx] = _options[labe_idx], _options[j]
+            _label = choice
+            prompt = create_prompt_standard(_options)
+            # print(options, "------->", _options, labe_idx, j, _label)
+            yield prompt, _label, prompt_def
+            if augment_with_prompts:
+                prompt = create_prompt_standard(
+                    _options, prefix="Question:\n", sufix="\nChoices:"
+                )
+                yield prompt, _label, ""
 
 
 class MMLUConfig(datasets.BuilderConfig):
@@ -213,34 +237,25 @@ class MMLUDataset(datasets.GeneratorBasedBuilder):
                     "Positive Examples": prompt_pos,
                 }
                 yield f"{subject}_{i}", instance
-
-                for j, (prompt_end, label, prompt_def) in enumerate(
-                    format_example_with_ai_harness_prompt(
-                        test_df, i, label, include_answer=True
-                    )
-                ):
-                    instance = {
-                        "Task": subject,
-                        "Instance": {
-                            "Input": prompt_end,
-                            "Output": label,
-                        },
-                        "Definition": prompt_def,
-                        "Positive Examples": prompt_pos,
-                    }
-                    yield f"{subject}_{i}_aug_{j}", instance
-
-                # if self.config.augment_with_prompts:
-                #     prompt_end_aug = format_example_with_ai_harness_prompt(test_df, i, include_answer=False)
-                #     prompt_def_aug = "" # remove definition like in AI HArness case discussed here https://huggingface.co/blog/evaluating-mmlu-leaderboard
-                #     instance = {'Task': subject,
-                #                 'Instance': {
-                #                     'Input': prompt_end_aug,
-                #                     'Output': label,
-                #                 },
-                #                 'Definition': prompt_def_aug,
-                #                 'Positive Examples': prompt_pos,
-                #                 }
-                #     yield f"{subject}_{i}_aug", instance
-
-                # if self.config.augment_with_option_permutations:
+                if subset != "auxiliary_train":
+                    for j, (_prompt_end, _label, _prompt_def) in enumerate(
+                        format_example_with_augmentation(
+                            test_df,
+                            i,
+                            label,
+                            prompt_def,
+                            include_answer=True,
+                            augment_with_prompts=self.config.augment_with_prompts,
+                            augment_with_options=self.config.augment_with_option_permutations,
+                        )
+                    ):
+                        instance = {
+                            "Task": subject,
+                            "Instance": {
+                                "Input": _prompt_end,
+                                "Output": _label,
+                            },
+                            "Definition": _prompt_def,
+                            "Positive Examples": prompt_pos,
+                        }
+                        yield f"{subject}_{i}_aug_{j}", instance
