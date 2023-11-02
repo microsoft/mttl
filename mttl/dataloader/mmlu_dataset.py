@@ -60,9 +60,9 @@ def _format_example_with_augmentation(
 
 
 def format_example_with_augmentation(
-    prompt,
-    options,
-    label,
+    example_prompt,
+    example_options,
+    example_label,
     icl_prompts: list,
     icl_options: list,
     icl_labels: list,
@@ -81,9 +81,9 @@ def format_example_with_augmentation(
 
     if augment_with_prompts:
         prompt = _format_example_with_augmentation(
-            prompt,
-            options,
-            label,
+            example_prompt,
+            example_options,
+            example_label,
             prefix="Question:\n",
             sufix="\nChoices:",
             include_answer=False,
@@ -94,19 +94,19 @@ def format_example_with_augmentation(
             prompt_pos_augm += _format_example_with_augmentation(
                 icl_p, icl_o, icl_l, prefix="Question:\n", sufix="\nChoices:"
             )
-        yield prompt, label, "", prompt_pos_augm
+        yield prompt, example_label, "", prompt_pos_augm
 
     if augment_with_options:
-        labe_idx = choices.index(label)
+        labe_idx = choices.index(example_label)
         for j, choice in enumerate(choices):
             if labe_idx == j:
                 continue
-            _options = options.copy()
+            _options = example_options.copy()
             # put the right answer in j's option
             _options[j], _options[labe_idx] = _options[labe_idx], _options[j]
             _label = choice
             prompt = _format_example_with_augmentation(
-                prompt, _options, _label, include_answer=False
+                example_prompt, _options, _label, include_answer=False
             )
             if prompt_pos is None:
                 prompt_pos = ""
@@ -116,7 +116,7 @@ def format_example_with_augmentation(
 
             if augment_with_prompts:
                 prompt = _format_example_with_augmentation(
-                    prompt,
+                    example_prompt,
                     _options,
                     _label,
                     prefix="Question:\n",
@@ -301,6 +301,14 @@ class MMLUDataset(datasets.GeneratorBasedBuilder):
                             augment_with_options=self.config.augment_with_option_permutations,
                         )
                     ):
+                        print("#" * 100)
+                        print(_prompt_end)
+                        print("-----")
+                        print(_label)
+                        print("-----")
+                        print(_prompt_def)
+                        print("-----")
+                        print(_prompt_pos)
                         instance = {
                             "Task": subject,
                             "Instance": {
