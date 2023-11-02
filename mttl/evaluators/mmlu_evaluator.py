@@ -5,7 +5,8 @@ import tqdm
 import torch
 import numpy as np
 import pytorch_lightning as pl
-
+import jsonlines
+import json
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.datamodule.mmlu_data_module import MMLUDataConfig
 from mttl.models.utils import transfer_batch_to_device
@@ -47,9 +48,12 @@ class MMLUEvaluator(object):
             enumerate(dataloader),
             total=len(dataloader),
         )
+        # write the file to disk (input, accuracy, expertname) to a json file
+        fout = open("adapter_ranker_train.jsonl", "w")
         for _, batch in pbar:
             task_names = batch.get("task_names", None)
             labels_text = batch.pop("labels_texts", None)
+            inputs_text = batch.get("inputs", None)
             extra_kwargs = {}
             max_length = 5
 
@@ -116,6 +120,20 @@ class MMLUEvaluator(object):
             )
 
             all_EM.extend(eval_metrics["exact_match"])
+
+            for i in range(len(predictions)):
+                fout.write(
+                    json.dumps(
+                        {
+                            "input": inputs_text[i],
+                            "accuracy": eval_metrics["exact_match"][i],
+                            "expertname": task_names[i],
+                        }
+                    )
+                    + "\n"
+                )
+            fout.flush()
+
             pbar.set_description(
                 f"Task: {task_names[0] if task_names else None}, EM: {np.mean(all_EM):.4f}"
             )
