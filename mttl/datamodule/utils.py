@@ -14,8 +14,8 @@ def tokenizer_enforces_eos(tokenizer):
         tokenizer.add_eos_token = True
 
     token_ids = tokenizer(test, truncation=True, max_length=3)
-    enforce_eos = token_ids["input_ids"][-1] == tokenizer.eos_token_id    
-    
+    enforce_eos = token_ids["input_ids"][-1] == tokenizer.eos_token_id
+
     if old_add_eos is not None:
         tokenizer.add_eos_token = old_add_eos
 
@@ -23,28 +23,31 @@ def tokenizer_enforces_eos(tokenizer):
 
 
 def get_tokenizer(config, for_generation=False):
-    if "llama" in config.model:
-        tokenizer = LlamaTokenizer.from_pretrained(config.model)
-        tokenizer.model_max_length = int(1e9)
-        tokenizer.pad_token_id = 0 
-        if not config.model_family == "gpt":
+    return get_tokenizer_with_args(
+        config.model, config.model_family, config.padding_side, for_generation
+    )
+
+
+def get_tokenizer_with_args(
+    model_name, model_family, padding_side="right", for_generation=False
+):
+    if "llama" in model_name:
+        tokenizer = LlamaTokenizer.from_pretrained(model_name)
+        tokenizer.pad_token_id = 0
+        if not model_family == "gpt":
             raise ValueError(
                 "We detected a Llama model, but model_family != 'gpt', fix your config!"
             )
     else:
-        tokenizer = AutoTokenizer.from_pretrained(config.model)
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
         tokenizer.model_max_length = int(1e9)
 
-    if hasattr(config, "padding_side"):
-        logger.warn("Setting padding side to {}".format(config.padding_side))
+    tokenizer.padding_side = padding_side
+    logger.warn("Padding side is {}".format(tokenizer.padding_side))
 
-        tokenizer.padding_side = config.padding_side
-    else:
-        logger.warn("Padding side is {}".format(tokenizer.padding_side))
-
-    if config.model_family == "gpt":
+    if model_family == "gpt":
         if for_generation:
-            if config.padding_side == "right":
+            if padding_side == "right":
                 logger.warn("Padding side is 'right', but we are in generation mode!")
 
             logger.warn(
