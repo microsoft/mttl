@@ -291,5 +291,4 @@ class Config:
         self.module_logits_dropout = 0.0
         self.module_logits_l2_norm = False
 
-        self.augment_mmlu_with_prompts: bool = False
-        self.augment_mmlu_with_option_permutations: bool = False
+        self.augment_mmlu: bool = False

@@ -184,8 +184,7 @@ class DataCollatorForMMLU(DefaultCollator):
 
 
 class MMLUDataConfig(DatasetConfig):
-    augment_mmlu_with_prompts: bool = False
-    augment_mmlu_with_permutations: bool = False
+    augment_mmlu: bool = False
 
 
 class MMLUDataModule(DefaultDataModule):
@@ -250,8 +249,8 @@ class MMLUDataModule(DefaultDataModule):
         dataset = load_dataset(
             filename,
             data_dir=os.environ[self.DATA_ENV],
-            augment_with_prompts=self.config.augment_mmlu_with_prompts,
-            augment_with_option_permutations=self.config.augment_mmlu_with_option_permutations,
+            augment_with_prompts=self.config.augment_mmlu,
+            augment_with_option_permutations=self.config.augment_mmlu,
         )
 
         task_names = set(dataset["train"]["Task"])
