@@ -15,7 +15,7 @@ def get_monitors(config):
         and "poly" in config.router_selector
     ):
         monitors += [PolytroponLog()]
-    if "prefix_tuning" in config.model_modifier:
+    if "llama_adapter" in config.model_modifier:
         monitors += [AlphaLog()]
 
     return monitors

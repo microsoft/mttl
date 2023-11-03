@@ -229,7 +229,6 @@ def run_multitask(args):
     loggers.append(pl.loggers.CSVLogger(save_dir=args.output_dir, name="csv_metrics"))
 
     kwargs = {"val_check_interval": args.eval_every} if args.eval_every else {}
-    kwargs["limit_val_batches"] = 10
 
     # get metric monitors for models
     callbacks = []
@@ -307,9 +306,13 @@ def run_multitask(args):
             del module
             torch.cuda.empty_cache()
 
+            eval_in_8bit = args.load_in_8bit and args.eval_in_8bit
+            logger.info(f"eval in 8 bit : {eval_in_8bit}")
+
             best_model = CLM.load_from_checkpoint(
                 path_best_model,
                 tokenizer=dm.tokenizer,
+                load_in_8bit=eval_in_8bit
             ).to("cuda")
         else:
             torch.cuda.empty_cache()
