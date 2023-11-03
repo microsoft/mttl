@@ -37,6 +37,7 @@ if __name__ == "__main__":
     config.predict_batch_size = 2
     config.max_input_length = 4096
     config.max_output_length = 5
+    config.augment_mmlu = True
 
     model = AutoModelForCausalLM.from_pretrained(
         config.model, load_in_8bit=config.load_in_8bit, device_map="auto"

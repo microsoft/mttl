@@ -147,6 +147,8 @@ class MMLUConfig(datasets.BuilderConfig):
         task_dir=None,
         max_num_instances_per_task=None,
         max_num_instances_per_eval_task=None,
+        augment_with_prompts=False,
+        augment_with_option_permutations=False,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -154,8 +156,8 @@ class MMLUConfig(datasets.BuilderConfig):
         self.task_dir: str = task_dir if task_dir else data_dir
         self.max_num_instances_per_task: int = max_num_instances_per_task
         self.max_num_instances_per_eval_task: int = max_num_instances_per_eval_task
-        self.augment_with_prompts: bool = True
-        self.augment_with_option_permutations: bool = True
+        self.augment_with_prompts: bool = augment_with_prompts
+        self.augment_with_option_permutations: bool = augment_with_option_permutations
 
 
 class MMLUDataset(datasets.GeneratorBasedBuilder):

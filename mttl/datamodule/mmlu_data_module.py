@@ -184,7 +184,7 @@ class DataCollatorForMMLU(DefaultCollator):
 
 
 class MMLUDataConfig(DatasetConfig):
-    pass
+    augment_mmlu: bool = False
 
 
 class MMLUDataModule(DefaultDataModule):
@@ -246,7 +246,12 @@ class MMLUDataModule(DefaultDataModule):
         filename = pkg_resources.resource_filename(
             __name__, "../dataloader/mmlu_dataset.py"
         )
-        dataset = load_dataset(filename, data_dir=os.environ[self.DATA_ENV])
+        dataset = load_dataset(
+            filename,
+            data_dir=os.environ[self.DATA_ENV],
+            augment_with_prompts=self.config.augment_mmlu,
+            augment_with_option_permutations=self.config.augment_mmlu,
+        )
 
         task_names = set(dataset["train"]["Task"])
         task_names = task_names.union(set(dataset["validation"]["Task"]))
