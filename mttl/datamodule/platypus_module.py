@@ -3,7 +3,7 @@ from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 
 from mttl.datamodule.base import DefaultCollator
-from mttl.dataloader.platyplus_dataset_reader import PlatypusDataset
+from mttl.dataloader.platypus_dataset_reader import PlatypusDataset
 
 from mttl.datamodule.utils import get_tokenizer
 
