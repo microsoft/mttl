@@ -3,7 +3,7 @@ from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from mttl.dataloader.alpaca_dataset_readers import AlpacaDataset
 from mttl.datamodule.utils import get_tokenizer
-from mttl.datamodule.collators import DefaultCollator
+from mttl.datamodule.base import DefaultCollator
 
 
 class AlpacaDataModule(LightningDataModule):

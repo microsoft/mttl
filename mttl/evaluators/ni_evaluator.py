@@ -75,7 +75,7 @@ class NIEvaluator(object):
         pred_output_file_path=None,
         device="cuda",
     ):
-        from mttl.datamodule.ni_original_data_module import NIOriginalDataModule
+        from mttl.datamodule.ni_data_module import NiDataModule
 
         self.config = deepcopy(config)
         self.device = device
@@ -94,7 +94,7 @@ class NIEvaluator(object):
             data_dir = config.data_dir
 
         self.data_dir = data_dir
-        self.datamodule = NIOriginalDataModule(
+        self.datamodule = NiDataModule(
             self.config,
             data_dir=data_dir,
             for_generation=True,

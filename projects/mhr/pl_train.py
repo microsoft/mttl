@@ -5,12 +5,12 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 from mttl.online_eval import NIOnlineZeroShot, T0OnlineZeroShot
 from mttl.callbacks import ProgressCallback
-from mttl.datamodule.ni_original_data_module import NIOriginalDataModule
+from mttl.datamodule.ni_data_module import NiDataModule
 from mttl.datamodule.t0_data_module import T0PretrainDataModule
 from mttl.models.encoder_decoder import EncoderDecoder
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.models.monitors import get_monitors
-from mttl.utils import get_mlf_logger, logger, setup_logging
+from mttl.utils import get_mlf_logger, setup_logging
 from mttl.config import Config
 
 
@@ -21,7 +21,7 @@ def run_multitask(args):
     # select dataloader
     if args.dataset == "ni":
         model_class = EncoderDecoder
-        dm = NIOriginalDataModule(args)
+        dm = NiDataModule(args)
     elif args.dataset == "t0":
         model_class = T0EncoderDecoder
         dm = T0PretrainDataModule(args)
@@ -61,7 +61,11 @@ def run_multitask(args):
 
     loggers.append(pl.loggers.CSVLogger(save_dir=args.output_dir, name="csv_metrics"))
 
-    kwargs = {"val_check_interval": args.eval_every * args.gradient_accumulation_steps} if args.eval_every else {}
+    kwargs = (
+        {"val_check_interval": args.eval_every * args.gradient_accumulation_steps}
+        if args.eval_every
+        else {}
+    )
 
     # get metric monitors for models
     callbacks = get_monitors(args)
@@ -72,7 +76,9 @@ def run_multitask(args):
 
     if args.dataset in ["ni"]:
         if args.early_stop_on_zero_shot and not args.ni_online_eval:
-            raise NotImplementedError("Specify online zero-shot if early stopping on zero shot.")
+            raise NotImplementedError(
+                "Specify online zero-shot if early stopping on zero shot."
+            )
 
         if args.ni_online_eval:
             callbacks.append(NIOnlineZeroShot(args.eval_every))
@@ -92,7 +98,7 @@ def run_multitask(args):
         )
         callbacks.append(checkpoint_callback)
     else:
-        # no need for checkpointing in t0 as we checkpoint manually in the module    
+        # no need for checkpointing in t0 as we checkpoint manually in the module
         if args.t0_online_eval:
             callbacks.append(T0OnlineZeroShot(args.eval_every))
 
