@@ -3,12 +3,12 @@ from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 
 from mttl.datamodule.base import DefaultCollator
-from mttl.dataloader.platyplus_dataset_reader import PlatypusDataset
+from mttl.dataloader.flan_100k_dataset_reader import Flan100KDataset
+from mttl.datamodule.utils import get_tokenizer, DefaultDataModule
+from mttl.datamodule.base import DefaultCollator
 
-from mttl.datamodule.utils import get_tokenizer
 
-
-class PlatypusModule(LightningDataModule):
+class FlanModule(DefaultDataModule):
     def train_dataloader(self):
         return DataLoader(
             self.train_dataset,
@@ -33,7 +33,7 @@ class PlatypusModule(LightningDataModule):
 
     def test_dataloader(self):
         return DataLoader(
-            self.test_dataset,
+            self.test_set,
             batch_size=self.config.predict_batch_size,
             shuffle=False,
             num_workers=16,
@@ -41,6 +41,10 @@ class PlatypusModule(LightningDataModule):
             persistent_workers=True,
             collate_fn=self.collate_fn,
         )
+
+    @property
+    def all_instructions(self):
+        return self.dataset.read_all_instructions()
 
     def __init__(self, config):
         super().__init__()
@@ -57,10 +61,10 @@ class PlatypusModule(LightningDataModule):
             return_tensors="pt",
             model_family=config.model_family,
         )
-        self.task_to_id = {"alpaca_full": 0}
+        self.task_to_id = {"flan_100k": 0}
 
     def get_dataset(self, idxs=None, loss_for_keywords=True):
-        return PlatypusDataset(
+        return Flan100KDataset(
             self.config.data_dir,
             idxs,
             loss_for_keywords=loss_for_keywords,
@@ -81,7 +85,7 @@ class PlatypusModule(LightningDataModule):
             ],
             generator=rng,
         )
-        self.test_dataset = self.dev_dataset
+        self.test_set = self.dev_dataset
 
         print("Training steps:", len(self.train_dataloader()))
         print("Validation steps:", len(self.val_dataloader()))

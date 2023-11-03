@@ -4,7 +4,7 @@ from transformers import AutoTokenizer
 
 from mttl.dataloader.xfit_dataset_readers import XFitDatasetReader
 from mttl.datamodule import IndexConcatDataset
-from mttl.datamodule.collators import DefaultCollator
+from mttl.datamodule.base import DefaultCollator
 from mttl.datamodule.utils import get_tokenizer
 from mttl.utils import get_example_to_ids, get_tasks_list
 
@@ -40,7 +40,7 @@ class XFitDataModule(LightningDataModule):
             persistent_workers=True,
             collate_fn=self.collate_fn,
         )
-        
+
     @property
     def all_instructions(self):
         raise NotImplementedError()
@@ -101,10 +101,10 @@ class XFitDataModule(LightningDataModule):
         self.val_dataset = IndexConcatDataset(
             self.dataset_reader.read_orig_datasets("dev")
         )
-        
+
         print("Training steps:", len(self.train_dataloader()))
         print("Validation steps:", len(self.val_dataloader()))
-        
+
         if self.config.finetune_task_name:
             self.test_dataset = IndexConcatDataset(
                 self.dataset_reader.read_orig_datasets("test")

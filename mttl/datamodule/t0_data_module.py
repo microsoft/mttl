@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import random
 from pytorch_lightning import LightningDataModule
-from mttl.datamodule.collators import DefaultCollator
+from mttl.datamodule.base import DefaultCollator
 from mttl.datamodule.utils import get_tokenizer
 
 from mttl.utils import hash_example, template_to_string
@@ -12,8 +12,7 @@ from mttl.dataloader.data_utils import ExampleInfo, MultiChoiceExampleInfo
 
 
 def apply_template(template, example, hash_friendly=False, handle_edge_cases=True):
-    """Could be done with a context manager, but we're lazy.
-    """
+    """Could be done with a context manager, but we're lazy."""
     if hash_friendly:
         state = random.getstate()
         random.seed(42)
@@ -347,6 +346,7 @@ class MultiChoiceCollator(DefaultCollator):
     """
     wrapper of `collate_fn` in `create_collate_fn` that is ddp compatible
     """
+
     def __call__(self, batch: MultiChoiceExampleInfo):
         output_batch = super().__call__(batch)
 
@@ -368,9 +368,11 @@ class MultiChoiceCollator(DefaultCollator):
             raise NotImplementedError(
                 "The collate_fn is not implmented for variable number of choices"
             )
-        answer_choices_ids = answer_choices_["input_ids"].view(
-            len(answer_choices), max(num_choice), -1
-        ).contiguous()
+        answer_choices_ids = (
+            answer_choices_["input_ids"]
+            .view(len(answer_choices), max(num_choice), -1)
+            .contiguous()
+        )
 
         output_batch["idx"] = torch.LongTensor([b.idx for b in batch])
         output_batch["labels"] = torch.LongTensor([b.label for b in batch])
