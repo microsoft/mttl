@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from mttl.utils import logger
 from mttl.datamodule.utils import get_tokenizer
-from mttl.datamodule.collators import DefaultCollator
+from mttl.datamodule.base import DefaultCollator
 
 
 @dataclass
