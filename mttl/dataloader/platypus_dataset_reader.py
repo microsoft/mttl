@@ -51,7 +51,7 @@ class PlatypusDataset(torch.utils.data.dataset.Dataset):
         super().__init__()
         self.loss_for_keywords = loss_for_keywords
 
-        # load the data        
+        # load the data
         self.dataset = load_dataset("garage-bAInd/Open-Platypus")["train"]
         if idxs is not None:
             self.dataset = self.dataset.select(idxs)
