@@ -17,10 +17,10 @@ class DatasetConfig:
     dataset: str = None
     data_dir: str = None
     model: str = None
-    train_batch_size: int = None
-    predict_batch_size: int = None
-    max_input_length: int = None
-    max_output_length: int = None
+    train_batch_size: int = 4
+    predict_batch_size: int = 4
+    max_input_length: int = 1024
+    max_output_length: int = 128
     validation_portion: float = None
     padding_side: str = "right"
     model_family: str = "gpt"
@@ -317,7 +317,7 @@ class AutoDataModule:
                 for_generation=for_generation,
                 val_mixin=val_mixin,
             )
-        elif name in ["sordonia/flan-10k-flat"]:
+        elif name in ["sordonia/flan-10k-flat", "sordonia/flan-debug-flat"]:
             return FlanModule(
                 DatasetConfig(dataset=name, **kwargs),
                 for_generation=for_generation,

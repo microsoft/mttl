@@ -107,8 +107,10 @@ class RouterWrapper:
 class RoutingSelector(nn.Module):
     @property
     def layer_name(self):
-        if not hasattr(self, '__layer_name__'):
-            raise ValueError("Layer name not available, dependency injection not done properly?")
+        if not hasattr(self, "__layer_name__"):
+            raise ValueError(
+                "Layer name not available, dependency injection not done properly?"
+            )
 
         return self.__layer_name__
 
@@ -143,22 +145,16 @@ class PrivateSelector(RoutingSelector):
 @dataclass
 class RoutingInfo:
     task_ids: torch.Tensor = None
-    hashes: List[str] = None
-    instruction_hashes: List[str] = None
+    task_names: List[str] = None
     example_ids: List[int] = None
     labels: torch.Tensor = None
 
     @classmethod
     def from_batch(cls, batch: dict, **kwargs):
-        if "task_ids" not in batch:
-            task_ids = None
-        else:
-            task_ids = batch["task_ids"].long()
         ri = cls(
-            task_ids=task_ids,
-            hashes=batch.get("hashes", None),
+            task_ids=batch.get("task_ids", None),
+            task_names=batch.get("task_names", None),
             example_ids=batch.get("example_ids", None),
-            instruction_hashes=batch.get("instruction_hashes", None),
             labels=batch.get("labels", None),
             **kwargs,
         )
@@ -167,10 +163,8 @@ class RoutingInfo:
     def repeat_interleave(self, repeats):
         # useful for beam search
         self.task_ids = self.task_ids.repeat_interleave(repeats)
-        if self.hashes:
-            self.hashes = [h for h in self.hashes for _ in range(repeats)]
-        if self.instruction_hashes:
-            self.instruction_hashes = [h for h in self.instruction_hashes for _ in range(repeats)]
+        if self.task_names:
+            self.task_names = [n for n in self.task_names for _ in range(repeats)]
         self.example_ids = (
             self.example_ids.repeat_interleave(repeats)
             if self.example_ids is not None
@@ -228,8 +222,14 @@ def modify_with_routing(transformer, config, layer_type, optional_wrapper=None):
 
                     if identifier not in selectors.keys():
                         # Special case when you have a decoder layer in an enc-dec model
-                        if not ('encoder' in m_name) and config.model_family == "encdec":
-                            from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
+                        if (
+                            not ("encoder" in m_name)
+                            and config.model_family == "encdec"
+                        ):
+                            from transformers.models.t5.modeling_t5 import (
+                                T5ForConditionalGeneration,
+                            )
+
                             assert isinstance(transformer, T5ForConditionalGeneration)
                             in_d = transformer.config.d_model
                         else:

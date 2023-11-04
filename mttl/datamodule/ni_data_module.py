@@ -255,10 +255,6 @@ class DataCollatorForNI(DefaultCollator):
         )  # task ids potentially used in routing
         output_batch["labels_texts"] = labels_rand
         output_batch["labels_full_seq"] = labels_full_seq
-        output_batch["hashes"] = [
-            hash_example(i + o) for i, o in zip(sources, labels_rand)
-        ]
-        output_batch["instruction_hashes"] = [hash_example(i) for i in sources]
         output_batch["instance_ids"] = instance_ids
         return output_batch
 
