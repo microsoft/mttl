@@ -301,7 +301,7 @@ class DefaultDataModule(LightningDataModule):
 
 class AutoDataModule:
     @classmethod
-    def create(name, for_generation=False, val_mixin=False, **kwargs):
+    def create(cls, name, for_generation=False, val_mixin=False, **kwargs):
         from mttl.datamodule.mt_seq_to_seq_module import (
             FlanModule,
             T0FlatModule,
@@ -339,3 +339,5 @@ class AutoDataModule:
             return T0PretrainDataModule(kwargs.pop("config"))
         elif name in ["ni"]:
             return NiDataModule(kwargs.pop("config"), for_generation=for_generation)
+        else:
+            raise ValueError(f"Unknown dataset {name}")
