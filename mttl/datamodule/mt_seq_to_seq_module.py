@@ -2,8 +2,10 @@ from mttl.utils import logger
 from datasets import load_dataset
 from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
+from dataclasses import dataclass
 
 
+@dataclass
 class FlanConfig(DatasetConfig):
     pass
 
@@ -27,3 +29,12 @@ class FlanModule(DefaultDataModule):
         )
         self.test_dataset = self.dev_dataset
         self.print_infos()
+
+
+@dataclass
+class T0FlatConfig(DatasetConfig):
+    pass
+
+
+class T0FlatModule(FlanModule):
+    pass
