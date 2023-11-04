@@ -1,4 +1,4 @@
-datasets==2.14.4
+datasets==2.14.6
 click
 transformers==4.34.1
 pytorch-lightning==2.0.5
