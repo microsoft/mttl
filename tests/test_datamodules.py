@@ -8,7 +8,7 @@ from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
 def test_flan(task_name):
     flan = FlanModule(
         FlanConfig(
-            "sordonia/flan-10k-flat",
+            "sordonia/flan-debug-flat",
             model="t5-small",
             model_family="seq2seq",
             train_batch_size=4,
@@ -17,22 +17,62 @@ def test_flan(task_name):
         )
     )
     if task_name is None:
-        assert len(flan.train_dataset) == 2_083_668
+        assert len(flan.train_dataset) == 2_460
         assert len(flan.task_names) == 246
     else:
-        assert len(flan.train_dataset) == 10_000
+        assert len(flan.train_dataset) == 10
         assert len(flan.task_names) == 1
+
+    batch = next(iter(flan.train_dataloader()))
+    assert "input_ids" in batch
+    assert "labels" in batch
+    assert "attention_mask" in batch
+    assert "source_texts" in batch
+    assert "label_texts" in batch
+    assert "task_names" in batch
+
+
+def test_platypus():
+    platy = AutoDataModule.create(
+        "platypus",
+        model="t5-small",
+        model_family="seq2seq",
+        for_generation=False,
+        validation_portion=0.05,
+    )
+    batch = next(iter(platy.train_dataloader()))
+    assert "input_ids" in batch
+    assert "labels" in batch
+    assert "attention_mask" in batch
+    assert "source_texts" in batch
+    assert "label_texts" in batch
+
+
+def test_alpaca():
+    alpaca = AutoDataModule.create(
+        "alpaca",
+        model="t5-small",
+        model_family="seq2seq",
+        for_generation=False,
+        validation_portion=0.05,
+    )
+    batch = next(iter(alpaca.train_dataloader()))
+    assert "input_ids" in batch
+    assert "labels" in batch
+    assert "attention_mask" in batch
+    assert "source_texts" in batch
+    assert "label_texts" in batch
 
 
 def test_auto_module():
     flan = AutoDataModule.create(
-        "sordonia/flan-10k-flat",
+        "sordonia/flan-debug-flat",
         model="t5-small",
         model_family="seq2seq",
         train_batch_size=4,
         predict_batch_size=4,
     )
-    assert len(flan.train_dataset) == 2_083_668
+    assert len(flan.train_dataset) == 2_460
     assert len(flan.task_names) == 246
 
 

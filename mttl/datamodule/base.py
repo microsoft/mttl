@@ -2,12 +2,11 @@ from dataclasses import dataclass
 from pytorch_lightning import LightningDataModule
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PaddingStrategy
-from typing import Any, List, Union, Optional
+from typing import Any, Dict, Union, Optional
 
 import torch
 from torch.utils.data import DataLoader
 
-from mttl.dataloader.data_utils import ExampleInfo
 from mttl.utils import logger
 from mttl.datamodule.utils import get_tokenizer
 
@@ -170,10 +169,11 @@ class DefaultCollator:
         output_batch["labels"] = targets
         return output_batch
 
-    def __call__(self, batch: List[ExampleInfo]):
-        sources = [b.input for b in batch]
-        labels = [b.target for b in batch]
-        task_ids = [b.task_id for b in batch]
+    def __call__(self, batch: Dict):
+        sources = [b["source"] for b in batch]
+        labels = [b["target"] for b in batch]
+        task_ids = [b.get("task_id", 0) for b in batch]
+        task_names = [b.get("task_name", None) for b in batch]
 
         output_batch = (
             self.prepare_inputs_for_gpt_family(sources, labels)
@@ -182,6 +182,7 @@ class DefaultCollator:
         )
 
         output_batch["task_ids"] = torch.LongTensor(task_ids)
+        output_batch["task_names"] = task_names
         output_batch["source_texts"] = sources
         output_batch["label_texts"] = labels
         return output_batch
@@ -305,6 +306,7 @@ class AutoDataModule:
         )
         from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
         from mttl.datamodule.platypus_module import PlatypusModule
+        from mttl.datamodule.alpaca_data_module import AlpacaDataModule
         from mttl.datamodule.t0_data_module import T0PretrainDataModule
         from mttl.datamodule.ni_data_module import NiDataModule
 
@@ -323,6 +325,12 @@ class AutoDataModule:
         elif name in ["mmlu"]:
             return MMLUDataModule(
                 MMLUDataConfig(dataset=name, **kwargs),
+                for_generation=for_generation,
+                val_mixin=val_mixin,
+            )
+        elif name in ["alpaca"]:
+            return AlpacaDataModule(
+                DatasetConfig(dataset=name, **kwargs),
                 for_generation=for_generation,
                 val_mixin=val_mixin,
             )

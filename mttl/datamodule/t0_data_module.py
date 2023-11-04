@@ -1,3 +1,4 @@
+from typing import Dict
 import torch
 import numpy as np
 import random
@@ -5,10 +6,9 @@ from pytorch_lightning import LightningDataModule
 from mttl.datamodule.base import DefaultCollator
 from mttl.datamodule.utils import get_tokenizer
 
-from mttl.utils import hash_example, template_to_string
+from mttl.utils import template_to_string
 from mttl.datamodule import IndexConcatDataset
 from mttl.dataloader.t0_dataset_readers import get_dataset_reader
-from mttl.dataloader.data_utils import ExampleInfo, MultiChoiceExampleInfo
 
 
 def apply_template(template, example, hash_friendly=False, handle_edge_cases=True):
@@ -81,6 +81,7 @@ class T0FinetuneDataModule(LightningDataModule):
                     self.train_dataset,
                     template,
                     self.tokenizer,
+                    self.config.finetune_task_name,
                 )
             )
         for template in self.dataset_reader.get_eval_template():
@@ -89,6 +90,7 @@ class T0FinetuneDataModule(LightningDataModule):
                     self.dev_dataset,
                     template,
                     self.tokenizer,
+                    self.config.finetune_task_name,
                 )
             )
         return IndexConcatDataset(all_datasets_with_template)
@@ -102,11 +104,13 @@ class T0FinetuneDataModule(LightningDataModule):
             self.train_dataset,
             self.dataset_reader.get_train_template(),
             self.tokenizer,
+            self.config.finetune_task_name,
         )
         self.dev_dataset_wt = T0FinetuneDatasetWithTemplate(
             self.dev_dataset,
             self.dataset_reader.get_eval_template(),
             self.tokenizer,
+            self.config.finetune_task_name,
         )
 
     def train_dataloader(self):
@@ -134,65 +138,13 @@ class T0FinetuneDataModule(LightningDataModule):
         return self.val_dataloader()
 
 
-class T0FinetuneDatasetWithTemplate(torch.utils.data.dataset.Dataset):
-    def __init__(
-        self,
-        dataset,
-        templates,
-        tokenizer,
-        add_special_tokens=True,
-        ds_id=0,
-    ):
-        super().__init__()
-
-        self.ds_id = ds_id
-        self.dataset = dataset
-        self.templates = templates
-        self.tokenizer = tokenizer
-        self.add_special_tokens = add_special_tokens
-
-    def __len__(self):
-        return len(self.dataset)
-
-    def __getitem__(self, example_id):
-        if isinstance(self.templates, list):
-            template = np.random.choice(self.templates)
-        else:
-            template = self.templates
-        example = self.dataset[example_id]
-
-        input_str, target_str = apply_template(
-            template, example, hash_friendly=False, handle_edge_cases=False
-        )
-        answer_choices = template.get_answer_choices_list(example)
-        label = example["label"]
-        idx = example["idx"]
-        input_str_hash, _ = apply_template(
-            template, example, hash_friendly=True, handle_edge_cases=True
-        )
-        hash = hash_example(input_str_hash)
-        instruction_hash = hash_example(template_to_string(template))
-
-        return MultiChoiceExampleInfo(
-            input_str,
-            target_str,
-            answer_choices,
-            label,
-            idx,
-            self.ds_id,
-            hash,
-            example_id,
-            input_text=input_str,
-            instruction_hash=instruction_hash,
-        )
-
-
 class T0PretrainDataModule(LightningDataModule):
     def __init__(self, config, flatten_templates=False):
         super().__init__()
 
         self.config = config
         self.tokenizer = get_tokenizer(config)
+
         self.collate_fn = DefaultCollator(
             tokenizer=self.tokenizer,
             max_input_length=config.max_input_length,
@@ -232,20 +184,20 @@ class T0PretrainDataModule(LightningDataModule):
             self.train_datasets, self.base_templates
         ):
             if self.dataset_reader.config.use_t0_templates_as_tasks:
-                task_id = self.task_to_id[
-                    f"{train_dataset.dataset_name}/{train_dataset.subset_name}/{train_dataset.template_name}"
-                ]
+                task_name = f"{train_dataset.dataset_name}/{train_dataset.subset_name}/{train_dataset.template_name}"
+                task_id = self.task_to_id[task_name]
             else:
-                task_id = self.task_to_id[
-                    f"{train_dataset.dataset_name}/{train_dataset.subset_name}"
-                ]
+                task_name = f"{train_dataset.dataset_name}/{train_dataset.subset_name}"
+                task_id = self.task_to_id[task_name]
 
             tr_dataset_wt = T0PretrainDatasetWithTemplate(
                 train_dataset,
                 base_template,
                 self.tokenizer,
                 task_id,
+                task_name,
             )
+
             # take 100 examples for validation
             tr_dataset_wt, val_dataset_wt = torch.utils.data.random_split(
                 tr_dataset_wt,
@@ -255,6 +207,7 @@ class T0PretrainDataModule(LightningDataModule):
                 ],
                 generator=self.rng,
             )
+
             self.train_datasets_withtemplate.append(tr_dataset_wt)
             self.val_datasets_withtemplate.append(val_dataset_wt)
             self.all_datasets_withtemplate.extend([tr_dataset_wt, val_dataset_wt])
@@ -307,13 +260,14 @@ class T0PretrainDataModule(LightningDataModule):
 
 
 class T0PretrainDatasetWithTemplate(torch.utils.data.dataset.Dataset):
-    def __init__(self, dataset, templates, tokenizer, ds_id):
+    def __init__(self, dataset, templates, tokenizer, ds_id, task_name):
         super().__init__()
 
         self.ds_id = ds_id
         self.dataset = dataset
         self.templates = templates
         self.tokenizer = tokenizer
+        self.task_name = task_name
 
     def __len__(self):
         return len(self.dataset)
@@ -325,21 +279,62 @@ class T0PretrainDatasetWithTemplate(torch.utils.data.dataset.Dataset):
             template = self.templates
 
         example = self.dataset[example_id]
+        source, target = apply_template(template, example, hash_friendly=False)
 
-        input, target = apply_template(template, example, hash_friendly=False)
-        # we need to be hash friendly here, template.apply is non-deterministic :-(
-        hash = hash_example(apply_template(template, example, hash_friendly=True)[0])
-        instruction_hash = hash_example(template_to_string(template))
+        return {
+            "source": source,
+            "target": target,
+            "example_id": example_id,
+            "task_name": self.task_name,
+        }
 
-        return ExampleInfo(
-            input,
-            target,
-            self.ds_id,
-            hash,
-            example_id,
-            input_text=input,
-            instruction_hash=instruction_hash,
+
+class T0FinetuneDatasetWithTemplate(torch.utils.data.dataset.Dataset):
+    def __init__(
+        self,
+        dataset,
+        templates,
+        tokenizer,
+        add_special_tokens=True,
+        ds_id=0,
+        task_name=None,
+    ):
+        super().__init__()
+
+        self.ds_id = ds_id
+        self.dataset = dataset
+        self.templates = templates
+        self.tokenizer = tokenizer
+        self.task_name = task_name
+        self.add_special_tokens = add_special_tokens
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, example_id):
+        if isinstance(self.templates, list):
+            template = np.random.choice(self.templates)
+        else:
+            template = self.templates
+        example = self.dataset[example_id]
+
+        source, target = apply_template(
+            template, example, hash_friendly=False, handle_edge_cases=False
         )
+        answer_choices = template.get_answer_choices_list(example)
+        label = example["label"]
+        idx = example["idx"]
+
+        return {
+            "source": source,
+            "target": target,
+            "answer_choices": answer_choices,
+            "label": label,
+            "idx": idx,
+            "example_id": example_id,
+            "task_id": self.ds_id,
+            "task_name": self.task_name,
+        }
 
 
 class MultiChoiceCollator(DefaultCollator):
@@ -347,10 +342,10 @@ class MultiChoiceCollator(DefaultCollator):
     wrapper of `collate_fn` in `create_collate_fn` that is ddp compatible
     """
 
-    def __call__(self, batch: MultiChoiceExampleInfo):
+    def __call__(self, batch: Dict):
         output_batch = super().__call__(batch)
 
-        answer_choices = [b.answer_choices for b in batch]
+        answer_choices = [b["answer_choices"] for b in batch]
         flat_answer_choice = [
             choice for list_choices in answer_choices for choice in list_choices
         ]
@@ -374,7 +369,7 @@ class MultiChoiceCollator(DefaultCollator):
             .contiguous()
         )
 
-        output_batch["idx"] = torch.LongTensor([b.idx for b in batch])
+        output_batch["idx"] = torch.LongTensor([b["idx"] for b in batch])
         output_batch["labels"] = torch.LongTensor([b.label for b in batch])
         output_batch["answer_choices_ids"] = answer_choices_ids
         return output_batch
