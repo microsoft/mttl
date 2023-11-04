@@ -297,3 +297,45 @@ class DefaultDataModule(LightningDataModule):
 
     def setup_dataset(self):
         pass
+
+
+class AutoDataModule:
+    @classmethod
+    def create(name, for_generation=False, val_mixin=False, **kwargs):
+        from mttl.datamodule.mt_seq_to_seq_module import (
+            FlanModule,
+            T0FlatModule,
+        )
+        from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
+        from mttl.datamodule.platypus_module import PlatypusModule
+        from mttl.datamodule.t0_data_module import T0PretrainDataModule
+        from mttl.datamodule.ni_data_module import NiDataModule
+
+        if name in ["sordonia/t0-10k-flat", "sordonia/t0-1.6M-flat"]:
+            return T0FlatModule(
+                DatasetConfig(dataset=name, **kwargs),
+                for_generation=for_generation,
+                val_mixin=val_mixin,
+            )
+        elif name in ["sordonia/flan-10k-flat"]:
+            return FlanModule(
+                DatasetConfig(dataset=name, **kwargs),
+                for_generation=for_generation,
+                val_mixin=val_mixin,
+            )
+        elif name in ["mmlu"]:
+            return MMLUDataModule(
+                MMLUDataConfig(dataset=name, **kwargs),
+                for_generation=for_generation,
+                val_mixin=val_mixin,
+            )
+        elif name in ["platypus"]:
+            return PlatypusModule(
+                DatasetConfig(dataset=name, **kwargs),
+                for_generation=for_generation,
+                val_mixin=val_mixin,
+            )
+        elif name in ["t0"]:
+            return T0PretrainDataModule(kwargs.pop("config"))
+        elif name in ["ni"]:
+            return NiDataModule(kwargs.pop("config"), for_generation=for_generation)
