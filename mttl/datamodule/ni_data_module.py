@@ -338,7 +338,7 @@ class NiDataModule(LightningDataModule):
 
     def setup_dataset(self):
         filename = pkg_resources.resource_filename(
-            __name__, "../dataloader/ni_original_dataset.py"
+            __name__, "../dataloader/ni_dataset.py"
         )
 
         # if we are fine-tuning, we have to load ~1000 instances,
