@@ -61,6 +61,7 @@ class T0FlatModule(FlanModule):
                     + "/"
                     + example["template_type"].strip().replace(" ", "_")
                 )
+                return example
 
             train_dataset = train_dataset.map(concat_templates_and_task, num_proc=16)
 

@@ -246,6 +246,8 @@ class DefaultDataModule(LightningDataModule):
             logger.info("Validation steps: %s" % len(self.val_dataloader()))
         if self.test_dataset is not None:
             logger.info("Test steps: %s" % len(self.test_dataloader()))
+        if self.task_names:
+            logger.info("Number of tasks: %s" % len(self.task_names))
 
     @property
     def task_names(self):

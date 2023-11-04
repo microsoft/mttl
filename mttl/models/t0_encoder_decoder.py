@@ -29,7 +29,9 @@ class T0EncoderDecoder(EfficientCheckpointModule):
         self.tokenizer = kwargs["tokenizer"]
 
         if kwargs.get("model_object") is None:
-            self.model = AutoModelForSeq2SeqLM.from_pretrained(config.model, cache_dir=config.cache_dir)
+            self.model = AutoModelForSeq2SeqLM.from_pretrained(
+                config.model, cache_dir=config.cache_dir
+            )
 
             # free up local space after loading in memory
             if config.free_up_space:
@@ -75,7 +77,7 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             bs, num_choices = choices_ids.shape[:2]
 
             flat_choices_ids = choices_ids.flatten(0, 1)
-            attention_mask = batch['attention_mask'].float()
+            attention_mask = batch["attention_mask"].float()
             encoder_hidden_states = self.model.encoder(
                 input_ids=input_ids, attention_mask=attention_mask
             )[0]
@@ -175,7 +177,7 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             decoder_input_ids = torch.cat(
                 [torch.zeros_like(target_ids[:, :1]), target_ids[:, :-1]], dim=1
             )  # [bs, max_seq_len]
-            
+
             # need to transform -100 into padding tokens
             decoder_input_ids[decoder_input_ids == -100] = self.tokenizer.pad_token_id
 
@@ -206,7 +208,9 @@ class T0EncoderDecoder(EfficientCheckpointModule):
         self.model.task_id_container["routing_infos"] = None
 
         self.log_dict(
-            {f"{split}/{k}": v for (k, v) in tensorboard_logs.items()}, sync_dist=True
+            {f"{split}/{k}": v for (k, v) in tensorboard_logs.items()},
+            sync_dist=True,
+            prog_bar=True,
         )
 
         for plugin in self.loss_plugins.values():
