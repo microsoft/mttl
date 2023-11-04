@@ -126,7 +126,8 @@ class NIEvaluator(object):
             total=len(dataloader),
         )
         eval_instances = {}
-        for step, batch in pbar:
+
+        for _, batch in pbar:
             task_names = batch.pop("task_names", None)
             batch.pop("input_texts", None)
             # we use labels texts here for evaluation, because some tokenizers do not skip

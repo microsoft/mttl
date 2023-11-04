@@ -3,11 +3,12 @@ from pytorch_lightning import LightningDataModule
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PaddingStrategy
 from typing import Any, List, Union, Optional
-import torch
 
-from mttl.dataloader.data_utils import ExampleInfo
+import torch
 from torch.utils.data import DataLoader
 
+from mttl.dataloader.data_utils import ExampleInfo
+from mttl.utils import logger
 from mttl.datamodule.utils import get_tokenizer
 
 
@@ -241,20 +242,30 @@ class DefaultDataModule(LightningDataModule):
     def print_infos(self):
         from mttl.utils import logger
 
-        logger.info("Training steps: %s" % len(self.train_dataloader()))
-        logger.info("Validation steps: %s" % len(self.val_dataloader()))
+        if len(self.train_dataset) > 0:
+            logger.info("Training steps: %s" % len(self.train_dataloader()))
+        if self.dev_dataset is not None:
+            logger.info("Validation steps: %s" % len(self.val_dataloader()))
+        if self.test_dataset is not None:
+            logger.info("Test steps: %s" % len(self.test_dataloader()))
 
     @property
     def task_names(self):
-        return []
+        return self._task_names
 
     @property
     def task_to_id(self):
-        return {}
+        return self._task_to_id
 
     def create_train_valid_split(self, dataset, validation_portion=None):
         # always use the same split for the dataset
         validation_portion = validation_portion or self.config.validation_portion
+
+        if validation_portion is None:
+            logger.warn(
+                "No validation portion specified, no dev set available for this dataset."
+            )
+            return dataset, None
 
         n_tr_samples = int(len(dataset) * (1 - validation_portion))
 
@@ -274,6 +285,8 @@ class DefaultDataModule(LightningDataModule):
         super().__init__()
         self.rng = torch.Generator().manual_seed(1234)
         self.config = config
+        self._task_names = []
+        self._task_to_id = {}
         self.val_mixin = val_mixin
         self.for_generation = for_generation
         self.tokenizer = get_tokenizer(config, for_generation=for_generation)
