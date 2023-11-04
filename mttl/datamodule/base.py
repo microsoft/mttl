@@ -173,17 +173,14 @@ class DefaultCollator:
     def __call__(self, batch: List[ExampleInfo]):
         sources = [b.input for b in batch]
         labels = [b.target for b in batch]
-        hashes = [b.hash for b in batch]
         task_ids = [b.task_id for b in batch]
-        instruction_hashes = [b.instruction_hash for b in batch]
 
         output_batch = (
             self.prepare_inputs_for_gpt_family(sources, labels)
             if self.model_family == "gpt"
             else self.prepare_inputs_for_seq2seq_family(sources, labels)
         )
-        output_batch["hashes"] = hashes
-        output_batch["instruction_hashes"] = instruction_hashes
+
         output_batch["task_ids"] = torch.LongTensor(task_ids)
         output_batch["source_texts"] = sources
         output_batch["label_texts"] = labels
