@@ -36,8 +36,41 @@ class FlanModule(DefaultDataModule):
 
 @dataclass
 class T0FlatConfig(DatasetConfig):
-    pass
+    use_templates_as_tasks: bool = False
 
 
 class T0FlatModule(FlanModule):
-    pass
+    def setup_dataset(self):
+        dataset = load_dataset(self.config.dataset)
+
+        (
+            self._task_names,
+            self._task_to_id,
+            train_dataset,
+            _,
+            _,
+        ) = maybe_filter_hf_dataset_by_task(
+            dataset, "task_name", self.config.finetune_task_name
+        )
+
+        if self.config.use_templates_as_tasks:
+
+            def concat_templates_and_task(example):
+                example["task_name"] = (
+                    example["task_name"]
+                    + "/"
+                    + example["template_type"].strip().replace(" ", "_")
+                )
+
+            train_dataset = train_dataset.map(concat_templates_and_task, num_proc=16)
+
+            self._task_names = sorted(list(set(train_dataset["task_name"])))
+            self._task_to_id = {
+                task_name: i for i, task_name in enumerate(self._task_names)
+            }
+
+        self.train_dataset, self.dev_dataset = self.create_train_valid_split(
+            train_dataset
+        )
+        self.test_dataset = self.dev_dataset
+        self.print_infos()

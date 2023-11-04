@@ -7,6 +7,7 @@ from mttl.online_eval import NIOnlineZeroShot, T0OnlineZeroShot
 from mttl.callbacks import ProgressCallback
 from mttl.datamodule.ni_data_module import NiDataModule
 from mttl.datamodule.t0_data_module import T0PretrainDataModule
+from mttl.datamodule.mt_seq_to_seq_module import T0FlatModule, T0FlatConfig
 from mttl.models.encoder_decoder import EncoderDecoder
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.models.monitors import get_monitors
@@ -25,6 +26,22 @@ def run_multitask(args):
     elif args.dataset == "t0":
         model_class = T0EncoderDecoder
         dm = T0PretrainDataModule(args)
+    elif args.dataset == "sordonia/t0-1.6M-flat":
+        model_class = T0EncoderDecoder
+        dm = T0FlatModule(
+            T0FlatConfig(
+                dataset=args.dataset,
+                model=args.model,
+                train_batch_size=args.train_batch_size,
+                predict_batch_size=args.train_batch_size,
+                max_input_length=args.max_input_length,
+                max_output_length=args.max_output_length,
+                validation_portion=0.05,
+                padding_side="right",
+                model_family="seq2seq",
+                use_templates_as_tasks=args.use_t0_templates_as_tasks,
+            )
+        )
     else:
         raise NotImplementedError()
 
