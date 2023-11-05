@@ -27,8 +27,8 @@ def test_flan(task_name):
     assert "input_ids" in batch
     assert "labels" in batch
     assert "attention_mask" in batch
-    assert "source_texts" in batch
-    assert "label_texts" in batch
+    assert "sources_texts" in batch
+    assert "labels_texts" in batch
     assert "task_names" in batch
 
 
@@ -44,8 +44,8 @@ def test_platypus():
     assert "input_ids" in batch
     assert "labels" in batch
     assert "attention_mask" in batch
-    assert "source_texts" in batch
-    assert "label_texts" in batch
+    assert "sources_texts" in batch
+    assert "labels_texts" in batch
 
 
 def test_alpaca():
@@ -60,8 +60,8 @@ def test_alpaca():
     assert "input_ids" in batch
     assert "labels" in batch
     assert "attention_mask" in batch
-    assert "source_texts" in batch
-    assert "label_texts" in batch
+    assert "sources_texts" in batch
+    assert "labels_texts" in batch
 
 
 def test_auto_module():
@@ -95,3 +95,21 @@ def test_mmlu(task_name):
     if task_name is not None:
         assert len(mmlu.task_names) == 1
         assert mmlu.task_names[0] == task_name
+
+
+def test_mmlu_examples(task_name=None):
+    mmlu = MMLUDataModule(
+        MMLUDataConfig(
+            "mmlu",
+            model="t5-small",
+            model_family="seq2seq",
+            train_batch_size=4,
+            predict_batch_size=4,
+            finetune_task_name=task_name,
+        )
+    )
+    batch = next(iter(mmlu.test_dataloader()))
+
+    source_text = batch["sources_texts"]
+    label_text = batch["labels_texts"]
+    assert source_text == "", source_text

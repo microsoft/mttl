@@ -174,13 +174,13 @@ class DataCollatorForMMLU(DefaultCollator):
                 [self.task_to_id[task] for task in task_names]
             )
 
-        output_batch["labels_texts"] = labels
         output_batch["sources_texts"] = sources
+        output_batch["labels_texts"] = labels
         return output_batch
 
 
 class MMLUDataConfig(DatasetConfig):
-    pass
+    augment_dataset: bool = False
 
 
 class MMLUDataModule(DefaultDataModule):
@@ -234,7 +234,12 @@ class MMLUDataModule(DefaultDataModule):
         filename = pkg_resources.resource_filename(
             __name__, "../dataloader/mmlu_dataset.py"
         )
-        dataset = load_dataset(filename, data_dir=os.environ[self.DATA_ENV])
+        dataset = load_dataset(
+            filename,
+            data_dir=os.environ[self.DATA_ENV],
+            augment_with_prompts=self.config.augment_dataset,
+            augment_with_option_permutations=self.config.augment_dataset,
+        )
 
         (
             self._task_names,
