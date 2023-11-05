@@ -4,7 +4,7 @@ import torch.nn as nn
 from enum import Enum
 
 import torch.nn.functional as F
-from mttl.models.adapters import SkilledLoRA
+from mttl.models.modifiers.base import SkilledLoRA
 from mttl.models.modifiers import modify_with_routing, register_modifier
 from mttl.models.modifiers.routing import (
     RouterWrapper,

@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from mttl.models.modifiers import register_modifier
-from mttl.models.adapters import LoRA, LN, IA3
+from mttl.models.modifiers.base import LoRA, LN, IA3
 from mttl.utils import logger
 from transformers.modeling_utils import PreTrainedModel
 from functools import partial
@@ -243,7 +243,7 @@ def modify_with_llama_adapter_cls(transformer, config, layer_type):
         transformer, LlamaForCausalLM
     ), "Only Llama Model supported for now."
     task_id_ptr = transformer.task_id_container
-    
+
     for param in transformer.parameters():
         param.requires_grad = False
 
@@ -269,7 +269,6 @@ def modify_with_llama_adapter_cls(transformer, config, layer_type):
 
 @register_modifier("mlp_llama_adapter")
 def modify_with_llama_adapter(transformer, config):
-
     if config.soft_prompt_learn_kv:
         out_dim = transformer.config.hidden_size * 2
     else:

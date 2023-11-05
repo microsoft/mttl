@@ -6,7 +6,7 @@ import torch.nn as nn
 from enum import Enum
 
 import torch.nn.functional as F
-from mttl.models.adapters import SkilledLoRA, LoRA, SkilledLoRA_MergeLoraAfterOP
+from mttl.models.modifiers.base import SkilledLoRA, LoRA, SkilledLoRA_MergeLoraAfterOP
 from mttl.models.modifiers import modify_with_routing, register_modifier
 from mttl.models.modifiers.routing import (
     RouterWrapper,
@@ -317,7 +317,9 @@ class TaskVSMEARRouter(SMEARRouter):
         prior_log_probs = prior_probs.log()
 
         h_pri = -(prior_probs * prior_log_probs).sum(-1).mean()
-        h_task_pri = -(prior_task_probs * prior_task_probs.clamp(min=1e-30).log()).sum(-1).mean()
+        h_task_pri = (
+            -(prior_task_probs * prior_task_probs.clamp(min=1e-30).log()).sum(-1).mean()
+        )
         self.metrics["h_pri"] = h_pri / math.log(self.adapter_skills)
         self.metrics["h_task_pri"] = h_task_pri / math.log(self.n_tasks)
 

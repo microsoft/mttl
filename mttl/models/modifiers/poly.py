@@ -1,6 +1,4 @@
-from typing import Union
 import torch
-from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
@@ -8,7 +6,7 @@ import numpy as np
 from torch.distributions.relaxed_bernoulli import RelaxedBernoulli
 from mttl.global_vars import EPS
 
-from mttl.models.adapters import SkilledLoRA
+from mttl.models.modifiers.base import SkilledLoRA
 from mttl.models.modifiers.modify_model import register_modifier
 from mttl.models.modifiers.routing import (
     RouterWrapper,
@@ -142,7 +140,9 @@ def modify_with_poly_ia3(transformer, config):
     if config.adapter_type == "lora":
         return modify_with_routing(transformer, config, PolyLoRA, SkillWrapper)
     else:
-        raise NotImplementedError(f"Poly modifier not implemented for adapter {config.adapter_type}.")
+        raise NotImplementedError(
+            f"Poly modifier not implemented for adapter {config.adapter_type}."
+        )
 
 
 @register_modifier("skilled")
@@ -156,4 +156,6 @@ def modify_with_poly_ia3(transformer, config):
     if config.adapter_type == "lora":
         return modify_with_routing(transformer, config, PolyLoRA, SkillWrapper)
     else:
-        raise NotImplementedError(f"Skilled modifier not implemented for adapter {config.adapter_type}.")
+        raise NotImplementedError(
+            f"Skilled modifier not implemented for adapter {config.adapter_type}."
+        )

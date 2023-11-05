@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import List
 import re
 
-from mttl.models.adapters import Adapter
+from mttl.models.modifiers.base import Adapter
 from mttl.utils import logger
 
 

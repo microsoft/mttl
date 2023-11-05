@@ -4,15 +4,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from mttl.models.modifiers import register_modifier
-from mttl.models.adapters import LoRA, LN, IA3
-from mttl.utils import logger
 from transformers.modeling_utils import PreTrainedModel
 from functools import partial
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Tuple
+from mttl.models.modifiers.base import Adapter
 from mttl.models.modifiers.poly import PolytroponSelector
 
 from transformers.models.llama.modeling_llama import (
-    LlamaAttention,
     apply_rotary_pos_emb,
     repeat_kv,
     LlamaForCausalLM,
@@ -155,7 +153,7 @@ def llama_adapter_attention(
     return attn_output, attn_weights, past_key_value
 
 
-class LlamaAdapter(nn.Module):
+class LlamaAdapter(Adapter):
     def __init__(self, config, attn_layer, task_id_ptr):
         super().__init__()
         self.task_id_ptr = task_id_ptr
@@ -166,16 +164,15 @@ class LlamaAdapter(nn.Module):
             config.soft_prompt_length, attn_layer.hidden_size
         )
 
-    # get adapter
     def forward(self):
         bsz = self.task_id_ptr["routing_infos"].task_ids.size(0)
         return self.adapter_query.weight.unsqueeze(0).expand(bsz, -1, -1)
 
 
-class PolyLlamaAdapter(nn.Module):
+class PolyLlamaAdapter(Adapter):
     def __init__(self, config, attn_layer, task_id_ptr):
         super().__init__()
-        # TODO: build polytropon selector
+
         self.selector = PolytroponSelector(config)
         self.n_skills, self.n_splits = config.n_skills, config.n_splits
         self.prompt_len = config.soft_prompt_length
