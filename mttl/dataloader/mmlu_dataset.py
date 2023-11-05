@@ -41,21 +41,21 @@ def format_example(df, idx, include_answer=True):
     k = df.shape[1] - 2
     for j in range(k):
         prompt += "\n{}. {}".format(choices[j], df.iloc[idx, j + 1])
-    prompt += "\nAnswer:"
+    prompt += "\nAnswer: "
     if include_answer:
-        prompt += " {}\n\n".format(df.iloc[idx, k + 1])
+        prompt += "{}\n\n".format(df.iloc[idx, k + 1])
     return prompt
 
 
 def _format_example_with_augmentation(
-    prompt, options, label, include_answer=True, prefix="", sufix=""
+    prompt, options, label, include_answer=True, prefix="", suffix=""
 ):
-    prompt = prefix + prompt + sufix
+    prompt = prefix + prompt + suffix
     for j in range(len(options)):
         prompt += "\n{}. {}".format(choices[j], options[j])
-    prompt += "\nAnswer:"
+    prompt += "\nAnswer: "
     if include_answer:
-        prompt += " {}\n\n".format(label)
+        prompt += "{}\n\n".format(label)
     return prompt
 
 
@@ -85,25 +85,25 @@ def format_example_with_augmentation(
             example_options,
             example_label,
             prefix="Question:\n",
-            sufix="\nChoices:",
+            suffix="\nChoices:",
             include_answer=False,
         )
 
         prompt_pos_augm = ""
         for icl_p, icl_o, icl_l in zip(icl_prompts, icl_options, icl_labels):
             prompt_pos_augm += _format_example_with_augmentation(
-                icl_p, icl_o, icl_l, prefix="Question:\n", sufix="\nChoices:"
+                icl_p, icl_o, icl_l, prefix="Question:\n", suffix="\nChoices:"
             )
         yield prompt, example_label, "", prompt_pos_augm
 
     if augment_with_options:
-        labe_idx = choices.index(example_label)
+        label_idx = choices.index(example_label)
         for j, choice in enumerate(choices):
-            if labe_idx == j:
+            if label_idx == j:
                 continue
             _options = example_options.copy()
             # put the right answer in j's option
-            _options[j], _options[labe_idx] = _options[labe_idx], _options[j]
+            _options[j], _options[label_idx] = _options[label_idx], _options[j]
             _label = choice
             prompt = _format_example_with_augmentation(
                 example_prompt, _options, _label, include_answer=False
@@ -120,7 +120,7 @@ def format_example_with_augmentation(
                     _options,
                     _label,
                     prefix="Question:\n",
-                    sufix="\nChoices:",
+                    suffix="\nChoices:",
                     include_answer=False,
                 )
                 if prompt_pos_augm is None:
@@ -133,7 +133,7 @@ def format_example_with_augmentation(
                             icl_o,
                             icl_l,
                             prefix="Question:\n",
-                            sufix="\nChoices:",
+                            suffix="\nChoices:",
                         )
                 yield prompt, _label, "", prompt_pos_augm
     return
@@ -278,6 +278,7 @@ class MMLUDataset(datasets.GeneratorBasedBuilder):
                     "Positive Examples": prompt_pos,
                 }
                 yield f"{subject}_{i}", instance
+
                 if subset != "auxiliary_train":
                     k = test_df.shape[1] - 2
                     options = [test_df.iloc[i, j + 1] for j in range(k)]

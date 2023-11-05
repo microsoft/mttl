@@ -97,12 +97,13 @@ def test_mmlu(task_name):
         assert mmlu.task_names[0] == task_name
 
 
-def test_mmlu_examples(task_name=None):
+def test_mmlu_spaces_and_merges(task_name=None):
     mmlu = MMLUDataModule(
         MMLUDataConfig(
             "mmlu",
-            model="t5-small",
-            model_family="seq2seq",
+            model="yahma/llama-7b-hf",
+            model_family="gpt",
+            max_input_length=4096,
             train_batch_size=4,
             predict_batch_size=4,
             finetune_task_name=task_name,
@@ -110,6 +111,31 @@ def test_mmlu_examples(task_name=None):
     )
     batch = next(iter(mmlu.test_dataloader()))
 
-    source_text = batch["sources_texts"]
-    label_text = batch["labels_texts"]
-    assert source_text == "", source_text
+    sources_text = batch["sources_texts"]
+    labels_text = batch["labels_texts"]
+    # there must be a space
+    assert sources_text[0][-1] == " "
+    # there must *not* be a space
+    assert labels_text[0][0] != " "
+
+    mmlu = MMLUDataModule(
+        MMLUDataConfig(
+            "mmlu",
+            model="EleutherAI/gpt-neo-125m",
+            model_family="gpt",
+            max_input_length=4096,
+            train_batch_size=4,
+            predict_batch_size=4,
+            finetune_task_name=task_name,
+        )
+    )
+
+    assert mmlu.tokenizer.mttl_merges_space
+    batch = next(iter(mmlu.test_dataloader()))
+
+    sources_text = batch["sources_texts"]
+    labels_text = batch["labels_texts"]
+    # there must be a space
+    assert sources_text[0][-1] != ""
+    # there *must* be a space
+    assert labels_text[0][0] == " "

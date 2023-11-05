@@ -43,6 +43,13 @@ def maybe_filter_hf_dataset_by_task(dataset, task_field, task_names: str = None)
     return task_names, task_to_id, train_dataset, dev_dataset, test_dataset
 
 
+def tokenizer_merges_space(tokenizer):
+    test1 = "this"
+    test2 = " this"
+
+    return len(tokenizer(test1)["input_ids"]) == len(tokenizer(test2)["input_ids"])
+
+
 def tokenizer_enforces_eos(tokenizer):
     test = "this is a long text seq that should be truncated"
 
@@ -105,5 +112,6 @@ def get_tokenizer_with_args(
         )
         tokenizer.pad_token_id = 0
 
+    tokenizer.mttl_merges_space = tokenizer_merges_space(tokenizer)
     tokenizer.mttl_enforces_eos = tokenizer_enforces_eos(tokenizer)
     return tokenizer

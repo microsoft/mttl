@@ -68,13 +68,12 @@ class DefaultCollator:
         This function moves the space to the targets instead, and removes it from the sources.
         """
         for i in range(len(sources)):
-            if sources[i][-1] == " ":
+            if self.tokenizer.mttl_merges_space and sources[i][-1] == " ":
                 # remove from sources and bring space to targets
                 sources[i] = sources[i][:-1]
                 labels[i] = " " + labels[i]
             elif sources[i][-1] not in [" ", "\n"] and labels[i][0] not in [" ", "\n"]:
-                # adds a space to targets by default
-                labels[i] = " " + labels[i]
+                logger.warn("No separator between source and target! Is this wanted?")
 
         # adds the eos token
         labels = [l + " " + self.tokenizer.eos_token for l in labels]
