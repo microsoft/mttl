@@ -106,7 +106,7 @@ class DataCollatorForNI(DefaultCollator):
             if not task_input[-1] in string.punctuation:
                 task_input += "."
             task_input += "\n"
-            task_input += "Output:"
+            task_input += "Output: "
 
             task_name = ""
             if add_task_name:
@@ -227,7 +227,7 @@ class DataCollatorForNI(DefaultCollator):
                         ],
                         skip_special_tokens=True,
                     )
-                    + "\nOutput:"
+                    + "\nOutput: "
                 )
 
         output_batch = {}
@@ -252,6 +252,8 @@ class DataCollatorForNI(DefaultCollator):
         output_batch["task_ids"] = torch.LongTensor(
             [self.task_to_id[task] for task in task_identifiers]
         )  # task ids potentially used in routing
+
+        output_batch["sources_texts"] = sources
         output_batch["labels_texts"] = labels_rand
         output_batch["labels_full_seq"] = labels_full_seq
         output_batch["instance_ids"] = instance_ids
