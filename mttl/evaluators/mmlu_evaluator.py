@@ -52,7 +52,7 @@ class MMLUEvaluator(object):
         )
         for step, batch in pbar:
             task_name = batch.pop("task_names", None)
-            batch.pop("input_texts", None)
+            sources_texts = batch.pop("sources_texts", None)
             labels_text = batch.pop("labels_texts", None)
 
             extra_kwargs = {}
@@ -84,21 +84,43 @@ class MMLUEvaluator(object):
                         **extra_kwargs,
                     )
 
+            # tokenizer merges space
+            if tokenizer.mttl_merges_space:
+                # space is in labels
+                assert sources_texts[0][-1] != " "
+                options = [" A", " B", " C", " D"]
+            else:
+                # space is in prompt
+                assert sources_texts[0][-1] == " "
+                options = ["A", "B", "C", "D"]
+
             logits = predictions.scores[0]
             probs = (
                 torch.stack(
                     [
                         logits[
-                            :, tokenizer("A", add_special_tokens=False).input_ids[-1]
+                            :,
+                            tokenizer(options[0], add_special_tokens=False).input_ids[
+                                -1
+                            ],
                         ],
                         logits[
-                            :, tokenizer("B", add_special_tokens=False).input_ids[-1]
+                            :,
+                            tokenizer(options[1], add_special_tokens=False).input_ids[
+                                -1
+                            ],
                         ],
                         logits[
-                            :, tokenizer("C", add_special_tokens=False).input_ids[-1]
+                            :,
+                            tokenizer(options[2], add_special_tokens=False).input_ids[
+                                -1
+                            ],
                         ],
                         logits[
-                            :, tokenizer("D", add_special_tokens=False).input_ids[-1]
+                            :,
+                            tokenizer(options[3], add_special_tokens=False).input_ids[
+                                -1
+                            ],
                         ],
                     ],
                     dim=-1,
