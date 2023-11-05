@@ -120,7 +120,7 @@ class DefaultCollator:
 
     def prepare_inputs_for_gpt_family(self, sources, labels):
         # Add eos token
-        labels = self.add_space_and_eos(sources, labels)
+        sources, labels = self.add_space_and_eos(sources, labels)
 
         output_batch = {}
         if self.max_input_length > 0:
