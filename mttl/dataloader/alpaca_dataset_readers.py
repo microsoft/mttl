@@ -57,11 +57,11 @@ class AlpacaTemplateSource(object):
             return f"Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.\
             \n### Instruction: {instruction}\
             \n### Input: {input}\
-            \n### Response:"
+            \n### Response: "
         else:
             return f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\
             \n### Instruction: {instruction}\
-            \n### Response:"
+            \n### Response: "
 
 
 class AlpacaDataset(torch.utils.data.dataset.Dataset):
