@@ -62,6 +62,5 @@ def get_tokenizer(config, for_generation=False):
         )
         tokenizer.pad_token_id = 0
 
-    tokenizer.mttl_merges_space = tokenizer_merges_space(tokenizer)
     tokenizer.mttl_enforces_eos = tokenizer_enforces_eos(tokenizer)
     return tokenizer
