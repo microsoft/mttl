@@ -98,6 +98,13 @@ def test_mmlu(task_name):
 
 
 def test_mmlu_spaces_and_merges(task_name=None):
+    """this tests whether spaces are added correctly after sources or labels.
+
+    if the tokenizer merges space w the next token (e.g. gpt2), then we strip the space from the sources
+    and add it to the labels. this logic is needed if we want to ensure that the model
+    creates the correct labels and input_ids.
+    """
+
     mmlu = MMLUDataModule(
         MMLUDataConfig(
             "mmlu",
