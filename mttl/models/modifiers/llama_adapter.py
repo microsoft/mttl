@@ -152,10 +152,44 @@ def llama_adapter_attention(
     return attn_output, attn_weights, past_key_value
 
 
+def modify_with_llama_adapters(cls, transformer, config, **kwargs):
+    assert isinstance(
+        transformer, PreTrainedModel
+    ), "Transformer must be a PreTrainedModel."
+
+    assert isinstance(
+        transformer, LlamaForCausalLM
+    ), "Only Llama Model supported for now."
+    task_id_ptr = transformer.task_id_container
+
+    for param in transformer.parameters():
+        param.requires_grad = False
+
+    def wrap_llama_attn(attn_layer):
+        # create the prefix embeddings
+        attn_layer.soft_prompt_length = config.soft_prompt_length
+        attn_layer.forward = partial(llama_adapter_attention, attn_layer)
+        attn_layer.adapter = cls(config, attn_layer, task_id_ptr, **kwargs)
+        assert (
+            attn_layer.num_heads == attn_layer.num_key_value_heads
+        ), "which to pick for gate?"
+
+    if config.patch_last_k_layers == -1:
+        layers_to_patch = transformer.model.layers
+    else:
+        layers_to_patch = [transformer.model.layers[-config.patch_last_k_layers]]
+
+    for layer in layers_to_patch:
+        wrap_llama_attn(layer.self_attn)
+
+    return transformer
+
+
 @register_modifier("llama_adapter")
 class LlamaAdapter(nn.Module):
     def __init__(self, config, attn_layer, task_id_ptr, **kwargs):
         super().__init__()
+
         self.task_id_ptr = task_id_ptr
         self.adapter_gate = torch.nn.Parameter(
             torch.zeros(1, attn_layer.num_heads, 1, 1)
@@ -177,43 +211,14 @@ class LlamaAdapter(nn.Module):
     @classmethod
     def modify_transformer(cls, transformer, config, **kwargs):
         """Wrap attention layer with additonal tokens"""
-
-        assert isinstance(
-            transformer, PreTrainedModel
-        ), "Transformer must be a PreTrainedModel."
-
-        assert isinstance(
-            transformer, LlamaForCausalLM
-        ), "Only Llama Model supported for now."
-        task_id_ptr = transformer.task_id_container
-
-        for param in transformer.parameters():
-            param.requires_grad = False
-
-        def wrap_llama_attn(attn_layer):
-            # create the prefix embeddings
-            attn_layer.soft_prompt_length = config.soft_prompt_length
-            attn_layer.forward = partial(llama_adapter_attention, attn_layer)
-            attn_layer.adapter = cls(config, attn_layer, task_id_ptr, **kwargs)
-            assert (
-                attn_layer.num_heads == attn_layer.num_key_value_heads
-            ), "which to pick for gate?"
-
-        if config.patch_last_k_layers == -1:
-            layers_to_patch = transformer.model.layers
-        else:
-            layers_to_patch = [transformer.model.layers[-config.patch_last_k_layers]]
-
-        for layer in layers_to_patch:
-            wrap_llama_attn(layer.self_attn)
-
-        return transformer
+        return modify_with_llama_adapters(cls, transformer, config, **kwargs)
 
 
 @register_modifier("mlp_llama_adapter")
 class MLPLlamaAdapter(Adapter, ModifyMixin):
     def __init__(self, mlp, config, attn_layer, task_id_ptr, **kwargs):
         super().__init__()
+
         self.task_id_ptr = task_id_ptr
         self.learn_kv = config.soft_prompt_learn_kv
         self.adapter_gate = torch.nn.Parameter(
@@ -245,8 +250,8 @@ class MLPLlamaAdapter(Adapter, ModifyMixin):
             nn.Linear(config.soft_prompt_hidden_dim, out_dim),
         )
 
-        return LlamaAdapter.modify_transformer(
-            transformer, config, mlp=shared_adapter_mlp
+        return modify_with_llama_adapters(
+            cls, transformer, config, mlp=shared_adapter_mlp
         )
 
 
@@ -285,4 +290,4 @@ class PolyLlamaAdapter(LlamaAdapter, ModifyMixin):
 
     @classmethod
     def modify_transformer(cls, transformer, config):
-        return LlamaAdapter.modify_transformer(transformer, config)
+        return modify_with_llama_adapters(cls, transformer, config)

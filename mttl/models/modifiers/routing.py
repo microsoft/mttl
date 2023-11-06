@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import List
 import re
 
-from mttl.models.modifiers.base import Adapter
+from mttl.models.modifiers.base import Adapter, ModifyMixin
 from mttl.utils import logger
 
 
@@ -172,7 +172,7 @@ class RoutingInfo:
         )
 
 
-class RoutingMixin:
+class RouterModifyMixin(ModifyMixin):
     def __init__(self, task_id_ptr) -> None:
         self.task_id_ptr = task_id_ptr
 
@@ -180,90 +180,94 @@ class RoutingMixin:
     def routing_infos(self) -> RoutingInfo:
         return self.task_id_ptr["routing_infos"]
 
+    @classmethod
+    def modify_transformer(cls, transformer, config, optional_wrapper=None):
+        # How to "bin" different levels of selectors ?
+        def _extract_identifier(string, match_on="coder"):
+            """Returns a unique identifier for the "chunk" of layers sharing the
+            same underlying selector
+            # e.g. 'block' : 'encoder.block.0.layer.0.SelfAttention' -> 'encoder.block.0'
+            """
+            pattern_map = {
+                "coarsegrained": None,
+                "finegrained": None,
+                "layerwise": "layer",
+                "blockwise": "block",
+                "coderwise": "coder",
+            }
+            assert match_on in pattern_map.keys()
 
-def modify_with_routing(transformer, config, layer_type, optional_wrapper=None):
-    # How to "bin" different levels of selectors ?
-    def _extract_identifier(string, match_on="coder"):
-        """Returns a unique identifier for the "chunk" of layers sharing the
-        same underlying selector
-        # e.g. 'block' : 'encoder.block.0.layer.0.SelfAttention' -> 'encoder.block.0'
-        """
-        pattern_map = {
-            "coarsegrained": None,
-            "finegrained": None,
-            "layerwise": "layer",
-            "blockwise": "block",
-            "coderwise": "coder",
-        }
-        assert match_on in pattern_map.keys()
+            if match_on == "finegrained":
+                return string
+            if match_on == "coarsegrained":
+                return ""
 
-        if match_on == "finegrained":
-            return string
-        if match_on == "coarsegrained":
-            return ""
+            match_on = pattern_map[match_on]
+            left_idx = string.find(f"{match_on}.") + len(match_on) + 1
+            right_idx = string[left_idx:].find(".")
+            return string[: left_idx + right_idx]
 
-        match_on = pattern_map[match_on]
-        left_idx = string.find(f"{match_on}.") + len(match_on) + 1
-        right_idx = string[left_idx:].find(".")
-        return string[: left_idx + right_idx]
+        selectors = {}
+        total_layers = 0
 
-    selectors = {}
-    total_layers = 0
+        for m_name, module in dict(transformer.named_modules()).items():
+            if re.fullmatch(config.modify_modules, m_name):
+                for c_name, layer in dict(module.named_children()).items():
+                    if re.fullmatch(config.modify_layers, c_name):
+                        layer_name = f"{m_name}.{c_name}"
 
-    for m_name, module in dict(transformer.named_modules()).items():
-        if re.fullmatch(config.modify_modules, m_name):
-            for c_name, layer in dict(module.named_children()).items():
-                if re.fullmatch(config.modify_layers, c_name):
-                    layer_name = f"{m_name}.{c_name}"
+                        identifier = _extract_identifier(
+                            f"{m_name}.{c_name}", config.router_granularity
+                        )
 
-                    identifier = _extract_identifier(
-                        f"{m_name}.{c_name}", config.router_granularity
-                    )
+                        if identifier not in selectors.keys():
+                            # Special case when you have a decoder layer in an enc-dec model
+                            if (
+                                not ("encoder" in m_name)
+                                and config.model_family == "encdec"
+                            ):
+                                from transformers.models.t5.modeling_t5 import (
+                                    T5ForConditionalGeneration,
+                                )
 
-                    if identifier not in selectors.keys():
-                        # Special case when you have a decoder layer in an enc-dec model
-                        if (
-                            not ("encoder" in m_name)
-                            and config.model_family == "encdec"
-                        ):
-                            from transformers.models.t5.modeling_t5 import (
-                                T5ForConditionalGeneration,
+                                assert isinstance(
+                                    transformer, T5ForConditionalGeneration
+                                )
+                                in_d = transformer.config.d_model
+                            else:
+                                in_d = layer.in_features
+
+                            selectors[identifier] = get_selector(
+                                config,
+                                in_d=in_d,
+                            )
+                            selectors[identifier].__layer_name__ = (
+                                layer_name + ".selector"
                             )
 
-                            assert isinstance(transformer, T5ForConditionalGeneration)
-                            in_d = transformer.config.d_model
-                        else:
-                            in_d = layer.in_features
+                        selector = selectors[identifier]
+                        total_layers += 1
 
-                        selectors[identifier] = get_selector(
+                        logger.info(f"Patching {m_name}.{c_name}...")
+
+                        wrapper = cls(
                             config,
-                            in_d=in_d,
+                            transformer.task_id_container,
+                            layer,
+                            selector=selector,
                         )
-                        selectors[identifier].__layer_name__ = layer_name + ".selector"
+                        wrapper.__layer_name__ = f"{m_name}.{c_name}"
 
-                    selector = selectors[identifier]
-                    total_layers += 1
+                        setattr(
+                            module,
+                            c_name,
+                            wrapper,
+                        )
 
-                    logger.info(f"Patching {m_name}.{c_name}...")
+        print(
+            f"created {len(selectors)} selectors for a total of {total_layers} adapted layers"
+        )
 
-                    wrapper = layer_type(
-                        config,
-                        transformer.task_id_container,
-                        layer,
-                        selector=selector,
-                    )
-                    wrapper.__layer_name__ = f"{m_name}.{c_name}"
-
-                    setattr(
-                        module,
-                        c_name,
-                        wrapper,
-                    )
-
-    print(
-        f"created {len(selectors)} selectors for a total of {total_layers} adapted layers"
-    )
-
-    if optional_wrapper is not None:
-        return optional_wrapper.register_functions(transformer)
-    return transformer
+        if optional_wrapper is not None:
+            return optional_wrapper.register_functions(transformer)
+        return transformer

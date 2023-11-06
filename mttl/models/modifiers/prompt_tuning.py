@@ -1,41 +1,13 @@
 import torch
 import torch.nn as nn
 from mttl.models.modifiers import register_modifier
-from mttl.models.modifiers.base import Adapter
+from mttl.models.modifiers.base import Adapter, ModifyMixin
 from transformers.modeling_utils import PreTrainedModel
 from mttl.models.modifiers.poly import PolytroponSelector
 from mttl.models.modifiers.routing import RoutingMixin
 
 
 PromptTuningRouting = None
-
-
-def modify_with_soft_prompt_cls(transformer, config, layer_type):
-    """Wrap the forward pass of the model with a hook that takes extracts the embeddings
-    from the `input_ids`, gets the embeddings from the soft prompt and stiches them together.
-    """
-
-    assert isinstance(
-        transformer, PreTrainedModel
-    ), "Transformer must be a PreTrainedModel."
-
-    for param in transformer.parameters():
-        param.requires_grad = False
-
-    task_id_container = transformer.task_id_container
-
-    input_embeddings = transformer.get_input_embeddings()
-    config.vocab_embed_dim = input_embeddings.embedding_dim
-
-    soft_prompt = layer_type(
-        config=config,
-        task_id_ptr=task_id_container,
-        base_input_embeddings=input_embeddings,
-    )
-
-    return DecoderPromptTuningWrapper(
-        config=config, transformer=transformer, soft_prompt=soft_prompt
-    )
 
 
 class DecoderPromptTuningWrapper(torch.nn.Module):
@@ -179,7 +151,41 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
         return model_kwargs
 
 
-class PromptTuning(Adapter):
+def modify_with_prompt_tuning(cls, transformer, config):
+    """Wrap the forward pass of the model with a hook that takes extracts the embeddings
+    from the `input_ids`, gets the embeddings from the soft prompt and stiches them together.
+    """
+    assert isinstance(
+        transformer, PreTrainedModel
+    ), "Transformer must be a PreTrainedModel."
+
+    for param in transformer.parameters():
+        param.requires_grad = False
+
+    task_id_container = transformer.task_id_container
+
+    input_embeddings = transformer.get_input_embeddings()
+    config.vocab_embed_dim = input_embeddings.embedding_dim
+
+    soft_prompt = cls(
+        config=config,
+        task_id_ptr=task_id_container,
+        base_input_embeddings=input_embeddings,
+    )
+
+    return DecoderPromptTuningWrapper(
+        config=config, transformer=transformer, soft_prompt=soft_prompt
+    )
+
+
+class PromptTuningModifyMixin(ModifyMixin):
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        return modify_with_prompt_tuning(cls, transformer, config)
+
+
+@register_modifier("prompt_tuning")
+class PromptTuning(Adapter, PromptTuningModifyMixin):
     def __init__(self, base_input_embeddings, config, *args, **kwargs):
         super().__init__()
 
@@ -203,7 +209,8 @@ class PromptTuning(Adapter):
         return self.prompt_embedding.weight.unsqueeze(0).expand(bs, -1, -1)
 
 
-class AlphaPromptTuning(Adapter):
+@register_modifier("alpha_prompt_tuning")
+class AlphaPromptTuning(Adapter, PromptTuningModifyMixin):
     def __init__(self, base_input_embeddings, config, task_id_ptr, *args, **kwargs):
         super().__init__()
 
@@ -237,8 +244,13 @@ class AlphaPromptTuning(Adapter):
         mixed = torch.einsum("BLSV,VSD->BLSD", (mixing_weights, embeds))
         return mixed.reshape(bs, self.prompt_length, -1)
 
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        return modify_with_prompt_tuning(cls, transformer, config)
 
-class PolyPromptTuning(Adapter, RoutingMixin):
+
+@register_modifier("poly_prompt_tuning")
+class PolyPromptTuning(Adapter, RoutingMixin, PromptTuningModifyMixin):
     def __init__(self, base_input_embeddings, config, task_id_ptr, *args, **kwargs):
         super(Adapter, self).__init__()
         super(RoutingMixin, self).__init__(task_id_ptr)
@@ -288,18 +300,3 @@ class PolyPromptTuning(Adapter, RoutingMixin):
 
         embed = embed.reshape(bs, self.prompt_length, self.embed_dim)
         return embed
-
-
-@register_modifier("prompt_tuning")
-def modify_with_soft_prompt_routing(transformer, config):
-    return modify_with_soft_prompt_cls(transformer, config, PromptTuning)
-
-
-@register_modifier("poly_prompt_tuning")
-def modify_with_soft_prompt_routing(transformer, config):
-    return modify_with_soft_prompt_cls(transformer, config, PolyPromptTuning)
-
-
-@register_modifier("alpha_prompt_tuning")
-def modify_with_soft_prompt_routing(transformer, config):
-    return modify_with_soft_prompt_cls(transformer, config, AlphaPromptTuning)
