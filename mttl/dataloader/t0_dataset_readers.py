@@ -609,8 +609,12 @@ class T0MixtureReader(object):
         Read the original dataset
         :param split: split of data
         """
+        import tqdm
+
         orig_data = []
-        for dataset_name, subset_name, template_name, cap in self.t0_base_tasks:
+        for dataset_name, subset_name, template_name, cap in tqdm.tqdm(
+            self.t0_base_tasks, desc="Loading data..."
+        ):
             if split == "train":
                 split_num = f"{split}[0:{cap}]"
             else:

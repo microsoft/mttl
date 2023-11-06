@@ -26,12 +26,17 @@ def swap_model(model, state=None):
 
 
 class MMLUEvaluator(object):
-    def __init__(self, mmlu_data_config, device="cuda", split="test", use_vllm=False):
+    def __init__(
+        self, config, max_input_length=None, split="test", device="cuda", use_vllm=False
+    ):
         from mttl.datamodule.mmlu_data_module import MMLUDataModule
 
         self.device = device
         self.split = split
-        self.config = mmlu_data_config
+        self.config = config
+
+        if max_input_length is not None:
+            self.config.max_input_length = max_input_length
 
         self.datamodule = MMLUDataModule(self.config, for_generation=True)
         self.use_vllm = use_vllm
@@ -105,7 +110,8 @@ class MMLUEvaluator(object):
         # write the file to disk (input, accuracy, expertname) to a json file
         fout = open("adapter_ranker_train.jsonl", "a")
         for _, batch in pbar:
-            task_names = batch.get("task_names", None)
+            task_names = batch.pop("task_names", None)
+            batch.pop("sources_texts", None)
             labels_text = batch.pop("labels_texts", None)
             inputs_text = batch.get("inputs", None)
             extra_kwargs = {}
@@ -142,16 +148,20 @@ class MMLUEvaluator(object):
                 torch.stack(
                     [
                         logits[
-                            :, tokenizer("A", add_special_tokens=False).input_ids[-1]
+                            :,
+                            tokenizer(" A", add_special_tokens=False).input_ids[-1],
                         ],
                         logits[
-                            :, tokenizer("B", add_special_tokens=False).input_ids[-1]
+                            :,
+                            tokenizer(" B", add_special_tokens=False).input_ids[-1],
                         ],
                         logits[
-                            :, tokenizer("C", add_special_tokens=False).input_ids[-1]
+                            :,
+                            tokenizer(" C", add_special_tokens=False).input_ids[-1],
                         ],
                         logits[
-                            :, tokenizer("D", add_special_tokens=False).input_ids[-1]
+                            :,
+                            tokenizer(" D", add_special_tokens=False).input_ids[-1],
                         ],
                     ],
                     dim=-1,
