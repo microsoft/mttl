@@ -32,7 +32,7 @@ def test_mmlu_eval():
 
 
 @pytest.mark.skipif(
-    os.getenv("NI_DATA_DIR") != None,
+    os.getenv("NI_DATA_DIR") == None,
     reason="No way of currently test this locally, SNI is too big.",
 )
 def test_ni_eval():
