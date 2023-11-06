@@ -73,7 +73,7 @@ class DefaultCollator:
                 sources[i] = sources[i][:-1]
                 labels[i] = " " + labels[i]
             elif sources[i][-1] not in [" ", "\n"] and labels[i][0] not in [" ", "\n"]:
-                logger.warn("No separator between source and target! Is this wanted?")
+                labels[i] = " " + labels[i]
 
         # adds the eos token
         labels = [l + " " + self.tokenizer.eos_token for l in labels]
