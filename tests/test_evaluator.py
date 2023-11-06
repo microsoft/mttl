@@ -49,6 +49,10 @@ def test_ni_eval():
         device="cpu",
     )
 
+    assert ni.config.max_output_length == 128
+    assert ni.config.add_task_definition
+    assert ni.config.num_pos_examples == 0
+
     model = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-125m")
     results = ni.evaluate(model, subsample=80)
     assert results["all"]["mean"] == pytest.approx(1.98, 0.1)
