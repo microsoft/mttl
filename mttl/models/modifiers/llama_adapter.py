@@ -4,17 +4,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from mttl.models.modifiers import register_modifier
-from mttl.models.modifiers.base import LoRA, LN, IA3
-from mttl.utils import logger
 from transformers.modeling_utils import PreTrainedModel
 from functools import partial
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Tuple
 from mttl.models.modifiers.poly import PolytroponSelector
 
 from transformers.models.llama.modeling_llama import (
-    LlamaAttention,
     apply_rotary_pos_emb,
-    # repeat_kv,
     LlamaForCausalLM,
 )
 
