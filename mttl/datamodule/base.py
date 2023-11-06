@@ -67,17 +67,23 @@ class DefaultCollator:
 
         This function moves the space to the targets instead, and removes it from the sources.
         """
-        for i in range(len(sources)):
-            if self.tokenizer.mttl_merges_space and sources[i][-1] == " ":
+        import copy
+
+        sources_ = copy.deepcopy(sources)
+        labels_ = copy.deepcopy(labels)
+
+        for i in range(len(sources_)):
+            if self.tokenizer.mttl_merges_space and sources_[i][-1] == " ":
                 # remove from sources and bring space to targets
-                sources[i] = sources[i][:-1]
-                labels[i] = " " + labels[i]
-            elif sources[i][-1] not in [" ", "\n"] and labels[i][0] not in [" ", "\n"]:
-                labels[i] = " " + labels[i]
+                sources_[i] = sources_[i][:-1]
+                labels_[i] = " " + labels_[i]
+
+            if sources_[i][-1] not in [" ", "\n"] and labels_[i][0] not in [" ", "\n"]:
+                labels_[i] = " " + labels_[i]
 
         # adds the eos token
-        labels = [l + " " + self.tokenizer.eos_token for l in labels]
-        return sources, labels
+        labels_ = [l + " " + self.tokenizer.eos_token for l in labels_]
+        return sources_, labels_
 
     def prepare_inputs_for_seq2seq_family(self, sources, labels):
         output_batch = {}

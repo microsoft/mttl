@@ -1,7 +1,9 @@
 import pytest
+import numpy as np
 from mttl.datamodule.base import AutoDataModule
 from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
 from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
+from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 
 
 @pytest.mark.parametrize("task_name", [None, "huggingface_xsum"])
@@ -62,6 +64,32 @@ def test_alpaca():
     assert "attention_mask" in batch
     assert "sources_texts" in batch
     assert "labels_texts" in batch
+    sources_texts = batch["sources_texts"]
+    labels_texts = batch["labels_texts"]
+    assert sources_texts[0][-1] == ":"
+    # there is no space added to the labels
+    assert labels_texts[0][0] != " "
+
+    alpaca = AutoDataModule.create(
+        "alpaca",
+        model="EleutherAI/gpt-neo-125m",
+        model_family="gpt",
+        for_generation=False,
+        validation_portion=0.05,
+    )
+    batch = next(iter(alpaca.train_dataloader()))
+
+    sources_texts = batch["sources_texts"]
+    labels_texts = batch["labels_texts"]
+
+    input_ids = alpaca.tokenizer(sources_texts[0] + " " + labels_texts[0]).input_ids
+    assert np.allclose(
+        batch["input_ids"][0][: len(input_ids)].numpy().tolist(), input_ids
+    )
+    assert batch["labels"][0][0] == -100  # train on inputs == False
+    assert sources_texts[0][-1] == ":"
+    # there is no space added to the labels
+    assert labels_texts[0][0] != ""
 
 
 def test_auto_module():
