@@ -61,6 +61,30 @@ class DefaultCollator:
             )
         return targets
 
+    def add_space_and_eos(self, sources, labels):
+        """Some tokenizers (e.g. gpt2) merge space with the next token. This will create problems when creating the
+        mask for the targets because the input will not be a subset of the concatenation of the input + label.
+
+        This function moves the space to the targets instead, and removes it from the sources.
+        """
+        import copy
+
+        sources_ = copy.deepcopy(sources)
+        labels_ = copy.deepcopy(labels)
+
+        for i in range(len(sources_)):
+            if self.tokenizer.mttl_merges_space and sources_[i][-1] == " ":
+                # remove from sources and bring space to targets
+                sources_[i] = sources_[i][:-1]
+                labels_[i] = " " + labels_[i]
+
+            if sources_[i][-1] not in [" ", "\n"] and labels_[i][0] not in [" ", "\n"]:
+                labels_[i] = " " + labels_[i]
+
+        # adds the eos token
+        labels_ = [l + " " + self.tokenizer.eos_token for l in labels_]
+        return sources_, labels_
+
     def prepare_inputs_for_seq2seq_family(self, sources, labels):
         output_batch = {}
 
@@ -101,7 +125,7 @@ class DefaultCollator:
 
     def prepare_inputs_for_gpt_family(self, sources, labels):
         # Add eos token
-        labels = [l + " " + self.tokenizer.eos_token for l in labels]
+        sources, labels = self.add_space_and_eos(sources, labels)
 
         output_batch = {}
         if self.max_input_length > 0:
@@ -183,8 +207,8 @@ class DefaultCollator:
 
         output_batch["task_ids"] = torch.LongTensor(task_ids)
         output_batch["task_names"] = task_names
-        output_batch["source_texts"] = sources
-        output_batch["label_texts"] = labels
+        output_batch["sources_texts"] = sources
+        output_batch["labels_texts"] = labels
         return output_batch
 
 

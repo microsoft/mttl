@@ -1,9 +1,3 @@
-import sys
-import os
-
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
-
-
 def encode_with_messages_format(example):
     message_text = ""
     intruction = "<|user|>\n" + example["user"].strip() + "\n"

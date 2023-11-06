@@ -15,8 +15,19 @@ import pkg_resources
 from dataclasses import dataclass
 
 from mttl.datamodule.utils import get_tokenizer, maybe_filter_hf_dataset_by_task
-from mttl.datamodule.base import DefaultCollator, DefaultDataModule
+from mttl.datamodule.base import DefaultCollator, DefaultDataModule, DatasetConfig
 from mttl.utils import hash_example, logger
+
+
+@dataclass
+class NiDataConfig(DatasetConfig):
+    add_task_name: bool = False
+    add_task_definition: bool = True
+    num_pos_examples: int = 0
+    num_neg_examples: int = 0
+    add_explanation: bool = False
+    tk_instruct: bool = False
+    max_num_instances_per_task: int = 100
 
 
 @dataclass
@@ -252,6 +263,8 @@ class DataCollatorForNI(DefaultCollator):
         output_batch["task_ids"] = torch.LongTensor(
             [self.task_to_id[task] for task in task_identifiers]
         )  # task ids potentially used in routing
+
+        output_batch["sources_texts"] = sources
         output_batch["labels_texts"] = labels_rand
         output_batch["labels_full_seq"] = labels_full_seq
         output_batch["instance_ids"] = instance_ids
@@ -264,7 +277,9 @@ class NiDataModule(DefaultDataModule):
             from mttl.datamodule import take_n_examples_per_task
 
             indices = take_n_examples_per_task(
-                list(self.test_dataset["Task"]), n=subsample, rng=self.rng
+                list(self.test_dataset["Task"]),
+                n=subsample,
+                rng=self.rng if isinstance(self.rng, np.random.RandomState) else None,
             )
             test_dataset = self.test_dataset.select(indices)
         else:
@@ -368,7 +383,7 @@ class NiDataModule(DefaultDataModule):
             self.dev_dataset = self.dev_dataset.select(
                 range(
                     self.config.max_num_instances_per_task,
-                    len(self.val_dataset),
+                    len(self.dev_dataset),
                 )
             )
 

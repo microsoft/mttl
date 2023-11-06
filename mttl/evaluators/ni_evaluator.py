@@ -69,7 +69,6 @@ class NIEvaluator(object):
     def __init__(
         self,
         config,
-        data_dir=None,
         num_pos_examples=0,
         max_input_length=None,
         pred_output_file_path=None,
@@ -86,17 +85,13 @@ class NIEvaluator(object):
         # unrestricted input length for SNI pass -1
         if max_input_length is not None:
             self.config.max_input_length = max_input_length
+
         self.config.max_output_length = 128
         self.config.num_pos_examples = num_pos_examples
         self.config.use_task_descriptions = True
 
-        if data_dir is None:
-            data_dir = config.data_dir
-
-        self.data_dir = data_dir
         self.datamodule = NiDataModule(
             self.config,
-            data_dir=data_dir,
             for_generation=True,
         )
         self.datamodule.setup("test")
