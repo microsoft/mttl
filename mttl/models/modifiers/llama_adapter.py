@@ -7,6 +7,7 @@ from mttl.models.modifiers import register_modifier
 from transformers.modeling_utils import PreTrainedModel
 from functools import partial
 from typing import Optional, Tuple
+from mttl.models.modifiers.base import Adapter, ModifyMixin
 from mttl.models.modifiers.poly import PolytroponSelector
 
 from transformers.models.llama.modeling_llama import (
@@ -151,6 +152,7 @@ def llama_adapter_attention(
     return attn_output, attn_weights, past_key_value
 
 
+@register_modifier("llama_adapter")
 class LlamaAdapter(nn.Module):
     def __init__(self, config, attn_layer, task_id_ptr, **kwargs):
         super().__init__()
@@ -172,8 +174,44 @@ class LlamaAdapter(nn.Module):
         bsz = self.task_id_ptr["routing_infos"].task_ids.size(0)
         return self.adapter_query.weight.unsqueeze(0).expand(bsz, -1, -1)
 
+    @classmethod
+    def modify_transformer(cls, transformer, config, **kwargs):
+        """Wrap attention layer with additonal tokens"""
 
-class MLPLlamaAdapter(nn.Module):
+        assert isinstance(
+            transformer, PreTrainedModel
+        ), "Transformer must be a PreTrainedModel."
+
+        assert isinstance(
+            transformer, LlamaForCausalLM
+        ), "Only Llama Model supported for now."
+        task_id_ptr = transformer.task_id_container
+
+        for param in transformer.parameters():
+            param.requires_grad = False
+
+        def wrap_llama_attn(attn_layer):
+            # create the prefix embeddings
+            attn_layer.soft_prompt_length = config.soft_prompt_length
+            attn_layer.forward = partial(llama_adapter_attention, attn_layer)
+            attn_layer.adapter = cls(config, attn_layer, task_id_ptr, **kwargs)
+            assert (
+                attn_layer.num_heads == attn_layer.num_key_value_heads
+            ), "which to pick for gate?"
+
+        if config.patch_last_k_layers == -1:
+            layers_to_patch = transformer.model.layers
+        else:
+            layers_to_patch = [transformer.model.layers[-config.patch_last_k_layers]]
+
+        for layer in layers_to_patch:
+            wrap_llama_attn(layer.self_attn)
+
+        return transformer
+
+
+@register_modifier("mlp_llama_adapter")
+class MLPLlamaAdapter(Adapter, ModifyMixin):
     def __init__(self, mlp, config, attn_layer, task_id_ptr, **kwargs):
         super().__init__()
         self.task_id_ptr = task_id_ptr
@@ -194,8 +232,26 @@ class MLPLlamaAdapter(nn.Module):
         out = self.shared_adapter_mlp(mlp_input)
         return out.unsqueeze(0).expand(bsz, -1, -1)
 
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        if config.soft_prompt_learn_kv:
+            out_dim = transformer.config.hidden_size * 2
+        else:
+            out_dim = transformer.config.hidden_size
 
-class PolyLlamaAdapter(nn.Module):
+        shared_adapter_mlp = nn.Sequential(
+            nn.Linear(config.soft_prompt_mlp_dim, config.soft_prompt_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(config.soft_prompt_hidden_dim, out_dim),
+        )
+
+        return LlamaAdapter.modify_transformer(
+            transformer, config, mlp=shared_adapter_mlp
+        )
+
+
+@register_modifier("poly_llama_adapter")
+class PolyLlamaAdapter(LlamaAdapter, ModifyMixin):
     def __init__(self, config, attn_layer, task_id_ptr, **kwargs):
         super().__init__()
         # TODO: build polytropon selector
@@ -227,65 +283,6 @@ class PolyLlamaAdapter(nn.Module):
 
         return out.flatten(-2)
 
-
-def modify_with_llama_adapter_cls(transformer, config, layer_type):
-    """Wrap attention layer with additonal tokens"""
-
-    assert isinstance(
-        transformer, PreTrainedModel
-    ), "Transformer must be a PreTrainedModel."
-
-    assert isinstance(
-        transformer, LlamaForCausalLM
-    ), "Only Llama Model supported for now."
-    task_id_ptr = transformer.task_id_container
-
-    for param in transformer.parameters():
-        param.requires_grad = False
-
-    def wrap_llama_attn(attn_layer):
-        # create the prefix embeddings
-        attn_layer.soft_prompt_length = config.soft_prompt_length
-        attn_layer.forward = partial(llama_adapter_attention, attn_layer)
-        attn_layer.adapter = layer_type(config, attn_layer, task_id_ptr)
-        assert (
-            attn_layer.num_heads == attn_layer.num_key_value_heads
-        ), "which to pick for gate?"
-
-    if config.patch_last_k_layers == -1:
-        layers_to_patch = transformer.model.layers
-    else:
-        layers_to_patch = [transformer.model.layers[-config.patch_last_k_layers]]
-
-    for layer in layers_to_patch:
-        wrap_llama_attn(layer.self_attn)
-
-    return transformer
-
-
-@register_modifier("mlp_llama_adapter")
-def modify_with_llama_adapter(transformer, config):
-    if config.soft_prompt_learn_kv:
-        out_dim = transformer.config.hidden_size * 2
-    else:
-        out_dim = transformer.config.hidden_size
-
-    shared_adapter_mlp = nn.Sequential(
-        nn.Linear(config.soft_prompt_mlp_dim, config.soft_prompt_hidden_dim),
-        nn.ReLU(),
-        nn.Linear(config.soft_prompt_hidden_dim, out_dim),
-    )
-
-    mlp_llama_adapter = partial(MLPLlamaAdapter, shared_adapter_mlp)
-
-    return modify_with_llama_adapter_cls(transformer, config, mlp_llama_adapter)
-
-
-@register_modifier("llama_adapter")
-def modify_with_llama_adapter(transformer, config):
-    return modify_with_llama_adapter_cls(transformer, config, LlamaAdapter)
-
-
-@register_modifier("poly_llama_adapter")
-def modify_with_poly_llama_adapter(transformer, config):
-    return modify_with_llama_adapter_cls(transformer, config, PolyLlamaAdapter)
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        return LlamaAdapter.modify_transformer(transformer, config)

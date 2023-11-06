@@ -1,5 +1,6 @@
 import os
 import torch
+import pytest
 from pytorch_lightning import seed_everything
 from projects.instr_routing.config import RoutingConfig
 from mttl.models.modifiers.routing import RoutingInfo
@@ -7,7 +8,10 @@ from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.llama_adapter import LlamaAdapter
 
 
-def test_llama_adapter():
+@pytest.mark.parametrize(
+    "adapter_type", ["llama_adapter", "poly_llama_adapter", "mlp_llama_adapter"]
+)
+def test_llama_adapter(adapter_type):
     os.environ["CONFIG_PATH"] = "./"
 
     _args = RoutingConfig(
@@ -57,20 +61,20 @@ def test_llama_adapter():
     assert round(output.loss.item(), 4) == 6.0915
 
     # Test with llama adapter
-    _args.model_modifier = "llama_adapter"
+    _args.model_modifier = adapter_type
     new_model = modify_transformer(model, _args)
 
     new_model.task_id_container["routing_infos"] = RoutingInfo(task_ids=task_ids)
 
-    # Test Base Llama model
-    output = new_model(**batch)
-    assert round(output.loss.item(), 4) == 6.0915
+    if adapter_type == "llama_adapter":
+        output = new_model(**batch)
+        assert round(output.loss.item(), 4) == 6.0915
 
-    # Manually set the gates to have non-zero values
-    for module in new_model.modules():
-        if isinstance(module, LlamaAdapter):
-            module.adapter_gate.data.fill_(10.0)
+        # Manually set the gates to have non-zero values
+        for module in new_model.modules():
+            if isinstance(module, LlamaAdapter):
+                module.adapter_gate.data.fill_(10.0)
 
-    # Test Base Llama model
-    output = new_model(**batch)
-    assert round(output.loss.item(), 4) == 6.0815
+        # Test Base Llama model
+        output = new_model(**batch)
+        assert round(output.loss.item(), 4) == 6.0815

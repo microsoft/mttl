@@ -1,10 +1,7 @@
 from torch import nn
-import torch
 import re
-import math
-
-from dataclasses import dataclass
 from mttl.utils import logger
+from dataclasses import dataclass
 
 
 class Adapter(nn.Module):
@@ -20,8 +17,15 @@ class Adapter(nn.Module):
 
 @dataclass
 class ModifierConfig(object):
+    model_modifier: str
     modify_modules: str
     modify_layers: str
+
+
+class ModifyMixin(nn.Module):
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        return modify_with_adapter(transformer, config, cls)
 
 
 def modify_with_adapter(transformer, config, adapter_klass):

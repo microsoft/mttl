@@ -1,13 +1,12 @@
 from torch import nn
 import torch
-import re
-import math
 
-from mttl.models.modifiers.base import Adapter, modify_with_adapter
+from mttl.models.modifiers.base import Adapter, ModifyMixin
 from mttl.models.modifiers.modify_model import register_modifier
 
 
-class IA3(Adapter):
+@register_modifier("ia3")
+class IA3(Adapter, ModifyMixin):
     def __init__(self, config, layer):
         super().__init__()
 
@@ -22,7 +21,8 @@ class IA3(Adapter):
         return self.layer(input) * self.multi_lora_b
 
 
-class LN(Adapter):
+@register_modifier("ln")
+class LN(Adapter, ModifyMixin):
     def __init__(self, config, layer):
         super().__init__()
 
@@ -42,13 +42,3 @@ class LN(Adapter):
         if self.weight.dtype == torch.float16:
             input = input.to(torch.float16)
         return self.lora_b.unsqueeze(0) * input
-
-
-@register_modifier("ia3")
-def modify_with_ia3(transformer, config):
-    return modify_with_adapter(transformer, config, IA3)
-
-
-@register_modifier("ln")
-def modify_with_ln(transformer, config):
-    return modify_with_adapter(transformer, config, LN)

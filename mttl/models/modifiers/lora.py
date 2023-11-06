@@ -1,13 +1,13 @@
 from dataclasses import dataclass
-import math
-from mttl.models.modifiers import register_modifier
-from mttl.models.modifiers.base import Adapter, ModifierConfig, modify_with_adapter
 import torch
 from torch import nn
+import math
+from mttl.models.modifiers import register_modifier
+from mttl.models.modifiers.base import Adapter, ModifyMixin, ModifierConfig
 
 
 @dataclass
-class LoRAModifierConfig(ModifierConfig):
+class LoRAConfig(ModifierConfig):
     lora_rank: int = 4
     lora_alpha: float = 16.0
     lora_dropout: float = 0.0
@@ -16,15 +16,16 @@ class LoRAModifierConfig(ModifierConfig):
 
 
 @dataclass
-class SkilledLoRAModifierConfig(LoRAModifierConfig):
+class SkilledLoRAConfig(LoRAConfig):
+    n_skills: int = 1
     n_splits: int = 1
-    n_skills: int = None
 
 
-class LoRA(Adapter):
+@register_modifier("lora")
+class LoRA(Adapter, ModifyMixin):
     def __init__(
         self,
-        config: LoRAModifierConfig,
+        config: LoRAConfig,
         layer: nn.Module,
     ):
         super().__init__()
@@ -94,7 +95,7 @@ class LoRA(Adapter):
 class SkilledLoRA(LoRA):
     def __init__(
         self,
-        config: SkilledLoRAModifierConfig,
+        config: SkilledLoRAConfig,
         layer: nn.Module,
     ):
         self.n_splits = config.n_splits
@@ -152,7 +153,7 @@ class SkilledLoRA(LoRA):
 class SkilledLoRA_MergeLoraAfterOP(SkilledLoRA):
     def __init__(
         self,
-        config: SkilledLoRAModifierConfig,
+        config: SkilledLoRAConfig,
         layer: nn.Module,
     ):
         super().__init__(config, layer)
@@ -183,8 +184,3 @@ class SkilledLoRA_MergeLoraAfterOP(SkilledLoRA):
             adapter_out = adapter_out * warmup
 
         return layer_out + adapter_out.to(input.dtype)
-
-
-@register_modifier("lora")
-def modify_with_lora(transformer, config):
-    return modify_with_adapter(transformer, config, LoRA)

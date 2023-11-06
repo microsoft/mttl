@@ -13,7 +13,7 @@ def register_modifier(name):
     return _thunk
 
 
-def modify_transformer(transformer, modifier_config):
+def modify_transformer(transformer, modifier_config, model_modifier=None):
     import mttl.models.modifiers.lora  # noqa: F401
     import mttl.models.modifiers.poly  # noqa: F401
     import mttl.models.modifiers.routing  # noqa: F401
@@ -25,13 +25,17 @@ def modify_transformer(transformer, modifier_config):
     # create a shared container for the task id
     transformer.task_id_container = {}
 
-    if modifier_config.model_modifier:
-        if modifier_config.model_modifier in MODIFIERS:
-            transformer = MODIFIERS[modifier_config.model_modifier](
+    if model_modifier is None:
+        model_modifier = getattr(modifier_config, "model_modifier", None)
+
+    if model_modifier is None:
+        raise ValueError("Model modifier not set nor in config nor as an argument.")
+
+    if model_modifier:
+        if model_modifier in MODIFIERS:
+            transformer = MODIFIERS[model_modifier].modify_transformer(
                 transformer, modifier_config
             )
         else:
-            raise ValueError(
-                f"Model modifier '{modifier_config.model_modifier}' not found."
-            )
+            raise ValueError(f"Model modifier '{model_modifier}' not found.")
     return transformer
