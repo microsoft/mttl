@@ -2,8 +2,7 @@ import torch
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 
-from mttl.datamodule.collators import DefaultCollator
-from mttl.dataloader.flan_100k_dataset_reader import Flan100KDataset
+from mttl.datamodule.base import DefaultCollator
 from transformers import AutoTokenizer
 
 from mttl.datamodule.utils import get_tokenizer

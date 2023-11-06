@@ -203,7 +203,9 @@ class T0EncoderDecoder(EfficientCheckpointModule):
         self.model.task_id_container["routing_infos"] = None
 
         self.log_dict(
-            {f"{split}/{k}": v for (k, v) in tensorboard_logs.items()}, sync_dist=True
+            {f"{split}/{k}": v for (k, v) in tensorboard_logs.items()},
+            sync_dist=True,
+            prog_bar=True,
         )
 
         for plugin in self.loss_plugins.values():
