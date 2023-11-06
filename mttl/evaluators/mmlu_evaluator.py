@@ -49,7 +49,7 @@ class MMLUEvaluator(object):
             total=len(dataloader),
         )
         # write the file to disk (input, accuracy, expertname) to a json file
-        fout = open("adapter_ranker_train.jsonl", "w")
+        fout = open("adapter_ranker_train.jsonl", "a")
         for _, batch in pbar:
             task_names = batch.get("task_names", None)
             labels_text = batch.pop("labels_texts", None)

@@ -23,6 +23,7 @@ from mttl.datamodule.platypus_module import (
     PlatypusConfig,
     PlatypusQAModule,
 )
+from mttl.datamodule.flan10k_module import Flan10kModule, Flan10kConfig
 from mttl.utils import get_mlf_logger, setup_logging, logger
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
@@ -78,7 +79,6 @@ def eval_mmlu(module, args, base_perf=None, chkpt_crit="val/loss"):
 
 def run_multitask(args):
     seed_everything(args.seed, workers=True)
-
     # get directory of the current file
     setup_logging(args.output_dir)
 
@@ -140,6 +140,20 @@ def run_multitask(args):
             train_on_reverse=args.dataset == "inverse-platypus",
         )
         dm = PlatypusModule(config)
+    elif "flan10k" in args.dataset:
+        config = Flan10kConfig(
+            model=args.model,
+            train_batch_size=args.train_batch_size,
+            predict_batch_size=args.predict_batch_size,
+            max_input_length=args.max_input_length,
+            max_output_length=args.max_output_length,
+            validation_portion=args.validation_portion,
+            model_family=args.model_family,
+            train_on_inputs=False,
+            category=args.category,
+        )
+        dm = Flan10kModule(config)
+        dm.setup()
     elif "oa1" in args.dataset:
         config = OA1Config(
             model=args.model,
@@ -214,10 +228,14 @@ def run_multitask(args):
             val_check_interval = len(dm.train_dataloader())
         elif val_check_interval > args.total_steps and args.total_steps != -1:
             val_check_interval = args.total_steps
-
-    mmlu_test_cb = MMLUCallback(args.eval_every, split="test", checkpoint_oracle=True)
-    mmmlu_val_cb = MMLUCallback(args.eval_every, split="val", checkpoint_oracle=True)
-    callbacks += [mmlu_test_cb, mmmlu_val_cb]
+    if args.eval_mmlu_flag is True:
+        mmlu_test_cb = MMLUCallback(
+            args.eval_every, split="test", checkpoint_oracle=True
+        )
+        mmmlu_val_cb = MMLUCallback(
+            args.eval_every, split="val", checkpoint_oracle=True
+        )
+        callbacks += [mmlu_test_cb, mmmlu_val_cb]
 
     trainer = Trainer(
         devices=-1,
@@ -246,23 +264,28 @@ def run_multitask(args):
     del module
     torch.cuda.empty_cache()
 
-    module_test_oracle = model_class.load_from_checkpoint(mmlu_test_cb.last_chkpt).to(
-        "cuda"
-    )
-    eval_mmlu(
-        module_test_oracle, args, mmlu_test_cb.base_perf, chkpt_crit="test_mmlu_oracle"
-    )
-    del module_test_oracle
-    torch.cuda.empty_cache()
+    if args.eval_mmlu_flag is True:
+        module_test_oracle = model_class.load_from_checkpoint(
+            mmlu_test_cb.last_chkpt
+        ).to("cuda")
+        eval_mmlu(
+            module_test_oracle,
+            args,
+            mmlu_test_cb.base_perf,
+            chkpt_crit="test_mmlu_oracle",
+        )
+        del module_test_oracle
+        torch.cuda.empty_cache()
 
-    # for best model selected with mmlu/val
-    module_valid_oracle = model_class.load_from_checkpoint(mmmlu_val_cb.last_chkpt).to(
-        "cuda"
-    )
-    eval_mmlu(module_valid_oracle, args, mmlu_test_cb.base_perf, chkpt_crit="val_mmlu")
-    del module_valid_oracle
-    torch.cuda.empty_cache()
-
+        # for best model selected with mmlu/val
+        module_valid_oracle = model_class.load_from_checkpoint(
+            mmmlu_val_cb.last_chkpt
+        ).to("cuda")
+        eval_mmlu(
+            module_valid_oracle, args, mmlu_test_cb.base_perf, chkpt_crit="val_mmlu"
+        )
+        del module_valid_oracle
+        torch.cuda.empty_cache()
     # reload best model before pushing!
     checkpoint = (
         checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
@@ -270,7 +293,8 @@ def run_multitask(args):
 
     if checkpoint:
         module = model_class.load_from_checkpoint(checkpoint).to("cuda")
-        eval_mmlu(module, args, mmlu_test_cb.base_perf, chkpt_crit=monitor)
+        if args.eval_mmlu_flag is True:
+            eval_mmlu(module, args, mmlu_test_cb.base_perf, chkpt_crit="val_mmlu")
 
     if args.hf_repo_id and checkpoint:
         from projects.wiki_experts.src.expert_model import push_expert_to_hub

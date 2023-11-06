@@ -20,10 +20,14 @@ class ExpertConfig(Config):
         self.micro_batch_size = None
         self.validation_portion = 0.03
 
-        self.expand_val_set_w_downstream = True
+        self.expand_val_set_w_downstream = False
 
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
+
+        # training expert
+        self.eval_mmlu_flag = False
+        self.category = None
 
     def post_init(self):
         if self.micro_batch_size is None:
