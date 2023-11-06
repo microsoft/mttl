@@ -157,8 +157,14 @@ def test_mmlu_spaces_and_merges(task_name=None):
     batch = next(iter(mmlu.test_dataloader()))
 
     sources_text = batch["sources_texts"]
+    labels_text = batch["labels_texts"]
+    input_ids = mmlu.tokenizer(sources_text[0] + " " + labels_text[0]).input_ids
+    assert np.allclose(
+        batch["input_ids"][0][: len(input_ids)].numpy().tolist(), input_ids
+    )
     # Answer:
     assert sources_text[0][-1] == ":"
+    assert labels_text[0][0] != " "
 
     mmlu = MMLUDataModule(
         MMLUDataConfig(
@@ -174,3 +180,9 @@ def test_mmlu_spaces_and_merges(task_name=None):
 
     assert mmlu.tokenizer.mttl_merges_space
     batch = next(iter(mmlu.test_dataloader()))
+    assert sources_text[0][-1] == ":"
+    assert labels_text[0][0] != " "
+    input_ids = mmlu.tokenizer(sources_text[0] + " " + labels_text[0]).input_ids
+    assert np.allclose(
+        batch["input_ids"][0][: len(input_ids)].numpy().tolist(), input_ids
+    )
