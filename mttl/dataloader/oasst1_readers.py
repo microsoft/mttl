@@ -1,7 +1,5 @@
 import torch
 from datasets import load_dataset
-
-from mttl.dataloader.data_utils import ExampleInfo
 from mttl.utils import hash_example, logger
 
 
@@ -30,7 +28,7 @@ class Oasst1Dataset(torch.utils.data.dataset.Dataset):
         self,
         data_dir: str = None,
     ):
-        super().__init__()     
+        super().__init__()
         self.dataset = load_dataset("ostapeno/oasst1_seed3200")["train"]
         logger.info(self[0])
 
@@ -41,20 +39,14 @@ class Oasst1Dataset(torch.utils.data.dataset.Dataset):
         entry = self.dataset[key]
 
         source = Oasst1Template.apply(entry)
-        labels = entry['response']
-        hash = hash_example(source)
-        instruction_hash = hash_example(entry["instruction"])
+        labels = entry["response"]
 
-        ex_info = ExampleInfo(
-            source,
-            labels,
-            task_id=-1,
-            example_id=key,
-            input_text=source,
-            hash=hash,
-            instruction_hash=instruction_hash,
-        )
-        return ex_info
+        return {
+            "source": source,
+            "target": labels,
+            "example_id": key,
+            "instruction": entry.get("instruction"),
+        }
 
     def read_all_instructions(self):
         """Read all instructions from the dataset."""
@@ -69,17 +61,13 @@ class InverseOasst1Dataset(Oasst1Dataset):
         entry = self.dataset[key]
 
         source = InverseOasst1Template.apply(entry)
-        labels = entry['instruction']
+        labels = entry["instruction"]
         hash = hash_example(source)
         instruction_hash = hash_example(entry["instruction"])
 
-        ex_info = ExampleInfo(
-            source,
-            labels,
-            task_id=-1,
-            example_id=key,
-            input_text=source,
-            hash=hash,
-            instruction_hash=instruction_hash,
-        )
-        return ex_info
+        return {
+            "source": source,
+            "target": labels,
+            "example_id": key,
+            "instruction": entry.get("response"),
+        }
