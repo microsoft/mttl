@@ -107,8 +107,6 @@ class MMLUEvaluator(object):
             enumerate(dataloader),
             total=len(dataloader),
         )
-        # write the file to disk (input, accuracy, expertname) to a json file
-        fout = open("adapter_ranker_train.jsonl", "a")
         for _, batch in pbar:
             task_names = batch.pop("task_names", None)
             batch.pop("sources_texts", None)
@@ -184,20 +182,6 @@ class MMLUEvaluator(object):
             )
 
             all_EM.extend(eval_metrics["exact_match"])
-
-            for i in range(len(predictions)):
-                fout.write(
-                    json.dumps(
-                        {
-                            "input": inputs_text[i],
-                            "accuracy": eval_metrics["exact_match"][i],
-                            "expertname": task_names[i],
-                        }
-                    )
-                    + "\n"
-                )
-            fout.flush()
-
             pbar.set_description(
                 f"Task: {task_names[0] if task_names else None}, EM: {np.mean(all_EM):.4f}"
             )
