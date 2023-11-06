@@ -11,22 +11,16 @@ from mttl.evaluators.base import compute_task_aggregation
 
 
 class MMLUEvaluator(object):
-    def __init__(self, config, data_dir=None, max_input_length=None, device="cuda"):
+    def __init__(self, config, max_input_length=None, device="cuda"):
         from mttl.datamodule.mmlu_data_module import MMLUDataModule
 
         self.config = deepcopy(config)
         self.device = device
 
-        if data_dir is None:
-            data_dir = config.data_dir
-
         if max_input_length is not None:
             self.config.max_input_length = max_input_length
 
-        self.data_dir = data_dir
-        self.datamodule = MMLUDataModule(
-            self.config, data_dir=self.data_dir, for_generation=True
-        )
+        self.datamodule = MMLUDataModule(self.config, for_generation=True)
         self.datamodule.setup("test")
 
     def evaluate(self, model, subsample=-1):

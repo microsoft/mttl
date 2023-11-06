@@ -24,6 +24,12 @@ def setup_mmlu(session):
         session.__MMLU_CACHE = None
 
 
+def setup_gptneo(session):
+    from transformers import AutoModelForCausalLM
+
+    AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-125m")
+
+
 def teardown_mmlu(session):
     # remove the cached images
     import shutil
@@ -34,6 +40,7 @@ def teardown_mmlu(session):
 
 def pytest_sessionstart(session):
     setup_mmlu(session)
+    setup_gptneo(session)
 
 
 def pytest_sessionfinish(session, exitstatus):
