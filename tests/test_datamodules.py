@@ -50,9 +50,10 @@ def test_platypus():
     assert "sources_texts" in batch
     assert "labels_texts" in batch
     # there is no space added to the labels
+    assert batch["sources_texts"][0][-1] == "\n"
     assert batch["labels_texts"][0][0] != ""
     input_ids = platy.tokenizer(
-        batch["sources_texts"][0] + " " + batch["labels_texts"][0]
+        batch["sources_texts"][0] + batch["labels_texts"][0]
     ).input_ids
     assert np.allclose(
         batch["input_ids"][0][: len(input_ids)].numpy().tolist(), input_ids
