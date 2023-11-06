@@ -1,5 +1,4 @@
 import os
-import sys
 import torch
 from pytorch_lightning import seed_everything
 from projects.instr_routing.config import RoutingConfig
