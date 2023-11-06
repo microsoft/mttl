@@ -1,9 +1,5 @@
 import torch
-import os
 from datasets import load_dataset
-
-from mttl.dataloader.data_utils import ExampleInfo
-from mttl.utils import hash_example
 
 
 class AlpacaTemplateForHash(
@@ -70,19 +66,11 @@ class AlpacaTemplateSource(object):
 
 class AlpacaDataset(torch.utils.data.dataset.Dataset):
     def __init__(
-        self,   
-        data_dir,
-        idxs=None,
-        subset=None,
+        self,
     ):
-        super().__init__()     
+        super().__init__()
+
         self.dataset = load_dataset("yahma/alpaca-cleaned")["train"]
-
-        if idxs is not None:
-            self.dataset = self.dataset.select(idxs)
-
-        if subset is not None:
-            self.dataset = self.dataset.select(range(subset))
 
     def __len__(self):
         return len(self.dataset)
@@ -90,25 +78,14 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
     def __getitem__(self, key):
         entry = self.dataset[key]
 
-        enc_input_for_hash = AlpacaTemplateForHash.apply(entry)
-        input_hash = hash_example(enc_input_for_hash)
-        instruction_hash = hash_example(entry["instruction"])
-
-        enc_input = AlpacaTemplate.apply(entry)
-        input = AlpacaTemplateSource.apply(entry)
+        source = AlpacaTemplateSource.apply(entry)
         target = entry["output"]
-        task_id = 0
 
-        ex_info = ExampleInfo(
-            input,
-            target,
-            task_id,
-            input_hash,
-            example_id=key,
-            input_text=enc_input,
-            instruction_hash=instruction_hash,
-        )
-        return ex_info
+        return {
+            "source": source,
+            "target": target,
+            "instruction": entry.get("instruction"),
+        }
 
     def read_all_instructions(self):
         """Read all instructions from the dataset."""

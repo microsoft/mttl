@@ -6,8 +6,7 @@ from datasets import (
     Dataset,
 )
 import numpy as np
-from mttl.dataloader.data_utils import ExampleInfo
-from mttl.utils import hash_example, logger
+from mttl.utils import logger
 
 
 class PlatypusTemplate:
@@ -38,49 +37,12 @@ class InversePlatypusTemplate:
             return prompt
 
 
-class PlatypusDataset(torch.utils.data.dataset.Dataset):
-    def __init__(
-        self, data_dir: str = None, dataset_name: str = "garage-bAInd/Open-Platypus"
-    ):
-        super().__init__()
-        self.dataset = load_dataset(dataset_name)["train"]
-        logger.info(self[0])
-
-    def __len__(self):
-        return len(self.dataset)
-
-    def __getitem__(self, key):
-        entry = self.dataset[key]
-
-        source = PlatypusTemplate.apply(entry["instruction"], entry["input"])
-        labels = entry["output"]
-        hash = hash_example(source)
-        instruction_hash = hash_example(entry["instruction"])
-
-        ex_info = ExampleInfo(
-            source,
-            labels,
-            task_id=-1,
-            example_id=key,
-            input_text=source,
-            hash=hash,
-            instruction_hash=instruction_hash,
-        )
-        return ex_info
-
-    def read_all_instructions(self):
-        """Read all instructions from the dataset."""
-        all_instructions = []
-        for data in self.dataset:
-            all_instructions.append(data["instruction"])
-        return all_instructions
-
-
 def preprocess(mix_in: Dataset):
     import pandas as pd
 
     if mix_in is None:
         return None
+
     mapping = {
         "Task": "subject",
         "Input": "instruction",
@@ -109,10 +71,39 @@ def preprocess(mix_in: Dataset):
     return new_dsts
 
 
+class PlatypusDataset(torch.utils.data.dataset.Dataset):
+    def __init__(self, dataset_name: str = "garage-bAInd/Open-Platypus"):
+        super().__init__()
+
+        self.dataset = load_dataset(dataset_name)["train"]
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, key):
+        entry = self.dataset[key]
+
+        source = PlatypusTemplate.apply(entry["instruction"], entry["input"])
+        target = entry["output"]
+
+        return {
+            "source": source,
+            "target": target,
+            "example_id": key,
+            "instruction": entry.get("instruction"),
+        }
+
+    def read_all_instructions(self):
+        """Read all instructions from the dataset."""
+        all_instructions = []
+        for data in self.dataset:
+            all_instructions.append(data["instruction"])
+        return all_instructions
+
+
 class PlatypusQADataset(torch.utils.data.dataset.Dataset):
     def __init__(
         self,
-        data_dir: str = None,
         dataset_name: str = None,
         filter_by_subject: str = None,
         val_mixin: Dataset = None,
@@ -127,19 +118,21 @@ class PlatypusQADataset(torch.utils.data.dataset.Dataset):
         datasets_ = []
         for task_name in task_names:
             datasets_.append(load_dataset(dataset_name, split=task_name))
+
         self.dataset = concatenate_datasets(datasets_)
         self.val_mixin = preprocess(val_mixin)
         self.mixin_idxs = None
+
         if self.val_mixin is not None:
             if filter_by_subject is not None:
                 val_mixins = [self.val_mixin[sub] for sub in task_names]
             else:
                 val_mixins = [v for k, v in self.val_mixin.items()]
+
             self.val_mixin = concatenate_datasets(val_mixins)
             self.dataset = concatenate_datasets([self.dataset, self.val_mixin])
             len_mixin = len(self.val_mixin)
             self.mixin_idxs = torch.arange(len(self.dataset))[-len_mixin:]
-        logger.info(self[0])
 
     def __len__(self):
         return len(self.dataset)
@@ -148,20 +141,14 @@ class PlatypusQADataset(torch.utils.data.dataset.Dataset):
         entry = self.dataset[key]
 
         source = PlatypusTemplate.apply(entry["instruction"], entry.get("input"))
-        labels = entry["response"] if "response" in entry else entry["output"]
-        hash = hash_example(source)
-        instruction_hash = hash_example(entry["instruction"])
+        target = entry["response"] if "response" in entry else entry["output"]
 
-        ex_info = ExampleInfo(
-            source,
-            labels,
-            task_id=-1,
-            example_id=key,
-            input_text=source,
-            hash=hash,
-            instruction_hash=instruction_hash,
-        )
-        return ex_info
+        return {
+            "source": source,
+            "target": target,
+            "example_id": key,
+            "instruction": entry.get("instruction"),
+        }
 
     def read_all_instructions(self):
         """Read all instructions from the dataset."""
@@ -178,17 +165,11 @@ class InversePlatypusDataset(PlatypusDataset):
         source = InversePlatypusTemplate.apply(
             entry["output"], entry.get("input"), entry.get("icl_examples")
         )
-        labels = entry["instruction"]
-        hash = hash_example(source)
-        instruction_hash = hash_example(entry["instruction"])
+        target = entry["instruction"]
 
-        ex_info = ExampleInfo(
-            source,
-            labels,
-            task_id=-1,
-            example_id=key,
-            input_text=source,
-            hash=hash,
-            instruction_hash=instruction_hash,
-        )
-        return ex_info
+        return {
+            "source": source,
+            "target": target,
+            "example_id": key,
+            "instruction": entry.get("instruction"),
+        }

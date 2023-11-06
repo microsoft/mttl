@@ -3,7 +3,7 @@ from mttl.dataloader.platypus_dataset_reader import (
     PlatypusDataset,
     PlatypusQADataset,
 )
-from mttl.datamodule.collators import DefaultDataModule, DatasetConfig
+from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from dataclasses import dataclass
 import torch
 
@@ -16,11 +16,12 @@ class PlatypusConfig(DatasetConfig):
 class PlatypusModule(DefaultDataModule):
     def setup_dataset(self):
         if getattr(self.config, "train_on_reverse", False):
-            dataset = InversePlatypusDataset(self.config.data_dir)
+            dataset = InversePlatypusDataset()
         else:
-            dataset = PlatypusDataset(self.config.data_dir)
+            dataset = PlatypusDataset()
 
         self.train_dataset, self.dev_dataset = self.create_train_valid_split(dataset)
+        self.test_dataset = self.dev_dataset
         self.print_infos()
 
 
@@ -30,7 +31,6 @@ class PlatypusQAModule(PlatypusModule):
             raise NotImplementedError("train_on_reverse is not implemented for QA.")
         else:
             train_dataset = PlatypusQADataset(
-                self.config.data_dir,
                 dataset_name=self.config.dataset,
                 filter_by_subject=self.config.finetune_task_name,
                 val_mixin=self.val_mixin,
@@ -48,6 +48,7 @@ class PlatypusQAModule(PlatypusModule):
         """
         if not hasattr(dataset, "val_mixin") or dataset.val_mixin is None:
             return super().create_train_valid_split(dataset, validation_portion)
+
         validation_portion = validation_portion or self.config.validation_portion
 
         n_tr_samples = int(

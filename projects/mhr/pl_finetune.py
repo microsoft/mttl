@@ -7,12 +7,16 @@ import pytorch_lightning as pl
 from pytorch_lightning import Trainer, seed_everything
 
 from mttl.callbacks import ProgressCallback
-from mttl.datamodule.ni_original_data_module import NIOriginalDataModule
 from mttl.datamodule.t0_data_module import T0FinetuneDataModule
 from mttl.models.encoder_decoder import Finetuner
 from mttl.models.monitors import get_monitors
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
-from mttl.utils import CustomModelCheckpoint, get_checkpoint_path, get_mlf_logger, setup_logging
+from mttl.utils import (
+    CustomModelCheckpoint,
+    get_checkpoint_path,
+    get_mlf_logger,
+    setup_logging,
+)
 from mttl.config import Config
 
 # When loading a checkpoint for evaluation, which args from old checkpoint
@@ -52,7 +56,9 @@ def finetune(args, use_mlf=True, do_zs=True):
 
     # build the pretrained model
     if args.checkpoint:
-        ckpt_path = get_checkpoint_path(args.checkpoint, use_last=args.finetune_use_last_checkpoint)
+        ckpt_path = get_checkpoint_path(
+            args.checkpoint, use_last=args.finetune_use_last_checkpoint
+        )
 
         if ckpt_path.startswith("az://"):
             import fsspec
@@ -168,9 +174,9 @@ def finetune(args, use_mlf=True, do_zs=True):
         if mlf_logger and use_mlf:
             loggers.append(mlf_logger)
 
-        loggers.append(pl.loggers.CSVLogger(
-            save_dir=args.output_dir, name="csv_metrics"
-        ))
+        loggers.append(
+            pl.loggers.CSVLogger(save_dir=args.output_dir, name="csv_metrics")
+        )
 
         if args.finetune_skip_es:
             check_val_every_n_epoch = 10000

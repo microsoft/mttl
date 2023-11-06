@@ -50,5 +50,5 @@ class TrainIndices:
 class IndexConcatDataset(ConcatDataset):
     def __getitem__(self, idx):
         example_info = super().__getitem__(idx)
-        example_info.example_id = idx
+        example_info["example_id"] = idx
         return example_info

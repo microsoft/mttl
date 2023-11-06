@@ -5,7 +5,7 @@ from datasets import load_dataset, get_dataset_split_names, concatenate_datasets
 from typing import Optional
 from dataclasses import dataclass
 from mttl.datamodule.platypus_module import PlatypusConfig
-from mttl.datamodule.collators import DefaultDataModule
+from mttl.datamodule.base import DefaultDataModule
 
 from mttl.utils import logger
 

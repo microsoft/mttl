@@ -3,21 +3,21 @@ import torch
 import os
 import itertools
 import pkg_resources
-from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PaddingStrategy
 from typing import Union, Optional
+
 import re
 import copy
+
 from datasets import load_dataset
 from dataclasses import dataclass
+from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 
-from collections import defaultdict
 from mttl.utils import logger
-from mttl.datamodule.utils import get_tokenizer
-from mttl.datamodule.collators import DatasetConfig, DefaultCollator, DefaultDataModule
+from mttl.datamodule.base import DatasetConfig, DefaultCollator, DefaultDataModule
 
 
 #################################################
@@ -116,9 +116,6 @@ def augment_prompts(dataset):
     return dataset.map(_augment_prompts, batched=True)
 
 
-#################################################
-
-
 @dataclass
 class DataCollatorForMMLU(DefaultCollator):
     tokenizer: AutoTokenizer
@@ -178,6 +175,7 @@ class DataCollatorForMMLU(DefaultCollator):
                 [self.task_to_id[task] for task in task_names]
             )
 
+        output_batch["sources_texts"] = sources
         output_batch["labels_texts"] = labels
         output_batch["sources_texts"] = sources
         return output_batch
@@ -234,14 +232,6 @@ class MMLUDataModule(DefaultDataModule):
             task_to_id=self.task_to_id,
         )
 
-    @property
-    def task_names(self):
-        return self._task_names
-
-    @property
-    def task_to_id(self):
-        return self._task_to_id
-
     def setup_dataset(self, stage=None):
         filename = pkg_resources.resource_filename(
             __name__, "../dataloader/mmlu_dataset.py"
@@ -253,42 +243,14 @@ class MMLUDataModule(DefaultDataModule):
             augment_with_option_permutations=self.config.augment_mmlu,
         )
 
-        task_names = set(dataset["train"]["Task"])
-        task_names = task_names.union(set(dataset["validation"]["Task"]))
-        task_names = task_names.union(set(dataset["test"]["Task"]))
-        task_subset = None
+        (
+            self._task_names,
+            self._task_to_id,
+            self.train_dataset,
+            self.dev_dataset,
+            self.test_dataset,
+        ) = maybe_filter_hf_dataset_by_task(
+            dataset, "Task", self.config.finetune_task_name
+        )
 
-        if self.config.finetune_task_name is not None:
-            task_subset = sorted(self.config.finetune_task_name.split(","))
-            if any(task not in task_names for task in task_subset):
-                raise ValueError("Unknown task name in finetune_task_name")
-            task_names = task_subset
-
-        self._task_names = sorted(list(task_names))
-        self._task_to_id = {task: i for i, task in enumerate(self._task_names)}
-
-        if task_subset is not None:
-            self.train_dataset = dataset["train"].filter(
-                lambda x: x["Task"] in task_subset
-            )
-            self.dev_dataset = dataset["validation"].filter(
-                lambda x: x["Task"] in task_subset
-            )
-            self.test_dataset = dataset["test"].filter(
-                lambda x: x["Task"] in task_subset
-            )
-        else:
-            self.train_dataset = dataset["train"]
-            self.test_dataset = dataset["test"]
-            self.dev_dataset = dataset["validation"]
-
-        logger.info("Training examples: {}".format(len(self.train_dataset)))
-        logger.info("Test examples: {}".format(len(self.test_dataset)))
-
-
-if __name__ == "__main__":
-    from mttl.config import Config
-
-    config = Config.parse()
-    data_module = MMLUDataModule(config)
-    data_module.setup()
+        self.print_infos()

@@ -3,15 +3,13 @@ import time
 import sys, os
 import copy
 from typing import Any
-from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 import pytorch_lightning as pl
 from pytorch_lightning import LightningModule, Trainer, callbacks as cb
 from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
 from torch.optim import Optimizer
-
-
 from mttl.utils import Averager, logger
+
 
 DEBUG = False
 
@@ -148,7 +146,6 @@ class MMLUCallback(cb.Callback):
 
         evaluator = MMLUEvaluator(
             pl_module.hparams,
-            data_dir=os.environ["MMLU_DATA_DIR"],
             **self.eval_kwargs,
         )
         metrics = evaluator.evaluate(
@@ -185,7 +182,6 @@ class NICallback(cb.Callback):
 
         evaluator = NIEvaluator(
             pl_module.hparams,
-            data_dir=os.environ["NI_DATA_DIR"],
             num_pos_examples=2,
             **self.eval_kwargs,
         )
