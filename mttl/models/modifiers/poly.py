@@ -6,7 +6,7 @@ import numpy as np
 from torch.distributions.relaxed_bernoulli import RelaxedBernoulli
 from mttl.global_vars import EPS
 
-from mttl.models.modifiers.base import SkilledLoRA
+from mttl.models.modifiers.lora import SkilledLoRA
 from mttl.models.modifiers.modify_model import register_modifier
 from mttl.models.modifiers.routing import (
     RouterWrapper,
