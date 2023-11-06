@@ -11,7 +11,6 @@ from vllm import LLM, SamplingParams
 from vllm.model_executor.parallel_utils.parallel_state import destroy_model_parallel
 from mttl.utils import logger
 from mttl.models.adapters import MergableAdapter
-from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 
 
 def save_merged_model(model, model_path, hf_path="/tmp/merged"):
@@ -22,6 +21,9 @@ def save_merged_model(model, model_path, hf_path="/tmp/merged"):
     """
 
     if model_path:
+        # TODO: REMOVE this
+        from projects.wiki_experts.src.expert_trainer import ExpertTrainer
+
         logger.info("Model path is given. Loading model from: %s" % model_path)
 
         model = ExpertTrainer.from_pretrained(

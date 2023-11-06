@@ -1,5 +1,5 @@
 from mttl.dataloader.oasst1_readers import InverseOasst1Dataset, Oasst1Dataset
-from mttl.datamodule.collators import DefaultDataModule, DatasetConfig
+from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from dataclasses import dataclass
 
 
@@ -10,7 +10,7 @@ class OA1Config(DatasetConfig):
 
 class OA1Module(DefaultDataModule):
     def setup_dataset(self):
-        if getattr(self.config, 'train_on_reverse', False):
+        if getattr(self.config, "train_on_reverse", False):
             dataset = InverseOasst1Dataset(self.config.data_dir)
         else:
             dataset = Oasst1Dataset(self.config.data_dir)
