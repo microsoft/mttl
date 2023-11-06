@@ -11,11 +11,10 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.callbacks import MMLUCallback, MiniProgress, NICallback
+from mttl.callbacks import MMLUCallback, NICallback
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.platypus_module import PlatypusModule
-from mttl.datamodule.flan100k_module import Flan100kModule
-from mttl.datamodule.ni_original_data_module import NIOriginalDataModule
+from mttl.datamodule.ni_data_module import NiDataModule
 from mttl.utils import get_mlf_logger, setup_logging, logger
 from mttl.dist_utils import is_main_process
 from mttl.models.modifiers.routing import RoutingSelector
@@ -191,10 +190,8 @@ def run_multitask(args):
         dm = AlpacaDataModule(args)
     elif args.dataset == "platypus":
         dm = PlatypusModule(args)
-    elif args.dataset == "flan100k":
-        dm = Flan100kModule(args)
     elif args.dataset == "ni":
-        dm = NIOriginalDataModule(args)
+        dm = NiDataModule(args)
     else:
         raise NotImplementedError()
 
@@ -310,9 +307,7 @@ def run_multitask(args):
             logger.info(f"eval in 8 bit : {eval_in_8bit}")
 
             best_model = CLM.load_from_checkpoint(
-                path_best_model,
-                tokenizer=dm.tokenizer,
-                load_in_8bit=eval_in_8bit
+                path_best_model, tokenizer=dm.tokenizer, load_in_8bit=eval_in_8bit
             ).to("cuda")
         else:
             torch.cuda.empty_cache()

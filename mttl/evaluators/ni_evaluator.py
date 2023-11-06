@@ -69,13 +69,12 @@ class NIEvaluator(object):
     def __init__(
         self,
         config,
-        data_dir=None,
         num_pos_examples=0,
         max_input_length=None,
         pred_output_file_path=None,
         device="cuda",
     ):
-        from mttl.datamodule.ni_original_data_module import NIOriginalDataModule
+        from mttl.datamodule.ni_data_module import NiDataModule
 
         self.config = deepcopy(config)
         self.device = device
@@ -86,17 +85,13 @@ class NIEvaluator(object):
         # unrestricted input length for SNI pass -1
         if max_input_length is not None:
             self.config.max_input_length = max_input_length
+
         self.config.max_output_length = 128
         self.config.num_pos_examples = num_pos_examples
         self.config.use_task_descriptions = True
 
-        if data_dir is None:
-            data_dir = config.data_dir
-
-        self.data_dir = data_dir
-        self.datamodule = NIOriginalDataModule(
+        self.datamodule = NiDataModule(
             self.config,
-            data_dir=data_dir,
             for_generation=True,
         )
         self.datamodule.setup("test")
@@ -126,7 +121,8 @@ class NIEvaluator(object):
             total=len(dataloader),
         )
         eval_instances = {}
-        for step, batch in pbar:
+
+        for _, batch in pbar:
             task_names = batch.pop("task_names", None)
             batch.pop("input_texts", None)
             # we use labels texts here for evaluation, because some tokenizers do not skip
@@ -187,7 +183,8 @@ class NIEvaluator(object):
             all_task_names += task_names
 
             eval_metrics = compute_metrics(predictions, references, reduction="none")
-            all_rougeL.append(np.mean(eval_metrics["rougeL"]))
+            all_rougeL.extend(eval_metrics["rougeL"])
+
             pbar.set_description(
                 f"Task: {task_names[0] if task_names else None}, rougeL: {np.mean(all_rougeL):.4f}"
             )

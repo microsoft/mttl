@@ -1,7 +1,7 @@
-datasets==2.14.4
+datasets==2.14.6
 click
 transformers==4.34.1
-pytorch-lightning==2.0.5
+pytorch-lightning==2.1.0
 wandb
 rouge
 wget
@@ -23,4 +23,5 @@ openai
 ray
 shortuuid
 matplotlib
-bleurt@https://github.com/google-research/bleurt/archive/b610120347ef22b494b6d69b4316e303f5932516.zip#egg=bleurt
+bleurt @ https://github.com/google-research/bleurt/archive/b610120347ef22b494b6d69b4316e303f5932516.zip#egg=bleurt
+promptsource @ git+https://github.com/bigscience-workshop/promptsource@7dab96a3eeb3717cea633705135ebc488885d709

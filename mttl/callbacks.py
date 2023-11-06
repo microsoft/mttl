@@ -5,8 +5,6 @@ from typing import Any
 
 from pytorch_lightning import callbacks as cb
 from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
-
-
 from mttl.utils import Averager, logger
 
 
@@ -48,9 +46,9 @@ class MMLUCallback(cb.Callback):
 
     def on_after_backward(self, *args, **kwargs):
         self.val_epoch += 1
-        
+
         trainer, pl_module = args
-        
+
         if trainer.global_step < 1:
             return
 
@@ -75,6 +73,7 @@ class MMLUCallback(cb.Callback):
             on_epoch=True,
             prog_bar=True,
         )
+
 
 class NICallback(cb.Callback):
     def __init__(self, every_val_epochs=1, **kwargs):

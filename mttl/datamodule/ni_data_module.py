@@ -1,138 +1,403 @@
+import numpy as np
 import torch
 
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
+from datasets import load_dataset
+import json
+import tqdm
+import os
+import random
+import string
+from typing import Optional
+import pkg_resources
+from dataclasses import dataclass
 
-from typing import List
-
-from mttl.utils import get_ni_tasks_from_file, trim_batch, hash_example
-from mttl.datamodule.utils import get_tokenizer
-from mttl.datamodule import IndexConcatDataset
-from mttl.datamodule.collators import DefaultCollator
-from mttl.dataloader.ni_dataset_readers import NIDatasetReader
+from mttl.datamodule.utils import get_tokenizer, maybe_filter_hf_dataset_by_task
+from mttl.datamodule.base import DefaultCollator, DefaultDataModule, DatasetConfig
+from mttl.utils import hash_example, logger
 
 
-class NIDataModule(LightningDataModule):
-    def train_dataloader(self):
-        return DataLoader(
-            self.train_dataset,
-            batch_size=self.config.train_batch_size,
-            num_workers=16,
-            pin_memory=True,
-            persistent_workers=True,
-            shuffle=True,
-            collate_fn=self.collate_fn,
-        )
+@dataclass
+class NiDataConfig(DatasetConfig):
+    add_task_name: bool = False
+    add_task_definition: bool = True
+    num_pos_examples: int = 0
+    num_neg_examples: int = 0
+    add_explanation: bool = False
+    tk_instruct: bool = False
+    max_num_instances_per_task: int = 100
 
-    def val_dataloader(self, shuffle=False):
-        return DataLoader(
-            self.val_dataset,
-            batch_size=self.config.predict_batch_size,
-            num_workers=16,
-            pin_memory=True,
-            shuffle=shuffle,
-            persistent_workers=True,
-            collate_fn=self.collate_fn,
-        )
 
-    def test_dataloader(self, shuffle=False):
-        return DataLoader(
-            self.test_dataset,
-            batch_size=self.config.predict_batch_size,
-            num_workers=16,
-            shuffle=shuffle,
-            pin_memory=True,
-            persistent_workers=True,
-            collate_fn=self.collate_fn,
-        )
+@dataclass
+class DataCollatorForNI(DefaultCollator):
+    tokenizer: AutoTokenizer
+    padding: bool = True
+    max_input_length: Optional[int] = 1024
+    max_output_length: Optional[int] = 128
+    pad_to_multiple_of: Optional[int] = None
+    label_pad_token_id: int = -100
+    return_tensors: str = "pt"
+    add_task_name: bool = False
+    add_task_definition: bool = True
+    num_pos_examples: int = 0
+    num_neg_examples: int = 0
+    add_explanation: bool = False
+    tk_instruct: bool = False
+    model_family: str = None
+    task_to_id: dict = None
 
-    def __init__(self, config):
-        super().__init__()
+    def __call__(self, batch, return_tensors=None):
+        if return_tensors is None:
+            return_tensors = self.return_tensors
 
-        self.config = config
+        sources = []
+        for instance in batch:
+            if self.tk_instruct:
+                all_valid_encodings = [
+                    # instruction only
+                    {
+                        "add_task_name": False,
+                        "add_task_definition": True,
+                        "num_pos_examples": 0,
+                        "num_neg_examples": 0,
+                        "add_explanation": False,
+                    },
+                    # example only
+                    {
+                        "add_task_name": False,
+                        "add_task_definition": False,
+                        "num_pos_examples": 2,
+                        "num_neg_examples": 0,
+                        "add_explanation": False,
+                    },
+                    # instruction + pos examples
+                    {
+                        "add_task_name": False,
+                        "add_task_definition": True,
+                        "num_pos_examples": 2,
+                        "num_neg_examples": 0,
+                        "add_explanation": False,
+                    },
+                    # instruction + pos examples + neg examples
+                    {
+                        "add_task_name": False,
+                        "add_task_definition": True,
+                        "num_pos_examples": 2,
+                        "num_neg_examples": 2,
+                        "add_explanation": False,
+                    },
+                    # instruction + pos (w. explanation)
+                    {
+                        "add_task_name": False,
+                        "add_task_definition": True,
+                        "num_pos_examples": 2,
+                        "num_neg_examples": 0,
+                        "add_explanation": True,
+                    },
+                ]
+                encoding_schema = random.choice(all_valid_encodings)
+                add_task_name = encoding_schema["add_task_name"]
+                add_task_definition = encoding_schema["add_task_definition"]
+                num_pos_examples = encoding_schema["num_pos_examples"]
+                num_neg_examples = encoding_schema["num_neg_examples"]
+                add_explanation = encoding_schema["add_explanation"]
+            else:
+                add_task_name = self.add_task_name
+                add_task_definition = self.add_task_definition
+                num_pos_examples = self.num_pos_examples
+                num_neg_examples = self.num_neg_examples
+                add_explanation = self.add_explanation
 
-        if not self.config.finetune_task_name:
-            self.tasks, self.task2id = get_ni_tasks_from_file(
-                config.custom_tasks_splits
+            task_input = ""
+            task_input += "Now complete the following example -\n"
+            # add the input first.
+            task_input += f"Input: {instance['Instance']['input'].strip()}"
+            if not task_input[-1] in string.punctuation:
+                task_input += "."
+            task_input += "\n"
+            task_input += "Output:"
+
+            task_name = ""
+            if add_task_name:
+                task_name += instance["Task"] + ". "
+
+            definition = ""
+            if add_task_definition:
+                if isinstance(instance["Definition"], list):
+                    definition = "Task definition: " + instance["Definition"][0].strip()
+                else:
+                    definition = "Task definition: " + instance["Definition"].strip()
+                if not definition[-1] in string.punctuation:
+                    definition += "."
+                definition += "\n"
+
+            # try to add positive examples.
+            pos_examples = []
+            for idx, pos_example in enumerate(
+                instance["Positive Examples"][:num_pos_examples]
+            ):
+                pos_example_str = f" Positive Example {idx+1} -\n"
+                pos_example_str += f"Input: {pos_example['input'].strip()}"
+                if not pos_example_str[-1] in string.punctuation:
+                    pos_example_str += "."
+                pos_example_str += "\n"
+                pos_example_str += f" Output: {pos_example['output'].strip()}"
+                if not pos_example_str[-1] in string.punctuation:
+                    pos_example_str += "."
+                # add eos token
+                pos_example_str += " " + self.tokenizer.eos_token
+                # end add eos token
+                pos_example_str += "\n"
+                if add_explanation and "explanation" in pos_example:
+                    pos_example_str += (
+                        f" Explanation: {pos_example['explanation'].strip()}"
+                    )
+                    if not pos_example_str[-1] in string.punctuation:
+                        pos_example_str += "."
+                    pos_example_str += "\n"
+                pos_example_str += "\n"
+                if self.max_input_length < 0 or (
+                    len(
+                        self.tokenizer(
+                            definition
+                            + " ".join(pos_examples)
+                            + pos_example_str
+                            + task_input
+                        )["input_ids"]
+                    )
+                    <= self.max_input_length
+                ):
+                    pos_examples.append(pos_example_str)
+                else:
+                    break
+
+            # try to add negative examples.
+            neg_examples = []
+            for idx, neg_example in enumerate(
+                instance["Negative Examples"][:num_neg_examples]
+            ):
+                neg_example_str = f" Negative Example {idx+1} -\n"
+                neg_example_str += f"Input: {neg_example['input'].strip()}"
+                if not neg_example_str[-1] in string.punctuation:
+                    neg_example_str += "."
+                neg_example_str += "\n"
+                neg_example_str += f" Output: {neg_example['output'].strip()}"
+                if not neg_example_str[-1] in string.punctuation:
+                    neg_example_str += "."
+                # add eos token
+                neg_example_str += " " + self.tokenizer.eos_token
+                # end add eos token
+                neg_example_str += "\n"
+                if add_explanation and "explanation" in neg_example:
+                    neg_example_str += (
+                        f" Explanation: {neg_example['explanation'].strip()}"
+                    )
+                    if not neg_example_str[-1] in string.punctuation:
+                        neg_example_str += "."
+                    neg_example_str += "\n"
+                neg_example_str += "\n"
+                if (
+                    len(
+                        self.tokenizer(
+                            definition
+                            + " ".join(pos_examples)
+                            + " ".join(neg_examples)
+                            + neg_example_str
+                            + task_input
+                        )["input_ids"]
+                    )
+                    <= self.max_input_length
+                ):
+                    neg_examples.append(neg_example_str)
+                else:
+                    break
+
+            source = (
+                task_name
+                + definition
+                + "".join(pos_examples)
+                + "".join(neg_examples)
+                + task_input
             )
+            tokenized_source = self.tokenizer(source)["input_ids"]
+            if (
+                len(tokenized_source) <= self.max_input_length
+                or self.max_input_length < 0
+            ):
+                sources.append(source)
+            else:
+                tokenized_task_input = self.tokenizer(
+                    "\nOutput:", add_special_tokens=False
+                )["input_ids"]
+                sources.append(
+                    self.tokenizer.decode(
+                        tokenized_source[
+                            : self.max_input_length - len(tokenized_task_input)
+                        ],
+                        skip_special_tokens=True,
+                    )
+                    + "\nOutput:"
+                )
+
+        output_batch = {}
+
+        labels_full_seq = [ex["Instance"]["output"] for ex in batch]
+        labels_rand = [random.choice(ex["Instance"]["output"]) for ex in batch]
+        instance_ids = [ex["Instance"]["id"] for ex in batch]
+        task_categories = [ex["Categories"] for ex in batch]
+        task_identifiers = [ex["Task"] for ex in batch]
+
+        output_batch = (
+            self.prepare_inputs_for_gpt_family(sources, labels_rand)
+            if self.model_family == "gpt"
+            else self.prepare_inputs_for_seq2seq_family(sources, labels_rand)
+        )
+
+        output_batch["task_names"] = task_identifiers
+        output_batch[
+            "task_identifiers"
+        ] = task_identifiers  # sni task id like e.g. task1356_xlsum_title_generation
+        output_batch["task_categories"] = task_categories
+        output_batch["task_ids"] = torch.LongTensor(
+            [self.task_to_id[task] for task in task_identifiers]
+        )  # task ids potentially used in routing
+
+        output_batch["sources_texts"] = sources
+        output_batch["labels_texts"] = labels_rand
+        output_batch["labels_full_seq"] = labels_full_seq
+        output_batch["instance_ids"] = instance_ids
+        return output_batch
+
+
+class NiDataModule(DefaultDataModule):
+    def test_dataloader(self, subsample=-1):
+        if subsample > 0:
+            from mttl.datamodule import take_n_examples_per_task
+
+            indices = take_n_examples_per_task(
+                list(self.test_dataset["Task"]),
+                n=subsample,
+                rng=self.rng if isinstance(self.rng, np.random.RandomState) else None,
+            )
+            test_dataset = self.test_dataset.select(indices)
         else:
-            self.task_name = self.config.finetune_task_name
-            self.task2id = {self.task_name: 0}
-            self.tasks = [self.task_name]
+            test_dataset = self.test_dataset
 
-        self.dataset_reader: NIDatasetReader = None
-        self.id2task = dict((k, v) for v, k in self.task2id.items())
+        return DataLoader(
+            test_dataset,
+            batch_size=self.config.predict_batch_size,
+            shuffle=False,
+            num_workers=16,
+            pin_memory=True,
+            persistent_workers=True,
+            collate_fn=self.collate_fn,
+        )
 
-        self.tokenizer = get_tokenizer(config)
-        self.collate_fn = DefaultCollator(
+    def __init__(self, config, for_generation=False, val_mixin=None):
+        if "NI_DATA_DIR" not in os.environ:
+            raise ValueError("Please set the NI_DATA_DIR environment variable.")
+
+        super().__init__(config, for_generation=for_generation, val_mixin=val_mixin)
+
+    def _check_test_references(self):
+        # make sure all test instances are in reference file
+        reference_file = os.path.join(
+            os.environ["NI_DATA_DIR"], "test_references.jsonl"
+        )
+
+        if not os.path.exists(reference_file):
+            logger.warn("No test references found, skipping check.")
+            return
+
+        eval_instances = {}
+        with open(reference_file) as fin:
+            for line in fin:
+                instance = json.loads(line)
+                # if track is not provided in the refernce file, we use set the track to `default` and use the default tokenizer in rouge-score.
+                if "track" not in instance:
+                    instance["track"] = "default"
+                eval_instances[instance["id"]] = instance
+
+        eval_ids = list(eval_instances.keys())
+        for element in tqdm.tqdm(
+            self.test_dataset,
+            desc="Checking test instances",
+            total=len(self.test_dataset),
+        ):
+            id = element["id"]
+            assert (
+                id in eval_ids
+            ), f"{id} not in test references, see https://github.com/allenai/natural-instructions/blob/master/eval/leaderboard/create_reference_file.py"
+
+    @property
+    def collate_fn(self):
+        return DataCollatorForNI(
             tokenizer=self.tokenizer,
-            max_input_length=config.max_input_length,
-            max_output_length=config.max_output_length,
-            pad_to_multiple_of=8,
-            return_tensors="pt",
-            model_family=config.model_family,
-        )
-        if config.embeddings_path:
-            self.task_embed_path = config.embeddings_path
-        else:
-            self.task_embed_path = None
-
-    @property
-    def full_dataset(self):
-        return torch.utils.data.dataset.ConcatDataset(
-            [self.train_dataset, self.val_dataset, self.test_dataset]
-        )
-
-    @property
-    def all_instructions(self):
-        """Return all task instructions used in the dataset.
-        """
-        return self.dataset_reader.read_all_instructions()
-
-    @property
-    def dataset_name(self):
-        return hash_example("-".join(self.tasks))
-
-    def setup(self, stage="fit", val_examples_per_task=None, test_examples_per_task=None):
-        self.dataset_reader = NIDatasetReader(
-            self.config.data_dir,
-            self.tokenizer,
-            tasks=self.tasks,
-            task2id=self.task2id,
-            task_embed_path=self.task_embed_path,
+            padding="longest",
             max_input_length=self.config.max_input_length,
             max_output_length=self.config.max_output_length,
-            use_task_descriptions=self.config.use_task_descriptions,
-            num_positive_examples=self.config.num_pos_examples,
-            val_examples_per_task=val_examples_per_task,
-            test_examples_per_task=test_examples_per_task,
+            num_pos_examples=self.config.num_pos_examples,
+            add_task_definition=self.config.use_task_descriptions,
+            pad_to_multiple_of=8,
+            return_tensors="pt",
+            model_family=self.config.model_family
+            if not self.for_generation
+            else "seq2seq",
+            task_to_id=self.task_to_id,
         )
 
-        print("Training on the following tasks: {}".format(self.tasks))
-
-        self.train_dataset = IndexConcatDataset(
-            self.dataset_reader.read_orig_datasets("train")
-        )
-        self.val_dataset = IndexConcatDataset(
-            self.dataset_reader.read_orig_datasets("dev")
-        )
-        self.test_dataset = IndexConcatDataset(
-            self.dataset_reader.read_orig_datasets("test")
+    def setup_dataset(self):
+        filename = pkg_resources.resource_filename(
+            __name__, "../dataloader/ni_dataset.py"
         )
 
-        print("Training examples:", len(self.train_dataset))
-        print("Validation examples:", len(self.val_dataset))
-        print("Test examples:", len(self.test_dataset))
+        # if we are fine-tuning, we have to load ~1000 instances,
+        # in order to be able to select the ones in training and in the valid set.
+        dataset = load_dataset(
+            filename,
+            data_dir=os.environ["NI_DATA_DIR"],
+            max_num_instances_per_task=(
+                self.config.max_num_instances_per_task
+                if self.config.finetune_task_name is None
+                else self.config.max_num_instances_per_task * 2
+            ),
+        )
+
+        (
+            self._task_names,
+            self._task_to_id,
+            self.train_dataset,
+            self.dev_dataset,
+            self.test_dataset,
+        ) = maybe_filter_hf_dataset_by_task(
+            dataset, "Task", self.config.finetune_task_name
+        )
+
+        # we have to pick some examples from the validation set
+        if len(self.train_dataset) == 0:
+            self.train_dataset = self.dev_dataset.select(
+                range(self.config.max_num_instances_per_task)
+            )
+            self.dev_dataset = self.dev_dataset.select(
+                range(
+                    self.config.max_num_instances_per_task,
+                    len(self.dev_dataset),
+                )
+            )
+
+        self.print_infos()
+        self._check_test_references()
 
 
-class NIPretrainDataModule(NIDataModule):
-    pass
+if __name__ == "__main__":
+    from mttl.config import Config
 
-
-class NIZeroShotDataModule(NIDataModule):
-    pass
-
-
-class NIFinetuneDataModule(NIDataModule):
-    pass
+    config = Config.parse()
+    config.task_dir = "/datadrive2/sni/tasks"
+    config.data_dir = "/datadrive2/sni/"
+    config.model = "EleutherAI/gpt-neo-125m"
+    datamodule = NiDataModule(config)
+    datamodule.setup()
+    print(next(iter(datamodule.train_dataloader())))

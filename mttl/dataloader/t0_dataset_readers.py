@@ -11,6 +11,9 @@ import re
 import pandas as pd
 
 
+import os
+
+
 DATASETS_OFFLINE = "no"
 MAX_EXAMPLES_PER_DATASET = 500_000
 TASK_BLACKLIST = [
@@ -43,6 +46,75 @@ TASK_BLACKLIST = [
 ]
 
 
+DATASET_INFO = """HF_name,subset,task_by_convention,do_train,do_eval,train_size
+crows_pairs,,bias_and_fairness,,BIAS_FAIRNESS,
+jigsaw_toxicity_pred,,bias_and_fairness,,BIAS_FAIRNESS,
+super_glue,axg,bias_and_fairness,,BIAS_FAIRNESS,
+wino_bias,type1_anti,bias_and_fairness,,BIAS_FAIRNESS,
+wino_bias,type2_anti,bias_and_fairness,,BIAS_FAIRNESS,
+wino_bias,type1_pro,bias_and_fairness,,BIAS_FAIRNESS,
+wino_bias,type2_pro,bias_and_fairness,,BIAS_FAIRNESS,
+super_glue,wsc.fixed,coreference,SGLUE,BASE,554
+winogrande,winogrande_xl,coreference,,BASE,40398
+super_glue,cb,NLI,,BASE,250
+super_glue,rte,NLI,,BASE,2490
+anli,,NLI,,BASE,162865
+glue,mrpc,paraphrase,BASE,,3668
+glue,qqp,paraphrase,BASE,,363846
+paws,labeled_final,paraphrase,BASE,,49401
+ai2_arc,ARC-Challenge,QA_closed_book,GPT_EVAL,,1119
+ai2_arc,ARC-Easy,QA_closed_book,GPT_EVAL,,2251
+kilt_tasks,hotpotqa,QA_closed_book,BASE,,88869
+trivia_qa,unfiltered,QA_closed_book,GPT_EVAL,,87622
+web_questions,,QA_closed_book,GPT_EVAL,,3778
+wiki_qa,,QA_closed_book,BASE,,20360
+adversarial_qa,dbidaf,QA_extractive,BASE,,10000
+adversarial_qa,dbert,QA_extractive,BASE,,10000
+adversarial_qa,droberta,QA_extractive,BASE,,10000
+duorc,SelfRC,QA_extractive,BASE,,60721
+duorc,ParaphraseRC,QA_extractive,BASE,,69524
+ropes,,QA_extractive,BASE,,10924
+squad_v2,,QA_extractive,GPT_EVAL,,130319
+super_glue,record,QA_extractive,SGLUE,,100730
+quoref,,QA_extractive,BASE,,19399
+cos_e,v1.11,QA_multiple_choice,BASE,,9741
+cosmos_qa,,QA_multiple_choice,BASE,,25262
+dream,,QA_multiple_choice,BASE,,6116
+openbookqa,main,QA_multiple_choice,GPT_EVAL,,4957
+qasc,,QA_multiple_choice,BASE,,8134
+quail,,QA_multiple_choice,BASE,,10246
+quarel,,QA_multiple_choice,BASE,,1941
+quartz,,QA_multiple_choice,BASE,,2696
+race,high,QA_multiple_choice,GPT_EVAL,,62445
+race,middle,QA_multiple_choice,GPT_EVAL,,25421
+sciq,,QA_multiple_choice,BASE,,11679
+social_i_qa,,QA_multiple_choice,BASE,,33410
+super_glue,boolq,QA_multiple_choice,SGLUE,,9427
+super_glue,copa,QA_multiple_choice,SGLUE,BASE,400
+super_glue,multirc,QA_multiple_choice,SGLUE,,27243
+wiki_hop,original,QA_multiple_choice,BASE,,43738
+wiqa,,QA_multiple_choice,BASE,,29808
+piqa,,QA_multiple_choice,GPT_EVAL,,16113
+amazon_polarity,,sentiment,BASE,,3600000
+app_reviews,,sentiment,BASE,,288065
+imdb,,sentiment,BASE,,25000
+rotten_tomatoes,,sentiment,BASE,,8530
+yelp_review_full,,sentiment,BASE,,650000
+story_cloze,2016,story_completion,,BASE,
+hellaswag,,story_completion,GPT_EVAL,BASE,39905
+common_gen,,structure_to_text,BASE,,67389
+wiki_bio,,structure_to_text,BASE,,582659
+cnn_dailymail,3.0.0,summarization,BASE,,287113
+gigaword,,summarization,BASE,,3803957
+multi_news,,summarization,BASE,,44972
+samsum,,summarization,BASE,,14732
+xsum,,summarization,BASE,,204045
+ag_news,,topic_classification,BASE,,120000
+dbpedia_14,,topic_classification,BASE,,560000
+trec,,topic_classification,BASE,,5452
+super_glue,wic,word_sense_disambiguation,SGLUE,BASE,5428
+"""
+
 # num shots for test tasks
 NUM_SHOTS_CONFIG = {
     "wsc": 32,
@@ -60,9 +132,9 @@ NUM_SHOTS_CONFIG = {
 
 
 class T0DatasetConfig:
-    def __init__(self, dataset, data_dir, output_dir, use_t0_templates_as_tasks, seed):
+    def __init__(self, dataset, use_t0_templates_as_tasks, seed):
         self.dataset = dataset
-        self.data_dir = data_dir
+        self.data_dir = os.environ["T0_DATA_DIR"]
         self.num_shot = NUM_SHOTS_CONFIG.get(dataset, 32)
         self.few_shot_random_seed = seed
         self.train_template_idx = -1
@@ -73,15 +145,11 @@ class T0DatasetConfig:
         self.raft_validation_start = 0
         self.raft_labels_in_input_string = "comma"
         self.cleaned_answer_choices_b77 = False
-        self.output_dir = output_dir
-        self.dev_pred_file = os.path.join(self.output_dir, "dev_pred.txt")
 
     @classmethod
     def from_args(cls, args):
         config = T0DatasetConfig(
             args.finetune_task_name,
-            args.data_dir,
-            args.output_dir,
             args.use_t0_templates_as_tasks,
             args.seed,
         )
@@ -242,9 +310,7 @@ class StoryClozeReader(BaseDatasetReader):
             orig_data = load_dataset(
                 *dataset_stash,
                 split=split,
-                data_dir=os.environ.get(
-                "STORYCLOZE_DIR", self.config.data_dir
-                ),
+                data_dir=os.environ.get("STORYCLOZE_DIR", self.config.data_dir),
             )
         orig_data = [example for example in orig_data]
         for idx, example in enumerate(orig_data):
@@ -414,32 +480,27 @@ class T0MixtureReader(object):
             "BIAS_FAIRNESS": [],
         }
         gsheet: Dict[datatset_subset_tuple, Dict] = {}
-        experiment_path = pkg_resources.resource_filename(
-            __name__, "t0_data/datasets.csv"
-        )
 
-        with open(experiment_path) as exp_file:
-            reader = csv.DictReader(exp_file)
-            for row in reader:
-                if row["subset"] == "":
-                    row["subset"] = None  # to match promptsource.Template object
-                dataset_subset = (row["HF_name"], row["subset"])
-                if row["do_train"] != "":
-                    do_train_source = row["do_train"]
-                    # sanity checks
-                    if do_train_source == "SGLUE":
-                        assert dataset_subset[0] == "super_glue"
-                    t0_train[do_train_source].append(dataset_subset)
-                if row["do_eval"] != "":
-                    do_eval_source = row["do_eval"]
-                    # sanity checks
-                    if do_eval_source == "BIAS_FAIRNESS":
-                        assert row["task_by_convention"] == "bias_and_fairness"
-                    t0_eval[do_eval_source].append(dataset_subset)
-                gsheet[dataset_subset] = row
+        reader = csv.DictReader(DATASET_INFO.splitlines())
+        for row in reader:
+            if row["subset"] == "":
+                row["subset"] = None  # to match promptsource.Template object
+            dataset_subset = (row["HF_name"], row["subset"])
+            if row["do_train"] != "":
+                do_train_source = row["do_train"]
+                # sanity checks
+                if do_train_source == "SGLUE":
+                    assert dataset_subset[0] == "super_glue"
+                t0_train[do_train_source].append(dataset_subset)
+            if row["do_eval"] != "":
+                do_eval_source = row["do_eval"]
+                # sanity checks
+                if do_eval_source == "BIAS_FAIRNESS":
+                    assert row["task_by_convention"] == "bias_and_fairness"
+                t0_eval[do_eval_source].append(dataset_subset)
+            gsheet[dataset_subset] = row
 
         all_datasets = sum(t0_train.values(), []) + sum(t0_eval.values(), [])
-
         all_templates = templates.TemplateCollection()
         all_templates.remove("anli")
 
@@ -548,8 +609,12 @@ class T0MixtureReader(object):
         Read the original dataset
         :param split: split of data
         """
+        import tqdm
+
         orig_data = []
-        for dataset_name, subset_name, template_name, cap in self.t0_base_tasks:
+        for dataset_name, subset_name, template_name, cap in tqdm.tqdm(
+            self.t0_base_tasks, desc="Loading data..."
+        ):
             if split == "train":
                 split_num = f"{split}[0:{cap}]"
             else:
@@ -565,6 +630,7 @@ class T0MixtureReader(object):
             ds.subset_name = subset_name
             ds.template_name = template_name
             orig_data.append(ds)
+
         return orig_data
 
 
