@@ -123,10 +123,10 @@ class LLMEngineMMLU(LLMEngine):
             logprobs=logprobs_for,
         )
         target_to_id = {
-            "A": tokenizer("A", add_special_tokens=False).input_ids[-1],
-            "B": tokenizer("B", add_special_tokens=False).input_ids[-1],
-            "C": tokenizer("C", add_special_tokens=False).input_ids[-1],
-            "D": tokenizer("D", add_special_tokens=False).input_ids[-1],
+            "A": tokenizer(" A", add_special_tokens=False).input_ids[-1],
+            "B": tokenizer(" B", add_special_tokens=False).input_ids[-1],
+            "C": tokenizer(" C", add_special_tokens=False).input_ids[-1],
+            "D": tokenizer(" D", add_special_tokens=False).input_ids[-1],
         }
 
         # we explicitly add requests here, so that we can keep track of the request id
