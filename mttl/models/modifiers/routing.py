@@ -172,7 +172,7 @@ class RoutingInfo:
         )
 
 
-class RouterModifyMixin(ModifyMixin):
+class RoutingMixin:
     def __init__(self, task_id_ptr) -> None:
         self.task_id_ptr = task_id_ptr
 
@@ -180,6 +180,8 @@ class RouterModifyMixin(ModifyMixin):
     def routing_infos(self) -> RoutingInfo:
         return self.task_id_ptr["routing_infos"]
 
+
+class RouterModifyMixin(ModifyMixin):
     @classmethod
     def modify_transformer(cls, transformer, config, optional_wrapper=None):
         # How to "bin" different levels of selectors ?

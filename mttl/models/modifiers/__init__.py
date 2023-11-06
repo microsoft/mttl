@@ -3,4 +3,4 @@ from mttl.models.modifiers.modify_model import (
     modify_transformer,
 )  # noqa: F401
 from mttl.models.modifiers.poly import PolyLoRA  # noqa: F401
-from mttl.models.modifiers.routing import modify_with_routing, RoutingInfo  # noqa: F401
+from mttl.models.modifiers.routing import RoutingInfo  # noqa: F401
