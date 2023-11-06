@@ -84,43 +84,25 @@ class MMLUEvaluator(object):
                         **extra_kwargs,
                     )
 
-            # tokenizer merges space
-            if tokenizer.mttl_merges_space:
-                # space is in labels
-                assert sources_texts[0][-1] != " "
-                options = [" A", " B", " C", " D"]
-            else:
-                # space is in prompt
-                assert sources_texts[0][-1] == " "
-                options = ["A", "B", "C", "D"]
-
             logits = predictions.scores[0]
             probs = (
                 torch.stack(
                     [
                         logits[
                             :,
-                            tokenizer(options[0], add_special_tokens=False).input_ids[
-                                -1
-                            ],
+                            tokenizer(" A", add_special_tokens=False).input_ids[-1],
                         ],
                         logits[
                             :,
-                            tokenizer(options[1], add_special_tokens=False).input_ids[
-                                -1
-                            ],
+                            tokenizer(" B", add_special_tokens=False).input_ids[-1],
                         ],
                         logits[
                             :,
-                            tokenizer(options[2], add_special_tokens=False).input_ids[
-                                -1
-                            ],
+                            tokenizer(" C", add_special_tokens=False).input_ids[-1],
                         ],
                         logits[
                             :,
-                            tokenizer(options[3], add_special_tokens=False).input_ids[
-                                -1
-                            ],
+                            tokenizer(" D", add_special_tokens=False).input_ids[-1],
                         ],
                     ],
                     dim=-1,

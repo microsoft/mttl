@@ -41,9 +41,9 @@ def format_example(df, idx, include_answer=True):
     k = df.shape[1] - 2
     for j in range(k):
         prompt += "\n{}. {}".format(choices[j], df.iloc[idx, j + 1])
-    prompt += "\nAnswer: "
+    prompt += "\nAnswer:"
     if include_answer:
-        prompt += "{}\n\n".format(df.iloc[idx, k + 1])
+        prompt += " {}\n\n".format(df.iloc[idx, k + 1])
     return prompt
 
 
@@ -53,9 +53,9 @@ def _format_example_with_augmentation(
     prompt = prefix + prompt + suffix
     for j in range(len(options)):
         prompt += "\n{}. {}".format(choices[j], options[j])
-    prompt += "\nAnswer: "
+    prompt += "\nAnswer:"
     if include_answer:
-        prompt += "{}\n\n".format(label)
+        prompt += " {}\n\n".format(label)
     return prompt
 
 

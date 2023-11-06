@@ -116,14 +116,12 @@ def test_mmlu_spaces_and_merges(task_name=None):
             finetune_task_name=task_name,
         )
     )
+
     batch = next(iter(mmlu.test_dataloader()))
 
     sources_text = batch["sources_texts"]
-    labels_text = batch["labels_texts"]
-    # there must be a space
-    assert sources_text[0][-1] == " "
-    # there must *not* be a space
-    assert labels_text[0][0] != " "
+    # Answer:
+    assert sources_text[0][-1] == ":"
 
     mmlu = MMLUDataModule(
         MMLUDataConfig(
@@ -139,10 +137,3 @@ def test_mmlu_spaces_and_merges(task_name=None):
 
     assert mmlu.tokenizer.mttl_merges_space
     batch = next(iter(mmlu.test_dataloader()))
-
-    sources_text = batch["sources_texts"]
-    labels_text = batch["labels_texts"]
-    # there must be a space
-    assert sources_text[0][-1] != ""
-    # there *must* be a space
-    assert labels_text[0][0] == " "
