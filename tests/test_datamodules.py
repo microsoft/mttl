@@ -37,17 +37,26 @@ def test_flan(task_name):
 def test_platypus():
     platy = AutoDataModule.create(
         "platypus",
-        model="t5-small",
-        model_family="seq2seq",
+        model="yahma/llama-7b-hf",
+        max_input_length=4096,
+        model_family="gpt",
         for_generation=False,
         validation_portion=0.05,
     )
-    batch = next(iter(platy.train_dataloader()))
+    batch = next(iter(platy.val_dataloader()))
     assert "input_ids" in batch
     assert "labels" in batch
     assert "attention_mask" in batch
     assert "sources_texts" in batch
     assert "labels_texts" in batch
+    # there is no space added to the labels
+    assert batch["labels_texts"][0][0] != ""
+    input_ids = platy.tokenizer(
+        batch["sources_texts"][0] + " " + batch["labels_texts"][0]
+    ).input_ids
+    assert np.allclose(
+        batch["input_ids"][0][: len(input_ids)].numpy().tolist(), input_ids
+    )
 
 
 def test_alpaca():
@@ -77,7 +86,7 @@ def test_alpaca():
         for_generation=False,
         validation_portion=0.05,
     )
-    batch = next(iter(alpaca.train_dataloader()))
+    batch = next(iter(alpaca.val_dataloader()))
 
     sources_texts = batch["sources_texts"]
     labels_texts = batch["labels_texts"]
