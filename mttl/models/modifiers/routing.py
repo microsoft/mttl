@@ -151,8 +151,6 @@ class PrivateSelector(RoutingSelector):
 class RoutingInfo:
     task_ids: torch.Tensor = None
     task_names: List[str] = None
-    hashes: List[str] = None
-    instruction_hashes: List[str] = None
     example_ids: List[int] = None
     labels: torch.Tensor = None
     task_weights: torch.nn.ParameterDict = None
@@ -162,13 +160,12 @@ class RoutingInfo:
         task_ids = batch.get("task_ids").long() if "task_ids" in batch else None
         task_names = batch.get("task_names", None)
         task_weights = batch.get("task_weights", None)
+
         ri = cls(
             task_ids=task_ids,
             task_names=task_names,
             task_weights=task_weights,
-            hashes=batch.get("hashes", None),
             example_ids=batch.get("example_ids", None),
-            instruction_hashes=batch.get("instruction_hashes", None),
             labels=batch.get("labels", None),
             **kwargs,
         )
@@ -186,8 +183,6 @@ class RoutingInfo:
         # useful for beam search
         self.task_ids = self._repeat(self.task_ids, repeats)
         self.task_names = self._repeat(self.task_names, repeats)
-        self.hashes = self._repeat(self.hashes, repeats)
-        self.instruction_hashes = self._repeat(self.instruction_hashes, repeats)
         self.example_ids = self._repeat(self.example_ids, repeats)
 
 

@@ -2,12 +2,12 @@ from dataclasses import dataclass
 from pytorch_lightning import LightningDataModule
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PaddingStrategy
-from typing import Any, List, Union, Optional
-import torch
+from typing import Any, Dict, Union, Optional
 
-from mttl.dataloader.data_utils import ExampleInfo
+import torch
 from torch.utils.data import DataLoader
 
+from mttl.utils import logger
 from mttl.datamodule.utils import get_tokenizer
 
 
@@ -16,10 +16,10 @@ class DatasetConfig:
     dataset: str = None
     data_dir: str = None
     model: str = None
-    train_batch_size: int = None
-    predict_batch_size: int = None
-    max_input_length: int = None
-    max_output_length: int = None
+    train_batch_size: int = 4
+    predict_batch_size: int = 4
+    max_input_length: int = 1024
+    max_output_length: int = 128
     validation_portion: float = None
     padding_side: str = "right"
     model_family: str = "gpt"
@@ -61,6 +61,30 @@ class DefaultCollator:
             )
         return targets
 
+    def add_space_and_eos(self, sources, labels):
+        """Some tokenizers (e.g. gpt2) merge space with the next token. This will create problems when creating the
+        mask for the targets because the input will not be a subset of the concatenation of the input + label.
+
+        This function moves the space to the targets instead, and removes it from the sources.
+        """
+        import copy
+
+        sources_ = copy.deepcopy(sources)
+        labels_ = copy.deepcopy(labels)
+
+        for i in range(len(sources_)):
+            if self.tokenizer.mttl_merges_space and sources_[i][-1] == " ":
+                # remove from sources and bring space to targets
+                sources_[i] = sources_[i][:-1]
+                labels_[i] = " " + labels_[i]
+
+            if sources_[i][-1] not in [" ", "\n"] and labels_[i][0] not in [" ", "\n"]:
+                labels_[i] = " " + labels_[i]
+
+        # adds the eos token
+        labels_ = [l + " " + self.tokenizer.eos_token for l in labels_]
+        return sources_, labels_
+
     def prepare_inputs_for_seq2seq_family(self, sources, labels):
         output_batch = {}
 
@@ -101,7 +125,7 @@ class DefaultCollator:
 
     def prepare_inputs_for_gpt_family(self, sources, labels):
         # Add eos token
-        labels = [l + " " + self.tokenizer.eos_token for l in labels]
+        sources, labels = self.add_space_and_eos(sources, labels)
 
         output_batch = {}
         if self.max_input_length > 0:
@@ -169,23 +193,22 @@ class DefaultCollator:
         output_batch["labels"] = targets
         return output_batch
 
-    def __call__(self, batch: List[ExampleInfo]):
-        sources = [b.input for b in batch]
-        labels = [b.target for b in batch]
-        hashes = [b.hash for b in batch]
-        task_ids = [b.task_id for b in batch]
-        instruction_hashes = [b.instruction_hash for b in batch]
+    def __call__(self, batch: Dict):
+        sources = [b["source"] for b in batch]
+        labels = [b["target"] for b in batch]
+        task_ids = [b.get("task_id", 0) for b in batch]
+        task_names = [b.get("task_name", None) for b in batch]
 
         output_batch = (
             self.prepare_inputs_for_gpt_family(sources, labels)
             if self.model_family == "gpt"
             else self.prepare_inputs_for_seq2seq_family(sources, labels)
         )
-        output_batch["hashes"] = hashes
-        output_batch["instruction_hashes"] = instruction_hashes
+
         output_batch["task_ids"] = torch.LongTensor(task_ids)
-        output_batch["source_texts"] = sources
-        output_batch["label_texts"] = labels
+        output_batch["task_names"] = task_names
+        output_batch["sources_texts"] = sources
+        output_batch["labels_texts"] = labels
         return output_batch
 
 
@@ -241,20 +264,32 @@ class DefaultDataModule(LightningDataModule):
     def print_infos(self):
         from mttl.utils import logger
 
-        logger.info("Training steps: %s" % len(self.train_dataloader()))
-        logger.info("Validation steps: %s" % len(self.val_dataloader()))
+        if len(self.train_dataset) > 0:
+            logger.info("Training steps: %s" % len(self.train_dataloader()))
+        if self.dev_dataset is not None:
+            logger.info("Validation steps: %s" % len(self.val_dataloader()))
+        if self.test_dataset is not None:
+            logger.info("Test steps: %s" % len(self.test_dataloader()))
+        if self.task_names:
+            logger.info("Number of tasks: %s" % len(self.task_names))
 
     @property
     def task_names(self):
-        return []
+        return self._task_names
 
     @property
     def task_to_id(self):
-        return {}
+        return self._task_to_id
 
     def create_train_valid_split(self, dataset, validation_portion=None):
         # always use the same split for the dataset
         validation_portion = validation_portion or self.config.validation_portion
+
+        if validation_portion is None:
+            logger.warn(
+                "No validation portion specified, no dev set available for this dataset."
+            )
+            return dataset, None
 
         n_tr_samples = int(len(dataset) * (1 - validation_portion))
 
@@ -274,6 +309,8 @@ class DefaultDataModule(LightningDataModule):
         super().__init__()
         self.rng = torch.Generator().manual_seed(1234)
         self.config = config
+        self._task_names = []
+        self._task_to_id = {}
         self.val_mixin = val_mixin
         self.for_generation = for_generation
         self.tokenizer = get_tokenizer(config, for_generation=for_generation)
@@ -284,3 +321,54 @@ class DefaultDataModule(LightningDataModule):
 
     def setup_dataset(self):
         pass
+
+
+class AutoDataModule:
+    @classmethod
+    def create(cls, name, for_generation=False, val_mixin=False, **kwargs):
+        from mttl.datamodule.mt_seq_to_seq_module import (
+            FlanModule,
+            T0FlatModule,
+        )
+        from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
+        from mttl.datamodule.platypus_module import PlatypusModule
+        from mttl.datamodule.alpaca_data_module import AlpacaDataModule
+        from mttl.datamodule.t0_data_module import T0PretrainDataModule
+        from mttl.datamodule.ni_data_module import NiDataModule
+
+        if name in ["sordonia/t0-10k-flat", "sordonia/t0-1.6M-flat"]:
+            return T0FlatModule(
+                DatasetConfig(dataset=name, **kwargs),
+                for_generation=for_generation,
+                val_mixin=val_mixin,
+            )
+        elif name in ["sordonia/flan-10k-flat", "sordonia/flan-debug-flat"]:
+            return FlanModule(
+                DatasetConfig(dataset=name, **kwargs),
+                for_generation=for_generation,
+                val_mixin=val_mixin,
+            )
+        elif name in ["mmlu"]:
+            return MMLUDataModule(
+                MMLUDataConfig(dataset=name, **kwargs),
+                for_generation=for_generation,
+                val_mixin=val_mixin,
+            )
+        elif name in ["alpaca"]:
+            return AlpacaDataModule(
+                DatasetConfig(dataset=name, **kwargs),
+                for_generation=for_generation,
+                val_mixin=val_mixin,
+            )
+        elif name in ["platypus"]:
+            return PlatypusModule(
+                DatasetConfig(dataset=name, **kwargs),
+                for_generation=for_generation,
+                val_mixin=val_mixin,
+            )
+        elif name in ["t0"]:
+            return T0PretrainDataModule(kwargs.pop("config"))
+        elif name in ["ni"]:
+            return NiDataModule(kwargs.pop("config"), for_generation=for_generation)
+        else:
+            raise ValueError(f"Unknown dataset {name}")

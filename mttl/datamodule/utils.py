@@ -1,6 +1,53 @@
-from transformers import AutoTokenizer, LlamaTokenizerFast, LlamaTokenizer
-
+from transformers import AutoTokenizer, LlamaTokenizer
 from mttl.utils import logger
+
+
+def maybe_filter_hf_dataset_by_task(dataset, task_field, task_names: str = None):
+    """Filter a HuggingFace dataset by task names."""
+    # get the tasks
+    all_tasks = set(dataset["train"][task_field])
+    if "validation" in dataset:
+        all_tasks = all_tasks.union(set(dataset["validation"][task_field]))
+    if "test" in dataset:
+        all_tasks = all_tasks.union(set(dataset["test"][task_field]))
+
+    if task_names:
+        task_names = sorted(task_names.split(","))
+        if not set(task_names).issubset(all_tasks):
+            raise ValueError("task_names must be a subset of the available tasks.")
+    else:
+        task_names = sorted(all_tasks)
+
+    train_dataset, dev_dataset, test_dataset = None, None, None
+
+    if task_names is not None:
+        train_dataset = dataset["train"].filter(
+            lambda x: x[task_field] in task_names, num_proc=16
+        )
+        if "validation" in dataset:
+            dev_dataset = dataset["validation"].filter(
+                lambda x: x[task_field] in task_names, num_proc=16
+            )
+        if "test" in dataset:
+            test_dataset = dataset["test"].filter(
+                lambda x: x[task_field] in task_names, num_proc=16
+            )
+    else:
+        train_dataset = dataset["train"]
+        if "validation" in dataset:
+            dev_dataset = dataset["validation"]
+        if "test" in dataset:
+            test_dataset = dataset["test"]
+
+    task_to_id = {task: i for i, task in enumerate(task_names)}
+    return task_names, task_to_id, train_dataset, dev_dataset, test_dataset
+
+
+def tokenizer_merges_space(tokenizer):
+    test1 = "this"
+    test2 = " this"
+
+    return len(tokenizer(test1)["input_ids"]) == len(tokenizer(test2)["input_ids"])
 
 
 def tokenizer_enforces_eos(tokenizer):
@@ -14,8 +61,8 @@ def tokenizer_enforces_eos(tokenizer):
         tokenizer.add_eos_token = True
 
     token_ids = tokenizer(test, truncation=True, max_length=3)
-    enforce_eos = token_ids["input_ids"][-1] == tokenizer.eos_token_id    
-    
+    enforce_eos = token_ids["input_ids"][-1] == tokenizer.eos_token_id
+
     if old_add_eos is not None:
         tokenizer.add_eos_token = old_add_eos
 
@@ -65,5 +112,6 @@ def get_tokenizer_with_args(
         )
         tokenizer.pad_token_id = 0
 
+    tokenizer.mttl_merges_space = tokenizer_merges_space(tokenizer)
     tokenizer.mttl_enforces_eos = tokenizer_enforces_eos(tokenizer)
     return tokenizer

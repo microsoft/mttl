@@ -14,10 +14,20 @@ from typing import Optional
 import pkg_resources
 from dataclasses import dataclass
 
-
-from mttl.datamodule.utils import get_tokenizer
-from mttl.datamodule.collators import DefaultCollator
+from mttl.datamodule.utils import get_tokenizer, maybe_filter_hf_dataset_by_task
+from mttl.datamodule.base import DefaultCollator, DefaultDataModule, DatasetConfig
 from mttl.utils import hash_example, logger
+
+
+@dataclass
+class NiDataConfig(DatasetConfig):
+    add_task_name: bool = False
+    add_task_definition: bool = True
+    num_pos_examples: int = 0
+    num_neg_examples: int = 0
+    add_explanation: bool = False
+    tk_instruct: bool = False
+    max_num_instances_per_task: int = 100
 
 
 @dataclass
@@ -246,48 +256,30 @@ class DataCollatorForNI(DefaultCollator):
         )
 
         output_batch["task_names"] = task_identifiers
-        output_batch["task_identifiers"] = task_identifiers # sni task id like e.g. task1356_xlsum_title_generation
+        output_batch[
+            "task_identifiers"
+        ] = task_identifiers  # sni task id like e.g. task1356_xlsum_title_generation
         output_batch["task_categories"] = task_categories
         output_batch["task_ids"] = torch.LongTensor(
             [self.task_to_id[task] for task in task_identifiers]
-        ) # task ids potentially used in routing
+        )  # task ids potentially used in routing
+
+        output_batch["sources_texts"] = sources
         output_batch["labels_texts"] = labels_rand
         output_batch["labels_full_seq"] = labels_full_seq
-        output_batch["hashes"] = [hash_example(i + o) for i, o in zip(sources, labels_rand)]
-        output_batch["instruction_hashes"] = [hash_example(i) for i in sources]
         output_batch["instance_ids"] = instance_ids
         return output_batch
 
 
-class NIOriginalDataModule(LightningDataModule):
-    def train_dataloader(self):
-        return DataLoader(
-            self.train_dataset,
-            batch_size=self.config.train_batch_size,
-            num_workers=16,
-            pin_memory=True,
-            persistent_workers=True,
-            shuffle=True,
-            collate_fn=self.collate_fn,
-        )
-
-    def val_dataloader(self):
-        return DataLoader(
-            self.val_dataset,
-            batch_size=self.config.predict_batch_size,
-            num_workers=16,
-            pin_memory=True,
-            shuffle=False,
-            persistent_workers=True,
-            collate_fn=self.collate_fn,
-        )
-
+class NiDataModule(DefaultDataModule):
     def test_dataloader(self, subsample=-1):
         if subsample > 0:
             from mttl.datamodule import take_n_examples_per_task
 
             indices = take_n_examples_per_task(
-                list(self.test_dataset["Task"]), n=subsample, rng=self.rng
+                list(self.test_dataset["Task"]),
+                n=subsample,
+                rng=self.rng if isinstance(self.rng, np.random.RandomState) else None,
             )
             test_dataset = self.test_dataset.select(indices)
         else:
@@ -303,21 +295,22 @@ class NIOriginalDataModule(LightningDataModule):
             collate_fn=self.collate_fn,
         )
 
-    def __init__(self, config, data_dir=None, for_generation=False):
-        super().__init__()
+    def __init__(self, config, for_generation=False, val_mixin=None):
+        if "NI_DATA_DIR" not in os.environ:
+            raise ValueError("Please set the NI_DATA_DIR environment variable.")
 
-        self.config = config
-        self.dataset_reader = None
-        self.data_dir = data_dir or config.data_dir
-        self.for_generation = for_generation
-        self.tokenizer = get_tokenizer(config, for_generation=for_generation)
-        self.rng = np.random.RandomState(config.seed)
-        self.tokenizer = get_tokenizer(config, for_generation=for_generation)
-        self.setup_dataset()
+        super().__init__(config, for_generation=for_generation, val_mixin=val_mixin)
 
     def _check_test_references(self):
         # make sure all test instances are in reference file
-        reference_file = os.path.join(self.data_dir, "test_references.jsonl")
+        reference_file = os.path.join(
+            os.environ["NI_DATA_DIR"], "test_references.jsonl"
+        )
+
+        if not os.path.exists(reference_file):
+            logger.warn("No test references found, skipping check.")
+            return
+
         eval_instances = {}
         with open(reference_file) as fin:
             for line in fin:
@@ -326,6 +319,7 @@ class NIOriginalDataModule(LightningDataModule):
                 if "track" not in instance:
                     instance["track"] = "default"
                 eval_instances[instance["id"]] = instance
+
         eval_ids = list(eval_instances.keys())
         for element in tqdm.tqdm(
             self.test_dataset,
@@ -337,63 +331,9 @@ class NIOriginalDataModule(LightningDataModule):
                 id in eval_ids
             ), f"{id} not in test references, see https://github.com/allenai/natural-instructions/blob/master/eval/leaderboard/create_reference_file.py"
 
-    def setup_dataset(self):
-        filename = pkg_resources.resource_filename(
-            __name__, "../dataloader/ni_original_dataset.py"
-        )
-
-        # if we are fine-tuning, we have to load ~1000 instances,
-        # in order to be able to select the ones in training and in the valid set.
-        dataset = load_dataset(
-            filename,
-            data_dir=self.data_dir,
-            max_num_instances_per_task=(
-                self.config.max_num_instances_per_task
-                if self.config.finetune_task_name is None
-                else self.config.max_num_instances_per_task * 2
-            ),
-        )
-
-        if self.config.finetune_task_name is None:
-            train_tasks = set(dataset["train"]["Task"])
-            validation_tasks = set(dataset["validation"]["Task"])
-            test_tasks = set(dataset["test"]["Task"])
-            all_tasks = train_tasks.union(validation_tasks).union(test_tasks)
-            self.task_names = list(sorted(all_tasks))
-            self.task_to_id = {task: i for i, task in enumerate(self.task_names)}
-            self.train_dataset = dataset["train"]
-            self.val_dataset = dataset["validation"]
-            self.test_dataset = dataset["test"]
-        else:
-            # take only the examples from the task we want to finetune on.
-            self.task_names = [self.config.finetune_task_name]
-            self.task_to_id = {self.config.finetune_task_name: 0}
-            train_indices = np.where(
-                np.array(dataset["train"]["Task"]) == self.config.finetune_task_name
-            )[0].tolist()
-            valid_indices = np.where(
-                np.array(dataset["validation"]["Task"])
-                == self.config.finetune_task_name
-            )[0].tolist()
-            test_indices = np.where(
-                np.array(dataset["test"]["Task"]) == self.config.finetune_task_name
-            )[0].tolist()
-            self.train_dataset = dataset["train"].select(train_indices)
-            self.val_dataset = dataset["validation"].select(valid_indices)
-            self.test_dataset = dataset["test"].select(test_indices)
-            # we have to pick some examples from the validation set
-            if len(self.train_dataset) == 0:
-                self.train_dataset = self.val_dataset.select(
-                    range(self.config.max_num_instances_per_task)
-                )
-                self.val_dataset = self.val_dataset.select(
-                    range(
-                        self.config.max_num_instances_per_task,
-                        len(self.val_dataset),
-                    )
-                )
-
-        self.collate_fn = DataCollatorForNI(
+    @property
+    def collate_fn(self):
+        return DataCollatorForNI(
             tokenizer=self.tokenizer,
             padding="longest",
             max_input_length=self.config.max_input_length,
@@ -407,10 +347,47 @@ class NIOriginalDataModule(LightningDataModule):
             else "seq2seq",
             task_to_id=self.task_to_id,
         )
-        logger.info("Training examples: {}".format(len(self.train_dataset)))
-        logger.info("Validation examples: {}".format(len(self.val_dataset)))
-        logger.info("Test examples: {}".format(len(self.test_dataset)))
 
+    def setup_dataset(self):
+        filename = pkg_resources.resource_filename(
+            __name__, "../dataloader/ni_dataset.py"
+        )
+
+        # if we are fine-tuning, we have to load ~1000 instances,
+        # in order to be able to select the ones in training and in the valid set.
+        dataset = load_dataset(
+            filename,
+            data_dir=os.environ["NI_DATA_DIR"],
+            max_num_instances_per_task=(
+                self.config.max_num_instances_per_task
+                if self.config.finetune_task_name is None
+                else self.config.max_num_instances_per_task * 2
+            ),
+        )
+
+        (
+            self._task_names,
+            self._task_to_id,
+            self.train_dataset,
+            self.dev_dataset,
+            self.test_dataset,
+        ) = maybe_filter_hf_dataset_by_task(
+            dataset, "Task", self.config.finetune_task_name
+        )
+
+        # we have to pick some examples from the validation set
+        if len(self.train_dataset) == 0:
+            self.train_dataset = self.dev_dataset.select(
+                range(self.config.max_num_instances_per_task)
+            )
+            self.dev_dataset = self.dev_dataset.select(
+                range(
+                    self.config.max_num_instances_per_task,
+                    len(self.dev_dataset),
+                )
+            )
+
+        self.print_infos()
         self._check_test_references()
 
 
@@ -421,6 +398,6 @@ if __name__ == "__main__":
     config.task_dir = "/datadrive2/sni/tasks"
     config.data_dir = "/datadrive2/sni/"
     config.model = "EleutherAI/gpt-neo-125m"
-    datamodule = NIOriginalDataModule(config)
+    datamodule = NiDataModule(config)
     datamodule.setup()
     print(next(iter(datamodule.train_dataloader())))
