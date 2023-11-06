@@ -44,13 +44,13 @@ class SimpleLogger(pl.loggers.logger.DummyLogger):
             json.dump(self.metrics, f)
 
 
-def eval_mmlu(module, args, base_perf=None, chkpt_crit="val/loss"):
+def eval_mmlu(module, args, base_perf=None, chkpt_criteria=None):
     mmlu = MMLUEvaluator(
         args,
         split=args.mmlu_test_split,
     )
     scores = mmlu.evaluate(module)
-    print(f"Evaluating final checkpoint with selection criteria {chkpt_crit}")
+    print(f"Evaluating final checkpoint with selection criteria {chkpt_criteria}")
     logger.info("Final MMLU Accuracy: {}".format(scores["all"]["mean"]))
     for t, v in scores.items():
         logger.info("MMLU Accuracy {}: {}".format(t, v["mean"]))
@@ -65,16 +65,17 @@ def eval_mmlu(module, args, base_perf=None, chkpt_crit="val/loss"):
     if wandb.run is not None:
         for t, v in scores.items():
             wandb.log(
-                {f"downstream_estoped/crit_{chkpt_crit}/test_mmlu_" + t: v["mean"]}
+                {f"downstream_estoped/crit_{chkpt_criteria}/test_mmlu_" + t: v["mean"]}
             )
         if improvement is not None:
             for t, v in improvement.items():
                 wandb.log(
                     {
-                        f"downstream_estoped/crit_{chkpt_crit}/test_mmlu_improvement_"
+                        f"downstream_estoped/crit_{chkpt_criteria}/test_mmlu_improvement_"
                         + t: improvement[t]
                     }
                 )
+    return scores
 
 
 def run_multitask(args):
@@ -115,6 +116,19 @@ def run_multitask(args):
             dataset=args.dataset,
         )
         dm = PlatypusQAModule(config, val_mixin=val_mixin)
+    elif args.dataset.startswith("raw_docs:"):
+        args.dataset = args.dataset.replace("raw_docs:", "")
+        config = FactsLMConfig(
+            model=args.model,
+            train_batch_size=args.train_batch_size,
+            predict_batch_size=args.predict_batch_size,
+            max_input_length=args.max_input_length,
+            validation_portion=args.validation_portion,
+            finetune_task_name=args.finetune_task_name,
+            dataset=args.dataset,
+            text_field="text",
+        )
+        dm = FactsLMDataModule(config)
     elif "facts" in args.dataset or "id" in args.dataset:
         config = FactsLMConfig(
             model=args.model,
@@ -171,7 +185,6 @@ def run_multitask(args):
         raise ValueError(f"Unknown dataset {args.dataset}")
 
     args.n_tasks = len(dm.task_to_id) if hasattr(dm, "task_to_id") else 0
-    module = model_class(**vars(args), tokenizer=dm.tokenizer)
 
     # legit logging
     loggers = []
@@ -189,6 +202,12 @@ def run_multitask(args):
         )
         wandb_logger.experiment.save("*.py")
         loggers.append(wandb_logger)
+
+    module = model_class(**vars(args), tokenizer=dm.tokenizer)
+    module.to("cuda")
+    # lets get base model downstream performance before doing anything
+    scores_init = eval_mmlu(module, args, chkpt_criteria="init")
+    ##############################
 
     mlf_logger = get_mlf_logger()
     if mlf_logger:

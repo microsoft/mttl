@@ -1,4 +1,5 @@
 from enum import Enum
+import hashlib
 import os
 from typing import Any, Callable, Optional, Union
 from pytorch_lightning import LightningModule
@@ -70,6 +71,11 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
         self.loss_plugins = {}
         self.save_if_loaded = kwargs.get("save_if_loaded", True)
 
+    def get_hash(self):
+        model_hash = hashlib.sha256()
+        model_hash.update(f"{self.hparams}".encode())
+        return model_hash.hexdigest()
+
     @classmethod
     def from_pretrained(
         cls,
@@ -96,7 +102,9 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
         if pretrained_model_name_or_path is not None:
             pretrained_model_name_or_path = str(pretrained_model_name_or_path)
 
-            if os.path.isdir(pretrained_model_name_or_path):
+            if os.path.isfile(pretrained_model_name_or_path) or os.path.isdir(
+                pretrained_model_name_or_path
+            ):
                 resolved_archive_file = get_checkpoint_path(
                     pretrained_model_name_or_path
                 )

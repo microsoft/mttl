@@ -5,6 +5,8 @@ import math
 from torch.autograd import Function
 from torch.nn.modules.module import Module
 import bitsandbytes as bnb
+from abc import ABC, abstractmethod
+from typing import Dict
 
 
 class Adapter(nn.Module):
@@ -18,7 +20,13 @@ class Adapter(nn.Module):
         return self.__layer_name__
 
 
-class LoRA(Adapter):
+class MergableAdapter(ABC):
+    @abstractmethod
+    def merge_with_layer(self):
+        pass
+
+
+class LoRA(Adapter, MergableAdapter):
     def __init__(
         self,
         config,
@@ -149,13 +157,15 @@ class LoRA(Adapter):
         scaling = torch.cat(
             [torch.FloatTensor([lora.scaling]) for lora in loras], dim=0
         ).to(device=lora_a.device)
-        # (n_examples, seq_len, out_features)
-        adapter_out = torch.bmm(
-            torch.bmm(input.to(dtype=lora_a.dtype), lora_a), lora_b
-        ) * scaling[:, None, None].to(dtype=input.dtype)
 
+        # (n_examples, seq_len, out_features)
         layer_out = loras[0].layer(input)
-        return layer_out + adapter_out.to(dtype=layer_out.dtype)
+        input_lora = input.to(loras[0].lora_a.dtype)
+
+        adapter_out = (
+            torch.bmm(torch.bmm(input_lora, lora_a), lora_b) * scaling[:, None, None]
+        )
+        return layer_out + adapter_out.to(dtype=input.dtype)
 
     def reset_parameters(self):
         gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
@@ -276,17 +286,50 @@ class SkilledLoRA(LoRA):
         adapter_out = input_lora.bmm(A).bmm(B) * self.scaling
         return layer_out + adapter_out.to(input.dtype)
 
+    @classmethod
+    def weighted_merge_forward(cls, input, loras, weights, merge_after=False):
+        """
+        Meging loras into one loa accroding to the weights
+        """
+        if any([lora.merged_with_layer for lora in loras]):
+            raise ValueError("Cannot parallelize merged loras.")
+        if len(set([lora.layer for lora in loras])) > 1:
+            raise ValueError("Cannot parallelize loras applied to different layers.")
 
-class ExpertContainer(Adapter):
-    def __init__(
-        self,
-        config,
-        task_id_container,
-        layer,
-    ):
+        # (n_skills, in_features, rank)
+        lora_a = torch.stack([lora.lora_a for lora in loras], dim=0)
+        # (n_skills, rank, out_features)
+        lora_b = torch.stack([lora.lora_b for lora in loras], dim=0)
+        # (n_examples,)
+        scaling = torch.cat(
+            [torch.FloatTensor([lora.scaling]) for lora in loras], dim=0
+        ).to(device=lora_a.device)
+        weights = torch.stack([weight.squeeze() for weight in weights], dim=0)
+        layer_out = loras[0].layer(input)
+        # make sure input is in the same dtype as lora. By default it is likley to be in float16 (if we lad LLama model in float16). Butloas here can be in float32
+        input = input.to(dtype=lora_a.dtype)
+        if merge_after:
+            adapter_out_a = torch.einsum("bsd,kdr->bskr", (input, lora_a))
+            adapter_out_b = torch.einsum("bskr,krd->bskd", (adapter_out_a, lora_b))
+            adapter_out = (
+                torch.einsum("bskd,k->bsd", (adapter_out_b, weights)) * scaling.mean()
+            )
+        else:
+            # merge lors according to the weights, As and Bs seperately
+            A = torch.einsum("s,sdr->dr", (weights, lora_a))
+            B = torch.einsum("s,srd->rd", (weights, lora_b))
+
+            # (n_examples, seq_len, out_features)
+            adapter_out = torch.matmul(torch.matmul(input, A), B) * scaling.mean()
+        return layer_out + adapter_out.to(dtype=layer_out.dtype)
+
+
+class ExpertContainer(Adapter, MergableAdapter):
+    def __init__(self, config, task_id_container, layer, selector=None):
         super().__init__()
         self.config = config
         self.layer = layer
+        self.selector = selector
 
         if not isinstance(self.layer, nn.Linear):
             raise ValueError(
@@ -334,10 +377,60 @@ class ExpertContainer(Adapter):
         if is_default:
             self.default_expert_name = name
 
+    def merge_with_layer(self):
+        if len(self.experts) > 0:
+            for name, expert_module in self.experts.items():
+                assert isinstance(
+                    expert_module, LoRA
+                ), "Only LoRA experts can be merged with the layer for now."
+                expert_module.merge_with_layer()
+                self.merged_expert_names.append(name)
+                self.experts.pop(name)
+
+    def weighted_route(self, input, task_weights):
+        """
+        Route all examples according to the weights given in the weights dictionary: expert_name -> weight
+        """
+        load_experts = []
+        weights = []
+
+        for task_name, weight in task_weights.items():
+            load_experts.append(self.experts[task_name])
+            weights.append(weight)
+        # assume all experts are loras
+        output = SkilledLoRA.weighted_merge_forward(
+            input, load_experts, weights, merge_after=True
+        )
+
+        return output
+
+    def route_with_task_name(self, input, task_names):
+        """
+        Route according to the task name information
+        """
+        load_experts = []
+
+        for task_name in task_names:
+            if task_name not in self.experts:
+                if not self.default_expert_name:
+                    raise ValueError(
+                        "The expert for this task {} does not exists. Consider setting a default expert!".format(
+                            task_name
+                        )
+                    )
+                else:
+                    selected_expert = self.default_expert_name
+            else:
+                selected_expert = task_name
+            load_experts.append(self.experts[selected_expert])
+        # assume all experts are loras
+        output = LoRA.parallel_linear_forward(input, load_experts)
+        return output
+
     def forward(self, input, **kwargs):
         task_names = self.info_container["routing_infos"].task_names
 
-        if (
+        if task_names and (
             any(task_name not in self.experts for task_name in task_names)
             and not self.default_expert_name
             and len(self.experts)
@@ -347,25 +440,17 @@ class ExpertContainer(Adapter):
             )
 
         # if it has some routing experts *and* task names, then we can route
-        if len(self.experts) and task_names is not None:
-            load_experts = []
-
-            for task_name in task_names:
-                if task_name not in self.experts:
-                    if not self.default_expert_name:
-                        raise ValueError(
-                            "The expert for this task {} does not exists. Consider setting a default expert!".format(
-                                task_name
-                            )
-                        )
-                    else:
-                        selected_expert = self.default_expert_name
-                else:
-                    selected_expert = task_name
-                load_experts.append(self.experts[selected_expert])
-            # assume all experts are loras
-            output = LoRA.parallel_linear_forward(input, load_experts)
+        if len(self.experts) and self.selector is None:
+            assert (
+                task_names is not None
+            ), "Task names are not given: set router or merge experts into the layer."
+            output = self.route_with_task_name(input, task_names)
+        elif len(self.experts) and self.selector is not None:
+            weights: Dict = self.selector(input)
+            output = self.weighted_route(input, weights)
         else:
+            ###############################################################
+            ## no experts -- no routing, experts were merged into the layer
             output = self.layer(input, **kwargs)
         return output
 
@@ -389,7 +474,7 @@ class SkilledLoRA_MergeLoraAfterOP(SkilledLoRA):
         bs, _, _ = weights.size()
         adapter_out = torch.einsum(
             "bsd,qkdr->bsqkr", (input_lora, self.lora_a)
-        )  # bs x n_splits x n_skills x rank")
+        )  # bs seq x n_splits x n_skills x rank
         adapter_out = torch.einsum(
             "bsqkr,qkrd->bsqkd", (adapter_out, self.lora_b)
         )  # bs x seq x n_splits x n_skills x D

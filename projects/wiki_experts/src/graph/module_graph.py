@@ -1,11 +1,18 @@
 import re
 import torch
 from typing import Dict
+import sys
+import os
+import re
+from string import Template
+from collections import defaultdict
 
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 from mttl.models.utils import download_from_hub
 from mttl.utils import get_checkpoint_path, logger
 from projects.wiki_experts.src.config import ExpertConfig
 from dataclasses import dataclass
+from typing import Union
 
 
 @dataclass
@@ -20,9 +27,22 @@ class Node:
         self.children = []
         self._cached_instantiation = None
 
+    def get_name(self, **kwargs):
+        return self.name
+
     @classmethod
     def from_args(cls, name, graph, args=None):
         return Node(name)
+
+    def collect_variables(self):
+        vars = []
+        if hasattr(self, "variables"):
+            vars += self.variables
+        if not self.children:
+            return vars
+        for child in self.children:
+            vars += child.collect_variables()
+        return vars
 
     def instantiate(self, *args, **kwargs):
         if self._cached_instantiation is not None:
@@ -59,30 +79,62 @@ class OperatorNode(Node):
 class LinearNode(OperatorNode):
     @classmethod
     def from_args(cls, name, graph, args=None):
+        variable_names = re.findall(r"\$([a-zA-Z_][a-zA-Z0-9_]*)", name)
+        for i, var_name in enumerate(variable_names):
+            # replace variable names with their position
+            name = re.sub(f"\${var_name}", f"${i}", name, count=1)
         node = LinearNode(name)
-        node.weights = []
+        node.weights = {}
+        node.variables = []
 
         node_args_pairs = args.split(",")
-        for pair in node_args_pairs:
+        for i, pair in enumerate(node_args_pairs):
             child_name, weight = pair.split(":")
             node.children.append(graph.get_or_create_node(child_name.strip()))
-            node.weights.append(float(weight.strip()))
+            # node.weights.append(float(weight.strip()))
+            weight = weight.strip()
+            if "$" not in weight:
+                node.weights[child_name] = float(weight)
+            else:
+                node.variables.append(f"{name}[{i}]")
+
         return node
+
+    def get_name(self, **kwargs):
+        if len(kwargs) == 0 or len(self.variables) == 0 or "$" not in self.name:
+            return self.name
+        name = self.name
+        for i, v in enumerate(self.variables):
+            name = name.replace(f"${i}", str(kwargs[v]))
+
+        return name
 
     def instantiate(self, *args, **kwargs):
         if self._cached_instantiation is not None:
             return self._cached_instantiation
 
-        instantiation = []
-
+        instantiation = {}
+        first_module = None
         for node in self.children:
-            instantiation.append(node.instantiate(*args, **kwargs)[0])
-    
+            instantiation[node.name] = node.instantiate(*args, **kwargs)[0]
+            first_module = (
+                instantiation[node.name] if first_module is None else first_module
+            )
+
         # now, merge with a given importance weight
-        assert len(instantiation) == len(self.weights)
+        assert len(instantiation) == len(self.weights) + len(self.variables)
 
         merged_weights = {}
-        for expert, weight in zip(instantiation, self.weights):
+        for i, (name, expert) in enumerate(instantiation.items()):
+            if name in self.weights:
+                weight = self.weights[name]
+            else:
+                param_name = f"{self.name}[{i}]"
+                weight = kwargs.get(param_name, None)
+                assert (
+                    weight is not None
+                ), f"Must pass the weight for node {param_name} to be able to instantiate"
+
             for k, v in expert.expert_weights.items():
                 value = v * torch.tensor(weight, dtype=v.dtype)
                 if k in merged_weights:
@@ -92,7 +144,7 @@ class LinearNode(OperatorNode):
 
         return [
             Expert(
-                expert_config=instantiation[0].expert_config,
+                expert_config=first_module.expert_config,
                 expert_weights=merged_weights,
             )
         ]
@@ -116,7 +168,7 @@ class ModuleGraph:
             self.nodes[node_name] = node_class.from_args(node_name, self, args)
         return self.nodes[node_name]
 
-    def dumps(self):
+    def dumps(self, **kwargs):
         graph_str = []
         for node_name, node in self.nodes.items():
             if not node.children:
@@ -124,7 +176,9 @@ class ModuleGraph:
             if isinstance(node, OperatorNode):
                 continue
             graph_str.append(
-                "{} -> {}".format(node_name, ", ".join([n.name for n in node.children]))
+                "{} -> {}".format(
+                    node_name, ", ".join([n.get_name(**kwargs) for n in node.children])
+                )
             )
         return "; ".join(graph_str)
 
@@ -189,6 +243,12 @@ class ModuleGraph:
             root_modules[root.name] = root.instantiate(*args, **kwargs)[0]
         return root_modules
 
+    def get_variables(self):
+        variables = []
+        for root in self.roots:
+            variables += root.collect_variables()
+        return variables
+
 
 def load_expert(
     expert_path: str,
@@ -197,7 +257,7 @@ def load_expert(
     # load the expert weights
     import os
 
-    if os.path.isdir(expert_path):
+    if os.path.isfile(expert_path) or os.path.isdir(expert_path):
         expert_checkpoint = get_checkpoint_path(expert_path)
     else:
         expert_checkpoint = download_from_hub(expert_path)
@@ -234,9 +294,26 @@ if __name__ == "__main__":
     C -> linear(B:0.5);
     default -> C
     """
+    s = """    
+    security_studies -> linear(sordonia/expert_llama2_13b_security_studies:5,sordonia/llama2-13b-platypus:$weight);
+    security_studies2 -> linear(sordonia/expert_llama2_13b_security_studies:1);    
+    security_studies3 -> linear(sordonia/expert_llama2_13b_security_studies:$weight_blabla);
+    """
+
     graph = ModuleGraph.from_string(s)
     print(graph)
     print(graph.roots)
     print(graph.leaves)
     print(graph.dumps())
-    print(graph.create_modules().keys())
+    vars = graph.get_variables()
+    print(vars)
+    print(
+        graph.dumps(
+            **{
+                "linear(sordonia/expert_llama2_13b_security_studies:5,sordonia/llama2-13b-platypus:$0)[1]": 0,
+                "linear(sordonia/expert_llama2_13b_security_studies:$0)[0]": 1,
+            }
+        )
+    )
+    print(graph.dumps(**{v: i for i, v in enumerate(vars)}))
+    print(graph.create_modules(**{v: 1 for v in vars}).keys())

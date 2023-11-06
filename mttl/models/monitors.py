@@ -29,6 +29,8 @@ def get_monitors(config):
         and "poly" in config.router_selector
     ):
         monitors += [PolytroponLog()]
+    if "prefix_tuning" in config.model_modifier:
+        monitors += [AlphaLog()]
 
     return monitors
 
@@ -210,3 +212,29 @@ class SelectorMetricsLog(Callback):
                 prog_bar=True,
             )
         self.metrics.clear()
+
+
+class AlphaLog(Callback):
+    LOG_EVERY = 5
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:
+        if trainer.global_step == 0 or trainer.global_step % self.LOG_EVERY > 0:
+            return
+
+        gate_values = []
+        for mod in pl_module.modules():
+            if hasattr(mod, "adapter_gate"):
+                gate_values += [mod.adapter_gate.mean().item()]
+
+        to_log = {
+            "train/alpha_mean": sum(gate_values) / len(gate_values),
+            "train/alpha_max": max(gate_values),
+            "train/alpha_min": min(gate_values),
+        }
+
+        pl_module.log_dict(
+            to_log,
+            on_epoch=True,
+            on_step=True,
+            sync_dist=True,
+        )

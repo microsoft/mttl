@@ -12,6 +12,7 @@ def register_modifier(name):
             raise ValueError(f"Cannot register duplicate model modifier ({name})")
         MODIFIERS[name] = fn
         return fn
+
     return _thunk
 
 
@@ -19,8 +20,12 @@ def modify_transformer(transformer, config):
     import mttl.models.modifiers.lora  # noqa: F401
     import mttl.models.modifiers.poly  # noqa: F401
     import mttl.models.modifiers.routing  # noqa: F401
+    import mttl.models.modifiers.prompt_tuning  # noqa: F401
+    import mttl.models.modifiers.llama_adapter  # noqa: F401
 
-    # create a shared container for the task id 
+    # import mttl.models.modifiers.prefix_tuning # noqa: F401
+
+    # create a shared container for the task id
     transformer.task_id_container = {}
 
     # set all params to not require grad

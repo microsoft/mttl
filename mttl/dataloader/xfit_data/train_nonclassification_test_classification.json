@@ -1,5 +1,0 @@
-{
-    "train": ["ade_corpus_v2-dosage", "art", "biomrc", "blimp-anaphor_number_agreement", "blimp-ellipsis_n_bar_2", "blimp-sentential_negation_npi_licensor_present", "blimp-sentential_negation_npi_scope", "break-QDMR-high-level", "commonsense_qa", "crows_pairs", "dream", "duorc", "eli5-asks", "eli5-eli5", "freebase_qa", "gigaword", "hellaswag", "hotpot_qa", "kilt_ay2", "kilt_hotpotqa", "kilt_trex", "kilt_zsre", "lama-conceptnet", "lama-google_re", "lama-squad", "math_qa", "numer_sense", "openbookqa", "piqa", "proto_qa", "qa_srl", "quarel", "quartz-no_knowledge", "race-high", "reddit_tifu-title", "reddit_tifu-tldr", "ropes", "sciq", "social_i_qa", "spider", "superglue-multirc", "wiki_bio", "wikisql", "xsum", "yelp_review_full"],
-    "dev": ["tweet_eval-stance_feminist", "ethos-national_origin", "tweet_eval-hate", "ag_news", "amazon_polarity", "hate_speech18", "poem_sentiment", "climate_fever", "medical_questions_pairs", "tweet_eval-stance_atheism"],
-    "test": ["superglue-cb", "dbpedia_14", "wiki_qa", "emo", "yelp_polarity", "ethos-religion", "financial_phrasebank", "tab_fact", "anli", "ethos-race"]
-}

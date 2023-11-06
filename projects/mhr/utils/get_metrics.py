@@ -244,7 +244,7 @@ def main(files, dataset, latex, hps, tasks, nt):
         for m, r in zip(models, res):
             filtered_results = r.loc[r["task_name"].isin(all_tasks)]
             # median across tasks
-            agg_seed_mean = filtered_results.groupby(["trial"]).agg("mean")
+            agg_seed_mean = filtered_results.groupby(["task_name"]).agg("median")
             agg_seed_std = agg_seed_mean.agg("std")
 
             # mean of medians across seeds

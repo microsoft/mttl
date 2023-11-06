@@ -1,10 +1,13 @@
 import torch
+from mttl.models.adapters import ExpertContainer
 
 from mttl.models.modifiers.routing import RoutingInfo
 
 from mttl.models.modifiers.experts import add_expert_to_transformer
 from mttl.utils import logger
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
+from projects.wiki_experts.models.routers import Router
+from typing import Dict
 
 
 def push_expert_to_hub(
@@ -30,18 +33,18 @@ def push_expert_to_hub(
     ckpt = torch.load(ckpt_path)
 
     if expert_name is None:
-        for key in ['expert_name', 'finetune_task_name']:
-            expert_name = ckpt['hyper_parameters'].get(key)
+        for key in ["expert_name", "finetune_task_name"]:
+            expert_name = ckpt["hyper_parameters"].get(key)
             if expert_name is not None:
                 break
 
-    dataset_name = ckpt['hyper_parameters']['dataset']
+    dataset_name = ckpt["hyper_parameters"]["dataset"]
     # handle the case where dataset is from huggingface
     if "/" in dataset_name:
         dataset_name = dataset_name.partition("/")[-1]
 
     # model is definitely from HF
-    model_name = ckpt['hyper_parameters']['model']
+    model_name = ckpt["hyper_parameters"]["model"]
     model_name = model_name.partition("/")[-1]
 
     repo_id = f"{hf_user_id}/expert__{model_name}__{dataset_name}__{expert_name}"
@@ -53,24 +56,41 @@ def push_expert_to_hub(
 class MultiExpertModel(ExpertTrainer):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+
+        self.selectors: Dict[str, Router] = {}
         self.experts = []
 
-    def load_from_graph_string(self, s):
-        from projects.wiki_experts.src.graph.module_graph import ModuleGraph
+    def get_router_weights(self):
+        weights = {}
+        for _, selector in self.selectors.items():
+            weights[selector.name] = selector.get_routing_weights()
+        return weights
 
-        graph = ModuleGraph.from_string(s)
+    def load_from_graph(self, graph, action="route", **kwargs):
         for module_name, module_data in graph.create_modules(
-            base_hparams=self.hparams
+            base_hparams=self.hparams, **kwargs
         ).items():
+            print("Loading module: {}".format(module_name))
             self.model = add_expert_to_transformer(
+                self.hparams,
                 self.model,
                 module_name,
                 module_data.expert_config,
                 module_data.expert_weights,
-                action="route",
+                action=action,
                 is_default=module_name == "default",
+                selectors=self.selectors,
             )
             self.experts.append(module_name)
+
+        for _, selector in self.selectors.items():
+            selector.resize_module_logits(self.experts)
+
+    def load_from_graph_string(self, s, action="route"):
+        from projects.wiki_experts.src.graph.module_graph import ModuleGraph
+
+        graph = ModuleGraph.from_string(s)
+        self.load_from_graph(graph, action=action)
 
     def load_expert(
         self,
@@ -106,6 +126,9 @@ class MultiExpertModel(ExpertTrainer):
         )
         if action != "merge":
             self.experts.append(expert_name)
+
+    def forward(self, batch, reduction="mean"):
+        return super().forward(batch, reduction)
 
     @property
     def generation_config(self):
@@ -159,6 +182,8 @@ class MultiExpertModel(ExpertTrainer):
         scores = torch.stack(scores, 0)
         expert_indices = scores.argmin(0)
         return [self.experts[i] for i in expert_indices]
+
+    # def forward(self, batch, reduction="mean"):
 
     def generate(
         self,

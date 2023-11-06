@@ -30,9 +30,6 @@ class MMLUCallback(cb.Callback):
         self.max_input_length = max_input_length
         self.evaluator = None
         self.split = split
-
-        # save first MMLU value
-        self.base_perf = None
         # save best perf
         self._best_perf = None
         # checkpointing
@@ -67,8 +64,6 @@ class MMLUCallback(cb.Callback):
     ) -> None:
         if trainer.global_step % self.eval_every_opt_step == 0:
             metrics = self.eval_mmlu(pl_module)
-            if self.base_perf is None:
-                self.base_perf = copy.deepcopy(metrics)
             self.best_perf = copy.deepcopy(metrics)
             self.maybe_checkpoint_now(trainer)
             self.log_metrics(metrics, pl_module)
@@ -85,22 +80,15 @@ class MMLUCallback(cb.Callback):
             )
             ckpt_path = os.path.join(dir_name, filename)
             trainer.save_checkpoint(ckpt_path)
-            if self._prev_checkpoint is not None and ckpt_path != self._prev_checkpoint:
-                os.remove(self._prev_checkpoint)
+            # if self._prev_checkpoint is not None and ckpt_path != self._prev_checkpoint:
+            #     os.remove(self._prev_checkpoint)
             self._prev_checkpoint = ckpt_path
         self._checkpoint_now = False
 
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:
-        # log best and base perf
-        if self.base_perf is not None:
-            for t, v in self.base_perf.items():
-                pl_module.log(
-                    f"downstream_init/{self.split}/mmlu_{t}",
-                    v["mean"],
-                    on_epoch=True,
-                )
+        # log best perf
         if self.best_perf is not None:
             for t, v in self.best_perf.items():
                 pl_module.log(
@@ -144,6 +132,36 @@ class MMLUCallback(cb.Callback):
 
         metrics = self.evaluator.evaluate(pl_module)
         return metrics
+
+    def on_after_backward(self, *args, **kwargs):
+        self.val_epoch += 1
+
+        trainer, pl_module = args
+
+        if trainer.global_step < 1:
+            return
+
+        if self.val_epoch % self.every_val_epochs != 0:
+            return
+
+        from mttl.evaluators import MMLUEvaluator
+
+        evaluator = MMLUEvaluator(
+            pl_module.hparams,
+            data_dir=os.environ["MMLU_DATA_DIR"],
+            **self.eval_kwargs,
+        )
+        metrics = evaluator.evaluate(
+            pl_module,
+            subsample=10,
+        )
+        pl_module.log(
+            "val/mmlu",
+            metrics["all"]["mean"],
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
 
 
 class NICallback(cb.Callback):
