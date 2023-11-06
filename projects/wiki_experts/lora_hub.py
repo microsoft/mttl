@@ -11,14 +11,12 @@ from functools import partial
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from typing import Union, Callable, List, Dict
+from typing import Callable, Dict
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators.base import compute_task_aggregation
 
 from src.config import ExpertConfig
-from huggingface_hub import login
 from src.expert_model import MultiExpertModel
-from mttl.datamodule.collators import DefaultDataModule
 from mttl.utils import logger, setup_logging
 from src.graph.module_graph import ModuleGraph
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
