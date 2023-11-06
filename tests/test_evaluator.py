@@ -1,5 +1,6 @@
 import pytest
 import numpy as np
+import os
 from mttl.datamodule.base import AutoDataModule
 from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
 from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
@@ -30,12 +31,11 @@ def test_mmlu_eval():
     assert results["all"]["stderr"] == 50
 
 
+@pytest.mark.skipif(
+    os.getenv("NI_DATA_DIR") != None,
+    reason="No way of currently test this locally, SNI is too big.",
+)
 def test_ni_eval():
-    import os
-
-    if os.environ.get("NI_DATA_DIR") is None:
-        return
-
     ni = NIEvaluator(
         NiDataConfig(
             "ni",
