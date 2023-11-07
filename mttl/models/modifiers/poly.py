@@ -131,7 +131,7 @@ class PolyLoRAConfig(SkilledLoRAConfig, PolytroponConfig):
     pass
 
 
-@register_modifier("poly_lora", config_cls=PolyLoRAConfig)
+@register_modifier("poly", config_cls=PolyLoRAConfig)
 class PolyLoRA(SkilledLoRA, RoutingMixin, RouterModifyMixin):
     def __init__(self, config, task_id_ptr, layer, selector):
         RoutingMixin.__init__(self, task_id_ptr)

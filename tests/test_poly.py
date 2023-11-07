@@ -10,7 +10,7 @@ from pathlib import Path
 def test_poly():
     root = Path(__file__).parent
     _args = Config(
-        f"{root}/t0/pretrain.json+{root}/t0/poly_lora.json",
+        f"{root}/configs/t0/pretrain.json+{root}/configs/t0/poly_lora.json",
     )
     _args.n_tasks = 768
     _args.model = "t5-small"
