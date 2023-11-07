@@ -8,7 +8,7 @@ from torch.distributions.relaxed_bernoulli import RelaxedBernoulli
 from mttl.global_vars import EPS
 
 from mttl.models.modifiers.base import ModifierConfig, ModifyMixin
-from mttl.models.modifiers.lora import SkilledLoRA
+from mttl.models.modifiers.lora import SkilledLoRA, SkilledLoRAConfig
 from mttl.models.modifiers.modify_model import register_modifier
 from mttl.models.modifiers.routing import (
     RouterModifyMixin,
@@ -126,7 +126,12 @@ class PolytroponSelector(RoutingSelector):
         return module_weights
 
 
-@register_modifier("poly_lora")
+@dataclass
+class PolyLoRAConfig(SkilledLoRAConfig, PolytroponConfig):
+    pass
+
+
+@register_modifier("poly_lora", config_cls=PolyLoRAConfig)
 class PolyLoRA(SkilledLoRA, RoutingMixin, RouterModifyMixin):
     def __init__(self, config, task_id_ptr, layer, selector):
         RoutingMixin.__init__(self, task_id_ptr)
@@ -152,10 +157,11 @@ class PolyLoRA(SkilledLoRA, RoutingMixin, RouterModifyMixin):
         return super().modify_transformer(transformer, config, SkillWrapper)
 
 
-@register_modifier("skilled")
-class SkilledPolyLoRA(PolyLoRA):
-    @classmethod
-    def modify_transformer(cls, transformer, config, optional_wrapper=None):
-        config.router_selector = "private"
+@dataclass
+class SkilledPolyConfig(SkilledLoRAConfig, PolytroponConfig):
+    router_selector: str = "private"
 
-        return super().modify_transformer(transformer, config)
+
+@register_modifier("skilled", config_cls=SkilledPolyConfig)
+class SkilledPolyLoRA(PolyLoRA):
+    pass

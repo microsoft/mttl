@@ -15,13 +15,7 @@ class LoRAConfig(ModifierConfig):
     lora_init_b_random: bool = False
 
 
-@dataclass
-class SkilledLoRAConfig(LoRAConfig):
-    n_skills: int = 1
-    n_splits: int = 1
-
-
-@register_modifier("lora")
+@register_modifier("lora", config_cls=LoRAConfig)
 class LoRA(Adapter, ModifyMixin):
     def __init__(
         self,
@@ -90,6 +84,12 @@ class LoRA(Adapter, ModifyMixin):
 
     def forward(self, *args, **kwargs):
         return self.forward_fn(*args, **kwargs)
+
+
+@dataclass
+class SkilledLoRAConfig(LoRAConfig):
+    n_skills: int = 1
+    n_splits: int = 1
 
 
 class SkilledLoRA(LoRA):
