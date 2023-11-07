@@ -4,7 +4,6 @@ import torch
 import hashlib
 import numpy as np
 import pytorch_lightning as pl
-import jsonlines
 import json
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.models.utils import transfer_batch_to_device
