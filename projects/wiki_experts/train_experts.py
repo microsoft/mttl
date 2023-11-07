@@ -15,7 +15,8 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from mttl.callbacks import MMLUCallback
 from mttl.evaluators import MMLUEvaluator
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-from mttl.datamodule.oasst1_module import OA1Config, OA1Module
+
+# from mttl.datamodule.oasst1_module import OA1Config, OA1Module
 from mttl.datamodule.retrieval_lm_module import RetrievalLMDataModule
 from mttl.datamodule.facts_lm_module import FactsLMConfig, FactsLMDataModule
 from mttl.datamodule.platypus_module import (
