@@ -17,9 +17,8 @@ class Adapter(nn.Module):
 
 @dataclass
 class ModifierConfig(object):
-    model_modifier: str
-    modify_modules: str
-    modify_layers: str
+    modify_modules: str = ".*"
+    modify_layers: str = ".*"
 
 
 class ModifyMixin(nn.Module):

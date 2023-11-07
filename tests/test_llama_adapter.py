@@ -2,25 +2,25 @@ import os
 import torch
 import pytest
 from pytorch_lightning import seed_everything
-from projects.instr_routing.config import RoutingConfig
 from mttl.models.modifiers.routing import RoutingInfo
 from mttl.models.modifiers import modify_transformer
-from mttl.models.modifiers.llama_adapter import LlamaAdapter
-
-
-@pytest.mark.parametrize(
-    "adapter_type", ["llama_adapter", "poly_llama_adapter", "mlp_llama_adapter"]
+from mttl.models.modifiers.llama_adapter import (
+    LlamaAdapter,
+    LLamaAdapterConfig,
+    PolyLLamaAdapterConfig,
 )
+
+
+@pytest.mark.parametrize("adapter_type", ["llama_adapter", "poly_llama_adapter"])
 def test_llama_adapter(adapter_type):
     os.environ["CONFIG_PATH"] = "./"
 
-    _args = RoutingConfig(
-        "projects/instr_routing/configs/platypus/llama2_7b.json"
-        + "+projects/instr_routing/configs/t0_/llama_adapter.json",
-    )
-    _args.n_tasks = 768
-    _args.warmup_steps = 0
-    _args.learning_rate = 1e-3
+    if adapter_type == "llama_adapter":
+        adapter_config = LLamaAdapterConfig(n_tasks=768, soft_prompt_learn_kv=True)
+    else:
+        adapter_config = PolyLLamaAdapterConfig(
+            n_tasks=768, n_splits=1, soft_prompt_learn_kv=True
+        )
 
     seed_everything(0)
 
@@ -51,7 +51,7 @@ def test_llama_adapter(adapter_type):
     attn_mask = torch.zeros(bs, max_seq_len, dtype=torch.int32)
     attn_mask[torch.arange(bs), seq_len] = 1
     attn_mask = 1 - attn_mask.cumsum(dim=-1)
-    task_ids = torch.randint(0, _args.n_tasks, (bs,))
+    task_ids = torch.randint(0, adapter_config.n_tasks, (bs,))
     batch["attention_mask"] = attn_mask
 
     model.task_id_container["routing_infos"] = RoutingInfo(task_ids=task_ids)
@@ -61,8 +61,7 @@ def test_llama_adapter(adapter_type):
     assert round(output.loss.item(), 4) == 6.0915
 
     # Test with llama adapter
-    _args.model_modifier = adapter_type
-    new_model = modify_transformer(model, _args)
+    new_model = modify_transformer(model, adapter_config)
 
     new_model.task_id_container["routing_infos"] = RoutingInfo(task_ids=task_ids)
 

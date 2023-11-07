@@ -1,14 +1,18 @@
 MODIFIERS = {}
+CONFIGS_TO_MODIFIERS = {}
 
 
-def register_modifier(name):
+def register_modifier(name, config_cls=None):
     print("Registering modifier..." + name)
 
-    def _thunk(fn):
+    def _thunk(klass):
         if name in MODIFIERS:
             raise ValueError(f"Cannot register duplicate model modifier ({name})")
-        MODIFIERS[name] = fn
-        return fn
+        MODIFIERS[name] = klass
+
+        if config_cls is not None:
+            CONFIGS_TO_MODIFIERS[config_cls] = name
+        return klass
 
     return _thunk
 
@@ -27,6 +31,9 @@ def modify_transformer(transformer, modifier_config, model_modifier=None):
 
     if model_modifier is None:
         model_modifier = getattr(modifier_config, "model_modifier", None)
+
+    if model_modifier is None:
+        model_modifier = CONFIGS_TO_MODIFIERS.get(type(modifier_config), None)
 
     if model_modifier is None:
         raise ValueError("Model modifier not set nor in config nor as an argument.")

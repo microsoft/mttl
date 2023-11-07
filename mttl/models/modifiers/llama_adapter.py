@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import re
 import math
 import torch
@@ -7,8 +8,9 @@ from mttl.models.modifiers import register_modifier
 from transformers.modeling_utils import PreTrainedModel
 from functools import partial
 from typing import Optional, Tuple
-from mttl.models.modifiers.base import Adapter, ModifyMixin
-from mttl.models.modifiers.poly import PolytroponSelector
+from mttl.models.modifiers.base import Adapter, ModifierConfig, ModifyMixin
+from mttl.models.modifiers.poly import PolytroponSelector, PolytroponConfig
+
 
 from transformers.models.llama.modeling_llama import (
     apply_rotary_pos_emb,
@@ -185,7 +187,15 @@ def modify_with_llama_adapters(cls, transformer, config, **kwargs):
     return transformer
 
 
-@register_modifier("llama_adapter")
+@dataclass
+class LLamaAdapterConfig(ModifierConfig):
+    soft_prompt_length: int = 10
+    soft_prompt_learn_kv: bool = False  # should we set this to True?
+    n_tasks: int = None
+    patch_last_k_layers: int = -1
+
+
+@register_modifier("llama_adapter", config_cls=LLamaAdapterConfig)
 class LlamaAdapter(nn.Module):
     def __init__(self, config, attn_layer, task_id_ptr, **kwargs):
         super().__init__()
@@ -214,7 +224,12 @@ class LlamaAdapter(nn.Module):
         return modify_with_llama_adapters(cls, transformer, config, **kwargs)
 
 
-@register_modifier("mlp_llama_adapter")
+@dataclass
+class MLPLLamaAdapterConfig(LLamaAdapterConfig):
+    soft_prompt_mlp_dim: int = 128
+
+
+@register_modifier("mlp_llama_adapter", config_cls=MLPLLamaAdapterConfig)
 class MLPLlamaAdapter(Adapter, ModifyMixin):
     def __init__(self, mlp, config, attn_layer, task_id_ptr, **kwargs):
         super().__init__()
@@ -255,11 +270,17 @@ class MLPLlamaAdapter(Adapter, ModifyMixin):
         )
 
 
-@register_modifier("poly_llama_adapter")
-class PolyLlamaAdapter(LlamaAdapter, ModifyMixin):
+@dataclass
+class PolyLLamaAdapterConfig(LLamaAdapterConfig, PolytroponConfig):
+    n_skills: int = 1
+    n_splits: int = 1
+
+
+@register_modifier("poly_llama_adapter", config_cls=PolyLLamaAdapterConfig)
+class PolyLlamaAdapter(Adapter, ModifyMixin):
     def __init__(self, config, attn_layer, task_id_ptr, **kwargs):
         super().__init__()
-        # TODO: build polytropon selector
+
         self.selector = PolytroponSelector(config)
         self.learn_kv = config.soft_prompt_learn_kv
         self.n_skills, self.n_splits = config.n_skills, config.n_splits

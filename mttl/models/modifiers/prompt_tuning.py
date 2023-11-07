@@ -1,8 +1,13 @@
+from dataclasses import dataclass
 import torch
 import torch.nn as nn
 from mttl.models.modifiers import register_modifier
-from mttl.models.modifiers.base import Adapter, ModifyMixin
+from mttl.models.modifiers.base import Adapter, ModifierConfig, ModifyMixin
 from transformers.modeling_utils import PreTrainedModel
+from mttl.models.modifiers.llama_adapter import (
+    LLamaAdapterConfig,
+    PolyLLamaAdapterConfig,
+)
 from mttl.models.modifiers.poly import PolytroponSelector
 from mttl.models.modifiers.routing import RoutingMixin
 
@@ -184,7 +189,12 @@ class PromptTuningModifyMixin(ModifyMixin):
         return modify_with_prompt_tuning(cls, transformer, config)
 
 
-@register_modifier("prompt_tuning")
+@dataclass
+class PromptTuningConfig(LLamaAdapterConfig):
+    pass
+
+
+@register_modifier("prompt_tuning", config_cls=PromptTuningConfig)
 class PromptTuning(Adapter, PromptTuningModifyMixin):
     def __init__(self, base_input_embeddings, config, *args, **kwargs):
         super().__init__()
@@ -209,7 +219,12 @@ class PromptTuning(Adapter, PromptTuningModifyMixin):
         return self.prompt_embedding.weight.unsqueeze(0).expand(bs, -1, -1)
 
 
-@register_modifier("alpha_prompt_tuning")
+@dataclass
+class AlphaPromptTuningConfig(LLamaAdapterConfig):
+    pass
+
+
+@register_modifier("alpha_prompt_tuning", config_cls=AlphaPromptTuningConfig)
 class AlphaPromptTuning(Adapter, PromptTuningModifyMixin):
     def __init__(self, base_input_embeddings, config, task_id_ptr, *args, **kwargs):
         super().__init__()
@@ -249,7 +264,12 @@ class AlphaPromptTuning(Adapter, PromptTuningModifyMixin):
         return modify_with_prompt_tuning(cls, transformer, config)
 
 
-@register_modifier("poly_prompt_tuning")
+@dataclass
+class PolyPromptTuningConfig(PolyLLamaAdapterConfig):
+    pass
+
+
+@register_modifier("poly_prompt_tuning", config_cls=PolyPromptTuningConfig)
 class PolyPromptTuning(Adapter, RoutingMixin, PromptTuningModifyMixin):
     def __init__(self, base_input_embeddings, config, task_id_ptr, *args, **kwargs):
         super(Adapter, self).__init__()
