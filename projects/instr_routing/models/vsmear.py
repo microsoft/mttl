@@ -353,6 +353,7 @@ class TaskVSMEARRouter(SMEARRouter):
         return routing_probs
 
 
+@register_modifier("smear")
 class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
     def __init__(self, config, task_id_ptr, layer, selector=None, **kwargs):
         RoutingMixin.__init__(self, task_id_ptr)
@@ -385,34 +386,38 @@ class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
         output = output.to(iput_dt)
         return output
 
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        config.router_selector = config.router_selector or "smear"
 
-@register_modifier("smear")
-def modify_with_smear(transformer, config):
-    config.router_selector = config.router_selector or "smear"
-    config.adapter_type = config.adapter_type or "lora"
+        return modify_with_routing(transformer, config, cls, RouterWrapper)
 
-    if config.adapter_type in ["lora"]:
-        return modify_with_routing(
-            transformer, config, AuxRoutingLoRALinear, RouterWrapper
-        )
-    else:
-        raise NotImplementedError(
-            f"Adapter type {config.adapter_type} not implemented for vsmear modifier."
-        )
+
+@register_modifier("smear_xr1_pt")
+class AuxRoutingLoRALinear_XR1_PT(SkilledLoRA, RoutingMixin):
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        config.router_selector = "smear_per_token"
+
+        return modify_with_routing(transformer, config, cls, RouterWrapper)
 
 
 @register_modifier("vsmear")
-def modify_with_vsmear(transformer, config):
-    config.router_selector = "vsmear"
+class VAuxRoutingLoRALinear(AuxRoutingLoRALinear):
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        config.router_selector = "vsmear"
 
-    return modify_with_smear(transformer, config)
+        return modify_with_routing(transformer, config, cls, RouterWrapper)
 
 
 @register_modifier("task_vsmear")
-def modify_with_task_vsmear(transformer, config):
-    config.router_selector = "task_vsmear"
+class VTAuxRoutingLoRALinear(AuxRoutingLoRALinear):
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        config.router_selector = "task_vsmear"
 
-    return modify_with_smear(transformer, config)
+        return modify_with_routing(transformer, config, cls, RouterWrapper)
 
 
 @register_selector("vsmear_xr4")
@@ -540,6 +545,25 @@ class VSMEARRouterOracle(VSMEARRouter):
         return routing_probs.unsqueeze(1)
 
 
+@register_selector("vsmear_xr1")
+class VSMEARRouterExperimentalXR1(SMEARRouter):
+    def __init__(self, config, in_d):
+        super().__init__(config, in_d)
+
+    def forward(self, routing_infos, input: torch.Tensor):
+        return super().forward(routing_infos, input)
+
+
+@register_selector("smear_per_token")
+class VSMEARRouterExperimentalXR1(SMEARRouter):
+    def __init__(self, config, in_d):
+        super().__init__(config, in_d)
+
+    def forward(self, routing_infos, input: torch.Tensor):
+        return super().forward(routing_infos, input)
+
+
+@register_modifier("vsmear_xr4")
 class AuxRoutingLoRALinear_MergeAfterOP(SkilledLoRA_MergeLoraAfterOP, RoutingMixin):
     def __init__(self, config, task_id_ptr, layer, selector=None, **kwargs):
         RoutingMixin.__init__(self, task_id_ptr)
@@ -595,74 +619,31 @@ class AuxRoutingLoRALinear_MergeAfterOP(SkilledLoRA_MergeLoraAfterOP, RoutingMix
         output = output.to(iput_dt)  # downcast output
         return output
 
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        config.router_selector = "vsmear_xr4"
 
-@register_modifier("vsmear_xr4")
-def modify_with_vsmear_reg(transformer, config):
-    config.router_selector = "vsmear_xr4"
-    config.adapter_type = "lora"
-
-    if config.adapter_type in ["lora"]:
-        return modify_with_routing(
-            transformer, config, AuxRoutingLoRALinear_MergeAfterOP, RouterWrapper
-        )
-    else:
-        raise NotImplementedError(
-            f"Adapter type {config.adapter_type} not implemented for vsmear modifier."
-        )
+        return modify_with_routing(transformer, config, cls, RouterWrapper)
 
 
-@register_selector("vsmear_xr1")
-class VSMEARRouterExperimentalXR1(SMEARRouter):
-    def __init__(self, config, in_d):
-        super().__init__(config, in_d)
-
-    def forward(self, routing_infos, input: torch.Tensor):
-        return super().forward(routing_infos, input)
-
-
-@register_selector("smear_per_token")
-class VSMEARRouterExperimentalXR1(SMEARRouter):
-    def __init__(self, config, in_d):
-        super().__init__(config, in_d)
-
-    def forward(self, routing_infos, input: torch.Tensor):
-        return super().forward(routing_infos, input)
-
-
-# same as smear, but uses merging after the outer product
 @register_modifier("vsmear_xr1")
-def modify_with_vsmear_reg(transformer, config):
-    config.router_selector = "vsmear_xr1"
-    config.adapter_type = "lora"
+class VSmearXR1_AuxRoutingLoRALinear_MergeAfterOP(AuxRoutingLoRALinear_MergeAfterOP):
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        config.router_selector = "vsmear_xr1"
 
-    if config.adapter_type in ["lora"]:
         return modify_with_routing(
             transformer, config, AuxRoutingLoRALinear_MergeAfterOP, RouterWrapper
-        )
-    else:
-        raise NotImplementedError(
-            f"Adapter type {config.adapter_type} not implemented for vsmear modifier."
         )
 
 
 # same as smear, but uses merging after the ouyter product
 @register_modifier("smear_oracle")
-def modify_with_vsmear_reg(transformer, config):
-    config.router_selector = "smear_oracle"
-    config.adapter_type = "lora"
+class VSmearXR1_AuxRoutingLoRALinear_MergeAfterOP(AuxRoutingLoRALinear_MergeAfterOP):
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        config.router_selector = "smear_oracle"
 
-    if config.adapter_type in ["lora"]:
         return modify_with_routing(
             transformer, config, AuxRoutingLoRALinear_MergeAfterOP, RouterWrapper
         )
-    else:
-        raise NotImplementedError(
-            f"Adapter type {config.adapter_type} not implemented for vsmear modifier."
-        )
-
-
-@register_modifier("smear_xr1_pt")
-def modify_with_vsmear(transformer, config):
-    config.router_selector = "smear_per_token"
-
-    return modify_with_smear(transformer, config)
