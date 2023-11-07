@@ -206,9 +206,6 @@ def run_multitask(args):
 
     module = model_class(**vars(args), tokenizer=dm.tokenizer)
     module.to("cuda")
-    # lets get base model downstream performance before doing anything
-    scores_init = eval_mmlu(module, args, chkpt_criteria="init")
-    ##############################
 
     mlf_logger = get_mlf_logger()
     if mlf_logger:
