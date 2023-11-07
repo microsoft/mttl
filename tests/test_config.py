@@ -1,7 +1,9 @@
 import json
-
+import os
 import pytest
+import sys
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mttl.config import Config
 
 
@@ -16,6 +18,7 @@ def ConfigTest(tmp_path):
             self.total_steps = 1000
             self.learning_rate = 1e-3
             self.output_dir = str(tmp_path / "output_dir")
+
     return SimpleConfig
 
 
@@ -45,11 +48,13 @@ def test_config_dict_like(tmp_path, ConfigTest):
 
 
 def test_config_was_override_from_kwargs(ConfigTest):
-    config = ConfigTest(kwargs={
-        "optimizer": "adafactor",
-        "dataset": "t0",
-        "model": "t5-small",
-    })
+    config = ConfigTest(
+        kwargs={
+            "optimizer": "adafactor",
+            "dataset": "t0",
+            "model": "t5-small",
+        }
+    )
     assert not config.was_overridden("train_dir")
     assert config.was_overridden("optimizer")
     assert config.was_overridden("dataset")
