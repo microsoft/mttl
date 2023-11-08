@@ -6,7 +6,6 @@ from datasets import (
     Dataset,
 )
 import numpy as np
-from mttl.utils import logger
 
 
 class PlatypusTemplate:

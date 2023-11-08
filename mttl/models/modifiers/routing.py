@@ -184,6 +184,7 @@ class RoutingInfo:
         self.task_ids = self._repeat(self.task_ids, repeats)
         self.task_names = self._repeat(self.task_names, repeats)
         self.example_ids = self._repeat(self.example_ids, repeats)
+        self.task_weights = self._repeat(self.task_weights, repeats)
 
 
 class RoutingMixin:
