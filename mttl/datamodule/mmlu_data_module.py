@@ -177,7 +177,6 @@ class DataCollatorForMMLU(DefaultCollator):
 
         output_batch["sources_texts"] = sources
         output_batch["labels_texts"] = labels
-        output_batch["sources_texts"] = sources
         return output_batch
 
 
