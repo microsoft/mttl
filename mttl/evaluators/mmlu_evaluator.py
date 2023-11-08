@@ -107,7 +107,7 @@ class MMLUEvaluator(object):
             total=len(dataloader),
         )
         for _, batch in pbar:
-            task_names = batch.pop("task_names", None)
+            task_names = batch.get("task_names", None)
             batch.pop("sources_texts", None)
             labels_text = batch.pop("labels_texts", None)
             inputs_text = batch.get("inputs", None)
