@@ -173,7 +173,7 @@ class RoutingInfo:
 
 
 class RoutingMixin:
-    def __init__(self, task_id_ptr) -> None:
+    def __init__(self, task_id_ptr, *args, **kwargs) -> None:
         self.task_id_ptr = task_id_ptr
 
     @property

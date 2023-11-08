@@ -132,10 +132,10 @@ class PolyLoRAConfig(SkilledLoRAConfig, PolytroponConfig):
 
 
 @register_modifier("poly", config_cls=PolyLoRAConfig)
-class PolyLoRA(SkilledLoRA, RoutingMixin, RouterModifyMixin):
+class PolyLoRA(SkilledLoRA, RouterModifyMixin, RoutingMixin):
     def __init__(self, config, task_id_ptr, layer, selector):
-        RoutingMixin.__init__(self, task_id_ptr)
         SkilledLoRA.__init__(self, config, layer)
+        RoutingMixin.__init__(self, task_id_ptr)
         self.selector = selector
 
     def forward(self, input):
@@ -154,6 +154,9 @@ class PolyLoRA(SkilledLoRA, RoutingMixin, RouterModifyMixin):
 
     @classmethod
     def modify_transformer(cls, transformer, config, optional_wrapper=None):
+        if config.router_selector is None:
+            config.router_selector = "poly"
+
         return super().modify_transformer(transformer, config, SkillWrapper)
 
 
