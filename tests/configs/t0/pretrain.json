@@ -1,8 +1,6 @@
 {
     "dataset": "ni",
     "optimizer": "adamw",
-    "data_dir": "$NI_DATA_DIR",
-    "custom_tasks_splits": "./mttl/dataloader/ni_data/train_tasks.txt",
     "warmup_steps": 1500,
     "total_steps": 25000,
     "eval_every": 5000,
