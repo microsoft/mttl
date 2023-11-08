@@ -1,5 +1,4 @@
 # Project related stuff
-configs/
 dataloader/*_data/processed/
 amlt*/
 amulet_*/
