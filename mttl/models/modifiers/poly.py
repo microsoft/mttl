@@ -11,7 +11,7 @@ from mttl.models.modifiers.base import ModifierConfig, ModifyMixin
 from mttl.models.modifiers.lora import SkilledLoRA, SkilledLoRAConfig
 from mttl.models.modifiers.modify_model import register_modifier
 from mttl.models.modifiers.routing import (
-    RouterModifyMixin,
+    modify_with_routing,
     RouterWrapper,
     RoutingMixin,
     RoutingSelector,
@@ -132,7 +132,7 @@ class PolyLoRAConfig(SkilledLoRAConfig, PolytroponConfig):
 
 
 @register_modifier("poly", config_cls=PolyLoRAConfig)
-class PolyLoRA(SkilledLoRA, RouterModifyMixin, RoutingMixin):
+class PolyLoRA(SkilledLoRA, RoutingMixin):
     def __init__(self, config, task_id_ptr, layer, selector):
         SkilledLoRA.__init__(self, config, layer)
         RoutingMixin.__init__(self, task_id_ptr)
@@ -157,7 +157,7 @@ class PolyLoRA(SkilledLoRA, RouterModifyMixin, RoutingMixin):
         if config.router_selector is None:
             config.router_selector = "poly"
 
-        return super().modify_transformer(transformer, config, SkillWrapper)
+        return modify_with_routing(cls, transformer, config, SkillWrapper)
 
 
 @dataclass

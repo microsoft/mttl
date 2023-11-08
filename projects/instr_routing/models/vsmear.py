@@ -2,11 +2,12 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mttl.models.modifiers import modify_with_routing, register_modifier
+from mttl.models.modifiers import register_modifier
 from mttl.models.modifiers.lora import SkilledLoRA, SkilledLoRA_MergeLoraAfterOP
-
 from mttl.models.modifiers.routing import (
     RouterWrapper,
+    RouterModifyMixin,
+    modify_with_routing,
     RoutingMixin,
     RoutingSelector,
     get_selector,
@@ -380,7 +381,7 @@ class SMEARRouterPerToken(SMEARRouter):
 
 
 @register_modifier("smear")
-class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
+class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin, RouterModifyMixin):
     def __init__(self, config, task_id_ptr, layer, selector=None, **kwargs):
         RoutingMixin.__init__(self, task_id_ptr)
         SkilledLoRA.__init__(self, config, layer, **kwargs)
@@ -416,7 +417,7 @@ class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
     def modify_transformer(cls, transformer, config):
         config.router_selector = config.router_selector or "smear"
 
-        return modify_with_routing(transformer, config, cls, RouterWrapper)
+        return modify_with_routing(cls, transformer, config, RouterWrapper)
 
 
 @register_modifier("smear_pt")
@@ -425,7 +426,7 @@ class AuxRoutingLoRALinear_XR1_PT(SkilledLoRA, RoutingMixin):
     def modify_transformer(cls, transformer, config):
         config.router_selector = "smear_pt"
 
-        return modify_with_routing(transformer, config, cls, RouterWrapper)
+        return modify_with_routing(cls, transformer, config, RouterWrapper)
 
 
 @register_modifier("vsmear")
@@ -434,7 +435,7 @@ class VSmear_AuxRoutingLoRALinear(AuxRoutingLoRALinear):
     def modify_transformer(cls, transformer, config):
         config.router_selector = "vsmear"
 
-        return modify_with_routing(transformer, config, cls, RouterWrapper)
+        return modify_with_routing(cls, transformer, config, RouterWrapper)
 
 
 @register_modifier("task_vsmear")
@@ -443,7 +444,7 @@ class TaskVSmear_AuxRoutingLoRALinear(AuxRoutingLoRALinear):
     def modify_transformer(cls, transformer, config):
         config.router_selector = "task_vsmear"
 
-        return modify_with_routing(transformer, config, cls, RouterWrapper)
+        return modify_with_routing(cls, transformer, config, RouterWrapper)
 
 
 @register_selector("vsmear_xr4")
@@ -639,7 +640,7 @@ class AuxRoutingLoRALinear_MergeAfterOP(SkilledLoRA_MergeLoraAfterOP, RoutingMix
     def modify_transformer(cls, transformer, config):
         config.router_selector = "vsmear_xr4"
 
-        return modify_with_routing(transformer, config, cls, RouterWrapper)
+        return modify_with_routing(cls, transformer, config, RouterWrapper)
 
 
 @register_modifier("vsmear_xr1")
@@ -652,9 +653,7 @@ class VSmearXR1_AuxRoutingLoRALinear_MergeAfterOP(AuxRoutingLoRALinear_MergeAfte
     def modify_transformer(cls, transformer, config):
         config.router_selector = "smear"
 
-        return modify_with_routing(
-            transformer, config, AuxRoutingLoRALinear_MergeAfterOP, RouterWrapper
-        )
+        return modify_with_routing(cls, transformer, config, RouterWrapper)
 
 
 # same as smear, but uses merging after the ouyter product
@@ -664,6 +663,4 @@ class VSmearXR1_AuxRoutingLoRALinear_MergeAfterOP(AuxRoutingLoRALinear_MergeAfte
     def modify_transformer(cls, transformer, config):
         config.router_selector = "smear_oracle"
 
-        return modify_with_routing(
-            transformer, config, AuxRoutingLoRALinear_MergeAfterOP, RouterWrapper
-        )
+        return modify_with_routing(cls, transformer, config, RouterWrapper)
