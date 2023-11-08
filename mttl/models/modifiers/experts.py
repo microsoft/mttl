@@ -28,7 +28,6 @@ def _extract_identifier(string, match_on="coder"):
 
 
 def add_expert_to_transformer(
-    config,
     transformer,
     expert_name,
     expert_config,
