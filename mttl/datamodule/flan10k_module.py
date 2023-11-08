@@ -5,11 +5,39 @@ from mttl.datamodule.base import DefaultCollator
 from mttl.dataloader.flan_10k_dataset_reader import Flan10kDataset
 from mttl.datamodule.base import DatasetConfig, DefaultDataModule
 from dataclasses import dataclass
+import numpy as np
 
 
 @dataclass
 class Flan10kConfig(DatasetConfig):
     pass
+
+
+@dataclass
+class DataCollatorForFlan10k(DefaultCollator):
+    def __call__(self, batch, return_tensors=None):
+        if return_tensors is None:
+            return_tensors = self.return_tensors
+
+        sources = [b["source"] for b in batch]
+        labels = [b["target"] for b in batch]
+        task_ids = [b.get("task_id", 0) for b in batch]
+        # give a random experts
+        experts_ids = [b.get("expert_id", np.random.randint(0, 245 - 1)) for b in batch]
+        task_names = [b.get("task_name", None) for b in batch]
+
+        output_batch = (
+            self.prepare_inputs_for_gpt_family(sources, labels)
+            if self.model_family == "gpt"
+            else self.prepare_inputs_for_seq2seq_family(sources, labels)
+        )
+
+        output_batch["task_ids"] = torch.LongTensor(task_ids)
+        output_batch["task_names"] = task_names
+        output_batch["sources_texts"] = sources
+        output_batch["labels_texts"] = labels
+        output_batch["expert_ids"] = torch.LongTensor(experts_ids)
+        return output_batch
 
 
 class Flan10kModule(DefaultDataModule):
@@ -43,13 +71,25 @@ class Flan10kModule(DefaultDataModule):
             num_workers=16,
             pin_memory=True,
             persistent_workers=True,
-            collate_fn=self.collate_fn,
+            collate_fn=self.test_collate_fn,
         )
 
     def __init__(self, config, for_generation=False, val_mixin=None):
         super().__init__(config, for_generation=for_generation, val_mixin=val_mixin)
 
         self.config = config
+
+    @property
+    def test_collate_fn(self):
+        return DataCollatorForFlan10k(
+            tokenizer=self.tokenizer,
+            padding="longest",
+            max_input_length=self.config.max_input_length,
+            max_output_length=self.config.max_output_length,
+            pad_to_multiple_of=8,
+            return_tensors="pt",
+            model_family=self.config.model_family,
+        )
 
     @property
     def collate_fn(self):

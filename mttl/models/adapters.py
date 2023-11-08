@@ -8,6 +8,8 @@ import bitsandbytes as bnb
 from abc import ABC, abstractmethod
 from typing import Dict
 
+expert_ids2name = {}
+
 
 class Adapter(nn.Module):
     @property
@@ -404,6 +406,27 @@ class ExpertContainer(Adapter, MergableAdapter):
 
         return output
 
+    def route_with_expert_name(self, input, expert_names):
+        """
+        Route according to the expert name information
+        """
+        load_experts = []
+        for expert_name in expert_names:
+            if expert_name not in self.experts:
+                if not self.default_expert_name:
+                    raise ValueError(
+                        "The expert {} not in the expert factory. Consider setting a default expert!".format(
+                            expert_name
+                        )
+                    )
+                else:
+                    selected_expert = self.default_expert_name
+            else:
+                selected_expert = expert_name
+                load_experts.append(self.experts[selected_expert])
+        output = LoRA.parallel_linear_forward(input, load_experts)
+        return output
+
     def route_with_task_name(self, input, task_names):
         """
         Route according to the task name information
@@ -429,6 +452,10 @@ class ExpertContainer(Adapter, MergableAdapter):
 
     def forward(self, input, **kwargs):
         task_names = self.info_container["routing_infos"].task_names
+        expert_ids = self.info_container["routing_infos"].expert_ids
+        expert_names = [
+            expert_ids2name.get(id, self.default_expert_name) for id in expert_ids
+        ]
 
         if task_names and (
             any(task_name not in self.experts for task_name in task_names)
@@ -444,7 +471,10 @@ class ExpertContainer(Adapter, MergableAdapter):
             assert (
                 task_names is not None
             ), "Task names are not given: set router or merge experts into the layer."
-            output = self.route_with_task_name(input, task_names)
+            if expert_names is not None:
+                output = self.route_with_expert_name(input, expert_names)
+            else:
+                output = self.route_with_task_name(input, task_names)
         elif len(self.experts) and self.selector is not None:
             weights: Dict = self.selector(input)
             output = self.weighted_route(input, weights)
