@@ -72,6 +72,7 @@ class MultiExpertModel(ExpertTrainer):
         ).items():
             print("Loading module: {}".format(module_name))
             self.model = add_expert_to_transformer(
+                self.hparams,
                 self.model,
                 module_name,
                 module_data.expert_config,
