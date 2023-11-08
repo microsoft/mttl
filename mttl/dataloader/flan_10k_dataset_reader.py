@@ -10,6 +10,7 @@ class Flan10kDataset(torch.utils.data.dataset.Dataset):
     def __init__(self, category, idxs=None):
         super().__init__()
         self.dataset = datasets.load_dataset("sordonia/flan-10k")[category]
+        self.task_name = category
         if idxs is not None:
             self.dataset = self.dataset.select(idxs)
 
@@ -26,6 +27,7 @@ class Flan10kDataset(torch.utils.data.dataset.Dataset):
             "source": source,
             "target": target,
             "task_id": task_id,
+            "task_name": self.task_name,
         }
 
 
