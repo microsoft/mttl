@@ -6,8 +6,9 @@ import torch.nn as nn
 from enum import Enum
 
 import torch.nn.functional as F
-from mttl.models.modifiers.base import SkilledLoRA, LoRA, SkilledLoRA_MergeLoraAfterOP
 from mttl.models.modifiers import modify_with_routing, register_modifier
+from mttl.models.modifiers.lora import SkilledLoRA, SkilledLoRA_MergeLoraAfterOP
+
 from mttl.models.modifiers.routing import (
     RouterWrapper,
     RoutingMixin,
@@ -15,8 +16,8 @@ from mttl.models.modifiers.routing import (
     get_selector,
     register_selector,
 )
+
 from projects.instr_routing.models.clm import AugmentedRoutingInfo
-from mttl.models.modifiers.poly import PolytroponSelector
 
 
 class Metrics:
