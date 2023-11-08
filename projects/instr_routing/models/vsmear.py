@@ -353,6 +353,35 @@ class TaskVSMEARRouter(SMEARRouter):
         return routing_probs
 
 
+@register_selector("smear_pt")
+class SMEARRouterPerToken(SMEARRouter):
+    def __init__(self, config, in_d):
+        super().__init__(config, in_d)
+
+    def _get_router_inputs(
+        self, input: torch.Tensor, routing_infos: AugmentedRoutingInfo
+    ):
+        return input
+
+    def forward(self, routing_infos: AugmentedRoutingInfo, input: torch.Tensor):
+        self.metrics.clear()
+
+        prior_input = self._get_router_inputs(input, routing_infos)  # b x seq x d
+        prior_routes = self.route_maybe_center(
+            prior_input,
+            self.prior_router,
+            self.prior_router_ln,
+            temperature=self.temperature,
+            center=self.router_center_momentum > 0.0,
+        )  # b x seq x self.n_skills
+
+        routing_probs = F.softmax(prior_routes, dim=-1)  # b x seq x d
+        h_pri = -(routing_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
+        self.routings = routing_probs.detach().cpu().view(-1, self.n_skills)
+        self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
+        return routing_probs.unsqueeze(1)
+
+
 @register_modifier("smear")
 class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
     def __init__(self, config, task_id_ptr, layer, selector=None, **kwargs):
@@ -393,11 +422,11 @@ class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
         return modify_with_routing(transformer, config, cls, RouterWrapper)
 
 
-@register_modifier("smear_xr1_pt")
+@register_modifier("smear_pt")
 class AuxRoutingLoRALinear_XR1_PT(SkilledLoRA, RoutingMixin):
     @classmethod
     def modify_transformer(cls, transformer, config):
-        config.router_selector = "smear"
+        config.router_selector = "smear_pt"
 
         return modify_with_routing(transformer, config, cls, RouterWrapper)
 
@@ -422,6 +451,10 @@ class TaskVSmear_AuxRoutingLoRALinear(AuxRoutingLoRALinear):
 
 @register_selector("vsmear_xr4")
 class VSMEARRouterExperimental(VSMEARRouter):
+    """
+    Adds aux loss between prior and posterior routings.
+    """
+
     def __init__(self, config, in_d):
         super().__init__(config, in_d)
         self.prior_router_ln = nn.Identity()
@@ -505,6 +538,10 @@ class VSMEARRouterExperimental(VSMEARRouter):
 
 @register_selector("smear_oracle")
 class VSMEARRouterOracle(VSMEARRouter):
+    """
+    Use posterior routings for trainign and test.
+    """
+
     def __init__(self, config, in_d):
         super().__init__(config, in_d)
         self.prior_router_ln = nn.Identity()
@@ -610,6 +647,10 @@ class AuxRoutingLoRALinear_MergeAfterOP(SkilledLoRA_MergeLoraAfterOP, RoutingMix
 
 @register_modifier("vsmear_xr1")
 class VSmearXR1_AuxRoutingLoRALinear_MergeAfterOP(AuxRoutingLoRALinear_MergeAfterOP):
+    """
+    Like smear, but can do merging after the outer product.
+    """
+
     @classmethod
     def modify_transformer(cls, transformer, config):
         config.router_selector = "smear"
