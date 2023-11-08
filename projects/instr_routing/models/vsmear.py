@@ -397,13 +397,13 @@ class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
 class AuxRoutingLoRALinear_XR1_PT(SkilledLoRA, RoutingMixin):
     @classmethod
     def modify_transformer(cls, transformer, config):
-        config.router_selector = "smear_per_token"
+        config.router_selector = "smear"
 
         return modify_with_routing(transformer, config, cls, RouterWrapper)
 
 
 @register_modifier("vsmear")
-class VAuxRoutingLoRALinear(AuxRoutingLoRALinear):
+class VSmear_AuxRoutingLoRALinear(AuxRoutingLoRALinear):
     @classmethod
     def modify_transformer(cls, transformer, config):
         config.router_selector = "vsmear"
@@ -412,7 +412,7 @@ class VAuxRoutingLoRALinear(AuxRoutingLoRALinear):
 
 
 @register_modifier("task_vsmear")
-class VTAuxRoutingLoRALinear(AuxRoutingLoRALinear):
+class TaskVSmear_AuxRoutingLoRALinear(AuxRoutingLoRALinear):
     @classmethod
     def modify_transformer(cls, transformer, config):
         config.router_selector = "task_vsmear"
@@ -545,24 +545,6 @@ class VSMEARRouterOracle(VSMEARRouter):
         return routing_probs.unsqueeze(1)
 
 
-@register_selector("vsmear_xr1")
-class VSMEARRouterExperimentalXR1(SMEARRouter):
-    def __init__(self, config, in_d):
-        super().__init__(config, in_d)
-
-    def forward(self, routing_infos, input: torch.Tensor):
-        return super().forward(routing_infos, input)
-
-
-@register_selector("smear_per_token")
-class VSMEARRouterExperimentalXR1(SMEARRouter):
-    def __init__(self, config, in_d):
-        super().__init__(config, in_d)
-
-    def forward(self, routing_infos, input: torch.Tensor):
-        return super().forward(routing_infos, input)
-
-
 @register_modifier("vsmear_xr4")
 class AuxRoutingLoRALinear_MergeAfterOP(SkilledLoRA_MergeLoraAfterOP, RoutingMixin):
     def __init__(self, config, task_id_ptr, layer, selector=None, **kwargs):
@@ -630,7 +612,7 @@ class AuxRoutingLoRALinear_MergeAfterOP(SkilledLoRA_MergeLoraAfterOP, RoutingMix
 class VSmearXR1_AuxRoutingLoRALinear_MergeAfterOP(AuxRoutingLoRALinear_MergeAfterOP):
     @classmethod
     def modify_transformer(cls, transformer, config):
-        config.router_selector = "vsmear_xr1"
+        config.router_selector = "smear"
 
         return modify_with_routing(
             transformer, config, AuxRoutingLoRALinear_MergeAfterOP, RouterWrapper
