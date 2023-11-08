@@ -1,6 +1,5 @@
-from typing import Union
+from dataclasses import dataclass
 import torch
-from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
@@ -8,14 +7,15 @@ import numpy as np
 from torch.distributions.relaxed_bernoulli import RelaxedBernoulli
 from mttl.global_vars import EPS
 
-from mttl.models.adapters import SkilledLoRA
+from mttl.models.modifiers.base import ModifierConfig, ModifyMixin
+from mttl.models.modifiers.lora import SkilledLoRA, SkilledLoRAConfig
 from mttl.models.modifiers.modify_model import register_modifier
 from mttl.models.modifiers.routing import (
+    modify_with_routing,
     RouterWrapper,
     RoutingMixin,
     RoutingSelector,
     register_selector,
-    modify_with_routing,
 )
 
 
@@ -32,6 +32,19 @@ class SkillWrapper(RouterWrapper):
         for name, selector in object.get_selectors().items():
             print("Resizing module_logits of selector", name, "with", n_tasks, "tasks.")
             selector.resize_module_logits(n_tasks)
+
+
+@dataclass
+class PolytroponConfig(ModifierConfig):
+    n_skills: int = 1
+    n_splits: int = 1
+    router_selector: str = "poly"
+    module_logits_dropout: float = 0.0
+    module_logits_l2_norm: bool = False
+    module_logits_relaxed_bernoulli: bool = False
+    module_logits_straight_through: bool = False
+    poly_average_correction: bool = False
+    poly_use_shared_skill: bool = False
 
 
 @register_selector("poly")
@@ -113,10 +126,16 @@ class PolytroponSelector(RoutingSelector):
         return module_weights
 
 
+@dataclass
+class PolyLoRAConfig(SkilledLoRAConfig, PolytroponConfig):
+    pass
+
+
+@register_modifier("poly", config_cls=PolyLoRAConfig)
 class PolyLoRA(SkilledLoRA, RoutingMixin):
     def __init__(self, config, task_id_ptr, layer, selector):
-        RoutingMixin.__init__(self, task_id_ptr)
         SkilledLoRA.__init__(self, config, layer)
+        RoutingMixin.__init__(self, task_id_ptr)
         self.selector = selector
 
     def forward(self, input):
@@ -133,27 +152,19 @@ class PolyLoRA(SkilledLoRA, RoutingMixin):
             mixing_weights = mixing_weights.unsqueeze(1)
         return SkilledLoRA.forward(self, input, mixing_weights)
 
+    @classmethod
+    def modify_transformer(cls, transformer, config, optional_wrapper=None):
+        if config.router_selector is None:
+            config.router_selector = "poly"
 
-@register_modifier("poly")
-def modify_with_poly_ia3(transformer, config):
-    config.router_selector = config.router_selector or "poly"
-    config.adapter_type = config.adapter_type or "lora"
-
-    if config.adapter_type == "lora":
-        return modify_with_routing(transformer, config, PolyLoRA, SkillWrapper)
-    else:
-        raise NotImplementedError(f"Poly modifier not implemented for adapter {config.adapter_type}.")
+        return modify_with_routing(cls, transformer, config, SkillWrapper)
 
 
-@register_modifier("skilled")
-def modify_with_poly_ia3(transformer, config):
-    # setting router_selector to private
-    config.router_selector = "private"
-    config.adapter_type = config.adapter_type or "lora"
-    # setting n_skills to n_tasks in case of skilled modifier
-    config.n_skills = config.n_tasks
+@dataclass
+class SkilledPolyConfig(SkilledLoRAConfig, PolytroponConfig):
+    router_selector: str = "private"
 
-    if config.adapter_type == "lora":
-        return modify_with_routing(transformer, config, PolyLoRA, SkillWrapper)
-    else:
-        raise NotImplementedError(f"Skilled modifier not implemented for adapter {config.adapter_type}.")
+
+@register_modifier("skilled", config_cls=SkilledPolyConfig)
+class SkilledPolyLoRA(PolyLoRA):
+    pass

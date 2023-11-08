@@ -1,42 +1,18 @@
-import re
+from dataclasses import dataclass
 import torch
 import torch.nn as nn
 from mttl.models.modifiers import register_modifier
-from mttl.models.adapters import LoRA, LN, IA3
-from mttl.utils import logger
+from mttl.models.modifiers.base import Adapter, ModifierConfig, ModifyMixin
 from transformers.modeling_utils import PreTrainedModel
-from functools import partial
+from mttl.models.modifiers.llama_adapter import (
+    LLamaAdapterConfig,
+    PolyLLamaAdapterConfig,
+)
 from mttl.models.modifiers.poly import PolytroponSelector
+from mttl.models.modifiers.routing import RoutingMixin
+
 
 PromptTuningRouting = None
-
-
-def modify_with_soft_prompt_cls(transformer, config, layer_type):
-    """Wrap the forward pass of the model with a hook that takes extracts the embeddings
-    from the `input_ids`, gets the embeddings from the soft prompt and stiches them together.
-    """
-
-    assert isinstance(
-        transformer, PreTrainedModel
-    ), "Transformer must be a PreTrainedModel."
-
-    for param in transformer.parameters():
-        param.requires_grad = False
-
-    task_id_container = transformer.task_id_container
-
-    input_embeddings = transformer.get_input_embeddings()
-    config.vocab_embed_dim = input_embeddings.embedding_dim
-
-    soft_prompt = layer_type(
-        config=config,
-        task_id_ptr=task_id_container,
-        base_input_embeddings=input_embeddings,
-    )
-
-    return DecoderPromptTuningWrapper(
-        config=config, transformer=transformer, soft_prompt=soft_prompt
-    )
 
 
 class DecoderPromptTuningWrapper(torch.nn.Module):
@@ -180,22 +156,46 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
         return model_kwargs
 
 
-@register_modifier("prompt_tuning")
-def modify_with_soft_prompt_routing(transformer, config):
-    return modify_with_soft_prompt_cls(transformer, config, PromptTuning)
+def modify_with_prompt_tuning(cls, transformer, config):
+    """Wrap the forward pass of the model with a hook that takes extracts the embeddings
+    from the `input_ids`, gets the embeddings from the soft prompt and stiches them together.
+    """
+    assert isinstance(
+        transformer, PreTrainedModel
+    ), "Transformer must be a PreTrainedModel."
+
+    for param in transformer.parameters():
+        param.requires_grad = False
+
+    task_id_container = transformer.task_id_container
+
+    input_embeddings = transformer.get_input_embeddings()
+    config.vocab_embed_dim = input_embeddings.embedding_dim
+
+    soft_prompt = cls(
+        config=config,
+        task_id_ptr=task_id_container,
+        base_input_embeddings=input_embeddings,
+    )
+
+    return DecoderPromptTuningWrapper(
+        config=config, transformer=transformer, soft_prompt=soft_prompt
+    )
 
 
-@register_modifier("poly_prompt_tuning")
-def modify_with_soft_prompt_routing(transformer, config):
-    return modify_with_soft_prompt_cls(transformer, config, PolyPromptTuning)
+class PromptTuningModifyMixin(ModifyMixin):
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        return modify_with_prompt_tuning(cls, transformer, config)
 
 
-@register_modifier("alpha_prompt_tuning")
-def modify_with_soft_prompt_routing(transformer, config):
-    return modify_with_soft_prompt_cls(transformer, config, AlphaPromptTuning)
+@dataclass
+class PromptTuningConfig(LLamaAdapterConfig):
+    pass
 
 
-class PromptTuning(nn.Module):
+@register_modifier("prompt_tuning", config_cls=PromptTuningConfig)
+class PromptTuning(Adapter, PromptTuningModifyMixin):
     def __init__(self, base_input_embeddings, config, *args, **kwargs):
         super().__init__()
 
@@ -219,7 +219,13 @@ class PromptTuning(nn.Module):
         return self.prompt_embedding.weight.unsqueeze(0).expand(bs, -1, -1)
 
 
-class AlphaPromptTuning(nn.Module):
+@dataclass
+class AlphaPromptTuningConfig(LLamaAdapterConfig):
+    pass
+
+
+@register_modifier("alpha_prompt_tuning", config_cls=AlphaPromptTuningConfig)
+class AlphaPromptTuning(Adapter, PromptTuningModifyMixin):
     def __init__(self, base_input_embeddings, config, task_id_ptr, *args, **kwargs):
         super().__init__()
 
@@ -253,13 +259,23 @@ class AlphaPromptTuning(nn.Module):
         mixed = torch.einsum("BLSV,VSD->BLSD", (mixing_weights, embeds))
         return mixed.reshape(bs, self.prompt_length, -1)
 
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        return modify_with_prompt_tuning(cls, transformer, config)
 
-class PolyPromptTuning(nn.Module):
+
+@dataclass
+class PolyPromptTuningConfig(PolyLLamaAdapterConfig):
+    pass
+
+
+@register_modifier("poly_prompt_tuning", config_cls=PolyPromptTuningConfig)
+class PolyPromptTuning(Adapter, RoutingMixin, PromptTuningModifyMixin):
     def __init__(self, base_input_embeddings, config, task_id_ptr, *args, **kwargs):
-        super().__init__()
+        super(Adapter, self).__init__()
+        super(RoutingMixin, self).__init__(task_id_ptr)
 
         self.config = config
-        self.task_id_ptr = task_id_ptr
         self.embed_dim = config.vocab_embed_dim
         self.prompt_length = config.soft_prompt_length
 
@@ -271,17 +287,13 @@ class PolyPromptTuning(nn.Module):
         std = base_input_embeddings.weight.std(0)
 
         # TODO: Revisit this initialization
-        embedding = (
-            torch.randn(
-                (
-                    config.n_skills,
-                    self.embed_dim,
-                    self.prompt_length,
-                )
+        embedding = torch.randn(
+            (
+                config.n_skills,
+                self.embed_dim,
+                self.prompt_length,
             )
-            * (std.view(1, -1, 1) / 2)
-            + mean.view(1, -1, 1)
-        )
+        ) * (std.view(1, -1, 1) / 2) + mean.view(1, -1, 1)
 
         # split dim according to `n_splits`
         embedding = embedding.reshape(
@@ -297,10 +309,7 @@ class PolyPromptTuning(nn.Module):
 
     def forward(self, input_ids, *args, **kwargs):
         bs, _ = input_ids.size()
-
-        # get task ids
-        routing_infos = self.task_id_ptr["routing_infos"]
-        weights = self.selector(routing_infos)
+        weights = self.selector(self.routing_infos)
 
         if weights.ndim == 1:
             raise NotImplementedError()

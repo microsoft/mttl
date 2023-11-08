@@ -13,16 +13,23 @@ from mttl.models.modifiers import modify_transformer
 from mttl.models.get_optimizer import get_optimizer
 from mttl.models.get_scheduler import get_scheduler
 from mttl.models.utils import EfficientCheckpointModule
-from mttl.models.modifiers.routing import RoutingSelector, RoutingInfo as BaseRoutingInfo
+from mttl.models.modifiers.routing import (
+    RoutingSelector,
+    RoutingInfo as BaseRoutingInfo,
+)
+
 
 @dataclass
 class RoutingInfo(BaseRoutingInfo):
     inst_token_mask: torch.Tensor = None
     encoder_output: torch.Tensor = None
     # from clm
-    inputs_cache_for_generation: Dict[object, torch.Tensor] = field(default_factory=dict)
+    inputs_cache_for_generation: Dict[object, torch.Tensor] = field(
+        default_factory=dict
+    )
     # signals if the model is in generation mode
     generation_mode: bool = False
+
 
 class EncoderDecoder(EfficientCheckpointModule):
     """
@@ -40,7 +47,9 @@ class EncoderDecoder(EfficientCheckpointModule):
         self.tokenizer = kwargs["tokenizer"]
 
         if kwargs.get("model_object") is None:
-            self.model = AutoModelForSeq2SeqLM.from_pretrained(config.model, cache_dir=config.cache_dir)
+            self.model = AutoModelForSeq2SeqLM.from_pretrained(
+                config.model, cache_dir=config.cache_dir
+            )
 
             # free up local space after loading in memory
             if config.free_up_space:
@@ -67,13 +76,17 @@ class EncoderDecoder(EfficientCheckpointModule):
         print(self.model.encoder.block[0])
         self._inference_outputs = []
 
-        if 'smear' in config.model_modifier:
+        if "smear" in config.model_modifier:
             task_id_container = self.model.task_id_container
+
             def enc_fwd(model, input, output):
-                task_id_container["routing_infos"].encoder_output = output.last_hidden_state
+                task_id_container[
+                    "routing_infos"
+                ].encoder_output = output.last_hidden_state
                 return output
+
             self.model.encoder.register_forward_hook(enc_fwd)
-    
+
     def gather_auxiliary_losses(self):
         # get some losses from the model if it is a router
         aux_loss = []
@@ -95,7 +108,7 @@ class EncoderDecoder(EfficientCheckpointModule):
     def training_step(self, batch, batch_idx, split="train"):
         # propagate task information
         routing_infos = RoutingInfo.from_batch(batch)
-        self.model.task_id_container["routing_infos"] = routing_infos 
+        self.model.task_id_container["routing_infos"] = routing_infos
 
         if self.config.mc_loss > 0 or self.config.unlikely_loss > 0:
             input_ids, choices_ids, labels = (
@@ -106,7 +119,7 @@ class EncoderDecoder(EfficientCheckpointModule):
             bs, num_choices = choices_ids.shape[:2]
 
             flat_choices_ids = choices_ids.flatten(0, 1)
-            attention_mask = batch['attention_mask'].float()
+            attention_mask = batch["attention_mask"].float()
             routing_infos.inst_token_mask = attention_mask
             encoder_hidden_states = self.model.encoder(
                 input_ids=input_ids, attention_mask=attention_mask
@@ -193,7 +206,7 @@ class EncoderDecoder(EfficientCheckpointModule):
                 tensorboard_logs["unlikely_loss"] = unlikely_loss.item()
             else:
                 unlikely_loss = 0.0
-            
+
             loss = (
                 lm_loss
                 + mc_loss * self.config.mc_loss
@@ -208,7 +221,7 @@ class EncoderDecoder(EfficientCheckpointModule):
             decoder_input_ids = torch.cat(
                 [torch.zeros_like(target_ids[:, :1]), target_ids[:, :-1]], dim=1
             )  # [bs, max_seq_len]
-            
+
             # need to transform -100 into padding tokens
             decoder_input_ids[decoder_input_ids == -100] = self.tokenizer.pad_token_id
 
@@ -226,8 +239,12 @@ class EncoderDecoder(EfficientCheckpointModule):
 
         # get some losses from the model if it is a router
         aux_loss = self.gather_auxiliary_losses()
-        aux_loss = torch.stack(aux_loss).mean() if len(aux_loss) else torch.zeros(1).to(loss.device)
-        tensorboard_logs['aux_loss'] = aux_loss.item()
+        aux_loss = (
+            torch.stack(aux_loss).mean()
+            if len(aux_loss)
+            else torch.zeros(1).to(loss.device)
+        )
+        tensorboard_logs["aux_loss"] = aux_loss.item()
         loss = loss + aux_loss
 
         # log learning rate as well
@@ -245,10 +262,17 @@ class EncoderDecoder(EfficientCheckpointModule):
         self.model.task_id_container["routing_infos"] = None
 
         self.log_dict(
-            {f"{split}/{k}": v for (k, v) in tensorboard_logs.items() if 'loss' in k}, sync_dist=True, prog_bar=True
+            {f"{split}/{k}": v for (k, v) in tensorboard_logs.items() if "loss" in k},
+            sync_dist=True,
+            prog_bar=True,
         )
         self.log_dict(
-            {f"{split}/{k}": v for (k, v) in tensorboard_logs.items() if 'loss' not in k}, sync_dist=True,
+            {
+                f"{split}/{k}": v
+                for (k, v) in tensorboard_logs.items()
+                if "loss" not in k
+            },
+            sync_dist=True,
         )
         for plugin in self.loss_plugins.values():
             plugin_loss = plugin.compute_loss(self.model, batch)
@@ -283,7 +307,7 @@ class EncoderDecoder(EfficientCheckpointModule):
 
         # propagate task information
         routing_infos = RoutingInfo.from_batch(batch)
-        self.model.task_id_container["routing_infos"] = routing_infos 
+        self.model.task_id_container["routing_infos"] = routing_infos
 
         input_ids, choices_ids, labels = (
             batch["input_ids"],
