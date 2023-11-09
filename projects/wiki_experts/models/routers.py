@@ -7,6 +7,9 @@ from typing import Any, Dict
 import torch.nn.functional as F
 from abc import abstractmethod, ABCMeta, abstractproperty
 from mttl.global_vars import EPS
+from classification_module import ClassificationDataModule
+from models.classifer_ranker import Classifier
+from sentence_transformers import SentenceTransformer
 
 MULTI_EXPERT_ROUTERS = {}
 
@@ -35,6 +38,20 @@ class Router:
     @abstractproperty
     def name(self):
         pass
+
+
+# add retrieval
+def get_classifier():
+    text_encoder = SentenceTransformer("all-MiniLM-L6-v2")
+
+    datamodule = ClassificationDataModule(batch_size=1024)
+    datamodule.setup("test")
+
+    classifier = Classifier(text_encoder, len(datamodule.task_names))
+    cls = classifier.load_from_checkpoint(
+        "/projects/futhark1/data/wzm289/code/lucas_mttl/classification_ranker/classifier-epoch=00-val/loss=2.37.ckpt"
+    )
+    return cls
 
 
 @register_multi_expert_selector("poly_router")

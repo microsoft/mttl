@@ -7,6 +7,7 @@ from mttl.models.modifiers.experts import add_expert_to_transformer
 from mttl.utils import logger
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.models.routers import Router
+from projects.wiki_experts.models.routers import get_classifier
 from typing import Dict
 
 
@@ -59,6 +60,7 @@ class MultiExpertModel(ExpertTrainer):
 
         self.selectors: Dict[str, Router] = {}
         self.experts = []
+        self.classifier = get_classifier()
 
     def get_router_weights(self):
         weights = {}
@@ -133,6 +135,19 @@ class MultiExpertModel(ExpertTrainer):
     def generation_config(self):
         return self.model.generation_config
 
+    def expert_retrieval(self, batch, **kwargs):
+        input_texts = batch["inputs"]
+        expert_selection = []
+        # get the expert predictions
+        expert_predictions = self.classifier(input_texts)
+        expert_indices = expert_predictions.argmax(dim=1).cpu()
+        for i in expert_indices:
+            if i < len(self.experts):
+                expert_selection.append(self.experts[i])
+            else:
+                expert_selection.append(self.experts[0])
+        return expert_selection
+
     def expert_choice(self, batch, **kwargs):
         input_ids = batch["input_ids"]
         mask = batch["input_ids"].ne(self.tokenizer.pad_token_id)
@@ -205,6 +220,9 @@ class MultiExpertModel(ExpertTrainer):
             batch["task_names"] = np.random.choice(
                 self.experts, batch["input_ids"].shape[0], replace=True
             ).tolist()
+        elif self.hparams.routing == "retrieval":
+            logger.info("retrieval routing")
+            batch["task_names"] = self.expert_retrieval(batch)
 
         if hasattr(self.model, "task_id_container"):
             self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
