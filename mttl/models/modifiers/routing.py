@@ -154,19 +154,16 @@ class RoutingInfo:
     example_ids: List[int] = None
     labels: torch.Tensor = None
     task_weights: torch.nn.ParameterDict = None
-    expert_ids: List[str] = None
 
     @classmethod
     def from_batch(cls, batch: dict, **kwargs):
         task_ids = batch.get("task_ids").long() if "task_ids" in batch else None
         task_names = batch.get("task_names", None)
         task_weights = batch.get("task_weights", None)
-        expert_ids = batch.get("expert_ids", None)
 
         ri = cls(
             task_ids=task_ids,
             task_names=task_names,
-            expert_ids=expert_ids,
             task_weights=task_weights,
             example_ids=batch.get("example_ids", None),
             labels=batch.get("labels", None),
@@ -187,7 +184,6 @@ class RoutingInfo:
         self.task_ids = self._repeat(self.task_ids, repeats)
         self.task_names = self._repeat(self.task_names, repeats)
         self.example_ids = self._repeat(self.example_ids, repeats)
-        self.expert_ids = self._repeat(self.expert_ids, repeats)
 
 
 class RoutingMixin:

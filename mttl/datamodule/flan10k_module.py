@@ -24,7 +24,6 @@ class DataCollatorForFlan10k(DefaultCollator):
     pad_to_multiple_of: Optional[int] = None
     return_tensors: str = "pt"
     model_family: str = None
-    ranker: str = None
 
     def __call__(self, batch, return_tensors=None):
         if return_tensors is None:
@@ -33,14 +32,6 @@ class DataCollatorForFlan10k(DefaultCollator):
         sources = [b["source"] for b in batch]
         labels = [b["target"] for b in batch]
         task_ids = [b.get("task_id", 0) for b in batch]
-        # give a random experts
-        # if self.ranker is classifier class
-        if isinstance(self.ranker, torch.nn.Module):
-            experts_ids = [self.ranker(b["source"]).argmax().item() for b in batch]
-        else:
-            experts_ids = [
-                b.get("expert_id", np.random.randint(0, 245 - 1)) for b in batch
-            ]
         task_names = [b.get("task_name", None) for b in batch]
 
         output_batch = (
@@ -53,7 +44,6 @@ class DataCollatorForFlan10k(DefaultCollator):
         output_batch["task_names"] = task_names
         output_batch["sources_texts"] = sources
         output_batch["labels_texts"] = labels
-        output_batch["expert_ids"] = torch.LongTensor(experts_ids)
         return output_batch
 
 
@@ -106,7 +96,6 @@ class Flan10kModule(DefaultDataModule):
             pad_to_multiple_of=8,
             return_tensors="pt",
             model_family=self.config.model_family,
-            ranker=self.config.ranker,
         )
 
     @property

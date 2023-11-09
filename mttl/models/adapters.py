@@ -8,8 +8,6 @@ import bitsandbytes as bnb
 from abc import ABC, abstractmethod
 from typing import Dict
 
-expert_ids2name = {}
-
 
 class Adapter(nn.Module):
     @property
@@ -452,13 +450,6 @@ class ExpertContainer(Adapter, MergableAdapter):
 
     def forward(self, input, **kwargs):
         task_names = self.info_container["routing_infos"].task_names
-        expert_ids = self.info_container["routing_infos"].expert_ids
-        expert_names = None
-        if expert_ids is not None:
-            expert_names = [
-                expert_ids2name.get(id, self.default_expert_name) for id in expert_ids
-            ]
-
         if task_names and (
             any(task_name not in self.experts for task_name in task_names)
             and not self.default_expert_name
@@ -473,10 +464,7 @@ class ExpertContainer(Adapter, MergableAdapter):
             assert (
                 task_names is not None
             ), "Task names are not given: set router or merge experts into the layer."
-            if expert_names is not None:
-                output = self.route_with_expert_name(input, expert_names)
-            else:
-                output = self.route_with_task_name(input, task_names)
+            output = self.route_with_task_name(input, task_names)
         elif len(self.experts) and self.selector is not None:
             weights: Dict = self.selector(input)
             output = self.weighted_route(input, weights)
