@@ -136,7 +136,10 @@ class MultiExpertModel(ExpertTrainer):
         return self.model.generation_config
 
     def expert_retrieval(self, batch, **kwargs):
-        input_texts = batch["inputs"]
+        if "inputs" in batch:
+            input_texts = batch["inputs"]
+        elif "sources_text" in batch:
+            input_texts = batch["sources_text"]
         expert_selection = []
         # get the expert predictions
         expert_predictions = self.classifier(input_texts)
