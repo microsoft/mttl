@@ -6,6 +6,8 @@ from mttl.dataloader.flan_10k_dataset_reader import Flan10kDataset
 from mttl.datamodule.base import DatasetConfig, DefaultDataModule
 from dataclasses import dataclass
 import numpy as np
+from transformers import AutoTokenizer
+from typing import Optional
 
 
 @dataclass
@@ -15,6 +17,15 @@ class Flan10kConfig(DatasetConfig):
 
 @dataclass
 class DataCollatorForFlan10k(DefaultCollator):
+    tokenizer: AutoTokenizer
+    padding: bool = True
+    max_input_length: int = 512
+    max_output_length: Optional[int] = 1024
+    pad_to_multiple_of: Optional[int] = None
+    return_tensors: str = "pt"
+    model_family: str = None
+    ranker: str = None
+
     def __call__(self, batch, return_tensors=None):
         if return_tensors is None:
             return_tensors = self.return_tensors
@@ -23,7 +34,13 @@ class DataCollatorForFlan10k(DefaultCollator):
         labels = [b["target"] for b in batch]
         task_ids = [b.get("task_id", 0) for b in batch]
         # give a random experts
-        experts_ids = [b.get("expert_id", np.random.randint(0, 245 - 1)) for b in batch]
+        # if self.ranker is classifier class
+        if isinstance(self.ranker, torch.nn.Module):
+            experts_ids = [self.ranker(b["source"]).argmax().item() for b in batch]
+        else:
+            experts_ids = [
+                b.get("expert_id", np.random.randint(0, 245 - 1)) for b in batch
+            ]
         task_names = [b.get("task_name", None) for b in batch]
 
         output_batch = (
@@ -89,6 +106,7 @@ class Flan10kModule(DefaultDataModule):
             pad_to_multiple_of=8,
             return_tensors="pt",
             model_family=self.config.model_family,
+            ranker=self.config.ranker,
         )
 
     @property

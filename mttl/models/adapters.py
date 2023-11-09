@@ -453,9 +453,11 @@ class ExpertContainer(Adapter, MergableAdapter):
     def forward(self, input, **kwargs):
         task_names = self.info_container["routing_infos"].task_names
         expert_ids = self.info_container["routing_infos"].expert_ids
-        expert_names = [
-            expert_ids2name.get(id, self.default_expert_name) for id in expert_ids
-        ]
+        expert_names = None
+        if expert_ids is not None:
+            expert_names = [
+                expert_ids2name.get(id, self.default_expert_name) for id in expert_ids
+            ]
 
         if task_names and (
             any(task_name not in self.experts for task_name in task_names)
