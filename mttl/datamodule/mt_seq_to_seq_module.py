@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 @dataclass
 class FlanConfig(DatasetConfig):
-    pass
+    include_templates: str = "zs_noopt"
 
 
 class FlanModule(DefaultDataModule):
@@ -27,10 +27,23 @@ class FlanModule(DefaultDataModule):
             dataset, "task_name", self.config.finetune_task_name
         )
 
-        self.train_dataset, self.dev_dataset = self.create_train_valid_split(
-            train_dataset
-        )
-        self.test_dataset = self.dev_dataset
+        if self.config.include_templates != "*":
+            train_dataset = train_dataset.filter(
+                lambda x: x["template_type"]
+                in self.config.include_templates.split(","),
+            )
+
+        if "split" in dataset.column_names:
+            self.train_dataset = train_dataset.filter(lambda x: x["split"] == "train")
+            self.dev_dataset = train_dataset.filter(
+                lambda x: x["split"] == "validation"
+            )
+            self.test_dataset = train_dataset.filter(lambda x: x["split"] == "test")
+        else:
+            self.train_dataset, self.dev_dataset = self.create_train_valid_split(
+                train_dataset
+            )
+            self.test_dataset = self.dev_dataset
         self.print_infos()
 
 
