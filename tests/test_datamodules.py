@@ -128,8 +128,8 @@ def test_auto_module():
         train_batch_size=4,
         predict_batch_size=4,
     )
-    assert len(flan.train_dataset) == 2_460
-    assert len(flan.task_names) == 246
+    assert len(flan.train_dataset) == 689
+    assert len(flan.task_names) == 1820
 
 
 @pytest.mark.parametrize("task_name", [None, "high_school_government_and_politics"])
