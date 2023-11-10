@@ -663,35 +663,6 @@ class VSmearXR1_AuxRoutingLoRALinear_MergeAfterOP(AuxRoutingLoRALinear_MergeAfte
         return modify_with_routing(cls, transformer, config, RouterWrapper)
 
 
-@register_modifier("smear")
-def modify_with_smear(transformer, config):
-    config.router_selector = config.router_selector or "smear"
-    config.adapter_type = config.adapter_type or "lora"
-
-    if config.adapter_type in ["lora"]:
-        return modify_with_routing(
-            transformer, config, AuxRoutingLoRALinear, RouterWrapper
-        )
-    else:
-        raise NotImplementedError(
-            f"Adapter type {config.adapter_type} not implemented for vsmear modifier."
-        )
-
-
-@register_modifier("vsmear")
-def modify_with_vsmear(transformer, config):
-    config.router_selector = config.router_selector or "vsmear"
-
-    return modify_with_smear(transformer, config)
-
-
-@register_modifier("task_vsmear")
-def modify_with_task_vsmear(transformer, config):
-    config.router_selector = "task_vsmear"
-
-    return modify_with_smear(transformer, config)
-
-
 # same as smear, but uses merging after the ouyter product
 @register_modifier("smear_oracle")
 class VSmearXR1_AuxRoutingLoRALinear_MergeAfterOP(AuxRoutingLoRALinear_MergeAfterOP):

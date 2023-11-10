@@ -188,6 +188,10 @@ class Config:
         )
         self.use_t0_few_shot_training_set = False  # if True, then use 100 examples per task during training + 100 examples per validation task
 
+        # Filtering configs, useful for flan flat, etc.
+        self.include_template_type = "zs_noopt"
+        self.include_task_source = "P3,Flan2021"
+
         # Training config
         self.compute_strategy = None
         self.padding_side = "right"

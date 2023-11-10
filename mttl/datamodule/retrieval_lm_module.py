@@ -71,7 +71,9 @@ class RetrievalLMDataCollator:
 
 
 class TaskSampler(torch.utils.data.sampler.Sampler):
-    def __init__(self, dataset, task_names, batch_size, num_tasks_per_batch=1, rng=None):
+    def __init__(
+        self, dataset, task_names, batch_size, num_tasks_per_batch=1, rng=None
+    ):
         self.dataset = dataset
         self.batch_size = batch_size
         self.num_tasks_per_batch = num_tasks_per_batch
@@ -84,6 +86,7 @@ class TaskSampler(torch.utils.data.sampler.Sampler):
 
     def __len__(self):
         import math
+
         return self.batch_size * math.ceil(self.num_examples / self.batch_size)
 
     def __iter__(self):
@@ -130,7 +133,7 @@ class RetrievalLMDataModule(LightningDataModule):
             sampler=self.get_task_sampler(
                 self.train_dataset,
                 batch_size=self.config.train_batch_size,
-            )
+            ),
         )
 
     def val_dataloader(self):
