@@ -29,12 +29,13 @@ class FlanModule(DefaultDataModule):
         if self.config.include_template_type != "*":
             train_dataset = train_dataset.filter(
                 lambda x: x["template_type"]
-                in self.config.include_templates.split(","),
+                in self.config.include_template_type.split(","),
             )
 
         if self.config.include_task_source != "*":
             train_dataset = train_dataset.filter(
-                lambda x: x["task_source"] in self.config.include_sources.split(","),
+                lambda x: x["task_source"]
+                in self.config.include_task_source.split(","),
             )
 
         if "split" in dataset.column_names:
