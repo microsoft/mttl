@@ -285,6 +285,7 @@ class T0PretrainDatasetWithTemplate(torch.utils.data.dataset.Dataset):
             "source": source,
             "target": target,
             "example_id": example_id,
+            "task_id": self.ds_id,
             "task_name": self.task_name,
         }
 

@@ -2,6 +2,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import urllib.request
 import os
+from pathlib import Path
+import pytest
 
 
 def setup_mmlu(session):

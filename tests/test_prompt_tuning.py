@@ -1,28 +1,15 @@
 import os
 import sys
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import torch
 import torch.nn.functional as F
 from pytorch_lightning import seed_everything
-from transformers import AutoTokenizer
-from projects.instr_routing.config import RoutingConfig
 from mttl.models.modifiers.routing import RoutingInfo
 from mttl.models.modifiers import modify_transformer
-from mttl.models.modifiers.prompt_tuning import PromptTuning
+from mttl.models.modifiers.prompt_tuning import PromptTuning, PromptTuningConfig
 
 
-def test_llama_adapter():
+def test_prompt_tuning():
     os.environ["CONFIG_PATH"] = "./"
-
-    _args = RoutingConfig(
-        "projects/instr_routing/configs/platypus/llama2_7b.json"
-        + "+projects/instr_routing/configs/t0_/llama_adapter.json",
-    )
-    _args.n_tasks = 768
-    _args.warmup_steps = 0
-    _args.learning_rate = 1e-3
 
     seed_everything(0)
 
@@ -30,6 +17,7 @@ def test_llama_adapter():
     # build llama config
     from transformers.models.llama.configuration_llama import LlamaConfig
 
+    adapter_config = PromptTuningConfig(n_tasks=768, soft_prompt_learn_kv=True)
     small_config = LlamaConfig(
         vocab_size=400,
         hidden_size=512,
@@ -53,7 +41,7 @@ def test_llama_adapter():
     attn_mask = torch.zeros(bs, max_seq_len, dtype=torch.int32)
     attn_mask[torch.arange(bs), seq_len] = 1
     attn_mask = 1 - attn_mask.cumsum(dim=-1)
-    task_ids = torch.randint(0, _args.n_tasks, (bs,))
+    task_ids = torch.randint(0, adapter_config.n_tasks, (bs,))
     batch["attention_mask"] = attn_mask
 
     model.task_id_container["routing_infos"] = RoutingInfo(task_ids=task_ids)
@@ -62,10 +50,7 @@ def test_llama_adapter():
     output = model(**batch)
     assert round(output.loss.item(), 4) == 6.0915
 
-    # Test with llama adapter
-    _args.model_modifier = "prompt_tuning"
-    new_model = modify_transformer(model, _args)
-
+    new_model = modify_transformer(model, adapter_config)
     new_model.task_id_container["routing_infos"] = RoutingInfo(task_ids=task_ids)
 
     # Test Base Llama model
