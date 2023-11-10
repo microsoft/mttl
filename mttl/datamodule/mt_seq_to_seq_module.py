@@ -11,6 +11,7 @@ from dataclasses import dataclass
 @dataclass
 class FlanConfig(DatasetConfig):
     include_templates: str = "zs_noopt"
+    include_sources: str = "P3,Flan2021"
 
 
 class FlanModule(DefaultDataModule):
@@ -31,6 +32,11 @@ class FlanModule(DefaultDataModule):
             train_dataset = train_dataset.filter(
                 lambda x: x["template_type"]
                 in self.config.include_templates.split(","),
+            )
+
+        if self.config.include_sources != "*":
+            train_dataset = train_dataset.filter(
+                lambda x: x["task_source"] in self.config.include_sources.split(","),
             )
 
         if "split" in dataset.column_names:
