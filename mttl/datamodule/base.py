@@ -328,7 +328,9 @@ class AutoDataModule:
     def create(cls, name, for_generation=False, val_mixin=False, **kwargs):
         from mttl.datamodule.mt_seq_to_seq_module import (
             FlanModule,
+            FlanConfig,
             T0FlatModule,
+            T0FlatConfig,
         )
         from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
         from mttl.datamodule.platypus_module import PlatypusModule
@@ -338,13 +340,13 @@ class AutoDataModule:
 
         if name in ["sordonia/t0-10k-flat", "sordonia/t0-1.6M-flat"]:
             return T0FlatModule(
-                DatasetConfig(dataset=name, **kwargs),
+                T0FlatConfig(dataset=name, **kwargs),
                 for_generation=for_generation,
                 val_mixin=val_mixin,
             )
         elif name in ["sordonia/flan-10k-flat", "sordonia/flan-debug-flat"]:
             return FlanModule(
-                DatasetConfig(dataset=name, **kwargs),
+                FlanConfig(dataset=name, **kwargs),
                 for_generation=for_generation,
                 val_mixin=val_mixin,
             )

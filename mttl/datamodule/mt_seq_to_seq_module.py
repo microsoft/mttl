@@ -1,9 +1,7 @@
 from typing import List
 
-import torch
-from mttl.utils import logger
 from datasets import load_dataset
-from mttl.datamodule.base import DefaultDataModule, DatasetConfig, DefaultCollator
+from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 from dataclasses import dataclass
 
