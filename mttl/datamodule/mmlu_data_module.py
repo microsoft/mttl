@@ -124,6 +124,7 @@ class DataCollatorForMMLU(DefaultCollator):
     pad_to_multiple_of: Optional[int] = None
     label_pad_token_id: int = -100
     return_tensors: str = "pt"
+    for_generation: bool = False
     model_family: str = "seq2seq"
     task_to_id: dict = None
 
@@ -226,7 +227,8 @@ class MMLUDataModule(DefaultDataModule):
             max_input_length=self.config.max_input_length,
             max_output_length=self.config.max_output_length,
             return_tensors="pt",
-            model_family="seq2seq" if self.for_generation else self.config.model_family,
+            model_family=self.config.model_family,
+            for_generation=self.for_generation,
             task_to_id=self.task_to_id,
         )
 

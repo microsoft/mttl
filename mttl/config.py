@@ -17,9 +17,13 @@ class Config:
         if filenames:
             for filename in filenames.split("+"):
                 if not os.path.exists(filename):
-                    filename = os.path.join(os.getenv("CONFIG_PATH", default="configs"), filename)
+                    filename = os.path.join(
+                        os.getenv("CONFIG_PATH", default="configs"), filename
+                    )
 
-                self.update_kwargs(json.load(open(filename)), eval=False, raise_error=raise_error)
+                self.update_kwargs(
+                    json.load(open(filename)), eval=False, raise_error=raise_error
+                )
 
         if kwargs:
             self.update_kwargs(kwargs, raise_error=raise_error)
@@ -33,11 +37,11 @@ class Config:
     def was_overridden(self, key):
         return key in self._updated_kwargs
 
-    def was_default(self, key):   
+    def was_default(self, key):
         return key not in self._updated_kwargs
 
     def update_kwargs(self, kwargs, eval=True, raise_error=True):
-        for (k, v) in kwargs.items():
+        for k, v in kwargs.items():
             if eval:
                 try:
                     v = ast.literal_eval(v)
@@ -52,7 +56,7 @@ class Config:
             if eval:
                 logger.warn("Overwriting {} to {}".format(k, v))
 
-            if k in ['data_dir', 'output_dir']:
+            if k in ["data_dir", "output_dir"]:
                 # this raises an error if the env. var does not exist
                 v = Template(v).substitute(os.environ)
 
@@ -142,13 +146,17 @@ class Config:
         self.finetune_task_name = None
         self.example_to_ids_path = None  # path to clustering of data
         self.embeddings_path = None
-        
+
         # NI related configs
         self.use_task_descriptions = False  # Use task descriptions
-        self.max_num_instances_per_task = 100  # Max instances per training task (applies to NI)
-        self.num_pos_examples = 0  # Use some few-shot examples if possible (applies to NI)
+        self.max_num_instances_per_task = (
+            100  # Max instances per training task (applies to NI)
+        )
+        self.num_pos_examples = (
+            0  # Use some few-shot examples if possible (applies to NI)
+        )
 
-        self.task_prefix = None    # xfit has task prefixes detailing # of shots, seed, etc; this is automatically filled in at fine-tuning time
+        self.task_prefix = None  # xfit has task prefixes detailing # of shots, seed, etc; this is automatically filled in at fine-tuning time
         self.exp_name = None
         self.wandb_project = None
         self.padding_side = "right"
@@ -160,8 +168,14 @@ class Config:
         self.freeze_embeds = False
 
         # T0 related configs
-        self.use_t0_templates_as_tasks = False     # if True, then t0 consists of 313 tasks, otherwise 38
+        self.use_t0_templates_as_tasks = (
+            False  # if True, then t0 consists of 313 tasks, otherwise 38
+        )
         self.use_t0_few_shot_training_set = False  # if True, then use 100 examples per task during training + 100 examples per validation task
+
+        # Filtering configs, useful for flan flat, etc.
+        self.include_template_type = "zs_noopt"
+        self.include_task_source = "P3,Flan2021"
 
         # Training config
         self.compute_strategy = None
@@ -193,25 +207,29 @@ class Config:
         self.debug = False
         self.seed = 42
 
-        self.ni_online_eval = False   # zero-shot online eval for ni
-        self.t0_online_eval = False   # zero-shot eval for t0
+        self.ni_online_eval = False  # zero-shot online eval for ni
+        self.t0_online_eval = False  # zero-shot eval for t0
         self.early_stop_on_zero_shot = False  # zero-shot early stopping
 
         # auxiliary losses
-        self.ortho_loss = 0.          # orthogonality between skills
-        self.task_loss = 0.           # task prediction loss (mi between tasks and skills)
-        self.l1_loss = 0.             # sparsity of the logits
-        self.mi_loss = 0.             # mi between tasks and skills (difference of entropies method)
-        self.mc_loss = 0.             # T-Few
-        self.length_norm = 0.         # T-Few
-        self.unlikely_loss = 0.       # T-Few
-        self.poly_unlikely_loss = 0.  # poly unlikelihood loss
-        self.finetune_type = None     # ["F", "A", "Z", "MuZ", "Poly", "PolyRand"]
+        self.ortho_loss = 0.0  # orthogonality between skills
+        self.task_loss = 0.0  # task prediction loss (mi between tasks and skills)
+        self.l1_loss = 0.0  # sparsity of the logits
+        self.mi_loss = (
+            0.0  # mi between tasks and skills (difference of entropies method)
+        )
+        self.mc_loss = 0.0  # T-Few
+        self.length_norm = 0.0  # T-Few
+        self.unlikely_loss = 0.0  # T-Few
+        self.poly_unlikely_loss = 0.0  # poly unlikelihood loss
+        self.finetune_type = None  # ["F", "A", "Z", "MuZ", "Poly", "PolyRand"]
         self.finetune_skip_es = False  # skip early stopping while fine-tuning
-        self.finetune_use_last_checkpoint = False  # use always the best valid_perf checkpoint if available
+        self.finetune_use_last_checkpoint = (
+            False  # use always the best valid_perf checkpoint if available
+        )
 
         self.model = None
-        self.model_family = None      # model family, either "gpt" or "encdec"
+        self.model_family = None  # model family, either "gpt" or "encdec"
 
         self.precision = "32"
         self.monitor_grad_alignment_on = None
@@ -220,12 +238,12 @@ class Config:
         self.adapter_type = None
 
         self.lora_rank = 16
-        self.lora_dropout = 0.
+        self.lora_dropout = 0.0
         self.lora_init_scale = 0.01
-        self.lora_alpha = 1.
+        self.lora_alpha = 1.0
         self.lora_warmup = False
         self.lora_init_b_random = False
-        self.lora_dropout = 0.
+        self.lora_dropout = 0.0
 
         # n-skills for router-based methods
         self.n_skills = 8
@@ -243,21 +261,21 @@ class Config:
         layerwise : 1 selector for each attention layer (and layernorm)
         finegrained : 1 selector for every linear layer
         """
-        self.router_granularity = 'finegrained'  # router granularity
-        self.router_selector = None              # router selector
-        
+        self.router_granularity = "finegrained"  # router granularity
+        self.router_selector = None  # router selector
+
         # Polytropon related hyper-parameters
-        self.n_splits = 1                        # number of splits for poly-s
+        self.n_splits = 1  # number of splits for poly-s
         self.router_selector_cluster_temp = 1.0  # temperature for the cluster selector
-        self.poly_average_correction = False     # correct the poly average
-        self.poly_use_shared_skill = False       # use one skill shared by all tasks
+        self.poly_average_correction = False  # correct the poly average
+        self.poly_use_shared_skill = False  # use one skill shared by all tasks
 
         self.module_logits_relaxed_bernoulli = True
         self.module_logits_straight_through = False
         self.module_logits_learning_rate = 0.1
         self.adapters_learning_rate = None
         self.adapters_weight_decay = None
-        self.module_logits_dropout = 0.
+        self.module_logits_dropout = 0.0
         self.module_logits_l2_norm = False
 
 
@@ -265,5 +283,5 @@ class ParseKwargs(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         setattr(namespace, self.dest, dict())
         for value in values:
-            key, value = value.split('=')
+            key, value = value.split("=")
             getattr(namespace, self.dest)[key] = value

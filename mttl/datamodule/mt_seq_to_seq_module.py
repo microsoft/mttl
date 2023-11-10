@@ -1,16 +1,15 @@
 from typing import List
 
-import torch
-from mttl.utils import logger
 from datasets import load_dataset
-from mttl.datamodule.base import DefaultDataModule, DatasetConfig, DefaultCollator
+from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 from dataclasses import dataclass
 
 
 @dataclass
 class FlanConfig(DatasetConfig):
-    pass
+    include_template_type: str = "zs_noopt"
+    include_task_source: str = "P3,Flan2021"
 
 
 class FlanModule(DefaultDataModule):
@@ -27,10 +26,29 @@ class FlanModule(DefaultDataModule):
             dataset, "task_name", self.config.finetune_task_name
         )
 
-        self.train_dataset, self.dev_dataset = self.create_train_valid_split(
-            train_dataset
-        )
-        self.test_dataset = self.dev_dataset
+        if self.config.include_template_type != "*":
+            train_dataset = train_dataset.filter(
+                lambda x: x["template_type"]
+                in self.config.include_template_type.split(","),
+            )
+
+        if self.config.include_task_source != "*":
+            train_dataset = train_dataset.filter(
+                lambda x: x["task_source"]
+                in self.config.include_task_source.split(","),
+            )
+
+        if "split" in dataset.column_names:
+            self.train_dataset = train_dataset.filter(lambda x: x["split"] == "train")
+            self.dev_dataset = train_dataset.filter(
+                lambda x: x["split"] == "validation"
+            )
+            self.test_dataset = train_dataset.filter(lambda x: x["split"] == "test")
+        else:
+            self.train_dataset, self.dev_dataset = self.create_train_valid_split(
+                train_dataset
+            )
+            self.test_dataset = self.dev_dataset
         self.print_infos()
 
 

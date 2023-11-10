@@ -14,13 +14,13 @@ class AlpacaTemplateForHash(
         )
         if len(input) > 0:
             return f"Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.\
-            \n### Instruction: {instruction}\
-            \n### Input:{input}\
-            \n### Response: {output}"
+\n### Instruction: {instruction}\
+\n### Input: {input}\
+\n### Response: {output}"
         else:
             return f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\
-            \n### Instruction: {instruction}\
-            \n### Response: {output}"
+\n### Instruction: {instruction}\
+\n### Response: {output}"
 
 
 class AlpacaTemplate(object):
@@ -33,11 +33,11 @@ class AlpacaTemplate(object):
         )
         if len(input) > 0:
             instr = f"Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.\
-            \n### Instruction: {instruction}\
-            \n### Input: {input}"
+\n### Instruction: {instruction}\
+\n### Input: {input}"
         else:
             instr = f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\
-            \n### Instruction: {instruction}"
+\n### Instruction: {instruction}"
         # if topics_str is not None:
         #         instr += f"\n###Response: [ {topics_str} ] {output}"
         # else:
@@ -55,13 +55,13 @@ class AlpacaTemplateSource(object):
         )
         if len(input) > 0:
             return f"Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.\
-            \n### Instruction: {instruction}\
-            \n### Input: {input}\
-            \n### Response:"
+\n### Instruction: {instruction}\
+\n### Input: {input}\
+\n### Response:"
         else:
             return f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\
-            \n### Instruction: {instruction}\
-            \n### Response:"
+\n### Instruction: {instruction}\
+\n### Response:"
 
 
 class AlpacaDataset(torch.utils.data.dataset.Dataset):
