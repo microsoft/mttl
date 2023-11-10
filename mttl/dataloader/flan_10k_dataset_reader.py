@@ -11,8 +11,6 @@ class Flan10kDataset(torch.utils.data.dataset.Dataset):
         super().__init__()
         self.dataset = datasets.load_dataset("sordonia/flan-10k")[category]
         self.task_name = category
-        if idxs is not None:
-            self.dataset = self.dataset.select(idxs)
 
     def __len__(self):
         return len(self.dataset)

@@ -138,8 +138,10 @@ class MultiExpertModel(ExpertTrainer):
     def expert_retrieval(self, batch, **kwargs):
         if "inputs" in batch:
             input_texts = batch["inputs"]
-        elif "sources_text" in batch:
-            input_texts = batch["sources_text"]
+        elif "sources_texts" in batch:
+            input_texts = batch["sources_texts"]
+        else:
+            raise ValueError("No inputs found in batch!")
         expert_selection = []
         # get the expert predictions
         expert_predictions = self.classifier(input_texts)

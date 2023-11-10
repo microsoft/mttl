@@ -110,11 +110,8 @@ class Flan10kModule(DefaultDataModule):
             model_family=self.config.model_family,
         )
 
-    def get_dataset(self, idxs=None):
-        return Flan10kDataset(
-            self.config.category,
-            idxs=idxs,
-        )
+    def get_dataset(self):
+        return Flan10kDataset(self.config.category)
 
     def setup(self, stage=None):
         dataset = self.get_dataset()

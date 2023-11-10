@@ -6,6 +6,7 @@ import numpy as np
 import pytorch_lightning as pl
 from pathlib import Path
 import rouge
+import os
 
 from mttl.models.utils import transfer_batch_to_device
 
@@ -27,18 +28,19 @@ class FlanEvaluator(object):
         pred_output_file_path=None,
         device="cuda",
     ):
-        from mttl.datamodule.flan10k_module import Flan10kModule
-
         self.config = deepcopy(config)
         self.device = device
         self.pred_output_file_path = (
             pred_output_file_path  # if not None, will trute generations into it
         )
+
+    def load_data_module(self):
+        from mttl.datamodule.flan10k_module import Flan10kModule
+
         self.datamodule = Flan10kModule(
             self.config,
             for_generation=True,
         )
-        self.datamodule.setup("test")
 
     def evaluate(self, model, subsample=-1):
         was_train = model.training
@@ -106,9 +108,13 @@ class FlanEvaluator(object):
 
             predictions = decode(predictions, tokenizer)
             references = labels_texts
-
-            rouge_score = rouge.Rouge().get_scores(predictions, references, avg=True)
-            all_rougeL.extend([rouge_score["rouge-1"]["f"]])
+            try:
+                rouge_score = rouge.Rouge().get_scores(
+                    predictions, references, avg=True
+                )
+                all_rougeL.extend([rouge_score["rouge-1"]["f"]])
+            except ValueError:
+                all_rougeL.extend([0.0])
 
             pbar.set_description(
                 f"Task: {task_names[0] if task_names else None}, rougeL: {np.mean(all_rougeL):.4f}"
