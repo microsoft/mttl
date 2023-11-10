@@ -8,8 +8,8 @@ from dataclasses import dataclass
 
 @dataclass
 class FlanConfig(DatasetConfig):
-    include_templates: str = "zs_noopt"
-    include_sources: str = "P3,Flan2021"
+    include_template_type: str = "zs_noopt"
+    include_task_source: str = "P3,Flan2021"
 
 
 class FlanModule(DefaultDataModule):
@@ -26,13 +26,13 @@ class FlanModule(DefaultDataModule):
             dataset, "task_name", self.config.finetune_task_name
         )
 
-        if self.config.include_templates != "*":
+        if self.config.include_template_type != "*":
             train_dataset = train_dataset.filter(
                 lambda x: x["template_type"]
                 in self.config.include_templates.split(","),
             )
 
-        if self.config.include_sources != "*":
+        if self.config.include_task_source != "*":
             train_dataset = train_dataset.filter(
                 lambda x: x["task_source"] in self.config.include_sources.split(","),
             )
