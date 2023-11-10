@@ -1,11 +1,7 @@
-import sys
-import os
-
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from mttl.dataloader.mmlu_dataset import format_example_with_augmentation
 
 
-def test_MMLUDataset():
+def test_mmlu_augmentation():
     icl_prompts = ["PROMT_ICL"]
     icl_options = [["0", "1", "2", "3"]]
     icl_labels = ["B"]
