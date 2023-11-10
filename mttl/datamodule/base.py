@@ -44,6 +44,7 @@ class DefaultCollator:
     label_pad_token_id: int = -100
     return_tensors: str = "pt"
     model_family: str = "seq2seq"
+    for_generation: bool = False
     train_on_inputs: bool = False
 
     def enforce_eos(self, targets):
@@ -125,9 +126,30 @@ class DefaultCollator:
 
     def prepare_inputs_for_gpt_family(self, sources, labels):
         # Add eos token
+        output_batch = {}
         sources, labels = self.add_space_and_eos(sources, labels)
 
-        output_batch = {}
+        # exit early if we are generating
+        if self.for_generation:
+            tokenized_sources = self.tokenizer(
+                sources,
+                max_length=self.max_input_length,
+                padding=self.padding,
+                return_tensors=self.return_tensors,
+                truncation=True,
+            )
+            tokenized_labels = self.tokenizer(
+                labels,
+                max_length=self.max_output_length,
+                padding=self.padding,
+                return_tensors=self.return_tensors,
+                truncation=True,
+            )
+            output_batch["input_ids"] = tokenized_sources["input_ids"]
+            output_batch["attention_mask"] = tokenized_sources["attention_mask"]
+            output_batch["labels"] = tokenized_labels["input_ids"]
+            return output_batch
+
         if self.max_input_length > 0:
             tokenized_sources = self.tokenizer(
                 sources,
@@ -258,6 +280,7 @@ class DefaultDataModule(LightningDataModule):
             pad_to_multiple_of=8,
             return_tensors="pt",
             model_family=self.config.model_family,
+            for_generation=self.for_generation,
             train_on_inputs=self.config.train_on_inputs,
         )
 

@@ -101,6 +101,25 @@ def test_alpaca():
     assert labels_texts[0][0] != ""
 
 
+def test_alpaca_for_gen():
+    alpaca = AutoDataModule.create(
+        "alpaca",
+        model="EleutherAI/gpt-neo-125m",
+        model_family="gpt",
+        predict_batch_size=1,
+        for_generation=True,
+        validation_portion=0.05,
+    )
+    batch = next(iter(alpaca.val_dataloader()))
+
+    sources_texts = batch["sources_texts"]
+
+    input_ids = alpaca.tokenizer(sources_texts[0]).input_ids
+    assert np.allclose(
+        batch["input_ids"][0][: len(input_ids)].numpy().tolist(), input_ids
+    )
+
+
 def test_auto_module():
     flan = AutoDataModule.create(
         "sordonia/flan-debug-flat",
