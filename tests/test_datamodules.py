@@ -19,10 +19,10 @@ def test_flan(task_name):
         )
     )
     if task_name is None:
-        assert len(flan.train_dataset) == 2_460
-        assert len(flan.task_names) == 246
+        assert len(flan.train_dataset) == 689
+        assert len(flan.task_names) == 1820
     else:
-        assert len(flan.train_dataset) == 10
+        assert len(flan.train_dataset) == 3
         assert len(flan.task_names) == 1
 
     batch = next(iter(flan.train_dataloader()))
