@@ -30,14 +30,18 @@ class FlanModule(DefaultDataModule):
                 partial(
                     set(self.config.include_template_type.split(",")),
                     filter_template_type,
-                )
+                ),
+                num_proc=16,
+                desc="Filtering template types",
             )
 
         if self.config.include_task_source != "*":
             dataset = dataset.filter(
                 partial(
                     filter_task_source, set(self.config.include_task_source.split(","))
-                )
+                ),
+                num_proc=16,
+                desc="Filtering task sources",
             )
 
         (
@@ -51,11 +55,21 @@ class FlanModule(DefaultDataModule):
         )
 
         if "split" in dataset.column_names["train"]:
-            self.train_dataset = train_dataset.filter(lambda x: x["split"] == "train")
-            self.dev_dataset = train_dataset.filter(
-                lambda x: x["split"] == "validation"
+            self.train_dataset = train_dataset.filter(
+                lambda x: x["split"] == "train",
+                num_proc=16,
+                desc="Creating train set",
             )
-            self.test_dataset = train_dataset.filter(lambda x: x["split"] == "test")
+            self.dev_dataset = train_dataset.filter(
+                lambda x: x["split"] == "validation",
+                num_proc=16,
+                desc="Creating valid set",
+            )
+            self.test_dataset = train_dataset.filter(
+                lambda x: x["split"] == "test",
+                num_proc=16,
+                desc="Creating test set",
+            )
         else:
             self.train_dataset, self.dev_dataset = self.create_train_valid_split(
                 train_dataset
