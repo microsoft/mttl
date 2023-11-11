@@ -1,3 +1,4 @@
+from functools import partial
 from typing import List
 
 from datasets import load_dataset
@@ -12,27 +13,32 @@ class FlanConfig(DatasetConfig):
     include_task_source: str = "P3,Flan2021"
 
 
+def filter_template_type(include_template_type, example):
+    return example["template_type"] in include_template_type
+
+
+def filter_task_source(include_task_source, example):
+    return example["task_source"] in include_task_source
+
+
 class FlanModule(DefaultDataModule):
     def setup_dataset(self):
         dataset = load_dataset(self.config.dataset)
 
         if self.config.include_template_type != "*":
-
-            def filter_template_type(example):
-                return example[
-                    "template_type"
-                ] in self.config.include_template_type.split(",")
-
-            dataset = dataset.filter(filter_template_type)
+            dataset = dataset.filter(
+                partial(
+                    set(self.config.include_template_type.split(",")),
+                    filter_template_type,
+                )
+            )
 
         if self.config.include_task_source != "*":
-
-            def filter_task_source(example):
-                return example["task_source"] in self.config.include_task_source.split(
-                    ","
+            dataset = dataset.filter(
+                partial(
+                    filter_task_source, set(self.config.include_task_source.split(","))
                 )
-
-            dataset = dataset.filter(filter_task_source)
+            )
 
         (
             self._task_names,
