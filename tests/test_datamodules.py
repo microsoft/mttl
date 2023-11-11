@@ -19,11 +19,13 @@ def test_flan(task_name):
         )
     )
     if task_name is None:
-        assert len(flan.train_dataset) == 689
+        assert len(flan.train_dataset) == 559
         assert len(flan.task_names) == 235
+        assert len(flan.test_dataset) == 63
     else:
-        assert len(flan.train_dataset) == 3
+        assert len(flan.train_dataset) == 2
         assert len(flan.task_names) == 1
+        assert len(flan.test_dataset) == 1
 
     batch = next(iter(flan.train_dataloader()))
     assert "input_ids" in batch
@@ -129,7 +131,19 @@ def test_auto_module():
         train_batch_size=4,
         predict_batch_size=4,
     )
-    assert len(flan.train_dataset) == 689
+    assert len(flan.train_dataset) == 559
+    assert len(flan.task_names) == 235
+
+    flan = AutoDataModule.create(
+        "sordonia/flan-debug-flat",
+        model="t5-small",
+        model_family="seq2seq",
+        train_batch_size=4,
+        predict_batch_size=4,
+        include_template_type="*",
+        include_task_source="*",
+    )
+    assert len(flan.train_dataset) == 14560
     assert len(flan.task_names) == 1820
 
 

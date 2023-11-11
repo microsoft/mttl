@@ -38,7 +38,7 @@ class FlanModule(DefaultDataModule):
             dataset, "task_name", self.config.finetune_task_name
         )
 
-        if "split" in dataset.column_names:
+        if "split" in dataset.column_names["train"]:
             self.train_dataset = train_dataset.filter(lambda x: x["split"] == "train")
             self.dev_dataset = train_dataset.filter(
                 lambda x: x["split"] == "validation"
