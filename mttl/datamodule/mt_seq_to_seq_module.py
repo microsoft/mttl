@@ -16,6 +16,18 @@ class FlanModule(DefaultDataModule):
     def setup_dataset(self):
         dataset = load_dataset(self.config.dataset)
 
+        if self.config.include_template_type != "*":
+            dataset = dataset.filter(
+                lambda x: x["template_type"]
+                in self.config.include_template_type.split(","),
+            )
+
+        if self.config.include_task_source != "*":
+            dataset = dataset.filter(
+                lambda x: x["task_source"]
+                in self.config.include_task_source.split(","),
+            )
+
         (
             self._task_names,
             self._task_to_id,
@@ -25,18 +37,6 @@ class FlanModule(DefaultDataModule):
         ) = maybe_filter_hf_dataset_by_task(
             dataset, "task_name", self.config.finetune_task_name
         )
-
-        if self.config.include_template_type != "*":
-            train_dataset = train_dataset.filter(
-                lambda x: x["template_type"]
-                in self.config.include_template_type.split(","),
-            )
-
-        if self.config.include_task_source != "*":
-            train_dataset = train_dataset.filter(
-                lambda x: x["task_source"]
-                in self.config.include_task_source.split(","),
-            )
 
         if "split" in dataset.column_names:
             self.train_dataset = train_dataset.filter(lambda x: x["split"] == "train")
