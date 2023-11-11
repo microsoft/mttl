@@ -17,16 +17,22 @@ class FlanModule(DefaultDataModule):
         dataset = load_dataset(self.config.dataset)
 
         if self.config.include_template_type != "*":
-            dataset = dataset.filter(
-                lambda x: x["template_type"]
-                in self.config.include_template_type.split(","),
-            )
+
+            def filter_template_type(example):
+                return example[
+                    "template_type"
+                ] in self.config.include_template_type.split(",")
+
+            dataset = dataset.filter(filter_template_type)
 
         if self.config.include_task_source != "*":
-            dataset = dataset.filter(
-                lambda x: x["task_source"]
-                in self.config.include_task_source.split(","),
-            )
+
+            def filter_task_source(example):
+                return example["task_source"] in self.config.include_task_source.split(
+                    ","
+                )
+
+            dataset = dataset.filter(filter_task_source)
 
         (
             self._task_names,
