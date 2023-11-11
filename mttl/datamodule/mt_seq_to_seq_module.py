@@ -28,8 +28,8 @@ class FlanModule(DefaultDataModule):
         if self.config.include_template_type != "*":
             dataset = dataset.filter(
                 partial(
-                    set(self.config.include_template_type.split(",")),
                     filter_template_type,
+                    set(self.config.include_template_type.split(",")),
                 ),
                 num_proc=16,
                 desc="Filtering template types",
