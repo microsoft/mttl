@@ -122,6 +122,27 @@ def test_alpaca_for_gen():
     )
 
 
+def test_t0_module():
+    t0 = AutoDataModule.create(
+        "sordonia/t0-10k-flat",
+        model="t5-small",
+        model_family="seq2seq",
+        train_batch_size=4,
+        predict_batch_size=4,
+    )
+    assert len(t0.task_names) == 38
+
+    t0 = AutoDataModule.create(
+        "sordonia/t0-10k-flat",
+        model="t5-small",
+        model_family="seq2seq",
+        train_batch_size=4,
+        predict_batch_size=4,
+        use_templates_as_tasks=True,
+    )
+    assert len(t0.task_names) == 313
+
+
 def test_auto_module():
     flan = AutoDataModule.create(
         "sordonia/flan-debug-flat",
