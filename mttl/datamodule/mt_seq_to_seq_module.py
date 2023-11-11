@@ -25,6 +25,11 @@ class FlanModule(DefaultDataModule):
     def setup_dataset(self):
         dataset = load_dataset(self.config.dataset)
 
+        if "split" not in dataset.column_names["train"]:
+            raise ValueError(
+                "Dataset must have a 'split' column, try removing the dataset manually from the cache."
+            )
+
         if self.config.include_template_type != "*":
             dataset = dataset.filter(
                 partial(
@@ -83,7 +88,7 @@ class T0FlatConfig(DatasetConfig):
     use_templates_as_tasks: bool = False
 
 
-class T0FlatModule(FlanModule):
+class T0FlatModule(DefaultDataModule):
     def setup_dataset(self):
         dataset = load_dataset(self.config.dataset)
 
