@@ -206,7 +206,16 @@ class DefaultCollator:
             # mask targets positions corresponding to the inputs
             if self.tokenizer.truncation_side == "left":
                 labels_len = tokenized_labels["attention_mask"].int().sum(-1)
-                offset = -labels_len - 1
+                pad_tokens = tok_sources_plus_labels["attention_mask"].shape[
+                    1
+                ] - tok_sources_plus_labels["attention_mask"].int().sum(-1)
+
+                if self.tokenizer.padding_side == "left":
+                    offset = -labels_len - 1
+                else:
+                    offset = torch.clamp(
+                        -pad_tokens - labels_len - 1, min=-self.max_input_length, max=0
+                    )
             else:
                 input_len = tokenized_sources["attention_mask"].int().sum(-1)
                 pad_tokens = tok_sources_plus_labels["attention_mask"].shape[
