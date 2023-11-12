@@ -64,13 +64,13 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
 
 
 class ExpertTrainer(EfficientCheckpointModule):
-    def __init__(self, **kwargs):
+    def __init__(self, tokenizer=None, **kwargs):
         super().__init__(**kwargs)
 
         # log hyperparameters
         self.save_hyperparameters(ignore=["tokenizer", "model_object"])
 
-        self.tokenizer = kwargs["tokenizer"]
+        self.tokenizer = tokenizer
         self.pad_token_id = self.tokenizer.pad_token_id
         self.model: AutoModelForCausalLM = None
         self.accumulate_metrics_batch = defaultdict(list)
@@ -143,26 +143,25 @@ class ExpertTrainer(EfficientCheckpointModule):
         return total_loss
 
     def validation_step(self, batch, batch_idx):
-        loss = self.forward(batch, reduction="mean")
-        self.log("val/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
-        # self._inference_outputs += [(loss.detach().cpu(),)]
+        loss = self.forward(batch, reduction="none")
+
+        self._inference_outputs += [(loss.detach().cpu(),)]
         return loss
 
-    # def on_validation_epoch_end(self):
-    #     from itertools import chain
+    def on_validation_epoch_end(self):
+        from itertools import chain
 
-    #     outputs = self._inference_outputs
-    #     losses = torch.cat([out for out in outputs])
-
-    #     self._inference_outputs.clear()
-
-    #     # log also the best val/loss sofar
-    #     if self.best_val_result is None:
-    #         self.best_val_result = losses.mean()
-    #     else:
-    #         if losses.mean() < self.best_val_result:
-    #             self.best_val_result = losses.mean()
-    #             self.log("val/best_loss", losses.mean(), on_epoch=True, prog_bar=True)
+        outputs = self._inference_outputs
+        losses = torch.cat([out[0] for out in outputs])
+        print(losses)
+        self._inference_outputs.clear()
+        if self.best_val_result is None:
+            self.best_val_result = losses.mean()
+        else:
+            if losses.mean() < self.best_val_result:
+                self.best_val_result = losses.mean()
+                self.log("val/best_loss", losses.mean(), on_epoch=True, prog_bar=True)
+        self.log("val/loss", losses.mean(), on_epoch=True, prog_bar=True)
 
     @property
     def generation_config(self):

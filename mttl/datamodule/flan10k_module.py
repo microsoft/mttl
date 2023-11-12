@@ -95,7 +95,7 @@ class Flan10kModule(DefaultDataModule):
             max_output_length=self.config.max_output_length,
             pad_to_multiple_of=8,
             return_tensors="pt",
-            model_family=self.config.model_family,
+            model_family="seq2seq" if self.for_generation else self.config.model_family,
         )
 
     @property
@@ -107,7 +107,7 @@ class Flan10kModule(DefaultDataModule):
             max_output_length=self.config.max_output_length,
             pad_to_multiple_of=8,
             return_tensors="pt",
-            model_family=self.config.model_family,
+            model_family="seq2seq" if self.for_generation else self.config.model_family,
         )
 
     def get_dataset(self):
