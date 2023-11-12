@@ -12,12 +12,13 @@
     "micro_batch_size": 16,
     "train_batch_size": 16,
     "predict_batch_size": 8,
+    "precision": "16",
+    "dataset": "sordonia/flan-10k-flat",
     "model": "EleutherAI/gpt-neo-125m",
     "model_family": "gpt",
     "optimizer": "adamw",
     "warmup_proportion": 0.06,
     "max_input_length": 1024,
     "max_output_length": 128,
-    "precision": "16",
-    "dataset": "sordonia/flan-10k-flat"
+    "truncation_side": "left"
 }
