@@ -36,13 +36,24 @@ class RougeCallback(cb.Callback):
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:
+        self.evaluate(split="val")
+        return super().on_validation_epoch_end(trainer, pl_module)
+
+    def on_test_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        self.evaluate(split="test")
+        return super().on_test_epoch_end(trainer, pl_module)
+
+    def evaluate(self, model, split="val"):
         extra_kwargs = {}
         extra_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
         extra_kwargs["eos_token_id"] = self.tokenizer.eos_token_id
 
         all_rougeL = []
 
-        dataloader = self.dm.val_dataloader()
+        if split == "val":
+            dataloader = self.dm.val_dataloader()
+        else:
+            dataloader = self.dm.test_dataloader()
         pbar = tqdm.tqdm(
             enumerate(dataloader),
             total=len(dataloader),
@@ -53,15 +64,15 @@ class RougeCallback(cb.Callback):
             sources_texts = batch["sources_texts"]
 
             max_length = self.max_output_length
-            if pl_module.hparams.model_family == "gpt":
+            if self.dm.config.model_family == "gpt":
                 max_length += batch["input_ids"].shape[-1]
 
             batch = transfer_batch_to_device(batch, self.device)
             with torch.no_grad():
-                predictions = pl_module.generate(
+                predictions = model.generate(
                     batch,
                     max_length=max_length,
-                    generation_config=pl_module.generation_config,
+                    generation_config=model.generation_config,
                     return_dict_in_generate=True,
                     output_scores=True,
                     **extra_kwargs,
@@ -83,8 +94,7 @@ class RougeCallback(cb.Callback):
 
             pbar.set_description(f"rougeL: {np.mean(all_rougeL):.4f}")
 
-        pl_module.log("val/rougeL", np.mean(all_rougeL), on_epoch=True, prog_bar=True)
-        return super().on_validation_epoch_end(trainer, pl_module)
+        model.log(f"{split}/rougeL", np.mean(all_rougeL), on_epoch=True, prog_bar=True)
 
 
 DEBUG = False

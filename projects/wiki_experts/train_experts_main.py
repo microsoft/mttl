@@ -184,6 +184,7 @@ def run_multitask(args):
 
     # initial validation!
     trainer.fit(module, dm)
+    trainer.test(module, dm)
 
     del module
     torch.cuda.empty_cache()
