@@ -160,6 +160,7 @@ class Config:
         self.exp_name = None
         self.wandb_project = None
         self.padding_side = "right"
+        self.truncation_side = "right"
         self.max_input_length = 512
         self.max_output_length = 64
         self.num_beams = 4

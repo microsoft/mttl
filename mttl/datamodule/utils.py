@@ -78,12 +78,20 @@ def tokenizer_enforces_eos(tokenizer):
 
 def get_tokenizer(config, for_generation=False):
     return get_tokenizer_with_args(
-        config.model, config.model_family, config.padding_side, for_generation
+        config.model,
+        config.model_family,
+        config.padding_side,
+        config.truncation_side,
+        for_generation,
     )
 
 
 def get_tokenizer_with_args(
-    model_name, model_family, padding_side="right", for_generation=False
+    model_name,
+    model_family,
+    padding_side="right",
+    truncation_side="right",
+    for_generation=False,
 ):
     if "llama" in model_name:
         tokenizer = LlamaTokenizer.from_pretrained(model_name)
@@ -97,6 +105,9 @@ def get_tokenizer_with_args(
         tokenizer.model_max_length = int(1e9)
 
     tokenizer.padding_side = padding_side
+    logger.warn("Padding side is {}".format(tokenizer.padding_side))
+
+    tokenizer.truncation_side = truncation_side
     logger.warn("Padding side is {}".format(tokenizer.padding_side))
 
     if model_family == "gpt":
@@ -113,11 +124,11 @@ def get_tokenizer_with_args(
         # do not add eos token, we will add it accordingly *if* needed.
         tokenizer.add_eos_token = False
 
-    if tokenizer.pad_token_id is None:
-        logger.warn(
-            "Setting pad_token_id to 0, given that pad_token_id was not detected."
-        )
-        tokenizer.pad_token_id = 0
+        if tokenizer.pad_token_id is None:
+            logger.warn(
+                "Setting pad_token_id to [PAD], given that pad_token_id was not detected!!"
+            )
+            tokenizer.add_special_tokens({"pad_token": "[PAD]"})
 
     tokenizer.mttl_merges_space = tokenizer_merges_space(tokenizer)
     tokenizer.mttl_enforces_eos = tokenizer_enforces_eos(tokenizer)
