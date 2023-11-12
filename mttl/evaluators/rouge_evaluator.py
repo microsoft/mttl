@@ -3,7 +3,7 @@ import torch
 import numpy as np
 
 from mttl.evaluators.ni_evaluator import compute_metrics
-from mttl.models.utils import transfer_batch_to_device
+from mttl.models.utils import transfer_batch_to_device, EfficientCheckpointModule
 from mttl.utils import logger
 
 
@@ -24,7 +24,7 @@ class RougeEvaluator:
         self.tokenizer = datamodule.tokenizer
         self.max_output_length = datamodule.config.max_output_length
 
-    def evaluate(self, model, split="val"):
+    def evaluate(self, model, split="val", num_batches=None):
         extra_kwargs = {}
         extra_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
         extra_kwargs["eos_token_id"] = self.tokenizer.eos_token_id
@@ -50,14 +50,25 @@ class RougeEvaluator:
 
             batch = transfer_batch_to_device(batch, self.device)
             with torch.no_grad():
-                predictions = model.generate(
-                    batch,
-                    max_length=max_length,
-                    generation_config=model.generation_config,
-                    return_dict_in_generate=True,
-                    output_scores=True,
-                    **extra_kwargs,
-                )
+                if isinstance(model, EfficientCheckpointModule):
+                    predictions = model.generate(
+                        batch,
+                        max_length=max_length,
+                        generation_config=model.generation_config,
+                        return_dict_in_generate=True,
+                        output_scores=True,
+                        **extra_kwargs,
+                    )
+                else:
+                    predictions = model.generate(
+                        batch["input_ids"],
+                        attention_mask=batch["attention_mask"],
+                        max_length=max_length,
+                        generation_config=model.generation_config,
+                        return_dict_in_generate=True,
+                        output_scores=True,
+                        **extra_kwargs,
+                    )
 
             predictions = predictions.sequences
             if self.dm.config.model_family == "gpt":
@@ -74,5 +85,8 @@ class RougeEvaluator:
             logger.info("Prediction:\n%s", predictions[0])
 
             pbar.set_description(f"rougeL: {np.mean(all_rougeL):.4f}")
+
+            if num_batches is not None and len(all_rougeL) >= num_batches:
+                break
 
         return np.mean(all_rougeL)
