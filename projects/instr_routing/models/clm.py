@@ -14,6 +14,7 @@ from mttl.models.get_scheduler import get_scheduler
 from mttl.models.utils import (
     EfficientCheckpointModule,
     get_global_batch_size,
+    prepare_model_for_kbit_training,
 )
 from mttl.models.get_optimizer import get_optimizer
 from dataclasses import dataclass, field
@@ -40,50 +41,6 @@ class AugmentedRoutingInfo(RoutingInfo):
     )
 
 
-def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
-    r"""
-    This method wraps the entire protocol for preparing a model before running a training. This includes:
-        1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
-        head to fp32
-
-    Args:
-        model, (`transformers.PreTrainedModel`):
-            The loaded model from `transformers`
-    """
-    loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(
-        model, "is_loaded_in_4bit", False
-    )
-
-    # cast all non INT8 parameters to fp32
-    for param in model.parameters():
-        if (param.dtype == torch.float16) or (param.dtype == torch.bfloat16):
-            param.data = param.data.to(torch.float32)
-
-    if loaded_in_kbit and use_gradient_checkpointing:
-        # For backward compatibility
-        if hasattr(model, "enable_input_require_grads"):
-            model.enable_input_require_grads()
-        else:
-
-            def make_inputs_require_grad(module, input, output):
-                output.requires_grad_(True)
-
-            model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
-
-        # FIX for enabling gradient of the auxiliary loss
-        # enable gradient checkpointing for memory efficiency
-        from functools import partial
-
-        notfailing_checkpoint = partial(
-            torch.utils.checkpoint.checkpoint, use_reentrant=False
-        )
-        torch.utils.checkpoint.checkpoint = notfailing_checkpoint
-        model.gradient_checkpointing_enable()
-        # FIX for enabling gradient of the auxiliary loss
-
-    return model
-
-
 class CLM(EfficientCheckpointModule):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -92,7 +49,6 @@ class CLM(EfficientCheckpointModule):
         self.save_hyperparameters(ignore=["tokenizer", "model_object"])
 
         self.tokenizer = kwargs["tokenizer"]
-        self.pad_token_id = self.tokenizer.pad_token_id
         self.model: AutoModelForCausalLM = None
         self.accumulate_metrics_batch = defaultdict(list)
 
@@ -140,7 +96,7 @@ class CLM(EfficientCheckpointModule):
     def gather_auxiliary_losses(self):
         # get some losses from the model if it is a router
         aux_loss = []
-        for name, module in self.model.named_modules():
+        for _, module in self.model.named_modules():
             if isinstance(module, RoutingSelector) and hasattr(
                 module, "auxiliary_loss"
             ):
@@ -152,7 +108,7 @@ class CLM(EfficientCheckpointModule):
     def forward(self, batch, reduction="mean"):
         input_ids, labels = batch["input_ids"], batch["labels"]
         pad_mask, instruction_mask = self.calculate_routing_mask(
-            batch["input_ids"], batch["labels"]
+            batch["input_ids"], batch["labels"], batch["attention_mask"]
         )
         routing_infos = AugmentedRoutingInfo.from_batch(
             batch, pad_token_mask=pad_mask, inst_token_mask=instruction_mask
@@ -195,9 +151,9 @@ class CLM(EfficientCheckpointModule):
         aux_loss = torch.stack(aux_loss).mean() if len(aux_loss) else 0.0
         return loss, aux_loss
 
-    def calculate_routing_mask(self, inputs, labels=None):
+    def calculate_routing_mask(self, inputs, labels=None, attention_mask=None):
         # 1 if the token is not a pad token (so inputs and outputs are 1)
-        padding_mask = (inputs != self.pad_token_id).float()
+        padding_mask = attention_mask.float()
         if labels is not None:
             # 1 if the token is part of instruction (so outputs and pad tokens are 0s)
             instruction_mask = (labels == -100).float() * padding_mask
@@ -222,7 +178,9 @@ class CLM(EfficientCheckpointModule):
         if not hasattr(self.model, "task_id_container"):
             self.model.task_id_container = {}
 
-        pad_mask, instruction_mask = self.calculate_routing_mask(batch["input_ids"])
+        pad_mask, instruction_mask = self.calculate_routing_mask(
+            batch["input_ids"], attention_mask=batch["attention_mask"]
+        )
         routing_infos = AugmentedRoutingInfo.from_batch(
             batch,
             generation_mode=True,
@@ -233,7 +191,9 @@ class CLM(EfficientCheckpointModule):
         )
 
         self.model.task_id_container["routing_infos"] = routing_infos
-        generations = self.model.generate(inputs=batch["input_ids"], **kwargs)
+        generations = self.model.generate(
+            inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
+        )
         return generations
 
     def training_step(self, batch, _):
