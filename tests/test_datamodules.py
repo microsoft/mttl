@@ -144,6 +144,31 @@ def test_t0_module():
     assert len(t0.task_names) == 313
 
 
+def test_truncation_side():
+    flan = AutoDataModule.create(
+        "sordonia/flan-debug-flat",
+        model="EleutherAI/gpt-neo-125m",
+        model_family="gpt",
+        max_input_length=16,
+        train_batch_size=4,
+        predict_batch_size=100,
+        truncation_side="left",
+    )
+    dl = flan.val_dataloader()
+    batch = next(iter(dl))
+
+    batch["labels"][batch["labels"] == -100] = flan.tokenizer.pad_token_id
+    decoded = flan.tokenizer.batch_decode(batch["labels"], skip_special_tokens=True)
+    decoded = [d.strip() for d in decoded]
+
+    for i, (true, dec) in enumerate(zip(batch["labels_texts"], decoded)):
+        if true != dec:
+            # eos token is added so everything larger than 15 is cut off
+            assert len(flan.tokenizer.encode(true)) >= 15
+        else:
+            assert true == dec
+
+
 def test_auto_module():
     flan = AutoDataModule.create(
         "sordonia/flan-debug-flat",

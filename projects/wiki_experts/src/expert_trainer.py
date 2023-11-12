@@ -39,6 +39,7 @@ class ExpertTrainer(EfficientCheckpointModule):
             model_object = prepare_model_for_kbit_training(model_object)
 
         self.model = modify_transformer(model_object, self.hparams)
+        self.model.resize_token_embeddings(len(self.tokenizer), pad_to_multiple_of=8)
 
         # replace w flash attn!
         replace_attn_with_flash_attn(self.model)

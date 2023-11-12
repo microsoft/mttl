@@ -53,6 +53,7 @@ def get_datamodule(args, for_generation=False):
         "validation_portion": args.validation_portion,
         "model_family": args.model_family,
         "finetune_task_name": args.finetune_task_name,
+        "truncation_side": args.truncation_side,
         "dataset": args.dataset.replace("qa:", "").replace("raw_docs:", ""),
         "train_on_inputs": False,
     }
