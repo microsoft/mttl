@@ -152,7 +152,7 @@ def run_multitask(args):
     callbacks.append(checkpoint_callback)
 
     val_check_interval = args.eval_every
-    if val_check_interval == -1:
+    if val_check_interval == -1 or val_check_interval is None:
         val_check_interval = None
     else:
         val_check_interval = args.gradient_accumulation_steps * args.eval_every
