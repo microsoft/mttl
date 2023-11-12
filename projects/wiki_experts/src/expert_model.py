@@ -1,13 +1,9 @@
 import torch
-from mttl.models.adapters import ExpertContainer
 
 from mttl.models.modifiers.routing import RoutingInfo
-
-from mttl.models.modifiers.experts import add_expert_to_transformer
+from mttl.models.modifiers.experts import add_expert_to_transformer, Router
 from mttl.utils import logger
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
-from projects.wiki_experts.models.routers import Router
-from projects.wiki_experts.models.routers import get_classifier
 from typing import Dict
 
 

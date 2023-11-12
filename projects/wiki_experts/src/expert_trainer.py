@@ -1,66 +1,16 @@
-import json
-import os
-import csv
 import torch
-import copy
 from collections import defaultdict
 from torch import nn
 from mttl.models.llama_patch import replace_attn_with_flash_attn
 from mttl.models.modifiers import modify_transformer
-from mttl.models.modifiers.routing import RoutingInfo, RoutingSelector
+from mttl.models.modifiers.routing import RoutingInfo
 from transformers import AutoModelForCausalLM, LlamaForCausalLM
 
-from mttl.models.get_scheduler import get_scheduler
 from mttl.models.utils import (
     EfficientCheckpointModule,
-    get_global_batch_size,
+    prepare_model_for_kbit_training,
 )
-from mttl.models.get_optimizer import get_optimizer
-from mttl.utils import get_mlf_logger, setup_logging, logger
-from dataclasses import dataclass, field
-
-
-def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
-    r"""
-    This method wraps the entire protocol for preparing a model before running a training. This includes:
-        1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
-        head to fp32
-
-    Args:
-        model, (`transformers.PreTrainedModel`):
-            The loaded model from `transformers`
-    """
-    loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(
-        model, "is_loaded_in_4bit", False
-    )
-
-    # cast all non INT8 parameters to fp32
-    for param in model.parameters():
-        if (param.dtype == torch.float16) or (param.dtype == torch.bfloat16):
-            param.data = param.data.to(torch.float32)
-
-    if loaded_in_kbit and use_gradient_checkpointing:
-        # For backward compatibility
-        if hasattr(model, "enable_input_require_grads"):
-            model.enable_input_require_grads()
-        else:
-
-            def make_inputs_require_grad(module, input, output):
-                output.requires_grad_(True)
-
-            model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
-
-        # FIX for enabling gradient of the auxiliary loss
-        # enable gradient checkpointing for memory efficiency
-        from functools import partial
-
-        notfailing_checkpoint = partial(
-            torch.utils.checkpoint.checkpoint, use_reentrant=False
-        )
-        torch.utils.checkpoint.checkpoint = notfailing_checkpoint
-        model.gradient_checkpointing_enable()
-
-    return model
+from mttl.utils import logger
 
 
 class ExpertTrainer(EfficientCheckpointModule):
@@ -138,30 +88,56 @@ class ExpertTrainer(EfficientCheckpointModule):
         total_loss = loss
 
         self.log("train/loss", loss, on_step=True, prog_bar=True)
+        self.log("train/total_loss", total_loss, on_step=True, prog_bar=True)
+
         for i, pg in enumerate(self.optimizers().optimizer.param_groups):
             self.log(f"train/lr_{i}", pg["lr"])
         return total_loss
 
+    def on_validation_epoch_start(self) -> None:
+        self._inference_outputs.clear()
+
+    def on_test_epoch_start(self) -> None:
+        self._inference_outputs.clear()
+
+    def on_validation_epoch_end(self) -> None:
+        self.log_loss(split="val")
+
+    def on_test_epoch_end(self) -> None:
+        self.log_loss(split="test")
+
+    def test_step(self, batch, batch_idx):
+        loss = self.forward(batch, reduction="none")
+        mean_loss = loss.sum() / loss.shape[0]
+        self._inference_outputs += [(loss.detach().cpu(),)]
+        return mean_loss
+
     def validation_step(self, batch, batch_idx):
         loss = self.forward(batch, reduction="none")
-
+        mean_loss = loss.sum() / loss.shape[0]
         self._inference_outputs += [(loss.detach().cpu(),)]
-        return loss
+        return mean_loss
 
-    def on_validation_epoch_end(self):
-        from itertools import chain
-
+    def log_loss(self, split="val"):
         outputs = self._inference_outputs
         losses = torch.cat([out[0] for out in outputs])
         print(losses)
         self._inference_outputs.clear()
-        if self.best_val_result is None:
-            self.best_val_result = losses.mean()
-        else:
-            if losses.mean() < self.best_val_result:
+        self.log(f"{split}/loss", losses.mean(), on_epoch=True, prog_bar=True)
+
+        # log also the best val/loss sofar
+        if split == "val":
+            if self.best_val_result is None:
                 self.best_val_result = losses.mean()
-                self.log("val/best_loss", losses.mean(), on_epoch=True, prog_bar=True)
-        self.log("val/loss", losses.mean(), on_epoch=True, prog_bar=True)
+            else:
+                if losses.mean() < self.best_val_result:
+                    self.best_val_result = losses.mean()
+                    self.log(
+                        f"{split}/best_loss",
+                        losses.mean(),
+                        on_epoch=True,
+                        prog_bar=True,
+                    )
 
     @property
     def generation_config(self):

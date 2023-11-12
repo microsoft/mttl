@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from vllm import LLM, SamplingParams
 from vllm.model_executor.parallel_utils.parallel_state import destroy_model_parallel
 from mttl.utils import logger
-from mttl.models.adapters import MergableAdapter
+from mttl.models.modifiers.base import MergeableAdapter
 
 
 def save_merged_model(model, model_path, hf_path="/tmp/merged"):
@@ -51,7 +51,7 @@ def save_merged_model(model, model_path, hf_path="/tmp/merged"):
 
     for name, module in model_copy.named_modules():
         for c_name, child in module.named_children():
-            if isinstance(child, MergableAdapter):
+            if isinstance(child, MergeableAdapter):
                 child.merge_with_layer()
                 setattr(
                     module,

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import List
 import re
 
-from mttl.models.adapters import Adapter
+from mttl.models.modifiers.base import Adapter, ModifyMixin
 from mttl.utils import logger
 
 
@@ -184,10 +184,11 @@ class RoutingInfo:
         self.task_ids = self._repeat(self.task_ids, repeats)
         self.task_names = self._repeat(self.task_names, repeats)
         self.example_ids = self._repeat(self.example_ids, repeats)
+        self.task_weights = self._repeat(self.task_weights, repeats)
 
 
 class RoutingMixin:
-    def __init__(self, task_id_ptr) -> None:
+    def __init__(self, task_id_ptr, *args, **kwargs) -> None:
         self.task_id_ptr = task_id_ptr
 
     @property
@@ -195,7 +196,13 @@ class RoutingMixin:
         return self.task_id_ptr["routing_infos"]
 
 
-def modify_with_routing(transformer, config, layer_type, optional_wrapper=None):
+class RouterModifyMixin(ModifyMixin):
+    @classmethod
+    def modify_transformer(cls, transformer, config, optional_wrapper=None):
+        return modify_with_routing(cls, transformer, config, RouterWrapper)
+
+
+def modify_with_routing(cls, transformer, config, optional_wrapper=None):
     # How to "bin" different levels of selectors ?
     def _extract_identifier(string, match_on="coder"):
         """Returns a unique identifier for the "chunk" of layers sharing the
@@ -260,7 +267,7 @@ def modify_with_routing(transformer, config, layer_type, optional_wrapper=None):
 
                     logger.info(f"Patching {m_name}.{c_name}...")
 
-                    wrapper = layer_type(
+                    wrapper = cls(
                         config,
                         transformer.task_id_container,
                         layer,

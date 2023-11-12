@@ -1,21 +1,53 @@
+from functools import partial
 from typing import List
 
-import torch
-from mttl.utils import logger
 from datasets import load_dataset
-from mttl.datamodule.base import DefaultDataModule, DatasetConfig, DefaultCollator
+from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 from dataclasses import dataclass
 
 
 @dataclass
 class FlanConfig(DatasetConfig):
-    pass
+    include_template_type: str = "zs_noopt"
+    include_task_source: str = "P3,Flan2021"
+
+
+def filter_template_type(include_template_type, example):
+    return example["template_type"] in include_template_type
+
+
+def filter_task_source(include_task_source, example):
+    return example["task_source"] in include_task_source
 
 
 class FlanModule(DefaultDataModule):
     def setup_dataset(self):
         dataset = load_dataset(self.config.dataset)
+
+        if "split" not in dataset.column_names["train"]:
+            raise ValueError(
+                "Dataset must have a 'split' column, try removing the dataset manually from the cache."
+            )
+
+        if self.config.include_template_type != "*":
+            dataset = dataset.filter(
+                partial(
+                    filter_template_type,
+                    set(self.config.include_template_type.split(",")),
+                ),
+                num_proc=16,
+                desc="Filtering template types",
+            )
+
+        if self.config.include_task_source != "*":
+            dataset = dataset.filter(
+                partial(
+                    filter_task_source, set(self.config.include_task_source.split(","))
+                ),
+                num_proc=16,
+                desc="Filtering task sources",
+            )
 
         (
             self._task_names,
@@ -27,10 +59,27 @@ class FlanModule(DefaultDataModule):
             dataset, "task_name", self.config.finetune_task_name
         )
 
-        self.train_dataset, self.dev_dataset = self.create_train_valid_split(
-            train_dataset
-        )
-        self.test_dataset = self.dev_dataset
+        if "split" in dataset.column_names["train"]:
+            self.train_dataset = train_dataset.filter(
+                lambda x: x["split"] == "train",
+                num_proc=16,
+                desc="Creating train set",
+            )
+            self.dev_dataset = train_dataset.filter(
+                lambda x: x["split"] == "validation",
+                num_proc=16,
+                desc="Creating valid set",
+            )
+            self.test_dataset = train_dataset.filter(
+                lambda x: x["split"] == "test",
+                num_proc=16,
+                desc="Creating test set",
+            )
+        else:
+            self.train_dataset, self.dev_dataset = self.create_train_valid_split(
+                train_dataset
+            )
+            self.test_dataset = self.dev_dataset
         self.print_infos()
 
 
@@ -39,7 +88,7 @@ class T0FlatConfig(DatasetConfig):
     use_templates_as_tasks: bool = False
 
 
-class T0FlatModule(FlanModule):
+class T0FlatModule(DefaultDataModule):
     def setup_dataset(self):
         dataset = load_dataset(self.config.dataset)
 

@@ -23,11 +23,13 @@ def test_flan(task_name):
         )
     )
     if task_name is None:
-        assert len(flan.train_dataset) == 2_460
-        assert len(flan.task_names) == 246
+        assert len(flan.train_dataset) == 559
+        assert len(flan.task_names) == 235
+        assert len(flan.test_dataset) == 63
     else:
-        assert len(flan.train_dataset) == 10
+        assert len(flan.train_dataset) == 2
         assert len(flan.task_names) == 1
+        assert len(flan.test_dataset) == 1
 
     batch = next(iter(flan.train_dataloader()))
     assert "input_ids" in batch
@@ -106,6 +108,46 @@ def test_alpaca():
     assert labels_texts[0][0] != ""
 
 
+def test_alpaca_for_gen():
+    alpaca = AutoDataModule.create(
+        "alpaca",
+        model="EleutherAI/gpt-neo-125m",
+        model_family="gpt",
+        predict_batch_size=1,
+        for_generation=True,
+        validation_portion=0.05,
+    )
+    batch = next(iter(alpaca.val_dataloader()))
+
+    sources_texts = batch["sources_texts"]
+
+    input_ids = alpaca.tokenizer(sources_texts[0]).input_ids
+    assert np.allclose(
+        batch["input_ids"][0][: len(input_ids)].numpy().tolist(), input_ids
+    )
+
+
+def test_t0_module():
+    t0 = AutoDataModule.create(
+        "sordonia/t0-10k-flat",
+        model="t5-small",
+        model_family="seq2seq",
+        train_batch_size=4,
+        predict_batch_size=4,
+    )
+    assert len(t0.task_names) == 38
+
+    t0 = AutoDataModule.create(
+        "sordonia/t0-10k-flat",
+        model="t5-small",
+        model_family="seq2seq",
+        train_batch_size=4,
+        predict_batch_size=4,
+        use_templates_as_tasks=True,
+    )
+    assert len(t0.task_names) == 313
+
+
 def test_auto_module():
     flan = AutoDataModule.create(
         "sordonia/flan-debug-flat",
@@ -114,8 +156,20 @@ def test_auto_module():
         train_batch_size=4,
         predict_batch_size=4,
     )
-    assert len(flan.train_dataset) == 2_460
-    assert len(flan.task_names) == 246
+    assert len(flan.train_dataset) == 559
+    assert len(flan.task_names) == 235
+
+    flan = AutoDataModule.create(
+        "sordonia/flan-debug-flat",
+        model="t5-small",
+        model_family="seq2seq",
+        train_batch_size=4,
+        predict_batch_size=4,
+        include_template_type="*",
+        include_task_source="*",
+    )
+    assert len(flan.train_dataset) == 14560
+    assert len(flan.task_names) == 1820
 
 
 @pytest.mark.parametrize("task_name", [None, "high_school_government_and_politics"])

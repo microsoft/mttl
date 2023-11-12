@@ -4,7 +4,7 @@ import torch.nn as nn
 from enum import Enum
 
 import torch.nn.functional as F
-from mttl.models.adapters import SkilledLoRA
+from mttl.models.modifiers.base import SkilledLoRA
 from mttl.models.modifiers import modify_with_routing, register_modifier
 from mttl.models.modifiers.routing import (
     RouterWrapper,
@@ -140,6 +140,7 @@ def create_causal_prefix_mask(
     return causal_padding_mask
 
 
+@register_modifier("softmoe")
 class SoftMOEAdapter(SkilledLoRA):
     def __init__(self, config, layer):
         super().__init__(config, layer)
@@ -235,17 +236,8 @@ class SoftMOEAdapter(SkilledLoRA):
 
         return adapter_out
 
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        config.router_selector = config.router_selector or "softmoe"
 
-@register_modifier("softmoe")
-def modify_with_softmoe(transformer, config):
-    config.router_selector = config.router_selector or "softmoe"
-    config.adapter_type = config.adapter_type or "lora"
-
-    if config.adapter_type in ["lora"]:
-        return modify_with_routing(
-            transformer, config, RoutingLoRASoftMoe, RouterWrapper
-        )
-    else:
-        raise NotImplementedError(
-            f"Adapter type {config.adapter_type} not implemented for softmoe modifier."
-        )
+        return modify_with_routing(transformer, config, cls, RouterWrapper)

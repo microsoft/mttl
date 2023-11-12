@@ -1,22 +1,20 @@
 import math
 import torch
-import numpy as np
-import copy
 import torch.nn as nn
-from enum import Enum
-
 import torch.nn.functional as F
-from mttl.models.adapters import SkilledLoRA, LoRA, SkilledLoRA_MergeLoraAfterOP
-from mttl.models.modifiers import modify_with_routing, register_modifier
+from mttl.models.modifiers import register_modifier
+from mttl.models.modifiers.lora import SkilledLoRA, SkilledLoRA_MergeLoraAfterOP
 from mttl.models.modifiers.routing import (
     RouterWrapper,
+    RouterModifyMixin,
+    modify_with_routing,
     RoutingMixin,
     RoutingSelector,
     get_selector,
     register_selector,
 )
+
 from projects.instr_routing.models.clm import AugmentedRoutingInfo
-from mttl.models.modifiers.poly import PolytroponSelector
 
 
 class Metrics:
@@ -360,7 +358,37 @@ class TaskVSMEARRouter(SMEARRouter):
         return routing_probs
 
 
-class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
+@register_selector("smear_pt")
+class SMEARRouterPerToken(SMEARRouter):
+    def __init__(self, config, in_d):
+        super().__init__(config, in_d)
+
+    def _get_router_inputs(
+        self, input: torch.Tensor, routing_infos: AugmentedRoutingInfo
+    ):
+        return input
+
+    def forward(self, routing_infos: AugmentedRoutingInfo, input: torch.Tensor):
+        self.metrics.clear()
+
+        prior_input = self._get_router_inputs(input, routing_infos)  # b x seq x d
+        prior_routes = self.route_maybe_center(
+            prior_input,
+            self.prior_router,
+            self.prior_router_ln,
+            temperature=self.temperature,
+            center=self.router_center_momentum > 0.0,
+        )  # b x seq x self.n_skills
+
+        routing_probs = F.softmax(prior_routes, dim=-1)  # b x seq x d
+        h_pri = -(routing_probs * F.log_softmax(prior_routes, -1)).sum(1).mean()
+        self.routings = routing_probs.detach().cpu().view(-1, self.n_skills)
+        self.metrics["h_pri"] = h_pri / math.log(self.n_skills)
+        return routing_probs.unsqueeze(1)
+
+
+@register_modifier("smear")
+class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin, RouterModifyMixin):
     def __init__(self, config, task_id_ptr, layer, selector=None, **kwargs):
         RoutingMixin.__init__(self, task_id_ptr)
         SkilledLoRA.__init__(self, config, layer, **kwargs)
@@ -392,9 +420,46 @@ class AuxRoutingLoRALinear(SkilledLoRA, RoutingMixin):
         output = output.to(iput_dt)
         return output
 
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        config.router_selector = config.router_selector or "smear"
+
+        return modify_with_routing(cls, transformer, config, RouterWrapper)
+
+
+@register_modifier("smear_pt")
+class AuxRoutingLoRALinear_XR1_PT(SkilledLoRA, RoutingMixin):
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        config.router_selector = "smear_pt"
+
+        return modify_with_routing(cls, transformer, config, RouterWrapper)
+
+
+@register_modifier("vsmear")
+class VSmear_AuxRoutingLoRALinear(AuxRoutingLoRALinear):
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        config.router_selector = "vsmear"
+
+        return modify_with_routing(cls, transformer, config, RouterWrapper)
+
+
+@register_modifier("task_vsmear")
+class TaskVSmear_AuxRoutingLoRALinear(AuxRoutingLoRALinear):
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        config.router_selector = "task_vsmear"
+
+        return modify_with_routing(cls, transformer, config, RouterWrapper)
+
 
 @register_selector("vsmear_xr4")
 class VSMEARRouterExperimental(VSMEARRouter):
+    """
+    Adds aux loss between prior and posterior routings.
+    """
+
     def __init__(self, config, in_d):
         super().__init__(config, in_d)
         self.prior_router_ln = nn.Identity()
@@ -478,6 +543,10 @@ class VSMEARRouterExperimental(VSMEARRouter):
 
 @register_selector("smear_oracle")
 class VSMEARRouterOracle(VSMEARRouter):
+    """
+    Use posterior routings for trainign and test.
+    """
+
     def __init__(self, config, in_d):
         super().__init__(config, in_d)
         self.prior_router_ln = nn.Identity()
@@ -518,6 +587,7 @@ class VSMEARRouterOracle(VSMEARRouter):
         return routing_probs.unsqueeze(1)
 
 
+@register_modifier("vsmear_xr4")
 class AuxRoutingLoRALinear_MergeAfterOP(SkilledLoRA_MergeLoraAfterOP, RoutingMixin):
     def __init__(self, config, task_id_ptr, layer, selector=None, **kwargs):
         RoutingMixin.__init__(self, task_id_ptr)
@@ -573,103 +643,31 @@ class AuxRoutingLoRALinear_MergeAfterOP(SkilledLoRA_MergeLoraAfterOP, RoutingMix
         output = output.to(iput_dt)  # downcast output
         return output
 
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        config.router_selector = "vsmear_xr4"
 
-@register_modifier("vsmear_xr4")
-def modify_with_vsmear_reg(transformer, config):
-    config.router_selector = "vsmear_xr4"
-    config.adapter_type = "lora"
-
-    if config.adapter_type in ["lora"]:
-        return modify_with_routing(
-            transformer, config, AuxRoutingLoRALinear_MergeAfterOP, RouterWrapper
-        )
-    else:
-        raise NotImplementedError(
-            f"Adapter type {config.adapter_type} not implemented for vsmear modifier."
-        )
+        return modify_with_routing(cls, transformer, config, RouterWrapper)
 
 
-@register_selector("vsmear_xr1")
-class VSMEARRouterExperimentalXR1(SMEARRouter):
-    def __init__(self, config, in_d):
-        super().__init__(config, in_d)
-
-    def forward(self, routing_infos, input: torch.Tensor):
-        return super().forward(routing_infos, input)
-
-
-@register_selector("smear_per_token")
-class VSMEARRouterExperimentalXR1(SMEARRouter):
-    def __init__(self, config, in_d):
-        super().__init__(config, in_d)
-
-    def forward(self, routing_infos, input: torch.Tensor):
-        return super().forward(routing_infos, input)
-
-
-# same as smear, but uses merging after the outer product
 @register_modifier("vsmear_xr1")
-def modify_with_vsmear_reg(transformer, config):
-    config.router_selector = "vsmear_xr1"
-    config.adapter_type = "lora"
+class VSmearXR1_AuxRoutingLoRALinear_MergeAfterOP(AuxRoutingLoRALinear_MergeAfterOP):
+    """
+    Like smear, but can do merging after the outer product.
+    """
 
-    if config.adapter_type in ["lora"]:
-        return modify_with_routing(
-            transformer, config, AuxRoutingLoRALinear_MergeAfterOP, RouterWrapper
-        )
-    else:
-        raise NotImplementedError(
-            f"Adapter type {config.adapter_type} not implemented for vsmear modifier."
-        )
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        config.router_selector = "smear"
 
-
-@register_modifier("smear")
-def modify_with_smear(transformer, config):
-    config.router_selector = config.router_selector or "smear"
-    config.adapter_type = config.adapter_type or "lora"
-
-    if config.adapter_type in ["lora"]:
-        return modify_with_routing(
-            transformer, config, AuxRoutingLoRALinear, RouterWrapper
-        )
-    else:
-        raise NotImplementedError(
-            f"Adapter type {config.adapter_type} not implemented for vsmear modifier."
-        )
-
-
-@register_modifier("vsmear")
-def modify_with_vsmear(transformer, config):
-    config.router_selector = config.router_selector or "vsmear"
-
-    return modify_with_smear(transformer, config)
-
-
-@register_modifier("task_vsmear")
-def modify_with_task_vsmear(transformer, config):
-    config.router_selector = "task_vsmear"
-
-    return modify_with_smear(transformer, config)
+        return modify_with_routing(cls, transformer, config, RouterWrapper)
 
 
 # same as smear, but uses merging after the ouyter product
 @register_modifier("smear_oracle")
-def modify_with_vsmear_reg(transformer, config):
-    config.router_selector = "smear_oracle"
-    config.adapter_type = "lora"
+class VSmearXR1_AuxRoutingLoRALinear_MergeAfterOP(AuxRoutingLoRALinear_MergeAfterOP):
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        config.router_selector = "smear_oracle"
 
-    if config.adapter_type in ["lora"]:
-        return modify_with_routing(
-            transformer, config, AuxRoutingLoRALinear_MergeAfterOP, RouterWrapper
-        )
-    else:
-        raise NotImplementedError(
-            f"Adapter type {config.adapter_type} not implemented for vsmear modifier."
-        )
-
-
-@register_modifier("smear_xr1_pt")
-def modify_with_vsmear(transformer, config):
-    config.router_selector = "smear_per_token"
-
-    return modify_with_smear(transformer, config)
+        return modify_with_routing(cls, transformer, config, RouterWrapper)

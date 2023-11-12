@@ -2,21 +2,15 @@ import os
 import torch
 from pytorch_lightning import seed_everything
 from transformers import AutoTokenizer
-
-# add mttl to path
-import sys
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mttl.models.encoder_decoder import EncoderDecoder
 from mttl.config import Config
+from pathlib import Path
 
 
-def test_poly(tmp_path):
-    os.environ["NI_DATA_DIR"] = str(tmp_path)
-    os.environ["OUTPUT_DIR"] = str(tmp_path / "output")
-
+def test_poly():
+    root = Path(__file__).parent
     _args = Config(
-        "projects/mhr/configs/ni/pretrain.json+projects/mhr/configs/ni/poly_lora.json",
+        f"{root}/configs/t0/pretrain.json+{root}/configs/t0/poly_lora.json",
     )
     _args.n_tasks = 768
     _args.model = "t5-small"

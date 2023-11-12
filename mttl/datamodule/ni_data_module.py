@@ -342,9 +342,8 @@ class NiDataModule(DefaultDataModule):
             add_task_definition=self.config.use_task_descriptions,
             pad_to_multiple_of=8,
             return_tensors="pt",
-            model_family=self.config.model_family
-            if not self.for_generation
-            else "seq2seq",
+            model_family=self.config.model_family,
+            for_generation=self.for_generation,
             task_to_id=self.task_to_id,
         )
 
