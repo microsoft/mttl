@@ -36,11 +36,11 @@ class RougeCallback(cb.Callback):
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:
-        self.evaluate(split="val")
+        self.evaluate(pl_module, split="val")
         return super().on_validation_epoch_end(trainer, pl_module)
 
     def on_test_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        self.evaluate(split="test")
+        self.evaluate(pl_module, split="test")
         return super().on_test_epoch_end(trainer, pl_module)
 
     def evaluate(self, model, split="val"):
