@@ -11,7 +11,7 @@ def transfer_batch_to_device(batch, device):
 
 class EfficientCheckpointModule(LightningModule):
     """Efficiently save and load checkpoints.
-    
+
     Only saves and loads parameters that are either in the trainable parameters
     or have been loaded from a previous checkpoint.
     """
@@ -75,3 +75,47 @@ def get_global_batch_size(batch_size, accumulation_steps):
         world_size = 1
     global_bs = batch_size * world_size * accumulation_steps
     return global_bs
+
+
+def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
+    r"""
+    This method wraps the entire protocol for preparing a model before running a training. This includes:
+        1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
+        head to fp32
+
+    Args:
+        model, (`transformers.PreTrainedModel`):
+            The loaded model from `transformers`
+    """
+    loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(
+        model, "is_loaded_in_4bit", False
+    )
+
+    # cast all non INT8 parameters to fp32
+    for param in model.parameters():
+        if (param.dtype == torch.float16) or (param.dtype == torch.bfloat16):
+            param.data = param.data.to(torch.float32)
+
+    if loaded_in_kbit and use_gradient_checkpointing:
+        # For backward compatibility
+        if hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
+        else:
+
+            def make_inputs_require_grad(module, input, output):
+                output.requires_grad_(True)
+
+            model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
+
+        # FIX for enabling gradient of the auxiliary loss
+        # enable gradient checkpointing for memory efficiency
+        from functools import partial
+
+        notfailing_checkpoint = partial(
+            torch.utils.checkpoint.checkpoint, use_reentrant=False
+        )
+        torch.utils.checkpoint.checkpoint = notfailing_checkpoint
+        model.gradient_checkpointing_enable()
+        # FIX for enabling gradient of the auxiliary loss
+
+    return model

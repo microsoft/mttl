@@ -22,6 +22,7 @@ class DatasetConfig:
     max_output_length: int = 128
     validation_portion: float = None
     padding_side: str = "right"
+    truncation_side: str = "right"
     model_family: str = "gpt"
     train_on_inputs: bool = False
     finetune_task_name: str = None
@@ -151,13 +152,23 @@ class DefaultCollator:
             return output_batch
 
         if self.max_input_length > 0:
-            tokenized_sources = self.tokenizer(
-                sources,
-                max_length=self.max_input_length,
-                padding=self.padding,
-                return_tensors=self.return_tensors,
-                truncation=True,
-            )
+            if self.tokenizer.truncation_side == "left":
+                tokenized_labels = self.tokenizer(
+                    labels,
+                    max_length=self.max_input_length,
+                    padding=self.padding,
+                    return_tensors=self.return_tensors,
+                    truncation=True,
+                )
+            else:
+                tokenized_sources = self.tokenizer(
+                    sources,
+                    max_length=self.max_input_length,
+                    padding=self.padding,
+                    return_tensors=self.return_tensors,
+                    truncation=True,
+                )
+
             tok_sources_plus_labels = self.tokenizer(
                 [i + t for i, t in zip(sources, labels)],
                 max_length=self.max_input_length,
@@ -187,20 +198,37 @@ class DefaultCollator:
         )
 
         if not self.train_on_inputs:
-            # mask targets positions corresponding to the inputs
-            input_len = tokenized_sources["attention_mask"].int().sum(-1)
-            pad_tokens = tok_sources_plus_labels["attention_mask"].shape[
-                1
-            ] - tok_sources_plus_labels["attention_mask"].int().sum(-1)
             mask = torch.zeros(
                 tok_sources_plus_labels["attention_mask"].shape[0],
                 tok_sources_plus_labels["attention_mask"].shape[1] + 1,
             )
-            # handle right padding here!
-            if self.tokenizer.padding_side == "left":
-                offset = torch.clamp(pad_tokens + input_len, max=self.max_input_length)
+
+            # mask targets positions corresponding to the inputs
+            if self.tokenizer.truncation_side == "left":
+                labels_len = tokenized_labels["attention_mask"].int().sum(-1)
+                pad_tokens = tok_sources_plus_labels["attention_mask"].shape[
+                    1
+                ] - tok_sources_plus_labels["attention_mask"].int().sum(-1)
+
+                if self.tokenizer.padding_side == "left":
+                    offset = -labels_len - 1
+                else:
+                    offset = torch.clamp(
+                        -pad_tokens - labels_len - 1, min=-self.max_input_length, max=0
+                    )
             else:
-                offset = input_len
+                input_len = tokenized_sources["attention_mask"].int().sum(-1)
+                pad_tokens = tok_sources_plus_labels["attention_mask"].shape[
+                    1
+                ] - tok_sources_plus_labels["attention_mask"].int().sum(-1)
+
+                # handle right padding here!
+                if self.tokenizer.padding_side == "left":
+                    offset = torch.clamp(
+                        pad_tokens + input_len, max=self.max_input_length
+                    )
+                else:
+                    offset = input_len
 
             mask[(torch.arange(mask.shape[0]), offset)] = 1
             mask = mask.cumsum(dim=1).bool()
