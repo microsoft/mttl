@@ -80,7 +80,11 @@ class DefaultCollator:
                 sources_[i] = sources_[i][:-1]
                 labels_[i] = " " + labels_[i]
 
-            if sources_[i][-1] not in [" ", "\n"] and labels_[i][0] not in [" ", "\n"]:
+            if (
+                sources_[i][-1] not in [" ", "\n"]
+                and len(labels_[i]) > 0
+                and labels_[i][0] not in [" ", "\n"]
+            ):
                 labels_[i] = " " + labels_[i]
 
         # adds the eos token
@@ -268,9 +272,9 @@ class DefaultDataModule(LightningDataModule):
             self.train_dataset,
             batch_size=self.config.train_batch_size,
             shuffle=True,
-            num_workers=16,
+            num_workers=0,
             pin_memory=True,
-            persistent_workers=True,
+            persistent_workers=False,  # True,
             collate_fn=self.collate_fn,
         )
 
@@ -279,9 +283,9 @@ class DefaultDataModule(LightningDataModule):
             self.dev_dataset,
             batch_size=self.config.predict_batch_size,
             shuffle=False,
-            num_workers=16,
+            num_workers=0,
             pin_memory=True,
-            persistent_workers=True,
+            persistent_workers=False,  # True,
             collate_fn=self.collate_fn,
             drop_last=False,
         )

@@ -297,3 +297,10 @@ class Config:
         self.module_logits_l2_norm = False
 
         self.augment_mmlu: bool = False
+
+        # soft prompts
+        self.soft_prompt_length: int = 10
+        self.patch_last_k_layers: int = -1
+        self.soft_prompt_mlp_dim: int = None
+        self.soft_prompt_hidden_dim: int = None
+        self.soft_prompt_learn_kv: bool = False

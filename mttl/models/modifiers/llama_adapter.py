@@ -16,9 +16,17 @@ from transformers.models.llama.modeling_llama import (
     apply_rotary_pos_emb,
     LlamaForCausalLM,
 )
+from transformers.models.gpt_neo.modeling_gpt_neo import GPTNeoForCausalLM
 
 
-def llama_adapter_attention(
+def type_safe_linear(input, linear_layer):
+    dtype_input = input.dtype
+    input = input.type(linear_layer.weight.dtype)
+    output = linear_layer(input)
+    return output.type(dtype_input)
+
+
+def llama_self_attention(
     self,
     hidden_states: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
@@ -27,7 +35,6 @@ def llama_adapter_attention(
     output_attentions: bool = False,
     use_cache: bool = False,
     padding_mask: Optional[torch.LongTensor] = None,
-    adapter: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
     bsz, q_len, _ = hidden_states.size()
 
@@ -98,12 +105,6 @@ def llama_adapter_attention(
             f" {attn_output.size()}"
         )
 
-    def type_safe_linear(input, linear_layer):
-        dtype_input = input.dtype
-        input = input.type(linear_layer.weight.dtype)
-        output = linear_layer(input)
-        return output.type(dtype_input)
-
     """ Adapter Start """
     # adapter not precomputed, so we compute it
     if adapter_k is None:
@@ -154,35 +155,124 @@ def llama_adapter_attention(
     return attn_output, attn_weights, past_key_value
 
 
+def gpt_neo_self_attention(
+    self,
+    hidden_states,
+    attention_mask=None,
+    layer_past=None,
+    head_mask=None,
+    use_cache=False,
+    output_attentions=False,
+):
+    query = self.q_proj(hidden_states)
+    key = self.k_proj(hidden_states)
+    value = self.v_proj(hidden_states)
+
+    adapter_k = adapter_v = None
+
+    query = self._split_heads(query, self.num_heads, self.head_dim)
+    key = self._split_heads(key, self.num_heads, self.head_dim)
+    value = self._split_heads(value, self.num_heads, self.head_dim)
+
+    bsz, n_heads, seq_len, d_head = query.size()
+
+    if layer_past is not None:
+        past_key = layer_past[0]
+        past_value = layer_past[1]
+        key = torch.cat((past_key, key), dim=-2)
+        value = torch.cat((past_value, value), dim=-2)
+        adapter_k, adapter_v = layer_past[2], layer_past[3]
+
+    attn_output, attn_weights = self._attn(query, key, value, attention_mask, head_mask)
+
+    """ Adapter Start """
+    # adapter not precomputed, so we compute it
+    if adapter_k is None:
+        adapter = self.adapter()
+        if self.adapter.learn_kv:
+            adapter_k, adapter_v = adapter.chunk(2, dim=-1)
+        else:
+            adapter_k = type_safe_linear(adapter, self.k_proj)
+            adapter_v = type_safe_linear(adapter, self.v_proj)
+
+        adapter_k = adapter_k.view(
+            bsz, self.soft_prompt_length, self.num_heads, self.head_dim
+        ).transpose(
+            1, 2
+        )  # bs, n_heads, len, d_head
+        adapter_v = adapter_v.view(
+            bsz, self.soft_prompt_length, self.num_heads, self.head_dim
+        ).transpose(1, 2)
+
+    # remains to compute the attention score and add the result
+    adapter_weights = torch.matmul(
+        query, adapter_k.transpose(2, 3).type_as(query)
+    ) / math.sqrt(self.head_dim)
+
+    adapter_weights = self.adapter.adapter_gate * F.softmax(
+        adapter_weights, dim=-1, dtype=torch.float32
+    ).type_as(query)
+
+    adapter_output = torch.matmul(adapter_weights, adapter_v).type_as(attn_output)
+    attn_output = attn_output + adapter_output
+    """ Adapter End """
+
+    if use_cache is True:
+        present = (key, value, adapter_k, adapter_v)
+    else:
+        present = None
+
+    attn_output = self._merge_heads(attn_output, self.num_heads, self.head_dim)
+    attn_output = self.out_proj(attn_output)
+    attn_output = self.resid_dropout(attn_output)
+
+    outputs = (attn_output, present)
+    if output_attentions:
+        outputs += (attn_weights,)
+
+    return outputs  # a, present, (attentions)
+
+
 def modify_with_llama_adapters(cls, transformer, config, **kwargs):
     assert isinstance(
         transformer, PreTrainedModel
     ), "Transformer must be a PreTrainedModel."
 
-    assert isinstance(
-        transformer, LlamaForCausalLM
-    ), "Only Llama Model supported for now."
-    task_id_ptr = transformer.task_id_container
-
-    for param in transformer.parameters():
-        param.requires_grad = False
-
     def wrap_llama_attn(attn_layer):
         # create the prefix embeddings
         attn_layer.soft_prompt_length = config.soft_prompt_length
-        attn_layer.forward = partial(llama_adapter_attention, attn_layer)
+        attn_layer.forward = partial(llama_self_attention, attn_layer)
         attn_layer.adapter = cls(config, attn_layer, task_id_ptr, **kwargs)
         assert (
             attn_layer.num_heads == attn_layer.num_key_value_heads
         ), "which to pick for gate?"
 
-    if config.patch_last_k_layers == -1:
-        layers_to_patch = transformer.model.layers
-    else:
-        layers_to_patch = [transformer.model.layers[-config.patch_last_k_layers]]
+    def wrap_gpt_neo_attn(attn_layer):
+        # create the prefix embeddings
+        attn_layer.soft_prompt_length = config.soft_prompt_length
+        attn_layer.forward = partial(gpt_neo_self_attention, attn_layer)
+        attn_layer.adapter = cls(config, attn_layer, task_id_ptr, **kwargs)
 
-    for layer in layers_to_patch:
-        wrap_llama_attn(layer.self_attn)
+    if isinstance(transformer, LlamaForCausalLM):
+        wrap_fn = wrap_llama_attn
+        attn_layers = [layer.self_attn for layer in transformer.model.layers]
+    elif isinstance(transformer, GPTNeoForCausalLM):
+        wrap_fn = wrap_gpt_neo_attn
+        attn_layers = [layer.attn.attention for layer in transformer.transformer.h]
+        # `hidden_size` needs to be set
+        for attn_layer in attn_layers:
+            attn_layer.hidden_size = attn_layer.embed_dim
+
+    task_id_ptr = transformer.task_id_container
+
+    for param in transformer.parameters():
+        param.requires_grad = False
+
+    if config.patch_last_k_layers != -1:
+        attn_layers = attn_layers[-config.patch_last_k_layers]
+
+    for layer in attn_layers:
+        wrap_fn(layer)
 
     return transformer
 
