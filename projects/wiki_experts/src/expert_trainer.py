@@ -115,16 +115,12 @@ class ExpertTrainer(EfficientCheckpointModule):
     def validation_step(self, batch, batch_idx):
         loss = self.forward(batch, reduction="none")
         mean_loss = loss.sum() / loss.shape[0]
-        print("len loss", len(loss))
         self._inference_outputs += [(loss.detach().cpu(),)]
         return mean_loss
 
     def log_loss(self, split="val"):
         outputs = self._inference_outputs
         losses = torch.cat([out[0] for out in outputs])
-        if split == "val":
-            print(losses)
-            print("len loss", len(losses))
         self._inference_outputs.clear()
         self.log(f"{split}/loss", losses.mean(), on_epoch=True, prog_bar=True)
 
