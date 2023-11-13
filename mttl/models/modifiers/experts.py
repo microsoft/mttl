@@ -165,7 +165,7 @@ class ExpertContainer(MergeableAdapter):
         self.config = config
         self.layer = layer
         self.selector = selector
-
+        breakpoint()
         if not isinstance(self.layer, nn.Linear):
             raise ValueError(
                 "Expert containers for layers other than nn.Linear have not been implemented."

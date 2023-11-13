@@ -5,6 +5,7 @@ from mttl.models.modifiers.experts import add_expert_to_transformer, Router
 from mttl.utils import logger
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from typing import Dict
+from projects.wiki_experts.adapter_ranker import get_classifier
 
 
 def push_expert_to_hub(
@@ -56,6 +57,7 @@ class MultiExpertModel(ExpertTrainer):
 
         self.selectors: Dict[str, Router] = {}
         self.experts = []
+
         self.classifier = get_classifier()
 
     def get_router_weights(self):

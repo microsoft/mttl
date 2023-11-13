@@ -24,6 +24,7 @@ class DataCollatorForFlan10k(DefaultCollator):
     pad_to_multiple_of: Optional[int] = None
     return_tensors: str = "pt"
     model_family: str = None
+    for_generation: bool = False
 
     def __call__(self, batch, return_tensors=None):
         if return_tensors is None:
@@ -95,7 +96,8 @@ class Flan10kModule(DefaultDataModule):
             max_output_length=self.config.max_output_length,
             pad_to_multiple_of=8,
             return_tensors="pt",
-            model_family="seq2seq" if self.for_generation else self.config.model_family,
+            model_family=self.config.model_family,
+            for_generation=self.for_generation,
         )
 
     @property
@@ -107,7 +109,8 @@ class Flan10kModule(DefaultDataModule):
             max_output_length=self.config.max_output_length,
             pad_to_multiple_of=8,
             return_tensors="pt",
-            model_family="seq2seq" if self.for_generation else self.config.model_family,
+            model_family=self.config.model_family,
+            for_generation=self.for_generation,
         )
 
     def get_dataset(self):

@@ -93,7 +93,7 @@ class FlanEvaluator(object):
                     if not self.for_generation:
                         # get loss ()
                         loss = model.validation_step(batch, batch_idx=0)
-                        all_val_loss.extend(loss.cpu())
+                        all_val_loss.append(loss.cpu())
                     predictions = model.generate(
                         batch,
                         max_length=max_length,
