@@ -3,6 +3,7 @@ import time
 import sys, os
 import copy
 from typing import Any
+from lightning import LightningModule, Trainer
 
 import pytorch_lightning as pl
 from pytorch_lightning import LightningModule, Trainer, callbacks as cb
@@ -12,6 +13,31 @@ from mttl.utils import Averager, logger
 
 
 DEBUG = False
+
+
+class RougeCallback(cb.Callback):
+    def __init__(self, datamodule, device="cuda"):
+        super().__init__()
+
+        from mttl.evaluators.rouge_evaluator import RougeEvaluator
+
+        self.evaluator = RougeEvaluator(datamodule, device=device)
+
+    def on_validation_epoch_end(
+        self, trainer: Trainer, pl_module: LightningModule
+    ) -> None:
+        rouge = self.evaluator.evaluate(pl_module, split="val")
+
+        pl_module.log("val/rougeL", rouge, on_epoch=True, prog_bar=True)
+
+        return super().on_validation_epoch_end(trainer, pl_module)
+
+    def on_test_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        rouge = self.evaluator.evaluate(pl_module, split="test")
+
+        pl_module.log("test/rougeL", rouge, on_epoch=True, prog_bar=True)
+
+        return super().on_test_epoch_end(trainer, pl_module)
 
 
 class MMLUCallback(cb.Callback):
