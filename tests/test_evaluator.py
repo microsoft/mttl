@@ -11,7 +11,27 @@ from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.ni_data_module import NiDataConfig
 from mttl.evaluators import MMLUEvaluator
 from mttl.evaluators import NIEvaluator
+from mttl.evaluators import RougeEvaluator
 from transformers import AutoModelForCausalLM
+
+
+def test_rouge_eval():
+    flan = AutoDataModule.create(
+        "sordonia/flan-debug-flat",
+        model="EleutherAI/gpt-neo-125m",
+        model_family="gpt",
+        max_input_length=1024,
+        max_output_length=128,
+        train_batch_size=4,
+        for_generation=True,
+        predict_batch_size=1,
+        truncation_side="left",
+    )
+    evaluator = RougeEvaluator(flan, device="cpu")
+
+    model = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-125m")
+    rouge = evaluator.evaluate(model, num_batches=1)
+    assert pytest.approx(rouge, 0.01) == 1.769
 
 
 def test_mmlu_eval():
