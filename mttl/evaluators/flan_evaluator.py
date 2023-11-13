@@ -118,7 +118,6 @@ class FlanEvaluator(object):
                 predictions = predictions[:, batch["input_ids"].shape[-1] :]
 
             predictions = decode(predictions, tokenizer)
-
             # write the inputs_texts, predictions, labels_texts to json file
             if not self.pred_output_file_path is None:
                 for i in range(len(predictions)):
@@ -133,6 +132,7 @@ class FlanEvaluator(object):
                         + "\n"
                     )
                     f.write(result_str)  # write to file
+                    f.flush()
 
             references = labels_texts
             try:
