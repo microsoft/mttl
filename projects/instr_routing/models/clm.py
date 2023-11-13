@@ -304,8 +304,6 @@ class CLM(EfficientCheckpointModule):
         Returns:
             AttributeDict: immutable initial hyperparameters
         """
-        if not hasattr(self, "_hparams_initial"):
-            return AttributeDict()
         # prevent any change
         hparams_initial = copy.deepcopy(self._hparams_initial)
         # pop anything that is not json serializable
