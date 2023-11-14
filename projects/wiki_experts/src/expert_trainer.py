@@ -14,7 +14,7 @@ from mttl.utils import logger
 
 
 class ExpertTrainer(EfficientCheckpointModule):
-    def __init__(self, tokenizer=None, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
         # log hyperparameters
