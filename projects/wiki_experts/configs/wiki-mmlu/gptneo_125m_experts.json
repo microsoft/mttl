@@ -1,0 +1,14 @@
+{
+    "num_train_epochs": 1,
+    "learning_rate": 0.0003,
+    "micro_batch_size": 8,
+    "train_batch_size": 16,
+    "predict_batch_size": 8,
+    "model": "EleutherAI/gpt-neo-125m",
+    "model_family": "gpt",
+    "optimizer": "adamw",
+    "eval_every": 400,
+    "warmup_steps": 100,
+    "precision": "16",
+    "dataset": "sordonia/wiki_mmlu_from_valid_all"
+}
