@@ -25,7 +25,7 @@ from expert_lilbrary import ExpertLibrary
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
 from config import ExpertsMergeConfig
-from projects.wiki_experts.lora_hub import RoutingOptimizer
+from projects.wiki_experts.src.evolution.lora_hub import RoutingOptimizer
 from mttl.utils import setup_logging, logger
 from projects.wiki_experts.src.graph.module_graph import ModuleGraph
 
