@@ -6,6 +6,7 @@ from torch import nn
 from typing import Any, Dict
 from mttl.models.modifiers.base import MergeableAdapter
 from mttl.models.modifiers.lora import LoRA, SkilledLoRA
+from mttl.models.modifiers.llama_adapter import KVAdapter
 from mttl.utils import logger
 
 
@@ -166,7 +167,10 @@ class ExpertContainer(MergeableAdapter):
         self.layer = layer
         self.selector = selector
 
-        if not isinstance(self.layer, nn.Linear):
+        if (
+            not isinstance(self.layer, nn.Linear)
+            and "kv_adapter" not in self.config.model_modifier
+        ):
             raise ValueError(
                 "Expert containers for layers other than nn.Linear have not been implemented."
             )
@@ -195,9 +199,12 @@ class ExpertContainer(MergeableAdapter):
         # hack this for now, but build a proper config for each module
         if expert_config.model_modifier == "lora":
             expert_module = LoRA(expert_config, self.layer)
-            expert_module.load_lora_weights(expert_weights)
+        elif expert_config.model_modifier == "kv_adapter":
+            expert_module = KVAdapter(expert_config, self.layer, self.info_container)
         else:
             raise NotImplementedError("ExpertContainer only supports LoRA experts.")
+
+        expert_module.load_adapter_weights(expert_weights)
 
         if action == "merge":
             # weight is merged with layer so we can discard it now
@@ -222,7 +229,7 @@ class ExpertContainer(MergeableAdapter):
                 self.merged_expert_names.append(name)
                 self.experts.pop(name)
 
-    def weighted_route(self, input, task_weights):
+    def weighted_route(self, input, task_weights, **kwargs):
         """
         Route all examples according to the weights given in the weights dictionary: expert_name -> weight
         """
@@ -234,11 +241,11 @@ class ExpertContainer(MergeableAdapter):
             weights.append(weight)
         # assume all experts are loras
         output = SkilledLoRA.weighted_merge_forward(
-            input, load_experts, weights, merge_after=True
+            input, load_experts, weights, merge_after=True, **kwargs
         )
         return output
 
-    def route_with_task_name(self, input, task_names):
+    def route_with_task_name(self, input, task_names, **kwargs):
         """
         Route according to the task name information
         """
@@ -257,13 +264,17 @@ class ExpertContainer(MergeableAdapter):
             else:
                 selected_expert = task_name
             load_experts.append(self.experts[selected_expert])
+
+        # For now, let's assume that all experts are of the same type
+        expert_cls = type(load_experts[0])
+        assert all(isinstance(expert, expert_cls) for expert in load_experts)
+
         # assume all experts are loras
-        output = LoRA.parallel_linear_forward(input, load_experts)
+        output = expert_cls.parallel_linear_forward(input, load_experts, **kwargs)
         return output
 
     def forward(self, input, **kwargs):
         task_names = self.info_container["routing_infos"].task_names
-
         if task_names and (
             any(task_name not in self.experts for task_name in task_names)
             and not self.default_expert_name
@@ -278,10 +289,10 @@ class ExpertContainer(MergeableAdapter):
             assert (
                 task_names is not None
             ), "Task names are not given: set router or merge experts into the layer."
-            output = self.route_with_task_name(input, task_names)
+            output = self.route_with_task_name(input, task_names, **kwargs)
         elif len(self.experts) and self.selector is not None:
             weights: Dict = self.selector(input)
-            output = self.weighted_route(input, weights)
+            output = self.weighted_route(input, weights, **kwargs)
         else:
             ###############################################################
             ## no experts -- no routing, experts were merged into the layer

@@ -51,7 +51,7 @@ class LoRA(MergeableAdapter, ModifyMixin):
         self.reset_parameters()
         self.merged_with_layer = False
 
-    def load_lora_weights(self, state_dict):
+    def load_adapter_weights(self, state_dict):
         self.lora_a.data.copy_(state_dict["lora_a"])
         self.lora_b.data.copy_(state_dict["lora_b"])
 
@@ -137,7 +137,7 @@ class LoRA(MergeableAdapter, ModifyMixin):
             return output + adapter_out.to(input.dtype)
 
     @classmethod
-    def parallel_linear_forward(cls, input, loras):
+    def parallel_linear_forward(cls, input, loras, **kwargs):
         if any([lora.merged_with_layer for lora in loras]):
             raise ValueError("Cannot parallelize merged loras.")
         if len(set([lora.layer for lora in loras])) > 1:
@@ -248,7 +248,7 @@ class SkilledLoRA(LoRA):
         return layer_out + adapter_out.to(input.dtype)
 
     @classmethod
-    def weighted_merge_forward(cls, input, loras, weights, merge_after=False):
+    def weighted_merge_forward(cls, input, loras, weights, merge_after=False, **kwargs):
         """
         Meging loras into one loa accroding to the weights
         """
