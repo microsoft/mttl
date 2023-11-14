@@ -8,15 +8,111 @@ from mttl.models.modifiers import register_modifier
 from transformers.modeling_utils import PreTrainedModel
 from functools import partial
 from typing import Optional, Tuple
+from mttl.utils import logger
 from mttl.models.modifiers.base import Adapter, ModifierConfig, ModifyMixin
 from mttl.models.modifiers.poly import PolytroponSelector, PolytroponConfig
-
+from mttl.models.modifiers.base import MergeableAdapter, ModifyMixin, ModifierConfig
 
 from transformers.models.llama.modeling_llama import (
     apply_rotary_pos_emb,
     LlamaForCausalLM,
 )
 from transformers.models.gpt_neo.modeling_gpt_neo import GPTNeoForCausalLM
+
+
+@dataclass
+class KVAdapterConfig(ModifierConfig):
+    soft_prompt_length: int = 10
+    soft_prompt_learn_kv: bool = True
+    n_tasks: int = None
+    # This argument is deprecated, as control has been switched to
+    patch_last_k_layers: int = -1
+
+
+@dataclass
+class PolyKVAdapterConfig(KVAdapterConfig, PolytroponConfig):
+    n_skills: int = 1
+    n_splits: int = 1
+
+
+@register_modifier("kv_adapter", config_cls=KVAdapterConfig)
+class KVAdapter(MergeableAdapter, ModifyMixin):
+    def __init__(
+        self,
+        config: KVAdapterConfig,
+        attn_layer: nn.Module,
+        task_id_ptr: dict,
+    ):
+        super().__init__()
+
+        # assign self variables
+        self.config = config
+        self.attn_layer = attn_layer
+        self.task_id_ptr = task_id_ptr
+        self.learn_kv = config.soft_prompt_learn_kv
+        self.soft_prompt_length = config.soft_prompt_length
+        self.soft_prompt_learn_kv = config.soft_prompt_learn_kv
+        attn_layer.soft_prompt_length = config.soft_prompt_length
+
+        if "gpt-neo" in config.model:
+            attn_layer.hidden_size = attn_layer.embed_dim
+            self.attn_fwd = gpt_neo_self_attention
+        elif "llama" in config.model:
+            self.attn_fwd = llama_self_attention
+            assert (
+                attn_layer.num_heads == attn_layer.num_key_value_heads
+            ), "which to pick for gate?"
+        else:
+            raise ValueError(f"{config.model} not supported for now.")
+
+        self.create_for_layer(attn_layer)
+
+    def create_for_layer(self, attn_layer):
+        # create the gate, and embeddings here
+        self.adapter_gate = torch.nn.Parameter(
+            torch.zeros(1, attn_layer.num_heads, 1, 1)
+        )
+
+        if self.soft_prompt_learn_kv:
+            out_dim = attn_layer.hidden_size * 2
+        else:
+            out_dim = attn_layer.hidden_size
+
+        self.adapter_query = nn.Embedding(self.soft_prompt_length, out_dim)
+
+    def load_adapter_weights(self, state_dict):
+        # load the weights from state_dict
+        self.adapter_query.weight.data.copy_(state_dict["adapter_query.weight"])
+        self.adapter_gate.data.copy_(state_dict["adapter_gate"])
+
+    def merge_with_layer(self):
+        # TODO: Should I just remove the `MergeableAdapter` inheritance ?
+        logger.warning("cannot merge `KVAdapter` with base layer. No-op")
+
+    def forward(self, *args, **kwargs):
+        # This Should Wrap at the SelfAttentionLevel, so behaves as such
+        return self.attn_fwd(self.attn_layer, self, None, *args, **kwargs)
+
+    def get_adapter(self, expand=True):
+        bsz = self.task_id_ptr["routing_infos"].task_ids.size(0)
+        out = self.adapter_query.weight.unsqueeze(0)
+        return out.expand(bsz, -1, -1) if expand else out
+
+    @classmethod
+    def parallel_linear_forward(cls, input, kv_adapters, **kwargs):
+        if len(set([kv_adapter.attn_layer for kv_adapter in kv_adapters])) > 1:
+            raise ValueError("Cannot parallelize adapters applied to different layers.")
+
+        # Build soft prompts
+        adapters = [kv_adapter.get_adapter(expand=False) for kv_adapter in kv_adapters]
+        adapters = torch.cat(adapters)
+        kv_adapter, attn_layer = kv_adapters[0], kv_adapters[0].attn_layer
+        return kv_adapter.attn_fwd(attn_layer, kv_adapter, adapters, input, **kwargs)
+
+    @classmethod
+    def modify_transformer(cls, transformer, config, **kwargs):
+        """Wrap attention layer with additonal tokens"""
+        return modify_with_kv_adapters(cls, transformer, config, **kwargs)
 
 
 def type_safe_linear(input, linear_layer):
@@ -28,6 +124,8 @@ def type_safe_linear(input, linear_layer):
 
 def llama_self_attention(
     self,
+    adapter: KVAdapter,
+    adapter_weights: torch.Tensor,
     hidden_states: torch.Tensor,
     attention_mask: Optional[torch.Tensor] = None,
     position_ids: Optional[torch.LongTensor] = None,
@@ -108,12 +206,13 @@ def llama_self_attention(
     """ Adapter Start """
     # adapter not precomputed, so we compute it
     if adapter_k is None:
-        adapter = self.adapter()
-        if self.adapter.learn_kv:
-            adapter_k, adapter_v = adapter.chunk(2, dim=-1)
+        if adapter_weights is None:
+            adapter_weights = adapter.get_adapter()
+        if adapter.learn_kv:
+            adapter_k, adapter_v = adapter_weights.chunk(2, dim=-1)
         else:
-            adapter_k = type_safe_linear(adapter, self.k_proj)
-            adapter_v = type_safe_linear(adapter, self.v_proj)
+            adapter_k = type_safe_linear(adapter_weights, self.k_proj)
+            adapter_v = type_safe_linear(adapter_weights, self.v_proj)
 
         adapter_k = adapter_k.view(
             bsz, self.soft_prompt_length, self.num_key_value_heads, self.head_dim
@@ -133,7 +232,7 @@ def llama_self_attention(
         query_states, adapter_k.transpose(2, 3).type_as(query_states)
     ) / math.sqrt(self.head_dim)
 
-    adapter_weights = self.adapter.adapter_gate * F.softmax(
+    adapter_weights = adapter.adapter_gate * F.softmax(
         adapter_weights, dim=-1, dtype=torch.float32
     ).type_as(query_states)
 
@@ -157,6 +256,8 @@ def llama_self_attention(
 
 def gpt_neo_self_attention(
     self,
+    adapter,
+    adapter_weights,
     hidden_states,
     attention_mask=None,
     layer_past=None,
@@ -188,12 +289,13 @@ def gpt_neo_self_attention(
     """ Adapter Start """
     # adapter not precomputed, so we compute it
     if adapter_k is None:
-        adapter = self.adapter()
-        if self.adapter.learn_kv:
-            adapter_k, adapter_v = adapter.chunk(2, dim=-1)
+        if adapter_weights is None:
+            adapter_weights = adapter.get_adapter()
+        if adapter.learn_kv:
+            adapter_k, adapter_v = adapter_weights.chunk(2, dim=-1)
         else:
-            adapter_k = type_safe_linear(adapter, self.k_proj)
-            adapter_v = type_safe_linear(adapter, self.v_proj)
+            adapter_k = type_safe_linear(adapter_weights, self.k_proj)
+            adapter_v = type_safe_linear(adapter_weights, self.v_proj)
 
         adapter_k = adapter_k.view(
             bsz, self.soft_prompt_length, self.num_heads, self.head_dim
@@ -209,7 +311,7 @@ def gpt_neo_self_attention(
         query, adapter_k.transpose(2, 3).type_as(query)
     ) / math.sqrt(self.head_dim)
 
-    adapter_weights = self.adapter.adapter_gate * F.softmax(
+    adapter_weights = adapter.adapter_gate * F.softmax(
         adapter_weights, dim=-1, dtype=torch.float32
     ).type_as(query)
 
@@ -233,6 +335,32 @@ def gpt_neo_self_attention(
     return outputs  # a, present, (attentions)
 
 
+def modify_with_kv_adapters(adapter_class, transformer, config, **kwargs):
+    assert isinstance(
+        transformer, PreTrainedModel
+    ), "Transformer must be a PreTrainedModel."
+
+    task_id_ptr = transformer.task_id_container
+
+    for param in transformer.parameters():
+        param.requires_grad = False
+
+    for m_name, module in dict(transformer.named_modules()).items():
+        if re.fullmatch(config.modify_modules, m_name):
+            for c_name, layer in dict(module.named_children()).items():
+                if re.fullmatch(config.modify_layers, c_name):
+                    logger.info(f"Patching {m_name}.{c_name}...")
+
+                    setattr(
+                        module,
+                        c_name,
+                        adapter_class(config, layer, task_id_ptr),
+                    )
+
+    return transformer
+
+
+'''
 def modify_with_llama_adapters(cls, transformer, config, **kwargs):
     assert isinstance(
         transformer, PreTrainedModel
@@ -360,12 +488,6 @@ class MLPLlamaAdapter(Adapter, ModifyMixin):
         )
 
 
-@dataclass
-class PolyLLamaAdapterConfig(LLamaAdapterConfig, PolytroponConfig):
-    n_skills: int = 1
-    n_splits: int = 1
-
-
 @register_modifier("poly_llama_adapter", config_cls=PolyLLamaAdapterConfig)
 class PolyLlamaAdapter(Adapter, ModifyMixin):
     def __init__(self, config, attn_layer, task_id_ptr, **kwargs):
@@ -402,3 +524,4 @@ class PolyLlamaAdapter(Adapter, ModifyMixin):
     @classmethod
     def modify_transformer(cls, transformer, config):
         return modify_with_llama_adapters(cls, transformer, config)
+'''
