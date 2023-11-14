@@ -10,6 +10,7 @@ from mttl.utils import logger
 
 
 MULTI_EXPERT_ROUTERS = {}
+EPS = 1e-8
 
 
 def register_multi_expert_selector(name):
@@ -47,6 +48,19 @@ class Router:
     @abstractproperty
     def name(self):
         pass
+
+
+def _extract_identifier(string, match_on="coder"):
+    """Returns a unique identifier for the "chunk" of layers sharing the
+    same underlying selector
+    # e.g. 'block' : 'encoder.block.0.layer.0.SelfAttention' -> 'encoder.block.0'
+    """
+
+    if match_on == "finegrained":
+        return string
+    if match_on == "coarsegrained":
+        return " "
+    return string
 
 
 @register_multi_expert_selector("poly_router")
@@ -94,6 +108,7 @@ def add_expert_to_transformer(
     is_default=False,
     load_only_layers=None,
     selectors={},
+    config=None,
 ):
     # create a shared container for the task id
     if not hasattr(transformer, "task_id_container"):
@@ -109,12 +124,28 @@ def add_expert_to_transformer(
                     total_layers += 1
                     layer_name = f"{m_name}.{c_name}"
 
+                    selector = None
+                    if config is not None:
+                        identifier = _extract_identifier(
+                            layer_name, config.router_granularity
+                        )
+                        if identifier not in selectors.keys():
+                            selectors[identifier] = get_selector(config)
+                            if config.expert_routing:
+                                selectors[identifier].__layer_name__ = (
+                                    identifier + ".selector"
+                                )
+                        selector = None
+                        if identifier in selectors.keys():
+                            selector = selectors[identifier]
+
                     if type(layer) != ExpertContainer:
                         # create an expert lora container
                         expert_container = ExpertContainer(
                             expert_config,
                             transformer.task_id_container,
                             layer,
+                            selector,
                         )
                         expert_container.__layer_name__ = layer_name
                         setattr(
@@ -211,6 +242,29 @@ class ExpertContainer(MergeableAdapter):
             self.experts[name] = expert_module
         if is_default:
             self.default_expert_name = name
+
+    def merge_experts_together(self, weights=None):
+        """
+        Merges experts to one expert according to weights, if weights are not given, it uses the selector to get the weights.
+        Does not merge the layer.
+        """
+        if weights is None:
+            assert self.selector is not None
+            weights: dict = self.selector.get_routing_weights()
+
+        merged_weights = {}
+        for name, expert in self.experts.items():
+            assert name in weights, f"Weight for expert {name} is not given"
+            expert_state_dict = expert.state_dict()
+            weight = weights[name]
+            for k, v in expert_state_dict.items():
+                value = weight * v
+                if k in merged_weights:
+                    merged_weights[k] += value
+                else:
+                    merged_weights[k] = value
+        self.experts = nn.ModuleDict({})
+        self.add_expert("merged_expert", self.config, merged_weights, action="route")
 
     def merge_with_layer(self):
         if len(self.experts) > 0:
