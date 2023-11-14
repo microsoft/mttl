@@ -132,7 +132,7 @@ class MultiExpertModel(ExpertTrainer):
 
     def expert_choice(self, batch, **kwargs):
         input_ids = batch["input_ids"]
-        mask = batch["input_ids"].ne(self.tokenizer.pad_token_id)
+        mask = batch["attention_mask"]
 
         # convert left to right padding here
         def roll_along(arr, shifts, dim):

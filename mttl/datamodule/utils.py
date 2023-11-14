@@ -14,7 +14,11 @@ def maybe_filter_hf_dataset_by_task(dataset, task_field, task_names: str = None)
     if task_names:
         task_names = sorted(task_names.split(","))
         if not set(task_names).issubset(all_tasks):
-            raise ValueError("task_names must be a subset of the available tasks.")
+            raise ValueError(
+                "task_names must be a subset of the available tasks. Got {} and {}".format(
+                    task_names, all_tasks
+                )
+            )
 
     train_dataset, dev_dataset, test_dataset = None, None, None
 
