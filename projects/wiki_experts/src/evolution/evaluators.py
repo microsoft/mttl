@@ -38,7 +38,7 @@ class ExtendedRougeEvaluator(RougeEvaluator, Evaluator):
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model.to(device)
         rougeL = super().evaluate(
-            model, split=self.split, num_samples=self.n_samples, verbose=False
+            model, split=self.split, num_batches=self.n_samples, verbose=False
         )
         return {"all": {"mean": rougeL}, f"{self.name}": {"mean": rougeL}}
 

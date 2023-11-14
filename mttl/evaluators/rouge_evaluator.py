@@ -24,7 +24,7 @@ class RougeEvaluator:
         self.tokenizer = datamodule.tokenizer
         self.max_output_length = datamodule.config.max_output_length
 
-    def evaluate(self, model, split="val", num_samples=None):
+    def evaluate(self, model, split="val", num_batches=None):
         extra_kwargs = {}
         extra_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
         extra_kwargs["eos_token_id"] = self.tokenizer.eos_token_id
@@ -86,7 +86,7 @@ class RougeEvaluator:
 
             pbar.set_description(f"rougeL: {np.mean(all_rougeL):.4f}")
 
-            if num_samples is not None and len(all_rougeL) >= num_samples:
+            if num_batches is not None and len(all_rougeL) >= num_batches:
                 break
 
         return np.mean(all_rougeL)
