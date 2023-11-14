@@ -112,6 +112,10 @@ class ExpertTrainer(EfficientCheckpointModule):
         self._inference_outputs += [(loss.detach().cpu(),)]
         return mean_loss
 
+    def get_loss_for_all(self, batch, batch_idx):
+        loss = self.forward(batch, reduction="none")
+        return loss
+
     def validation_step(self, batch, batch_idx):
         loss = self.forward(batch, reduction="none")
         mean_loss = loss.sum() / loss.shape[0]

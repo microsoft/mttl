@@ -44,6 +44,65 @@ class FlanEvaluator(object):
             for_generation=self.for_generation,
         )
 
+    def create_x_e_acc(self, model, subsample=-1):
+        """
+        Creates the dataset for latent adapter routing
+
+        Args:
+            model: A trained Flan model.
+            subsample: An optional integer specifying the number of examples to evaluate. If set to -1 (default), all examples are evaluated.
+
+        Returns:
+            A dictionary containing the evaluation metrics for the model, including the cross-entropy loss (XE) and accuracy (ACC).
+        """
+        model.eval()
+
+        if hasattr(model, "module"):
+            model = model.module
+
+        # load train dataloader
+        dataloader = self.datamodule.train_dataloader()
+
+        pbar = tqdm.tqdm(
+            enumerate(dataloader),
+            total=len(dataloader),
+        )
+        all_val_loss = []
+
+        # note that if for_generation is True, we should use rougeL rather than loss
+
+        # write to the jsonl file
+        if not os.path.exists(self.pred_output_file_path):
+            os.mkdir(self.pred_output_file_path)
+        f = open(self.pred_output_file_path + "/train_triple_loss.jsonl", "w")
+        for _, batch in pbar:
+            task_names = batch.get("task_names", None)
+            # I guess there should be some function to ge the experts
+            inputs = batch.get("sources_texts", None)
+            batch = transfer_batch_to_device(batch, self.device)
+            with torch.no_grad():
+                if isinstance(model, pl.LightningModule):
+                    loss = model.get_loss_for_all(batch, batch_idx=0)
+                    all_val_loss.append(loss.cpu())
+                else:
+                    loss = model(**batch).loss
+                    all_val_loss.append(loss.cpu())
+
+            # print triple items, x, expert, loss
+            for i in range(len(inputs)):
+                result_str = (
+                    json.dumps(
+                        {
+                            "input_texts": inputs[i],
+                            "expert_name": task_names[i],
+                            "score": 1 - loss[i].item(),
+                        }
+                    )
+                    + "\n"
+                )
+                f.write(result_str)
+            f.flush()
+
     def evaluate(self, model, subsample=-1):
         was_train = model.training
         if was_train:
