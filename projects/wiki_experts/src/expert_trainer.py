@@ -20,8 +20,7 @@ class ExpertTrainer(EfficientCheckpointModule):
         # log hyperparameters
         self.save_hyperparameters(ignore=["tokenizer", "model_object"])
 
-        self.tokenizer = tokenizer
-        self.pad_token_id = self.tokenizer.pad_token_id
+        self.tokenizer = kwargs["tokenizer"]
         self.model: AutoModelForCausalLM = None
         self.accumulate_metrics_batch = defaultdict(list)
 
