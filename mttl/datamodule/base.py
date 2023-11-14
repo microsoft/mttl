@@ -340,10 +340,13 @@ class DefaultDataModule(LightningDataModule):
 
         if len(self.train_dataset) > 0:
             logger.info("Training steps: %s" % len(self.train_dataloader()))
+            logger.info("Training samples: %s" % len(self.train_dataset))
         if self.dev_dataset is not None:
             logger.info("Validation steps: %s" % len(self.val_dataloader()))
+            logger.info("Validation samples: %s" % len(self.dev_dataset))
         if self.test_dataset is not None:
             logger.info("Test steps: %s" % len(self.test_dataloader()))
+            logger.info("Test samples: %s" % len(self.test_dataset))
         if self.task_names:
             logger.info("Number of tasks: %s" % len(self.task_names))
 
