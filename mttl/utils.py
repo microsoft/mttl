@@ -403,7 +403,7 @@ if __name__ == "__main__":
         Am = torch.randn(S, I, R, dtype=torch.double).cuda()
         Bm = torch.randn(S, R, O, dtype=torch.double).cuda()
         skill = torch.randn(B, S, dtype=torch.double).cuda()
-        idx1 = torch.multinomial(torch.ones(S, I * O).cuda(), num_batches=10)
+        idx1 = torch.multinomial(torch.ones(S, I * O).cuda(), num_samples=10)
         idx2 = torch.arange(S).repeat_interleave(10).cuda()
         idx = torch.stack([idx1.flatten(), idx2.flatten()])
         val = torch.randn(size=idx.shape[1:]).cuda().double()
