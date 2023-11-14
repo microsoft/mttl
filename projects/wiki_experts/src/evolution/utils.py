@@ -8,24 +8,19 @@ import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
 from mttl.utils import setup_logging, logger
 from mttl.datamodule.base import AutoDataModule
-from projects.wiki_experts.experts_merge.config import ExpertsMergeConfig
+from config import ExpertsMergeConfig
 
-# from mttl.datamodule.platypus_module import PlatypusConfig, PlatypusQAModule
-from projects.wiki_experts.experts_merge.evaluators import (
+from evaluators import (
     TestLossEvaluator,
     ExtendedMMLUEvaluator,
     Evaluator,
     ExtendedRougeEvaluator,
 )
 
-
-from src import mmlu_subject_configs
 from mttl.utils import logger
 
 

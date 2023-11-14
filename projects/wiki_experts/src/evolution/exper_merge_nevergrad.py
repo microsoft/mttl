@@ -22,9 +22,9 @@ from utils import (
 from evaluators import Evaluator
 from expert_lilbrary import ExpertLibrary
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
-from projects.wiki_experts.experts_merge.config import ExpertsMergeConfig
+from config import ExpertsMergeConfig
 from projects.wiki_experts.lora_hub import RoutingOptimizer
 from mttl.utils import setup_logging, logger
 from projects.wiki_experts.src.graph.module_graph import ModuleGraph

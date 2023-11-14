@@ -2,50 +2,6 @@ import glob
 import torch
 import numpy as np
 from collections import defaultdict
-from mttl.utils import setup_logging, logger
-
-
-def get_file(base_dir, subject=None, selection="_test_oracle", operator=np.argmin):
-    if subject:
-        subject_dirs = [
-            f"{base_dir}/**/{subject}/*{selection}",
-            f"{base_dir}/**/**/{subject}/*{selection}",
-        ]
-        subject_dirs += [
-            f"{base_dir}/**/{subject}/*{selection}/**/",
-            f"{base_dir}/**/**/{subject}*{selection}/**/",
-        ]
-        files = []
-        for subject_dir in subject_dirs:
-            files += glob.glob(f"{subject_dir}/*.ckpt")
-        if len(files) == 0:
-            logger.warning(f"no ckpt files found for {subject}")
-            return
-        best_idx = operator(
-            [
-                float(f.split("/")[-1].replace(".ckpt", "").replace("loss=", ""))
-                for f in files
-            ]
-        )
-        file = files[best_idx]
-        # for f in files:
-        #     if f!=file:
-        #         os.remove(f)
-        return file
-    else:
-        dirs = [f"{base_dir}/**/*{selection}", f"{base_dir}/**/**/*{selection}"]
-        files = glob.glob(f"{dirs[0]}/*.ckpt") + glob.glob(f"{dirs[1]}/*.ckpt")
-        if len(files) == 0:
-            logger.warning(f"no ckpt files found for {subject}")
-            return
-        best_idx = operator(
-            [
-                float(f.split("/")[-1].replace(".ckpt", "").replace("loss=", ""))
-                for f in files
-            ]
-        )
-        file = files[best_idx]
-        return file
 
 
 class ExpertLibrary:

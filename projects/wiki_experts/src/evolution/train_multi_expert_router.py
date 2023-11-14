@@ -10,7 +10,7 @@ from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 import json
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
 from projects.wiki_experts.src.graph.module_graph import ModuleGraph
 from mttl.datamodule.mmlu_data_module import MMLUDataModule
@@ -20,7 +20,7 @@ from projects.wiki_experts.src.expert_model import (
 )
 from mttl.utils import get_mlf_logger, setup_logging, logger
 from projects.wiki_experts.src.config import ExpertConfig
-from projects.wiki_experts.experts_merge.config import ExpertsMergeConfig
+from config import ExpertsMergeConfig
 from typing import List
 
 

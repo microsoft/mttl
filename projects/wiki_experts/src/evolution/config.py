@@ -1,8 +1,9 @@
 import os
 import sys
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 from projects.wiki_experts.src.config import ExpertConfig
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 from mttl.datamodule.flan_tasks import FLAN_SUB19, FLAN_TASKS
 
 

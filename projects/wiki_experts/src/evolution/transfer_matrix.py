@@ -8,15 +8,14 @@ from huggingface_hub import login
 from pytorch_lightning import seed_everything
 
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-
-from projects.wiki_experts.experts_merge.config import ExpertsMergeConfig
+from config import ExpertsMergeConfig
 from utils import log_wandb, prepare_evaluator, init_wandb_logger, TableLogger
 
 from evaluators import Evaluator
 from expert_lilbrary import ExpertLibrary
 from mttl.utils import setup_logging, logger
 
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 # register models
 from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.vllm_engines.engines import free_memory
