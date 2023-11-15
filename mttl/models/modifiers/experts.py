@@ -1,89 +1,16 @@
-from abc import abstractproperty
 import re
-from pyparsing import abstractmethod
 import torch
 from torch import nn
 from typing import Any, Dict
 from mttl.models.modifiers.base import MergeableAdapter
 from mttl.models.modifiers.lora import LoRA, SkilledLoRA
-from mttl.models.modifiers.llama_adapter import KVAdapter
+from mttl.models.modifiers.llama_adapter import (
+    KVAdapter,
+    ParallelKVAdapters,
+    ConcatKVAdapters,
+)
+from mttl.models.modifiers.expert_routing import Router
 from mttl.utils import logger
-
-
-MULTI_EXPERT_ROUTERS = {}
-
-
-def register_multi_expert_selector(name):
-    print("Registering multi-expert selector..." + name)
-
-    def _thunk(fn):
-        if name in MULTI_EXPERT_ROUTERS:
-            raise ValueError(
-                f"Cannot register duplicate multi-expert selector ({name})"
-            )
-        MULTI_EXPERT_ROUTERS[name] = fn
-        return fn
-
-    return _thunk
-
-
-def get_selector(config, **kwargs):
-    if config.expert_routing:
-        if config.expert_routing not in MULTI_EXPERT_ROUTERS:
-            raise ValueError(f"Cannot find selector: {config.expert_routing}")
-        return MULTI_EXPERT_ROUTERS[config.expert_routing](config, **kwargs)
-    else:
-        return None
-
-
-class Router:
-    @abstractmethod
-    def forward(self, input, **kwargs):
-        pass
-
-    @abstractmethod
-    def get_routing_weights(self):
-        pass
-
-    @abstractproperty
-    def name(self):
-        pass
-
-
-@register_multi_expert_selector("poly_router")
-class Multi_ExpertRouter(torch.nn.Module, Router):
-    """
-    Implements routing at a per-layer or pe-model level
-    """
-
-    def __init__(self, config, expert_names=[]):
-        super().__init__()
-        self.config = config
-        self.expert_names: list = expert_names
-
-        self.module_logits = nn.Parameter(
-            torch.empty(len(expert_names)).uniform_(-1e-3, 1e-3)
-        )
-
-        self.__layer_name__ = f"poly_router"
-
-    def resize_module_logits(self, expet_names: list):
-        self.expert_names += expet_names
-        self.module_logits.data = torch.empty(len(self.expert_names)).uniform_(
-            -1e-3, 1e-3
-        )
-
-    @property
-    def name(self):
-        return f"{self.__layer_name__}"
-
-    def forward(self, *args, **kwargs):
-        module_logits = torch.sigmoid(self.module_logits)
-        module_weights = module_logits / (module_logits.sum(dim=-1, keepdim=True) + EPS)
-        return {k: v for k, v in zip(self.expert_names, module_weights)}
-
-    def get_routing_weights(self):
-        return self.forward()
 
 
 def add_expert_to_transformer(
@@ -95,6 +22,7 @@ def add_expert_to_transformer(
     is_default=False,
     load_only_layers=None,
     selectors={},
+    global_config=None,
 ):
     # create a shared container for the task id
     if not hasattr(transformer, "task_id_container"):
@@ -109,6 +37,12 @@ def add_expert_to_transformer(
                 if re.fullmatch(expert_config.modify_layers, c_name):
                     total_layers += 1
                     layer_name = f"{m_name}.{c_name}"
+                    selector = None
+                    if (
+                        global_config.task_agnostic_routing
+                        and "kv_adapter" in expert_config.model_modifier
+                    ):
+                        selector = 1
 
                     if type(layer) != ExpertContainer:
                         # create an expert lora container
@@ -116,6 +50,7 @@ def add_expert_to_transformer(
                             expert_config,
                             transformer.task_id_container,
                             layer,
+                            selector=selector,
                         )
                         expert_container.__layer_name__ = layer_name
                         setattr(
@@ -200,9 +135,11 @@ class ExpertContainer(MergeableAdapter):
         if expert_config.model_modifier == "lora":
             expert_module = LoRA(expert_config, self.layer)
         elif expert_config.model_modifier == "kv_adapter":
-            expert_module = KVAdapter(expert_config, self.layer, self.info_container)
+            expert_module = KVAdapter(expert_config, self.layer)
         else:
-            raise NotImplementedError("ExpertContainer only supports LoRA experts.")
+            raise NotImplementedError(
+                "ExpertContainer only supports LoRA/KVAdapter experts."
+            )
 
         expert_module.load_adapter_weights(expert_weights)
 
@@ -269,8 +206,12 @@ class ExpertContainer(MergeableAdapter):
         expert_cls = type(load_experts[0])
         assert all(isinstance(expert, expert_cls) for expert in load_experts)
 
-        # assume all experts are loras
-        output = expert_cls.parallel_linear_forward(input, load_experts, **kwargs)
+        if expert_cls == LoRA:
+            output = expert_cls.parallel_linear_forward(input, load_experts, **kwargs)
+        elif expert_cls == KVAdapter:
+            fused_adapter = ParallelKVAdapters(load_experts)
+            output = fused_adapter(input, **kwargs)
+
         return output
 
     def forward(self, input, **kwargs):
@@ -285,14 +226,22 @@ class ExpertContainer(MergeableAdapter):
             )
 
         # if it has some routing experts *and* task names, then we can route
-        if len(self.experts) and self.selector is None:
+        if (
+            len(self.experts)
+            and self.selector is None
+            and not self.config.task_agnostic_routing
+        ):
             assert (
                 task_names is not None
             ), "Task names are not given: set router or merge experts into the layer."
             output = self.route_with_task_name(input, task_names, **kwargs)
         elif len(self.experts) and self.selector is not None:
-            weights: Dict = self.selector(input)
-            output = self.weighted_route(input, weights, **kwargs)
+            if "kv_adapter" in self.config.model_modifier:
+                fused_adapter = ConcatKVAdapters(self.experts.values())
+                output = fused_adapter(input, **kwargs)
+            else:
+                weights: Dict = self.selector(input)
+                output = self.weighted_route(input, weights, **kwargs)
         else:
             ###############################################################
             ## no experts -- no routing, experts were merged into the layer
