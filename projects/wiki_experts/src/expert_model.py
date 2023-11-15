@@ -273,11 +273,6 @@ class RoutedMultiExpertModel(MultiExpertModel):
         if action != "merge":
             self.experts.append(expert_name)
 
-    def load_from_module_dict(self, module_dict, action="route"):
-        out = super().load_from_module_dict(module_dict, action)
-        self.resize_selector_logits()
-        return out
-
     def load_from_graph(self, graph, action="route", **kwargs):
         for module_name, module_data in graph.create_modules(
             base_hparams=self.hparams, **kwargs
