@@ -318,7 +318,7 @@ class DefaultDataModule(LightningDataModule):
             test_dataset,
             batch_size=self.config.predict_batch_size,
             shuffle=False,
-            num_workers=1,
+            num_workers=16,
             pin_memory=True,
             persistent_workers=True,
             collate_fn=self.collate_fn,
