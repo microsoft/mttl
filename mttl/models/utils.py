@@ -242,6 +242,7 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
         output_model_file = os.path.join(save_directory, "checkpoint.ckpt")
         torch.save(save_package, output_model_file)
         logger.info(f"Model weights saved in {output_model_file}")
+        return output_model_file
 
     def load_state_dict(self, ckpt, **kwargs):
         # store params that might have been loaded from a previous checkpoint
