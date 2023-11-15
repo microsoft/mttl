@@ -31,7 +31,6 @@ class ExpertConfig(Config):
 
         # training expert
         self.eval_mmlu_flag = False
-        self.category = None
 
     def post_init(self):
         if self.micro_batch_size is None:

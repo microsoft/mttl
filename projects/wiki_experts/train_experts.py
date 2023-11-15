@@ -16,7 +16,7 @@ from mttl.callbacks import MMLUCallback
 from mttl.evaluators import MMLUEvaluator
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
-# from mttl.datamodule.oasst1_module import OA1Config, OA1Module
+from mttl.datamodule.oasst1_module import OA1Config, OA1Module
 from mttl.datamodule.retrieval_lm_module import RetrievalLMDataModule
 from mttl.datamodule.facts_lm_module import FactsLMConfig, FactsLMDataModule
 from mttl.datamodule.platypus_module import (
@@ -24,7 +24,7 @@ from mttl.datamodule.platypus_module import (
     PlatypusConfig,
     PlatypusQAModule,
 )
-from mttl.datamodule.flan10k_module import Flan10kModule, Flan10kConfig
+
 from mttl.utils import get_mlf_logger, setup_logging, logger
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
@@ -155,20 +155,6 @@ def run_multitask(args):
             train_on_reverse=args.dataset == "inverse-platypus",
         )
         dm = PlatypusModule(config)
-    elif "flan10k" in args.dataset:
-        config = Flan10kConfig(
-            model=args.model,
-            train_batch_size=args.train_batch_size,
-            predict_batch_size=args.predict_batch_size,
-            max_input_length=args.max_input_length,
-            max_output_length=args.max_output_length,
-            validation_portion=args.validation_portion,
-            model_family=args.model_family,
-            train_on_inputs=False,
-            category=args.category,
-        )
-        dm = Flan10kModule(config)
-        dm.setup()
     elif "oa1" in args.dataset:
         config = OA1Config(
             model=args.model,
