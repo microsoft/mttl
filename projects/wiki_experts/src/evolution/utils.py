@@ -109,7 +109,13 @@ def prepare_evaluator(
         train_batch_size=args.train_batch_size,
         predict_batch_size=args.predict_batch_size,
     )
-    evaluator = EVAL_CLASS(datamodule=dm, subsample=subsample, name=tasks, split=split)
+    evaluator = EVAL_CLASS(
+        datamodule=dm,
+        subsample=subsample,
+        name=tasks,
+        split=split,
+        use_vllm=args.use_vllm,
+    )
     return evaluator
 
 
