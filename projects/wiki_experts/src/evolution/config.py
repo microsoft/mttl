@@ -33,6 +33,8 @@ class ExpertsMergeConfig(ExpertConfig):
 
         self.finetune_new_expert = False
 
+        self.experiment_state_path = None
+
     def post_init(self):
         super().post_init()
         self.finetune_task_name = getattr(

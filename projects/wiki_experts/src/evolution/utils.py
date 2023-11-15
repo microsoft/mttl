@@ -55,6 +55,10 @@ class TableLogger:
         )
         self.df = pd.DataFrame(columns=self.columns)
 
+    def tasks_in_active_iteration(self, act_i):
+        tasks_in_active_iteration = self.df[self.df["act_i"] == act_i]["task"].tolist()
+        return tasks_in_active_iteration
+
     def from_df(self, df):
         self.df = df
         self.columns = df.columns

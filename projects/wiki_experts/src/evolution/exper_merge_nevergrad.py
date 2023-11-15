@@ -83,6 +83,9 @@ class ExperimentState:
         state = torch.load(path)
         self.state = state
 
+    def tasks_in_active_iteration(self, aci):
+        return self.state.results_table.tasks_in_active_iteration(aci)
+
 
 def log_best_weights(module_dict, best_weights, task, prefix=""):
     if wandb.run is not None:
@@ -120,21 +123,31 @@ def run_eval(args: ExpertsMergeConfig):
         expert_lib=ExpertLibrary(model_name=args.model, modules_dir=args.modules_dir),
         results_table=TableLogger(),
     )
+
+    if args.experiment_state_path is not None:
+        exp_state.load_from_path(args.experiment_state_path)
+
     expert_lib = exp_state.state.expert_lib
     tablelogger = exp_state.state.results_table
     args = exp_state.state.config
     iterations_run = exp_state.state.active_iteration
 
+    tasks = args.finetune_task_name
+
     expert_lib.pop("base")
-    print("###### Tasks", args.finetune_task_name)
+    print("###### Tasks", tasks)
     exp_state.save()
     for it in range(args.n_active_iterations - iterations_run):
         a_i = it + iterations_run
-        print("###### Active iteration", a_i)
         best_weights_matrix = {}
         log_prefix = f"ai_{a_i}_"
 
-        for task in args.finetune_task_name:  # tasks iteration
+        # continue from task in the task iteration
+        tasks_seen_in_active_iteration = exp_state.tasks_in_active_iteration(aci=a_i)
+        tasks_left = [t for t in tasks if t not in tasks_seen_in_active_iteration]
+
+        print("###### Active iteration", a_i, " tasks to be trained on ", tasks_left)
+        for task in tasks_left:  # tasks iteration
             log_row = {c: 0 for c in tablelogger.columns}
             log_row["act_i"] = a_i
             log_row["task"] = task
@@ -357,6 +370,7 @@ def run_eval(args: ExpertsMergeConfig):
             free_memory()
             tablelogger.log_table_wandb()
             exp_state.update(active_iteration=a_i)
+            exp_state.save()
 
             # TODO: log experiment: exp. library with the table, restart from expert library checkpoint if provided
 
