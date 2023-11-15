@@ -2,7 +2,9 @@ from transformers import AutoTokenizer, LlamaTokenizer
 from mttl.utils import logger
 
 
-def maybe_filter_hf_dataset_by_task(dataset, task_field, task_names: str = None):
+def maybe_filter_hf_dataset_by_task(
+    dataset, task_field, task_names: str = None, n_proc=16
+):
     """Filter a HuggingFace dataset by task names."""
     # get the tasks
     all_tasks = set(dataset["train"][task_field])
@@ -25,19 +27,19 @@ def maybe_filter_hf_dataset_by_task(dataset, task_field, task_names: str = None)
     if task_names is not None:
         train_dataset = dataset["train"].filter(
             lambda x: x[task_field] in task_names,
-            num_proc=16,
+            num_proc=n_proc,
             desc="Filtering task names",
         )
         if "validation" in dataset:
             dev_dataset = dataset["validation"].filter(
                 lambda x: x[task_field] in task_names,
-                num_proc=16,
+                num_proc=n_proc,
                 desc="Filtering task names",
             )
         if "test" in dataset:
             test_dataset = dataset["test"].filter(
                 lambda x: x[task_field] in task_names,
-                num_proc=16,
+                num_proc=n_proc,
                 desc="Filtering task names",
             )
     else:

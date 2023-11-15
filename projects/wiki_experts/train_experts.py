@@ -12,23 +12,20 @@ import json
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.callbacks import MMLUCallback
 from mttl.evaluators import MMLUEvaluator
-from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from mttl.callbacks import MMLUCallback, LossCallback
+from mttl.utils import get_mlf_logger, setup_logging, logger
 
+from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
 from mttl.datamodule.oasst1_module import OA1Config, OA1Module
-from mttl.datamodule.retrieval_lm_module import RetrievalLMDataModule
+from projects.wiki_experts.src.expert_trainer import ExpertTrainer
+from projects.wiki_experts.src.config import ExpertConfig
 from mttl.datamodule.facts_lm_module import FactsLMConfig, FactsLMDataModule
 from mttl.datamodule.platypus_module import (
     PlatypusModule,
     PlatypusConfig,
     PlatypusQAModule,
 )
-
-from mttl.utils import get_mlf_logger, setup_logging, logger
-
-from projects.wiki_experts.src.expert_trainer import ExpertTrainer
-from projects.wiki_experts.src.config import ExpertConfig
 
 
 class SimpleLogger(pl.loggers.logger.DummyLogger):
@@ -79,7 +76,54 @@ def eval_mmlu(module, args, base_perf=None, chkpt_criteria=None):
     return scores
 
 
-def run_multitask(args):
+def get_datamodule(args, for_generation=False):
+    # refactor all the common arguments below into a dict common kwargs
+    common_kwargs = {
+        "model": args.model,
+        "train_batch_size": args.train_batch_size,
+        "predict_batch_size": args.predict_batch_size,
+        "max_input_length": args.max_input_length,
+        "max_output_length": args.max_output_length,
+        "validation_portion": args.validation_portion,
+        "model_family": args.model_family,
+        "finetune_task_name": args.finetune_task_name,
+        "truncation_side": args.truncation_side,
+        "dataset": args.dataset.replace("qa:", "").replace("raw_docs:", ""),
+        "train_on_inputs": False,
+    }
+    if args.dataset.startswith("qa:"):
+        config = PlatypusConfig(**common_kwargs)
+        dm = PlatypusQAModule(config, for_generation=for_generation)
+    elif args.dataset.startswith("raw_docs:"):
+        config = FactsLMConfig(
+            **common_kwargs,
+            text_field="facts" if "facts" in args.dataset else "text",
+        )
+        dm = FactsLMDataModule(config, for_generation=for_generation)
+    elif "platypus" in args.dataset:
+        config = PlatypusConfig(
+            **common_kwargs,
+            train_on_reverse=args.dataset == "inverse-platypus",
+        )
+        dm = PlatypusModule(config, for_generation=for_generation)
+    elif "oa1" in args.dataset:
+        config = OA1Config(
+            **common_kwargs,
+            train_on_reverse=args.dataset == "inverse-oa1",
+        )
+        dm = OA1Module(config, for_generation=for_generation)
+    elif "flan" in args.dataset:
+        config = FlanConfig(
+            **common_kwargs,
+            include_template_type="*",
+        )
+        dm = FlanModule(config, for_generation=for_generation)
+    else:
+        raise ValueError(f"Unknown dataset {args.dataset}")
+    return dm
+
+
+def run_multitask(args: ExpertConfig):
     seed_everything(args.seed, workers=True)
     # get directory of the current file
     setup_logging(args.output_dir)
@@ -90,86 +134,10 @@ def run_multitask(args):
         login(token=args.hf_token_hub)
 
     # select dataloader
+    # get metric monitors for models
+    callbacks = []
     model_class = ExpertTrainer
-    # add MMLU val data to validaiton set
-    val_mixin = None
-    if args.expand_val_set_w_downstream:
-        from mttl.datamodule.mmlu_data_module import MMLUDataModule
-
-        val_mixin = MMLUDataModule(args).dev_dataset
-
-    if "qa" in args.dataset:
-        args.dataset = (
-            args.dataset.split("/")[0].replace("qa-", "")
-            + "/"
-            + args.dataset.split("/")[1]
-        )
-        config = PlatypusConfig(
-            model=args.model,
-            train_batch_size=args.train_batch_size,
-            predict_batch_size=args.predict_batch_size,
-            max_input_length=args.max_input_length,
-            max_output_length=args.max_output_length,
-            validation_portion=args.validation_portion,
-            model_family=args.model_family,
-            train_on_inputs=False,
-            finetune_task_name=args.finetune_task_name,
-            dataset=args.dataset,
-        )
-        dm = PlatypusQAModule(config, val_mixin=val_mixin)
-    elif args.dataset.startswith("raw_docs:"):
-        args.dataset = args.dataset.replace("raw_docs:", "")
-        config = FactsLMConfig(
-            model=args.model,
-            train_batch_size=args.train_batch_size,
-            predict_batch_size=args.predict_batch_size,
-            max_input_length=args.max_input_length,
-            validation_portion=args.validation_portion,
-            finetune_task_name=args.finetune_task_name,
-            dataset=args.dataset,
-            text_field="text",
-        )
-        dm = FactsLMDataModule(config)
-    elif "facts" in args.dataset or "id" in args.dataset:
-        config = FactsLMConfig(
-            model=args.model,
-            train_batch_size=args.train_batch_size,
-            predict_batch_size=args.predict_batch_size,
-            max_input_length=args.max_input_length,
-            validation_portion=args.validation_portion,
-            finetune_task_name=args.finetune_task_name,
-            dataset=args.dataset,
-            text_field="facts" if "facts" in args.dataset else "text",
-        )
-        dm = FactsLMDataModule(config)
-    elif "platypus" in args.dataset:
-        config = PlatypusConfig(
-            model=args.model,
-            train_batch_size=args.train_batch_size,
-            predict_batch_size=args.predict_batch_size,
-            max_input_length=args.max_input_length,
-            max_output_length=args.max_output_length,
-            validation_portion=args.validation_portion,
-            model_family=args.model_family,
-            train_on_inputs=False,
-            train_on_reverse=args.dataset == "inverse-platypus",
-        )
-        dm = PlatypusModule(config)
-    elif "oa1" in args.dataset:
-        config = OA1Config(
-            model=args.model,
-            train_batch_size=args.train_batch_size,
-            predict_batch_size=args.predict_batch_size,
-            max_input_length=args.max_input_length,
-            max_output_length=args.max_output_length,
-            validation_portion=args.validation_portion,
-            model_family=args.model_family,
-            train_on_inputs=False,
-            train_on_reverse=args.dataset == "inverse-oa1",
-        )
-        dm = OA1Module(config)
-    else:
-        raise ValueError(f"Unknown dataset {args.dataset}")
+    dm = get_datamodule(args)
 
     args.n_tasks = len(dm.task_to_id) if hasattr(dm, "task_to_id") else 0
 
@@ -179,19 +147,34 @@ def run_multitask(args):
     if os.environ.get("WANDB_API_KEY") or args.wandb_project:
         import wandb
 
-        project = "wiki_experts" if args.wandb_project is None else args.wandb_project
+        project = os.environ.get("WANDB_PROJECT", "wiki_experts")
+        project = args.wandb_project if args.wandb_project is not None else project
         args.exp_name = "dev_run" if args.exp_name is None else args.exp_name
-        project = os.environ.get("WANDB_PROJECT", project)
         wandb_logger = pl.loggers.WandbLogger(
             project=project,
             name=exp_name,  # , config=args_
             settings=wandb.Settings(start_method="fork"),
         )
         wandb_logger.experiment.save("*.py")
+        wandb_logger.experiment.save("*/*.py")
         loggers.append(wandb_logger)
 
-    module = model_class(**vars(args), tokenizer=dm.tokenizer)
+    module = model_class(**vars(args), tokenizer=dm.tokenizer, device_map="auto")
     module.to("cuda")
+    ##############################
+    # MMLU callbacks
+    mmlu_test_cb, mmmlu_val_cb, scores_init = None, None, None
+    if args.eval_mmlu_callbacks_every > 0:
+        mmlu_test_cb = MMLUCallback(
+            args.eval_mmlu_callbacks_every, split="test", checkpoint_oracle=True
+        )
+        mmmlu_val_cb = MMLUCallback(
+            args.eval_mmlu_callbacks_every, split="val", checkpoint_oracle=True
+        )
+        callbacks += [mmlu_test_cb, mmmlu_val_cb]
+        # lets get base model downstream performance before doing anything
+        scores_init = eval_mmlu(module, args, chkpt_criteria="init")
+    ##############################
 
     mlf_logger = get_mlf_logger()
     if mlf_logger:
@@ -202,43 +185,53 @@ def run_multitask(args):
         loggers.append(tb_logger)
 
     loggers.append(SimpleLogger(args.output_dir))
-
-    # get metric monitors for models
-    callbacks = []
-
     monitor = "val/loss"
-    mode = "min"
 
-    model_name = args.model.replace("/", "_")
-
-    checkpoint_callback = ModelCheckpoint(
-        dirpath=args.output_dir,
-        monitor=monitor,
-        filename=f"{model_name}" + "-{" + monitor + ":.004f}",
-        save_top_k=1,
-        save_last=True,
-        save_weights_only=True,  # make checkpoints smaller
-        mode=mode,
-    )
-    callbacks.append(checkpoint_callback)
-
-    val_check_interval = args.eval_every
-    if val_check_interval == -1:
+    if args.use_custom_valid_callback:
+        # add custome validation callback (dont trust the lightning one)
+        checkpoint_callback = LossCallback(
+            dataloader=dm.val_dataloader(),
+            output_dir=args.output_dir,
+            eval_every_opt_step=args.eval_every,
+            name=monitor,
+        )
+        callbacks.append(checkpoint_callback)
         val_check_interval = None
     else:
-        val_check_interval = args.gradient_accumulation_steps * args.eval_every
-        if val_check_interval > len(dm.train_dataloader()):
-            val_check_interval = len(dm.train_dataloader())
-        elif val_check_interval > args.total_steps and args.total_steps != -1:
-            val_check_interval = args.total_steps
-    if args.eval_mmlu_flag is True:
-        mmlu_test_cb = MMLUCallback(
-            args.eval_every, split="test", checkpoint_oracle=True
+        mode = "min"
+        model_name = args.model.replace("/", "_")
+        # native checkpointer
+        checkpoint_callback = ModelCheckpoint(
+            dirpath=args.output_dir,
+            monitor=monitor,
+            filename=f"{model_name}" + "-{" + monitor + ":.004f}",
+            save_top_k=1,
+            save_last=True,
+            save_weights_only=True,  # make checkpoints smaller
+            mode=mode,
         )
-        mmmlu_val_cb = MMLUCallback(
-            args.eval_every, split="val", checkpoint_oracle=True
+        callbacks.append(checkpoint_callback)
+
+        val_check_interval = args.eval_every
+        if val_check_interval == -1:
+            val_check_interval = None
+        else:
+            val_check_interval = args.gradient_accumulation_steps * args.eval_every
+            if val_check_interval > len(dm.train_dataloader()):
+                val_check_interval = len(dm.train_dataloader())
+            elif val_check_interval > args.total_steps and args.total_steps != -1:
+                val_check_interval = args.total_steps
+
+    # add RougeL callback on test set
+    if args.eval_rougeL_callback_every > 0:
+        from projects.wiki_experts.src.callbacks import RougeLCallback
+
+        rougeL_callback = RougeLCallback(
+            datamodule=get_datamodule(args, for_generation=True),
+            output_dir=args.output_dir,
+            name="rougeL_val",
         )
-        callbacks += [mmlu_test_cb, mmmlu_val_cb]
+        callbacks.append(rougeL_callback)
 
     trainer = Trainer(
         devices=-1,
@@ -258,26 +251,28 @@ def run_multitask(args):
         else args.precision,
         val_check_interval=val_check_interval,
     )
-
-    # initial validation!
+    # train
     trainer.fit(module, dm)
-
-    # perform final evals on MMLU
-    # for oracle
     del module
     torch.cuda.empty_cache()
 
-    if args.eval_mmlu_flag is True:
+    if mmlu_test_cb is None and scores_init is not None:
+        # perform final evals on MMLU
         module_test_oracle = model_class.load_from_checkpoint(
             mmlu_test_cb.last_chkpt
         ).to("cuda")
         eval_mmlu(
-            module_test_oracle,
-            args,
-            mmlu_test_cb.base_perf,
-            chkpt_crit="test_mmlu_oracle",
+            module_test_oracle, args, scores_init, chkpt_criteria="test_mmlu_oracle"
         )
         del module_test_oracle
+        torch.cuda.empty_cache()
+    if mmmlu_val_cb is None and scores_init is not None:
+        # for best model selected with mmlu/val
+        module_valid_oracle = model_class.load_from_checkpoint(
+            mmmlu_val_cb.last_chkpt
+        ).to("cuda")
+        eval_mmlu(module_valid_oracle, args, scores_init, chkpt_criteria="val_mmlu")
+        del module_valid_oracle
         torch.cuda.empty_cache()
 
         # for best model selected with mmlu/val
@@ -294,7 +289,7 @@ def run_multitask(args):
         checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
     )
 
-    if checkpoint:
+    if checkpoint and scores_init is not None:
         module = model_class.load_from_checkpoint(checkpoint).to("cuda")
         if args.eval_mmlu_flag is True:
             eval_mmlu(module, args, mmlu_test_cb.base_perf, chkpt_crit="val_mmlu")

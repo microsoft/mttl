@@ -22,9 +22,13 @@ class ExpertConfig(Config):
 
         self.expand_val_set_w_downstream = False
 
-        self.n_ng_iterations = 2
-        self.use_vllm = False
-        self.expert_routing = None
+        self.eval_mmlu_callbacks_every = 0
+        self.eval_test_set_callback_every = 0
+        self.eval_rougeL_callback_every = 0
+        self.test_sets_callbacks = []
+
+        self.parent_node: str = None
+        self.use_custom_valid_callback = False  # if True use custom callback to early top on eval loss  instead of lightning callback
 
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
