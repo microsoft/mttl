@@ -112,6 +112,7 @@ class LLMEngineRouge(LLMEngine):
         max_tokens,
         **kwargs,
     ):
+        raise NotImplementedError("This is not finished yet.")
         all_references = {}
         all_task_names = {}
         sampling_params = SamplingParams(
