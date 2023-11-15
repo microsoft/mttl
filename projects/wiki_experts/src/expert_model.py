@@ -147,6 +147,11 @@ class MultiExpertModel(ExpertTrainer):
     def generation_config(self):
         return self.model.generation_config
 
+    def load_from_module_dict(self, module_dict, action="route"):
+        out = super().load_from_module_dict(module_dict, action)
+        self.resize_selector_logits()
+        return out
+
     def expert_choice(self, batch, **kwargs):
         input_ids = batch["input_ids"]
         mask = batch["attention_mask"]
