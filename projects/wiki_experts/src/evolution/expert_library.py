@@ -2,11 +2,10 @@ import glob
 import torch
 import numpy as np
 from collections import UserDict
-from collections import defaultdict
 
 
-class ExpertLibrary(UserDict):
-    def __init__(self, modules_dir, model_name, selection="", operator="mean"):
+class LocalExpertLibrary(UserDict):
+    def __init__(self, modules_dir, model_name, selection="", operator=np.argmin):
         """
         Searches local experts
         """
@@ -36,7 +35,7 @@ class ExpertLibrary(UserDict):
         self.data["base"] = [None]
 
     def __getitem__(self, task):
-        experts = self[task]
+        experts = self.data[task]
         if task == "base":
             return None
         metrics = [

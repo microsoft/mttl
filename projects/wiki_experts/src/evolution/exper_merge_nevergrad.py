@@ -1,7 +1,5 @@
 import os
 import sys
-import re
-import json
 import copy
 import torch
 import wandb
@@ -22,7 +20,7 @@ from utils import (
 )
 
 from evaluators import Evaluator
-from projects.wiki_experts.src.evolution.expert_library import ExpertLibrary
+from projects.wiki_experts.src.evolution.expert_library import LocalExpertLibrary
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
@@ -45,7 +43,7 @@ class ExperimentState:
     class State:
         config: ExpertsMergeConfig
         active_iteration: int
-        expert_lib: ExpertLibrary
+        expert_lib: LocalExpertLibrary
         results_table: TableLogger
 
     def __init__(self, **kwargs):
@@ -120,7 +118,9 @@ def run_eval(args: ExpertsMergeConfig):
     exp_state = ExperimentState(
         config=args,
         active_iteration=0,
-        expert_lib=ExpertLibrary(model_name=args.model, modules_dir=args.modules_dir),
+        expert_lib=LocalExpertLibrary(
+            model_name=args.model, modules_dir=args.modules_dir
+        ),
         results_table=TableLogger(),
     )
 
@@ -371,8 +371,6 @@ def run_eval(args: ExpertsMergeConfig):
             tablelogger.log_table_wandb()
             exp_state.update(active_iteration=a_i)
             exp_state.save()
-
-            # TODO: log experiment: exp. library with the table, restart from expert library checkpoint if provided
 
         best_weights_matrix = pd.DataFrame.from_dict(best_weights_matrix)
         if wandb.run is not None:

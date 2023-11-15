@@ -1,10 +1,6 @@
 # flan tasks without NIv2 template
-FLAN_SUB5 = [
-    "duorc_ParaphraseRC_answer_question",
-    "duorc_ParaphraseRC_title_generation",
-    "adversarial_qa_dbidaf_generate_question",
-    "yelp_polarity_reviews_0_2_0",
-    "dream_baseline",
+FLAN_SUB1 = [
+    "ai2_arc_ARC_Challenge_1_0_0",
 ]
 
 FLAN_SUB19 = [

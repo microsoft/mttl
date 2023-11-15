@@ -12,7 +12,7 @@ from config import ExpertsMergeConfig
 from utils import log_wandb, prepare_evaluator, init_wandb_logger, TableLogger
 
 from evaluators import Evaluator
-from projects.wiki_experts.src.evolution.expert_library import ExpertLibrary
+from projects.wiki_experts.src.evolution.expert_library import LocalExpertLibrary
 from mttl.utils import setup_logging, logger
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
@@ -22,7 +22,7 @@ from mttl.vllm_engines.engines import free_memory
 
 
 def produce_transfer_matrix(
-    args: ExpertsMergeConfig, expert_lib: ExpertLibrary, tasks: list
+    args: ExpertsMergeConfig, expert_lib: LocalExpertLibrary, tasks: list
 ):
     """
     Eval each module in expert_lib on each subject in subjects.
@@ -100,7 +100,7 @@ def run_eval(args: ExpertsMergeConfig):
 
     print("###### Tasks", args.finetune_task_name)
 
-    expert_lib = ExpertLibrary(modules_dir=args.modules_dir)
+    expert_lib = LocalExpertLibrary(modules_dir=args.modules_dir)
 
     transfer_matrix: pd.DataFrame = produce_transfer_matrix(
         args, expert_lib, tasks=args.finetune_task_name
