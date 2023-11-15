@@ -280,8 +280,14 @@ def run_eval(args: ExpertsMergeConfig):
             # replace the module in the dict with the new one or add new module
             if improved_on_valid:
                 if args.new_module_action == "replace":
+                    logger.info(
+                        f"Module {module_dict[task]} \n for {task} is replaced in the dict with \n {new_momodule_path}"
+                    )
                     module_dict[task] = new_momodule_path
                 elif args.new_module_action == "add":
+                    logger.info(
+                        f"Module {module_dict[task]} \n for {task} is added to the dict with \n {new_momodule_path}"
+                    )
                     old_path = module_dict.get(task, None)
                     module_dict[task] = new_momodule_path
                     if old_path is not None:
