@@ -9,7 +9,7 @@ import nevergrad as ng
 from torch.utils.data import DataLoader
 from functools import partial
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
 from typing import Union, Callable, List, Dict
 from mttl.dataloader.ni_metrics import compute_metrics
