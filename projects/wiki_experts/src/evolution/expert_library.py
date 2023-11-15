@@ -34,3 +34,17 @@ class ExpertLibrary(UserDict):
         )
         # adding base module also
         self.data["base"] = [None]
+
+    def __getitem__(self, task):
+        experts = self[task]
+        if task == "base":
+            return None
+        metrics = [
+            float(e.split("/")[-1].replace(".ckpt", "").replace("loss=", ""))
+            for e in experts
+        ]
+        args_best = self.operator(metrics)
+        return experts[args_best]
+
+    def pop(self, task):
+        return self.data.pop(task)
