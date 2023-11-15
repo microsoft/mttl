@@ -138,14 +138,7 @@ def run_multitask(args: ExpertConfig):
     # get metric monitors for models
     callbacks = []
     model_class = ExpertTrainer
-    # add MMLU val data to validaiton set
-    val_mixin = None
-    if args.expand_val_set_w_downstream:
-        from mttl.datamodule.mmlu_data_module import MMLUDataModule
-
-        val_mixin = MMLUDataModule(args).dev_dataset
-
-    dm = get_datamodule(args, val_mixin=val_mixin)
+    dm = get_datamodule(args)
 
     args.n_tasks = len(dm.task_to_id) if hasattr(dm, "task_to_id") else 0
 

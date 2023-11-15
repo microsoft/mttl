@@ -4,7 +4,7 @@ import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 from projects.wiki_experts.src.config import ExpertConfig
 
-from mttl.datamodule.flan_tasks import FLAN_SUB19, FLAN_TASKS
+import mttl.datamodule.flan_tasks
 
 
 class ExpertsMergeConfig(ExpertConfig):
@@ -35,8 +35,6 @@ class ExpertsMergeConfig(ExpertConfig):
 
     def post_init(self):
         super().post_init()
-
-        if self.finetune_task_name == "FLAN_SUB19":
-            self.finetune_task_name = FLAN_SUB19
-        elif self.finetune_task_name == "FLAN_ALL":
-            self.finetune_task_name = FLAN_TASKS
+        self.finetune_task_name = getattr(
+            mttl.datamodule.flan_tasks, self.finetune_task_name
+        )
