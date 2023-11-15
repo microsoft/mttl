@@ -12,7 +12,7 @@ from config import ExpertsMergeConfig
 from utils import log_wandb, prepare_evaluator, init_wandb_logger, TableLogger
 
 from evaluators import Evaluator
-from expert_lilbrary import ExpertLibrary
+from projects.wiki_experts.src.evolution.expert_library import ExpertLibrary
 from mttl.utils import setup_logging, logger
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))

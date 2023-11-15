@@ -20,7 +20,7 @@ from utils import (
 )
 
 from evaluators import Evaluator
-from expert_lilbrary import ExpertLibrary
+from projects.wiki_experts.src.evolution.expert_library import ExpertLibrary
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
