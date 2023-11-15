@@ -95,6 +95,10 @@ class MultiExpertModel(ExpertTrainer):
         if loaded_expert:
             self.hparams.update(loaded_expert.config.__dict__)
 
+    def load_from_module_dict(self, module_dict, action="route"):
+        for module_name, destination in module_dict.items():
+            self.load_expert(destination, module_name, action=action)
+
     def load_from_graph_string(self, s, action="route"):
         from projects.wiki_experts.src.graph.module_graph import ModuleGraph
 
