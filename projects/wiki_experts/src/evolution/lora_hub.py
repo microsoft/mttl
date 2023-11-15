@@ -9,16 +9,17 @@ import nevergrad as ng
 from torch.utils.data import DataLoader
 from functools import partial
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from typing import Callable, Dict
+from typing import Union, Callable, List, Dict
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators.base import compute_task_aggregation
 
-from projects.wiki_experts.src.config import ExpertConfig
-from projects.wiki_experts.src.expert_model import MultiExpertModel
+from src.config import ExpertConfig
+from huggingface_hub import login
+from src.expert_model import MultiExpertModel
 from mttl.utils import logger, setup_logging
-from projects.wiki_experts.src.graph.module_graph import ModuleGraph
+from src.graph.module_graph import ModuleGraph
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
 from mttl.evaluators import MMLUEvaluator
 
@@ -27,7 +28,6 @@ def mmlu_get_loss(
     model: MultiExpertModel,
     tokenizer,
     dataloader: DataLoader,
-    graph_string,
     use_vllm=True,
     use_loss=False,
 ):
@@ -37,7 +37,7 @@ def mmlu_get_loss(
         # use vllm
         generation_config = model.generation_config
         model_hash = hashlib.sha256()
-        model_hash.update(f"{graph_string}_{model.model.__class__}".encode())
+        model_hash.update(str([p for p in model.parameters()]).encode())
         model = LLMEngineMMLU(
             model,
             temp_path=f"{os.environ.get('MTTL_TEMP','/tmp/merged')}/{model_hash.hexdigest()}/",
@@ -96,23 +96,30 @@ class RoutingOptimizer:
         self,
         model: MultiExpertModel,
         modules_2_dest: Dict,
-        dataloader: DataLoader,
-        get_loss: Callable,
+        get_loss: Callable,  # function that takes model as input and returns loss
         budget=5,
         task_name="new_task",
+        init_one=None,
+        regularizer_factor=0.0,
+        action="route",
     ) -> None:
+        self.action = action
+        self.regularizer_factor = regularizer_factor
         self.task_name = task_name
         self.model: MultiExpertModel = model
         self.module_graph: ModuleGraph = self.construct_graph(modules_2_dest)
         self.varaibles = self.module_graph.get_variables()
         self.K = len(self.varaibles)
 
+        init = [0] * self.K
+        if init_one is not None:
+            init[init_one] = 1
+
         self.parametrization = ng.p.Array(
-            init=[0] * self.K,
+            init=init,
             upper=[1.5] * self.K,
             lower=[-1.5] * self.K,
         )
-        self.dataloader = dataloader
         self.optimizer = ng.optimizers.NGOpt(
             parametrization=self.parametrization, budget=budget
         )
@@ -137,35 +144,38 @@ class RoutingOptimizer:
     ):
         def get_score(
             weights,
-            dataloader,
             basemodel: MultiExpertModel,
             get_loss,
             get_regular,
             get_vars,
+            action,
         ):
             graph_vars = get_vars(weights)
-            graph_string = self.module_graph.dumps(**graph_vars)
-            logger.info(f"Testing weights {graph_string} into the model")
+            logger.info(f"Testing weights {graph_vars.values()} into the model")
             model = copy.deepcopy(basemodel)
-            model.load_from_graph(self.module_graph, action="merge", **graph_vars)
+            model.load_from_graph(self.module_graph, action=action, **graph_vars)
+            # import numpy as np
+            # np.sum([p.detach().cpu().sum().item() for p in model.parameters()])
+            if action == "route":
+                model.convert_container_to_expert("new_task")
+
             # minimize the metric
             loss = get_loss(
                 model=model,
-                tokenizer=model.tokenizer,
-                dataloader=dataloader,
-                graph_string=graph_string,
             )
             # L1 regularization term
-            metric_val = loss + get_regular(weights)
+            metric_val = loss + self.regularizer_factor * get_regular(weights)
+            del model
+            free_memory()
             return metric_val
 
         _get_score = partial(
             get_score,
-            dataloader=self.dataloader,
             get_loss=self.get_loss,
             basemodel=self.model,
             get_regular=default_l1_regularization,
             get_vars=self.get_graph_vars,
+            action=self.action,
         )
         recommendation = self.optimizer.minimize(_get_score)
         logger.info(recommendation.value)
