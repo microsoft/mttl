@@ -42,6 +42,7 @@ def modify_transformer(transformer, modifier_config, model_modifier=None):
 
     if model_modifier is None:
         logger.warn("Model modifier not set nor in config nor as an argument.")
+        return transformer
 
     if model_modifier:
         if model_modifier in MODIFIERS:

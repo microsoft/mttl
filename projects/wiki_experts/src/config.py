@@ -22,7 +22,7 @@ class ExpertConfig(Config):
 
         self.expand_val_set_w_downstream = False
 
-        self.eval_MMLU_callbacks_every = 0
+        self.eval_mmlu_callbacks_every = 0
         self.eval_test_set_callback_every = 0
         self.eval_rougeL_callback_every = 0
         self.test_sets_callbacks = []

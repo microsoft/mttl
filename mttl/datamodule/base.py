@@ -263,7 +263,7 @@ class DefaultCollator:
 
 
 def subsample_dst(dataset, subsample: int):
-    subsample = int(len(dataset) / subsample)
+    subsample = len(dataset) // subsample
     if isinstance(dataset, torch.utils.data.Subset):
         idxs = dataset.indices
         idxs = idxs[:subsample]

@@ -172,12 +172,12 @@ def run_multitask(args: ExpertConfig):
     ##############################
     # MMLU callbacks
     mmlu_test_cb, mmmlu_val_cb, scores_init = None, None, None
-    if args.eval_MMLU_callbacks_every > 0:
+    if args.eval_mmlu_callbacks_every > 0:
         mmlu_test_cb = MMLUCallback(
-            args.eval_MMLU_callbacks_every, split="test", checkpoint_oracle=True
+            args.eval_mmlu_callbacks_every, split="test", checkpoint_oracle=True
         )
         mmmlu_val_cb = MMLUCallback(
-            args.eval_MMLU_callbacks_every, split="val", checkpoint_oracle=True
+            args.eval_mmlu_callbacks_every, split="val", checkpoint_oracle=True
         )
         callbacks += [mmlu_test_cb, mmmlu_val_cb]
         # lets get base model downstream performance before doing anything
@@ -232,7 +232,7 @@ def run_multitask(args: ExpertConfig):
 
     # add RougeL callback on test set
     if args.eval_rougeL_callback_every > 0:
-        from callbacks import RougeLCallback
+        from projects.wiki_experts.src.callbacks import RougeLCallback
 
         rougeL_callback = RougeLCallback(
             datamodule=get_datamodule(args, for_generation=True),
