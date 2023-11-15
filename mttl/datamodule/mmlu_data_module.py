@@ -128,7 +128,6 @@ class DataCollatorForMMLU(DefaultCollator):
     for_generation: bool = False
     model_family: str = "seq2seq"
     task_to_id: dict = (None,)
-    use_original_input: bool = False
 
     def __call__(self, batch, return_tensors=None):
         if return_tensors is None:
@@ -171,11 +170,6 @@ class DataCollatorForMMLU(DefaultCollator):
 
         task_names = [instance["Task"] for instance in batch]
         output_batch["task_names"] = task_names
-
-        # if use original input:
-        if self.use_original_input:
-            inputs = [instance["Instance"]["Input"] for instance in batch]
-            output_batch["inputs"] = inputs
 
         if self.task_to_id is not None:
             output_batch["task_ids"] = torch.LongTensor(
@@ -237,7 +231,6 @@ class MMLUDataModule(DefaultDataModule):
             model_family=self.config.model_family,
             for_generation=self.for_generation,
             task_to_id=self.task_to_id,
-            use_original_input=True,
         )
 
     def setup_dataset(self, stage=None):
