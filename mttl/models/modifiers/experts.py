@@ -163,7 +163,7 @@ class ExpertContainer(MergeableAdapter):
     def __init__(self, config, task_id_container, layer, selector=None):
         super().__init__()
         self.config = config
-        self.layer = layer.layer
+        self.layer = layer
         self.selector = selector
 
         if not isinstance(self.layer, nn.Linear):

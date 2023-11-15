@@ -40,7 +40,8 @@ def modify_transformer(transformer, modifier_config, model_modifier=None):
         model_modifier = CONFIGS_TO_MODIFIERS.get(type(modifier_config), None)
 
     if model_modifier is None:
-        raise ValueError("Model modifier not set nor in config nor as an argument.")
+        print("Model modifier not set nor in config nor as an argument.")
+        return transformer
 
     if model_modifier:
         if model_modifier in MODIFIERS:
