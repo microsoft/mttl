@@ -24,7 +24,7 @@ class RougeEvaluator:
         self.tokenizer = datamodule.tokenizer
         self.max_output_length = datamodule.config.max_output_length
 
-    def evaluate(self, model, split="val", num_batches=None):
+    def evaluate(self, model, split="val", num_batches=None, verbose=True):
         extra_kwargs = {}
         extra_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
         extra_kwargs["eos_token_id"] = self.tokenizer.eos_token_id
@@ -79,10 +79,10 @@ class RougeEvaluator:
 
             eval_metrics = compute_metrics(predictions, references, reduction="none")
             all_rougeL.extend(eval_metrics["rougeL"])
-
-            logger.info("Sources:\n%s", sources_texts[0])
-            logger.info("Label:\n%s", labels_texts[0])
-            logger.info("Prediction:\n%s", predictions[0])
+            if verbose:
+                logger.info("Sources:\n%s", sources_texts[0])
+                logger.info("Label:\n%s", labels_texts[0])
+                logger.info("Prediction:\n%s", predictions[0])
 
             pbar.set_description(f"rougeL: {np.mean(all_rougeL):.4f}")
 
