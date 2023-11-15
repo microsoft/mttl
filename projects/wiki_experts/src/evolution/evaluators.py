@@ -43,7 +43,7 @@ class ExtendedRougeEvaluator(RougeEvaluator, Evaluator):
     def get_loss(self, model, **kwargs):
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model.to(device)
-        rougeL = self.evaluate(model, **kwargs)
+        rougeL = self.evaluate(model, **kwargs)["all"]["mean"]
         return rougeL * -1.0
 
     @property
