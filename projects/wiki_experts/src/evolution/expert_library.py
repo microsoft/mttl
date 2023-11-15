@@ -38,6 +38,8 @@ class LocalExpertLibrary(UserDict):
         experts = self.data[task]
         if task == "base":
             return None
+        if not isinstance(experts, list):
+            return experts
         metrics = [
             float(e.split("/")[-1].replace(".ckpt", "").replace("loss=", ""))
             for e in experts
@@ -46,4 +48,4 @@ class LocalExpertLibrary(UserDict):
         return experts[args_best]
 
     def pop(self, task):
-        return self.data.pop(task)
+        return self.data.pop(task, None)

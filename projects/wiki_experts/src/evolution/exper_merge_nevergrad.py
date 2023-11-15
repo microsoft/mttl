@@ -132,7 +132,6 @@ def run_eval(args: ExpertsMergeConfig):
 
     expert_lib.pop("base")
     print("###### Tasks", tasks)
-    exp_state.save()
     for it in range(args.n_active_iterations - iterations_run):
         a_i = it + iterations_run
         best_weights_matrix = {}
@@ -142,7 +141,17 @@ def run_eval(args: ExpertsMergeConfig):
         tasks_seen_in_active_iteration = exp_state.tasks_in_active_iteration(aci=a_i)
         tasks_left = [t for t in tasks if t not in tasks_seen_in_active_iteration]
 
-        print("###### Active iteration", a_i, " tasks to be trained on ", tasks_left)
+        print(
+            "#" * 10,
+            "\n",
+            "Active iteration",
+            a_i,
+            " tasks to be trained on ",
+            tasks_left,
+            "\n",
+            "#" * 10,
+        )
+
         for task in tasks_left:  # tasks iteration
             log_row = {c: 0 for c in tablelogger.columns}
             log_row["act_i"] = a_i
@@ -356,7 +365,7 @@ def run_eval(args: ExpertsMergeConfig):
                     old_path = expert_lib.get(task, None)
                     expert_lib[task] = new_momodule_path
                     if old_path is not None:
-                        expert_lib[f"{task}_from_{a_i}"] = old_path
+                        expert_lib[f"{task}_from_ai{a_i}"] = old_path
                 else:
                     logger.info(
                         f"New module for {task} is not added to the dict (new_module_action is {args.new_module_action}), only saved to {new_momodule_path}"
