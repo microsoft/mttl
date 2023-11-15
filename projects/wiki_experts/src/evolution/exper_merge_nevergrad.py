@@ -28,13 +28,9 @@ from dataclasses import dataclass
 from config import ExpertsMergeConfig
 from projects.wiki_experts.src.evolution.lora_hub import RoutingOptimizer
 from mttl.utils import setup_logging, logger
-from projects.wiki_experts.src.graph.module_graph import ModuleGraph
 
 # register models
 from projects.wiki_experts.src.expert_model import MultiExpertModel
-
-# from projects.wiki_experts.src.expert_trainer import ExpertTrainer
-# from mttl.datamodule.mmlu_data_module import MMLUDataModule
 from mttl.vllm_engines.engines import free_memory
 
 
