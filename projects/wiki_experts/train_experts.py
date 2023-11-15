@@ -28,22 +28,6 @@ from mttl.datamodule.platypus_module import (
 )
 
 
-def create_test_loss_callback(args: ExpertConfig, test_set):
-    import copy
-
-    args_copy = copy.deepcopy(args)
-    args_copy.dataset = test_set
-    args_copy.validation_portion = 0.0
-    dm = get_datamodule(args_copy)
-    dm.test_dataset = dm.train_dataset
-    return LossCallback(
-        dataloader=dm.test_dataloader(),
-        output_dir=args.output_dir,
-        eval_every_opt_step=args.eval_test_set_callback_every,
-        name=test_set + "_test_oracle",
-    )
-
-
 class SimpleLogger(pl.loggers.logger.DummyLogger):
     def __init__(self, output_dir):
         self.metrics = {}
@@ -245,14 +229,6 @@ def run_multitask(args: ExpertConfig):
                 val_check_interval = len(dm.train_dataloader())
             elif val_check_interval > args.total_steps and args.total_steps != -1:
                 val_check_interval = args.total_steps
-
-    if (
-        args.test_sets_callbacks
-        and len(args.test_sets_callbacks) > 0
-        and args.eval_test_set_callback_every > 0
-    ):
-        for test_set in args.test_sets_callbacks:
-            callbacks.append(create_test_loss_callback(args, test_set))
 
     # add RougeL callback on test set
     if args.eval_rougeL_callback_every > 0:
