@@ -15,11 +15,11 @@ from typing import Union, Callable, List, Dict
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators.base import compute_task_aggregation
 
-from src.config import ExpertConfig
+from projects.wiki_experts.src.config import ExpertConfig
 from huggingface_hub import login
-from src.expert_model import MultiExpertModel
+from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.utils import logger, setup_logging
-from src.graph.module_graph import ModuleGraph
+from projects.wiki_experts.src.graph.module_graph import ModuleGraph
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
 from mttl.evaluators import MMLUEvaluator
 
