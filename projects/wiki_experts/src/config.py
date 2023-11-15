@@ -36,6 +36,10 @@ class ExpertConfig(Config):
         # training expert
         self.eval_mmlu_flag = False
 
+        # training classfier routing
+        self.num_labels = 246
+        self.classifer_repo_id = None
+
     def post_init(self):
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size

@@ -2,11 +2,26 @@ import pytorch_lightning as pl
 from sentence_transformers import SentenceTransformer
 from classification_module import ClassificationDataModule
 from models.classifer_ranker import Classifier
+from projects.wiki_experts.src.config import ExpertConfig
+import os
 
 
-def train_model():
+def train_model(args):
     # using wandb project
-    wandb_logger = pl.loggers.WandbLogger(project="wiki_experts")
+    wandb_logger = None
+    if os.environ.get("WANDB_API_KEY") or args.wandb_project:
+        import wandb
+
+        project = os.environ.get("WANDB_PROJECT", "wiki_experts")
+        project = args.wandb_project if args.wandb_project is not None else project
+        args.exp_name = "dev_run" if args.exp_name is None else args.exp_name
+        wandb_logger = pl.loggers.WandbLogger(
+            project=project,
+            name=args.exp_name,  # , config=args_
+            settings=wandb.Settings(start_method="fork"),
+        )
+        wandb_logger.experiment.save("*.py")
+        wandb_logger.experiment.save("*/*.py")
 
     text_encoder = SentenceTransformer(
         "all-MiniLM-L6-v2"
@@ -18,8 +33,8 @@ def train_model():
         param.requires_grad = False
 
     # train the classifier
-    datamodule = ClassificationDataModule(batch_size=1024)
-    classifier = Classifier(text_encoder, num_labels=246)
+    datamodule = ClassificationDataModule(batch_size=args.train_batch_size)
+    classifier = Classifier(text_encoder, num_labels=args.num_labels)
 
     # add model checkpoint
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
@@ -31,7 +46,7 @@ def train_model():
     )
 
     trainer = pl.Trainer(
-        max_epochs=10,
+        max_epochs=args.num_train_epochs,
         accelerator="gpu",
         callbacks=[checkpoint_callback],
         devices=1,
@@ -42,4 +57,5 @@ def train_model():
 
 
 if __name__ == "__main__":
-    train_model()
+    args = ExpertConfig.parse()
+    train_model(args)
