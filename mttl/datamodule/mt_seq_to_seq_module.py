@@ -1,6 +1,6 @@
 from functools import partial
 from typing import List
-
+import os
 from datasets import load_dataset
 from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
@@ -24,7 +24,7 @@ def filter_task_source(include_task_source, example):
 class FlanModule(DefaultDataModule):
     def setup_dataset(self):
         dataset = load_dataset(self.config.dataset)
-
+        n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
         if "split" not in dataset.column_names["train"]:
             raise ValueError(
                 "Dataset must have a 'split' column, try removing the dataset manually from the cache."
@@ -36,7 +36,7 @@ class FlanModule(DefaultDataModule):
                     filter_template_type,
                     set(self.config.include_template_type.split(",")),
                 ),
-                num_proc=16,
+                num_proc=n_proc,
                 desc="Filtering template types",
             )
 
@@ -45,7 +45,7 @@ class FlanModule(DefaultDataModule):
                 partial(
                     filter_task_source, set(self.config.include_task_source.split(","))
                 ),
-                num_proc=16,
+                num_proc=n_proc,
                 desc="Filtering task sources",
             )
 
@@ -56,23 +56,23 @@ class FlanModule(DefaultDataModule):
             _,
             _,
         ) = maybe_filter_hf_dataset_by_task(
-            dataset, "task_name", self.config.finetune_task_name
+            dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
         )
 
         if "split" in dataset.column_names["train"]:
             self.train_dataset = train_dataset.filter(
                 lambda x: x["split"] == "train",
-                num_proc=16,
+                num_proc=n_proc,
                 desc="Creating train set",
             )
             self.dev_dataset = train_dataset.filter(
                 lambda x: x["split"] == "validation",
-                num_proc=16,
+                num_proc=n_proc,
                 desc="Creating valid set",
             )
             self.test_dataset = train_dataset.filter(
                 lambda x: x["split"] == "test",
-                num_proc=16,
+                num_proc=n_proc,
                 desc="Creating test set",
             )
         else:

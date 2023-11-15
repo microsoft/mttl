@@ -20,6 +20,10 @@ class Expert:
     expert_config: ExpertConfig
     expert_weights: Dict[str, torch.Tensor]
 
+    @property
+    def parent(self):
+        return self.expert_config.parent_node
+
 
 class Node:
     def __init__(self, name):
@@ -55,8 +59,10 @@ class Node:
         instantiation = []
         if not self.children:
             # consider this to be a leaf node
+            # the name of leafs is their destination (path)
             instantiation = [load_expert(self.name)]
         else:
+            # currently non-leaf nodes have at most one child
             instantiation = [self.children[0].instantiate(*args, **kwargs)[0]]
         return instantiation
 
@@ -77,13 +83,42 @@ class OperatorNode(Node):
 
 
 class LinearNode(OperatorNode):
+    OPERATORTemplate = Template("linear(${arg})")
+    ARGUMENT = Template("${name}:{weight}")
+
     @classmethod
-    def from_args(cls, name, graph, args=None):
-        variable_names = re.findall(r"\$([a-zA-Z_][a-zA-Z0-9_]*)", name)
+    def check_name(cls, string):
+        # given any string translate it into the format of the linear node
+        # e.g. 'linear(sordonia/expert_llama2_13b_security_studies:5,sordonia/llama2-13b-platypus:$weight)' is already in the format of the linear node
+        # sordonia/expert_llama2_13b_security_studies -> linear(sordonia/expert_llama2_13b_security_studies:1.0)
+        if "linear" in string:
+            return string
+        else:
+            return LinearNode.OPERATOR.substitute(
+                arg=LinearNode.ARGUMENT.substitute(name=string, weight=1.0)
+            )
+
+    @classmethod
+    def create_name(cls, string):
+        """
+        Find and replace variable names with their position in the connection
+        """
+        string = LinearNode.check_name(string)
+        variable_names = re.findall(r"\$([a-zA-Z_][a-zA-Z0-9_]*)", string)
         for i, var_name in enumerate(variable_names):
             # replace variable names with their position
-            name = re.sub(f"\${var_name}", f"${i}", name, count=1)
-        node = LinearNode(name)
+            string = re.sub(f"\${var_name}", f"${i}", string, count=1)
+        return string
+
+    @classmethod
+    def get_varaible_name(cls, node_name, var_index):
+        return f"{node_name}[{var_index}]"
+
+    @classmethod
+    def add_variables_and_weights_to_node(cls, node: Node, graph, args):
+        """
+        Append varibales and weights to the node given args
+        """
         node.weights = {}
         node.variables = []
 
@@ -96,18 +131,32 @@ class LinearNode(OperatorNode):
             if "$" not in weight:
                 node.weights[child_name] = float(weight)
             else:
-                node.variables.append(f"{name}[{i}]")
+                node.variables.append(LinearNode.get_varaible_name(node.name, i))
+        return node
 
+    @classmethod
+    def instantiate_name(cls, name_template, varaibles: list = [], **kwargs):
+        """
+        Puts varibales in the name template if variables are given
+        """
+        name = LinearNode.check_name(name_template)
+        for i, v in enumerate(varaibles):
+            name = name.replace(f"${i}", str(kwargs[v]), 1)
+        return name
+
+    # End of Language for LinearNode
+
+    @classmethod
+    def from_args(cls, name, graph, args=None):
+        name = LinearNode.create_name(name)
+        node = LinearNode(name)
+        node = LinearNode.add_variables_and_weights_to_node(node, graph, args)
         return node
 
     def get_name(self, **kwargs):
-        if len(kwargs) == 0 or len(self.variables) == 0 or "$" not in self.name:
+        if len(self.variables) == 0 or len(kwargs) == 0:
             return self.name
-        name = self.name
-        for i, v in enumerate(self.variables):
-            name = name.replace(f"${i}", str(kwargs[v]))
-
-        return name
+        return LinearNode.instantiate_name(self.name, self.variables, **kwargs)
 
     def instantiate(self, *args, **kwargs):
         if self._cached_instantiation is not None:
@@ -142,9 +191,11 @@ class LinearNode(OperatorNode):
                 else:
                     merged_weights[k] = value
 
+        config: ExpertConfig = first_module.expert_config
+        config.parent_node = self.get_name(**kwargs)
         return [
             Expert(
-                expert_config=first_module.expert_config,
+                expert_config=config,
                 expert_weights=merged_weights,
             )
         ]
@@ -266,7 +317,9 @@ def load_expert(
     expert_checkpoint = torch.load(expert_checkpoint, map_location="cpu")
 
     expert_config = ExpertConfig(
-        kwargs=expert_checkpoint["hyper_parameters"], silent=True, raise_error=False
+        kwargs=expert_checkpoint["hyper_parameters"],
+        silent=True,
+        raise_error=False,
     )
 
     expert_name = expert_name or expert_config.expert_name
@@ -295,6 +348,11 @@ if __name__ == "__main__":
     default -> C
     """
     s = """    
+    Variables:
+    - if a weight starts with $ it is considered as a variale
+    - variables will be stored in lInearNodes under the name of the linear connection (e.g. "linear(a:5,b:$weight)" ) + the index of the varable in the connections, e.g. "linear(a:5,b:$weight)[1]" since $weight is the second variable in the connection
+    - a graph with variables cannot be instantiated without passing the values for the variables to the instantiate method
+    
     security_studies -> linear(sordonia/expert_llama2_13b_security_studies:5,sordonia/llama2-13b-platypus:$weight);
     security_studies2 -> linear(sordonia/expert_llama2_13b_security_studies:1);    
     security_studies3 -> linear(sordonia/expert_llama2_13b_security_studies:$weight_blabla);

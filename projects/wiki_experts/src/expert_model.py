@@ -5,6 +5,7 @@ from mttl.models.modifiers.experts import add_expert_to_transformer, Router
 from mttl.utils import logger
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from typing import Dict
+from mttl.models.modifiers.experts import ExpertContainer
 
 
 def push_expert_to_hub(
@@ -81,6 +82,22 @@ class MultiExpertModel(ExpertTrainer):
 
         for _, selector in self.selectors.items():
             selector.resize_module_logits(self.experts)
+
+    def convert_container_to_expert(self, expert_name):
+        loaded_expert = None
+        for _, module in self.model.named_modules():
+            for c_name, child in dict(module.named_children()).items():
+                if isinstance(child, ExpertContainer) and len(child.experts) > 0:
+                    setattr(module, c_name, child.experts[expert_name])
+                    if loaded_expert is None:
+                        loaded_expert = child.experts[expert_name]
+        # make sure hparams reflect the loaded expert
+        if loaded_expert:
+            self.hparams.update(loaded_expert.config.__dict__)
+
+    def load_from_module_dict(self, module_dict, action="route"):
+        for module_name, destination in module_dict.items():
+            self.load_expert(destination, module_name, action=action)
 
     def load_from_graph_string(self, s, action="route"):
         from projects.wiki_experts.src.graph.module_graph import ModuleGraph
@@ -210,3 +227,92 @@ class MultiExpertModel(ExpertTrainer):
 
         generations = self.model.generate(inputs=batch["input_ids"], **kwargs)
         return generations
+
+
+class RoutedMultiExpertModel(MultiExpertModel):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        self.selectors = torch.nn.ModuleDict()
+        self.load_from_module_dict(self.hparams.module_dict, action="route")
+
+    def load_expert(
+        self,
+        expert_path: str,
+        expert_name: str = None,
+        action: str = "merge",
+        is_default: bool = False,
+        load_only_layers: str = None,
+    ):
+        from projects.wiki_experts.src.graph.module_graph import load_expert
+
+        expert = load_expert(expert_path, expert_name=expert_name)
+        if self.hparams.model != expert.expert_config.model:
+            raise ValueError(
+                "The expert has been trained on top of a different model!"
+                " Detected: {} - Expected: {}".format(
+                    expert.expert_config.model, self.hparams.model
+                )
+            )
+
+        logger.info(
+            f"Adding expert with name {expert_name}... with action ... {action}!"
+        )
+
+        self.model = add_expert_to_transformer(
+            self.model,
+            expert_name,
+            expert.expert_config,
+            expert.expert_weights,
+            action=action,
+            is_default=is_default,
+            load_only_layers=load_only_layers,
+            selectors=self.selectors,
+            config=self.hparams,
+        )
+        if action != "merge":
+            self.experts.append(expert_name)
+
+    def load_from_graph(self, graph, action="route", **kwargs):
+        for module_name, module_data in graph.create_modules(
+            base_hparams=self.hparams, **kwargs
+        ).items():
+            self.model = add_expert_to_transformer(
+                self.model,
+                module_name,
+                module_data.expert_config,
+                module_data.expert_weights,
+                action=action,
+                is_default=module_name == "default",
+                selectors=self.selectors,
+                config=self.hparams,
+            )
+            self.experts.append(module_name)
+        self.resize_selector_logits()
+
+    def load_from_module_dict(self, module_dict, action="route"):
+        out = super().load_from_module_dict(module_dict, action)
+        self.resize_selector_logits()
+        return out
+
+    def resize_selector_logits(self):
+        for _, selector in self.selectors.items():
+            if selector:
+                selector.resize_module_logits(self.experts)
+
+    def get_router_weights(self):
+        weights = {}
+        for _, selector in self.selectors.items():
+            weights[selector.name] = selector.get_routing_weights()
+        return weights
+
+    def merge_experts_together(self, weights: dict = None):
+        """
+        Merges current experts together according to weights if given, otherwise uses router's weights
+        """
+        for _, module in self.model.named_modules():
+            for c_name, child in dict(module.named_children()).items():
+                if isinstance(child, ExpertContainer) and len(child.experts) > 0:
+                    # creates a single Lora
+                    child.merge_experts_together(weights)
+        self.convert_container_to_expert("merged_expert")

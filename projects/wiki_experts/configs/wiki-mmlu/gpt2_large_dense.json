@@ -1,0 +1,11 @@
+{
+    "lora_rank": 16,
+    "lora_alpha": 64,
+    "lora_dropout": 0.05,
+    "weight_decay": 0.00,
+    "n_skills": 1,
+    "model_modifier": "lora",
+    "modify_modules": ".*",
+    "modify_layers": "c_attn|c_proj|c_fc|c_proj",
+    "trainable_param_names": ".*lora_[ab].*"
+}
