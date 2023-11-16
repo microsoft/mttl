@@ -76,6 +76,7 @@ class MultiExpertModel(ExpertTrainer):
                 action=action,
                 is_default=module_name == "default",
                 selectors=self.selectors,
+                global_config=self.hparams,
             )
             self.experts.append(module_name)
 
