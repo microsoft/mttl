@@ -1,4 +1,7 @@
 # flan tasks without NIv2 template
+FLAN_SUB1 = [
+    "ai2_arc_ARC_Challenge_1_0_0",
+]
 
 FLAN_SUB19 = [
     "ai2_arc_ARC_Challenge_1_0_0",

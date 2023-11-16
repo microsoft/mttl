@@ -27,8 +27,10 @@ class Evaluator(ABC):
 
 
 class ExtendedRougeEvaluator(RougeEvaluator, Evaluator):
-    def __init__(self, datamodule, name="test", split="test", subsample=-1):
-        super().__init__(datamodule)
+    def __init__(
+        self, datamodule, name="test", split="test", subsample=-1, use_vllm=False
+    ):
+        super().__init__(datamodule, use_vllm=use_vllm)
         self.name = name
         self.split = split
         self.n_samples = len(self.dm.test_dataloader(subsample=subsample).dataset)
@@ -60,6 +62,7 @@ class TestLossEvaluator(LossCallback, Evaluator):
         name="test",
         split="test",
         subsample=-1,
+        **kwargs,
     ):
         if split == "test":
             dataloader = datamodule.test_dataloader(subsample=subsample)
@@ -106,9 +109,11 @@ class ExtendedMMLUEvaluator(MMLUEvaluator, Evaluator):
         name="test",
         split="test",
         subsample=-1,
+        use_vllm=False,
     ):
         assert split in ["test"]
-        super().__init__(datamodule.config)
+        self.use_vllm = use_vllm
+        super().__init__(datamodule.config, use_vllm=use_vllm)
         self.subsample = subsample
         self.datamodule = datamodule
         self.name = name
