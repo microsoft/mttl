@@ -33,6 +33,13 @@ class ExpertConfig(Config):
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
 
+        # training expert
+        self.eval_mmlu_flag = False
+
+        # training classfier routing
+        self.num_labels = 246
+        self.classifer_repo_id = None
+
     def post_init(self):
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size

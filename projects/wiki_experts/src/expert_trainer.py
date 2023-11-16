@@ -29,10 +29,13 @@ class ExpertTrainer(EfficientCheckpointModule):
                 self.hparams.model,
                 load_in_8bit=self.hparams.load_in_8bit,
                 torch_dtype=torch.bfloat16,
-                device_map="auto",
+                device_map=kwargs.get("device_map", "auto"),
             )
         else:
-            model_object = AutoModelForCausalLM.from_pretrained(self.hparams.model)
+            model_object = AutoModelForCausalLM.from_pretrained(
+                self.hparams.model,
+                device_map=kwargs.get("device_map", "auto"),
+            )
 
         if self.hparams.load_in_8bit:
             model_object = prepare_model_for_kbit_training(model_object)
@@ -111,6 +114,10 @@ class ExpertTrainer(EfficientCheckpointModule):
         self._inference_outputs += [(loss.detach().cpu(),)]
         return mean_loss
 
+    def get_loss_for_all(self, batch, batch_idx):
+        loss = self.forward(batch, reduction="none")
+        return loss
+
     def validation_step(self, batch, batch_idx):
         loss = self.forward(batch, reduction="none")
         mean_loss = loss.sum() / loss.shape[0]
@@ -120,7 +127,6 @@ class ExpertTrainer(EfficientCheckpointModule):
     def log_loss(self, split="val"):
         outputs = self._inference_outputs
         losses = torch.cat([out[0] for out in outputs], 0)
-
         self._inference_outputs.clear()
         self.log(f"{split}/loss", losses.mean(), on_epoch=True, prog_bar=True)
 
