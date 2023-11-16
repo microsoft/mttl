@@ -16,19 +16,21 @@ def test_retrieval_routing():
     finetune_task_name = "adversarial_qa_dbert_answer_the_following_q"
     data_module = FlanModule(
         FlanConfig(
-            dataset="sordonia/flan-10k-flat",
+            dataset="sordonia/flan-debug-flat",
             model="EleutherAI/gpt-neo-125m",
             finetune_task_name=finetune_task_name,
+            predict_batch_size=1,
+            include_template_type="*",
         ),
         for_generation=True,
     )
 
     module = MultiExpertModelRanker(**vars(config), tokenizer=data_module.tokenizer)
     module.load_from_graph_string(config.module_graph)
-    module.to("cuda")
     batch = next(iter(data_module.val_dataloader()))
+
     prediction_experts = module.get_predicted_experts(batch)
     experts_selections = module.expert_retrieval(batch)
-    assert len(prediction_experts) == 4
-    assert prediction_experts[0] == "trivia_qa_rc_1_1_0"
+    assert len(prediction_experts) == 1
+    assert prediction_experts[0] == "adversarial_qa_dbidaf_answer_the_following_q"
     assert experts_selections[0] == "adversarial_qa_dbert_answer_the_following_q"

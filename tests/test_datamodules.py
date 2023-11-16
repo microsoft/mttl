@@ -3,7 +3,6 @@ import numpy as np
 from mttl.datamodule.base import AutoDataModule
 from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
 from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
-from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from projects.wiki_experts.src.ranker.classification_module import (
     ClassificationDataModule,
     ClassificationConfig,
