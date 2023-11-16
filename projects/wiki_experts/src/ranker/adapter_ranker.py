@@ -38,7 +38,9 @@ class ExpertRanker:
         print(f"Downloaded the classifer from {self.classifer_ckpt}")
         text_encoder = SentenceTransformer("all-MiniLM-L6-v2")
         classifer = Classifer(text_encoder, self.num_labels).to(device)
-        classifer.load_state_dict(torch.load(self.classifer_ckpt)["state_dict"])
+        classifer.load_state_dict(
+            torch.load(self.classifer_ckpt, map_location=device)["state_dict"]
+        )
         return classifer
 
     def test_accuracy(self, dataset, model, fine_tune_task_name):
