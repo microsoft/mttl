@@ -304,6 +304,3 @@ class Config:
         self.soft_prompt_mlp_dim: int = None
         self.soft_prompt_hidden_dim: int = None
         self.soft_prompt_learn_kv: bool = False
-
-        # ... with routing
-        self.task_agnostic_routing: bool = False
