@@ -26,6 +26,10 @@ class ExpertRanker:
         self,
     ):
         if self.classifer_ckpt is None:
+            if self.classifer_repo_id is None:
+                raise ValueError(
+                    "Please provide a classifer_repo_id or set the CLASSIFER_CKPT environment variable"
+                )
             self.classifer_ckpt = hf_hub_download(
                 repo_id=self.classifer_repo_id,
                 filename="checkpoint.ckpt",
