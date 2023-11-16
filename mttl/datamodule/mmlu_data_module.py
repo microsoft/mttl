@@ -127,7 +127,7 @@ class DataCollatorForMMLU(DefaultCollator):
     return_tensors: str = "pt"
     for_generation: bool = False
     model_family: str = "seq2seq"
-    task_to_id: dict = (None,)
+    task_to_id: dict = None
 
     def __call__(self, batch, return_tensors=None):
         if return_tensors is None:

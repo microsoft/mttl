@@ -110,7 +110,6 @@ class MMLUEvaluator(object):
             task_names = batch.get("task_names", None)
             batch.pop("sources_texts", None)
             labels_text = batch.pop("labels_texts", None)
-            inputs_text = batch.get("inputs", None)
             extra_kwargs = {}
             max_length = 5
 

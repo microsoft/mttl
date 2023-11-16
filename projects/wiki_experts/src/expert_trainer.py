@@ -123,7 +123,7 @@ class ExpertTrainer(EfficientCheckpointModule):
 
     def log_loss(self, split="val"):
         outputs = self._inference_outputs
-        losses = torch.cat([out[0] for out in outputs])
+        losses = torch.cat([out[0] for out in outputs], 0)
         self._inference_outputs.clear()
         self.log(f"{split}/loss", losses.mean(), on_epoch=True, prog_bar=True)
 
