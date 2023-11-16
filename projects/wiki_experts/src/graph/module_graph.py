@@ -308,6 +308,7 @@ def load_expert(
     # load the expert weights
     import os
 
+    logger.info(f"Attempting to load expert from {expert_path}")
     if os.path.isfile(expert_path) or os.path.isdir(expert_path):
         expert_checkpoint = get_checkpoint_path(expert_path)
     else:

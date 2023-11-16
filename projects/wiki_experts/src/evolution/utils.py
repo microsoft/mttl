@@ -55,6 +55,14 @@ class TableLogger:
         )
         self.df = pd.DataFrame(columns=self.columns)
 
+    def tasks_in_active_iteration(self, act_i):
+        tasks_in_active_iteration = self.df[self.df["act_i"] == act_i]["task"].tolist()
+        return tasks_in_active_iteration
+
+    def from_df(self, df):
+        self.df = df
+        self.columns = df.columns
+
     def log(self, row: dict):
         self.df.loc[len(self.df.index)] = row
 
@@ -70,13 +78,13 @@ def get_loss(model, evaluator: Evaluator, **kwargs):
     return evaluator.get_loss(model, **kwargs)
 
 
-def save_new_module(output_dir, module, task_name, score):
+def save_new_module(output_dir, module, task_name, postfix=""):
     module_copy = copy.deepcopy(module)
     # make Loras trainable so that they are saved
     module_copy.trainable_param_names = [
         n for n, p in module_copy.named_parameters() if re.match(".*lora.*", n)
     ]
-    dest = output_dir + f"/{task_name}_optimal_weights_{score}"
+    dest = output_dir + f"/{task_name}_{postfix}"
     os.makedirs(dest, exist_ok=True)
     ckpt_path = module_copy.save_pretrained(dest)
     del module_copy
@@ -109,7 +117,13 @@ def prepare_evaluator(
         train_batch_size=args.train_batch_size,
         predict_batch_size=args.predict_batch_size,
     )
-    evaluator = EVAL_CLASS(datamodule=dm, subsample=subsample, name=tasks, split=split)
+    evaluator = EVAL_CLASS(
+        datamodule=dm,
+        subsample=subsample,
+        name=tasks,
+        split=split,
+        use_vllm=args.use_vllm,
+    )
     return evaluator
 
 

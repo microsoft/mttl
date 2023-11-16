@@ -1,55 +1,51 @@
 import glob
 import torch
 import numpy as np
-from collections import defaultdict
+from collections import UserDict
 
 
-class ExpertLibrary:
-    """
-    Searches local experts
-    """
-
-    def __init__(self, modules_dir=None, selection="-val", operator=np.argmin):
+class LocalExpertLibrary(UserDict):
+    def __init__(self, modules_dir, model_name, selection="", operator=np.argmin):
+        """
+        Searches local experts
+        """
+        super().__init__()
         self.home_dir = modules_dir
         # searches home and loads all the existing experts with selection criteria
-
         all_checkpoints = glob.glob(f"{self.home_dir}/**/*{selection}/*.ckpt")
         all_checkpoints += glob.glob(f"{self.home_dir}/**/**/*{selection}/*.ckpt")
+        self.model_name = model_name
 
         self.operator = operator
         # expert per model and task
-        self.experts = defaultdict(lambda: defaultdict(list))
         for path in all_checkpoints:
             ckpt = torch.load(path, map_location="cpu")
             model = ckpt["hyper_parameters"]["model"]
+            if model != self.model_name:
+                continue
             task = ckpt["hyper_parameters"]["finetune_task_name"]
-            self.experts[model][task].append(path)
+            if task not in self.__dict__:
+                self.data[task] = []
+            self.data[task].append(path)
 
         print(
-            f"Found {len(all_checkpoints)} experts in {self.home_dir} for models {list(self.experts.keys())}"
+            f"Found {len(all_checkpoints)} experts in {self.home_dir} for models {list(self.__dict__.keys())}"
         )
         # adding base module also
-        for model in self.experts.keys():
-            self.experts[model]["base"] = [None]
+        self.data["base"] = [None]
 
-    def get_all_tasks(self):
-        return [t for m in self.experts.values() for t in m.keys()]
-
-    def get_experts_for_model(self, model):
-        assert model in self.experts, f"Model {model} not found in {self.home_dir}"
-        return list(self.experts[model].keys())
-
-    def get_experts(self, model, task):
-        assert model in self.experts, f"Model {model} not found in {self.home_dir}"
-        return self.experts[model][task]
-
-    def get_expert_path(self, model, task):
-        experts = self.get_experts(model, task)
+    def __getitem__(self, task):
+        experts = self.data[task]
         if task == "base":
             return None
+        if not isinstance(experts, list):
+            return experts
         metrics = [
             float(e.split("/")[-1].replace(".ckpt", "").replace("loss=", ""))
             for e in experts
         ]
         args_best = self.operator(metrics)
         return experts[args_best]
+
+    def pop(self, task):
+        return self.data.pop(task, None)

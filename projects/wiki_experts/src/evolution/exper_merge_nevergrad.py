@@ -1,7 +1,7 @@
 import os
 import sys
-import re
 import copy
+import torch
 import wandb
 import numpy as np
 import pandas as pd
@@ -20,21 +20,65 @@ from utils import (
 )
 
 from evaluators import Evaluator
-from projects.wiki_experts.src.evolution.expert_library import ExpertLibrary
+from projects.wiki_experts.src.evolution.expert_library import LocalExpertLibrary
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
+from dataclasses import dataclass
 from config import ExpertsMergeConfig
 from projects.wiki_experts.src.evolution.lora_hub import RoutingOptimizer
 from mttl.utils import setup_logging, logger
-from projects.wiki_experts.src.graph.module_graph import ModuleGraph
 
 # register models
 from projects.wiki_experts.src.expert_model import MultiExpertModel
-
-# from projects.wiki_experts.src.expert_trainer import ExpertTrainer
-# from mttl.datamodule.mmlu_data_module import MMLUDataModule
 from mttl.vllm_engines.engines import free_memory
+
+
+class ExperimentState:
+    @dataclass
+    class State:
+        config: ExpertsMergeConfig
+        active_iteration: int
+        expert_lib: LocalExpertLibrary
+        results_table: TableLogger
+
+    def __init__(self, **kwargs):
+        self.state = self.State(**kwargs)
+
+    def update(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self.state, k, v)
+
+    @property
+    def path(self):
+        if wandb.run is not None:
+            run_name = wandb.run.name
+        else:
+            run_name = os.getenv("AMLT_JOB_NAME", "_some_experiment")
+        run_name = run_name.replace("/", "_")
+        path = self.state.config.output_dir
+        path = os.path.join(path, f"exp_state_{run_name}")
+
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def save(self, path=None):
+        path = path or self.path
+        if not path.endswith(".pt"):
+            path = os.path.join(path, "state.pt")
+
+        state = copy.deepcopy(self.state)
+        torch.save(state, path)
+
+    def load_from_path(self, path=None):
+        path = path or self.path
+        if not path.endswith(".pt"):
+            path = os.path.join(path, "state.pt")
+        state = torch.load(path)
+        self.state = state
+
+    def tasks_in_active_iteration(self, aci):
+        return self.state.results_table.tasks_in_active_iteration(aci)
 
 
 def log_best_weights(module_dict, best_weights, task, prefix=""):
@@ -67,20 +111,48 @@ def run_eval(args: ExpertsMergeConfig):
     if args.hf_token_hub:
         login(token=args.hf_token_hub)
 
-    tablelogger = TableLogger()
-    expert_lib = ExpertLibrary(modules_dir=args.modules_dir)
-    module_dict = {
-        m: expert_lib.get_expert_path(args.model, m)
-        for m in expert_lib.get_experts_for_model(args.model)
-    }
-    module_dict.pop("base")
-    print("###### Tasks", args.finetune_task_name)
+    exp_state = ExperimentState(
+        config=args,
+        active_iteration=0,
+        expert_lib=LocalExpertLibrary(
+            model_name=args.model, modules_dir=args.modules_dir
+        ),
+        results_table=TableLogger(),
+    )
 
-    for a_i in range(args.n_active_iterations):  # population iteration
+    if args.experiment_state_path is not None:
+        exp_state.load_from_path(args.experiment_state_path)
+
+    expert_lib = exp_state.state.expert_lib
+    tablelogger = exp_state.state.results_table
+    args = exp_state.state.config
+    iterations_run = exp_state.state.active_iteration
+
+    tasks = args.finetune_task_name
+
+    expert_lib.pop("base")
+    print("###### Tasks", tasks)
+    for it in range(args.n_active_iterations - iterations_run):
+        a_i = it + iterations_run
         best_weights_matrix = {}
         log_prefix = f"ai_{a_i}_"
 
-        for task in args.finetune_task_name:  # tasks iteration
+        # continue from task in the task iteration
+        tasks_seen_in_active_iteration = exp_state.tasks_in_active_iteration(aci=a_i)
+        tasks_left = [t for t in tasks if t not in tasks_seen_in_active_iteration]
+
+        print(
+            "#" * 10,
+            "\n",
+            "Active iteration",
+            a_i,
+            " tasks to be trained on ",
+            tasks_left,
+            "\n",
+            "#" * 10,
+        )
+
+        for task in tasks_left:  # tasks iteration
             log_row = {c: 0 for c in tablelogger.columns}
             log_row["act_i"] = a_i
             log_row["task"] = task
@@ -113,10 +185,11 @@ def run_eval(args: ExpertsMergeConfig):
             ########################################################################
             # 1. eval base performance
             logger.info(f"Evaluating base perf for {task} using its best module sofar")
-            if task in module_dict:
+
+            if task in expert_lib:
                 model_copy = copy.deepcopy(module)
                 model_copy.load_from_module_dict(
-                    {task: module_dict[task]}, action=args.action
+                    {task: expert_lib[task]}, action=args.action
                 )
                 if args.action == "route":
                     model_copy.convert_container_to_expert(task)
@@ -139,10 +212,10 @@ def run_eval(args: ExpertsMergeConfig):
 
             optimizer = RoutingOptimizer(
                 model=module,
-                modules_2_dest=module_dict,
+                modules_2_dest=expert_lib,
                 get_loss=get_loss_function,
                 budget=args.n_ng_iterations,
-                init_one=list(module_dict.keys()).index(task)
+                init_one=list(expert_lib.keys()).index(task)
                 if args.init_ng_oracle
                 else None,
                 action=args.action,
@@ -153,13 +226,13 @@ def run_eval(args: ExpertsMergeConfig):
             logger.info("Found best weights: {}".format(best_weights))
             logger.info("Found best graph: {}".format(best_graph_string))
 
-            log_best_weights(module_dict, best_weights, task, prefix=log_prefix)
+            log_best_weights(expert_lib, best_weights, task, prefix=log_prefix)
 
             best_weights_matrix[task] = {
-                t: v for t, v in zip(module_dict.keys(), best_weights)
+                t: v for t, v in zip(expert_lib.keys(), best_weights)
             }
             log_row["weights"] = str(
-                {t: v for t, v in zip(module_dict.keys(), best_weights)}
+                {t: v for t, v in zip(expert_lib.keys(), best_weights)}
             )
             ########################################################################
             # 3. get test/train/val score of the new expert
@@ -207,7 +280,7 @@ def run_eval(args: ExpertsMergeConfig):
                 args.output_dir,
                 model_optimal,
                 task,
-                log_row["score_test_selected"],
+                postfix=f"_{task}_test_score_{log_row['score_test_selected']}_aci{a_i}",
             )
 
             logger.info(
@@ -272,7 +345,7 @@ def run_eval(args: ExpertsMergeConfig):
                     args.output_dir,
                     model_optimal,
                     task,
-                    log_row["score_test_selected_fine_tuned"],
+                    postfix=f"_{task}_test_score_{log_row['score_test_selected_fine_tuned']}_aci{a_i}",
                 )
             ########################################################################
             tablelogger.log(log_row)
@@ -280,12 +353,19 @@ def run_eval(args: ExpertsMergeConfig):
             # replace the module in the dict with the new one or add new module
             if improved_on_valid:
                 if args.new_module_action == "replace":
-                    module_dict[task] = new_momodule_path
+                    logger.info(
+                        f"Module {expert_lib[task]} \n for {task} is replaced in the dict with \n {new_momodule_path}"
+                    )
+
+                    expert_lib[task] = new_momodule_path
                 elif args.new_module_action == "add":
-                    old_path = module_dict.get(task, None)
-                    module_dict[task] = new_momodule_path
+                    logger.info(
+                        f"Module {expert_lib[task]} \n for {task} is added to the dict with \n {new_momodule_path}"
+                    )
+                    old_path = expert_lib.get(task, None)
+                    expert_lib[task] = new_momodule_path
                     if old_path is not None:
-                        module_dict[f"{task}_from_{a_i}"] = old_path
+                        expert_lib[f"{task}_from_ai{a_i}"] = old_path
                 else:
                     logger.info(
                         f"New module for {task} is not added to the dict (new_module_action is {args.new_module_action}), only saved to {new_momodule_path}"
@@ -294,6 +374,8 @@ def run_eval(args: ExpertsMergeConfig):
             plt.clf()
             free_memory()
             tablelogger.log_table_wandb()
+            exp_state.update(active_iteration=a_i)
+            exp_state.save()
 
         best_weights_matrix = pd.DataFrame.from_dict(best_weights_matrix)
         if wandb.run is not None:
