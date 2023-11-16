@@ -27,11 +27,13 @@ def register_multi_expert_selector(name):
     return _thunk
 
 
-def get_selector(config, **kwargs):
-    if config.expert_routing:
-        if config.expert_routing not in MULTI_EXPERT_ROUTERS:
-            raise ValueError(f"Cannot find selector: {config.expert_routing}")
-        return MULTI_EXPERT_ROUTERS[config.expert_routing](config, **kwargs)
+def get_selector(config, info_container, **kwargs):
+    if config.router_selector:
+        if config.router_selector not in MULTI_EXPERT_ROUTERS:
+            raise ValueError(f"Cannot find selector: {config.router_selector}")
+        return MULTI_EXPERT_ROUTERS[config.router_selector](
+            config, info_container, **kwargs
+        )
     else:
         return None
 
@@ -69,10 +71,11 @@ class Multi_ExpertRouter(torch.nn.Module, Router):
     Implements routing at a per-layer or pe-model level
     """
 
-    def __init__(self, config, expert_names=[]):
+    def __init__(self, config, info_container, expert_names=[]):
         super().__init__()
         self.config = config
         self.expert_names: list = expert_names
+        self.info_container = info_container
 
         self.module_logits = nn.Parameter(
             torch.empty(len(expert_names)).uniform_(-1e-3, 1e-3)
@@ -97,3 +100,16 @@ class Multi_ExpertRouter(torch.nn.Module, Router):
 
     def get_routing_weights(self):
         return self.forward()
+
+
+@register_multi_expert_selector("kv_router")
+class DummyKVRouter(Router, nn.Module):
+    def __init__(self, config, *args, **kwargs):
+        super().__init__()
+        self.config = config
+
+    def forward(self, *args, **kwargs):
+        assert False
+
+    def resize_module_logits(self, *args, **kwargs):
+        pass
