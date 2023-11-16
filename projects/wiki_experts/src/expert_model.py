@@ -60,10 +60,6 @@ class MultiExpertModel(ExpertTrainer):
 
         self.selectors: Dict[str, Router] = {}
         self.experts = []
-        self.classifier = ExpertRanker(
-            num_labels=kwargs["num_labels"],
-            classifer_repo_id=kwargs["classifer_repo_id"],
-        ).get_classifer()
 
     def get_router_weights(self):
         weights = {}
@@ -154,34 +150,6 @@ class MultiExpertModel(ExpertTrainer):
     def generation_config(self):
         return self.model.generation_config
 
-    def get_predicted_experts(self, batch):
-        if "inputs" in batch:
-            input_texts = batch["inputs"]
-        elif "sources_texts" in batch:
-            input_texts = batch["sources_texts"]
-        else:
-            raise ValueError("No inputs found in batch!")
-        expert_logits = self.classifier(input_texts)
-        expert_indices = expert_logits.argmax(dim=1).cpu()
-        expert_prediction = [ids_to_tasks_names[i.item()] for i in expert_indices]
-        return expert_prediction
-
-    def expert_retrieval(self, batch, **kwargs):
-        expert_selection = []
-        # get the expert predictions
-        expert_prediction = self.get_predicted_experts(batch)
-        print("predicted experts: {}".format(expert_prediction))
-        for expert in expert_prediction:
-            if expert in self.experts:
-                expert_selection.append(expert)
-            else:
-                # randomly select an expert
-                expert_selection.append(
-                    self.experts[np.random.randint(len(self.experts))]
-                )
-
-        return expert_selection
-
     def expert_choice(self, batch, **kwargs):
         input_ids = batch["input_ids"]
         mask = batch["attention_mask"]
@@ -231,7 +199,71 @@ class MultiExpertModel(ExpertTrainer):
         expert_indices = scores.argmin(0)
         return [self.experts[i] for i in expert_indices]
 
-    # def forward(self, batch, reduction="mean"):
+    def generate(
+        self,
+        batch,
+        **kwargs,
+    ):
+        if self.hparams.routing == "auto":
+            logger.info(
+                "Auto-routing... ground-truth tasks: {}".format(batch["task_names"])
+            )
+            batch["task_names"] = self.expert_choice(batch)
+            logger.info("Auto-route tasks: {}".format(batch["task_names"]))
+        elif self.hparams.routing == "first":
+            batch["task_names"] = [
+                self.experts[0] for _ in range(batch["input_ids"].shape[0])
+            ]
+        elif self.hparams.routing == "random":
+            import numpy as np
+
+            batch["task_names"] = np.random.choice(
+                self.experts, batch["input_ids"].shape[0], replace=True
+            ).tolist()
+        if hasattr(self.model, "task_id_container"):
+            self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
+                batch
+            )
+
+        generations = self.model.generate(inputs=batch["input_ids"], **kwargs)
+        return generations
+
+
+class MultiExpertModelRanker(MultiExpertModel):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.classifier = ExpertRanker(
+            num_labels=kwargs["num_labels"],
+            classifer_repo_id=kwargs["classifer_repo_id"],
+        ).get_classifer()
+
+    def get_predicted_experts(self, batch):
+        if "inputs" in batch:
+            input_texts = batch["inputs"]
+        elif "sources_texts" in batch:
+            input_texts = batch["sources_texts"]
+        else:
+            raise ValueError("No inputs found in batch!")
+        expert_logits = self.classifier(input_texts)
+        expert_indices = expert_logits.argmax(dim=1).cpu()
+        expert_prediction = [ids_to_tasks_names[i.item()] for i in expert_indices]
+        return expert_prediction
+
+    def expert_retrieval(self, batch, **kwargs):
+        expert_selection = []
+        # get the expert predictions
+        expert_prediction = self.get_predicted_experts(batch)
+        print("predicted experts: {}".format(expert_prediction))
+        for expert in expert_prediction:
+            if expert in self.experts:
+                expert_selection.append(expert)
+            else:
+                # randomly select an expert
+                expert_selection.append(
+                    self.experts[np.random.randint(len(self.experts))]
+                )
+
+        return expert_selection
 
     def generate(
         self,

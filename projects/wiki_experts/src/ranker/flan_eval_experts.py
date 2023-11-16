@@ -7,7 +7,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from mttl.utils import setup_logging, logger
 
 # register models
-from projects.wiki_experts.src.expert_model import MultiExpertModel
+from projects.wiki_experts.src.expert_model import MultiExpertModelRanker
 from projects.wiki_experts.src.config import ExpertConfig
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
 
@@ -91,7 +91,7 @@ def run_eval(args):
 
     evaluator = RougeEvaluator(data_module)
     # load module
-    module = MultiExpertModel(**vars(args), tokenizer=data_module.tokenizer)
+    module = MultiExpertModelRanker(**vars(args), tokenizer=data_module.tokenizer)
     if args.load_module is not None:
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:

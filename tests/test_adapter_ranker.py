@@ -1,7 +1,7 @@
 # unit test for adapter_ranker
 import pytest
 from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
-from projects.wiki_experts.src.expert_model import MultiExpertModel
+from projects.wiki_experts.src.expert_model import MultiExpertModelRanker
 from projects.wiki_experts.src.config import ExpertConfig
 
 
@@ -23,7 +23,7 @@ def test_retrieval_routing():
         for_generation=True,
     )
 
-    module = MultiExpertModel(**vars(config), tokenizer=data_module.tokenizer)
+    module = MultiExpertModelRanker(**vars(config), tokenizer=data_module.tokenizer)
     module.load_from_graph_string(config.module_graph)
     module.to("cuda")
     batch = next(iter(data_module.val_dataloader()))
