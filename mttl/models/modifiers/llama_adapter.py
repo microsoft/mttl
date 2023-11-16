@@ -126,10 +126,11 @@ class KVAdapter(Adapter, ModifyMixin):
 class FusedKVAdapters(KVAdapter, Router):
     """Container class to handle routing and forwarding through multiple KVAdapters"""
 
-    def __init__(self, kv_adapters):
+    def __init__(self, kv_adapters, selector=None):
         # super(ModifyMixin, self).__init__()
         self.kv_adapters = list(kv_adapters)
         self.n_experts = len(self.kv_adapters)
+        self.selector = selector
 
     def __getattr__(self, name):
         if name == "kv_adapters":

@@ -9,7 +9,11 @@ from mttl.models.modifiers.llama_adapter import (
     ParallelKVAdapters,
     ConcatKVAdapters,
 )
-from mttl.models.modifiers.expert_routing import Router
+from mttl.models.modifiers.expert_routing import (
+    Router,
+    _extract_identifier,
+    get_selector,
+)
 from mttl.utils import logger
 
 
@@ -23,7 +27,6 @@ def add_expert_to_transformer(
     load_only_layers=None,
     selectors={},
     config=None,
-    global_config=None,
 ):
     # create a shared container for the task id
     if not hasattr(transformer, "task_id_container"):
@@ -39,11 +42,22 @@ def add_expert_to_transformer(
                     total_layers += 1
                     layer_name = f"{m_name}.{c_name}"
                     selector = None
-                    if (
-                        global_config.task_agnostic_routing
-                        and "kv_adapter" in expert_config.model_modifier
-                    ):
-                        selector = 1
+
+                    if config is not None:
+                        identifier = _extract_identifier(
+                            layer_name, config.router_granularity
+                        )
+                        if identifier not in selectors.keys():
+                            selectors[identifier] = get_selector(
+                                config, transformer.task_id_container
+                            )
+                            if config.router_selector:
+                                selectors[identifier].__layer_name__ = (
+                                    identifier + ".selector"
+                                )
+                        selector = None  # Can we remove this line ?
+                        if identifier in selectors.keys():
+                            selector = selectors[identifier]
 
                     if type(layer) != ExpertContainer:
                         # create an expert lora container
@@ -261,7 +275,7 @@ class ExpertContainer(MergeableAdapter):
             output = self.route_with_task_name(input, task_names, **kwargs)
         elif len(self.experts) and self.selector is not None:
             if "kv_adapter" in self.config.model_modifier:
-                fused_adapter = ConcatKVAdapters(self.experts.values())
+                fused_adapter = ConcatKVAdapters(self.experts.values(), self.selector)
                 output = fused_adapter(input, **kwargs)
             else:
                 weights: Dict = self.selector(input)
