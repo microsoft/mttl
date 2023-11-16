@@ -28,18 +28,18 @@ def produce_transfer_matrix(
     Eval each module in expert_lib on each subject in subjects.
     """
     # sort tasks to first include tasks for which modules are available
-    tasks = [t for t in expert_lib.get_experts_for_model(args.model) if t in tasks] + [
-        t for t in tasks if t not in expert_lib.get_experts_for_model(args.model)
+    tasks = [t for t in expert_lib.keys() if t in tasks] + [
+        t for t in tasks if t not in expert_lib.keys()
     ]
 
     transfer_table = TableLogger(columns=["module"] + tasks)
 
-    for expert_name in expert_lib.get_experts_for_model(args.model):
+    for expert_name in expert_lib.keys():
         result = {c: 0 for c in transfer_table.columns}
         result["module"] = expert_name
 
         for task_eval_on in tasks:
-            module_dest = expert_lib.get_expert_path(args.model, expert_name)
+            module_dest = expert_lib[expert_name]
 
             logger.info(f"################# Evaluating {expert_name} on {task_eval_on}")
 
@@ -100,7 +100,7 @@ def run_eval(args: ExpertsMergeConfig):
 
     print("###### Tasks", args.finetune_task_name)
 
-    expert_lib = LocalExpertLibrary(modules_dir=args.modules_dir)
+    expert_lib = LocalExpertLibrary(model_name=args.model, modules_dir=args.modules_dir)
 
     transfer_matrix: pd.DataFrame = produce_transfer_matrix(
         args, expert_lib, tasks=args.finetune_task_name
