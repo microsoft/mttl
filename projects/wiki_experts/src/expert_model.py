@@ -5,8 +5,10 @@ from mttl.models.modifiers.experts import add_expert_to_transformer, Router
 from mttl.utils import logger
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from typing import Dict
-from projects.wiki_experts.adapter_ranker import ExpertRanker
+from projects.wiki_experts.src.ranker.adapter_ranker import ExpertRanker
+from projects.wiki_experts.src.ranker.classification_module import ids_to_tasks_names
 from mttl.models.modifiers.experts import ExpertContainer
+import numpy as np
 
 
 def push_expert_to_hub(
@@ -61,7 +63,7 @@ class MultiExpertModel(ExpertTrainer):
         self.classifier = ExpertRanker(
             num_labels=kwargs["num_labels"],
             classifer_repo_id=kwargs["classifer_repo_id"],
-        ).get_classifier()
+        ).get_classifer()
 
     def get_router_weights(self):
         weights = {}
@@ -152,22 +154,32 @@ class MultiExpertModel(ExpertTrainer):
     def generation_config(self):
         return self.model.generation_config
 
-    def expert_retrieval(self, batch, **kwargs):
+    def get_predicted_experts(self, batch):
         if "inputs" in batch:
             input_texts = batch["inputs"]
         elif "sources_texts" in batch:
             input_texts = batch["sources_texts"]
         else:
             raise ValueError("No inputs found in batch!")
+        expert_logits = self.classifier(input_texts)
+        expert_indices = expert_logits.argmax(dim=1).cpu()
+        expert_prediction = [ids_to_tasks_names[i.item()] for i in expert_indices]
+        return expert_prediction
+
+    def expert_retrieval(self, batch, **kwargs):
         expert_selection = []
         # get the expert predictions
-        expert_predictions = self.classifier(input_texts)
-        expert_indices = expert_predictions.argmax(dim=1).cpu()
-        for i in expert_indices:
-            if i < len(self.experts):
-                expert_selection.append(self.experts[i])
+        expert_prediction = self.get_predicted_experts(batch)
+        print("predicted experts: {}".format(expert_prediction))
+        for expert in expert_prediction:
+            if expert in self.experts:
+                expert_selection.append(expert)
             else:
-                expert_selection.append(self.experts[0])
+                # randomly select an expert
+                expert_selection.append(
+                    self.experts[np.random.randint(len(self.experts))]
+                )
+
         return expert_selection
 
     def expert_choice(self, batch, **kwargs):
@@ -242,7 +254,7 @@ class MultiExpertModel(ExpertTrainer):
             batch["task_names"] = np.random.choice(
                 self.experts, batch["input_ids"].shape[0], replace=True
             ).tolist()
-        elif self.hparams.routing == "retrieval":
+        elif self.hparams.routing == "X":
             logger.info("retrieval routing")
             batch["task_names"] = self.expert_retrieval(batch)
 
