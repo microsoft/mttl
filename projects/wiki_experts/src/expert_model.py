@@ -254,7 +254,7 @@ class MultiExpertModel(ExpertTrainer):
             batch["task_names"] = np.random.choice(
                 self.experts, batch["input_ids"].shape[0], replace=True
             ).tolist()
-        elif self.hparams.routing == "X":
+        elif self.hparams.routing == "retrieval":
             logger.info("retrieval routing")
             batch["task_names"] = self.expert_retrieval(batch)
 

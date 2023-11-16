@@ -1,9 +1,5 @@
 import json
-import os
 import pytest
-import sys
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mttl.config import Config
 
 
