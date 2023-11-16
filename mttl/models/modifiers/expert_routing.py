@@ -1,9 +1,16 @@
+from abc import abstractproperty
+import re
+from pyparsing import abstractmethod
 import torch
 from torch import nn
-from abc import abstractproperty
-from pyparsing import abstractmethod
+from typing import Any, Dict
+from mttl.models.modifiers.base import MergeableAdapter
+from mttl.models.modifiers.lora import LoRA, SkilledLoRA
+from mttl.utils import logger
+
 
 MULTI_EXPERT_ROUTERS = {}
+EPS = 1e-8
 
 
 def register_multi_expert_selector(name):
@@ -41,6 +48,19 @@ class Router:
     @abstractproperty
     def name(self):
         pass
+
+
+def _extract_identifier(string, match_on="coder"):
+    """Returns a unique identifier for the "chunk" of layers sharing the
+    same underlying selector
+    # e.g. 'block' : 'encoder.block.0.layer.0.SelfAttention' -> 'encoder.block.0'
+    """
+
+    if match_on == "finegrained":
+        return string
+    if match_on == "coarsegrained":
+        return " "
+    return string
 
 
 @register_multi_expert_selector("poly_router")

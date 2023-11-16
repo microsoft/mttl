@@ -25,6 +25,7 @@ def modify_transformer(transformer, modifier_config, model_modifier=None):
     import mttl.models.modifiers.routing  # noqa: F401
     import mttl.models.modifiers.prompt_tuning  # noqa: F401
     import mttl.models.modifiers.llama_adapter  # noqa: F401
+    from mttl.utils import logger
 
     # import mttl.models.modifiers.prefix_tuning # noqa: F401
 
@@ -42,7 +43,7 @@ def modify_transformer(transformer, modifier_config, model_modifier=None):
         model_modifier = CONFIGS_TO_MODIFIERS.get(type(modifier_config), None)
 
     if model_modifier is None:
-        logger.warning("`model_modifier` is None. Returning original transformer.")
+        logger.warn("Model modifier not set nor in config nor as an argument.")
         return transformer
 
     if model_modifier:

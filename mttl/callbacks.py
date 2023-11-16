@@ -2,6 +2,8 @@ import datetime
 import time
 import sys, os
 import copy
+import torch
+import tqdm
 from typing import Any
 
 import pytorch_lightning as pl
@@ -9,6 +11,115 @@ from pytorch_lightning import LightningModule, Trainer, callbacks as cb
 from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
 from torch.optim import Optimizer
 from mttl.utils import Averager, logger
+from mttl.models.utils import transfer_batch_to_device
+
+
+DEBUG = False
+
+
+class LossCallback(cb.Callback):
+    def __init__(
+        self,
+        dataloader,
+        output_dir,
+        name="test",
+        eval_every_opt_step=1,
+        checkpoint_oracle=True,
+    ):
+        self.name = name
+        self.output_dir = output_dir
+        self.dataloader = dataloader
+        self.eval_every_opt_step = eval_every_opt_step
+        # save best perf
+        self._best_loss = None
+        # checkpointing
+        self.do_checkpoint = checkpoint_oracle
+        self._checkpoint_now = False
+        self._prev_checkpoint = None
+
+    @property
+    def last_model_path(self):
+        return self._prev_checkpoint
+
+    @property
+    def best_model_path(self):
+        return self._prev_checkpoint
+
+    @property
+    def last_chkpt(self):
+        return self._prev_checkpoint
+
+    @property
+    def best_loss(self):
+        return self._best_loss
+
+    @best_loss.setter
+    def best_loss(self, value):
+        if self._best_loss is None:
+            self._best_loss = value
+            self._checkpoint_now = True
+        else:
+            if value < self._best_loss:
+                self._checkpoint_now = True
+                self._best_loss = value
+
+    def on_before_optimizer_step(
+        self, trainer: Trainer, pl_module: LightningModule, optimizer: Optimizer
+    ) -> None:
+        if trainer.global_step % self.eval_every_opt_step == 0:
+            metrics = self.test(pl_module)
+            self.best_loss = copy.deepcopy(metrics)
+            self.maybe_checkpoint_now(trainer)
+            self.log_metrics(metrics, pl_module)
+            # checksum of parameters
+            # p_sum = np.sum([p.detach().cpu().sum() for p in pl_module.parameters()])
+        return super().on_before_optimizer_step(trainer, pl_module, optimizer)
+
+    def maybe_checkpoint_now(self, trainer):
+        if self.do_checkpoint and self._checkpoint_now:
+            try:
+                dir_name = trainer.checkpoint_callback.dirpath
+                filename = (
+                    self.output_dir + f"{self.name}/" + f"{self.best_loss:.004f}.ckpt"
+                )
+                ckpt_path = os.path.join(dir_name, filename)
+                trainer.save_checkpoint(ckpt_path)
+                if (
+                    self._prev_checkpoint is not None
+                    and ckpt_path != self._prev_checkpoint
+                ):
+                    os.remove(self._prev_checkpoint)
+                self._prev_checkpoint = ckpt_path
+            except Exception as e:
+                logger.error(e)
+        self._checkpoint_now = False
+
+    def test(self, pl_module: LightningModule):
+        outputs = []
+        was_train = pl_module.training
+        if was_train:
+            pl_module.eval()
+        with torch.no_grad():
+            for i, batch in tqdm.tqdm(
+                enumerate(self.dataloader),
+                total=len(self.dataloader),
+                desc=f"Test {self.name}",
+            ):
+                batch = transfer_batch_to_device(batch, pl_module.device)
+                loss = pl_module.forward(batch, reduction="none")
+                outputs += [(loss.detach().cpu(),)]
+        losses = torch.cat([out[0] for out in outputs], 0)
+
+        if was_train:
+            pl_module.train()
+        return losses.mean()
+
+    def log_metrics(self, metrics, pl_module: pl.LightningModule, on_step=True):
+        pl_module.log(
+            f"downstream/{self.name}",
+            metrics,
+            on_step=on_step,
+        )
 
 
 class RougeCallback(cb.Callback):
@@ -34,9 +145,6 @@ class RougeCallback(cb.Callback):
         pl_module.log("test/rougeL", rouge, on_epoch=True, prog_bar=True)
 
         return super().on_test_epoch_end(trainer, pl_module)
-
-
-DEBUG = False
 
 
 class MMLUCallback(cb.Callback):

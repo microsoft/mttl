@@ -132,7 +132,9 @@ class Averager:
             if key not in self.total:
                 self.total[key] = value
             else:
-                self.total[key] = self.total[key] * self.weight + value * (1 - self.weight)
+                self.total[key] = self.total[key] * self.weight + value * (
+                    1 - self.weight
+                )
         return self.total
 
 
@@ -418,6 +420,7 @@ if __name__ == "__main__":
         pdb.set_trace()
         print(res)
 
+
 # define a retry decorator
 def retry_with_exponential_backoff(
     initial_delay: float = 1,
@@ -427,6 +430,7 @@ def retry_with_exponential_backoff(
     errors: tuple = (),
 ):
     """Retry a function with exponential backoff."""
+
     def decorator(func):
         def wrapper(*args, **kwargs):
             # Initialize variables
@@ -460,4 +464,5 @@ def retry_with_exponential_backoff(
                     raise e
 
         return wrapper
+
     return decorator

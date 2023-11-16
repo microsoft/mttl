@@ -22,6 +22,7 @@ def add_expert_to_transformer(
     is_default=False,
     load_only_layers=None,
     selectors={},
+    config=None,
     global_config=None,
 ):
     # create a shared container for the task id
@@ -155,6 +156,29 @@ class ExpertContainer(MergeableAdapter):
             self.experts[name] = expert_module
         if is_default:
             self.default_expert_name = name
+
+    def merge_experts_together(self, weights=None):
+        """
+        Merges experts to one expert according to weights, if weights are not given, it uses the selector to get the weights.
+        Does not merge the layer.
+        """
+        if weights is None:
+            assert self.selector is not None
+            weights: dict = self.selector.get_routing_weights()
+
+        merged_weights = {}
+        for name, expert in self.experts.items():
+            assert name in weights, f"Weight for expert {name} is not given"
+            expert_state_dict = expert.state_dict()
+            weight = weights[name]
+            for k, v in expert_state_dict.items():
+                value = weight * v
+                if k in merged_weights:
+                    merged_weights[k] += value
+                else:
+                    merged_weights[k] = value
+        self.experts = nn.ModuleDict({})
+        self.add_expert("merged_expert", self.config, merged_weights, action="route")
 
     def merge_with_layer(self):
         if len(self.experts) > 0:

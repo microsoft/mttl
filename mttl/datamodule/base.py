@@ -5,7 +5,7 @@ from transformers.tokenization_utils_base import PaddingStrategy
 from typing import Any, Dict, Union, Optional
 
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 from mttl.utils import logger
 from mttl.datamodule.utils import get_tokenizer
@@ -266,10 +266,27 @@ class DefaultCollator:
         return output_batch
 
 
+def subsample_dst(dataset, subsample: int):
+    subsample = len(dataset) // subsample
+    if isinstance(dataset, torch.utils.data.Subset):
+        idxs = dataset.indices
+        idxs = idxs[:subsample]
+        dataset.indices = idxs
+    elif isinstance(dataset, Dataset):
+        idxs = torch.randperm(len(dataset))
+        idxs = idxs[:subsample]
+        dataset = torch.utils.data.Subset(dataset, idxs)
+    return dataset
+
+
 class DefaultDataModule(LightningDataModule):
-    def train_dataloader(self):
+    def train_dataloader(self, subsample=None):
+        train_dataset = self.train_dataset
+        if subsample and subsample > 0:
+            train_dataset = subsample_dst(train_dataset, subsample)
+
         return DataLoader(
-            self.train_dataset,
+            train_dataset,
             batch_size=self.config.train_batch_size,
             shuffle=True,
             num_workers=0,
@@ -278,9 +295,12 @@ class DefaultDataModule(LightningDataModule):
             collate_fn=self.collate_fn,
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self, subsample=None):
+        dev_dataset = self.dev_dataset
+        if subsample and subsample > 0:
+            dev_dataset = subsample_dst(dev_dataset, subsample)
         return DataLoader(
-            self.dev_dataset,
+            dev_dataset,
             batch_size=self.config.predict_batch_size,
             shuffle=False,
             num_workers=0,
@@ -290,9 +310,12 @@ class DefaultDataModule(LightningDataModule):
             drop_last=False,
         )
 
-    def test_dataloader(self):
+    def test_dataloader(self, subsample=None):
+        test_dataset = self.test_dataset
+        if subsample and subsample > 0:
+            test_dataset = subsample_dst(test_dataset, subsample)
         return DataLoader(
-            self.test_dataset,
+            test_dataset,
             batch_size=self.config.predict_batch_size,
             shuffle=False,
             num_workers=16,
@@ -321,10 +344,13 @@ class DefaultDataModule(LightningDataModule):
 
         if len(self.train_dataset) > 0:
             logger.info("Training steps: %s" % len(self.train_dataloader()))
+            logger.info("Training samples: %s" % len(self.train_dataset))
         if self.dev_dataset is not None:
             logger.info("Validation steps: %s" % len(self.val_dataloader()))
+            logger.info("Validation samples: %s" % len(self.dev_dataset))
         if self.test_dataset is not None:
             logger.info("Test steps: %s" % len(self.test_dataloader()))
+            logger.info("Test samples: %s" % len(self.test_dataset))
         if self.task_names:
             logger.info("Number of tasks: %s" % len(self.task_names))
 
