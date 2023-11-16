@@ -8,7 +8,10 @@ from mttl.datamodule.base import AutoDataModule
 from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
 from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
-from projects.wiki_experts.classification_module import ClassificationDataModule
+from projects.wiki_experts.src.ranker.classification_module import (
+    ClassificationDataModule,
+    ClassificationConfig,
+)
 
 
 @pytest.mark.parametrize("task_name", [None, "huggingface_xsum"])
@@ -41,11 +44,16 @@ def test_flan(task_name):
     assert "task_names" in batch
 
 
-def test_classification():
-    datamodule = ClassificationDataModule(batch_size=2)
-    datamodule.setup("test")
+@pytest.mark.parametrize("task_name", [None, "huggingface_xsum"])
+def test_classification(task_name):
+    config = ClassificationConfig(
+        "sordonia/flan-debug-flat",
+        model="t5-small",
+        train_batch_size=4,
+        finetune_task_name=task_name,
+    )
+    datamodule = ClassificationDataModule(config)
     train_loader = datamodule.train_dataloader()
-    assert train_loader.batch_size == 2
     batch = next(iter(train_loader))
     assert "input" in batch
     assert "target" in batch
