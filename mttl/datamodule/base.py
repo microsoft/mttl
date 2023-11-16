@@ -289,9 +289,9 @@ class DefaultDataModule(LightningDataModule):
             train_dataset,
             batch_size=self.config.train_batch_size,
             shuffle=True,
-            num_workers=0,
+            num_workers=16,
             pin_memory=True,
-            persistent_workers=False,  # True,
+            persistent_workers=True,
             collate_fn=self.collate_fn,
         )
 
@@ -303,9 +303,9 @@ class DefaultDataModule(LightningDataModule):
             dev_dataset,
             batch_size=self.config.predict_batch_size,
             shuffle=False,
-            num_workers=0,
+            num_workers=16,
             pin_memory=True,
-            persistent_workers=False,  # True,
+            persistent_workers=True,
             collate_fn=self.collate_fn,
             drop_last=False,
         )
