@@ -25,7 +25,9 @@ def test_retrieval_routing():
         for_generation=True,
     )
 
-    module = MultiExpertModelRanker(**vars(config), tokenizer=data_module.tokenizer)
+    module = MultiExpertModelRanker(
+        **vars(config), device_map="cpu", tokenizer=data_module.tokenizer
+    )
     module.load_from_graph_string(config.module_graph)
     batch = next(iter(data_module.val_dataloader()))
 

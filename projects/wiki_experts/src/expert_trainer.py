@@ -29,10 +29,13 @@ class ExpertTrainer(EfficientCheckpointModule):
                 self.hparams.model,
                 load_in_8bit=self.hparams.load_in_8bit,
                 torch_dtype=torch.bfloat16,
-                device_map="auto",
+                device_map=kwargs.get("device_map", "auto"),
             )
         else:
-            model_object = AutoModelForCausalLM.from_pretrained(self.hparams.model)
+            model_object = AutoModelForCausalLM.from_pretrained(
+                self.hparams.model,
+                device_map=kwargs.get("device_map", "auto"),
+            )
 
         if self.hparams.load_in_8bit:
             model_object = prepare_model_for_kbit_training(model_object)
