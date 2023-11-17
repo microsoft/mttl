@@ -36,7 +36,7 @@ def produce_transfer_matrix(
 
     for task_eval_on in tasks:
         log_row = {}
-        log_row["module"] = task_eval_on
+        log_row["eval_task"] = task_eval_on
 
         evaluator: Evaluator = prepare_evaluator(
             args,
@@ -64,7 +64,7 @@ def produce_transfer_matrix(
 
             scores = evaluator.evaluate(module)
 
-            log_row[expert_name] = scores[expert_name]["mean"]
+            log_row[expert_name] = scores[task_eval_on]["mean"]
 
             all = scores.pop("all")
             log_wandb(scores, f"transfer/{expert_name}")
@@ -73,6 +73,7 @@ def produce_transfer_matrix(
             del module
             free_memory()
 
+        print(transfer_table.df)
         transfer_table.log(log_row)
         transfer_table.log_table_wandb()
 
