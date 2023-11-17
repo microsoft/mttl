@@ -1,10 +1,14 @@
 import tqdm
 import torch
+import hashlib
 import numpy as np
 
+import os
 from mttl.evaluators.ni_evaluator import compute_metrics
+from mttl.evaluators.mmlu_evaluator import swap_model
 from mttl.models.utils import transfer_batch_to_device, EfficientCheckpointModule
 from mttl.utils import logger
+from mttl.vllm_engines.engines import LLMEngineRouge, free_memory
 
 
 def decode(preds, tokenizer):
@@ -17,12 +21,41 @@ def decode(preds, tokenizer):
 
 
 class RougeEvaluator:
-    def __init__(self, datamodule, device="cuda"):
+    def __init__(self, datamodule, device="cuda", use_vllm=False):
         super().__init__()
         self.device = device
         self.dm = datamodule
+        self.use_vllm = use_vllm
         self.tokenizer = datamodule.tokenizer
         self.max_output_length = datamodule.config.max_output_length
+
+    def evaluate_with_vllm(self, model, dataloader, num_batches=None, verbose=True):
+        model_hash = hashlib.sha256()
+        model_hash.update(f"{model.hparams}_{model.model.__class__}".encode())
+
+        # move the model to CPU as VLLM loads its own version of the model
+        state = swap_model(model)
+
+        vllm_model = LLMEngineRouge(
+            model,
+            temp_path=f"{os.environ.get('MTTL_TEMP', '/tmp/merged')}/{model_hash.hexdigest()}/",
+        )
+
+        all_predictions, all_references = vllm_model.eval(
+            dataloader, model.generation_config, self.max_output_length
+        )
+
+        free_memory()
+        del vllm_model
+
+        # move the model back to GPU
+        swap_model(model, state)
+        eval_metrics = compute_metrics(
+            all_predictions, all_references, reduction="none"
+        )
+        all_rougeL = eval_metrics["rougeL"]
+
+        return np.mean(all_rougeL)
 
     def evaluate(self, model, split="val", num_batches=None, verbose=True):
         extra_kwargs = {}
@@ -35,6 +68,10 @@ class RougeEvaluator:
             dataloader = self.dm.val_dataloader()
         else:
             dataloader = self.dm.test_dataloader()
+
+        if self.use_vllm:
+            return self.evaluate_with_vllm(model, dataloader, num_batches, verbose)
+
         pbar = tqdm.tqdm(
             enumerate(dataloader),
             total=len(dataloader),

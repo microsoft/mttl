@@ -16,10 +16,7 @@ class ExpertsMergeConfig(ExpertConfig):
         self.init_ng_oracle = False
         self.subsample_ng_train_set = -1
         self.use_vllm = False
-        self.use_loss = False
         self.regularizer_factor = 0.0
-        self.module_dict = None
-        self.expert_routing = None
         self.n_ng_iterations = 2
         self.n_active_iterations = 1
 
@@ -33,8 +30,14 @@ class ExpertsMergeConfig(ExpertConfig):
 
         self.finetune_new_expert = False
 
+        self.experiment_state_path = None
+        self.expert_routing = "sgd_router"  # sgd
+
     def post_init(self):
         super().post_init()
-        self.finetune_task_name = getattr(
-            mttl.datamodule.flan_tasks, self.finetune_task_name
-        )
+        if self.finetune_task_name is not None:
+            self.finetune_task_name = getattr(
+                mttl.datamodule.flan_tasks,
+                self.finetune_task_name,
+                self.finetune_task_name,
+            )

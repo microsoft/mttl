@@ -6,6 +6,7 @@ import copy
 import wandb
 import numpy as np
 import pandas as pd
+from functools import partial
 import pytorch_lightning as pl
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
@@ -25,37 +26,16 @@ from mttl.utils import logger
 
 
 class TableLogger:
-    """
-    score_base -- score before optimization roung on the module of task
-    score_train -- score after optimization round on the module of task, on the train set
-    score_test -- score after optimization round on the module of task, on the test set
-    """
+    def __init__(self):
+        self.df = pd.DataFrame()
 
-    def __init__(self, columns: list = None):
-        self.columns = (
-            [
-                "act_i",
-                "task",
-                "weights",
-                "score_base_test",
-                "score_base_train",
-                "score_base_valid",
-                "score_train",
-                "score_test",
-                "score_valid",
-                "score_train_max",
-                "score_test_max",
-                "score_valid_max",
-                "score_test_selected",
-                "score_test_fine_tuned",
-                "score_valid_fine_tuned" "score_test_selected_fine_tuned",
-            ]
-            if columns is None
-            else columns
-        )
-        self.df = pd.DataFrame(columns=self.columns)
+    def from_df(self, df):
+        self.df = df
+        self.columns = df.columns
 
     def log(self, row: dict):
+        if self.df is None or len(self.df) == 0:
+            self.df = pd.DataFrame(columns=row.keys())
         self.df.loc[len(self.df.index)] = row
 
     def get_table(self):
@@ -70,13 +50,13 @@ def get_loss(model, evaluator: Evaluator, **kwargs):
     return evaluator.get_loss(model, **kwargs)
 
 
-def save_new_module(output_dir, module, task_name, score):
+def save_new_module(output_dir, module, task_name, postfix=""):
     module_copy = copy.deepcopy(module)
     # make Loras trainable so that they are saved
     module_copy.trainable_param_names = [
         n for n, p in module_copy.named_parameters() if re.match(".*lora.*", n)
     ]
-    dest = output_dir + f"/{task_name}_optimal_weights_{score}"
+    dest = output_dir + f"/{task_name}_{postfix}"
     os.makedirs(dest, exist_ok=True)
     ckpt_path = module_copy.save_pretrained(dest)
     del module_copy
@@ -84,7 +64,7 @@ def save_new_module(output_dir, module, task_name, score):
 
 
 def prepare_evaluator(
-    args: ExpertsMergeConfig, dataset, tasks, split="test", subsample=-1
+    args: ExpertsMergeConfig, dataset, tasks, split=None, subsample=-1
 ):
     if args.eval_metric == "loss":
         EVAL_CLASS = TestLossEvaluator
@@ -109,8 +89,22 @@ def prepare_evaluator(
         train_batch_size=args.train_batch_size,
         predict_batch_size=args.predict_batch_size,
     )
-    evaluator = EVAL_CLASS(datamodule=dm, subsample=subsample, name=tasks, split=split)
-    return evaluator
+    if split is not None:
+        evaluator = EVAL_CLASS(
+            datamodule=dm,
+            subsample=subsample,
+            name=tasks,
+            split=split,
+            use_vllm=args.use_vllm,
+        )
+        return evaluator
+    return partial(
+        EVAL_CLASS,
+        datamodule=dm,
+        subsample=subsample,
+        name=tasks,
+        use_vllm=args.use_vllm,
+    )
 
 
 def init_wandb_logger(args):

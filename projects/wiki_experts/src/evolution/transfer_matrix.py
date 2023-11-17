@@ -12,7 +12,7 @@ from config import ExpertsMergeConfig
 from utils import log_wandb, prepare_evaluator, init_wandb_logger, TableLogger
 
 from evaluators import Evaluator
-from projects.wiki_experts.src.evolution.expert_library import ExpertLibrary
+from projects.wiki_experts.src.expert_library import LocalExpertLibrary
 from mttl.utils import setup_logging, logger
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
@@ -22,19 +22,22 @@ from mttl.vllm_engines.engines import free_memory
 
 
 def produce_transfer_matrix(
-    args: ExpertsMergeConfig, expert_lib: ExpertLibrary, tasks: list
+    args: ExpertsMergeConfig, expert_lib: LocalExpertLibrary, tasks: list
 ):
     """
     Eval each module in expert_lib on each subject in subjects.
     """
     # sort tasks to first include tasks for which modules are available
-    tasks = [t for t in expert_lib.get_experts_for_model(args.model) if t in tasks] + [
-        t for t in tasks if t not in expert_lib.get_experts_for_model(args.model)
+    tasks = [t for t in expert_lib.keys() if t in tasks] + [
+        t for t in tasks if t not in expert_lib.keys()
     ]
 
-    transfer_table = TableLogger(columns=["module"] + tasks)
+    transfer_table = TableLogger()
 
     for task_eval_on in tasks:
+        log_row = {}
+        log_row["module"] = task_eval_on
+
         evaluator: Evaluator = prepare_evaluator(
             args,
             args.dataset_test,
@@ -64,7 +67,7 @@ def produce_transfer_matrix(
 
             scores = evaluator.evaluate(module)
 
-            result[task_eval_on] = scores[task_eval_on]["mean"]
+            log_row[expert_name] = scores[expert_name]["mean"]
 
             all = scores.pop("all")
             log_wandb(scores, f"transfer/{expert_name}")
@@ -73,7 +76,7 @@ def produce_transfer_matrix(
             del module
             free_memory()
 
-        transfer_table.log(result)
+        transfer_table.log(log_row)
         transfer_table.log_table_wandb()
 
     transfer_matrix = transfer_table.df
@@ -101,7 +104,7 @@ def run_eval(args: ExpertsMergeConfig):
 
     print("###### Tasks", args.finetune_task_name)
 
-    expert_lib = ExpertLibrary(modules_dir=args.modules_dir)
+    expert_lib = LocalExpertLibrary(model_name=args.model, modules_dir=args.modules_dir)
 
     transfer_matrix: pd.DataFrame = produce_transfer_matrix(
         args, expert_lib, tasks=args.finetune_task_name

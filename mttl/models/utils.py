@@ -209,7 +209,11 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
                 padding_side=ckpt["hyper_parameters"]["padding_side"],
             )
 
-        model = cls(**ckpt["hyper_parameters"], tokenizer=tokenizer)
+        expert_info = ckpt.get("expert_info", None)
+
+        model = cls(
+            **ckpt["hyper_parameters"], expert_info=expert_info, tokenizer=tokenizer
+        )
         model.load_state_dict(ckpt["state_dict"], strict=False)
         return model
 
@@ -238,10 +242,13 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
             "state_dict": ckpt,
             "hyper_parameters": hparams_allowed,
         }
+        if hasattr(self, "expert_info"):
+            save_package["expert_info"] = self.expert_info.__dict__
 
         output_model_file = os.path.join(save_directory, "checkpoint.ckpt")
         torch.save(save_package, output_model_file)
         logger.info(f"Model weights saved in {output_model_file}")
+        return output_model_file
 
     def load_state_dict(self, ckpt, **kwargs):
         # store params that might have been loaded from a previous checkpoint
