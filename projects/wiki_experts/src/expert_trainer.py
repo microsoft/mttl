@@ -27,15 +27,18 @@ class ExpertTrainer(EfficientCheckpointModule):
         self.model: AutoModelForCausalLM = None
         self.accumulate_metrics_batch = defaultdict(list)
 
-        if "llama" in self.hparams.model:
-            model_object = LlamaForCausalLM.from_pretrained(
-                self.hparams.model,
-                load_in_8bit=self.hparams.load_in_8bit,
-                torch_dtype=torch.bfloat16,
-                device_map="auto",
-            )
-        else:
-            model_object = AutoModelForCausalLM.from_pretrained(self.hparams.model)
+        model_object = kwargs.get("model_object", None)
+
+        if model_object is None:
+            if "llama" in self.hparams.model:
+                model_object = LlamaForCausalLM.from_pretrained(
+                    self.hparams.model,
+                    load_in_8bit=self.hparams.load_in_8bit,
+                    torch_dtype=torch.bfloat16,
+                    device_map="auto",
+                )
+            else:
+                model_object = AutoModelForCausalLM.from_pretrained(self.hparams.model)
 
         if self.hparams.load_in_8bit:
             model_object = prepare_model_for_kbit_training(model_object)

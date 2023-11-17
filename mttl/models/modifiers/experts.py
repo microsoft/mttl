@@ -199,7 +199,9 @@ class ExpertContainer(MergeableAdapter):
 
         if not isinstance(self.layer, nn.Linear):
             raise ValueError(
-                "Expert containers for layers other than nn.Linear have not been implemented."
+                "Expert containers for layers other than nn.Linear have not been implemented, current layer is {}".format(
+                    self.layer.__class__.__name__
+                )
             )
 
         self.info_container = task_id_container
