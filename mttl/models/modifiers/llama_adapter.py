@@ -10,8 +10,8 @@ from mttl.utils import logger
 from mttl.models.modifiers.base import Adapter, ModifierConfig, ModifyMixin
 from mttl.models.modifiers.poly import PolytroponConfig
 from mttl.models.modifiers.base import ModifyMixin, ModifierConfig
-from mttl.models.modifiers.expert_routing import Router
 
+# from mttl.models.modifiers.experts import Router
 
 from transformers.models.llama.modeling_llama import apply_rotary_pos_emb
 
@@ -123,7 +123,7 @@ class KVAdapter(Adapter, ModifyMixin):
         return torch.matmul(adapter_weights, adapter_v)
 
 
-class FusedKVAdapters(KVAdapter, Router):
+class FusedKVAdapters(KVAdapter):  # Router): (circular import)
     """Container class to handle routing and forwarding through multiple KVAdapters"""
 
     def __init__(self, kv_adapters, selector=None):
