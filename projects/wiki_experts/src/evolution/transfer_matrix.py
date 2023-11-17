@@ -34,21 +34,22 @@ def produce_transfer_matrix(
 
     transfer_table = TableLogger(columns=["module"] + tasks)
 
-    for expert_name in expert_lib.get_experts_for_model(args.model):
-        result = {c: 0 for c in transfer_table.columns}
-        result["module"] = expert_name
+    for task_eval_on in tasks:
+        evaluator: Evaluator = prepare_evaluator(
+            args,
+            args.dataset_test,
+            tasks=task_eval_on,
+            split=args.test_split,
+        )
 
-        for task_eval_on in tasks:
+        for expert_name in expert_lib.get_experts_for_model(args.model):
             module_dest = expert_lib.get_expert_path(args.model, expert_name)
+
+            result = {c: 0 for c in transfer_table.columns}
+            result["module"] = expert_name
 
             logger.info(f"################# Evaluating {expert_name} on {task_eval_on}")
 
-            evaluator: Evaluator = prepare_evaluator(
-                args,
-                args.dataset_test,
-                tasks=task_eval_on,
-                split=args.test_split,
-            )
             module = MultiExpertModel(
                 **vars(args),
                 tokenizer=evaluator.datamodule.tokenizer,
@@ -106,6 +107,7 @@ def run_eval(args: ExpertsMergeConfig):
         args, expert_lib, tasks=args.finetune_task_name
     )
     print("Transfer matrix", transfer_matrix)
+    transfer_matrix.to_csv(os.path.join(args.output_dir, "transfer_matrix.csv"))
 
 
 if __name__ == "__main__":
