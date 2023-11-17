@@ -248,7 +248,7 @@ class SkilledLoRA(LoRA):
         return layer_out + adapter_out.to(input.dtype)
 
     @classmethod
-    def parallel_linear_forward(cls, input, loras: list, weights: list[torch.Tensor]):
+    def parallel_linear_forward(cls, input, loras: list, weights: list):
         # loras -- list of loras per example
         # weights -- list of weights for parallel loras
         weights = torch.stack(weights, dim=0)
