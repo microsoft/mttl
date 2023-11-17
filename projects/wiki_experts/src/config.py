@@ -1,5 +1,17 @@
+from dataclasses import dataclass
 from mttl.config import Config
 import os
+
+
+@dataclass
+class ExpertInfo:
+    """
+    Stuff that we want to save about experts but will never be passed from command line
+    """
+
+    parent_node: str = None
+    expert_name: str = None
+    expert_task_name: str = None
 
 
 class ExpertConfig(Config):
@@ -27,7 +39,6 @@ class ExpertConfig(Config):
         self.eval_rougeL_callback_every = 0
         self.test_sets_callbacks = []
 
-        self.parent_node: str = None
         self.use_custom_valid_callback = False  # if True use custom callback to early top on eval loss  instead of lightning callback
 
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")

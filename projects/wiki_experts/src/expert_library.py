@@ -47,5 +47,5 @@ class LocalExpertLibrary(UserDict):
         args_best = self.operator(metrics)
         return experts[args_best]
 
-    def pop(self, task):
-        return self.data.pop(task, None)
+    def pop(self, task, default=None):
+        return self.data.pop(task, default)

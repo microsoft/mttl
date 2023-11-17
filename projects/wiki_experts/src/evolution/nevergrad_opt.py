@@ -91,7 +91,7 @@ def default_l1_regularization(weights):
     return 0.05 * sum_of_squares
 
 
-class RoutingOptimizer:
+class NGRoutingOptimizer:
     def __init__(
         self,
         model: MultiExpertModel,
@@ -217,7 +217,7 @@ if __name__ == "__main__":
 
     _mmlu_get_loss = partial(mmlu_get_loss, use_vllm=use_vllm)
 
-    optimizer = RoutingOptimizer(
+    optimizer = NGRoutingOptimizer(
         model=module,
         modules_2_dest=modules_2_dest,
         dataloader=dm.test_dataloader(),

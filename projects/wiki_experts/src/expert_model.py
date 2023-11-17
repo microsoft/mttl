@@ -4,6 +4,7 @@ from mttl.models.modifiers.routing import RoutingInfo
 from mttl.models.modifiers.experts import add_expert_to_transformer, Router
 from mttl.utils import logger
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
+from projects.wiki_experts.src.graph.module_graph import ModuleGraph
 from typing import Dict
 from mttl.models.modifiers.experts import ExpertContainer
 
@@ -55,7 +56,6 @@ class MultiExpertModel(ExpertTrainer):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        self.selectors: Dict[str, Router] = {}
         self.experts = []
 
     def get_router_weights(self):
@@ -64,7 +64,7 @@ class MultiExpertModel(ExpertTrainer):
             weights[selector.name] = selector.get_routing_weights()
         return weights
 
-    def load_from_graph(self, graph, action="route", **kwargs):
+    def load_from_graph(self, graph: ModuleGraph, action="route", **kwargs):
         for module_name, module_data in graph.create_modules(
             base_hparams=self.hparams, **kwargs
         ).items():
@@ -76,12 +76,9 @@ class MultiExpertModel(ExpertTrainer):
                 module_data.expert_weights,
                 action=action,
                 is_default=module_name == "default",
-                selectors=self.selectors,
             )
             self.experts.append(module_name)
-
-        for _, selector in self.selectors.items():
-            selector.resize_module_logits(self.experts)
+        self.expert_info.parent_node = graph.dumps()
 
     def convert_container_to_expert(self, expert_name):
         loaded_expert = None
@@ -98,6 +95,7 @@ class MultiExpertModel(ExpertTrainer):
     def load_from_module_dict(self, module_dict, action="route"):
         for module_name, destination in module_dict.items():
             self.load_expert(destination, module_name, action=action)
+        self.expert_info.parent_node = ModuleGraph.from_module_dict(module_dict).dumps()
 
     def load_from_graph_string(self, s, action="route"):
         from projects.wiki_experts.src.graph.module_graph import ModuleGraph
@@ -230,11 +228,17 @@ class MultiExpertModel(ExpertTrainer):
 
 
 class RoutedMultiExpertModel(MultiExpertModel):
+    """
+    Class that allows to route to different experts with a learned router from mttl.models.modifiers.experts.Router.
+    """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
         self.selectors = torch.nn.ModuleDict()
-        self.load_from_module_dict(self.hparams.module_dict, action="route")
+        self.graph_string = self.expert_info.parent_node
+        if self.graph_string is not None:
+            self.load_from_graph_string(self.expert_info.parent_node, action="route")
 
     def load_expert(
         self,
@@ -293,6 +297,7 @@ class RoutedMultiExpertModel(MultiExpertModel):
     def load_from_module_dict(self, module_dict, action="route"):
         out = super().load_from_module_dict(module_dict, action)
         self.resize_selector_logits()
+
         return out
 
     def resize_selector_logits(self):
