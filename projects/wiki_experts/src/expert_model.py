@@ -82,7 +82,8 @@ class MultiExpertModel(ExpertTrainer):
             self.experts.append(module_name)
 
         for _, selector in self.selectors.items():
-            selector.resize_module_logits(self.experts)
+            if selector is not None:
+                selector.resize_module_logits(self.experts)
 
     def convert_container_to_expert(self, expert_name):
         loaded_expert = None
@@ -226,7 +227,9 @@ class MultiExpertModel(ExpertTrainer):
                 batch
             )
 
-        generations = self.model.generate(inputs=batch["input_ids"], **kwargs)
+        generations = self.model.generate(
+            inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
+        )
         return generations
 
 
