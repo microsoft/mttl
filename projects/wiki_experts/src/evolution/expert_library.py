@@ -12,9 +12,9 @@ class ExpertLibrary:
     def __init__(self, modules_dir=None, selection="-val", operator=np.argmin):
         self.home_dir = modules_dir
         # searches home and loads all the existing experts with selection criteria
-
         all_checkpoints = glob.glob(f"{self.home_dir}/**/*{selection}/*.ckpt")
         all_checkpoints += glob.glob(f"{self.home_dir}/**/**/*{selection}/*.ckpt")
+        all_checkpoints += glob.glob(f"{self.home_dir}/**/{selection}.ckpt")
 
         self.operator = operator
         # expert per model and task
@@ -47,6 +47,8 @@ class ExpertLibrary:
         experts = self.get_experts(model, task)
         if task == "base":
             return None
+        if len(experts) == 1:
+            return experts[0]
         metrics = [
             float(e.split("/")[-1].replace(".ckpt", "").replace("loss=", ""))
             for e in experts
