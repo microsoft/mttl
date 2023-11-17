@@ -223,7 +223,9 @@ class MultiExpertModel(ExpertTrainer):
                 batch
             )
 
-        generations = self.model.generate(inputs=batch["input_ids"], **kwargs)
+        generations = self.model.generate(
+            inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
+        )
         return generations
 
 
