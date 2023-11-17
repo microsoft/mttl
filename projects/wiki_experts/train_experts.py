@@ -125,7 +125,6 @@ def get_datamodule(args, for_generation=False):
 
 def run_multitask(args: ExpertConfig):
     seed_everything(args.seed, workers=True)
-
     # get directory of the current file
     setup_logging(args.output_dir)
 
@@ -276,6 +275,15 @@ def run_multitask(args: ExpertConfig):
         del module_valid_oracle
         torch.cuda.empty_cache()
 
+        # for best model selected with mmlu/val
+        module_valid_oracle = model_class.load_from_checkpoint(
+            mmmlu_val_cb.last_chkpt
+        ).to("cuda")
+        eval_mmlu(
+            module_valid_oracle, args, mmlu_test_cb.base_perf, chkpt_crit="val_mmlu"
+        )
+        del module_valid_oracle
+        torch.cuda.empty_cache()
     # reload best model before pushing!
     checkpoint = (
         checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
@@ -283,7 +291,8 @@ def run_multitask(args: ExpertConfig):
 
     if checkpoint and scores_init is not None:
         module = model_class.load_from_checkpoint(checkpoint).to("cuda")
-        eval_mmlu(module, args, scores_init, chkpt_criteria=monitor)
+        if args.eval_mmlu_flag is True:
+            eval_mmlu(module, args, mmlu_test_cb.base_perf, chkpt_crit="val_mmlu")
 
     if args.hf_repo_id and checkpoint:
         from projects.wiki_experts.src.expert_model import push_expert_to_hub

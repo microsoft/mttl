@@ -7,10 +7,15 @@ import os
 import copy
 
 from torch.utils.data import DataLoader
-from vllm import LLM, SamplingParams
-from vllm.model_executor.parallel_utils.parallel_state import destroy_model_parallel
 from mttl.utils import logger
 from mttl.models.modifiers.base import MergeableAdapter
+
+try:
+    from vllm import LLM, SamplingParams
+    from vllm.model_executor.parallel_utils.parallel_state import destroy_model_parallel
+except ImportError:
+    LLM = object
+    logger.warning("VLLM is not installed. Please install it to use LLMEngine.")
 
 
 def save_merged_model(model, model_path, hf_path="/tmp/merged"):

@@ -80,7 +80,11 @@ class DefaultCollator:
                 sources_[i] = sources_[i][:-1]
                 labels_[i] = " " + labels_[i]
 
-            if sources_[i][-1] not in [" ", "\n"] and labels_[i][0] not in [" ", "\n"]:
+            if (
+                sources_[i][-1] not in [" ", "\n"]
+                and len(labels[i]) > 0
+                and labels_[i][0] not in [" ", "\n"]
+            ):
                 labels_[i] = " " + labels_[i]
 
         # adds the eos token
