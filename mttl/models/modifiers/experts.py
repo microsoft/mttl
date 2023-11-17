@@ -28,10 +28,10 @@ def register_multi_expert_selector(name):
 
 
 def get_selector(config, **kwargs):
-    if config.expert_routing:
-        if config.expert_routing not in MULTI_EXPERT_ROUTERS:
-            raise ValueError(f"Cannot find selector: {config.expert_routing}")
-        return MULTI_EXPERT_ROUTERS[config.expert_routing](config, **kwargs)
+    if config.router_selector:
+        if config.router_selector not in MULTI_EXPERT_ROUTERS:
+            raise ValueError(f"Cannot find selector: {config.router_selector}")
+        return MULTI_EXPERT_ROUTERS[config.router_selector](config, **kwargs)
     else:
         return None
 
@@ -53,13 +53,17 @@ class Router:
 def _extract_identifier(string, match_on="coder"):
     """Returns a unique identifier for the "chunk" of layers sharing the
     same underlying selector
-    # e.g. 'block' : 'encoder.block.0.layer.0.SelfAttention' -> 'encoder.block.0'
+    e.g. 'block' : 'encoder.block.0.layer.0.SelfAttention' -> 'encoder.block.0'
     """
+    assert match_on in [
+        "coarsegrained",
+        "finegrained",
+    ], "For expert router only coarsegrained and finegrained are supported"
 
     if match_on == "finegrained":
-        return string
+        return string.replace(".", "_")
     if match_on == "coarsegrained":
-        return " "
+        return "shared"
     return string
 
 
@@ -69,14 +73,12 @@ class Multi_ExpertRouter(torch.nn.Module, Router):
     Implements routing at a per-layer or pe-model level
     """
 
-    def __init__(self, config, expert_names=[]):
+    def __init__(self, config):
         super().__init__()
         self.config = config
-        self.expert_names: list = expert_names
+        self.expert_names: list = []
 
-        self.module_logits = nn.Parameter(
-            torch.empty(len(expert_names)).uniform_(-1e-3, 1e-3)
-        )
+        self.module_logits = nn.Parameter(torch.empty(1).uniform_(-1e-3, 1e-3))
 
         self.__layer_name__ = f"poly_router"
 
@@ -131,13 +133,11 @@ def add_expert_to_transformer(
                         )
                         if identifier not in selectors.keys():
                             selectors[identifier] = get_selector(config)
-                            if config.expert_routing:
+                            if config.router_selector:
                                 selectors[identifier].__layer_name__ = (
                                     identifier + ".selector"
                                 )
-                        selector = None
-                        if identifier in selectors.keys():
-                            selector = selectors[identifier]
+                        selector = selectors[identifier]
 
                     if type(layer) != ExpertContainer:
                         # create an expert lora container
@@ -199,7 +199,9 @@ class ExpertContainer(MergeableAdapter):
 
         if not isinstance(self.layer, nn.Linear):
             raise ValueError(
-                "Expert containers for layers other than nn.Linear have not been implemented."
+                "Expert containers for layers other than nn.Linear have not been implemented, current layer is {}".format(
+                    self.layer.__class__.__name__
+                )
             )
 
         self.info_container = task_id_container

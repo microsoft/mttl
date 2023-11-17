@@ -8,13 +8,9 @@ import pytorch_lightning as pl
 from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
-import json
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
-
-from projects.wiki_experts.src.expert_trainer import ExpertTrainer
-from projects.wiki_experts.src.graph.module_graph import ModuleGraph
 from mttl.datamodule.mmlu_data_module import MMLUDataModule
 from projects.wiki_experts.src.expert_model import (
     MultiExpertModel,
@@ -22,13 +18,14 @@ from projects.wiki_experts.src.expert_model import (
 )
 from mttl.utils import get_mlf_logger, setup_logging, logger
 from projects.wiki_experts.src.config import ExpertConfig
-from projects.wiki_experts.experts_merge.config import ExpertsMergeConfig
+from config import ExpertsMergeConfig
 from typing import List
 
 
 class SimpleLogger(pl.loggers.logger.DummyLogger):
     def __init__(self, output_dir):
         self.metrics = {}
+        os.makedirs(output_dir, exist_ok=True)
         self.output_file = os.path.join(output_dir, "metrics.json")
 
     def log_metrics(self, metrics, step=None):
@@ -49,40 +46,23 @@ def save_new_module(module_copy, args):
     return checkpoint
 
 
-def finetune_expert(
-    args: ExpertsMergeConfig, dm, module_dest, val_check_interval, loggers: List = []
+def train_router(
+    args: ExpertsMergeConfig,
+    dm,
+    module_dict: dict,
+    loggers: List = [],
+    val_check_interval=None,
+    logging_prefix="",
 ):
     seed_everything(args.seed, workers=True)
-    # get directory of the current file
-    setup_logging(args.output_dir)
-    logger.info("Args: {}".format(args.to_json()))
 
-    if args.hf_token_hub:
-        login(token=args.hf_token_hub)
-
-    # legit logging
-    exp_name = os.environ.get("AMLT_JOB_NAME", args.exp_name)
-    if len(loggers) == 0:
-        loggers = []
-        if os.environ.get("WANDB_API_KEY") or args.wandb_project:
-            import wandb
-
-            project = (
-                "wiki_experts" if args.wandb_project is None else args.wandb_project
-            )
-            args.exp_name = "dev_run" if args.exp_name is None else args.exp_name
-            project = os.environ.get("WANDB_PROJECT", project)
-            wandb_logger = pl.loggers.WandbLogger(
-                project=project,
-                name=exp_name,  # , config=args_
-                settings=wandb.Settings(start_method="fork"),
-            )
-            wandb_logger.experiment.save("*.py")
-            loggers.append(wandb_logger)
-
-    module = ExpertTrainer(**vars(args), tokenizer=dm.tokenizer, device_map="auto")
-    module.from_pretrained(module_dest)
-    module.to("cuda")
+    module = RoutedMultiExpertModel(
+        **vars(args),
+        tokenizer=dm.tokenizer,
+        device_map="auto",
+        logging_prefix=logging_prefix,
+    )
+    module.load_from_module_dict(module_dict)
     ##############################
 
     mlf_logger = get_mlf_logger()
@@ -98,7 +78,7 @@ def finetune_expert(
     # get metric monitors for models
     callbacks = []
 
-    monitor = "val/loss"
+    monitor = f"{logging_prefix}val/loss"
     mode = "min"
     model_name = args.model.replace("/", "_")
 
@@ -112,6 +92,7 @@ def finetune_expert(
         mode=mode,
     )
     callbacks.append(checkpoint_callback)
+    val_check_interval = val_check_interval or args.gradient_accumulation_steps
 
     trainer = Trainer(
         devices=-1,
@@ -140,20 +121,29 @@ def finetune_expert(
     )
     del module
     torch.cuda.empty_cache()
-    return checkpoint
+
+    module = RoutedMultiExpertModel.load_from_checkpoint(checkpoint)
+    weights = module.get_router_weights()
+    module.merge_experts_together()
+    checkpoint = save_new_module(module, args)
+
+    del module
+    torch.cuda.empty_cache()
+    return weights, checkpoint
 
 
 if __name__ == "__main__":
-    args = ExpertsMergeConfig.parse()
-    from utils import get_module_graph
+    args = ExpertsMergeConfig()
 
-    graph, module_dict, subjects = get_module_graph(args)
+    args.model = "meta-llama/Llama-2-13b-hf"
+    args.router_granularity = "coarsegrained"
+    args.finetune_task_name = "security_studies"
+    args.model_family = "gpt"
 
     # add MMLU val data to validaiton set
     dm = MMLUDataModule(args, for_generation=False)
     args.n_tasks = len(dm.task_to_id) if hasattr(dm, "task_to_id") else 0
     args.num_train_epochs = 1
-    dm.train_dataset = dm.dev_dataset
-
-    weights, checkpoint = finetune_expert(args, dm=dm, graph=graph)
+    module_dict = {"base": "sordonia/expert_llama2_13b_security_studies"}
+    weights, checkpoint = train_router(args, dm=dm, module_dict=module_dict)
     print(weights, checkpoint)

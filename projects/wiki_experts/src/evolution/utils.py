@@ -6,6 +6,7 @@ import copy
 import wandb
 import numpy as np
 import pandas as pd
+from functools import partial
 import pytorch_lightning as pl
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
@@ -25,45 +26,16 @@ from mttl.utils import logger
 
 
 class TableLogger:
-    """
-    score_base -- score before optimization roung on the module of task
-    score_train -- score after optimization round on the module of task, on the train set
-    score_test -- score after optimization round on the module of task, on the test set
-    """
-
-    def __init__(self, columns: list = None):
-        self.columns = (
-            [
-                "act_i",
-                "task",
-                "weights",
-                "score_base_test",
-                "score_base_train",
-                "score_base_valid",
-                "score_train",
-                "score_test",
-                "score_valid",
-                "score_train_max",
-                "score_test_max",
-                "score_valid_max",
-                "score_test_selected",
-                "score_test_fine_tuned",
-                "score_valid_fine_tuned" "score_test_selected_fine_tuned",
-            ]
-            if columns is None
-            else columns
-        )
-        self.df = pd.DataFrame(columns=self.columns)
-
-    def tasks_in_active_iteration(self, act_i):
-        tasks_in_active_iteration = self.df[self.df["act_i"] == act_i]["task"].tolist()
-        return tasks_in_active_iteration
+    def __init__(self):
+        self.df = pd.DataFrame()
 
     def from_df(self, df):
         self.df = df
         self.columns = df.columns
 
     def log(self, row: dict):
+        if self.df is None or len(self.df) == 0:
+            self.df = pd.DataFrame(columns=row.keys())
         self.df.loc[len(self.df.index)] = row
 
     def get_table(self):
@@ -92,7 +64,7 @@ def save_new_module(output_dir, module, task_name, postfix=""):
 
 
 def prepare_evaluator(
-    args: ExpertsMergeConfig, dataset, tasks, split="test", subsample=-1
+    args: ExpertsMergeConfig, dataset, tasks, split=None, subsample=-1
 ):
     if args.eval_metric == "loss":
         EVAL_CLASS = TestLossEvaluator
@@ -117,14 +89,22 @@ def prepare_evaluator(
         train_batch_size=args.train_batch_size,
         predict_batch_size=args.predict_batch_size,
     )
-    evaluator = EVAL_CLASS(
+    if split is not None:
+        evaluator = EVAL_CLASS(
+            datamodule=dm,
+            subsample=subsample,
+            name=tasks,
+            split=split,
+            use_vllm=args.use_vllm,
+        )
+        return evaluator
+    return partial(
+        EVAL_CLASS,
         datamodule=dm,
         subsample=subsample,
         name=tasks,
-        split=split,
         use_vllm=args.use_vllm,
     )
-    return evaluator
 
 
 def init_wandb_logger(args):
