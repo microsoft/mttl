@@ -32,11 +32,11 @@ def produce_transfer_matrix(
         t for t in tasks if t not in expert_lib.keys()
     ]
 
-    transfer_table = TableLogger(columns=["module"] + tasks)
+    transfer_table = TableLogger()
 
     for expert_name in expert_lib.keys():
-        result = {c: 0 for c in transfer_table.columns}
-        result["module"] = expert_name
+        log_row = {}
+        log_row["module"] = expert_name
 
         for task_eval_on in tasks:
             module_dest = expert_lib[expert_name]
@@ -63,7 +63,7 @@ def produce_transfer_matrix(
 
             scores = evaluator.evaluate(module)
 
-            result[task_eval_on] = scores[task_eval_on]["mean"]
+            log_row[task_eval_on] = scores[task_eval_on]["mean"]
 
             all = scores.pop("all")
             log_wandb(scores, f"transfer/{expert_name}")
@@ -72,7 +72,7 @@ def produce_transfer_matrix(
             del module
             free_memory()
 
-        transfer_table.log(result)
+        transfer_table.log(log_row)
         transfer_table.log_table_wandb()
 
     transfer_matrix = transfer_table.df
