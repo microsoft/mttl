@@ -1,8 +1,4 @@
-import pytest
 import numpy as np
-from pathlib import Path
-from mttl.config import Config
-from unittest.mock import MagicMock
 from tempfile import TemporaryDirectory
 from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
@@ -45,9 +41,7 @@ class TestNGRoutingOptimizer:
 
         get_loss = lambda *args, **kwargs: 0.0
 
-        # create a mock modules_2_dest dictionary
         modules_2_dest = {"module1": checkpoint}
-
         model_object = LlamaForCausalLM(small_config)
         config.model_modifier = None
         model = MultiExpertModel(
