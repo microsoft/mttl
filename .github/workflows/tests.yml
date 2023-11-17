@@ -1,9 +1,8 @@
 name: "Tests"
 
 on:
-  push:
-    branches:
-      - '*'
+  pull_request:
+    types: [opened, reopened]
   schedule:
     - cron: '37 20 * * 3'
 
