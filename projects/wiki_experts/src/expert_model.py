@@ -79,14 +79,10 @@ class MultiExpertModel(ExpertTrainer):
                 module_data.expert_weights,
                 action=action,
                 is_default=module_name == "default",
-                selectors=self.selectors,
                 config=self.hparams,
             )
             self.experts.append(module_name)
-
-        for _, selector in self.selectors.items():
-            if selector is not None:
-                selector.resize_module_logits(self.experts)
+        self.expert_info.parent_node = graph.dumps()
 
     def convert_container_to_expert(self, expert_name):
         loaded_expert = None

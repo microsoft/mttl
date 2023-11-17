@@ -45,11 +45,8 @@ def produce_transfer_matrix(
             split=args.test_split,
         )
 
-        for expert_name in expert_lib.get_experts_for_model(args.model):
-            module_dest = expert_lib.get_expert_path(args.model, expert_name)
-
-            result = {c: 0 for c in transfer_table.columns}
-            result["module"] = expert_name
+        for expert_name in expert_lib.keys():
+            module_dest = expert_lib[expert_name]
 
             logger.info(f"################# Evaluating {expert_name} on {task_eval_on}")
 
