@@ -26,7 +26,7 @@ def register_multi_expert_selector(name):
 
 class Selector:
     @abstractmethod
-    def forward(self, input, **kwargs) -> list[Dict[str, Any]]:
+    def forward(self, input, **kwargs) -> list:
         pass
 
     @abstractmethod
