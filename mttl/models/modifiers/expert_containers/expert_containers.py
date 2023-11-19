@@ -114,7 +114,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer):
                 self.merged_expert_names.append(name)
                 self.experts.pop(name)
 
-    def route(self, input, routing: list[dict[str:float]]):
+    def route(self, input, routing: list):
         load_experts = []
         weights = []
 
@@ -141,6 +141,6 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer):
         return SkilledLoRA.parallel_linear_forward(input, load_experts, weights)
 
     def forward(self, input, **kwargs):
-        weights: list[dict[str:float]] = self.selector(input)
+        weights: list = self.selector(input)
         output = self.route(input, weights)
         return output
