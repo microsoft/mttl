@@ -393,3 +393,28 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
         # FIX for enabling gradient of the auxiliary loss
 
     return model
+
+
+def model_loader_helper(model_name, device_map="auto", load_in_8bit=False):
+    from transformers import LlamaForCausalLM, AutoModelForCausalLM
+
+    if "llama" in model_name:
+        model_object = LlamaForCausalLM.from_pretrained(
+            model_name,
+            load_in_8bit=load_in_8bit,
+            torch_dtype=torch.bfloat16,
+            device_map=device_map,
+        )
+    elif "phi-2" in model_name:
+        model_object = AutoModelForCausalLM.from_pretrained(
+            os.environ["PHI_PATH"],
+            load_in_8bit=load_in_8bit,
+            torch_dtype=torch.bfloat16,
+            device_map=device_map,
+            trust_remote_code=True,
+        )
+    else:
+        model_object = AutoModelForCausalLM.from_pretrained(
+            model_name, device_map=device_map
+        )
+    return model_object
