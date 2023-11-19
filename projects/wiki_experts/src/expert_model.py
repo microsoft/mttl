@@ -57,7 +57,14 @@ def push_expert_to_hub(
 
 
 class MultiExpertModel(ExpertTrainer):
+    """
+    MultiExpert models handels multiple experts with ExpertContainer and allows to route to different experts.
+    You can add modifiers using one of the 'self.modify_weith...' methods.
+    """
+
     def __init__(self, **kwargs: dict):
+        # we dont use any  model modifier for MultiExpertModel model by default.
+        # If you want to use a model modifier, use one of the 'self.modify_weith...' methods.
         kwargs.pop("model_modifier", None)
         super().__init__(model_modifier=None, **kwargs)
 
@@ -99,7 +106,12 @@ class MultiExpertModel(ExpertTrainer):
 
     def load_from_module_dict(self, module_dict, action="route"):
         for module_name, destination in module_dict.items():
-            self.load_expert(destination, module_name, action=action)
+            self.load_expert(
+                destination,
+                module_name,
+                action=action,
+                is_default=module_name == "default",
+            )
         self.expert_info.parent_node = ModuleGraph.from_module_dict(module_dict).dumps()
 
     def load_from_graph_string(self, s, action="route"):
@@ -364,18 +376,6 @@ class RoutedMultiExpertModel(MultiExpertModel):
                 config=self.hparams,
             )
             self.experts.append(module_name)
-        self.resize_selector_logits()
-
-    def load_from_module_dict(self, module_dict, action="route"):
-        out = super().load_from_module_dict(module_dict, action)
-        self.resize_selector_logits()
-
-        return out
-
-    def resize_selector_logits(self):
-        for _, selector in self.selectors.items():
-            if selector:
-                selector.add_experts(self.experts)
 
     def get_router_weights(self):
         weights = {}

@@ -33,12 +33,12 @@ class Selector:
     def get_routing_weights(self):
         pass
 
-    @abstractmethod
-    def add_experts(self, expert_names: list):
-        pass
-
     @abstractproperty
     def name(self):
+        pass
+
+    @abstractmethod
+    def add_expert(self, expert_name: str):
         pass
 
 
@@ -58,10 +58,8 @@ class MultiExpertSelector(torch.nn.Module, Selector):
         self.__layer_name__ = f"poly_router"
 
     def add_experts(self, expet_names: list):
-        self.expert_names += expet_names
-        self.module_logits.data = torch.empty(len(self.expert_names)).uniform_(
-            -1e-3, 1e-3
-        )
+        for expert_name in expet_names:
+            self.add_expert(expert_name)
 
     @property
     def name(self):
@@ -75,6 +73,13 @@ class MultiExpertSelector(torch.nn.Module, Selector):
     def get_routing_weights(self):
         return self.forward()[0]
 
+    def add_expert(self, expert_name: str):
+        if expert_name not in self.expert_names:
+            self.expert_names.append(expert_name)
+            self.module_logits.data = torch.empty(len(self.expert_names)).uniform_(
+                -1e-3, 1e-3
+            )
+
 
 @register_multi_expert_selector("task_selector")
 class TaskNameSelector(torch.nn.Module, Selector):
@@ -82,14 +87,32 @@ class TaskNameSelector(torch.nn.Module, Selector):
         super().__init__()
         self.info_container = info_container
         self.__layer_name__ = f"task_selector"
+        self.expert_names = []
+        self.default_expert_name = None
 
     def forward(self, *args, **kwargs):
         task_names = self.info_container["routing_infos"].task_names
+
+        if (
+            any(task_name not in self.expert_names for task_name in task_names)
+            and not self.default_expert_name
+            and len(self.expert_names)
+        ):
+            raise ValueError(
+                "Experts for all tasks have not been loaded! Set a default expert?"
+            )
+
         routing_weights = [{task_name: 1.0} for task_name in task_names]
+
         return routing_weights
 
-    def add_experts(self, expert_names: list):
-        pass
+    def add_expert(self, expert_name: list):
+        if expert_name not in self.expert_names:
+            self.expert_names.append(expert_name)
+
+    def add_experts(self, expet_names: list):
+        for expert_name in expet_names:
+            self.add_expert(expert_name)
 
     @property
     def name(self):

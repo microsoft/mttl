@@ -77,9 +77,19 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer):
                 raise NotImplementedError("Merging experts only supports LoRA experts.")
         else:
             # we keep track of the expert weights
+            if name in self.experts:
+                raise ValueError("An expert with name {} already exists.".format(name))
             self.experts[name] = expert_module
+
         if is_default:
             self.default_expert_name = name
+
+        self.add_expert_to_selector(name)
+
+    def add_expert_to_selector(self, expert_name: str):
+        if expert_name in self.experts:
+            self.selector.add_expert(expert_name)
+            self.selector.default_expert_name = self.default_expert_name
 
     def merge_experts_together(self, weights=None):
         """
@@ -140,7 +150,15 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer):
             weights.append(torch.tensor(ws))
         return SkilledLoRA.parallel_linear_forward(input, load_experts, weights)
 
+    def __getitem__(self, key):
+        return self.experts[key]
+
+    def __len__(self):
+        return len(self.experts)
+
     def forward(self, input, **kwargs):
-        weights: list = self.selector(input)
-        output = self.route(input, weights)
-        return output
+        if len(self.experts) > 0:
+            weights: list = self.selector(input)
+            output = self.route(input, weights)
+            return output
+        return self.layer(input)
