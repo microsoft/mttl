@@ -196,7 +196,7 @@ class MMLUEvaluator(object):
 
 @click.command()
 @click.argument("hf_model")
-@click.option("task_name", default=None)
+@click.option("--task_name", default=None)
 def evaluate_mmlu(hf_model, task_name=None):
     from mttl.datamodule.mmlu_data_module import MMLUDataConfig
     from mttl.models.utils import model_loader_helper
