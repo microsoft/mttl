@@ -1,14 +1,15 @@
 import torch
 
 from mttl.models.modifiers.routing import RoutingInfo
-from mttl.models.modifiers.experts import add_expert_to_transformer, Router
 from mttl.utils import logger
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.graph.module_graph import ModuleGraph
 from typing import Dict
 from projects.wiki_experts.src.ranker.adapter_ranker import ExpertRanker
 from projects.wiki_experts.src.ranker.classification_module import ids_to_tasks_names
-from mttl.models.modifiers.experts import ExpertContainer
+from mttl.models.modifiers.expert_containers import ExpertContainer
+from mttl.models.modifiers.expert_containers import Selector
+from mttl.models.modifiers.expert_containers import add_expert_to_transformer
 import numpy as np
 
 
@@ -56,8 +57,16 @@ def push_expert_to_hub(
 
 
 class MultiExpertModel(ExpertTrainer):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    """
+    MultiExpert models handels multiple experts with ExpertContainer and allows to route to different experts.
+    You can add modifiers using one of the 'self.modify_weith...' methods.
+    """
+
+    def __init__(self, **kwargs: dict):
+        # we dont use any  model modifier for MultiExpertModel model by default.
+        # If you want to use a model modifier, use one of the 'self.modify_weith...' methods.
+        kwargs.pop("model_modifier", None)
+        super().__init__(model_modifier=None, **kwargs)
 
         self.experts = []
 
@@ -97,7 +106,12 @@ class MultiExpertModel(ExpertTrainer):
 
     def load_from_module_dict(self, module_dict, action="route"):
         for module_name, destination in module_dict.items():
-            self.load_expert(destination, module_name, action=action)
+            self.load_expert(
+                destination,
+                module_name,
+                action=action,
+                is_default=module_name == "default",
+            )
         self.expert_info.parent_node = ModuleGraph.from_module_dict(module_dict).dumps()
 
     def load_from_graph_string(self, s, action="route"):
@@ -307,7 +321,7 @@ class RoutedMultiExpertModel(MultiExpertModel):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        self.selectors = torch.nn.ModuleDict()
+        self.selectors: Dict[str:Selector] = torch.nn.ModuleDict()
         self.graph_string = self.expert_info.parent_node
         if self.graph_string is not None:
             self.load_from_graph_string(self.expert_info.parent_node, action="route")
@@ -364,18 +378,6 @@ class RoutedMultiExpertModel(MultiExpertModel):
                 config=self.hparams,
             )
             self.experts.append(module_name)
-        self.resize_selector_logits()
-
-    def load_from_module_dict(self, module_dict, action="route"):
-        out = super().load_from_module_dict(module_dict, action)
-        self.resize_selector_logits()
-
-        return out
-
-    def resize_selector_logits(self):
-        for _, selector in self.selectors.items():
-            if selector:
-                selector.resize_module_logits(self.experts)
 
     def get_router_weights(self):
         weights = {}

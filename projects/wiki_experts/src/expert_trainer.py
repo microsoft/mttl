@@ -19,7 +19,7 @@ class ExpertTrainer(EfficientCheckpointModule):
         super().__init__(**kwargs)
 
         # log hyperparameters
-        self.save_hyperparameters(ignore=["tokenizer", "model_object"])
+        self.save_hyperparameters(kwargs, ignore=["tokenizer", "model_object"])
 
         self.tokenizer = kwargs["tokenizer"]
         self.expert_info = ExpertInfo(**kwargs.get("expert_info", {}))
