@@ -4,6 +4,7 @@ from projects.wiki_experts.src.ranker.classification_module import (
     ClassificationConfig,
 )
 from projects.wiki_experts.src.ranker.classifer_ranker import Classifer
+from projects.wiki_experts.src.ranker.clip_ranker import CLIPRanker
 from sentence_transformers import SentenceTransformer
 from huggingface_hub import hf_hub_download
 from projects.wiki_experts.src.config import ExpertConfig
@@ -20,6 +21,16 @@ class ExpertRanker:
         self.classifer_ckpt = os.environ.get("CLASSIFER_CKPT")
         self.classifer_repo_id = classifer_repo_id
         self.predict_batch_size = predict_batch_size
+
+    def get_clip_ranker(self):
+        self.clip_ckpt = os.environ.get("CLIP_CKPT", None)
+        if self.clip_ckpt is None:
+            raise ValueError(
+                "Please provide a clip_ckpt or set the CLIP_CKPT environment variable"
+            )
+        clip_ranker = CLIPRanker().to(device)
+        clip_ranker.load_state_dict(torch.load(self.clip_ckpt)["state_dict"])
+        return clip_ranker
 
     # get a single instance of the classifer
     def get_classifer(

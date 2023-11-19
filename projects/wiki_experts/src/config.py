@@ -290,6 +290,7 @@ class ExpertConfig(Config):
         # training classfier routing
         self.num_labels = 246
         self.classifer_repo_id = None
+        self.retrieval_model = "classifer"
 
     def post_init(self):
         if self.micro_batch_size is None:

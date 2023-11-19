@@ -4,12 +4,63 @@ from projects.wiki_experts.src.ranker.classification_module import (
     ClassificationDataModule,
     ClassificationConfig,
 )
-from projects.wiki_experts.src.ranker.classifer_ranker import Classifier
+
+from projects.wiki_experts.src.ranker.classifer_ranker import Classifer
 from projects.wiki_experts.src.config import ExpertConfig
+from projects.wiki_experts.src.ranker.clip_ranker import CLIPRanker
+from projects.wiki_experts.src.ranker.clip_data_module import (
+    CLIPExpertsDatamodule,
+    CLIPExpertsConfig,
+)
 import os
 
 
-def train_model(args):
+def train_clip(args):
+    wandb_logger = None
+    if os.environ.get("WANDB_API_KEY") or args.wandb_project:
+        import wandb
+
+        project = os.environ.get("WANDB_PROJECT", "wiki_experts")
+        project = args.wandb_project if args.wandb_project is not None else project
+        args.exp_name = "dev_run" if args.exp_name is None else args.exp_name
+        wandb_logger = pl.loggers.WandbLogger(
+            project=project,
+            name=args.exp_name,  # , config=args_
+            settings=wandb.Settings(start_method="fork"),
+        )
+        wandb_logger.experiment.save("*.py")
+        wandb_logger.experiment.save("*/*.py")
+    model = CLIPRanker()
+
+    # test the model
+    dataconfig = CLIPExpertsConfig(model="EleutherAI/gpt-neo-125m")
+    datamodule = CLIPExpertsDatamodule(dataconfig)
+
+    # add model checkpoint
+    checkpoint_callback = pl.callbacks.ModelCheckpoint(
+        monitor="val/loss_epoch",
+        dirpath="clip_ranker/",
+        filename="clip-{epoch:02d}-{val/loss:.2f}",
+        save_top_k=1,
+        mode="min",
+    )
+
+    trainer = pl.Trainer(
+        max_epochs=args.num_train_epochs,
+        accelerator="gpu",
+        callbacks=[checkpoint_callback],
+        devices=1,
+        logger=wandb_logger,
+        val_check_interval=0.25,
+        # limit_val_batches=10,
+        # limit_train_batches=10,
+    )
+    trainer.fit(model, datamodule)
+    if wandb_logger:
+        wandb_logger.experiment.finish()
+
+
+def train_classifer(args):
     # using wandb project
     wandb_logger = None
     if os.environ.get("WANDB_API_KEY") or args.wandb_project:
@@ -44,7 +95,7 @@ def train_model(args):
     )
     # train the classifier
     datamodule = ClassificationDataModule(config)
-    classifier = Classifier(text_encoder, num_labels=args.num_labels)
+    classifier = Classifer(text_encoder, num_labels=args.num_labels)
 
     # add model checkpoint
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
@@ -69,4 +120,7 @@ def train_model(args):
 
 if __name__ == "__main__":
     args = ExpertConfig.parse()
-    train_model(args)
+    if args.retrieval_model == "classifier":
+        train_classifer(args)
+    elif args.retrieval_model == "clip":
+        train_clip(args)

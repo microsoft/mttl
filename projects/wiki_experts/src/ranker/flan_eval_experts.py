@@ -7,7 +7,10 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from mttl.utils import setup_logging, logger
 
 # register models
-from projects.wiki_experts.src.expert_model import MultiExpertModelRanker
+from projects.wiki_experts.src.expert_model import (
+    MultiExpertModelRanker,
+    MultiExpertModelClipRanker,
+)
 from projects.wiki_experts.src.config import ExpertConfig
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
 
@@ -85,13 +88,26 @@ def run_eval(args):
             dataset="sordonia/flan-10k-flat",
             model="EleutherAI/gpt-neo-125m",
             finetune_task_name=configuration,
+            predict_batch_size=64,
         ),
         for_generation=True,
     )
 
     evaluator = RougeEvaluator(data_module)
     # load module
-    module = MultiExpertModelRanker(**vars(args), tokenizer=data_module.tokenizer)
+    if args.retrieval_model == "clip":
+        print("Using clip model")
+        module = MultiExpertModelClipRanker(
+            **vars(args),
+            tokenizer=data_module.tokenizer,
+        )
+    else:
+        print("Using classifer model")
+        module = MultiExpertModelRanker(
+            **vars(args),
+            tokenizer=data_module.tokenizer,
+        )
+
     if args.load_module is not None:
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:
@@ -101,7 +117,7 @@ def run_eval(args):
 
     module.to("cuda")
     # evaluate all the category
-    rouge = evaluator.evaluate(module, split="test")
+    rouge = evaluator.evaluate(module, split="test", verbose=False)
 
     logger.info("Flan rouge: {}".format(rouge))
     del module

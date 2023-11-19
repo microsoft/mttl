@@ -232,10 +232,14 @@ class MultiExpertModel(ExpertTrainer):
 class MultiExpertModelRanker(MultiExpertModel):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.classifier = ExpertRanker(
-            num_labels=kwargs["num_labels"],
-            classifer_repo_id=kwargs["classifer_repo_id"],
-        ).get_classifer()
+        if (
+            kwargs["routing"] == "retrieval"
+            and kwargs["retrieval_model"] == "classifer"
+        ):
+            self.classifier = ExpertRanker(
+                num_labels=kwargs["num_labels"],
+                classifer_repo_id=kwargs["classifer_repo_id"],
+            ).get_classifer()
 
     def get_predicted_experts(self, batch):
         if "inputs" in batch:
@@ -287,7 +291,7 @@ class MultiExpertModelRanker(MultiExpertModel):
                 self.experts, batch["input_ids"].shape[0], replace=True
             ).tolist()
         elif self.hparams.routing == "retrieval":
-            logger.info("retrieval routing")
+            logger.info(f"retrieval routing with {self.hparams.retrieval_model}")
             batch["task_names"] = self.expert_retrieval(batch)
 
         if hasattr(self.model, "task_id_container"):
@@ -297,6 +301,24 @@ class MultiExpertModelRanker(MultiExpertModel):
 
         generations = self.model.generate(inputs=batch["input_ids"], **kwargs)
         return generations
+
+
+class MultiExpertModelClipRanker(MultiExpertModelRanker):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if kwargs["retrieval_model"] == "clip":
+            self.clip_ranker = ExpertRanker(
+                num_labels=kwargs["num_labels"],
+                classifer_repo_id=kwargs["classifer_repo_id"],
+            ).get_clip_ranker()
+            self.expert_embeddings = self.clip_ranker.get_expert_embeddings()
+
+    def get_predicted_experts(self, batch):
+        # ToDo. give the input and return the experts.
+        experts_prediction = self.clip_ranker.predict_experts_using_clip(
+            batch, self.expert_embeddings
+        )
+        return experts_prediction
 
 
 class RoutedMultiExpertModel(MultiExpertModel):
