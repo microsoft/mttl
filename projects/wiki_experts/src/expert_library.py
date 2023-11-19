@@ -131,14 +131,16 @@ class HFExpertLibrary(UserDict):
                 )
             )
             buffer.write(
-                f"| Expert Name | Trained on | Adapter Type |\n".encode("utf-8")
+                f"| Expert Name | Base Model | Trained on | Adapter Type |\n".encode(
+                    "utf-8"
+                )
             )
-            buffer.write(f"| --- | --- | --- |\n".encode("utf-8"))
+            buffer.write(f"| --- | --- | --- | --- |\n".encode("utf-8"))
             for expert_name, expert_dump in zip(
                 library_dump["expert_name"], library_dump["expert_dump"]
             ):
                 buffer.write(
-                    f"| {expert_name} | {expert_dump.expert_config.dataset}/{expert_dump.expert_config.finetune_task_name} | {expert_dump.expert_config.model_modifier} |\n".encode(
+                    f"| {expert_name} | {expert_dump.expert_config.model} | {expert_dump.expert_config.dataset}/{expert_dump.expert_config.finetune_task_name} | {expert_dump.expert_config.model_modifier} |\n".encode(
                         "utf-8"
                     )
                 )
@@ -212,4 +214,4 @@ if __name__ == "__main__":
             get_checkpoint_path(directory),
         )
         break
-    library.close()
+    library.flush()

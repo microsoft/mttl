@@ -9,6 +9,7 @@ def test_expert_lib():
     library = HFExpertLibrary("sordonia/test-library-for-neo-125m")
     assert len(library) == 1
     assert not library._sliced
+    assert not library._modified
 
     # expert already there
     with pytest.raises(ValueError):
@@ -16,6 +17,7 @@ def test_expert_lib():
 
     library.add_expert("new-expert", list(library.values())[0])
     assert len(library) == 2
+    assert library._modified
 
     library = HFExpertLibrary(
         "sordonia/test-library-for-neo-125m", model_name="EleutherAI/other-model"
