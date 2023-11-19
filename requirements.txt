@@ -12,7 +12,7 @@ sentencepiece
 torch_kmeans
 sentence-transformers
 fsspec[adl]
-huggingface-hub
+huggingface-hub==0.19.4
 rich
 accelerate
 bitsandbytes
