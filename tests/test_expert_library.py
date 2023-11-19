@@ -6,17 +6,19 @@ from projects.wiki_experts.src.config import ExpertConfig
 
 
 def test_expert_lib():
-    library = HFExpertLibrary(
-        "sordonia/test-library-for-neo-125m", "EleutherAI/gpt-neo-125m"
-    )
+    library = HFExpertLibrary("sordonia/test-library-for-neo-125m")
     assert len(library) == 1
+    assert not library._sliced
 
     # expert already there
     with pytest.raises(ValueError):
         library.add_expert(list(library.keys())[0], list(library.values())[0])
 
-    # wrong model
-    with pytest.raises(ValueError):
-        config = list(library.values())[0].expert_config
-        config.model = "my-other-model"
-        library.add_expert("new_adapter", list(library.values())[0])
+    library.add_expert("new-expert", list(library.values())[0])
+    assert len(library) == 2
+
+    library = HFExpertLibrary(
+        "sordonia/test-library-for-neo-125m", model_name="EleutherAI/other-model"
+    )
+    assert len(library) == 0
+    assert library._sliced

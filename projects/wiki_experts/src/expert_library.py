@@ -15,16 +15,18 @@ from huggingface_hub import (
     create_repo,
 )
 
-from mttl.utils import logger, retry_with_exponential_backoff
+from mttl.utils import logger
 from projects.wiki_experts.src.graph.module_graph import Expert, load_expert
 
 
 class HFExpertLibrary(UserDict):
-    def __init__(self, repo_id, model_name, selection=""):
+    def __init__(self, repo_id, model_name=None, selection=None):
         super().__init__()
 
         self.repo_id = repo_id
-        self.model_name = model_name
+
+        self._sliced = False
+        self._modified = False
 
         if "HF_TOKEN" in os.environ:
             login(token=os.environ["HF_TOKEN"])
@@ -43,30 +45,45 @@ class HFExpertLibrary(UserDict):
             for expert_name, expert_dump in zip(
                 library_dump["expert_name"], library_dump["expert_dump"]
             ):
-                self.add_expert(expert_name, expert_dump)
+                if (
+                    model_name is not None
+                    and expert_dump.expert_config.model != model_name
+                ):
+                    self._sliced = True
+                    continue
+
+                if expert_name in self.data:
+                    raise ValueError(
+                        f"Expert {expert_name} already exists. Library corrupted."
+                    )
+
+                self.data[expert_name] = expert_dump
 
             if selection:
+                self._sliced = True
                 self.data = {k: v for k, v in self.data.items() if selection in k}
 
         logger.info("Loaded %s experts from huggingface hub", len(self.data))
 
     def add_expert(self, expert_name: str, expert_dump: Expert):
+        if self._sliced:
+            raise ValueError("Cannot add expert to sliced library.")
+
         if expert_name in self.data:
             raise ValueError(f"Expert {expert_name} already exists")
 
-        if expert_dump.expert_config.model != self.model_name:
-            raise ValueError(
-                f"Model {expert_dump.expert_config.model} does not match {self.model_name}"
-            )
-
         self.data[expert_name] = expert_dump
+        self._modified = True
 
     def add_expert_from_ckpt(self, ckpt_path: str, expert_name: str = None):
         expert_dump = load_expert(ckpt_path, expert_name)
 
         self.add_expert(expert_dump.expert_config.expert_name, expert_dump)
 
-    def close(self):
+    def flush(self):
+        if not self._modified or self._sliced:
+            return
+
         # synchronize with huggingface hub
         library_dump = {"expert_name": [], "expert_dump": []}
         for expert_name, expert_dump in self.data.items():
