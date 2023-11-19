@@ -6,6 +6,23 @@ from pathlib import Path
 import pytest
 
 
+def make_tiny_llama():
+    from transformers.models.llama.configuration_llama import LlamaConfig
+
+    small_config = LlamaConfig(
+        vocab_size=400,
+        hidden_size=512,
+        intermediate_size=1024,
+        num_hidden_layers=5,
+        num_attention_heads=8,
+        max_position_embeddings=512,
+    )
+    from transformers.models.llama.modeling_llama import LlamaForCausalLM
+
+    model_object = LlamaForCausalLM(small_config)
+    return model_object
+
+
 def setup_mmlu(session):
     # setup_mmlu
     if "MMLU_DATA_DIR" not in os.environ:

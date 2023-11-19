@@ -248,6 +248,25 @@ class SkilledLoRA(LoRA):
         return layer_out + adapter_out.to(input.dtype)
 
     @classmethod
+    def parallel_linear_forward(cls, input, loras: list, weights: list):
+        # loras -- list of loras per example
+        # weights -- list of weights for parallel loras
+        weights = torch.stack(weights, dim=0)
+        if weights.shape[-1] == 1:
+            loras = [lora[0] for lora in loras]
+            return LoRA.parallel_linear_forward(input, loras)
+
+        if len(loras) == 1:
+            weights = weights.squeeze()
+            loras = loras[0]
+            # use same weights for all samples in the input
+            return SkilledLoRA.weighted_merge_forward(
+                input, loras, weights, merge_after=True
+            )
+
+        raise NotImplementedError("Not Implemented yet")
+
+    @classmethod
     def weighted_merge_forward(cls, input, loras, weights, merge_after=False):
         """
         Meging loras into one loa accroding to the weights
