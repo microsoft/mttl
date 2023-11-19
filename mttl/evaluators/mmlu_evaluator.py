@@ -205,13 +205,13 @@ def evaluate_mmlu(hf_model, task_name=None):
     config = MMLUDataConfig(
         dataset="mmlu",
         model=hf_model,
-        predict_batch_size=1,
+        predict_batch_size=16,
         max_input_length=model.config.max_position_embeddings,
         model_family="gpt",
         finetune_task_name=task_name,
     )
 
-    MMLUEvaluator(config).evaluate(model)
+    MMLUEvaluator(config).evaluate(model, shuffle=True)
 
 
 if __name__ == "__main__":
