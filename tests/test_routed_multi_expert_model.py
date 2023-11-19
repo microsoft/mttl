@@ -1,83 +1,65 @@
+import os
 import torch
+import pytest
 import numpy as np
 from mttl.config import Config
-from tempfile import TemporaryDirectory
 from pytorch_lightning import seed_everything
-from mttl.models.modifiers.routing import RoutingInfo
-from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.src.expert_model import (
-    MultiExpertModel,
     RoutedMultiExpertModel,
 )
 from mttl.models.modifiers.expert_containers import LoRAExpertContainer
 from mttl.models.modifiers.lora import LoRA
+from conftest import make_tiny_llama
 
 
-def create_a_tiny_llama():
-    from transformers.models.llama.configuration_llama import LlamaConfig
+@pytest.fixture
+def tmp_exp_config(tmp_path):
+    class SimpleConfig(ExpertConfig):
+        def _set_defaults(self):
+            super()._set_defaults()
+            self.model_modifier = "lora"
+            self.modify_layers = "gate_proj|down_proj|up_proj"
+            self.modify_modules = ".*mlp.*"
+            self.trainable_param_names = ".*lora_[ab].*"
+            self.output_dir = tmp_path
+            self.router_selector = "poly_router"
+            self.router_granularity = "coarsegrained"
 
-    small_config = LlamaConfig(
-        vocab_size=400,
-        hidden_size=512,
-        intermediate_size=1024,
-        num_hidden_layers=5,
-        num_attention_heads=8,
-        max_position_embeddings=512,
-    )
-    from transformers.models.llama.modeling_llama import LlamaForCausalLM
-
-    model_object = LlamaForCausalLM(small_config)
-    return model_object
+    return SimpleConfig()
 
 
 class TestRoutedMultiExpertModel:
-    def __init__(self):
-        td = TemporaryDirectory()
-        self.exp_config: Config = ExpertConfig(
-            kwargs={
-                "model_modifier": "lora",
-                "modify_layers": "gate_proj|down_proj|up_proj",
-                "modify_modules": ".*mlp.*",
-                "trainable_param_names": ".*lora_[ab].*",
-                "output_dir": td.name,
-                "router_selector": "poly_router",
-                "router_granularity": "coarsegrained",
-            }
-        )
-        # keep references so that temp dirs dont get deleted
-        self._tds = [td]
-
-    def create_dummy_expert(self):
-        tiny_llama = create_a_tiny_llama()
+    def creat_dummy_expert(self, config: ExpertConfig, exp_name):
         # create random Lora
         exp_trainer = ExpertTrainer(
-            model_object=tiny_llama,
-            tokenizer=None,
-            expert_info={},
-            **vars(self.exp_config),
-        )
-        td = TemporaryDirectory()
-        self._tds.append(td)
-        checkpoint = exp_trainer.save_pretrained(td.name)
-        return checkpoint
-
-    def test_expert_selector_with_task_name_routing(self):
-        seed_everything(0)
-        config: Config = self.exp_config
-
-        config.router_selector = "task_selector"
-        exp1_dest = self.create_dummy_expert()
-        exp2_dest = self.create_dummy_expert()
-        module_dict = {"mod1": exp1_dest, "mod2": exp2_dest, "default": exp1_dest}
-
-        module = RoutedMultiExpertModel(
-            model_object=create_a_tiny_llama(),
+            model_object=make_tiny_llama(),
             tokenizer=None,
             expert_info={},
             **vars(config),
         )
+        dir = str(config.output_dir / exp_name)
+        os.makedirs(dir, exist_ok=True)
+        checkpoint = exp_trainer.save_pretrained(dir)
+        return checkpoint
+
+    def test_expert_selector_with_task_name_routing(self, tmp_exp_config):
+        seed_everything(0)
+        config: Config = tmp_exp_config
+
+        config.router_selector = "task_selector"
+        exp1_dest = self.creat_dummy_expert(config, "exp1")
+        exp2_dest = self.creat_dummy_expert(config, "exp2")
+        module_dict = {"mod1": exp1_dest, "mod2": exp2_dest, "default": exp1_dest}
+
+        module = RoutedMultiExpertModel(
+            model_object=make_tiny_llama(),
+            tokenizer=None,
+            expert_info={},
+            **vars(config),
+        )
+        assert module.hparams.model_modifier == None
         module.load_from_module_dict(module_dict, action="route")
         bs, max_seq_len = 10, 100
 
@@ -101,17 +83,17 @@ class TestRoutedMultiExpertModel:
         output = module(batch)
         assert np.allclose(output.item(), 6.0915, atol=0.1)
 
-    def test_expert_selector_with_poly_routing(self):
+    def test_expert_selector_with_poly_routing(self, tmp_exp_config):
         seed_everything(0)
-        config: Config = self.exp_config
+        config: ExpertConfig = tmp_exp_config
 
         config.router_selector = "poly_router"
-        exp1_dest = self.create_dummy_expert()
-        exp2_dest = self.create_dummy_expert()
+        exp1_dest = self.creat_dummy_expert(config, "exp1")
+        exp2_dest = self.creat_dummy_expert(config, "exp2")
         module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
 
         module = RoutedMultiExpertModel(
-            model_object=create_a_tiny_llama(),
+            model_object=make_tiny_llama(),
             tokenizer=None,
             expert_info={},
             **vars(config),
@@ -147,7 +129,7 @@ class TestRoutedMultiExpertModel:
         # change router_granularity to finegrained
         config.router_granularity = "finegrained"
         module = RoutedMultiExpertModel(
-            model_object=create_a_tiny_llama(),
+            model_object=make_tiny_llama(),
             tokenizer=None,
             expert_info={},
             **vars(config),
@@ -163,17 +145,17 @@ class TestRoutedMultiExpertModel:
         module.merge_experts_together()
         assert isinstance(module.model.model.layers[0].mlp.down_proj, LoRA)
 
-    def test_add_expert_with_action_merge(self):
+    def test_add_expert_with_action_merge(self, tmp_exp_config):
         seed_everything(0)
-        config: Config = self.exp_config
+        config: ExpertConfig = tmp_exp_config
 
         config.router_selector = "poly_router"
-        exp1_dest = self.create_dummy_expert()
-        exp2_dest = self.create_dummy_expert()
+        exp1_dest = self.creat_dummy_expert(config, "exp1")
+        exp2_dest = self.creat_dummy_expert(config, "exp2")
         module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
 
         module = RoutedMultiExpertModel(
-            model_object=create_a_tiny_llama(),
+            model_object=make_tiny_llama(),
             tokenizer=None,
             expert_info={},
             **vars(config),
@@ -200,25 +182,3 @@ class TestRoutedMultiExpertModel:
         # Test Base Llama model
         output = module(batch)
         assert np.allclose(output.item(), 6.09, atol=0.1)
-
-
-def test_expert_selector_with_task_name_routing():
-    test = TestRoutedMultiExpertModel()
-    test.test_expert_selector_with_task_name_routing()
-
-
-def test_expert_selector_with_poly_routing():
-    test = TestRoutedMultiExpertModel()
-    test.test_expert_selector_with_poly_routing()
-
-
-def test_add_expert_with_action_merge():
-    test = TestRoutedMultiExpertModel()
-    test.test_add_expert_with_action_merge()
-
-
-# if __name__ == "__main__":
-#     test = TestRoutedMultiExpertModel()
-#     test.test_expert_selector_with_task_name_routing()
-#     # test.test_expert_selector_with_poly_routing()
-#     # test.test_add_expert_with_action_merge()
