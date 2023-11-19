@@ -196,19 +196,20 @@ class MMLUEvaluator(object):
 
 @click.command()
 @click.argument("hf_model")
-def evaluate_mmlu(hf_model):
+@click.option("task_name", default=None)
+def evaluate_mmlu(hf_model, task_name=None):
     from mttl.datamodule.mmlu_data_module import MMLUDataConfig
     from mttl.models.utils import model_loader_helper
 
+    model = model_loader_helper(hf_model)
     config = MMLUDataConfig(
         dataset="mmlu",
         model=hf_model,
         predict_batch_size=1,
-        max_input_length=2048,
+        max_input_length=model.config.max_position_embeddings,
         model_family="gpt",
-        finetune_task_name="abstract_algebra",
+        finetune_task_name=task_name,
     )
-    model = model_loader_helper(hf_model)
 
     MMLUEvaluator(config).evaluate(model)
 
