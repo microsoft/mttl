@@ -406,14 +406,12 @@ def model_loader_helper(model_name, device_map="auto", load_in_8bit=False):
             device_map=device_map,
         )
     elif "phi-2" in model_name:
-        if "PHI_PATH" not in os.environ:
-            raise ValueError("PHI_PATH not set, need a path to load Phi-2 from.")
-
         model_object = AutoModelForCausalLM.from_pretrained(
             os.environ["PHI_PATH"],
             load_in_8bit=load_in_8bit,
             torch_dtype=torch.bfloat16,
             device_map=device_map,
+            trust_remote_code=True,
         )
     else:
         model_object = AutoModelForCausalLM.from_pretrained(

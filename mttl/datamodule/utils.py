@@ -114,7 +114,7 @@ def get_tokenizer_with_args(
     logger.warn("Padding side is {}".format(tokenizer.padding_side))
 
     tokenizer.truncation_side = truncation_side
-    logger.warn("Padding side is {}".format(tokenizer.padding_side))
+    logger.warn("Truncation side is {}".format(tokenizer.truncation_side))
 
     if model_family == "gpt":
         if for_generation:
