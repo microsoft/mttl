@@ -1,16 +1,17 @@
 import torch
+import numpy as np
+from typing import Dict
 
 from mttl.models.modifiers.routing import RoutingInfo
 from mttl.utils import logger
-from projects.wiki_experts.src.expert_trainer import ExpertTrainer
-from projects.wiki_experts.src.graph.module_graph import ModuleGraph
-from typing import Dict
-from projects.wiki_experts.src.ranker.adapter_ranker import ExpertRanker
-from projects.wiki_experts.src.ranker.classification_module import ids_to_tasks_names
+from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
 from mttl.models.modifiers.expert_containers import ExpertContainer
 from mttl.models.modifiers.expert_containers import Selector
 from mttl.models.modifiers.expert_containers import add_expert_to_transformer
-import numpy as np
+
+from projects.wiki_experts.src.expert_trainer import ExpertTrainer
+from projects.wiki_experts.src.ranker.adapter_ranker import ExpertRanker
+from projects.wiki_experts.src.ranker.classification_module import ids_to_tasks_names
 
 
 def push_expert_to_hub(
@@ -115,7 +116,7 @@ class MultiExpertModel(ExpertTrainer):
         self.expert_info.parent_node = ModuleGraph.from_module_dict(module_dict).dumps()
 
     def load_from_graph_string(self, s, action="route"):
-        from projects.wiki_experts.src.graph.module_graph import ModuleGraph
+        from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
 
         graph = ModuleGraph.from_string(s)
         self.load_from_graph(graph, action=action)
@@ -128,7 +129,7 @@ class MultiExpertModel(ExpertTrainer):
         is_default: bool = False,
         load_only_layers: str = None,
     ):
-        from projects.wiki_experts.src.graph.module_graph import load_expert
+        from mttl.models.modifiers.expert_containers.module_graph import load_expert
 
         expert = load_expert(expert_path, expert_name=expert_name)
         if self.hparams.model != expert.expert_config.model:
@@ -334,7 +335,7 @@ class RoutedMultiExpertModel(MultiExpertModel):
         is_default: bool = False,
         load_only_layers: str = None,
     ):
-        from projects.wiki_experts.src.graph.module_graph import load_expert
+        from mttl.models.modifiers.expert_containers.module_graph import load_expert
 
         expert = load_expert(expert_path, expert_name=expert_name)
         if self.hparams.model != expert.expert_config.model:

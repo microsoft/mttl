@@ -9,7 +9,7 @@ from config import ExpertsMergeConfig
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
 from projects.wiki_experts.src.evolution.utils import TableLogger
-from projects.wiki_experts.src.expert_library import LocalExpertLibrary
+from mttl.models.modifiers.expert_containers.expert_library import LocalExpertLibrary
 
 
 class ExperimentState:
