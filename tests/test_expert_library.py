@@ -17,6 +17,22 @@ def test_expert_lib():
         library["quail_description_context_question_answer_text"].expert_config.model
         == "EleutherAI/gpt-neo-125m"
     )
+    assert (
+        len(library["quail_description_context_question_answer_text"].expert_weights)
+        == 72
+    )
+    assert (
+        library[
+            "quail_description_context_question_answer_text"
+        ].expert_info.parent_node
+        is None
+    )
+    assert (
+        library[
+            "quail_description_context_question_answer_text"
+        ].expert_info.expert_name
+        is None
+    )
 
     library.add_expert("new-expert", list(library.values())[0])
     assert len(library) == 2
