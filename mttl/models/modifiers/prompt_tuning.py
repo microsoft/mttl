@@ -4,7 +4,7 @@ import torch.nn as nn
 from mttl.models.modifiers import register_modifier
 from mttl.models.modifiers.base import Adapter, ModifierConfig, ModifyMixin
 from transformers.modeling_utils import PreTrainedModel
-from mttl.models.modifiers.llama_adapter import (
+from mttl.models.modifiers.kv_adapter import (
     KVAdapterConfig,
     PolyKVAdapterConfig,
 )
