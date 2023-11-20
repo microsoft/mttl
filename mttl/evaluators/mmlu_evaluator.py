@@ -43,7 +43,11 @@ class MMLUEvaluator(object):
 
     def eval_vllm(self, model, generation_config, subsample, shuffle):
         model_hash = hashlib.sha256()
-        model_hash.update(f"{model.hparams}_{model.model.__class__}".encode())
+
+        if hasattr(model, "hparams"):
+            model_hash.update(f"{model.hparams}_{model.model.__class__}".encode())
+        else:
+            model_hash.update(f"{model.__class__}".encode())
 
         # move the model to CPU as VLLM loads its own version of the model
         state = swap_model(model)
