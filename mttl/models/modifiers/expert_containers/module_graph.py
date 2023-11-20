@@ -1,18 +1,31 @@
+import json
 import re
 import torch
 from typing import Dict
-import sys
-import os
 import re
 from string import Template
-from collections import defaultdict
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 from mttl.models.utils import download_from_hub
 from mttl.utils import get_checkpoint_path, logger
-from projects.wiki_experts.src.config import ExpertConfig, ExpertInfo
+from mttl.config import Config
+
+from projects.wiki_experts.src.config import ExpertConfig
 from dataclasses import dataclass
-from typing import Union
+
+
+@dataclass
+class ExpertInfo:
+    """
+    Stuff that we want to save about experts but will never be passed from command line
+    """
+
+    parent_node: str = None
+    expert_name: str = None
+    expert_task_name: str = None
+
+
+class ExpertConfig(Config):
+    pass
 
 
 @dataclass
@@ -20,6 +33,25 @@ class Expert:
     expert_config: ExpertConfig
     expert_weights: Dict[str, torch.Tensor]
     expert_info: ExpertInfo
+
+    def dumps(self):
+        return {
+            "expert_config": self.expert_config.dumps(),
+            "expert_info": self.expert_info.__dict__,
+            "expert_weights": self.expert_weights,
+        }
+
+    @classmethod
+    def loads(cls, ckpt):
+        return cls(
+            expert_config=ExpertConfig(
+                kwargs=json.loads(ckpt["expert_config"]),
+                silent=True,
+                raise_error=False,
+            ),
+            expert_info=ExpertInfo(**ckpt["expert_info"]),
+            expert_weights=ckpt["expert_weights"],
+        )
 
 
 class Node:

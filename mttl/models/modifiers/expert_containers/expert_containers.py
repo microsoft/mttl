@@ -2,7 +2,7 @@ from pyparsing import abstractmethod
 import torch
 from torch import nn
 from typing import Any, Dict
-from mttl.models.modifiers.base import MergeableAdapter
+from mttl.models.modifiers.base import MergeableAdapter, ModifyMixin
 from mttl.models.modifiers.lora import LoRA, SkilledLoRA
 from mttl.models.modifiers.expert_containers.selectors import *
 from mttl.utils import logger
@@ -25,7 +25,7 @@ class ExpertContainer:
         pass
 
 
-class LoRAExpertContainer(MergeableAdapter, ExpertContainer):
+class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
     def __init__(self, config, task_id_container, layer, selector=None):
         super().__init__()
         self.config = config

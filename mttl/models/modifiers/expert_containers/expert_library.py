@@ -16,10 +16,14 @@ from huggingface_hub import (
 )
 
 from mttl.utils import logger
-from projects.wiki_experts.src.graph.module_graph import Expert, load_expert
+from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
 
 
-class HFExpertLibrary(UserDict):
+class ExpertLibrary(UserDict):
+    pass
+
+
+class HFExpertLibrary(ExpertLibrary):
     def __init__(self, repo_id, model_name=None, selection=None):
         super().__init__()
 
@@ -40,7 +44,11 @@ class HFExpertLibrary(UserDict):
             library_ckpt = huggingface_hub.hf_hub_download(
                 repo_id, filename="library.ckpt"
             )
-            library_dump = torch.load(library_ckpt, map_location="cpu")
+
+            try:
+                library_dump = torch.load(library_ckpt, map_location="cpu")
+            except:
+                library_dump = {"expert_name": [], "expert_dump": []}
 
             for expert_name, expert_dump in zip(
                 library_dump["expert_name"], library_dump["expert_dump"]
@@ -117,14 +125,8 @@ class HFExpertLibrary(UserDict):
 
         with io.BytesIO() as buffer:
             # Write the following into the buffer:
-            # This is a library of experts for the model {self.model_name}
             # Number of experts present in the library: {len(library_dump["expert_name"])}
             # Types of experts present in the library: unique(dump.model_modifier for dump in library_dump["expert_dump"])
-            buffer.write(
-                f"This is a library of experts for the model: {self.model_name}\n\n".encode(
-                    "utf-8"
-                )
-            )
             buffer.write(
                 f"Number of experts present in the library: {len(library_dump['expert_name'])}\n\n".encode(
                     "utf-8"
@@ -144,9 +146,10 @@ class HFExpertLibrary(UserDict):
                         "utf-8"
                     )
                 )
+
             # write date before last updated on
             buffer.write(
-                f"Last updated on: {api.repo_info(self.repo_id).last_modified}\n\n".encode(
+                f"Last updated on: {api.repo_info(self.repo_id).lastModified}\n\n".encode(
                     "utf-8"
                 )
             )
@@ -154,7 +157,7 @@ class HFExpertLibrary(UserDict):
             upload(buffer)
 
 
-class LocalExpertLibrary(UserDict):
+class LocalExpertLibrary(ExpertLibrary):
     def __init__(self, modules_dir, model_name, selection="", operator=np.argmin):
         """
         Searches local experts
@@ -199,19 +202,3 @@ class LocalExpertLibrary(UserDict):
 
     def pop(self, task, default=None):
         return self.data.pop(task, default)
-
-
-if __name__ == "__main__":
-    from mttl.utils import get_checkpoint_path, setup_logging
-
-    setup_logging()
-
-    library = HFExpertLibrary(
-        "sordonia/test-library-for-neo-125m", "EleutherAI/gpt-neo-125m"
-    )
-    for directory in glob.glob("../../amlt/flan_experts_gptneo_125m_tleft/*"):
-        library.add_expert_from_ckpt(
-            get_checkpoint_path(directory),
-        )
-        break
-    library.flush()
