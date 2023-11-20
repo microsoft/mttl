@@ -64,7 +64,7 @@ class Config:
             if eval and not silent:
                 logger.warn("Overwriting {} to {}".format(k, v))
 
-            if k in ["data_dir", "output_dir"]:
+            if type(v) == str and "$" in v:
                 # this raises an error if the env. var does not exist
                 v = Template(v).substitute(os.environ)
 

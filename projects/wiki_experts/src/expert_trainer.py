@@ -19,7 +19,7 @@ class ExpertTrainer(EfficientCheckpointModule):
         super().__init__(**kwargs)
 
         # log hyperparameters
-        self.save_hyperparameters(ignore=["tokenizer", "model_object"])
+        self.save_hyperparameters(kwargs, ignore=["tokenizer", "model_object"])
 
         self.tokenizer = kwargs["tokenizer"]
         self.expert_info = ExpertInfo(**kwargs.get("expert_info", {}))
@@ -30,15 +30,12 @@ class ExpertTrainer(EfficientCheckpointModule):
         model_object = kwargs.get("model_object", None)
 
         if model_object is None:
-            if "llama" in self.hparams.model:
-                model_object = LlamaForCausalLM.from_pretrained(
-                    self.hparams.model,
-                    load_in_8bit=self.hparams.load_in_8bit,
-                    torch_dtype=torch.bfloat16,
-                    device_map="auto",
-                )
-            else:
-                model_object = AutoModelForCausalLM.from_pretrained(self.hparams.model)
+            from mttl.models.utils import model_loader_helper
+
+            model_object = model_loader_helper(
+                self.hparams.model,
+                load_in_8bit=self.hparams.load_in_8bit,
+            )
 
         if self.hparams.load_in_8bit:
             model_object = prepare_model_for_kbit_training(model_object)

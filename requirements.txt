@@ -1,6 +1,7 @@
-datasets==2.14.6
+datasets>=2.14.6
 click
-transformers==4.34.1
+transformers>=4.33.3
+huggingface_hub==0.18
 pytorch-lightning==2.1.0
 wandb
 rouge
@@ -12,7 +13,6 @@ sentencepiece
 torch_kmeans
 sentence-transformers
 fsspec[adl]
-huggingface-hub
 rich
 accelerate
 bitsandbytes

@@ -1,3 +1,5 @@
+import os
+
 from transformers import AutoTokenizer, LlamaTokenizer
 from mttl.utils import logger
 
@@ -110,6 +112,8 @@ def get_tokenizer_with_args(
                 "We detected a Llama model, but model_family != 'gpt', fix your config!"
             )
     else:
+        if "phi-2" in model_name:
+            model_name = os.environ["PHI_PATH"]
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         tokenizer.model_max_length = int(1e9)
 
@@ -117,7 +121,7 @@ def get_tokenizer_with_args(
     logger.warn("Padding side is {}".format(tokenizer.padding_side))
 
     tokenizer.truncation_side = truncation_side
-    logger.warn("Padding side is {}".format(tokenizer.padding_side))
+    logger.warn("Truncation side is {}".format(tokenizer.truncation_side))
 
     if model_family == "gpt":
         if for_generation:

@@ -1,4 +1,5 @@
 import os
+import click
 import tqdm
 import torch
 import hashlib
@@ -191,3 +192,26 @@ class MMLUEvaluator(object):
             all_predictions, [[r] for r in all_references], reduction="none"
         )
         return compute_task_aggregation(all_task_names, eval_metrics["exact_match"])
+
+
+@click.command()
+@click.argument("hf_model")
+def evaluate_mmlu(hf_model):
+    from mttl.datamodule.mmlu_data_module import MMLUDataConfig
+    from mttl.models.utils import model_loader_helper
+
+    config = MMLUDataConfig(
+        dataset="mmlu",
+        model=hf_model,
+        predict_batch_size=1,
+        max_input_length=2048,
+        model_family="gpt",
+        finetune_task_name="abstract_algebra",
+    )
+    model = model_loader_helper(hf_model)
+
+    MMLUEvaluator(config).evaluate(model)
+
+
+if __name__ == "__main__":
+    evaluate_mmlu()
