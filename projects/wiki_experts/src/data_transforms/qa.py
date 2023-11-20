@@ -505,6 +505,8 @@ class QATransformModel(TransformModel):
         if type(filter_subjects) == str:
             filter_subject = getattr(mmlu_subject_configs, filter_subjects)
 
+        print("Filtering subjects:", filter_subject)
+
         for subject in filter_subject:
             subject_data = dataset[dataset["subject"] == subject]
             subject_data.sort_values(by="dfq", ascending=False, inplace=True)

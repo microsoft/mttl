@@ -43,7 +43,11 @@ class MMLUEvaluator(object):
 
     def eval_vllm(self, model, generation_config, subsample, shuffle):
         model_hash = hashlib.sha256()
-        model_hash.update(f"{model.hparams}_{model.model.__class__}".encode())
+
+        if hasattr(model, "hparams"):
+            model_hash.update(f"{model.hparams}_{model.model.__class__}".encode())
+        else:
+            model_hash.update(f"{model.__class__}".encode())
 
         # move the model to CPU as VLLM loads its own version of the model
         state = swap_model(model)
@@ -196,21 +200,22 @@ class MMLUEvaluator(object):
 
 @click.command()
 @click.argument("hf_model")
-def evaluate_mmlu(hf_model):
+@click.option("--task_name", default=None)
+def evaluate_mmlu(hf_model, task_name=None):
     from mttl.datamodule.mmlu_data_module import MMLUDataConfig
     from mttl.models.utils import model_loader_helper
 
+    model = model_loader_helper(hf_model)
     config = MMLUDataConfig(
         dataset="mmlu",
         model=hf_model,
-        predict_batch_size=1,
-        max_input_length=2048,
+        predict_batch_size=16,
+        max_input_length=model.config.max_position_embeddings,
         model_family="gpt",
-        finetune_task_name="abstract_algebra",
+        finetune_task_name=task_name,
     )
-    model = model_loader_helper(hf_model)
 
-    MMLUEvaluator(config).evaluate(model)
+    MMLUEvaluator(config).evaluate(model, shuffle=True)
 
 
 if __name__ == "__main__":
