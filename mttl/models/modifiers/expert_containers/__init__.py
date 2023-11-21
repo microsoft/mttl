@@ -61,6 +61,51 @@ def add_expert_library_to_transformer(
         )
 
 
+def add_hard_prompt_to_transformer(
+    transformer,
+    expert_name,
+    expert_config,
+    expert_weights,
+    action="route",
+    is_default=False,
+    selectors={},
+    config=None,
+):
+    if not hasattr(transformer, "_hard_prompt_container"):
+        # create a shared prompt container holding the experts
+        transformer._hard_prompt_container = HardPromptExpertContainer(
+            expert_config,
+            transformer.task_id_container,
+            layer=None,
+            selector=None,
+        )
+
+        def hard_prompt_forward_patch(
+            self, input_ids=None, attention_mask=None, labels=None, **kwargs
+        ):
+            # appends the hard prompt to the input, modifies attention mask and labels
+            input_ids, attention_mask, labels = self._hard_prompt_container.forward(
+                input_ids, attention_mask, labels
+            )
+            return self.forward(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                labels=labels,
+                **kwargs,
+            )
+
+        # patch the forward function
+        transformer.forward = hard_prompt_forward_patch
+
+    transformer._hard_prompt_container.add_expert(
+        expert_name,
+        expert_config,
+        expert_weights,
+        action=action,
+        is_default=is_default,
+    )
+
+
 def add_expert_to_transformer(
     transformer,
     expert_name,
@@ -75,6 +120,18 @@ def add_expert_to_transformer(
     # create a shared container for the task id
     if not hasattr(transformer, "task_id_container"):
         transformer.task_id_container = {}
+
+    if expert_config.model_modifier == "hard_prompt":
+        return add_hard_prompt_to_transformer(
+            transformer,
+            expert_name,
+            expert_config,
+            expert_weights,
+            action=action,
+            is_default=is_default,
+            selectors=selectors,
+            config=config,
+        )
 
     total_layers = 0
     added_layers = []

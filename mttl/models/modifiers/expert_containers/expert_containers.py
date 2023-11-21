@@ -231,7 +231,7 @@ class HardPromptExpertContainer(ExpertContainer, ModifyMixin):
     def __len__(self):
         return len(self.experts)
 
-    def forward(self, input, **kwargs):
+    def forward(self, input_ids, attention_mask, labels):
         if len(self.experts) > 0:
             weights: list = self.selector(input)
             output = self.route(input, weights)
