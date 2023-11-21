@@ -19,7 +19,7 @@ from utils import (
 )
 from projects.wiki_experts.src.evolution.train_router import train_router
 from evaluators import Evaluator
-from projects.wiki_experts.src.expert_library import LocalExpertLibrary
+from mttl.models.modifiers.expert_containers.expert_library import LocalExpertLibrary
 from dataclasses import dataclass
 from config import ExpertsMergeConfig
 from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer

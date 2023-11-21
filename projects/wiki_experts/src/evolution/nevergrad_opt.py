@@ -19,7 +19,7 @@ from projects.wiki_experts.src.config import ExpertConfig
 from huggingface_hub import login
 from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.utils import logger, setup_logging
-from projects.wiki_experts.src.graph.module_graph import ModuleGraph
+from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
 from mttl.evaluators import MMLUEvaluator
 

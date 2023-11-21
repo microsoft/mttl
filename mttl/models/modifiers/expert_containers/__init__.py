@@ -41,6 +41,29 @@ def get_container_class(modifier: str):
         raise ValueError(f"Cannot find modifier: {modifier}")
 
 
+def add_expert_library_to_transformer(
+    transformer,
+    expert_library,
+    action="route",
+    default_expert=None,
+    load_only_layers=None,
+    selectors={},
+    config=None,
+):
+    for expert_name, expert_dump in expert_library.items():
+        add_expert_to_transformer(
+            transformer,
+            expert_name,
+            expert_dump.expert_config,
+            expert_dump.expert_weights,
+            action=action,
+            is_default=expert_name == default_expert,
+            load_only_layers=load_only_layers,
+            selectors=selectors,
+            config=config,
+        )
+
+
 def add_expert_to_transformer(
     transformer,
     expert_name,

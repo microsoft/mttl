@@ -1,8 +1,6 @@
 # unit test for adapter_ranker
 import pytest
-from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
-from projects.wiki_experts.src.expert_library import HFExpertLibrary
-from projects.wiki_experts.src.config import ExpertConfig
+from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 
 
 def test_expert_lib():
@@ -14,6 +12,27 @@ def test_expert_lib():
     # expert already there
     with pytest.raises(ValueError):
         library.add_expert(list(library.keys())[0], list(library.values())[0])
+
+    assert (
+        library["quail_description_context_question_answer_text"].expert_config.model
+        == "EleutherAI/gpt-neo-125m"
+    )
+    assert (
+        len(library["quail_description_context_question_answer_text"].expert_weights)
+        == 72
+    )
+    assert (
+        library[
+            "quail_description_context_question_answer_text"
+        ].expert_info.parent_node
+        is None
+    )
+    assert (
+        library[
+            "quail_description_context_question_answer_text"
+        ].expert_info.expert_name
+        is None
+    )
 
     library.add_expert("new-expert", list(library.values())[0])
     assert len(library) == 2
