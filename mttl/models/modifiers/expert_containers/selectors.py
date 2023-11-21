@@ -40,7 +40,7 @@ class Selector:
         pass
 
     @abstractmethod
-    def add_expert(self, expert_name: list):
+    def add_expert(self, expert_name: str):
         pass
 
     def add_experts(self, expet_names: list):
@@ -108,7 +108,7 @@ class TaskNameSelector(torch.nn.Module, Selector):
 
         return routing_weights
 
-    def add_expert(self, expert_name: list):
+    def add_expert(self, expert_name: str):
         if expert_name not in self.expert_names:
             self.expert_names.append(expert_name)
 
@@ -129,7 +129,7 @@ class KVSelector(Selector):
     def get_gate(self, adapter_weights):
         pass
 
-    def add_expert(self, expert_name: list):
+    def add_expert(self, expert_name: str):
         if expert_name not in self.expert_names:
             self.expert_names.append(expert_name)
 
