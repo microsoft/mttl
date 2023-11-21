@@ -153,6 +153,7 @@ class RoutingInfo:
     task_names: List[str] = None
     example_ids: List[int] = None
     labels: torch.Tensor = None
+    input_ids: torch.Tensor = None
     task_weights: torch.nn.ParameterDict = None
 
     @classmethod
@@ -165,6 +166,7 @@ class RoutingInfo:
             task_ids=task_ids,
             task_names=task_names,
             task_weights=task_weights,
+            input_ids=batch.get("input_ids", None),
             example_ids=batch.get("example_ids", None),
             labels=batch.get("labels", None),
             **kwargs,

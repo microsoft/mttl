@@ -34,21 +34,22 @@ def produce_transfer_matrix(
 
     transfer_table = TableLogger()
 
-    for expert_name in expert_lib.keys():
+    for task_eval_on in tasks:
         log_row = {}
-        log_row["module"] = expert_name
+        log_row["eval_task"] = task_eval_on
 
-        for task_eval_on in tasks:
+        evaluator: Evaluator = prepare_evaluator(
+            args,
+            args.dataset_test,
+            tasks=task_eval_on,
+            split=args.test_split,
+        )
+
+        for expert_name in expert_lib.keys():
             module_dest = expert_lib[expert_name]
 
             logger.info(f"################# Evaluating {expert_name} on {task_eval_on}")
 
-            evaluator: Evaluator = prepare_evaluator(
-                args,
-                args.dataset_test,
-                tasks=task_eval_on,
-                split=args.test_split,
-            )
             module = MultiExpertModel(
                 **vars(args),
                 tokenizer=evaluator.datamodule.tokenizer,
@@ -63,7 +64,7 @@ def produce_transfer_matrix(
 
             scores = evaluator.evaluate(module)
 
-            log_row[task_eval_on] = scores[task_eval_on]["mean"]
+            log_row[expert_name] = scores[task_eval_on]["mean"]
 
             all = scores.pop("all")
             log_wandb(scores, f"transfer/{expert_name}")
@@ -72,6 +73,7 @@ def produce_transfer_matrix(
             del module
             free_memory()
 
+        print(transfer_table.df)
         transfer_table.log(log_row)
         transfer_table.log_table_wandb()
 
@@ -106,6 +108,7 @@ def run_eval(args: ExpertsMergeConfig):
         args, expert_lib, tasks=args.finetune_task_name
     )
     print("Transfer matrix", transfer_matrix)
+    transfer_matrix.to_csv(os.path.join(args.output_dir, "transfer_matrix.csv"))
 
 
 if __name__ == "__main__":

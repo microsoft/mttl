@@ -82,7 +82,7 @@ class DefaultCollator:
 
             if (
                 sources_[i][-1] not in [" ", "\n"]
-                and len(labels[i]) > 0
+                and len(labels_[i]) > 0
                 and labels_[i][0] not in [" ", "\n"]
             ):
                 labels_[i] = " " + labels_[i]
