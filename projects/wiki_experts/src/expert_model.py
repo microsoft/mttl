@@ -11,7 +11,7 @@ from mttl.models.modifiers.expert_containers import add_expert_to_transformer
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.ranker.adapter_ranker import ExpertRanker
-from projects.wiki_experts.src.ranker.classification_module import ids_to_tasks_names
+from projects.wiki_experts.src.config import ids_to_tasks_names
 
 
 def push_expert_to_hub(
