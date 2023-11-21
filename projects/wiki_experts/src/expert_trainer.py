@@ -4,13 +4,16 @@ from torch import nn
 from mttl.models.llama_patch import replace_attn_with_flash_attn
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.routing import RoutingInfo
-from transformers import AutoModelForCausalLM, LlamaForCausalLM
+from transformers import AutoModelForCausalLM
+from projects.wiki_experts.src.config import ExpertInfo
 
 from mttl.models.utils import (
     EfficientCheckpointModule,
     prepare_model_for_kbit_training,
 )
-from mttl.utils import logger
+
+
+torch.set_float32_matmul_precision("high")
 
 
 class ExpertTrainer(EfficientCheckpointModule):
@@ -18,23 +21,22 @@ class ExpertTrainer(EfficientCheckpointModule):
         super().__init__(**kwargs)
 
         # log hyperparameters
-        self.save_hyperparameters(ignore=["tokenizer", "model_object"])
+        self.save_hyperparameters(kwargs, ignore=["tokenizer", "model_object"])
 
         self.tokenizer = kwargs["tokenizer"]
+        self.expert_info = ExpertInfo(**kwargs.get("expert_info", {}))
+
         self.model: AutoModelForCausalLM = None
         self.accumulate_metrics_batch = defaultdict(list)
 
-        if "llama" in self.hparams.model:
-            model_object = LlamaForCausalLM.from_pretrained(
+        model_object = kwargs.get("model_object", None)
+
+        if model_object is None:
+            from mttl.models.utils import model_loader_helper
+
+            model_object = model_loader_helper(
                 self.hparams.model,
                 load_in_8bit=self.hparams.load_in_8bit,
-                torch_dtype=torch.bfloat16,
-                device_map=kwargs.get("device_map", "auto"),
-            )
-        else:
-            model_object = AutoModelForCausalLM.from_pretrained(
-                self.hparams.model,
-                device_map=kwargs.get("device_map", "auto"),
             )
 
         if self.hparams.load_in_8bit:
@@ -49,6 +51,8 @@ class ExpertTrainer(EfficientCheckpointModule):
         self.test_results = []
         self.best_val_result = None
         self._inference_outputs = []
+
+        self._log_pref = kwargs.get("logging_prefix", "")
 
     def forward(self, batch, reduction="mean"):
         input_ids, labels = batch["input_ids"], batch["labels"]
@@ -89,8 +93,10 @@ class ExpertTrainer(EfficientCheckpointModule):
         loss = self.forward(batch)
         total_loss = loss
 
-        self.log("train/loss", loss, on_step=True, prog_bar=True)
-        self.log("train/total_loss", total_loss, on_step=True, prog_bar=True)
+        self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
+        self.log(
+            f"{self._log_pref}train/total_loss", total_loss, on_step=True, prog_bar=True
+        )
 
         for i, pg in enumerate(self.optimizers().optimizer.param_groups):
             self.log(f"train/lr_{i}", pg["lr"])
@@ -128,7 +134,9 @@ class ExpertTrainer(EfficientCheckpointModule):
         outputs = self._inference_outputs
         losses = torch.cat([out[0] for out in outputs], 0)
         self._inference_outputs.clear()
-        self.log(f"{split}/loss", losses.mean(), on_epoch=True, prog_bar=True)
+        self.log(
+            f"{self._log_pref}{split}/loss", losses.mean(), on_epoch=True, prog_bar=True
+        )
 
         # log also the best val/loss sofar
         if split == "val":
@@ -138,7 +146,7 @@ class ExpertTrainer(EfficientCheckpointModule):
                 if losses.mean() < self.best_val_result:
                     self.best_val_result = losses.mean()
                     self.log(
-                        f"{split}/best_loss",
+                        f"{self._log_pref}{split}/best_loss",
                         losses.mean(),
                         on_epoch=True,
                         prog_bar=True,
@@ -162,3 +170,7 @@ class ExpertTrainer(EfficientCheckpointModule):
             inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
         )
         return generations
+
+    def on_save_checkpoint(self, ckpt):
+        super().on_save_checkpoint(ckpt)
+        ckpt["expert_info"] = self.expert_info.__dict__

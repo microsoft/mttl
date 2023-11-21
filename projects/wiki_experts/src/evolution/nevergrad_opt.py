@@ -19,7 +19,7 @@ from projects.wiki_experts.src.config import ExpertConfig
 from huggingface_hub import login
 from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.utils import logger, setup_logging
-from projects.wiki_experts.src.graph.module_graph import ModuleGraph
+from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
 from mttl.evaluators import MMLUEvaluator
 
@@ -91,7 +91,7 @@ def default_l1_regularization(weights):
     return 0.05 * sum_of_squares
 
 
-class RoutingOptimizer:
+class NGRoutingOptimizer:
     def __init__(
         self,
         model: MultiExpertModel,
@@ -217,7 +217,7 @@ if __name__ == "__main__":
 
     _mmlu_get_loss = partial(mmlu_get_loss, use_vllm=use_vllm)
 
-    optimizer = RoutingOptimizer(
+    optimizer = NGRoutingOptimizer(
         model=module,
         modules_2_dest=modules_2_dest,
         dataloader=dm.test_dataloader(),

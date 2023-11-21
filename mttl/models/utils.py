@@ -209,7 +209,11 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
                 padding_side=ckpt["hyper_parameters"]["padding_side"],
             )
 
-        model = cls(**ckpt["hyper_parameters"], tokenizer=tokenizer)
+        expert_info = ckpt.get("expert_info", None)
+
+        model = cls(
+            **ckpt["hyper_parameters"], expert_info=expert_info, tokenizer=tokenizer
+        )
         model.load_state_dict(ckpt["state_dict"], strict=False)
         return model
 
@@ -238,6 +242,8 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
             "state_dict": ckpt,
             "hyper_parameters": hparams_allowed,
         }
+        if hasattr(self, "expert_info"):
+            save_package["expert_info"] = self.expert_info.__dict__
 
         output_model_file = os.path.join(save_directory, "checkpoint.ckpt")
         torch.save(save_package, output_model_file)
@@ -387,3 +393,28 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
         # FIX for enabling gradient of the auxiliary loss
 
     return model
+
+
+def model_loader_helper(model_name, device_map="auto", load_in_8bit=False):
+    from transformers import LlamaForCausalLM, AutoModelForCausalLM
+
+    if "llama" in model_name:
+        model_object = LlamaForCausalLM.from_pretrained(
+            model_name,
+            load_in_8bit=load_in_8bit,
+            torch_dtype=torch.bfloat16,
+            device_map=device_map,
+        )
+    elif "phi-2" in model_name:
+        model_object = AutoModelForCausalLM.from_pretrained(
+            os.environ["PHI_PATH"],
+            load_in_8bit=load_in_8bit,
+            torch_dtype=torch.bfloat16,
+            device_map=device_map,
+            trust_remote_code=True,
+        )
+    else:
+        model_object = AutoModelForCausalLM.from_pretrained(
+            model_name, device_map=device_map
+        )
+    return model_object

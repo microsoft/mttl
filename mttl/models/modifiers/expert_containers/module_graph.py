@@ -1,28 +1,56 @@
+import json
 import re
 import torch
 from typing import Dict
-import sys
-import os
 import re
 from string import Template
-from collections import defaultdict
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 from mttl.models.utils import download_from_hub
 from mttl.utils import get_checkpoint_path, logger
-from projects.wiki_experts.src.config import ExpertConfig
+from mttl.config import Config
+
 from dataclasses import dataclass
-from typing import Union
+
+
+@dataclass
+class ExpertInfo:
+    """
+    Stuff that we want to save about experts but will never be passed from command line
+    """
+
+    parent_node: str = None
+    expert_name: str = None
+    expert_task_name: str = None
+
+
+class ExpertConfig(Config):
+    pass
 
 
 @dataclass
 class Expert:
     expert_config: ExpertConfig
     expert_weights: Dict[str, torch.Tensor]
+    expert_info: ExpertInfo
 
-    @property
-    def parent(self):
-        return self.expert_config.parent_node
+    def dumps(self):
+        return {
+            "expert_config": self.expert_config.dumps(),
+            "expert_info": self.expert_info.__dict__,
+            "expert_weights": self.expert_weights,
+        }
+
+    @classmethod
+    def loads(cls, ckpt):
+        return cls(
+            expert_config=ExpertConfig(
+                kwargs=json.loads(ckpt["expert_config"]),
+                silent=True,
+                raise_error=False,
+            ),
+            expert_info=ExpertInfo(**ckpt["expert_info"]),
+            expert_weights=ckpt["expert_weights"],
+        )
 
 
 class Node:
@@ -84,17 +112,17 @@ class OperatorNode(Node):
 
 class LinearNode(OperatorNode):
     OPERATORTemplate = Template("linear(${arg})")
-    ARGUMENT = Template("${name}:{weight}")
+    ARGUMENT = Template("${name}:${weight}")
 
     @classmethod
     def check_name(cls, string):
         # given any string translate it into the format of the linear node
         # e.g. 'linear(sordonia/expert_llama2_13b_security_studies:5,sordonia/llama2-13b-platypus:$weight)' is already in the format of the linear node
         # sordonia/expert_llama2_13b_security_studies -> linear(sordonia/expert_llama2_13b_security_studies:1.0)
-        if "linear" in string:
+        if string.startswith("linear"):
             return string
         else:
-            return LinearNode.OPERATOR.substitute(
+            return LinearNode.OPERATORTemplate.substitute(
                 arg=LinearNode.ARGUMENT.substitute(name=string, weight=1.0)
             )
 
@@ -191,12 +219,14 @@ class LinearNode(OperatorNode):
                 else:
                     merged_weights[k] = value
 
+        exp_info: ExpertInfo = first_module.expert_info
         config: ExpertConfig = first_module.expert_config
-        config.parent_node = self.get_name(**kwargs)
+        exp_info.parent_node = self.get_name(**kwargs)
         return [
             Expert(
                 expert_config=config,
                 expert_weights=merged_weights,
+                expert_info=exp_info,
             )
         ]
 
@@ -212,6 +242,13 @@ class ModuleGraph:
 
     def __init__(self):
         self.nodes = {}
+
+    @classmethod
+    def from_module_dict(cls, module_dict: dict):
+        s = ""
+        for module, dest in module_dict.items():
+            s += f"{module} -> {LinearNode.instantiate_name(dest, )}; "
+        return cls.from_string(s)
 
     def get_or_create_node(self, node_name, node_type=None, args=None):
         if node_name not in self.nodes:
@@ -322,6 +359,7 @@ def load_expert(
         silent=True,
         raise_error=False,
     )
+    expert_info = ExpertInfo(**expert_checkpoint.get("expert_info", {}))
 
     expert_name = expert_name or expert_config.expert_name
     if expert_name is None:
@@ -337,7 +375,7 @@ def load_expert(
 
     expert_weights = expert_checkpoint["state_dict"]
     expert_weights = {k.replace("model.", "", 1): v for k, v in expert_weights.items()}
-    return Expert(expert_config, expert_weights)
+    return Expert(expert_config, expert_weights, expert_info)
 
 
 if __name__ == "__main__":

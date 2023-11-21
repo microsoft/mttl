@@ -257,12 +257,13 @@ def get_mlf_logger():
         from azureml.core.run import Run
 
         run = Run.get_context()
-        mlflow_url = run.experiment.workspace.get_mlflow_tracking_uri()
+
         mlf_logger = MLFlowLoggerCustom(
-            experiment_name=run.experiment.name, tracking_uri=mlflow_url
+            experiment_name=run.experiment.name,
         )
         mlf_logger._run_id = run.id
     except:
+        logger.warn("Couldn't instantiate MLFlowLogger!")
         mlf_logger = None
     return mlf_logger
 

@@ -147,7 +147,6 @@ def run_multitask(args):
         filename=f"{model_name}" + "-{" + monitor + ":.004f}",
         save_top_k=1,
         save_last=True,
-        save_weights_only=True,  # make checkpoints smaller
         mode=mode,
     )
     callbacks.append(checkpoint_callback)
