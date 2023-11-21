@@ -4,9 +4,9 @@ import torch.nn as nn
 from mttl.models.modifiers import register_modifier
 from mttl.models.modifiers.base import Adapter, ModifierConfig, ModifyMixin
 from transformers.modeling_utils import PreTrainedModel
-from mttl.models.modifiers.llama_adapter import (
-    LLamaAdapterConfig,
-    PolyLLamaAdapterConfig,
+from mttl.models.modifiers.kv_adapter import (
+    KVAdapterConfig,
+    PolyKVAdapterConfig,
 )
 from mttl.models.modifiers.poly import PolytroponSelector
 from mttl.models.modifiers.routing import RoutingMixin
@@ -190,7 +190,7 @@ class PromptTuningModifyMixin(ModifyMixin):
 
 
 @dataclass
-class PromptTuningConfig(LLamaAdapterConfig):
+class PromptTuningConfig(KVAdapterConfig):
     pass
 
 
@@ -220,7 +220,7 @@ class PromptTuning(Adapter, PromptTuningModifyMixin):
 
 
 @dataclass
-class AlphaPromptTuningConfig(LLamaAdapterConfig):
+class AlphaPromptTuningConfig(KVAdapterConfig):
     pass
 
 
@@ -265,7 +265,7 @@ class AlphaPromptTuning(Adapter, PromptTuningModifyMixin):
 
 
 @dataclass
-class PolyPromptTuningConfig(PolyLLamaAdapterConfig):
+class PolyPromptTuningConfig(PolyKVAdapterConfig):
     pass
 
 

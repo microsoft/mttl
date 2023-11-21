@@ -2,6 +2,7 @@ import re
 from mttl.config import Config
 from mttl.models.modifiers.expert_containers.selectors import *
 from mttl.models.modifiers.expert_containers.expert_containers import *
+from mttl.models.modifiers.kv_adapter import KVAdapter
 from mttl.utils import logger
 
 
@@ -34,6 +35,8 @@ def _extract_identifier(string, match_on="coder"):
 def get_container_class(modifier: str):
     if modifier == "lora":
         return LoRAExpertContainer
+    elif modifier == "kv_adapter":
+        return KVExpertContainer
     else:
         raise ValueError(f"Cannot find modifier: {modifier}")
 

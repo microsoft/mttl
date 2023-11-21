@@ -1,3 +1,5 @@
+from mttl.utils import logger
+
 MODIFIERS = {}
 CONFIGS_TO_MODIFIERS = {}
 
@@ -22,7 +24,7 @@ def modify_transformer(transformer, modifier_config, model_modifier=None):
     import mttl.models.modifiers.poly  # noqa: F401
     import mttl.models.modifiers.routing  # noqa: F401
     import mttl.models.modifiers.prompt_tuning  # noqa: F401
-    import mttl.models.modifiers.llama_adapter  # noqa: F401
+    import mttl.models.modifiers.kv_adapter  # noqa: F401
     from mttl.utils import logger
 
     # import mttl.models.modifiers.prefix_tuning # noqa: F401

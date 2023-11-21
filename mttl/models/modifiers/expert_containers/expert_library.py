@@ -167,6 +167,7 @@ class LocalExpertLibrary(ExpertLibrary):
         # searches home and loads all the existing experts with selection criteria
         all_checkpoints = glob.glob(f"{self.home_dir}/**/*{selection}/*.ckpt")
         all_checkpoints += glob.glob(f"{self.home_dir}/**/**/*{selection}/*.ckpt")
+        all_checkpoints += glob.glob(f"{self.home_dir}/**/{selection}.ckpt")
         self.model_name = model_name
 
         self.operator = operator
@@ -193,6 +194,8 @@ class LocalExpertLibrary(ExpertLibrary):
             return None
         if not isinstance(experts, list):
             return experts
+        if len(experts) == 1:
+            return experts[0]
         metrics = [
             float(e.split("/")[-1].replace(".ckpt", "").replace("loss=", ""))
             for e in experts
