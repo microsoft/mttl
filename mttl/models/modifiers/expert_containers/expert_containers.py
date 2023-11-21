@@ -2,7 +2,7 @@ from pyparsing import abstractmethod
 import torch
 from torch import nn
 from typing import Any, Dict
-from mttl.models.modifiers.base import MergeableAdapter
+from mttl.models.modifiers.base import Adapter, MergeableAdapter
 from mttl.models.modifiers.lora import LoRA, SkilledLoRA
 from mttl.models.modifiers.kv_adapter import KVAdapter
 from mttl.models.modifiers.expert_containers.selectors import *
@@ -165,12 +165,13 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer):
         return self.layer(input)
 
 
-class KVExpertContainer(ExpertContainer, nn.Module):
+class KVExpertContainer(ExpertContainer, KVAdapter):
     def __init__(self, config, task_id_container, layer, selector=None):
-        super().__init__()
+        super(Adapter, self).__init__()
+
         self.config = config
         self.layer = layer
-        self.selector: Selector = selector or TaskNameSelector()
+        self.selector: KVSelector = selector or KVTaskNameSelector()
         self.selector.info_container = task_id_container
 
         # Check if layer is an attention layer :
@@ -183,17 +184,29 @@ class KVExpertContainer(ExpertContainer, nn.Module):
 
         self.info_container = task_id_container
         self.default_expert_name = None
-        self.merged_expert_names = []
         self.experts = nn.ModuleDict({})
 
-        # For KVExpertContainer, we "fuse" the routing and expert fwd pass
+        # Needed to mimich behavior of `KVAdapter`
+        self.an_expert = None
 
-    def forward(self, input, **kwargs):
-        if len(self.experts) > 0:
-            weights: list = self.selector(input)
-            output = self.route(input, weights)
-            return output
-        return self.layer(input, **kwargs)
+    def __getattr__(self, name):
+        try:
+            return super(Adapter, self).__getattr__(name)
+        except AttributeError:
+            return getattr(self.an_expert, name)
+
+    # Delegate Routing ops to the selectors
+    def route(self, query, keys, attn_layer):
+        if callable(getattr(self.selector, "route", None)):
+            return self.selector.route(self.experts, query, keys, attn_layer)
+
+        return self.an_expert.route(query, keys, attn_layer)
+
+    def get_kv_weights(self, k_proj, v_proj):
+        return self.selector.get_kv_weights(self.experts, k_proj, v_proj)
+
+    def get_gate(self, adapter_weights):
+        return self.selector.get_gate(self.experts, adapter_weights)
 
     def add_expert(
         self,
@@ -212,8 +225,13 @@ class KVExpertContainer(ExpertContainer, nn.Module):
         expert_module = KVAdapter(expert_config, self.layer)
         expert_module.load_adapter_weights(expert_weights)
         self.experts[name] = expert_module
+        self.an_expert = expert_module
 
         if is_default:
             self.default_expert_name = name
 
         self.add_expert_to_selector(name)
+
+    def forward(self, *args, **kwargs):
+        # Copying the forward pass of KVAdapter, for some reason super() does not work
+        return self.attn_fwd(self.attn_layer, self, *args, **kwargs)

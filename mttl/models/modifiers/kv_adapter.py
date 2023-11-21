@@ -114,15 +114,17 @@ class KVAdapter(Adapter, ModifyMixin):
         ) / math.sqrt(attn_layer.head_dim)
 
         adapter_weights = F.softmax(adapter_logits, dim=-1, dtype=torch.float32)
+        gate_out = self.get_gate(adapter_weights)
+        out = gate_out * adapter_weights.type_as(query)
 
-        return self.get_gate(adapter_weights) * adapter_weights.type_as(query)
+        return out
 
     def aggregate(self, adapter_weights, adapter_v):
         """(3) Aggregate the weighted values according to the adapter weights"""
-
         return torch.matmul(adapter_weights, adapter_v)
 
 
+'''
 class FusedKVAdapters(KVAdapter):  # Router): (circular import)
     """Container class to handle routing and forwarding through multiple KVAdapters"""
 
@@ -204,6 +206,7 @@ class ConcatKVAdapters(FusedKVAdapters):
         out = torch.einsum("bhqe,ehab->bhqa", per_expert_weight, all_gates)
         return out
 
+'''
 
 """ """ """ """
 """ Model Specific Implementations of Self Attention """
