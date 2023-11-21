@@ -88,7 +88,7 @@ def run_eval(args):
             dataset="sordonia/flan-10k-flat",
             model="EleutherAI/gpt-neo-125m",
             finetune_task_name=configuration,
-            predict_batch_size=64,
+            predict_batch_size=8,
         ),
         for_generation=True,
     )

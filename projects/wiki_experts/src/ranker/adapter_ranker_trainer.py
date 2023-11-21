@@ -33,13 +33,19 @@ def train_clip(args):
     model = CLIPRanker()
 
     # test the model
-    dataconfig = CLIPExpertsConfig(model="EleutherAI/gpt-neo-125m")
+    dataconfig = CLIPExpertsConfig(
+        dataset=args.dataset,
+        model=args.model,
+        train_batch_size=args.train_batch_size,
+        finetune_task_name=args.finetune_task_name,
+        predict_batch_size=args.predict_batch_size,
+    )
     datamodule = CLIPExpertsDatamodule(dataconfig)
 
     # add model checkpoint
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
         monitor="val/loss_epoch",
-        dirpath="clip_ranker/",
+        dirpath=f"clip_ranker_{args.exp_name}/",
         filename="clip-{epoch:02d}-{val/loss:.2f}",
         save_top_k=1,
         mode="min",
