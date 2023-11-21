@@ -78,6 +78,14 @@ def get_datamodule(args, for_generation=False):
             train_on_reverse=args.dataset == "inverse-oa1",
         )
         dm = OA1Module(config, for_generation=for_generation)
+    elif "cot:flan" in args.dataset:
+        common_kwargs["dataset"] = common_kwargs["dataset"].replace("cot:", "")
+        config = FlanConfig(
+            **common_kwargs,
+            include_template_type="*",
+            include_task_source="CoT",
+        )
+        dm = FlanModule(config, for_generation=for_generation)
     elif "flan" in args.dataset:
         config = FlanConfig(
             **common_kwargs,
