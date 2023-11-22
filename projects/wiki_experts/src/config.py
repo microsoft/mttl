@@ -302,6 +302,7 @@ class ExpertConfig(Config):
         self.num_labels = 246
         self.classifer_repo_id = None
         self.retrieval_model = "classifer"
+        self.expert_library_path = None
 
     def post_init(self):
         if self.micro_batch_size is None:

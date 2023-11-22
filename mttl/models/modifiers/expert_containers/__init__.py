@@ -51,7 +51,6 @@ def add_expert_library_to_transformer(
     config=None,
 ):
     for expert_name, expert_dump in expert_library.items():
-        print(expert_name)
         add_expert_to_transformer(
             transformer,
             expert_name,
