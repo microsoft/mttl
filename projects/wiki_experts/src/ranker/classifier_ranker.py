@@ -6,7 +6,7 @@ import torch.nn.functional as F
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-class Classifer(pl.LightningModule):
+class Classifier(pl.LightningModule):
     # define the classifier, the x is the input, the task_id or expert_id is the label
     def __init__(
         self, text_encoder, num_labels, hidden_size=768, transformer_embed_dim=384

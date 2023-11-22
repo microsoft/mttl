@@ -300,8 +300,8 @@ class ExpertConfig(Config):
 
         # training classfier routing
         self.num_labels = 246
-        self.classifer_repo_id = None
-        self.retrieval_model = "classifer"
+        self.classifier_repo_id = None
+        self.retrieval_model = "classifier"
         self.expert_library_path = None
 
     def post_init(self):

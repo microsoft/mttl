@@ -5,7 +5,7 @@ from projects.wiki_experts.src.ranker.classification_module import (
     ClassificationConfig,
 )
 
-from projects.wiki_experts.src.ranker.classifer_ranker import Classifer
+from projects.wiki_experts.src.ranker.classifier_ranker import Classifier
 from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.src.ranker.clip_ranker import CLIPRanker
 from projects.wiki_experts.src.ranker.clip_data_module import (
@@ -66,7 +66,7 @@ def train_clip(args):
         wandb_logger.experiment.finish()
 
 
-def train_classifer(args):
+def train_classifier(args):
     # using wandb project
     wandb_logger = None
     if os.environ.get("WANDB_API_KEY") or args.wandb_project:
@@ -101,7 +101,7 @@ def train_classifer(args):
     )
     # train the classifier
     datamodule = ClassificationDataModule(config)
-    classifier = Classifer(text_encoder, num_labels=args.num_labels)
+    classifier = Classifier(text_encoder, num_labels=args.num_labels)
 
     # add model checkpoint
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
@@ -127,6 +127,6 @@ def train_classifer(args):
 if __name__ == "__main__":
     args = ExpertConfig.parse()
     if args.retrieval_model == "classifier":
-        train_classifer(args)
+        train_classifier(args)
     elif args.retrieval_model == "clip":
         train_clip(args)

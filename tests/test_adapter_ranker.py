@@ -13,7 +13,7 @@ def test_retrieval_routing():
     config.routing = "retrieval"
     config.num_labels = 246
     config.model = "EleutherAI/gpt-neo-125m"
-    config.classifer_repo_id = "zhan1993/gpt-neo_classifer_ranker"
+    config.classifier_repo_id = "zhan1993/gpt-neo_classifier_ranker"
 
     config.module_graph = "adversarial_qa_dbert_answer_the_following_q -> linear(zhan1993/gpt-neo_adversarial_qa_dbert_answer_the_following_q:0);"
     finetune_task_name = "adversarial_qa_dbert_answer_the_following_q"

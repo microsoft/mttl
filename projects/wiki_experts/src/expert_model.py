@@ -253,12 +253,12 @@ class MultiExpertModelRanker(MultiExpertModel):
         super().__init__(**kwargs)
         if (
             kwargs["routing"] == "retrieval"
-            and kwargs["retrieval_model"] == "classifer"
+            and kwargs["retrieval_model"] == "classifier"
         ):
             self.classifier = ExpertRanker(
                 num_labels=kwargs["num_labels"],
-                classifer_repo_id=kwargs["classifer_repo_id"],
-            ).get_classifer()
+                classifier_repo_id=kwargs["classifier_repo_id"],
+            ).get_classifier()
 
     def load_from_library(self, library):
         add_expert_library_to_transformer(self.model, library)
@@ -358,7 +358,7 @@ class MultiExpertModelClipRanker(MultiExpertModelRanker):
         if kwargs["retrieval_model"] == "clip":
             self.clip_ranker = ExpertRanker(
                 num_labels=kwargs["num_labels"],
-                classifer_repo_id=kwargs["classifer_repo_id"],
+                classifier_repo_id=kwargs["classifier_repo_id"],
             ).get_clip_ranker()
             self.expert_embeddings = self.clip_ranker.get_expert_embeddings()
 

@@ -103,7 +103,7 @@ def run_eval(args):
             tokenizer=data_module.tokenizer,
         )
     else:
-        print("Using classifer model")
+        print("Using classifier model")
         module = MultiExpertModelRanker(
             **vars(args),
             tokenizer=data_module.tokenizer,
