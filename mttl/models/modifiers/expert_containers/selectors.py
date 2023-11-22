@@ -93,19 +93,34 @@ class TaskNameSelector(torch.nn.Module, Selector):
         self.default_expert_name = None
 
     def forward(self, *args, **kwargs):
-        task_names = self.info_container["routing_infos"].task_names
+        # try to infer batch size
+        if "routing_infos" not in self.info_container:
+            if "input_ids" in kwargs:
+                batch_size = kwargs["input_ids"].size(0)
+            else:
+                raise ValueError(
+                    "routing_infos not in info_container and cannot infer batch size."
+                )
 
-        if (
-            any(task_name not in self.expert_names for task_name in task_names)
-            and not self.default_expert_name
-            and len(self.expert_names)
-        ):
-            raise ValueError(
-                "Experts for all tasks have not been loaded! Set a default expert?"
-            )
+            if not self.default_expert_name:
+                raise ValueError("No default expert name set and no task names given!")
 
-        routing_weights = [{task_name: 1.0} for task_name in task_names]
+            routing_weights = [
+                {self.default_expert_name: 1.0} for _ in range(batch_size)
+            ]
+        else:
+            task_names = self.info_container["routing_infos"].task_names
 
+            if (
+                any(task_name not in self.expert_names for task_name in task_names)
+                and not self.default_expert_name
+                and len(self.expert_names)
+            ):
+                raise ValueError(
+                    "Experts for all tasks have not been loaded! Set a default expert?"
+                )
+
+            routing_weights = [{task_name: 1.0} for task_name in task_names]
         return routing_weights
 
     def add_expert(self, expert_name: str):
@@ -117,10 +132,9 @@ class TaskNameSelector(torch.nn.Module, Selector):
         return f"{self.__layer_name__}"
 
 
-""" KV Specific Stuff """
-
-
 class KVSelector(Selector):
+    """KV Specific Stuff"""
+
     @abstractmethod
     def get_kv_weights(self, k_proj, v_proj):
         pass
