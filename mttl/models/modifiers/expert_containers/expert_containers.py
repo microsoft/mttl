@@ -166,6 +166,13 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
 
 
 class KVExpertContainer(ExpertContainer, KVAdapter):
+    """Expert Container for KVAdapters.
+    Unlike the LoRAExpertContainer, the KVExpertContainer is a KVAdapter itself,
+
+    See `KVSelector` for info on how the routing is done.
+    See `KVAdapter` for info on the control flow of the forward pass.
+    """
+
     def __init__(self, config, task_id_container, layer, selector=None):
         super(Adapter, self).__init__()
 
