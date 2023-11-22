@@ -13,9 +13,9 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
 from mttl.utils import setup_logging, logger
 from mttl.datamodule.base import AutoDataModule
-from config import ExpertsMergeConfig
+from projects.wiki_experts.src.evolution.config import ExpertsMergeConfig
 
-from evaluators import (
+from projects.wiki_experts.src.evolution.evaluators import (
     TestLossEvaluator,
     ExtendedMMLUEvaluator,
     Evaluator,
