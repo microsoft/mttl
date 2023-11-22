@@ -89,6 +89,7 @@ class MultiExpertModel(ExpertTrainer):
                 module_data.expert_weights,
                 action=action,
                 is_default=module_name == "default",
+                config=self.hparams,
             )
             self.experts.append(module_name)
         self.expert_info.parent_node = graph.dumps()
@@ -314,7 +315,9 @@ class MultiExpertModelRanker(MultiExpertModel):
                 batch
             )
 
-        generations = self.model.generate(inputs=batch["input_ids"], **kwargs)
+        generations = self.model.generate(
+            inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
+        )
         return generations
 
 
