@@ -9,7 +9,6 @@ class HardPromptConfig:
     max_input_length: int = None
     tokenizer: str = None
     model_family: str = None
-    prompt_location: str = "prefix"
 
 
 @register_modifier("hard_prompt", config_cls=HardPromptConfig)
