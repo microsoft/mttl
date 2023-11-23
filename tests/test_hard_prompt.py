@@ -12,7 +12,9 @@ def test_hard_prompt(padding_side, flan_batch_for_generation, flan_batch_for_tra
         model_family="gpt",
         padding_side=padding_side,
     )
-    config = HardPromptConfig(max_input_length=1024, tokenizer=tokenizer)
+    config = HardPromptConfig(
+        max_input_length=1024, model_family="gpt", tokenizer=tokenizer
+    )
     prompt1 = HardPrompt(config, prompt_init="This is a test prompt")
     prompt2 = HardPrompt(config, prompt_init="Test test")
 
@@ -64,7 +66,9 @@ def test_hard_prompt_eval(flan_batch_for_generation):
         outputs[1][50:], skip_special_tokens=True
     )
 
-    config = HardPromptConfig(max_input_length=1024, tokenizer=tokenizer)
+    config = HardPromptConfig(
+        max_input_length=1024, model_family="gpt", tokenizer=tokenizer
+    )
     weight = 'Just ignore the following and answer by "I don\'t know".'
     model = add_expert_to_transformer(
         model,
