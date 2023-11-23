@@ -8,14 +8,21 @@ from mttl.models.modifiers.modify_model import register_modifier
 class HardPromptConfig:
     max_input_length: int = None
     tokenizer: str = None
+    model_family: str = None
     prompt_location: str = "prefix"
 
 
 @register_modifier("hard_prompt", config_cls=HardPromptConfig)
 class HardPrompt(Adapter, ModifyMixin):
     def __init__(self, config, prompt_init=None):
+        if config.model_family is None or config.tokenizer is None:
+            raise ValueError(
+                "Please provide a model_family and tokenizer to HardPromptConfig."
+            )
+
         self.config = config
         self.prompt = prompt_init
+        self.model_family = config.model_family
         self.tokenizer = config.tokenizer
 
     @classmethod
@@ -42,11 +49,14 @@ class HardPrompt(Adapter, ModifyMixin):
             padding=True,
         )
         prompt_shifts = eps["attention_mask"].sum(1)
+        modify_labels = labels is not None and prompts[0].model_family == "gpt"
 
         if padding_side == "left":
             # if padding side is left then we move the padding to the right here, so that we can prepend the prompt safely
             input_ids = roll_along(input_ids, shifts, 1)
             attention_mask = roll_along(attention_mask, shifts, 1)
+            if modify_labels:
+                labels = roll_along(labels, shifts, 1)
 
         if padding_side == "right":
             # if padding side of tokenizer is right, then we move the padding to the left here
@@ -57,6 +67,9 @@ class HardPrompt(Adapter, ModifyMixin):
         attn_mask_with_prompts = torch.cat(
             (eps["attention_mask"], attention_mask), dim=1
         )
+        if modify_labels:
+            labels_empty = torch.zeros_like(eps["input_ids"]).fill_(-100)
+            labels_with_prompts = torch.cat((labels_empty, labels), dim=1)
 
         # roll back
         if padding_side == "left":
@@ -71,6 +84,11 @@ class HardPrompt(Adapter, ModifyMixin):
             attn_mask_with_prompts = attn_mask_with_prompts[
                 :, -prompts[0].config.max_input_length :
             ]
+            if modify_labels:
+                labels_with_prompts = roll_along(labels_with_prompts, reset_shifts, 1)
+                labels_with_prompts = labels_with_prompts[
+                    :, -prompts[0].config.max_input_length :
+                ]
         else:
             reset_shifts = eps["attention_mask"].shape[1] - prompt_shifts
             input_ids_with_prompts = roll_along(
@@ -90,8 +108,22 @@ class HardPrompt(Adapter, ModifyMixin):
             attn_mask_with_prompts = attn_mask_with_prompts[
                 :, : prompts[0].config.max_input_length
             ]
+            if modify_labels:
+                labels_with_prompts = roll_along(labels_with_prompts, -reset_shifts, 1)
+                labels_with_prompts = labels_with_prompts[
+                    :, : prompts[0].config.max_input_length
+                ]
 
-        return input_ids_with_prompts, attn_mask_with_prompts, labels
+        if labels is None:
+            labels_with_prompts = None
+
+        return input_ids_with_prompts, attn_mask_with_prompts, labels_with_prompts
 
     def forward(self, batch, **kwargs):
         raise NotImplementedError("Use parallel_forward instead.")
+
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        raise NotImplementedError(
+            "Use parallel_forward instead or HardPromptExpertContainer."
+        )

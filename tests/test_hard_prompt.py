@@ -1,4 +1,5 @@
 import pytest
+import torch
 from mttl.datamodule.utils import get_tokenizer_with_args
 from mttl.models.modifiers.expert_containers import add_expert_to_transformer
 from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
@@ -27,6 +28,7 @@ def test_hard_prompt(padding_side, flan_batch_for_generation, flan_batch_for_tra
         assert new_inputs[1][0, 0].item() == 1
         assert new_inputs[1][1, 0].item() == 0
         assert new_inputs[0].shape[1] == 503
+        assert new_inputs[2][1, 0].item() == -100
     elif padding_side == "right":
         new_inputs = HardPrompt.parallel_forward(
             [prompt1, prompt2], **flan_batch_for_training
@@ -36,6 +38,12 @@ def test_hard_prompt(padding_side, flan_batch_for_generation, flan_batch_for_tra
         assert new_inputs[0][0, 2].item() == 257
         assert new_inputs[1][0, 0].item() == 1
         assert new_inputs[1][1, 0].item() == 1
+        assert new_inputs[2][1, 0].item() == -100
+        target_ids = new_inputs[0][1][torch.where(new_inputs[2][1] != -100)]
+        target_ids_true = flan_batch_for_training["input_ids"][1][
+            torch.where(flan_batch_for_training["labels"][1] != -100)
+        ]
+        assert torch.all(target_ids == target_ids_true)
 
 
 def test_hard_prompt_eval(flan_batch_for_generation):
