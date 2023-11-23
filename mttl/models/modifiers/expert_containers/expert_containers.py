@@ -210,6 +210,14 @@ class KVExpertContainer(ExpertContainer, KVAdapter):
         # This behavior is problematic! you need `get_gate` to call the adapter method
         return super().route(query, keys, attn_layer)
 
+    # Delegate Routing ops to the selectors
+    def aggregate(self, adapter_weights, adapter_v):
+        if callable(getattr(self.selector, "aggregate", None)):
+            return self.selector.aggregate(self.experts, adapter_weights, adapter_v)
+
+        # This behavior is problematic! you need `get_gate` to call the adapter method
+        return super().aggregate(adapter_weights, adapter_v)
+
     def get_kv_weights(self, k_proj, v_proj):
         return self.selector.get_kv_weights(self.experts, k_proj, v_proj)
 
