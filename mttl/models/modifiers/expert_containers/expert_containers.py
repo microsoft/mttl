@@ -166,6 +166,13 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
 
 
 class KVExpertContainer(ExpertContainer, KVAdapter):
+    """Expert Container for KVAdapters.
+    Unlike the LoRAExpertContainer, the KVExpertContainer is a KVAdapter itself,
+
+    See `KVSelector` for info on how the routing is done.
+    See `KVAdapter` for info on the control flow of the forward pass.
+    """
+
     def __init__(self, config, task_id_container, layer, selector=None):
         super(Adapter, self).__init__()
 
@@ -200,7 +207,8 @@ class KVExpertContainer(ExpertContainer, KVAdapter):
         if callable(getattr(self.selector, "route", None)):
             return self.selector.route(self.experts, query, keys, attn_layer)
 
-        return self.an_expert.route(query, keys, attn_layer)
+        # This behavior is problematic! you need `get_gate` to call the adapter method
+        return super().route(query, keys, attn_layer)
 
     def get_kv_weights(self, k_proj, v_proj):
         return self.selector.get_kv_weights(self.experts, k_proj, v_proj)
