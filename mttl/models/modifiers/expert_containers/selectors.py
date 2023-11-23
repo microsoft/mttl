@@ -39,9 +39,9 @@ class Selector:
     def name(self):
         pass
 
-    @abstractmethod
     def add_expert(self, expert_name: str):
-        pass
+        if expert_name not in self.expert_names:
+            self.expert_names.append(expert_name)
 
     def add_experts(self, expet_names: list):
         for expert_name in expet_names:
@@ -133,7 +133,20 @@ class TaskNameSelector(torch.nn.Module, Selector):
 
 
 class KVSelector(Selector):
-    """KV Specific Stuff"""
+    """Selector specific to KV adapters. The KV Adapter modifies the self-attention
+    call, adding the following execution :
+
+    1. adapter_k, adapter_v = adapter.get_kv_weights(k_proj, v_proj)
+    2. adapter_weights = adapter.route(query_states, adapter_k, self)
+        2.1 `adapter.route` calls get_gate(adapter_weights)
+    3. adapter_output = adapter.aggregate(adapter_weights, adapter_v)
+
+    To enable custom routing, one typically needs to modify `get_kv_weights` and `get_gate`.
+    For example, see `KVTaskNameSelector` for an example.
+
+    You can also overwrite the `route` method; the `KVExpertContainer` will call it instead of
+    the default `route` method (see lines 199-201 in `KVExpertContainer`)
+    """
 
     @abstractmethod
     def get_kv_weights(self, k_proj, v_proj):
@@ -142,10 +155,6 @@ class KVSelector(Selector):
     @abstractmethod
     def get_gate(self, adapter_weights):
         pass
-
-    def add_expert(self, expert_name: str):
-        if expert_name not in self.expert_names:
-            self.expert_names.append(expert_name)
 
     @property
     def name(self):
@@ -158,6 +167,8 @@ class KVSelector(Selector):
 
 @register_multi_expert_selector("kv_task_selector")
 class KVTaskNameSelector(KVSelector):
+    """Selects KVAdapters based on the task name."""
+
     def __init__(self, config=None, info_container=None, **kwargs) -> None:
         super().__init__()
         self.info_container = info_container
@@ -192,6 +203,10 @@ class KVTaskNameSelector(KVSelector):
 
 @register_multi_expert_selector("kv_concat_selector")
 class KVConcatSelector(KVSelector, nn.Module):
+    """Concatenates along the sequence dim. all the adapters, and lets the
+    model's internal attention mechanism take care of routing in a task agnostic way
+    """
+
     def __init__(self, config=None, info_container=None, **kwargs) -> None:
         super().__init__()
         self.config = config
