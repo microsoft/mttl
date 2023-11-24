@@ -46,7 +46,13 @@ def read_jsonl_dataset(filename):
     return dataset
 
 
-def upload_to_hf_(dataset_path, hf_destination=None, configuration=None):
+def upload_to_hf_(
+    dataset_path,
+    hf_destination=None,
+    configuration=None,
+    flat=False,
+    create_split=False,
+):
     import pandas as pd
     from datasets import DatasetDict
     import huggingface_hub
@@ -60,15 +66,44 @@ def upload_to_hf_(dataset_path, hf_destination=None, configuration=None):
         hf_destination = f"{hf_user}/{dts_name}"
 
     dataset = load_dataset("json", data_files=dataset_path)["train"]
-    pd = dataset.to_pandas()
-    subjects = pd["subject"].unique()
 
-    dts_per_subject = DatasetDict()
-    for sub in subjects:
-        dts_subject = dataset.filter(lambda x: x["subject"] == sub)
-        dts_per_subject[sub] = dts_subject
+    if create_split:
+        pd = dataset.to_pandas()
+        subjects = pd["subject"].unique()
 
-    dts_per_subject.push_to_hub(hf_destination, token=hf_token)
+        train_ids = []
+        valid_ids = []
+        test_ids = []
+
+        for sub in subjects:
+            dts_subject = dataset.filter(lambda x: x["subject"] == sub)
+            context_ids = list(set(dts_subject["id"]))
+            train_ids = train_ids + context_ids[: int(len(context_ids) * 0.9)]
+            valid_ids = valid_ids + context_ids[int(len(context_ids) * 0.9) :]
+            print(sub, len(context_ids))
+            print("train", len(train_ids))
+            print("valid", len(valid_ids))
+
+        # creates a split column for each task (subject)
+        def create_split_column(example):
+            return (
+                {"split": "train"} if example["id"] in train_ids else {"split": "valid"}
+            )
+
+        dataset = dataset.map(create_split_column)
+
+    if not flat:
+        pd = dataset.to_pandas()
+        subjects = pd["subject"].unique()
+
+        dts_per_subject = DatasetDict()
+        for sub in subjects:
+            dts_subject = dataset.filter(lambda x: x["subject"] == sub)
+            dts_per_subject[sub] = dts_subject
+
+        dts_per_subject.push_to_hub(hf_destination, token=hf_token)
+    else:
+        dataset.push_to_hub(hf_destination, token=hf_token)
 
     if configuration is not None:
         from huggingface_hub import HfApi

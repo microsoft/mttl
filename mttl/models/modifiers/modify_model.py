@@ -1,5 +1,6 @@
 from mttl.utils import logger
 
+
 MODIFIERS = {}
 CONFIGS_TO_MODIFIERS = {}
 
@@ -19,12 +20,19 @@ def register_modifier(name, config_cls=None):
     return _thunk
 
 
+def get_modifier_type(config, model_modifier=None):
+    model_modifier = model_modifier or getattr(config, "model_modifier", None)
+    model_modifier = model_modifier or CONFIGS_TO_MODIFIERS.get(type(config), None)
+    return model_modifier
+
+
 def modify_transformer(transformer, modifier_config, model_modifier=None):
     import mttl.models.modifiers.lora  # noqa: F401
     import mttl.models.modifiers.poly  # noqa: F401
     import mttl.models.modifiers.routing  # noqa: F401
     import mttl.models.modifiers.prompt_tuning  # noqa: F401
     import mttl.models.modifiers.kv_adapter  # noqa: F401
+    import mttl.models.modifiers.hard_prompts  # noqa: F401
     from mttl.utils import logger
 
     # import mttl.models.modifiers.prefix_tuning # noqa: F401
@@ -36,11 +44,7 @@ def modify_transformer(transformer, modifier_config, model_modifier=None):
     for param in transformer.parameters():
         param.requires_grad = False
 
-    if model_modifier is None:
-        model_modifier = getattr(modifier_config, "model_modifier", None)
-
-    if model_modifier is None:
-        model_modifier = CONFIGS_TO_MODIFIERS.get(type(modifier_config), None)
+    model_modifier = get_modifier_type(modifier_config, model_modifier=model_modifier)
 
     if model_modifier is None:
         logger.warn("Model modifier not set nor in config nor as an argument.")

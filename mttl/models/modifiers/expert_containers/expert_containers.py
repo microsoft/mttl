@@ -2,6 +2,7 @@ from pyparsing import abstractmethod
 import torch
 from torch import nn
 from typing import Any, Dict
+from mttl.models.modifiers.base import MergeableAdapter, ModifyMixin
 from mttl.models.modifiers.base import Adapter, MergeableAdapter, ModifyMixin
 from mttl.models.modifiers.lora import LoRA, SkilledLoRA
 from mttl.models.modifiers.kv_adapter import KVAdapter
