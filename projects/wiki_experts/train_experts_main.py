@@ -11,6 +11,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 import json
 
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
+from mttl.datamodule.adauni_data_module import AdaUniConfig, AdaUniModule
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -92,6 +93,11 @@ def get_datamodule(args, for_generation=False):
             include_template_type="*",
         )
         dm = FlanModule(config, for_generation=for_generation)
+    elif "adauni" in args.dataset:
+        config = AdaUniConfig(
+            **common_kwargs,
+        )
+        dm = AdaUniModule(config, for_generation=for_generation)
     else:
         raise ValueError(f"Unknown dataset {args.dataset}")
     return dm
