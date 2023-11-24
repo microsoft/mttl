@@ -3,6 +3,8 @@ from sentence_transformers import SentenceTransformer
 from projects.wiki_experts.src.ranker.classification_module import (
     ClassificationDataModule,
     ClassificationConfig,
+    ClassificationDataModuleAdaUni,
+    ClassificationAdaUniConfig,
 )
 
 from projects.wiki_experts.src.ranker.classifier_ranker import Classifier
@@ -93,20 +95,30 @@ def train_classifier(args):
         param.requires_grad = False
 
     # load config
-    config = ClassificationConfig(
-        dataset=args.dataset,
-        model=args.model,
-        train_batch_size=args.train_batch_size,
-        finetune_task_name=args.finetune_task_name,
-    )
-    # train the classifier
-    datamodule = ClassificationDataModule(config)
+    if "flan" in args.dataset:
+        config = ClassificationConfig(
+            dataset=args.dataset,
+            model=args.model,
+            train_batch_size=args.train_batch_size,
+            finetune_task_name=args.finetune_task_name,
+        )
+        # train the classifier
+        datamodule = ClassificationDataModule(config)
+    elif "adauni" in args.dataset:
+        config = ClassificationAdaUniConfig(
+            dataset=args.dataset,
+            model=args.model,
+            train_batch_size=args.train_batch_size,
+            finetune_task_name=args.finetune_task_name,
+        )
+        # train the classifier
+        datamodule = ClassificationDataModuleAdaUni(config)
     classifier = Classifier(text_encoder, num_labels=args.num_labels)
 
     # add model checkpoint
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
         monitor="val/loss_epoch",
-        dirpath="classification_ranker/",
+        dirpath=f"classification_ranker_{args.dataset}/",
         filename="classifier-{epoch:02d}-{val/loss:.2f}",
         save_top_k=1,
         mode="min",

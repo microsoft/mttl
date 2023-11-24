@@ -84,6 +84,12 @@ def get_datamodule(args, for_generation=False):
             include_template_type="*",
         )
         dm = FlanModule(config, for_generation=for_generation)
+    elif "adauni" in args.dataset:
+        config = FlanConfig(
+            **common_kwargs,
+            include_template_type="*",
+        )
+        dm = FlanModule(config, for_generation=for_generation)
     else:
         raise ValueError(f"Unknown dataset {args.dataset}")
     return dm
