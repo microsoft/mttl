@@ -132,9 +132,9 @@ def add_expert_to_transformer(
                     }
 
                     # get the layer number
-                    pattern = r"h\.(\d+)"
-                    match = re.search(pattern, expert_container.__layer_name__)
-                    layer_num = match.group(1)
+                    # pattern = r"\.\d\."
+                    # match = re.search(pattern, expert_container.__layer_name__)
+                    # layer_num = int(match.group(0).replace(".", ""))
 
                     if load_only_layers:
                         pos = load_only_layers.find("-")

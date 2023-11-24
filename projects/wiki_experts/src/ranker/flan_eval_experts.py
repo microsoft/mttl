@@ -122,6 +122,9 @@ def run_eval(args):
     # evaluate all the category
     rouge = evaluator.evaluate(module, split="test", verbose=False)
 
+    if args.routing == "retrieval":
+        accuracy = module.get_retrieval_accuracy(data_module.val_dataloader())
+        logger.info("Accuracy: {}".format(accuracy))
     logger.info("Flan rouge: {}".format(rouge))
     del module
 

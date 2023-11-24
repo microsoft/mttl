@@ -61,6 +61,7 @@ def test_expert_model_generate():
     module = MultiExpertModel(
         **vars(config), device_map="cpu", tokenizer=data_module.tokenizer
     )
+    module.to("cpu")
     module.load_from_graph_string(config.module_graph)
     batch = next(iter(data_module.val_dataloader()))
 

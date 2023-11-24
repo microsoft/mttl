@@ -333,14 +333,11 @@ class MultiExpertModelRanker(MultiExpertModel):
                 self.experts, batch["input_ids"].shape[0], replace=True
             ).tolist()
         elif self.hparams.routing == "retrieval":
+            import numpy as np
+
             logger.info(f"retrieval routing with {self.hparams.retrieval_model}")
             original_task_names = batch["task_names"]
             batch["task_names"] = self.expert_retrieval(batch)
-
-            acc = sum(
-                np.array(batch["task_names"]) == np.array(original_task_names)
-            ) / len(original_task_names)
-
         if hasattr(self.model, "task_id_container"):
             self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
                 batch

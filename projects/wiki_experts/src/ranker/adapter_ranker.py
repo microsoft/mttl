@@ -48,7 +48,7 @@ class ExpertRanker:
             )
         print(f"Downloaded the classifier from {self.classifier_ckpt}")
         text_encoder = SentenceTransformer("all-MiniLM-L6-v2")
-        classifier = classifier(text_encoder, self.num_labels).to(device)
+        classifier = Classifier(text_encoder, self.num_labels).to(device)
         classifier.load_state_dict(
             torch.load(self.classifier_ckpt, map_location=device)["state_dict"]
         )
