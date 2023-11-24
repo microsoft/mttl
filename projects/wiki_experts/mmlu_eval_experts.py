@@ -2,6 +2,7 @@ import os
 import sys
 from huggingface_hub import login
 from pytorch_lightning import seed_everything
+from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -9,7 +10,11 @@ from mttl.evaluators import MMLUEvaluator
 from mttl.utils import setup_logging, logger
 
 # register models
-from projects.wiki_experts.src.expert_model import MultiExpertModel
+from projects.wiki_experts.src.expert_model import (
+    MultiExpertModel,
+    MultiExpertModelRanker,
+    MultiExpertModelClipRanker,
+)
 from projects.wiki_experts.src.config import ExpertConfig
 
 
@@ -105,9 +110,26 @@ def run_eval(args):
         args,
         split=args.mmlu_test_split,
     )
-    module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
+    # load module
+    if args.retrieval_model == "clip":
+        print("Using clip model")
+        module = MultiExpertModelClipRanker(
+            **vars(args),
+            tokenizer=mmlu.datamodule.tokenizer,
+        )
+    elif args.retrieval_model == "classifier":
+        print("Using classifier model")
+        module = MultiExpertModelRanker(
+            **vars(args),
+            tokenizer=mmlu.datamodule.tokenizer,
+        )
+    else:
+        module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
 
-    if args.load_module is not None:
+    if args.expert_library_path:
+        library = HFExpertLibrary(args.expert_library_path)
+        module.load_from_library(library)
+    elif args.load_module is not None:
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:
             module.load_expert(**expert_kwargs)
