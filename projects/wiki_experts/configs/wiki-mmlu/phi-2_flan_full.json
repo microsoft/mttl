@@ -1,5 +1,5 @@
 {
-    "num_train_epochs": 10,
+    "num_train_epochs": 1,
     "learning_rate": 3e-5,
     "micro_batch_size": 2,
     "train_batch_size": 16,
