@@ -3,43 +3,35 @@ import pytest
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 
 
-def test_expert_lib():
-    library = HFExpertLibrary("sordonia/test-library-for-neo-125m")
-    assert len(library) == 1
+def test_expert_lib(mocker):
+    library = HFExpertLibrary("sordonia/test-library")
+    assert len(library) == 20
     assert not library._sliced
-    assert not library._modified
+
+    module_name = library.keys()[0]
+    module_dump = library[module_name]
+
+    library._upload_metadata = mocker.MagicMock()
+    library._upload_weights = mocker.MagicMock()
+    library._update_readme = mocker.MagicMock()
 
     # expert already there
     with pytest.raises(ValueError):
-        library.add_expert(list(library.keys())[0], list(library.values())[0])
+        library.add_expert(module_name, module_dump)
 
-    assert (
-        library["quail_description_context_question_answer_text"].expert_config.model
-        == "EleutherAI/gpt-neo-125m"
-    )
-    assert (
-        len(library["quail_description_context_question_answer_text"].expert_weights)
-        == 72
-    )
-    assert (
-        library[
-            "quail_description_context_question_answer_text"
-        ].expert_info.parent_node
-        is None
-    )
-    assert (
-        library[
-            "quail_description_context_question_answer_text"
-        ].expert_info.expert_name
-        is None
-    )
+    assert module_dump.expert_config.model == "phi-2"
+    assert len(module_dump.expert_weights) == 128
+    assert module_dump.expert_info.parent_node is None
+    assert module_dump.expert_info.expert_name is None
 
-    library.add_expert("new-expert", list(library.values())[0])
-    assert len(library) == 2
-    assert library._modified
+    library.add_expert("new_module", module_dump)
+    assert library._upload_metadata.call_count == 1
+    assert library._upload_weights.call_count == 1
+    assert library._update_readme.call_count == 1
+    assert len(library) == 21
 
     library = HFExpertLibrary(
-        "sordonia/test-library-for-neo-125m", model_name="EleutherAI/other-model"
+        "sordonia/test-library", model_name="EleutherAI/other-model"
     )
     assert len(library) == 0
     assert library._sliced
