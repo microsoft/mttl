@@ -1,5 +1,7 @@
+from dataclasses import dataclass, asdict
 import glob
 import io
+import json
 import torch
 import os
 import numpy as np
@@ -8,19 +10,53 @@ from collections import UserDict
 import huggingface_hub
 from huggingface_hub import HfApi
 from huggingface_hub import (
+    hf_hub_download,
     login,
     CommitOperationAdd,
     create_commit,
+    snapshot_download,
     preupload_lfs_files,
     create_repo,
 )
 
+from huggingface_hub import HfApi, HfFolder
 from mttl.utils import logger
-from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
+from mttl.models.modifiers.expert_containers.module_graph import (
+    Expert,
+    ExpertConfig,
+    load_expert,
+)
+from projects.wiki_experts.src.config import ExpertInfo
 
 
-class ExpertLibrary(UserDict):
+class ExpertLibrary:
     pass
+
+
+@dataclass
+class MetadataEntry:
+    expert_name: str = None
+    expert_info: ExpertInfo = None
+    expert_config: ExpertConfig = None
+
+    def dumps(self):
+        return {
+            "expert_config": self.expert_config.to_json(),
+            "expert_info": asdict(self.expert_info),
+            "expert_name": self.expert_name,
+        }
+
+    @classmethod
+    def loads(cls, ckpt):
+        return cls(
+            expert_config=ExpertConfig(
+                kwargs=json.loads(ckpt["expert_config"]),
+                silent=True,
+                raise_error=False,
+            ),
+            expert_info=ExpertInfo(**ckpt["expert_info"]),
+            expert_name=ckpt["expert_name"],
+        )
 
 
 class HFExpertLibrary(ExpertLibrary):
@@ -28,9 +64,9 @@ class HFExpertLibrary(ExpertLibrary):
         super().__init__()
 
         self.repo_id = repo_id
-
+        self.api = HfApi()
         self._sliced = False
-        self._modified = False
+        self.data = {}
 
         if "HF_TOKEN" in os.environ:
             login(token=os.environ["HF_TOKEN"])
@@ -40,80 +76,108 @@ class HFExpertLibrary(ExpertLibrary):
         except:
             pass
 
-        if huggingface_hub.file_exists(repo_id, "library.ckpt"):
-            library_ckpt = huggingface_hub.hf_hub_download(
-                repo_id, filename="library.ckpt"
-            )
+        metadata_dir = snapshot_download(repo_id, allow_patterns="*.meta")
+        metadata = [
+            MetadataEntry.loads(torch.load(file, map_location="cpu"))
+            for file in glob.glob(f"{metadata_dir}/*.meta")
+        ]
 
-            try:
-                library_dump = torch.load(library_ckpt, map_location="cpu")
-            except:
-                library_dump = {"expert_name": [], "expert_dump": []}
-
-            for expert_name, expert_dump in zip(
-                library_dump["expert_name"], library_dump["expert_dump"]
-            ):
-                if (
-                    model_name is not None
-                    and expert_dump.expert_config.model != model_name
-                ):
-                    self._sliced = True
-                    continue
-
-                if expert_name in self.data:
-                    raise ValueError(
-                        f"Expert {expert_name} already exists. Library corrupted."
-                    )
-
-                self.data[expert_name] = expert_dump
-
-            if selection:
+        for metadatum in metadata:
+            if model_name is not None and metadatum.expert_config.model != model_name:
                 self._sliced = True
-                self.data = {k: v for k, v in self.data.items() if selection in k}
+                continue
+
+            if metadatum.expert_name in self.data:
+                raise ValueError(
+                    f"Expert {metadata.expert_name} already exists. Library corrupted."
+                )
+
+            self.data[metadatum.expert_name] = metadatum
+
+        if selection:
+            self._sliced = True
+            self.data = {k: v for k, v in self.data.items() if selection in k}
 
         logger.info("Loaded %s experts from huggingface hub", len(self.data))
 
-    def add_expert(self, expert_name: str, expert_dump: Expert):
-        if self._sliced:
-            raise ValueError("Cannot add expert to sliced library.")
+    def _download_model(self, model_name):
+        if model_name not in self.data:
+            raise ValueError(f"Model {model_name} not found in repository.")
 
-        if expert_name in self.data:
-            raise ValueError(f"Expert {expert_name} already exists")
+        model_file = f"{model_name}.ckpt"
+        return hf_hub_download(self.repo_id, filename=model_file)
 
-        self.data[expert_name] = expert_dump
-        self._modified = True
-
-    def add_expert_from_ckpt(self, ckpt_path: str, expert_name: str = None):
-        expert_dump = load_expert(ckpt_path, expert_name)
-
-        self.add_expert(expert_dump.expert_config.expert_name, expert_dump)
-
-    def flush(self):
-        if not self._modified or self._sliced:
-            return
-
-        # synchronize with huggingface hub
-        library_dump = {"expert_name": [], "expert_dump": []}
-        for expert_name, expert_dump in self.data.items():
-            library_dump["expert_name"].append(expert_name)
-            library_dump["expert_dump"].append(expert_dump)
-
+    def _upload_weights(self, expert_name, expert_dump):
         with io.BytesIO() as buffer:
-            torch.save(library_dump, buffer)
+            torch.save(expert_dump.expert_weights, buffer)
             buffer.flush()
 
-            logger.info("Uploading library to huggingface hub...")
-            logger.info("Num experts: %s", len(library_dump["expert_name"]))
-            logger.info("Total size: %s MB", buffer.tell() / 1024 / 1024)
-
+            logger.info("Uploading expert to huggingface hub...")
             addition = CommitOperationAdd(
-                path_in_repo=f"library.ckpt", path_or_fileobj=buffer
+                path_in_repo=f"{expert_name}.ckpt", path_or_fileobj=buffer
             )
             preupload_lfs_files(self.repo_id, additions=[addition])
             create_commit(
-                self.repo_id, operations=[addition], commit_message="Update library."
+                self.repo_id,
+                operations=[addition],
+                commit_message=f"Update library with {expert_name}.",
             )
 
+    def _upload_metadata(self, metadata):
+        with io.BytesIO() as buffer:
+            torch.save(metadata.dumps(), buffer)
+            buffer.flush()
+
+            self.api.upload_file(
+                repo_id=self.repo_id,
+                path_or_fileobj=buffer,
+                path_in_repo=f"{metadata.expert_name}.meta",
+            )
+            print(f"Metadata for {metadata.expert_name} uploaded successfully.")
+
+    def keys(self):
+        return list(self.data.keys())
+
+    def items(self):
+        for k in self.keys():
+            yield k, self.__getitem__(k)
+
+    def __getitem__(self, model_name):
+        try:
+            model = self._download_model(model_name)
+            # Load the model from the downloaded file
+            model = torch.load(model, map_location="cpu")
+            return Expert(
+                expert_config=self.data[model_name].expert_config,
+                expert_info=self.data[model_name].expert_info,
+                expert_weights=model,
+            )
+        except Exception as e:
+            print(f"Error loading model {model_name}: {e}")
+
+    def __len__(self):
+        return len(self.data)
+
+    def add_expert(self, expert_name: str, expert_dump: Expert, force: bool = False):
+        if self._sliced:
+            raise ValueError("Cannot add expert to sliced library.")
+
+        if expert_name in self.data and not force:
+            raise ValueError(f"Expert {expert_name} already exists")
+
+        metadata = MetadataEntry(
+            expert_name=expert_name,
+            expert_info=expert_dump.expert_info,
+            expert_config=expert_dump.expert_config,
+        )
+
+        self._upload_weights(expert_name, expert_dump)
+        self._upload_metadata(metadata)
+
+        self.data[metadata.expert_name] = metadata
+        self._update_readme()
+
+    def _update_readme(self):
         api = HfApi()
 
         def upload(buffer):
@@ -128,7 +192,7 @@ class HFExpertLibrary(ExpertLibrary):
             # Number of experts present in the library: {len(library_dump["expert_name"])}
             # Types of experts present in the library: unique(dump.model_modifier for dump in library_dump["expert_dump"])
             buffer.write(
-                f"Number of experts present in the library: {len(library_dump['expert_name'])}\n\n".encode(
+                f"Number of experts present in the library: {len(self)}\n\n".encode(
                     "utf-8"
                 )
             )
@@ -138,11 +202,9 @@ class HFExpertLibrary(ExpertLibrary):
                 )
             )
             buffer.write(f"| --- | --- | --- | --- |\n".encode("utf-8"))
-            for expert_name, expert_dump in zip(
-                library_dump["expert_name"], library_dump["expert_dump"]
-            ):
+            for expert_name, metadata in self.data.items():
                 buffer.write(
-                    f"| {expert_name} | {expert_dump.expert_config.model} | {expert_dump.expert_config.dataset}/{expert_dump.expert_config.finetune_task_name} | {expert_dump.expert_config.model_modifier} |\n".encode(
+                    f"| {expert_name} | {metadata.expert_config.model} | {metadata.expert_config.dataset}/{metadata.expert_config.finetune_task_name} | {metadata.expert_config.model_modifier} |\n".encode(
                         "utf-8"
                     )
                 )
@@ -156,13 +218,21 @@ class HFExpertLibrary(ExpertLibrary):
             buffer.flush()
             upload(buffer)
 
+    def add_expert_from_ckpt(
+        self, ckpt_path: str, expert_name: str = None, force: bool = False
+    ):
+        expert_dump = load_expert(ckpt_path, expert_name)
 
-class LocalExpertLibrary(ExpertLibrary):
+        self.add_expert(expert_dump.expert_config.expert_name, expert_dump, force=force)
+
+
+class LocalExpertLibrary(UserDict, ExpertLibrary):
     def __init__(self, modules_dir, model_name, selection="", operator=np.argmin):
         """
         Searches local experts
         """
-        super().__init__()
+        UserDict.__init__(self)
+
         self.home_dir = modules_dir
         # searches home and loads all the existing experts with selection criteria
         all_checkpoints = glob.glob(f"{self.home_dir}/**/*{selection}/*.ckpt")

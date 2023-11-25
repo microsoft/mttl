@@ -354,6 +354,10 @@ def load_expert(
     logger.info(f"Loading expert from {expert_checkpoint}...")
     expert_checkpoint = torch.load(expert_checkpoint, map_location="cpu")
 
+    # remove tokenizer if ever is present
+    if "tokenizer" in expert_checkpoint["hyper_parameters"]:
+        del expert_checkpoint["hyper_parameters"]["tokenizer"]
+
     expert_config = ExpertConfig(
         kwargs=expert_checkpoint["hyper_parameters"],
         silent=True,
