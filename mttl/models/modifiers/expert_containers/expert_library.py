@@ -19,14 +19,14 @@ from huggingface_hub import (
     create_repo,
 )
 
-from huggingface_hub import HfApi, HfFolder
+from huggingface_hub import HfApi
 from mttl.utils import logger
 from mttl.models.modifiers.expert_containers.module_graph import (
     Expert,
     ExpertConfig,
     load_expert,
+    ExpertInfo,
 )
-from projects.wiki_experts.src.config import ExpertInfo
 
 
 class ExpertLibrary:
