@@ -41,7 +41,6 @@ class ExpertTrainer(EfficientCheckpointModule):
 
         if self.hparams.load_in_8bit:
             model_object = prepare_model_for_kbit_training(model_object)
-
         self.model = modify_transformer(model_object, self.hparams)
 
         # replace w flash attn!

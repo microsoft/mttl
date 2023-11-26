@@ -1,6 +1,5 @@
 from mttl.utils import logger
 
-
 MODIFIERS = {}
 CONFIGS_TO_MODIFIERS = {}
 
@@ -43,6 +42,13 @@ def modify_transformer(transformer, modifier_config, model_modifier=None):
     # set all params to not require grad
     for param in transformer.parameters():
         param.requires_grad = False
+
+    if hasattr(modifier_config, "model_modifier") and (
+        modifier_config.model_modifier is None
+    ):
+        # set all params to require grad
+        for param in transformer.parameters():
+            param.requires_grad = True
 
     model_modifier = get_modifier_type(modifier_config, model_modifier=model_modifier)
 
