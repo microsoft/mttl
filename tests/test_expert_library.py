@@ -8,7 +8,7 @@ def test_expert_lib(mocker):
     assert len(library) == 20
     assert not library._sliced
 
-    module_name = library.keys()[0]
+    module_name = list(library.keys())[0]
     module_dump = library[module_name]
 
     library._upload_metadata = mocker.MagicMock()
