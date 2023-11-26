@@ -1,6 +1,5 @@
 from mttl.utils import logger
 
-
 MODIFIERS = {}
 CONFIGS_TO_MODIFIERS = {}
 
@@ -39,7 +38,8 @@ def modify_transformer(transformer, modifier_config, model_modifier=None):
 
     # create a shared container for the task id
     transformer.task_id_container = {}
-    if modifier_config.model_modifier:
+
+    if hasattr(modifier_config, "model_modifier") and (modifier_config.model_modifier):
         # set all params to require grad
         for param in transformer.parameters():
             param.requires_grad = False
