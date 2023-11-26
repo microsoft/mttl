@@ -162,17 +162,17 @@ class HFExpertLibrary(ExpertLibrary):
                 "Cannot access library while in transaction. Finish current commit!"
             )
 
-        try:
-            model = self._download_model(model_name)
-            # Load the model from the downloaded file
-            model = torch.load(model, map_location="cpu")
-            return Expert(
-                expert_config=self.data[model_name].expert_config,
-                expert_info=self.data[model_name].expert_info,
-                expert_weights=model,
-            )
-        except Exception as e:
-            print(f"Error loading model {model_name}: {e}")
+        if model_name not in self.data:
+            raise ValueError(f"Expert {model_name} not found in repository.")
+
+        model = self._download_model(model_name)
+        # Load the model from the downloaded file
+        model = torch.load(model, map_location="cpu")
+        return Expert(
+            expert_config=self.data[model_name].expert_config,
+            expert_info=self.data[model_name].expert_info,
+            expert_weights=model,
+        )
 
     def __len__(self):
         return len(self.data)
