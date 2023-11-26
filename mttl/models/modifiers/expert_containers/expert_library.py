@@ -194,9 +194,6 @@ class HFExpertLibrary(ExpertLibrary):
         api = HfApi()
 
         buffer = io.BytesIO()
-        # Write the following into the buffer:
-        # Number of experts present in the library: {len(library_dump["expert_name"])}
-        # Types of experts present in the library: unique(dump.model_modifier for dump in library_dump["expert_dump"])
         buffer.write(
             f"Number of experts present in the library: {len(self)}\n\n".encode("utf-8")
         )
