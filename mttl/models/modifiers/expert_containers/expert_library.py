@@ -60,7 +60,7 @@ class MetadataEntry:
 
 
 class HFExpertLibrary(ExpertLibrary):
-    def __init__(self, repo_id, model_name=None, selection=None):
+    def __init__(self, repo_id, model_name=None, selection=None, create=False):
         super().__init__()
 
         self.repo_id = repo_id
@@ -74,7 +74,8 @@ class HFExpertLibrary(ExpertLibrary):
             login(token=os.environ["HF_TOKEN"])
 
         try:
-            create_repo(repo_id, repo_type="model", exist_ok=True)
+            if create:
+                create_repo(repo_id, repo_type="model", exist_ok=True)
         except:
             pass
 
@@ -149,13 +150,18 @@ class HFExpertLibrary(ExpertLibrary):
             logger.info(f"Metadata for {metadata.expert_name} uploaded successfully.")
 
     def keys(self):
-        return list(self.data.keys())
+        return self.data.keys()
 
     def items(self):
-        for k in self.keys():
+        for k in list(self.keys()):
             yield k, self.__getitem__(k)
 
     def __getitem__(self, model_name):
+        if self._in_transaction:
+            raise ValueError(
+                "Cannot access library while in transaction. Finish current commit!"
+            )
+
         try:
             model = self._download_model(model_name)
             # Load the model from the downloaded file
@@ -262,6 +268,24 @@ class HFExpertLibrary(ExpertLibrary):
         expert_dump = load_expert(ckpt_path, expert_name)
 
         self.add_expert(expert_dump.expert_config.expert_name, expert_dump, force=force)
+
+    @property
+    def tasks(self):
+        """
+        Assume that the experts' names correspond to the tasks they were trained on
+        """
+        return list(self.keys())
+
+    def filter_with_tasks(self, tasks):
+        """
+        Remove modules for tasks other than the ones in tasks.
+        """
+        self._sliced = True
+        all_tasks = self.tasks
+
+        for t in all_tasks:
+            if t not in tasks:
+                self.data.pop(t, None)
 
 
 class LocalExpertLibrary(UserDict, ExpertLibrary):
