@@ -149,9 +149,9 @@ def add_expert_to_transformer(
                         if k.startswith(expert_container.__layer_name__)
                     }
 
-                    layer_num = int(expert_container.__layer_name__.split(".")[2])
-
                     if load_only_layers:
+                        layer_num = int(expert_container.__layer_name__.split(".")[2])
+
                         pos = load_only_layers.find("-")
                         sel = int(load_only_layers.replace("-", ""))
 
