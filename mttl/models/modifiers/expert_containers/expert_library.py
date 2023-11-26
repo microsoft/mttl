@@ -224,10 +224,10 @@ class HFExpertLibrary(ExpertLibrary):
 
         addition = CommitOperationAdd(path_in_repo=f"README.md", path_or_fileobj=buffer)
         if self._in_transaction:
+            # remove previous readme operations, keep only the latest
             for operation in self._pending_operations:
                 if operation.path_in_repo == "README.md":
                     self._pending_operations.remove(operation)
-            # keep only the latest readme
             self._pending_operations.append(addition)
         else:
             create_commit(
@@ -238,6 +238,8 @@ class HFExpertLibrary(ExpertLibrary):
 
     @contextmanager
     def batched_commit(self):
+        """Context manager batching operations into a single commit."""
+        # set in transaction flag
         self._in_transaction = True
         yield
         logger.info(f"Committing len(self._pending_operations) operations...")
@@ -246,7 +248,9 @@ class HFExpertLibrary(ExpertLibrary):
             operations=self._pending_operations,
             commit_message="Update library with new ops.",
         )
+        # exit transaction and clear pending operations
         self._in_transaction = False
+        self._pending_operations.clear()
 
     def _commit(self):
         create_commit(
