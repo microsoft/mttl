@@ -3,7 +3,22 @@ import pytorch_lightning as pl
 import torch.nn as nn
 import torch.nn.functional as F
 
+from transformers import T5Tokenizer, T5ForConditionalGeneration
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+class T5Classifier(pl.LightningModule):
+    def __init__(self, t5_model, num_labels):
+        super().__init__()
+        self.t5_model = t5_model
+
+        self.tokenizer = T5Tokenizer.from_pretrained("t5-small")
+        self.model = T5ForConditionalGeneration.from_pretrained("t5-small")
+
+    def forward(self, x):
+        # Encode the text input
+        pass
 
 
 class Classifier(pl.LightningModule):
