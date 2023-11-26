@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from dataclasses import dataclass, asdict
 import glob
 import io
@@ -66,6 +67,8 @@ class HFExpertLibrary(ExpertLibrary):
         self.repo_id = repo_id
         self.api = HfApi()
         self._sliced = False
+        self._in_transaction = False
+        self._pending_operations = []
         self.data = {}
 
         if "HF_TOKEN" in os.environ:
@@ -108,32 +111,43 @@ class HFExpertLibrary(ExpertLibrary):
         return hf_hub_download(self.repo_id, filename=model_file)
 
     def _upload_weights(self, expert_name, expert_dump):
-        with io.BytesIO() as buffer:
-            torch.save(expert_dump.expert_weights, buffer)
-            buffer.flush()
+        buffer = io.BytesIO()
+        torch.save(expert_dump.expert_weights, buffer)
+        buffer.flush()
 
-            logger.info("Uploading expert to huggingface hub...")
-            addition = CommitOperationAdd(
-                path_in_repo=f"{expert_name}.ckpt", path_or_fileobj=buffer
-            )
-            preupload_lfs_files(self.repo_id, additions=[addition])
+        logger.info("Uploading expert to huggingface hub...")
+        addition = CommitOperationAdd(
+            path_in_repo=f"{expert_name}.ckpt", path_or_fileobj=buffer
+        )
+        preupload_lfs_files(self.repo_id, additions=[addition])
+        if self._in_transaction:
+            self._pending_operations.append(addition)
+        else:
             create_commit(
                 self.repo_id,
                 operations=[addition],
                 commit_message=f"Update library with {expert_name}.",
             )
+            logger.info(f"Expert {expert_name} uploaded successfully.")
 
     def _upload_metadata(self, metadata):
-        with io.BytesIO() as buffer:
-            torch.save(metadata.dumps(), buffer)
-            buffer.flush()
+        buffer = io.BytesIO()
+        torch.save(metadata.dumps(), buffer)
+        buffer.flush()
 
-            self.api.upload_file(
-                repo_id=self.repo_id,
-                path_or_fileobj=buffer,
-                path_in_repo=f"{metadata.expert_name}.meta",
+        addition = CommitOperationAdd(
+            path_in_repo=f"{metadata.expert_name}.meta", path_or_fileobj=buffer
+        )
+
+        if self._in_transaction:
+            self._pending_operations.append(addition)
+        else:
+            create_commit(
+                self.repo_id,
+                operations=[addition],
+                commit_message=f"Update library with {metadata.expert_name}.",
             )
-            print(f"Metadata for {metadata.expert_name} uploaded successfully.")
+            logger.info(f"Metadata for {metadata.expert_name} uploaded successfully.")
 
     def keys(self):
         return list(self.data.keys())
@@ -180,43 +194,67 @@ class HFExpertLibrary(ExpertLibrary):
     def _update_readme(self):
         api = HfApi()
 
-        def upload(buffer):
-            api.upload_file(
-                path_or_fileobj=buffer,
-                path_in_repo="README.md",
-                repo_id=self.repo_id,
+        buffer = io.BytesIO()
+        # Write the following into the buffer:
+        # Number of experts present in the library: {len(library_dump["expert_name"])}
+        # Types of experts present in the library: unique(dump.model_modifier for dump in library_dump["expert_dump"])
+        buffer.write(
+            f"Number of experts present in the library: {len(self)}\n\n".encode("utf-8")
+        )
+        buffer.write(
+            f"| Expert Name | Base Model | Trained on | Adapter Type |\n".encode(
+                "utf-8"
+            )
+        )
+        buffer.write(f"| --- | --- | --- | --- |\n".encode("utf-8"))
+        for expert_name, metadata in self.data.items():
+            buffer.write(
+                f"| {expert_name} | {metadata.expert_config.model} | {metadata.expert_config.dataset}/{metadata.expert_config.finetune_task_name} | {metadata.expert_config.model_modifier} |\n".encode(
+                    "utf-8"
+                )
             )
 
-        with io.BytesIO() as buffer:
-            # Write the following into the buffer:
-            # Number of experts present in the library: {len(library_dump["expert_name"])}
-            # Types of experts present in the library: unique(dump.model_modifier for dump in library_dump["expert_dump"])
-            buffer.write(
-                f"Number of experts present in the library: {len(self)}\n\n".encode(
-                    "utf-8"
-                )
+        # write date before last updated on
+        buffer.write(
+            f"Last updated on: {api.repo_info(self.repo_id).lastModified}\n\n".encode(
+                "utf-8"
             )
-            buffer.write(
-                f"| Expert Name | Base Model | Trained on | Adapter Type |\n".encode(
-                    "utf-8"
-                )
-            )
-            buffer.write(f"| --- | --- | --- | --- |\n".encode("utf-8"))
-            for expert_name, metadata in self.data.items():
-                buffer.write(
-                    f"| {expert_name} | {metadata.expert_config.model} | {metadata.expert_config.dataset}/{metadata.expert_config.finetune_task_name} | {metadata.expert_config.model_modifier} |\n".encode(
-                        "utf-8"
-                    )
-                )
+        )
+        buffer.flush()
 
-            # write date before last updated on
-            buffer.write(
-                f"Last updated on: {api.repo_info(self.repo_id).lastModified}\n\n".encode(
-                    "utf-8"
-                )
+        addition = CommitOperationAdd(path_in_repo=f"README.md", path_or_fileobj=buffer)
+        if self._in_transaction:
+            for operation in self._pending_operations:
+                if operation.path_in_repo == "README.md":
+                    self._pending_operations.remove(operation)
+            # keep only the latest readme
+            self._pending_operations.append(addition)
+        else:
+            create_commit(
+                self.repo_id,
+                operations=[addition],
+                commit_message="Update readme.",
             )
-            buffer.flush()
-            upload(buffer)
+
+    @contextmanager
+    def batched_commit(self):
+        self._in_transaction = True
+        yield
+        logger.info(f"Committing len(self._pending_operations) operations...")
+        create_commit(
+            self.repo_id,
+            operations=self._pending_operations,
+            commit_message="Update library with new ops.",
+        )
+        self._in_transaction = False
+
+    def _commit(self):
+        create_commit(
+            self.repo_id,
+            operations=self._pending_operations,
+            commit_message="Update library with new experts.",
+        )
+        self._pending_operations = []
 
     def add_expert_from_ckpt(
         self, ckpt_path: str, expert_name: str = None, force: bool = False
