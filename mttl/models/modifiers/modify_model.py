@@ -39,12 +39,14 @@ def modify_transformer(transformer, modifier_config, model_modifier=None):
     # create a shared container for the task id
     transformer.task_id_container = {}
 
-    if hasattr(modifier_config, "model_modifier") and (modifier_config.model_modifier):
+    # set all params to not require grad
+    for param in transformer.parameters():
+        param.requires_grad = False
+
+    if hasattr(modifier_config, "model_modifier") and (
+        modifier_config.model_modifier is None
+    ):
         # set all params to require grad
-        for param in transformer.parameters():
-            param.requires_grad = False
-    else:
-        # set all params to not require grad
         for param in transformer.parameters():
             param.requires_grad = True
 
