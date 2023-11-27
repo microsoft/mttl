@@ -289,8 +289,9 @@ class DefaultDataModule(LightningDataModule):
             train_dataset,
             batch_size=self.config.train_batch_size,
             shuffle=True,
-            num_workers=16,
+            num_workers=8,
             pin_memory=True,
+            drop_last=True,
             persistent_workers=True,
             collate_fn=self.collate_fn,
         )
@@ -303,7 +304,7 @@ class DefaultDataModule(LightningDataModule):
             dev_dataset,
             batch_size=self.config.predict_batch_size,
             shuffle=False,
-            num_workers=16,
+            num_workers=8,
             pin_memory=True,
             persistent_workers=True,
             collate_fn=self.collate_fn,
@@ -318,7 +319,7 @@ class DefaultDataModule(LightningDataModule):
             test_dataset,
             batch_size=self.config.predict_batch_size,
             shuffle=False,
-            num_workers=16,
+            num_workers=8,
             pin_memory=True,
             persistent_workers=True,
             collate_fn=self.collate_fn,
@@ -412,6 +413,8 @@ class AutoDataModule:
             FlanConfig,
             T0FlatModule,
             T0FlatConfig,
+            FlatMultiTaskConfig,
+            FlatMultiTaskModule,
         )
         from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
         from mttl.datamodule.platypus_module import PlatypusModule
@@ -422,6 +425,12 @@ class AutoDataModule:
         if name in ["sordonia/t0-10k-flat", "sordonia/t0-1.6M-flat"]:
             return T0FlatModule(
                 T0FlatConfig(dataset=name, **kwargs),
+                for_generation=for_generation,
+                val_mixin=val_mixin,
+            )
+        elif "adauni" in name:
+            return FlatMultiTaskModule(
+                FlatMultiTaskConfig(dataset=name, **kwargs),
                 for_generation=for_generation,
                 val_mixin=val_mixin,
             )

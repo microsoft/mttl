@@ -10,8 +10,12 @@ from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 import json
 
-from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
-from mttl.datamodule.adauni_data_module import FlatMultiTaskConfig, FlatMultiTaskModule
+from mttl.datamodule.mt_seq_to_seq_module import (
+    FlanConfig,
+    FlanModule,
+    FlatMultiTaskConfig,
+    FlatMultiTaskModule,
+)
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
