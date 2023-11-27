@@ -62,7 +62,7 @@ def test_expert_model_generate():
         **vars(config), device_map="cpu", tokenizer=data_module.tokenizer
     )
     module.load_from_graph_string(config.module_graph)
-    module.to("cpu")
+
     batch = next(iter(data_module.val_dataloader()))
 
     generation = module.generate(batch)[:, batch["input_ids"].shape[1] :]
