@@ -291,7 +291,6 @@ class DefaultDataModule(LightningDataModule):
             shuffle=True,
             num_workers=8,
             pin_memory=True,
-            drop_last=True,
             persistent_workers=True,
             collate_fn=self.collate_fn,
         )
