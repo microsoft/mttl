@@ -2,6 +2,8 @@
 from projects.wiki_experts.src.ranker.classification_module import (
     ClassificationDataModule,
     ClassificationConfig,
+    ClassificationDataModuleAdaUni,
+    ClassificationAdaUniConfig,
 )
 from projects.wiki_experts.src.ranker.classifier_ranker import Classifier
 from projects.wiki_experts.src.ranker.clip_ranker import CLIPRanker
@@ -55,12 +57,20 @@ class ExpertRanker:
         return classifier
 
     def test_accuracy(self, dataset, model, fine_tune_task_name):
-        classifier_config = ClassificationConfig(
-            dataset=dataset,
-            model=model,
-            finetune_task_name=fine_tune_task_name,
-        )
-        datamodule = ClassificationDataModule(classifier_config)
+        if "flan" in dataset:
+            classifier_config = ClassificationConfig(
+                dataset=dataset,
+                model=model,
+                finetune_task_name=fine_tune_task_name,
+            )
+            datamodule = ClassificationDataModule(classifier_config)
+        elif "adauni" in dataset:
+            classifier_config = ClassificationAdaUniConfig(
+                dataset=dataset,
+                model=model,
+                finetune_task_name=fine_tune_task_name,
+            )
+            datamodule = ClassificationDataModuleAdaUni(classifier_config)
         classifier = self.get_classifier()
         classifier.load_state_dict(torch.load(self.classifier_ckpt)["state_dict"])
         print("begin test")

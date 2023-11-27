@@ -9,16 +9,25 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class T5Classifier(pl.LightningModule):
-    def __init__(self, t5_model, num_labels):
+    def __init__(
+        self,
+    ):
         super().__init__()
-        self.t5_model = t5_model
 
         self.tokenizer = T5Tokenizer.from_pretrained("t5-small")
         self.model = T5ForConditionalGeneration.from_pretrained("t5-small")
 
-    def forward(self, x):
-        # Encode the text input
-        pass
+    def forward(self, inputs, labels=None):
+        outputs = self.model(inputs, labels=labels)
+        return outputs
+
+    def training_step(self, batch):
+        inputs = batch["input_ids"]
+        labels = batch["labels"]
+
+        outputs = self(inputs, labels=labels)
+        loss = outputs.loss
+        return loss
 
 
 class Classifier(pl.LightningModule):
