@@ -1,8 +1,10 @@
 from dataclasses import dataclass
+from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 from mttl.models.modifiers.expert_containers.module_graph import Expert
 from mttl.utils import logger
 from mttl.models.modifiers.modify_model import get_modifier_type
 
+from datasets import Dataset
 from tqdm import tqdm
 import numpy as np
 import sklearn.decomposition
@@ -30,27 +32,29 @@ class SVDEmbeddingTransform(LibraryTransform):
     """
 
     def transform(self, library, upload_to_hf=True):
+        if type(library) == str:
+            library = HFExpertLibrary(library)
+
         experts_weights = []
         experts_names = list(library.keys())
 
         logger.info(f"Factorizing library with {len(experts_names)} experts.")
 
-        bar = tqdm(experts_names)
-        for key in bar:
-            flattened = []
-            expert: Expert = library[key]
+        def get_weights(example):
+            expert = library[example["name"]]
             model_modifier = get_modifier_type(expert.expert_config)
 
+            flattened = []
             if model_modifier == "lora":
                 for _, p in expert.expert_weights.items():
                     flattened = flattened + list(p.flatten().cpu().numpy())
-
-                experts_weights.append(flattened)
+                return {"weights": flattened}
             else:
-                raise ValueError("Only LoRA is supported for now.")
-            bar.set_description("Processed %s" % key)
+                return {"weights": None}
 
-        experts_weights = np.asarray(experts_weights)
+        dataset = Dataset.from_list([{"name": n} for n in experts_names])
+        dataset = dataset.map(get_weights, num_proc=16)
+        experts_weights = np.asarray([d["weights"] for d in dataset])
 
         svd = sklearn.decomposition.TruncatedSVD(
             n_components=self.config.n_components,
@@ -77,7 +81,7 @@ class SVDEmbeddingTransform(LibraryTransform):
 
         if upload_to_hf:
             # add embeddings to the library
-            with library.batched_commit():
-                for name, embedding in zip(experts_names, experts_embeddings):
-                    library.add_embedding("svd", name, embedding, config=self.config)
+            library.add_embeddings(
+                "svd", experts_names, experts_embeddings, config=self.config
+            )
         return experts_embeddings

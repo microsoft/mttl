@@ -197,21 +197,35 @@ class HFExpertLibrary(ExpertLibrary):
         self.data[metadata.expert_name] = metadata
         self._update_readme()
 
-    def add_embedding(
+    def add_embeddings(
         self,
         embedding_type: str,
-        expert_name: str,
-        embedding: np.ndarray,
+        expert_names: str,
+        expert_embeddings: np.ndarray,
         config: Any = None,
+        overwrite: bool = False,
     ):
         import json
 
         operations = []
-        embedding_file = f"{expert_name}_embedding={embedding_type}.emb"
-        config_file = f"{expert_name}_embedding={embedding_type}.json"
+        embedding_file = f"{embedding_type}.emb"
+        config_file = f"{embedding_type}.json"
+
+        embeddings = self.api.list_repo_files(self.repo_id, "*.emb")
+        if embedding_file in embeddings:
+            raise ValueError(
+                f"Embedding {embedding_file} already exists. Use `overwrite=True`."
+            )
+
+        for expert_name in expert_names:
+            if expert_name not in self.data:
+                raise ValueError(f"Expert {expert_name} not found in repository.")
 
         buffer = io.BytesIO()
-        torch.save(buffer, embedding)
+        torch.save(
+            buffer,
+            {"expert_names": expert_names, "expert_embeddings": expert_embeddings},
+        )
         buffer.flush()
 
         addition_a = CommitOperationAdd(
