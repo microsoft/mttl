@@ -78,23 +78,23 @@ class OpenAI:
         return self._model_name
 
     def generate(
-        self, templated_contexts, max_tokens=1024, top_p=1.0, temperature=0.0, **kwargs
+        self,
+        templated_contexts,
+        max_tokens=1024,
+        top_p=1.0,
+        temperature=0.0,
+        stream=False,
+        **kwargs,
     ):
         results = Response()
-
-        pbar = tqdm.tqdm(range(len(templated_contexts)))
-        for context in range(0, len(templated_contexts), 20):
-            batch = templated_contexts[context : context + 20]
-            for _ in range(10):
-                try:
-                    output = self.operator.generate(batch, max_tokens=max_tokens)
-                    break
-                except Exception as e:
-                    print(e)
-                    print("retrying...")
-                    time.sleep(2)
-                    continue
+        outputs = self.operator.generate(
+            templated_contexts, max_tokens=max_tokens, stream=stream
+        )
+        if stream:
+            # yield results
+            for output in outputs:
+                yield output, "stop"
+        else:
             results.outputs += output
             results.finish_reason += ["stop"] * len(output)
-            pbar.update(len(batch))
-        return results
+            return results

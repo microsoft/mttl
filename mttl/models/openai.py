@@ -43,6 +43,7 @@ class GPT:
         "text-ada-001",
         "gpt-3.5-turbo",
         "gpt-35-turbo",
+        "gpt-35-turbo-instruct",
         "gpt-4",
         "gpt-4-32k",
         "gpt-4-0613",
@@ -267,13 +268,25 @@ class GPT:
             input_batch = inputs[batch_size * i : batch_size * (i + 1)]
             yield input_batch
 
-    def generate(self, inputs, async_generation=True, batch_size=20, **kwargs):
+    def generate(
+        self,
+        inputs,
+        async_generation=True,
+        batch_size=20,
+        stream=False,
+        progress=True,
+        **kwargs,
+    ):
+        import tqdm
+
         if type(inputs) is not list:
             inputs = [inputs]
 
         kwargs.pop("output_space", None)
         generation_options = self.generation_options.copy()
         generation_options.update(**kwargs)
+
+        progress_bar = tqdm.tqdm(inputs, disable=not progress)
 
         if self.engine in (
             "gpt-3.5-turbo",
@@ -293,13 +306,23 @@ class GPT:
                     outputs_batch = asyncio.run(
                         self.gather_chat_response(input_batch, **generation_options)
                     )
-                    outputs = outputs + outputs_batch
+                    if stream:
+                        yield from outputs_batch
+                    else:
+                        outputs = outputs + outputs_batch
+                    progress_bar.update(len(input_batch))
             else:
                 # call api one by one
-                outputs = [
-                    self.get_chat_completion_response(_input, **generation_options)
-                    for _input in inputs
-                ]
+                outputs = []
+                for _input in inputs:
+                    output = self.get_chat_completion_response(
+                        _input, **generation_options
+                    )
+                    if stream:
+                        yield output
+                    else:
+                        outputs.append(output)
+                    progress_bar.update(1)
         else:
             # devide to mini batches (max batch size = 20 according to openai)
             outputs = []
@@ -307,8 +330,13 @@ class GPT:
                 outputs_batch = self.get_completion_response(
                     input_batch, **generation_options
                 )
-                outputs = outputs + outputs_batch
-        return outputs
+                if stream:
+                    yield from outputs_batch
+                else:
+                    outputs = outputs + outputs_batch
+                progress_bar.update(len(input_batch))
+        if not stream:
+            return outputs
 
     def compute_cost(self, inputs):
         return np.sum(list([len(self.encoder(input)) for input in inputs]))

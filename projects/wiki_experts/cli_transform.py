@@ -50,11 +50,11 @@ def transform(
 @cli.command("upload")
 @click.option("--dataset-path", type=str, required=True)
 @click.option("--config-file", type=str, required=False)
-@click.option("--flat", type=bool, default=False)
+@click.option("--flat", type=bool, default=True)
 @click.option("--create-split", type=bool, default=False)
 @click.option("--hf-destination", type=str, required=False, default=None)
 def upload_to_hf(
-    dataset_path, hf_destination=None, config_file=None, flat=False, create_split=False
+    dataset_path, hf_destination=None, config_file=None, flat=True, create_split=False
 ):
     from src.data_transforms.utils import upload_to_hf_
 
