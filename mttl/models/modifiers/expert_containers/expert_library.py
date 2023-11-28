@@ -3,6 +3,7 @@ from dataclasses import dataclass, asdict
 import glob
 import io
 import json
+from typing import Any
 import torch
 import os
 import numpy as np
@@ -195,6 +196,48 @@ class HFExpertLibrary(ExpertLibrary):
 
         self.data[metadata.expert_name] = metadata
         self._update_readme()
+
+    def add_embedding(
+        self,
+        embedding_type: str,
+        expert_name: str,
+        embedding: np.ndarray,
+        config: Any = None,
+    ):
+        import json
+
+        operations = []
+        embedding_file = f"{expert_name}_embedding={embedding_type}.emb"
+        config_file = f"{expert_name}_embedding={embedding_type}.json"
+
+        buffer = io.BytesIO()
+        torch.save(buffer, embedding)
+        buffer.flush()
+
+        addition_a = CommitOperationAdd(
+            path_in_repo=f"{embedding_file}", path_or_fileobj=buffer
+        )
+        operations.append(addition_a)
+
+        if config is not None:
+            buffer = io.BytesIO()
+            json.dump(config.__dict__, buffer)
+            buffer.flush()
+
+            addition_b = CommitOperationAdd(
+                path_in_repo=f"{config_file}", path_or_fileobj=buffer
+            )
+            operations.append(addition_b)
+
+        if self._in_transaction:
+            self._pending_operations.extend(operations)
+        else:
+            create_commit(
+                self.repo_id,
+                operations=operations,
+                commit_message=f"Update library with embedding for {expert_name}.",
+            )
+            logger.info(f"Embedding for {expert_name} uploaded successfully.")
 
     def _update_readme(self):
         api = HfApi()
