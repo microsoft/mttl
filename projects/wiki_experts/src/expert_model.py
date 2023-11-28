@@ -14,7 +14,7 @@ from mttl.models.modifiers.expert_containers import (
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.ranker.adapter_ranker import ExpertRanker
-from projects.wiki_experts.src.config import ids_to_tasks_names
+from projects.wiki_experts.src.config import ids_to_tasks_names, ids_to_tasks_names_ada
 
 
 def push_expert_to_hub(
@@ -260,6 +260,11 @@ class MultiExpertModelRanker(MultiExpertModel):
                 classifier_repo_id=kwargs["classifier_repo_id"],
             ).get_classifier()
 
+        if int(kwargs["num_labels"]) == 439:
+            self.ids_to_tasks_names = ids_to_tasks_names_ada
+        else:
+            self.ids_to_tasks_names = ids_to_tasks_names
+
     def load_from_library(self, library):
         add_expert_library_to_transformer(self.model, library)
         for expert_name, _ in library.items():
@@ -274,7 +279,7 @@ class MultiExpertModelRanker(MultiExpertModel):
             raise ValueError("No inputs found in batch!")
         expert_logits = self.classifier(input_texts)
         expert_indices = expert_logits.argmax(dim=1).cpu()
-        expert_prediction = [ids_to_tasks_names[i.item()] for i in expert_indices]
+        expert_prediction = [self.ids_to_tasks_names[i.item()] for i in expert_indices]
         return expert_prediction
 
     def expert_retrieval(self, batch, **kwargs):

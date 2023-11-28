@@ -33,6 +33,17 @@ class PolyKVAdapterConfig(KVAdapterConfig, PolytroponConfig):
 
 @register_modifier("kv_adapter", config_cls=KVAdapterConfig)
 class KVAdapter(Adapter, ModifyMixin):
+    """
+    Adapter augmenting the self-attention with additional learnable KV pairs.
+
+    Adapter modifies the self-attention call with the following execution :
+    1. adapter_k, adapter_v = adapter.get_kv_weights(k_proj, v_proj)
+    2. adapter_weights = adapter.route(query_states, adapter_k, self)
+        2.1 `adapter.route` calls get_gate(adapter_weights)
+    3. adapter_output = adapter.aggregate(adapter_weights, adapter_v)
+
+    """
+
     def __init__(
         self,
         config: KVAdapterConfig,
@@ -123,90 +134,6 @@ class KVAdapter(Adapter, ModifyMixin):
         """(3) Aggregate the weighted values according to the adapter weights"""
         return torch.matmul(adapter_weights, adapter_v)
 
-
-'''
-class FusedKVAdapters(KVAdapter):  # Router): (circular import)
-    """Container class to handle routing and forwarding through multiple KVAdapters"""
-
-    def __init__(self, kv_adapters, selector=None):
-        # super(ModifyMixin, self).__init__()
-        self.kv_adapters = list(kv_adapters)
-        self.n_experts = len(self.kv_adapters)
-        self.selector = selector
-
-    def __getattr__(self, name):
-        if name == "kv_adapters":
-            return self.kv_adapters
-        else:
-            return getattr(self.kv_adapters[0], name)
-
-    def load_adapter_weights(self, _):
-        raise NotImplementedError("Not Implemented for FusedKVAdapters")
-
-
-""" """ """ """
-"""   Specific instantiations of FusedKVAdapters     """
-""" """ """ """
-
-
-class ParallelKVAdapters(FusedKVAdapters):
-    """Container class to handle routing and forwarding through multiple KVAdapters"""
-
-    def get_kv_weights(self, k_proj, v_proj):
-        out = zip(
-            *[
-                kv_adapter.get_kv_weights(k_proj, v_proj)
-                for kv_adapter in self.kv_adapters
-            ]
-        )
-        out = (torch.cat(tensors, dim=0) for tensors in out)
-        return out
-
-    def get_gate(self, adapter_weights):
-        return torch.cat(
-            [kv_adapter.get_gate(adapter_weights) for kv_adapter in self.kv_adapters]
-        )
-
-
-class ConcatKVAdapters(FusedKVAdapters):
-    """Route over KVAdapters using attention"""
-
-    def get_kv_weights(self, k_proj, v_proj):
-        out = zip(
-            *[
-                kv_adapter.get_kv_weights(k_proj, v_proj)
-                for kv_adapter in self.kv_adapters
-            ]
-        )
-        # (1, n_experts, n_heads, soft_prompt_len, head_dim)
-        adapter_k, adapter_v = (torch.cat(tensors, dim=0) for tensors in out)
-        n_experts, n_heads, soft_prompt_len, head_dim = adapter_k.size()
-        # (1, n_heads, n_experts * soft_prompt_len, head_dim)
-        adapter_k = adapter_k.transpose(1, 2).reshape(
-            1, n_heads, n_experts * soft_prompt_len, head_dim
-        )
-        adapter_v = adapter_v.transpose(1, 2).reshape(
-            1, n_heads, n_experts * soft_prompt_len, head_dim
-        )
-        return adapter_k, adapter_v
-
-    def get_gate(self, adapter_weights):
-        bsz, n_heads, q_len, n_exp_kv_len = adapter_weights.size()
-        adapter_weights = adapter_weights.view(bsz, n_heads, q_len, self.n_experts, -1)
-
-        # sum probs over all `soft_prompt_len` keys, to get (bsz, n_heads, q_len, n_experts)
-        per_expert_weight = adapter_weights.sum(dim=-1)
-
-        # (n_experts, n_heads, 1, 1)
-        all_gates = torch.cat(
-            [kv_adapter.get_gate(adapter_weights) for kv_adapter in self.kv_adapters]
-        )
-
-        # output : (bsz, n_heads, q_len, 1)
-        out = torch.einsum("bhqe,ehab->bhqa", per_expert_weight, all_gates)
-        return out
-
-'''
 
 """ """ """ """
 """ Model Specific Implementations of Self Attention """

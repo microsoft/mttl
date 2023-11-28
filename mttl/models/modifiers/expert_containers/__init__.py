@@ -1,3 +1,4 @@
+from functools import partial
 import re
 from mttl.config import Config
 from mttl.models.modifiers.expert_containers.selectors import *
@@ -75,9 +76,28 @@ def add_expert_to_transformer(
     selectors={},
     config=None,
 ):
+    from mttl.models.modifiers.modify_model import get_modifier_type
+    from mttl.models.modifiers.expert_containers.hard_prompts_container import (
+        add_hard_prompt_to_transformer,
+    )
+
     # create a shared container for the task id
     if not hasattr(transformer, "task_id_container"):
         transformer.task_id_container = {}
+
+    model_modifier = get_modifier_type(expert_config)
+
+    if model_modifier == "hard_prompt":
+        return add_hard_prompt_to_transformer(
+            transformer,
+            expert_name,
+            expert_config,
+            expert_weights,
+            action=action,
+            is_default=is_default,
+            selectors=selectors,
+            config=config,
+        )
 
     total_layers = 0
     added_layers = []
@@ -106,9 +126,7 @@ def add_expert_to_transformer(
 
                     if not isinstance(layer, ExpertContainer):
                         # create an expert lora container
-                        CONTAINER_CLASS = get_container_class(
-                            expert_config.model_modifier
-                        )
+                        CONTAINER_CLASS = get_container_class(model_modifier)
                         expert_container = CONTAINER_CLASS(
                             expert_config,
                             transformer.task_id_container,
@@ -131,12 +149,9 @@ def add_expert_to_transformer(
                         if k.startswith(expert_container.__layer_name__)
                     }
 
-                    # get the layer number
-                    # pattern = r"\.\d\."
-                    # match = re.search(pattern, expert_container.__layer_name__)
-                    # layer_num = int(match.group(0).replace(".", ""))
-
                     if load_only_layers:
+                        layer_num = int(expert_container.__layer_name__.split(".")[2])
+
                         pos = load_only_layers.find("-")
                         sel = int(load_only_layers.replace("-", ""))
 

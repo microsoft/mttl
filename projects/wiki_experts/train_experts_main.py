@@ -10,7 +10,12 @@ from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 import json
 
-from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
+from mttl.datamodule.mt_seq_to_seq_module import (
+    FlanConfig,
+    FlanModule,
+    FlatMultiTaskConfig,
+    FlatMultiTaskModule,
+)
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -78,6 +83,14 @@ def get_datamodule(args, for_generation=False):
             train_on_reverse=args.dataset == "inverse-oa1",
         )
         dm = OA1Module(config, for_generation=for_generation)
+    elif "cot:flan" in args.dataset:
+        common_kwargs["dataset"] = common_kwargs["dataset"].replace("cot:", "")
+        config = FlanConfig(
+            **common_kwargs,
+            include_template_type="*",
+            include_task_source="CoT",
+        )
+        dm = FlanModule(config, for_generation=for_generation)
     elif "flan" in args.dataset:
         config = FlanConfig(
             **common_kwargs,
@@ -85,11 +98,10 @@ def get_datamodule(args, for_generation=False):
         )
         dm = FlanModule(config, for_generation=for_generation)
     elif "adauni" in args.dataset:
-        config = FlanConfig(
+        config = FlatMultiTaskConfig(
             **common_kwargs,
-            include_template_type="*",
         )
-        dm = FlanModule(config, for_generation=for_generation)
+        dm = FlatMultiTaskModule(config, for_generation=for_generation)
     else:
         raise ValueError(f"Unknown dataset {args.dataset}")
     return dm

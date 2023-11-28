@@ -63,6 +63,7 @@ def test_expert_model_generate():
     )
     module.to("cpu")
     module.load_from_graph_string(config.module_graph)
+
     batch = next(iter(data_module.val_dataloader()))
 
     generation = module.generate(batch)[:, batch["input_ids"].shape[1] :]

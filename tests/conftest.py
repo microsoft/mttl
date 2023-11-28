@@ -6,6 +6,43 @@ from pathlib import Path
 import pytest
 
 
+@pytest.fixture(scope="session")
+def flan_batch_for_generation():
+    from mttl.datamodule.base import AutoDataModule
+
+    flan = AutoDataModule.create(
+        "sordonia/flan-debug-flat",
+        model="EleutherAI/gpt-neo-125m",
+        model_family="gpt",
+        max_input_length=1024,
+        train_batch_size=4,
+        predict_batch_size=2,
+        truncation_side="left",
+        for_generation=True,
+    )
+    dl = flan.val_dataloader()
+    batch = next(iter(dl))
+    return batch
+
+
+@pytest.fixture(scope="session")
+def flan_batch_for_training():
+    from mttl.datamodule.base import AutoDataModule
+
+    flan = AutoDataModule.create(
+        "sordonia/flan-debug-flat",
+        model="EleutherAI/gpt-neo-125m",
+        model_family="gpt",
+        max_input_length=1024,
+        train_batch_size=4,
+        predict_batch_size=2,
+        truncation_side="left",
+    )
+    dl = flan.val_dataloader()
+    batch = next(iter(dl))
+    return batch
+
+
 def make_tiny_llama():
     from transformers.models.llama.configuration_llama import LlamaConfig
 

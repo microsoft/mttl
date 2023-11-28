@@ -37,11 +37,11 @@ class ExpertTrainer(EfficientCheckpointModule):
             model_object = model_loader_helper(
                 self.hparams.model,
                 load_in_8bit=self.hparams.load_in_8bit,
+                device_map=getattr(self.hparams, "device_map", "auto"),
             )
 
         if self.hparams.load_in_8bit:
             model_object = prepare_model_for_kbit_training(model_object)
-
         self.model = modify_transformer(model_object, self.hparams)
 
         # replace w flash attn!
