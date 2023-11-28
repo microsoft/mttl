@@ -1,7 +1,9 @@
 from dataclasses import dataclass
+from mttl.models.modifiers.expert_containers.module_graph import Expert
 from mttl.utils import logger
-from tqdm import tqdm
+from mttl.models.modifiers.modify_model import get_modifier_type
 
+from tqdm import tqdm
 import numpy as np
 import sklearn.decomposition
 
@@ -35,13 +37,17 @@ class SVDEmbeddingTransform(LibraryTransform):
 
         bar = tqdm(experts_names)
         for key in bar:
-            model = library[key]
             flattened = []
+            expert: Expert = library[key]
+            model_modifier = get_modifier_type(expert.expert_config)
 
-            for _, p in model.expert_weights.items():
-                flattened = flattened + list(p.flatten().cpu().numpy())
+            if model_modifier == "lora":
+                for _, p in expert.expert_weights.items():
+                    flattened = flattened + list(p.flatten().cpu().numpy())
 
-            experts_weights.append(flattened)
+                experts_weights.append(flattened)
+            else:
+                raise ValueError("Only LoRA is supported for now.")
             bar.set_description("Processed %s" % key)
 
         experts_weights = np.asarray(experts_weights)
