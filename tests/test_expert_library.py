@@ -31,7 +31,7 @@ def test_expert_lib(mocker):
     assert len(library) == 21
 
     library = HFExpertLibrary(
-        "sordonia/test-library
+        "sordonia/test-library", model_name="EleutherAI/other-model"
     )
     assert len(library) == 0
     assert library._sliced
