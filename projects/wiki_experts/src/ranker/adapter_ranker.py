@@ -5,6 +5,7 @@ from projects.wiki_experts.src.ranker.classification_module import (
     ClassificationDataModuleAdaUni,
     ClassificationAdaUniConfig,
 )
+from projects.wiki_experts.src.config import ids_to_tasks_names, ids_to_tasks_names_ada
 from projects.wiki_experts.src.ranker.classifier_ranker import Classifier
 from projects.wiki_experts.src.ranker.clip_ranker import CLIPRanker
 from sentence_transformers import SentenceTransformer
@@ -23,6 +24,11 @@ class ExpertRanker:
         self.classifier_ckpt = os.environ.get("CLASSIFIER_CKPT")
         self.classifier_repo_id = classifier_repo_id
         self.predict_batch_size = predict_batch_size
+
+        if num_labels == 439:
+            self.ids_to_tasks_names = ids_to_tasks_names_ada
+        else:
+            self.ids_to_tasks_names = ids_to_tasks_names
 
     def get_clip_ranker(self):
         self.clip_ckpt = os.environ.get("CLIP_CKPT", None)
@@ -90,8 +96,23 @@ class ExpertRanker:
 
         print(f"Accuracy: {sum(acc_all)/len(acc_all)}")
 
+    def get_predict_retrieval(
+        self,
+    ):
+        classifier = self.get_classifier()
+        classifier.load_state_dict(torch.load(self.classifier_ckpt)["state_dict"])
+        input_text = "if a horse at 2 years old has 3 legs, how many legs it has at 10 years old?"
+        logits = classifier([input_text])
+
+        expert_indices = logits.argmax(dim=1).cpu()
+        expert_prediction = [self.ids_to_tasks_names[i.item()] for i in expert_indices]
+
+        print(expert_prediction)
+        print("begin test")
+
 
 if __name__ == "__main__":
     config = ExpertConfig.parse()
     expert_ranker = ExpertRanker(config.num_labels, config.classifier_repo_id)
-    expert_ranker.test_accuracy(config.dataset, config.model, config.finetune_task_name)
+    expert_ranker.get_predict_retrieval()
+    # expert_ranker.test_accuracy(config.dataset, config.model, config.finetune_task_name)

@@ -266,7 +266,37 @@ class MultiExpertModelRanker(MultiExpertModel):
             self.ids_to_tasks_names = ids_to_tasks_names
 
     def load_from_library(self, library):
-        add_expert_library_to_transformer(self.model, library)
+        import copy
+
+        module_name = list(library.keys())[0]
+        module_dump = library[module_name]
+
+        # fill all the weights with zeros
+        # deep copy the weights
+        weights = copy.deepcopy(module_dump.expert_weights)
+        for key, value in weights.items():
+            value.fill_(0)
+        add_expert_to_transformer(
+            self.model,
+            "default",
+            module_dump.expert_config,
+            weights,
+            action="route",
+            is_default=True,
+        )
+
+        self.experts.append("default")
+
+        for expert_name, expert_dump in library.items():
+            add_expert_to_transformer(
+                self.model,
+                expert_name,
+                expert_dump.expert_config,
+                expert_dump.expert_weights,
+                action="route",
+                is_default=expert_name == "default",
+            )
+
         for expert_name, _ in library.items():
             self.experts.append(expert_name)
 
@@ -291,10 +321,8 @@ class MultiExpertModelRanker(MultiExpertModel):
             if expert in self.experts:
                 expert_selection.append(expert)
             else:
-                # randomly select an expert
-                expert_selection.append(
-                    self.experts[np.random.randint(len(self.experts))]
-                )
+                # set the empty expert
+                expert_selection.append("default")
 
         return expert_selection
 
