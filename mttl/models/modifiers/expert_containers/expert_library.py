@@ -36,7 +36,11 @@ class ExpertLibrary:
 
 @dataclass
 class LibraryEmbedding:
-    embeddings: np.ndarray
+    # names of the experts
+    expert_names: list
+    # embeddings of the experts
+    expert_embeddings: np.ndarray
+    # how the embeddings were computed
     config: Any = None
 
 
@@ -225,7 +229,11 @@ class HFExpertLibrary(ExpertLibrary):
             with open(path, "r") as path:
                 config = json.load(path)
 
-        return LibraryEmbedding(embeddings=embeddings, config=config)
+        return LibraryEmbedding(
+            expert_names=embeddings["expert_names"],
+            expert_embeddings=embeddings["expert_embeddings"],
+            config=config,
+        )
 
     def add_embeddings(
         self,
