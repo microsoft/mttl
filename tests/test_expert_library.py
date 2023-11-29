@@ -17,18 +17,21 @@ def test_expert_lib(mocker):
 
     # expert already there
     with pytest.raises(ValueError):
-        library.add_expert(module_name, module_dump)
+        library.add_expert(module_dump, module_name)
 
     assert module_dump.expert_config.model == "phi-2"
     assert len(module_dump.expert_weights) == 128
     assert module_dump.expert_info.parent_node is None
-    assert module_dump.expert_info.expert_name is None
+    assert (
+        module_dump.expert_info.expert_name
+        == "adversarial_qa_dbert_answer_the_following_q"
+    )
 
-    library.add_expert("new_module", module_dump)
+    library.add_expert(module_dump, "new_module")
     assert library._upload_metadata.call_count == 1
     assert library._upload_weights.call_count == 1
     assert library._update_readme.call_count == 1
-    assert len(library) == 2
+    assert len(library) == 3
 
     library = HFExpertLibrary(
         "sordonia/test-library", model_name="EleutherAI/other-model"

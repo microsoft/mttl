@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import glob
 import io
 import json
-from typing import Any
+from typing import Any, Dict, List
 import torch
 import os
 import numpy as np
@@ -29,16 +29,6 @@ from mttl.models.modifiers.expert_containers.module_graph import (
     load_expert,
     ExpertInfo,
 )
-
-
-@dataclass
-class LibraryEmbedding:
-    # names of the experts
-    expert_names: list
-    # embeddings of the experts
-    expert_embeddings: np.ndarray
-    # how the embeddings were computed
-    config: Any = None
 
 
 @dataclass
@@ -202,10 +192,7 @@ class ExpertLibrary:
         ]
 
         for metadatum in metadata:
-            if (
-                self.model_name is not None
-                and metadatum.expert_config.model != self.model_name
-            ):
+            if self.model_name is not None and metadatum.model != self.model_name:
                 self._sliced = True
                 continue
             if metadatum.expert_deleted:
@@ -276,6 +263,20 @@ class ExpertLibrary:
         for k in list(self.keys()):
             yield k, self.__getitem__(k)
 
+    def get_expert(self, expert_name, with_auxiliary_data: bool = False):
+        expert_dump = self[expert_name]
+
+        if with_auxiliary_data:
+            embeddings = self.get_auxiliary_data(
+                data_type="embeddings", expert_name=expert_name
+            )
+            scores = self.get_auxiliary_data(
+                data_type="scores", expert_name=expert_name
+            )
+            expert_dump.expert_info.embeddings = embeddings
+            expert_dump.expert_info.scores = scores
+        return expert_dump
+
     def __getitem__(self, model_name):
         if self._in_transaction:
             raise ValueError(
@@ -289,7 +290,7 @@ class ExpertLibrary:
         # Load the model from the downloaded file
         model = torch.load(model, map_location="cpu")
         return Expert(
-            expert_info=self.data[model_name].expert_info,
+            expert_info=self.data[model_name],
             expert_weights=model,
         )
 
@@ -320,33 +321,31 @@ class ExpertLibrary:
         self.data[metadata.expert_name] = metadata
         self._update_readme()
 
-    def read_embeddings(
+    def get_auxiliary_data(
         self,
-        embedding_type: str,
-    ) -> LibraryEmbedding:
-        files = self.list_repo_files(self.repo_id)
-        embedding_file = f"{embedding_type}.emb"
-        config_file = f"{embedding_type}.json"
-
-        if embedding_file not in files:
+        data_type: str = "embeddings",
+        expert_name: str = None,
+    ) -> List[Any]:
+        files = snapshot_download(self.repo_id, allow_patterns=f"*.{data_type}")
+        if not files:
             raise ValueError(
-                f"Embedding {embedding_file} not found in repository. Did you compute it?"
+                f"No data of type {data_type} found in repository. Did you compute it?"
             )
 
-        path = self.hf_hub_download(self.repo_id, filename=embedding_file)
-        embeddings = torch.load(path, map_location="cpu")
-
-        config = None
-        if config_file in files:
-            path = self.hf_hub_download(self.repo_id, filename=config_file)
-            with open(path, "r") as path:
-                config = json.load(path)
-
-        return LibraryEmbedding(
-            expert_names=embeddings["expert_names"],
-            expert_embeddings=embeddings["expert_embeddings"],
-            config=config,
-        )
+        if expert_name:
+            filename = f"{expert_name}.{data_type}"
+            if filename not in files:
+                raise ValueError(
+                    f"Data of type {data_type} for expert {expert_name} not found in repository. Did you compute it?"
+                )
+            return torch.load(filename)
+        else:
+            auxiliary_data = {}
+            for key in self.keys():
+                filename = f"{key}.{data_type}"
+                if filename in files:
+                    auxiliary_data[f"{key}"] = torch.load(filename)
+        return auxiliary_data
 
     def unremove_expert(self, expert_name: str):
         """Restore a previously soft-deleted expert."""
@@ -397,51 +396,87 @@ class ExpertLibrary:
         self.data.pop(expert_name)
         self._update_readme()
 
-    def add_embeddings(
+    def add_scores(
         self,
-        embedding_type: str,
-        expert_names: str,
-        expert_embeddings: np.ndarray,
-        config: Any = None,
-        overwrite: bool = False,
+        expert_name: str,
+        scores_config: Dict,
+        expert_scores: np.ndarray,
     ):
-        import json
+        if expert_name not in self.data:
+            raise ValueError(f"Expert {expert_name} not found in repository.")
+
+        if "name" not in scores_config:
+            raise ValueError("Embedding config must contain a name.")
 
         operations = []
-        embedding_file = f"{embedding_type}.emb"
-        config_file = f"{embedding_type}.json"
+        scores_file = f"{expert_name}.scores"
 
-        embeddings = self.list_repo_files(self.repo_id)
-        if embedding_file in embeddings and not overwrite:
-            raise ValueError(
-                f"Embedding {embedding_file} already exists. Use `overwrite=True`."
-            )
+        scores = self.list_repo_files(self.repo_id)
+        if scores_file in scores:
+            path = hf_hub_download(self.repo_id, filename=scores_file)
+            scores = torch.load(path, map_location="cpu")
+        else:
+            scores = {}
 
-        for expert_name in expert_names:
-            if expert_name not in self.data:
-                raise ValueError(f"Expert {expert_name} not found in repository.")
+        scores[scores_config["name"]] = {
+            "scores": expert_scores,
+            "config": scores_config,
+        }
 
         buffer = io.BytesIO()
-        torch.save(
-            {"expert_names": expert_names, "expert_embeddings": expert_embeddings},
-            buffer,
+        torch.save(buffer, scores)
+        buffer.flush()
+
+        addition_a = CommitOperationAdd(
+            path_in_repo=f"{scores_file}", path_or_fileobj=buffer
         )
+        operations.append(addition_a)
+
+        if self._in_transaction:
+            self._pending_operations.extend(operations)
+        else:
+            self.create_commit(
+                self.repo_id,
+                operations=operations,
+                commit_message=f"Update library with embedding for {expert_name}.",
+            )
+            logger.info(f"Scores for {expert_name} uploaded successfully.")
+
+    def add_embeddings(
+        self,
+        expert_name: str,
+        embedding_config: Dict,
+        expert_embedding: np.ndarray,
+    ):
+        if expert_name not in self.data:
+            raise ValueError(f"Expert {expert_name} not found in repository.")
+
+        if "name" not in embedding_config:
+            raise ValueError("Embedding config must contain a name.")
+
+        operations = []
+        embedding_file = f"{expert_name}.embeddings"
+
+        embeddings = self.list_repo_files(self.repo_id)
+        if embedding_file in embeddings:
+            path = snapshot_download(self.repo_id, allow_patterns=embedding_file)
+            embeddings = torch.load(path, map_location="cpu")
+        else:
+            embeddings = {}
+
+        embeddings[embedding_config["name"]] = {
+            "embedding": expert_embedding,
+            "config": embedding_config,
+        }
+
+        buffer = io.BytesIO()
+        torch.save(buffer, embedding_config)
         buffer.flush()
 
         addition_a = CommitOperationAdd(
             path_in_repo=f"{embedding_file}", path_or_fileobj=buffer
         )
         operations.append(addition_a)
-
-        if config is not None:
-            buffer = io.BytesIO()
-            buffer.write(json.dumps(config.__dict__).encode("utf-8"))
-            buffer.flush()
-
-            addition_b = CommitOperationAdd(
-                path_in_repo=f"{config_file}", path_or_fileobj=buffer
-            )
-            operations.append(addition_b)
 
         if self._in_transaction:
             self._pending_operations.extend(operations)

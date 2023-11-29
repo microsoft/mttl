@@ -73,26 +73,11 @@ class SVDEmbeddingTransform(LibraryTransform):
 
         if upload_to_hf:
             # add embeddings to the library
-            library.add_embeddings(
-                self.config.name,
-                names,
-                experts_embeddings,
-                config=self.config,
-                overwrite=True,
-            )
+            with library.batched_commit():
+                for name in names:
+                    library.add_embeddings(
+                        name,
+                        self.config.__dict__,
+                        experts_embeddings,
+                    )
         return experts_embeddings
-
-
-@dataclass
-class EvaluationTransformConfig:
-    name: str = "loss"
-    dataset: str = "sordonia/adauni-v1-flat"
-
-
-class EvaluationTransform(LibraryTransform):
-    def transform(self, library, model, upload_to_hf=True):
-        if type(library) == str:
-            library = HFExpertLibrary(library)
-
-        # trainer is a Trainer object
-        trainer = model.trainer
