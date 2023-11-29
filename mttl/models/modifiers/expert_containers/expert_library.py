@@ -386,9 +386,9 @@ class ExpertLibrary:
                 self.create_commit(
                     self.repo_id,
                     operations=[deletion_a, deletion_b],
-                    commit_message=f"Update library with {metadata.expert_name}.",
+                    commit_message=f"Update library with {expert_name}.",
                 )
-                logger.info(f"Deletion of {metadata.expert_name} successful.")
+                logger.info(f"Deletion of {expert_name} successful.")
         else:
             metadata = self.data[expert_name]
             metadata.expert_deleted = True
