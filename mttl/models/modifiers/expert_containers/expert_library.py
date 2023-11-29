@@ -222,7 +222,8 @@ class HFExpertLibrary(ExpertLibrary):
         config = None
         if config_file in files:
             path = hf_hub_download(self.repo_id, filename=config_file)
-            config = json.load(path)
+            with open(path, "r") as path:
+                config = json.load(path)
 
         return LibraryEmbedding(embeddings=embeddings, config=config)
 
