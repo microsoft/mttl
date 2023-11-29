@@ -36,7 +36,6 @@ class TestRoutedMultiExpertModel:
         exp_trainer = ExpertTrainer(
             model_object=make_tiny_llama(),
             tokenizer=None,
-            expert_info={},
             **vars(config),
         )
         dir = str(config.output_dir / exp_name)
@@ -142,7 +141,7 @@ class TestRoutedMultiExpertModel:
             "mod1" in routing_weights["model_layers_0_mlp_up_proj.selector"]
             and "mod2" in routing_weights["model_layers_0_mlp_up_proj.selector"]
         )
-        module.merge_experts_together()
+        module.to_expert()
         assert isinstance(module.model.model.layers[0].mlp.down_proj, LoRA)
 
     def test_add_expert_with_action_merge(self, tmp_exp_config):
@@ -182,3 +181,7 @@ class TestRoutedMultiExpertModel:
         # Test Base Llama model
         output = module(batch)
         assert np.allclose(output.item(), 6.09, atol=0.1)
+
+
+if __name__ == "__main__":
+    pytest.main([__file__])
