@@ -246,7 +246,6 @@ class LinearNode(OperatorNode):
         exp_info.parent_node = self.get_name(**kwargs)
         return [
             Expert(
-                expert_config=config,
                 expert_weights=merged_weights,
                 expert_info=exp_info,
             )

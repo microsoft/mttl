@@ -201,7 +201,7 @@ class T0FlatConfig(DatasetConfig):
 
 class T0FlatModule(DefaultDataModule):
     def setup_dataset(self):
-        self.dataset = load_dataset(self.config.dataset)
+        dataset = load_dataset(self.config.dataset)
 
         (
             self._task_names,

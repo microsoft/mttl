@@ -71,3 +71,7 @@ def test_expert_model_generate():
     batch["attention_mask"][:1] = 0
     generation = module.generate(batch)[:, batch["input_ids"].shape[1] :]
     assert generation[0][:4].cpu().numpy().tolist() != [220]
+
+
+if __name__ == "__main__":
+    pytest.main([__file__])
