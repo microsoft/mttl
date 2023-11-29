@@ -427,7 +427,7 @@ class AutoDataModule:
                 for_generation=for_generation,
                 val_mixin=val_mixin,
             )
-        elif "adauni" in name:
+        elif "adauni-v1-flat" in name or "platypus-flat" in name:
             return FlatMultiTaskModule(
                 FlatMultiTaskConfig(dataset=name, **kwargs),
                 for_generation=for_generation,
