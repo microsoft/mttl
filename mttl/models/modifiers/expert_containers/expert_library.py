@@ -14,6 +14,7 @@ from huggingface_hub import (
     login,
     CommitOperationAdd,
     CommitOperationDelete,
+    CommitOperationCopy,
     create_commit,
     snapshot_download,
     preupload_lfs_files,
@@ -276,6 +277,10 @@ class HFExpertLibrary(ExpertLibrary):
         self.data[expert_name] = metadata
 
     def remove_expert(self, expert_name: str, soft_delete: bool = True):
+        """Remove an expert from the library.
+
+        soft_delete: if True, the expert is not removed from the repository, but only marked as deleted.
+        """
         if self._sliced:
             raise ValueError("Cannot remove expert from sliced library.")
 
@@ -430,8 +435,51 @@ class HFExpertLibrary(ExpertLibrary):
         self, ckpt_path: str, expert_name: str = None, force: bool = False
     ):
         expert_dump = load_expert(ckpt_path, expert_name)
+        expert_name = expert_dump.expert_config.expert_name
 
-        self.add_expert(expert_dump.expert_config.expert_name, expert_dump, force=force)
+        if expert_name.contains("."):
+            logger.warn("Expert name contains a dot, replacing with underscore.")
+            expert_name = expert_name.replace(".", "_")
+            expert_dump.expert_config.expert_name = expert_name
+
+        self.add_expert(expert_name, expert_dump, force=force)
+
+    def rename_expert(self, old_name, new_name):
+        if self._sliced:
+            raise ValueError("Cannot rename expert in sliced library.")
+
+        if old_name not in self.data:
+            raise ValueError(f"Expert {old_name} not found in repository.")
+
+        if new_name in self.data:
+            raise ValueError(f"Expert {new_name} already exists.")
+
+        metadata = self.data[old_name]
+        metadata.expert_name = new_name
+        metadata.expert_config.expert_name = new_name
+
+        self.data[new_name] = metadata
+        self.data.pop(old_name)
+
+        meta_delete = CommitOperationDelete(path_in_repo=f"{old_name}.meta")
+        ckpt_copy = CommitOperationCopy(
+            src_path_in_repo=f"{old_name}.ckpt", path_in_repo=f"{new_name}.ckpt"
+        )
+        ckpt_delete = CommitOperationDelete(path_in_repo=f"{old_name}.ckpt")
+        ops = [meta_delete, ckpt_copy, ckpt_delete]
+
+        if self._in_transaction:
+            self._pending_operations.extend(ops)
+        else:
+            create_commit(
+                self.repo_id,
+                operations=ops,
+                commit_message=f"Renaming expert {old_name} with {new_name}.",
+            )
+            logger.info(f"Expert {new_name} uploaded successfully.")
+
+        self._upload_metadata(metadata)
+        self._update_readme()
 
     @property
     def tasks(self):
