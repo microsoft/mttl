@@ -70,9 +70,9 @@ class FlatMultiTaskConfig(DatasetConfig):
 
 class FlatMultiTaskModule(DefaultDataModule):
     def setup_dataset(self):
-        dataset = load_dataset(self.config.dataset)
+        self.dataset = load_dataset(self.config.dataset)
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
-        if "split" not in dataset.column_names["train"]:
+        if "split" not in self.dataset.column_names["train"]:
             raise ValueError(
                 "Dataset must have a 'split' column, try removing the dataset manually from the cache."
             )
@@ -83,7 +83,7 @@ class FlatMultiTaskModule(DefaultDataModule):
             _,
             _,
         ) = maybe_filter_hf_dataset_by_task(
-            dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
+            self.dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
         )
 
         if self.config.source_template is not None:
@@ -134,7 +134,7 @@ def filter_task_source(include_task_source, example):
 
 class FlanModule(DefaultDataModule):
     def setup_dataset(self):
-        dataset = load_dataset(self.config.dataset)
+        self.dataset = load_dataset(self.config.dataset)
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
         if "split" not in dataset.column_names["train"]:
             raise ValueError(
@@ -201,7 +201,7 @@ class T0FlatConfig(DatasetConfig):
 
 class T0FlatModule(DefaultDataModule):
     def setup_dataset(self):
-        dataset = load_dataset(self.config.dataset)
+        self.dataset = load_dataset(self.config.dataset)
 
         (
             self._task_names,

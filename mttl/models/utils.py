@@ -57,6 +57,15 @@ def download_from_hub(repo_id) -> str:
     )
 
 
+def convert_hps_to_dict(hparams):
+    hparams_allowed = {}
+    # drop parameters which contain some strange datatypes as fsspec
+    for k, v in hparams.items():
+        v = v.name if isinstance(v, Enum) else v
+        hparams_allowed[k] = v
+    return hparams_allowed
+
+
 def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
     r"""
     This method wraps the entire protocol for preparing a model before running a training. This includes:

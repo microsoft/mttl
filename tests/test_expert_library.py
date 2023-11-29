@@ -5,7 +5,7 @@ from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibra
 
 def test_expert_lib(mocker):
     library = HFExpertLibrary("sordonia/test-library")
-    assert len(library) == 20
+    assert len(library) == 2
     assert not library._sliced
 
     module_name = list(library.keys())[0]
@@ -28,10 +28,46 @@ def test_expert_lib(mocker):
     assert library._upload_metadata.call_count == 1
     assert library._upload_weights.call_count == 1
     assert library._update_readme.call_count == 1
-    assert len(library) == 21
+    assert len(library) == 2
 
     library = HFExpertLibrary(
         "sordonia/test-library", model_name="EleutherAI/other-model"
     )
     assert len(library) == 0
     assert library._sliced
+
+
+def test_soft_delete(mocker):
+    from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+
+    # read the stored embeddings
+    library = HFExpertLibrary("sordonia/test-library")
+    assert len(library.data) == 2
+
+    key = list(library.keys())[0]
+
+    library._upload_metadata = mocker.MagicMock()
+    library.remove_expert(key, soft_delete=True)
+    assert len(library.data) == 1
+    assert key not in library.data
+    assert library._upload_metadata.call_count == 1
+
+    library.unremove_expert(key)
+    assert len(library.data) == 2
+
+
+def test_compute_embeddings():
+    from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+    from mttl.models.modifiers.expert_containers.library_transforms import (
+        SVDEmbeddingTransform,
+        SVDEmbeddingTransformConfig,
+    )
+
+    embeddings = SVDEmbeddingTransform(
+        SVDEmbeddingTransformConfig(n_components=2)
+    ).transform("sordonia/test-library", upload_to_hf=False)
+    assert embeddings.shape[1] == 2
+
+    # read the stored embeddings
+    embeddings = HFExpertLibrary("sordonia/test-library").read_embeddings("svd")
+    assert embeddings.expert_embeddings.shape[1] == 2
