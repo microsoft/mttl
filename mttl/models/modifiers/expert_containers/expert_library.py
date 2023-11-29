@@ -192,10 +192,7 @@ class ExpertLibrary:
         ]
 
         for metadatum in metadata:
-            if (
-                self.model_name is not None
-                and metadatum.expert_config.model != self.model_name
-            ):
+            if self.model_name is not None and metadatum.model != self.model_name:
                 self._sliced = True
                 continue
             if metadatum.expert_deleted:
