@@ -307,7 +307,9 @@ class ExpertLibrary:
             expert_dump.expert_info.expert_name = expert_name
 
         if expert_dump.expert_info.expert_name in self.data and not force:
-            raise ValueError(f"Expert {expert_name} already exists!")
+            raise ValueError(
+                f"Expert {expert_dump.expert_info.expert_name} already exists!"
+            )
 
         if "." in expert_dump.expert_info.expert_name:
             raise ValueError("Expert name cannot contain dots.")
