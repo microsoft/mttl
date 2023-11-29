@@ -294,7 +294,7 @@ class ExpertLibrary:
         # Load the model from the downloaded file
         model = torch.load(model, map_location="cpu")
         return Expert(
-            expert_info=self.data[model_name].expert_info,
+            expert_info=self.data[model_name],
             expert_weights=model,
         )
 
