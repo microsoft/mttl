@@ -169,6 +169,7 @@ class ExpertLibrary:
         self.model_name = model_name
         self._in_transaction = False
         self._pending_operations = []
+        self._pending_pre_uploads = []
         self.data = {}
 
         if "HF_TOKEN" in os.environ:
@@ -237,10 +238,11 @@ class ExpertLibrary:
         addition = CommitOperationAdd(
             path_in_repo=f"{expert_name}.ckpt", path_or_fileobj=buffer
         )
-        self.preupload_lfs_files(self.repo_id, additions=[addition])
         if self._in_transaction:
+            self._pending_pre_uploads.append(addition)
             self._pending_operations.append(addition)
         else:
+            self.preupload_lfs_files(self.repo_id, additions=[addition])
             self.create_commit(
                 self.repo_id,
                 operations=[addition],
@@ -303,8 +305,8 @@ class ExpertLibrary:
         if expert_name is not None:
             expert_dump.expert_info.expert_name = expert_name
 
-        if expert_name in self.data and not force:
-            raise ValueError(f"Expert {expert_name} already exists")
+        if expert_dump.expert_info.expert_name in self.data and not force:
+            raise ValueError(f"Expert {expert_name} already exists!")
 
         if "." in expert_dump.expert_info.expert_name:
             raise ValueError("Expert name cannot contain dots.")
@@ -498,6 +500,8 @@ class ExpertLibrary:
         self._in_transaction = True
         yield
         logger.info(f"Committing len(self._pending_operations) operations...")
+        if self._pending_pre_uploads:
+            preupload_lfs_files(self.repo_id, additions=self._pending_pre_uploads)
         self.create_commit(
             self.repo_id,
             operations=self._pending_operations,
@@ -505,6 +509,7 @@ class ExpertLibrary:
         )
         # exit transaction and clear pending operations
         self._in_transaction = False
+        self._pending_pre_uploads.clear()
         self._pending_operations.clear()
 
     def add_expert_from_ckpt(
