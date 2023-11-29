@@ -211,7 +211,7 @@ class HFExpertLibrary(ExpertLibrary):
         embedding_file = f"{embedding_type}.emb"
         config_file = f"{embedding_type}.json"
 
-        embeddings = self.api.list_repo_files(self.repo_id, "*.emb")
+        embeddings = self.api.list_repo_files(self.repo_id)
         if embedding_file in embeddings:
             raise ValueError(
                 f"Embedding {embedding_file} already exists. Use `overwrite=True`."
@@ -223,8 +223,8 @@ class HFExpertLibrary(ExpertLibrary):
 
         buffer = io.BytesIO()
         torch.save(
-            buffer,
             {"expert_names": expert_names, "expert_embeddings": expert_embeddings},
+            buffer,
         )
         buffer.flush()
 
@@ -235,7 +235,7 @@ class HFExpertLibrary(ExpertLibrary):
 
         if config is not None:
             buffer = io.BytesIO()
-            json.dump(config.__dict__, buffer)
+            buffer.write(json.dumps(config.__dict__).encode("utf-8"))
             buffer.flush()
 
             addition_b = CommitOperationAdd(
