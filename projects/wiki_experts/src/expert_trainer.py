@@ -5,8 +5,8 @@ from mttl.models.llama_patch import replace_attn_with_flash_attn
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.routing import RoutingInfo
 from transformers import AutoModelForCausalLM
-from projects.wiki_experts.src.config import ExpertInfo
 
+from mttl.models.modifiers.expert_containers.module_graph import ExpertInfo
 from mttl.models.utils import (
     EfficientCheckpointModule,
     prepare_model_for_kbit_training,
