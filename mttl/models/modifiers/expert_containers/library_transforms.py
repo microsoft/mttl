@@ -61,8 +61,9 @@ class SVDEmbeddingTransform(LibraryTransform):
             for thr in [0.0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1]:
                 ar_copy = array.copy()
                 ar_copy[np.abs(ar_copy) <= thr] = 0.0
-                ratio = float(np.count_nonzero(ar_copy)) / ar_copy.size
+                ratio = float((ar_copy == 0.0).sum()) / ar_copy.size
                 if ratio >= self.config.sparsity_threshold:
+                    logger.info("Found sparsity threshold: {}".format(thr))
                     break
 
         experts_embeddings = svd.fit_transform(ar_copy)
