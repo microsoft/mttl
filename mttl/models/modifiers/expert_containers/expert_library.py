@@ -216,12 +216,12 @@ class HFExpertLibrary(ExpertLibrary):
                 f"Embedding {embedding_file} not found in repository. Did you compute it?"
             )
 
-        path = snapshot_download(self.repo_id, filename=embedding_file)
+        path = hf_hub_download(self.repo_id, filename=embedding_file)
         embeddings = torch.load(path, map_location="cpu")
 
         config = None
         if config_file in files:
-            path = snapshot_download(self.repo_id, filename=config_file)
+            path = hf_hub_download(self.repo_id, filename=config_file)
             config = json.load(path)
 
         return LibraryEmbedding(embeddings=embeddings, config=config)
