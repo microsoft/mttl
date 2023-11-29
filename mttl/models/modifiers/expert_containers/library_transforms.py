@@ -22,6 +22,7 @@ class LibraryTransform:
 
 @dataclass
 class SVDEmbeddingTransformConfig:
+    name: str = "svd"
     n_components: int = 64
     sparsity_threshold: float = 0.8
 
@@ -71,5 +72,7 @@ class SVDEmbeddingTransform(LibraryTransform):
 
         if upload_to_hf:
             # add embeddings to the library
-            library.add_embeddings("svd", names, experts_embeddings, config=self.config)
+            library.add_embeddings(
+                self.config.name, names, experts_embeddings, config=self.config
+            )
         return experts_embeddings
