@@ -60,7 +60,6 @@ def test_soft_delete(mocker):
 
 
 def test_compute_embeddings():
-    from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
     from mttl.models.modifiers.expert_containers.library_transforms import (
         SVDEmbeddingTransform,
         SVDEmbeddingTransformConfig,
@@ -71,6 +70,13 @@ def test_compute_embeddings():
     ).transform("sordonia/test-library", upload_to_hf=False)
     assert embeddings.shape[1] == 2
 
+
+def test_read_embeddings():
+    from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+
     # read the stored embeddings
-    embeddings = HFExpertLibrary("sordonia/test-library").read_embeddings("svd")
-    assert embeddings.expert_embeddings.shape[1] == 2
+    embeddings = HFExpertLibrary("sordonia/test-library").get_auxiliary_data(
+        "embeddings"
+    )
+    assert "abstract_algebra" in embeddings
+    assert embeddings["abstract_algebra"]["svd"]["embedding"].shape[1] == 2

@@ -326,15 +326,11 @@ class ExpertLibrary:
         data_type: str = "embeddings",
         expert_name: str = None,
     ) -> List[Any]:
-        files = snapshot_download(self.repo_id, allow_patterns=f"*.{data_type}")
-        if not files:
-            raise ValueError(
-                f"No data of type {data_type} found in repository. Did you compute it?"
-            )
+        path = snapshot_download(self.repo_id, allow_patterns=f"*.{data_type}")
 
         if expert_name:
-            filename = f"{expert_name}.{data_type}"
-            if filename not in files:
+            filename = os.path.join(path, f"{expert_name}.{data_type}")
+            if not os.path.isfile(filename):
                 raise ValueError(
                     f"Data of type {data_type} for expert {expert_name} not found in repository. Did you compute it?"
                 )
@@ -342,8 +338,8 @@ class ExpertLibrary:
         else:
             auxiliary_data = {}
             for key in self.keys():
-                filename = f"{key}.{data_type}"
-                if filename in files:
+                filename = os.path.join(path, f"{key}.{data_type}")
+                if os.path.isfile(filename):
                     auxiliary_data[f"{key}"] = torch.load(filename)
         return auxiliary_data
 
@@ -413,7 +409,7 @@ class ExpertLibrary:
 
         scores = self.list_repo_files(self.repo_id)
         if scores_file in scores:
-            path = hf_hub_download(self.repo_id, filename=scores_file)
+            path = self.hf_hub_download(self.repo_id, filename=scores_file)
             scores = torch.load(path, map_location="cpu")
         else:
             scores = {}
@@ -459,7 +455,7 @@ class ExpertLibrary:
 
         embeddings = self.list_repo_files(self.repo_id)
         if embedding_file in embeddings:
-            path = snapshot_download(self.repo_id, allow_patterns=embedding_file)
+            path = self.hf_hub_download(self.repo_id, filename=embedding_file)
             embeddings = torch.load(path, map_location="cpu")
         else:
             embeddings = {}
@@ -470,7 +466,7 @@ class ExpertLibrary:
         }
 
         buffer = io.BytesIO()
-        torch.save(buffer, embedding_config)
+        torch.save(embeddings, buffer)
         buffer.flush()
 
         addition_a = CommitOperationAdd(
