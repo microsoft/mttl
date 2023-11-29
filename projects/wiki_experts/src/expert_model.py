@@ -308,6 +308,10 @@ class MultiExpertModelRanker(MultiExpertModel):
         else:
             raise ValueError("No inputs found in batch!")
         expert_logits = self.classifier(input_texts)
+        log_expert_logits = torch.log_softmax(expert_logits, dim=1)
+        # get the max log score
+        max_log_score = log_expert_logits.max(dim=1)
+        print("max log score: {}".format(max_log_score))
         expert_indices = expert_logits.argmax(dim=1).cpu()
         expert_prediction = [self.ids_to_tasks_names[i.item()] for i in expert_indices]
         return expert_prediction
