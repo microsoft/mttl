@@ -73,6 +73,10 @@ class SVDEmbeddingTransform(LibraryTransform):
         if upload_to_hf:
             # add embeddings to the library
             library.add_embeddings(
-                self.config.name, names, experts_embeddings, config=self.config
+                self.config.name,
+                names,
+                experts_embeddings,
+                config=self.config,
+                overwrite=True,
             )
         return experts_embeddings

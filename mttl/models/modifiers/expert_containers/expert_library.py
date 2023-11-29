@@ -9,16 +9,18 @@ import os
 import numpy as np
 from collections import UserDict
 
-from huggingface_hub import HfApi
 from huggingface_hub import (
     hf_hub_download,
     login,
     CommitOperationAdd,
+    CommitOperationDelete,
     create_commit,
     snapshot_download,
     preupload_lfs_files,
     create_repo,
+    HfApi,
 )
+from huggingface_hub.utils._errors import RepositoryNotFoundError
 
 from huggingface_hub import HfApi
 from mttl.utils import logger
@@ -49,12 +51,14 @@ class MetadataEntry:
     expert_name: str = None
     expert_info: ExpertInfo = None
     expert_config: ExpertConfig = None
+    expert_deleted: bool = False
 
     def dumps(self):
         return {
             "expert_config": self.expert_config.to_json(),
             "expert_info": asdict(self.expert_info),
             "expert_name": self.expert_name,
+            "expert_deleted": self.expert_deleted,
         }
 
     @classmethod
@@ -67,6 +71,7 @@ class MetadataEntry:
             ),
             expert_info=ExpertInfo(**ckpt["expert_info"]),
             expert_name=ckpt["expert_name"],
+            expert_deleted=ckpt.get("expert_deleted", False),
         )
 
 
@@ -77,6 +82,8 @@ class HFExpertLibrary(ExpertLibrary):
         self.repo_id = repo_id
         self.api = HfApi()
         self._sliced = False
+        self.selection = None
+        self.model_name = None
         self._in_transaction = False
         self._pending_operations = []
         self.data = {}
@@ -87,32 +94,49 @@ class HFExpertLibrary(ExpertLibrary):
         try:
             if create:
                 create_repo(repo_id, repo_type="model", exist_ok=True)
-        except:
-            pass
+        except Exception as e:
+            logger.error("Error creating repo %s\n", repo_id)
 
-        metadata_dir = snapshot_download(repo_id, allow_patterns="*.meta")
+        self._build_lib()
+        logger.info("Loaded %s experts from huggingface hub", len(self.data))
+
+    def _build_lib(self):
+        self._sliced = False
+        self.data = {}
+
+        try:
+            metadata_dir = snapshot_download(self.repo_id, allow_patterns="*.meta")
+        except Exception as e:
+            if isinstance(e, RepositoryNotFoundError):
+                logger.error("Repository not found: %s", self.repo_id)
+                return self.data, self._sliced
+            raise e
+
         metadata = [
             MetadataEntry.loads(torch.load(file, map_location="cpu"))
             for file in glob.glob(f"{metadata_dir}/*.meta")
         ]
 
         for metadatum in metadata:
-            if model_name is not None and metadatum.expert_config.model != model_name:
+            if (
+                self.model_name is not None
+                and metadatum.expert_config.model != self.model_name
+            ):
                 self._sliced = True
                 continue
+            if metadatum.expert_deleted:
+                continue
 
-            if metadatum.expert_name in self.data:
+            key = metadatum.expert_name
+            if key in self.data:
                 raise ValueError(
-                    f"Expert {metadata.expert_name} already exists. Library corrupted."
+                    f"Expert {metadatum.expert_name} already exists. Library corrupted."
                 )
+            self.data[key] = metadatum
 
-            self.data[metadatum.expert_name] = metadatum
-
-        if selection:
+        if self.selection:
             self._sliced = True
-            self.data = {k: v for k, v in self.data.items() if selection in k}
-
-        logger.info("Loaded %s experts from huggingface hub", len(self.data))
+            self.data = {k: v for k, v in self.data.items() if self.selection in k}
 
     def _download_model(self, model_name):
         if model_name not in self.data:
@@ -235,6 +259,51 @@ class HFExpertLibrary(ExpertLibrary):
             config=config,
         )
 
+    def unremove_expert(self, expert_name: str):
+        """Restore a previously soft-deleted expert."""
+        if self._sliced:
+            raise ValueError("Cannot remove expert from sliced library.")
+
+        list_of_files = self.api.list_repo_files(self.repo_id)
+        if f"{expert_name}.meta" not in list_of_files:
+            raise ValueError(f"Expert {expert_name} not found in repository.")
+
+        path = hf_hub_download(self.repo_id, filename=f"{expert_name}.meta")
+        metadata = MetadataEntry.loads(torch.load(path, map_location="cpu"))
+        metadata.expert_deleted = False
+
+        self._upload_metadata(metadata)
+        self.data[expert_name] = metadata
+
+    def remove_expert(self, expert_name: str, soft_delete: bool = True):
+        if self._sliced:
+            raise ValueError("Cannot remove expert from sliced library.")
+
+        if expert_name not in self.data:
+            raise ValueError(f"Expert {expert_name} not found in repository.")
+
+        if not soft_delete:
+            deletion_a = CommitOperationDelete(path_in_repo=f"{expert_name}.ckpt")
+            deletion_b = CommitOperationDelete(path_in_repo=f"{expert_name}.meta")
+
+            if self._in_transaction:
+                # watch out, if other operations (adding files) are pending, this might be dangerous
+                self._pending_operations.extend([deletion_a, deletion_b])
+            else:
+                create_commit(
+                    self.repo_id,
+                    operations=[deletion_a, deletion_b],
+                    commit_message=f"Update library with {metadata.expert_name}.",
+                )
+                logger.info(f"Deletion of {metadata.expert_name} successful.")
+        else:
+            metadata = self.data[expert_name]
+            metadata.expert_deleted = True
+            self._upload_metadata(metadata)
+
+        self.data.pop(expert_name)
+        self._update_readme()
+
     def add_embeddings(
         self,
         embedding_type: str,
@@ -250,7 +319,7 @@ class HFExpertLibrary(ExpertLibrary):
         config_file = f"{embedding_type}.json"
 
         embeddings = self.api.list_repo_files(self.repo_id)
-        if embedding_file in embeddings:
+        if embedding_file in embeddings and not overwrite:
             raise ValueError(
                 f"Embedding {embedding_file} already exists. Use `overwrite=True`."
             )
