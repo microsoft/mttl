@@ -3,7 +3,6 @@ from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibra
 from mttl.models.modifiers.expert_containers.module_graph import Expert
 from mttl.utils import logger
 from mttl.models.modifiers.modify_model import get_modifier_type
-import concurrent.futures
 
 from tqdm import tqdm
 import numpy as np
@@ -62,6 +61,7 @@ class SVDEmbeddingTransform(LibraryTransform):
                 ar_copy = array.copy()
                 ar_copy[np.abs(ar_copy) <= thr] = 0.0
                 ratio = float((ar_copy == 0.0).sum()) / ar_copy.size
+
                 if ratio >= self.config.sparsity_threshold:
                     logger.info("Found sparsity threshold: {}".format(thr))
                     break
@@ -81,3 +81,18 @@ class SVDEmbeddingTransform(LibraryTransform):
                 overwrite=True,
             )
         return experts_embeddings
+
+
+@dataclass
+class EvaluationTransformConfig:
+    name: str = "loss"
+    dataset: str = "sordonia/adauni-v1-flat"
+
+
+class EvaluationTransform(LibraryTransform):
+    def transform(self, library, model, upload_to_hf=True):
+        if type(library) == str:
+            library = HFExpertLibrary(library)
+
+        # trainer is a Trainer object
+        trainer = model.trainer
