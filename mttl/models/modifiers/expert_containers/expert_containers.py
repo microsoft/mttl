@@ -155,7 +155,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                 ws.append(weight)
             assert len(exps) == len(ws)
             load_experts.append(exps)
-            weights.append(torch.tensor(ws))
+            weights.append(torch.stack(ws))
         return SkilledLoRA.parallel_linear_forward(input, load_experts, weights)
 
     def forward(self, input, **kwargs):

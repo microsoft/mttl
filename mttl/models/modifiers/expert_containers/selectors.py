@@ -73,9 +73,10 @@ class MultiExpertSelector(torch.nn.Module, Selector):
         return [{k: v for k, v in zip(self.expert_names, module_weights)}]
 
     def get_routing_weights(self):
-        return self.forward()[0]
+        weights = self.forward()[0]
+        return {k: v.detach().item() for k, v in weights.items()}
 
-    def add_expert(self, expert_name: str):
+    def add_expert(self, expert_name: str, **kwargs):
         if expert_name not in self.expert_names:
             self.expert_names.append(expert_name)
             self.module_logits.data = torch.empty(len(self.expert_names)).uniform_(
@@ -106,7 +107,7 @@ class TaskNameSelector(torch.nn.Module, Selector):
                 raise ValueError("No default expert name set and no task names given!")
 
             routing_weights = [
-                {self.default_expert_name: 1.0} for _ in range(batch_size)
+                {self.default_expert_name: torch.tensor(1.0)} for _ in range(batch_size)
             ]
         else:
             task_names = self.info_container["routing_infos"].task_names
@@ -120,7 +121,9 @@ class TaskNameSelector(torch.nn.Module, Selector):
                     "Experts for all tasks have not been loaded! Set a default expert?"
                 )
 
-            routing_weights = [{task_name: 1.0} for task_name in task_names]
+            routing_weights = [
+                {task_name: torch.tensor(1.0)} for task_name in task_names
+            ]
         return routing_weights
 
     def add_expert(self, expert_name: str):

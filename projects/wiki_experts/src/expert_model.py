@@ -1,16 +1,20 @@
 import torch
 import numpy as np
 from typing import Dict
-
+from tempfile import TemporaryDirectory
 from mttl.models.modifiers.routing import RoutingInfo
 from mttl.utils import logger
-from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
 from mttl.models.modifiers.expert_containers import ExpertContainer
 from mttl.models.modifiers.expert_containers import Selector
 from mttl.models.modifiers.expert_containers import add_expert_to_transformer
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.ranker.adapter_ranker import ExpertRanker
+from mttl.models.modifiers.expert_containers.module_graph import Expert
+from mttl.models.modifiers.expert_containers.module_graph import (
+    ModuleGraph,
+    load_expert,
+)
 from projects.wiki_experts.src.ranker.classification_module import ids_to_tasks_names
 
 
@@ -92,29 +96,51 @@ class MultiExpertModel(ExpertTrainer):
                 config=self.hparams,
             )
             self.experts.append(module_name)
-        self.expert_info.parent_node = graph.dumps()
 
-    def convert_container_to_expert(self, expert_name):
-        loaded_expert = None
+    def convert_container_to_expert(self, expert_name, get_expert_instance=True):
+        """
+        Replaces the expert container with the expert with the given name.
+        """
+        expert = None
         for _, module in self.model.named_modules():
             for c_name, child in dict(module.named_children()).items():
                 if isinstance(child, ExpertContainer) and len(child.experts) > 0:
                     setattr(module, c_name, child.experts[expert_name])
-                    if loaded_expert is None:
-                        loaded_expert = child.experts[expert_name]
+                    if expert is None:
+                        expert = child.experts[expert_name]
         # make sure hparams reflect the loaded expert
-        if loaded_expert:
-            self.hparams.update(loaded_expert.config.__dict__)
+        if expert:
+            self.hparams.update(expert.config.__dict__)
+        if get_expert_instance:
+            td = TemporaryDirectory()
+            expert_checkpoint = MultiExpertModel.save_pretrained(self, td.name)
+            expert: Expert = load_expert(expert_checkpoint)
+            return expert
+        return
 
     def load_from_module_dict(self, module_dict, action="route"):
         for module_name, destination in module_dict.items():
-            self.load_expert(
-                destination,
-                module_name,
-                action=action,
-                is_default=module_name == "default",
-            )
-        self.expert_info.parent_node = ModuleGraph.from_module_dict(module_dict).dumps()
+            if isinstance(destination, str):
+                self.load_expert(
+                    destination,
+                    module_name,
+                    action=action,
+                    is_default=module_name == "default",
+                )
+            elif isinstance(destination, Expert):
+                self.add_expert_instance(destination, module_name, action=action)
+
+    def add_expert_instance(self, expert_instance: Expert, expert_name, action="route"):
+        self.model = add_expert_to_transformer(
+            self.model,
+            expert_name,
+            expert_instance.expert_config,
+            expert_instance.expert_weights,
+            action=action,
+            is_default=expert_name == "default",
+        )
+        if action != "merge":
+            self.experts.append(expert_name)
 
     def load_from_graph_string(self, s, action="route"):
         from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
@@ -324,11 +350,7 @@ class RoutedMultiExpertModel(MultiExpertModel):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-
         self.selectors: Dict[str:Selector] = torch.nn.ModuleDict()
-        self.graph_string = self.expert_info.parent_node
-        if self.graph_string is not None:
-            self.load_from_graph_string(self.expert_info.parent_node, action="route")
 
     def load_expert(
         self,
@@ -340,7 +362,7 @@ class RoutedMultiExpertModel(MultiExpertModel):
     ):
         from mttl.models.modifiers.expert_containers.module_graph import load_expert
 
-        expert = load_expert(expert_path, expert_name=expert_name)
+        expert = load_expert(expert_path)
         if self.hparams.model != expert.expert_config.model:
             raise ValueError(
                 "The expert has been trained on top of a different model!"
@@ -389,7 +411,21 @@ class RoutedMultiExpertModel(MultiExpertModel):
             weights[selector.name] = selector.get_routing_weights()
         return weights
 
-    def merge_experts_together(self, weights: dict = None):
+    def add_expert_instance(self, expert_instance, expert_name, action="route"):
+        self.model = add_expert_to_transformer(
+            self.model,
+            expert_name,
+            expert_instance.expert_config,
+            expert_instance.expert_weights,
+            action=action,
+            is_default=expert_name == "default",
+            selectors=self.selectors,
+            config=self.hparams,
+        )
+        if action != "merge":
+            self.experts.append(expert_name)
+
+    def to_expert(self, weights: dict = None) -> Expert:
         """
         Merges current experts together according to weights if given, otherwise uses router's weights
         """
@@ -398,4 +434,9 @@ class RoutedMultiExpertModel(MultiExpertModel):
                 if isinstance(child, ExpertContainer) and len(child.experts) > 0:
                     # creates a single Lora
                     child.merge_experts_together(weights)
-        self.convert_container_to_expert("merged_expert")
+        return self.convert_container_to_expert("merged_expert")
+
+    def on_save_checkpoint(self, ckpt):
+        expert: Expert = self.to_expert()
+        ckpt["expert_dumps"] = expert.dumps()
+        ckpt["merging_weights"] = self.get_router_weights()
