@@ -35,6 +35,12 @@ class ExpertLibrary:
 
 
 @dataclass
+class LibraryEmbedding:
+    embeddings: np.ndarray
+    config: Any = None
+
+
+@dataclass
 class MetadataEntry:
     expert_name: str = None
     expert_info: ExpertInfo = None
@@ -196,6 +202,29 @@ class HFExpertLibrary(ExpertLibrary):
 
         self.data[metadata.expert_name] = metadata
         self._update_readme()
+
+    def read_embeddings(
+        self,
+        embedding_type: str,
+    ) -> LibraryEmbedding:
+        files = self.api.list_repo_files(self.repo_id)
+        embedding_file = f"{embedding_type}.emb"
+        config_file = f"{embedding_type}.json"
+
+        if embedding_file not in files:
+            raise ValueError(
+                f"Embedding {embedding_file} not found in repository. Did you compute it?"
+            )
+
+        path = snapshot_download(self.repo_id, path_in_repo=embedding_file)
+        embeddings = torch.load(path, map_location="cpu")
+
+        config = None
+        if config_file in files:
+            path = snapshot_download(self.repo_id, path_in_repo=config_file)
+            config = json.load(path)
+
+        return LibraryEmbedding(embeddings=embeddings, config=config)
 
     def add_embeddings(
         self,
