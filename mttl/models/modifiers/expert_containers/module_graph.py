@@ -8,7 +8,6 @@ from string import Template
 from mttl.models.utils import download_from_hub
 from mttl.utils import get_checkpoint_path, logger
 from mttl.config import Config
-
 from dataclasses import dataclass
 
 
@@ -22,6 +21,9 @@ class ExpertInfo:
     expert_task_name: str
     expert_config: Dict
     parent_node: str = None
+    # dependency injection from library
+    expert_embeddings: Dict = None
+    expert_scores: Dict = None
 
     @property
     def model(self):
