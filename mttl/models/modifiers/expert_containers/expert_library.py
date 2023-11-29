@@ -26,7 +26,6 @@ from huggingface_hub import HfApi
 from mttl.utils import logger
 from mttl.models.modifiers.expert_containers.module_graph import (
     Expert,
-    ExpertEmbedding,
     load_expert,
     ExpertInfo,
 )
