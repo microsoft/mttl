@@ -758,13 +758,6 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
                 new_lib.add_expert(expert)
         return new_lib
 
-    def to_graph(self, task_name: str = "new_task"):
-        """
-        Creates a flat linear graph node.
-        The names of the experts in the graph is given by task_name param.
-        """
-        return ModuleGraph.from_expert_dict(self, module_name=task_name)
-
 
 class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
     @classmethod

@@ -128,14 +128,7 @@ class NGRoutingOptimizer:
         self.get_loss = get_loss
 
     def construct_graph(self, modules_to_dest: Union[Dict, ExpertLibrary]):
-        if hasattr(modules_to_dest, "to_graph"):
-            return modules_to_dest.to_graph(self.task_name)
-        s = f"{self.task_name} -> linear("
-        for i, (name, destination) in enumerate(modules_to_dest.items()):
-            s += f"{destination}:${i},"
-        s = s[:-1] + ")"
-        graph = ModuleGraph.from_string(s)
-        return graph
+        return ModuleGraph.from_expert_dict(modules_to_dest, module_name="new_task")
 
     def get_graph_vars(self, weights: list):
         s = {}
