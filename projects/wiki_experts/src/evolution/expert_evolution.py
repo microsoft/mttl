@@ -21,6 +21,7 @@ from projects.wiki_experts.src.evolution.utils import (
 )
 
 from mttl.models.modifiers.expert_containers.expert_library import (
+    get_best_expert_for_task,
     LocalExpertLibrary,
     HFExpertLibrary,
     ExpertLibrary,
@@ -102,8 +103,8 @@ def optimize_evol_expert_routing(
             expert_lib=expert_lib,
             get_loss=get_loss_function,
             budget=args.n_ng_iterations,
-            base_module_name=expert_lib.get_best_expert_for_task(
-                task, default_score_name
+            base_module_name=get_best_expert_for_task(
+                expert_lib, task, default_score_name
             ).name
             if args.init_router_best
             else None,
@@ -260,10 +261,7 @@ def setup(args: EvolExpertConfig):
         exper_state.load_from_path(args.experiment_state_path)
 
     tasks = args.finetune_task_name
-
-    # filter only experts that are in the task list
     expert_lib = exper_state.state.expert_lib
-    expert_lib.filter_with_tasks(args.finetune_task_name)
     # remove tasks for which we dont have experts
     tasks = [t for t in tasks if t in expert_lib.tasks]
 
@@ -290,8 +288,8 @@ def retrieve_experts_for_task(
     if metric not in ["random", "lora_sim", "loss", "rougeL"]:
         return expert_lib
     expert_lib_copy = copy.deepcopy(expert_lib)
-    task_module: Expert = expert_lib_copy.get_best_expert_for_task(
-        task, default_score_name
+    task_module: Expert = get_best_expert_for_task(
+        expert_lib_copy, task, default_score_name
     )
     task_module_name = task_module.name
 
@@ -432,8 +430,8 @@ def main(args: EvolExpertConfig):
                 )
 
             assert task in expert_lib.tasks
-            parent_exp: Expert = expert_lib.get_best_expert_for_task(
-                task, default_score_name
+            parent_exp: Expert = get_best_expert_for_task(
+                expert_lib, task, default_score_name
             )
             base_perf = {
                 "train": expert_lib.get_score(

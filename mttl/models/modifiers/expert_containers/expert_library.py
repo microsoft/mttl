@@ -192,7 +192,6 @@ class ExpertLibrary:
         self._pending_operations = []
         self._pending_pre_uploads = []
         self.data = {}
-        self.task_to_expert = defaultdict(list)
 
         self.ignore_sliced = ignore_sliced
 
@@ -242,27 +241,10 @@ class ExpertLibrary:
                     f"Expert {metadatum.expert_name} already exists. Library corrupted."
                 )
             self.data[key] = metadatum
-            self._add_to_task_to_expert(metadatum.expert_task_name, metadatum)
 
         if self.selection:
             self._sliced = True
             self.data = {k: v for k, v in self.data.items() if self.selection in k}
-
-    def _add_to_task_to_expert(self, task, metadatum):
-        self.task_to_expert[task].append(metadatum)
-
-    def _remove_from_task_to_expert(self, task, metadatum: MetadataEntry):
-        """
-        Removes expert_name from task_to_expert[task]. If resulting list is empty, removes task from task_to_expert
-        """
-        if task in self.task_to_expert:
-            # self.task_to_expert[task].remove(expert) # this is buggy
-            for i, exp in enumerate(self.task_to_expert[task]):
-                if exp == metadatum:
-                    self.task_to_expert[task].pop(i)
-                    break
-            if len(self.task_to_expert[task]) == 0:
-                self.task_to_expert.pop(task)
 
     def _download_model(self, model_name):
         if model_name not in self.data:
@@ -379,7 +361,6 @@ class ExpertLibrary:
         self._upload_metadata(metadata)
 
         self.data[metadata.expert_name] = metadata
-        self._add_to_task_to_expert(metadata.expert_task_name, metadata)
         self._update_readme()
 
     def get_auxiliary_data(
@@ -419,7 +400,6 @@ class ExpertLibrary:
 
         self._upload_metadata(metadata)
         self.data[expert_name] = metadata
-        self._add_to_task_to_expert(metadata.expert_task_name, metadata)
 
     def remove_expert(self, expert_name: str, soft_delete: bool = True):
         """Remove an expert from the library.
@@ -452,7 +432,6 @@ class ExpertLibrary:
             self._upload_metadata(metadata)
 
         metadata = self.data.pop(expert_name)
-        self._remove_from_task_to_expert(metadata.expert_task_name, metadata)
         self._update_readme()
 
     def get_score(self, expert_name: str, task: str, score_name: str):
@@ -659,46 +638,13 @@ class ExpertLibrary:
     @property
     def tasks(self):
         """
-        Assume that the experts' names correspond to the tasks they were trained on
+        Doesn't assume that the experts' names correspond to the tasks they were trained on
         """
-        return list(self.keys())
-
-    def filter_with_tasks(self, tasks):
-        """
-        Remove modules for tasks other than the ones in tasks.
-        """
-        self._sliced = True
-        all_tasks = self.tasks
-
-        for t in all_tasks:
-            if t not in tasks:
-                self.data.pop(t, None)
+        return [metadatum.expert_task_name for metadatum in self.data.values()]
 
     def __contains__(self, expert: Union[Expert, str]):
         key = expert if isinstance(expert, str) else expert.expert_info.expert_name
         return key in self.data
-
-    def get_best_expert_for_task(self, task, score_name=None):
-        """
-        Return the expert with the highest score on task. If none found, returns the last expert added.
-        """
-        if task not in self.task_to_expert:
-            raise ValueError(f"Task {task} not found in repository.")
-        if score_name is None:
-            return self[self.task_to_expert[task][-1].expert_name]
-
-        best_expert = None
-        best_score = -np.inf
-        for metadata in self.task_to_expert[task]:
-            score: Score = self.get_score(metadata.expert_name, task, score_name)
-            if score is None:
-                continue
-            if score > best_score:
-                best_score = score
-                best_expert = metadata
-        if best_expert is None:
-            best_expert = metadata
-        return self[best_expert.expert_name]
 
     def replace_expert(self, old_expert: Expert, new_expert: Expert):
         """
@@ -771,3 +717,26 @@ class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
             new_lib.add_expert(expert, name)
 
         return new_lib
+
+
+def get_best_expert_for_task(library: HFExpertLibrary, task, score_name) -> Expert:
+    """
+    Return the expert with the highest score on task. If none found, returns the last expert found.
+    """
+    if task not in library.tasks:
+        raise ValueError(f"Task {task} not found in repository.")
+
+    best_expert = None
+    best_score = -np.inf
+    for metadata in library.data.values():
+        if metadata.expert_task_name != task:
+            continue
+        score: Score = library.get_score(metadata.expert_name, task, score_name)
+        if score is None:
+            continue
+        if score > best_score:
+            best_score = score
+            best_expert = metadata
+    if best_expert is None:
+        best_expert = metadata
+    return library[best_expert.expert_name]
