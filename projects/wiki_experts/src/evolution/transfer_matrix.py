@@ -53,7 +53,7 @@ def eval_expert_on_task(
         else:
             raise ValueError(f"Checkpoint type {type(expert)} not supported")
         if len(model_copy.experts) == 1:
-            model_copy.convert_container_to_expert(task, get_expert_instance=False)
+            model_copy.replace_container_with_expert(task, get_expert_instance=False)
         module = model_copy
 
     result = {}

@@ -118,7 +118,7 @@ def optimize_evol_expert_routing(
         model_optimal.load_from_graph_string(
             best_graph_string, "route", expert_library=expert_lib
         )
-        expert = model_optimal.convert_container_to_expert("new_task")
+        expert = model_optimal.replace_container_with_expert("new_task")
 
         logger.info("Found best graph: {}".format(best_graph_string))
         logger.info("Found best weights: {}".format(best_weights))

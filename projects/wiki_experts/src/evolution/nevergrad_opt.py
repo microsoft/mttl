@@ -154,7 +154,7 @@ class NGRoutingOptimizer:
             # import numpy as np
             # np.sum([p.detach().cpu().sum().item() for p in model.parameters()])
             if action == "route":
-                model.convert_container_to_expert("new_task")
+                model.replace_container_with_expert("new_task")
 
             # minimize the metric
             loss = get_loss(
