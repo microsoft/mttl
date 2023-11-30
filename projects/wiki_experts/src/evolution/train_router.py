@@ -136,7 +136,7 @@ def train_router(
     )
     del module
     torch.cuda.empty_cache()
-
+    logger.disabled = False
     ckpt = torch.load(checkpoint)
     expert_dumps = ckpt["expert_dumps"]
     weights = ckpt["merging_weights"]
