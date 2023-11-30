@@ -438,10 +438,7 @@ class RoutedMultiExpertModel(MultiExpertModel):
                     exp_config, _weights = child.get_merged_weights(
                         weights, with_global_names=with_global_names
                     )
-                    for k, v in _weights.items():
-                        key = k if not with_global_names else "model" + "." + k
-                        expert_weights[key] = v
-
+                    expert_weights.update(_weights)
         config_merged = copy.deepcopy(self.hparams)
         config_merged.model_modifier = exp_config.model_modifier
         expert_info = ExpertInfo(
