@@ -190,67 +190,12 @@ class MultiExpertModel(ExpertTrainer):
     def generation_config(self):
         return self.model.generation_config
 
-    def expert_choice(self, batch, **kwargs):
-        input_ids = batch["input_ids"]
-        mask = batch["attention_mask"]
-
-        # convert left to right padding here
-        def roll_along(arr, shifts, dim):
-            assert arr.ndim - 1 == shifts.ndim
-            dim %= arr.ndim
-            shape = (1,) * dim + (-1,) + (1,) * (arr.ndim - dim - 1)
-            dim_indices = torch.arange(arr.shape[dim]).reshape(shape).to(arr.device)
-            indices = (dim_indices - shifts.unsqueeze(dim)) % arr.shape[dim]
-            return torch.gather(arr, dim, indices)
-
-        input_ids = roll_along(input_ids, mask.sum(1), 1)
-        mask = input_ids.ne(0)
-        labels = torch.masked_fill(input_ids, ~mask, -100)
-
-        scores = []
-        for expert in self.experts:
-            batch["task_names"] = [expert for _ in range(batch["input_ids"].shape[0])]
-            self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
-                batch
-            )
-            outputs = self.model.forward(
-                input_ids,
-                attention_mask=mask,
-            )
-            # calculate loss, could also be done inside of the model
-            bs = input_ids.size(0)
-            logits = outputs.logits
-            vocab_size = logits.size(-1)
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-            # Flatten the tokens
-            loss_fct = torch.nn.CrossEntropyLoss(reduction="none")
-            shift_logits = shift_logits.view(-1, vocab_size)
-            shift_labels = shift_labels.view(-1)
-
-            # Enable model parallelism
-            shift_labels = shift_labels.to(shift_logits.device)
-            loss = loss_fct(shift_logits, shift_labels)
-            loss = loss.view((bs, -1)).sum(1)
-            # mean only non-zero
-            scores.append(loss.cpu())
-
-        scores = torch.stack(scores, 0)
-        expert_indices = scores.argmin(0)
-        return [self.experts[i] for i in expert_indices]
-
     def generate(
         self,
         batch,
         **kwargs,
     ):
-        if self.hparams.routing == "auto":
-            logger.info(
-                "Auto-routing... ground-truth tasks: {}".format(batch["task_names"])
-            )
-            batch["task_names"] = self.expert_choice(batch)
-            logger.info("Auto-route tasks: {}".format(batch["task_names"]))
-        elif self.hparams.routing == "first":
+        if self.hparams.routing == "first":
             batch["task_names"] = [
                 self.experts[0] for _ in range(batch["input_ids"].shape[0])
             ]
@@ -260,11 +205,11 @@ class MultiExpertModel(ExpertTrainer):
             batch["task_names"] = np.random.choice(
                 self.experts, batch["input_ids"].shape[0], replace=True
             ).tolist()
+
         if hasattr(self.model, "task_id_container"):
             self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
                 batch
             )
-
         generations = self.model.generate(
             inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
         )
@@ -312,13 +257,7 @@ class MultiExpertModelRanker(MultiExpertModel):
         batch,
         **kwargs,
     ):
-        if self.hparams.routing == "auto":
-            logger.info(
-                "Auto-routing... ground-truth tasks: {}".format(batch["task_names"])
-            )
-            batch["task_names"] = self.expert_choice(batch)
-            logger.info("Auto-route tasks: {}".format(batch["task_names"]))
-        elif self.hparams.routing == "first":
+        if self.hparams.routing == "first":
             batch["task_names"] = [
                 self.experts[0] for _ in range(batch["input_ids"].shape[0])
             ]
