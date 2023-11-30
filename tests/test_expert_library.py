@@ -44,16 +44,18 @@ def test_soft_delete(mocker):
     from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 
     # read the stored embeddings
-    library = HFExpertLibrary("sordonia/test-library")
+    library = HFExpertLibrary("sordonia/test-library", create=False)
     assert len(library.data) == 2
 
     key = list(library.keys())[0]
 
     library._upload_metadata = mocker.MagicMock()
+    library._update_readme = mocker.MagicMock()
     library.remove_expert(key, soft_delete=True)
     assert len(library.data) == 1
     assert key not in library.data
     assert library._upload_metadata.call_count == 1
+    assert library._update_readme.call_count == 1
 
     library.unremove_expert(key)
     assert len(library.data) == 2
