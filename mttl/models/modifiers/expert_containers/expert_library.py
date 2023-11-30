@@ -319,7 +319,6 @@ class ExpertLibrary:
 
         self._upload_weights(metadata.expert_name, expert_dump)
         self._upload_metadata(metadata)
-
         self.data[metadata.expert_name] = metadata
         self._update_readme()
 

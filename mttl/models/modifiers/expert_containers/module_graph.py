@@ -21,7 +21,6 @@ class ExpertInfo:
     expert_task_name: str
     expert_config: Dict
     parent_node: str = None
-    # dependency injection from library
     expert_embeddings: Dict = None
     expert_scores: Dict = None
 
@@ -377,12 +376,21 @@ def load_expert(
     logger.info(f"Loading expert from {expert_checkpoint}...")
     expert_checkpoint = torch.load(expert_checkpoint, map_location="cpu")
 
+    breakpoint()
     if "hyper_parameters" in expert_checkpoint:
         # this is a PL checkpoint
         if "tokenizer" in expert_checkpoint["hyper_parameters"]:
             del expert_checkpoint["hyper_parameters"]["tokenizer"]
 
         expert_info_data = expert_checkpoint.get("expert_info", {})
+
+        # fix bug in checkpoints
+        if "tokenizer" in expert_checkpoint["hyper_parameters"]:
+            expert_checkpoint["hyper_parameters"].pop("tokenizer")
+
+        if "tokenizer" in expert_info_data["expert_config"]:
+            expert_info_data["expert_config"].pop("tokenizer")
+
         if not expert_info_data.get("expert_config", None):
             expert_info_data["expert_config"] = expert_checkpoint["hyper_parameters"]
         if not expert_info_data.get("expert_name", None):

@@ -70,8 +70,8 @@ class MultiExpertModel(ExpertTrainer):
     def __init__(self, **kwargs: dict):
         # we dont use any  model modifier for MultiExpertModel model by default.
         # If you want to use a model modifier, use one of the 'self.modify_weith...' methods.
-        kwargs.pop("model_modifier", None)
-        super().__init__(model_modifier=None, **kwargs)
+        kwargs["model_modifier"] = None
+        super().__init__(**kwargs)
 
         self.experts = []
 
