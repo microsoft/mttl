@@ -10,11 +10,10 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
-from mttl.datamodule.mmlu_data_module import MMLUDataModule
 from projects.wiki_experts.src.expert_model import (
-    MultiExpertModel,
     RoutedMultiExpertModel,
 )
+from mttl.models.modifiers.expert_containers.module_graph import Expert
 from mttl.utils import get_mlf_logger, setup_logging, logger
 from projects.wiki_experts.src.config import ExpertConfig
 from config import EvolExpertConfig
