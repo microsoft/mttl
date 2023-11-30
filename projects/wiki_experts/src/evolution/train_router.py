@@ -140,7 +140,7 @@ def train_router(
     ckpt = torch.load(checkpoint)
     expert_dumps = ckpt["expert_dumps"]
     weights = ckpt["merging_weights"]
-    return weights, Expert(**expert_dumps)
+    return weights, Expert.loads(expert_dumps)
 
 
 if __name__ == "__main__":

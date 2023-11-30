@@ -167,6 +167,9 @@ def optimize_evol_expert_routing(
         loggers = [] if wandb_logger is None else [wandb_logger]
         if DEBUG:
             eval_every = 300
+            from mttl.datamodule.base import subsample_dst
+
+            dm_train.train_dataset = subsample_dst(dm_train.train_dataset, 100)
 
         best_weights, expert = train_router(
             config_copy,

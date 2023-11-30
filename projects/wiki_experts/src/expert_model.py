@@ -438,6 +438,8 @@ class RoutedMultiExpertModel(MultiExpertModel):
         return self.convert_container_to_expert("merged_expert")
 
     def on_save_checkpoint(self, ckpt):
-        expert: Expert = copy.deepcopy(self).cpu().to_expert()
+        _self = copy.deepcopy(self)
+        delattr(_self, "trainable_param_names")
+        expert: Expert = _self.to_expert()
         ckpt["expert_dumps"] = expert.dumps()
         ckpt["merging_weights"] = self.get_router_weights()
