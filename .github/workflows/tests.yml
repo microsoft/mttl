@@ -1,14 +1,7 @@
 name: "Tests"
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
-    branches-ignore:
-      - main
-  schedule:
-    - cron: '37 20 * * 3'
 
 jobs:
   tests:
