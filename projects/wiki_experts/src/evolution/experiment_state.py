@@ -4,7 +4,7 @@ import copy
 import torch
 import wandb
 from dataclasses import dataclass
-from config import ExpertsMergeConfig
+from config import EvolExpertConfig
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
@@ -15,7 +15,7 @@ from mttl.models.modifiers.expert_containers.expert_library import LocalExpertLi
 class ExperimentState:
     @dataclass
     class State:
-        config: ExpertsMergeConfig
+        config: EvolExpertConfig
         active_iteration: int
         expert_lib: LocalExpertLibrary
         results_table: TableLogger

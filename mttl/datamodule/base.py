@@ -7,8 +7,10 @@ from typing import Any, Dict, Union, Optional
 import torch
 from torch.utils.data import DataLoader, Dataset
 
+import numpy as np
 from mttl.utils import logger
 from mttl.datamodule.utils import get_tokenizer
+from datasets import Dataset as HFDataset
 
 
 @dataclass
@@ -267,7 +269,7 @@ class DefaultCollator:
 
 
 def subsample_dst(dataset, subsample: int):
-    subsample = len(dataset) // subsample
+    subsample = max(len(dataset) // subsample, 1)
     if isinstance(dataset, torch.utils.data.Subset):
         idxs = dataset.indices
         idxs = idxs[:subsample]
@@ -276,6 +278,11 @@ def subsample_dst(dataset, subsample: int):
         idxs = torch.randperm(len(dataset))
         idxs = idxs[:subsample]
         dataset = torch.utils.data.Subset(dataset, idxs)
+    # hugginface datasets
+    elif isinstance(dataset, HFDataset):
+        # randomly select subsample indices
+        dataset = dataset.select(np.random.choice(len(dataset), subsample))
+
     return dataset
 
 

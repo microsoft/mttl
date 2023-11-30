@@ -1,4 +1,5 @@
 import torch
+import copy
 import numpy as np
 from typing import Dict
 from tempfile import TemporaryDirectory
@@ -142,10 +143,10 @@ class MultiExpertModel(ExpertTrainer):
         if action != "merge":
             self.experts.append(expert_name)
 
-    def load_from_graph_string(self, s, action="route"):
+    def load_from_graph_string(self, s, action="route", **kwargs):
         from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
 
-        graph = ModuleGraph.from_string(s)
+        graph = ModuleGraph.from_string(s, **kwargs)
         self.load_from_graph(graph, action=action)
 
     def load_expert(
@@ -437,6 +438,6 @@ class RoutedMultiExpertModel(MultiExpertModel):
         return self.convert_container_to_expert("merged_expert")
 
     def on_save_checkpoint(self, ckpt):
-        expert: Expert = self.to_expert()
+        expert: Expert = copy.deepcopy(self).cpu().to_expert()
         ckpt["expert_dumps"] = expert.dumps()
         ckpt["merging_weights"] = self.get_router_weights()

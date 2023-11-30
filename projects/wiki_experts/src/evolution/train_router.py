@@ -17,7 +17,7 @@ from projects.wiki_experts.src.expert_model import (
 )
 from mttl.utils import get_mlf_logger, setup_logging, logger
 from projects.wiki_experts.src.config import ExpertConfig
-from config import ExpertsMergeConfig
+from config import EvolExpertConfig
 from typing import List
 
 
@@ -46,12 +46,14 @@ def save_new_module(module_copy, args):
 
 
 def train_router(
-    args: ExpertsMergeConfig,
+    args: EvolExpertConfig,
     dm,
-    module_dict: dict,
+    dm_eval,
+    expert_lib: dict,
     loggers: List = [],
     val_check_interval=None,
     logging_prefix="",
+    silent=False,
 ):
     seed_everything(args.seed, workers=True)
 
@@ -61,7 +63,7 @@ def train_router(
         device_map="auto",
         logging_prefix=logging_prefix,
     )
-    module.load_from_module_dict(module_dict)
+    module.load_from_module_dict(expert_lib)
     module.to("cuda")
     ##############################
 
@@ -75,24 +77,38 @@ def train_router(
 
     loggers.append(SimpleLogger(args.output_dir))
 
+    if silent:
+        logger.disabled = True
     # get metric monitors for models
     callbacks = []
+    if "rouge" in args.eval_metric:  # early stop on Rouge
+        from projects.wiki_experts.src.callbacks import RougeLCallback
 
-    monitor = f"{logging_prefix}val/loss"
-    mode = "min"
-    model_name = args.model.replace("/", "_")
+        checkpoint_callback = RougeLCallback(
+            datamodule=dm_eval,
+            output_dir=args.output_dir,
+            eval_every_opt_step=val_check_interval,
+            name=f"{logging_prefix}rougeL_val_es",
+            checkpoint_oracle=True,
+        )
+        val_check_interval = None
+    else:
+        monitor = f"{logging_prefix}val/loss"
+        mode = "min"
+        model_name = args.model.replace("/", "_")
 
-    checkpoint_callback = ModelCheckpoint(
-        dirpath=args.output_dir,
-        monitor=monitor,
-        filename=f"{model_name}" + "-{" + monitor + ":.004f}",
-        save_top_k=1,
-        save_last=True,
-        save_weights_only=True,  # make checkpoints smaller
-        mode=mode,
-    )
+        checkpoint_callback = ModelCheckpoint(
+            dirpath=args.output_dir,
+            monitor=monitor,
+            filename=f"{model_name}" + "-{" + monitor + ":.004f}",
+            save_top_k=1,
+            save_last=True,
+            save_weights_only=True,  # make checkpoints smaller
+            mode=mode,
+        )
+        val_check_interval = val_check_interval * args.gradient_accumulation_steps
+
     callbacks.append(checkpoint_callback)
-    val_check_interval = val_check_interval or args.gradient_accumulation_steps
 
     trainer = Trainer(
         devices=-1,
