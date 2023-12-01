@@ -377,7 +377,7 @@ class ExpertLibrary:
         data_type: str = "embeddings",
         expert_name: str = None,
     ) -> List[Any]:
-        path = snapshot_download(self.repo_id, allow_patterns=f"*.{data_type}")
+        path = self.snapshot_download(self.repo_id, allow_patterns=f"*.{data_type}")
 
         if expert_name:
             filename = os.path.join(path, f"{expert_name}.{data_type}")
