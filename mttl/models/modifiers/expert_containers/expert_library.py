@@ -738,7 +738,12 @@ class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
             scores = local_lib.get_auxiliary_data(data_type="scores")
             for expert_name, expert_scores in scores.items():
                 for score in expert_scores.values():
-                    new_lib.add_score(expert_name, Score(**score))
+                    try:
+                        new_lib.add_score(expert_name, Score(**score))
+                    except ValueError as e:
+                        logger.error(e)
+                        continue
+
             # TODO: upload the embeddings
 
         return new_lib
