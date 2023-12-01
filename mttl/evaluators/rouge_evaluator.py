@@ -82,7 +82,8 @@ class RougeEvaluator(Evaluator):
             if self.datamodule.config.model_family == "gpt":
                 max_length += batch["input_ids"].shape[-1]
 
-                batch = transfer_batch_to_device(batch, self.device)
+            batch = transfer_batch_to_device(batch, self.device)
+            with torch.no_grad():
                 if isinstance(model, EfficientCheckpointModule):
                     predictions = model.generate(
                         batch,
@@ -107,22 +108,19 @@ class RougeEvaluator(Evaluator):
             if self.datamodule.config.model_family == "gpt":
                 predictions = predictions[:, batch["input_ids"].shape[-1] :]
 
-                predictions = decode(predictions, self.tokenizer)
-                references = [[l] for l in labels_texts]
+            predictions = decode(predictions, self.tokenizer)
+            references = [[l] for l in labels_texts]
 
-                eval_metrics = compute_metrics(
-                    predictions, references, reduction="none"
-                )
-                all_rougeL.extend(eval_metrics["rougeL"])
-                if verbose:
-                    logger.info("Sources:\n%s", sources_texts[0])
-                    logger.info("Label:\n%s", labels_texts[0])
-                    logger.info("Prediction:\n%s", predictions[0])
+            eval_metrics = compute_metrics(predictions, references, reduction="none")
+            all_rougeL.extend(eval_metrics["rougeL"])
+            if verbose:
+                logger.info("Sources:\n%s", sources_texts[0])
+                logger.info("Label:\n%s", labels_texts[0])
+                logger.info("Prediction:\n%s", predictions[0])
 
-                pbar.set_description(f"rougeL: {np.mean(all_rougeL):.4f}")
+            pbar.set_description(f"rougeL: {np.mean(all_rougeL):.4f}")
 
-                if num_batches is not None and len(all_rougeL) >= num_batches:
-                    break
+            if num_batches is not None and len(all_rougeL) >= num_batches:
+                break
 
-        del pbar, dataloader
         return np.mean(all_rougeL)
