@@ -15,13 +15,14 @@ from typing import Union, Callable, List, Dict
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators.base import compute_task_aggregation
 
-from projects.wiki_experts.src.config import ExpertConfig
 from huggingface_hub import login
 from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.utils import logger, setup_logging
 from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
 from mttl.evaluators import MMLUEvaluator
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
+from projects.wiki_experts.src.evolution.config import EvolExpertConfig as ExpertConfig
 
 
 def mmlu_get_loss(
@@ -95,11 +96,11 @@ class NGRoutingOptimizer:
     def __init__(
         self,
         model: MultiExpertModel,
-        modules_2_dest: Dict,
+        expert_lib: ExpertLibrary,
         get_loss: Callable,  # function that takes model as input and returns loss
         budget=5,
         task_name="new_task",
-        init_one=None,
+        base_module_name=None,
         regularizer_factor=0.0,
         action="route",
     ) -> None:
@@ -107,12 +108,13 @@ class NGRoutingOptimizer:
         self.regularizer_factor = regularizer_factor
         self.task_name = task_name
         self.model: MultiExpertModel = model
-        self.module_graph: ModuleGraph = self.construct_graph(modules_2_dest)
+        self.module_graph: ModuleGraph = self.construct_graph(expert_lib)
         self.varaibles = self.module_graph.get_variables()
         self.K = len(self.varaibles)
-
+        # vars ordered in the same order as data in expert_lib
         init = [0] * self.K
-        if init_one is not None:
+        if base_module_name is not None:
+            init_one = list(expert_lib.keys()).index(base_module_name)
             init[init_one] = 1
 
         self.parametrization = ng.p.Array(
@@ -125,13 +127,8 @@ class NGRoutingOptimizer:
         )
         self.get_loss = get_loss
 
-    def construct_graph(self, modules_to_dest: Dict):
-        s = f"{self.task_name} -> linear("
-        for i, (name, destination) in enumerate(modules_to_dest.items()):
-            s += f"{destination}:${i},"
-        s = s[:-1] + ")"
-        graph = ModuleGraph.from_string(s)
-        return graph
+    def construct_graph(self, modules_to_dest: Union[Dict, ExpertLibrary]):
+        return ModuleGraph.from_expert_dict(modules_to_dest, module_name="new_task")
 
     def get_graph_vars(self, weights: list):
         s = {}
@@ -157,7 +154,7 @@ class NGRoutingOptimizer:
             # import numpy as np
             # np.sum([p.detach().cpu().sum().item() for p in model.parameters()])
             if action == "route":
-                model.convert_container_to_expert("new_task")
+                model.replace_container_with_expert("new_task")
 
             # minimize the metric
             loss = get_loss(
@@ -183,47 +180,3 @@ class NGRoutingOptimizer:
         best_vars = self.get_graph_vars(recommendation.value)
         best_graph = self.module_graph.dumps(**best_vars)
         return recommendation.value, best_graph
-
-
-if __name__ == "__main__":
-    from mttl.datamodule.mmlu_data_module import MMLUDataModule
-
-    setup_logging()
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-    config = ExpertConfig()
-    config.model = "meta-llama/Llama-2-13b-hf"
-    config.load_in_8bit = False
-    config.model_family = "gpt"
-    config.data_dir = os.environ["MMLU_DATA_DIR"]
-    config.predict_batch_size = 2
-    config.max_input_length = 4096
-    config.max_output_length = 5
-    # config.model_modifier = "lora"
-    config.modify_modules = ".*mlp.*"
-    config.modify_layers = "gate_proj|down_proj|up_proj"
-    config.predict_batch_size = 1
-    config.finetune_task_name = "abstract_algebra"
-
-    modules_2_dest = {
-        "security_studies": "sordonia/expert_llama2_13b_security_studies",
-        "platy": "sordonia/llama2-13b-platypus",
-    }
-    use_vllm = False
-    dm = MMLUDataModule(config, for_generation=use_vllm)
-    module = MultiExpertModel(
-        **vars(config), tokenizer=dm.tokenizer, device_map="cpu" if use_vllm else "auto"
-    )
-
-    _mmlu_get_loss = partial(mmlu_get_loss, use_vllm=use_vllm)
-
-    optimizer = NGRoutingOptimizer(
-        model=module,
-        modules_2_dest=modules_2_dest,
-        dataloader=dm.test_dataloader(),
-        get_loss=_mmlu_get_loss,
-        budget=2,
-        task_name=config.finetune_task_name,
-    )
-    recommendation = optimizer.optimize()
-    print(recommendation)

@@ -12,9 +12,6 @@ import pytorch_lightning as pl
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
 from mttl.utils import setup_logging, logger
-from mttl.datamodule.base import AutoDataModule
-from projects.wiki_experts.src.evolution.config import ExpertsMergeConfig
-
 from projects.wiki_experts.src.evolution.evaluators import (
     TestLossEvaluator,
     ExtendedMMLUEvaluator,
@@ -61,50 +58,6 @@ def save_new_module(output_dir, module, task_name, postfix=""):
     ckpt_path = module_copy.save_pretrained(dest)
     del module_copy
     return ckpt_path
-
-
-def prepare_evaluator(
-    args: ExpertsMergeConfig, dataset, tasks, split=None, subsample=-1
-):
-    if args.eval_metric == "loss":
-        EVAL_CLASS = TestLossEvaluator
-        for_generation = False
-    elif args.eval_metric == "rougeL":
-        EVAL_CLASS = ExtendedRougeEvaluator
-        for_generation = True
-    elif args.eval_metric == "acc":
-        assert "mmlu" in dataset
-        EVAL_CLASS = ExtendedMMLUEvaluator
-        for_generation = True
-    else:
-        raise ValueError(f"Unknown eval metric {args.eval_metric}")
-
-    dm = AutoDataModule.create(
-        name=dataset,
-        for_generation=for_generation,
-        model=args.model,
-        model_family=args.model_family,
-        validation_portion=0.0,
-        finetune_task_name=tasks,
-        train_batch_size=args.train_batch_size,
-        predict_batch_size=args.predict_batch_size,
-    )
-    if split is not None:
-        evaluator = EVAL_CLASS(
-            datamodule=dm,
-            subsample=subsample,
-            name=tasks,
-            split=split,
-            use_vllm=args.use_vllm,
-        )
-        return evaluator
-    return partial(
-        EVAL_CLASS,
-        datamodule=dm,
-        subsample=subsample,
-        name=tasks,
-        use_vllm=args.use_vllm,
-    )
 
 
 def init_wandb_logger(args):

@@ -1,4 +1,5 @@
 import torch
+import copy
 import numpy as np
 from typing import Dict
 from tempfile import TemporaryDirectory
@@ -10,7 +11,7 @@ from mttl.models.modifiers.expert_containers import add_expert_to_transformer
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.ranker.adapter_ranker import ExpertRanker
-from mttl.models.modifiers.expert_containers.module_graph import Expert
+from mttl.models.modifiers.expert_containers.module_graph import Expert, ExpertInfo
 from mttl.models.modifiers.expert_containers.module_graph import (
     ModuleGraph,
     load_expert,
@@ -71,7 +72,6 @@ class MultiExpertModel(ExpertTrainer):
         # we dont use any  model modifier for MultiExpertModel model by default.
         # If you want to use a model modifier, use one of the 'self.modify_weith...' methods.
         kwargs["model_modifier"] = None
-
         super().__init__(**kwargs)
 
         self.experts = []
@@ -98,7 +98,7 @@ class MultiExpertModel(ExpertTrainer):
             )
             self.experts.append(module_name)
 
-    def convert_container_to_expert(self, expert_name, get_expert_instance=True):
+    def replace_container_with_expert(self, expert_name, get_expert_instance=True):
         """
         Replaces the expert container with the expert with the given name.
         """
@@ -143,10 +143,10 @@ class MultiExpertModel(ExpertTrainer):
         if action != "merge":
             self.experts.append(expert_name)
 
-    def load_from_graph_string(self, s, action="route"):
+    def load_from_graph_string(self, s, action="route", **kwargs):
         from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
 
-        graph = ModuleGraph.from_string(s)
+        graph = ModuleGraph.from_string(s, **kwargs)
         self.load_from_graph(graph, action=action)
 
     def load_expert(
@@ -367,16 +367,27 @@ class RoutedMultiExpertModel(MultiExpertModel):
         if action != "merge":
             self.experts.append(expert_name)
 
-    def to_expert(self, weights: dict = None) -> Expert:
+    def to_expert(self, weights: dict = None, with_global_names=True) -> Expert:
         """
         Merges current experts together according to weights if given, otherwise uses router's weights
         """
+        expert_weights = {}
         for _, module in self.model.named_modules():
             for c_name, child in dict(module.named_children()).items():
                 if isinstance(child, ExpertContainer) and len(child.experts) > 0:
                     # creates a single Lora
-                    child.merge_experts_together(weights)
-        return self.convert_container_to_expert("merged_expert")
+                    exp_config, _weights = child.get_merged_weights(
+                        weights, with_global_names=with_global_names
+                    )
+                    expert_weights.update(_weights)
+        config_merged = copy.deepcopy(self.hparams)
+        config_merged.model_modifier = exp_config.model_modifier
+        expert_info = ExpertInfo(
+            self.hparams.finetune_task_name,
+            expert_task_name=self.hparams.finetune_task_name,
+            expert_config=config_merged,
+        )
+        return Expert(expert_info=expert_info, expert_weights=expert_weights)
 
     def on_save_checkpoint(self, ckpt):
         expert: Expert = self.to_expert()

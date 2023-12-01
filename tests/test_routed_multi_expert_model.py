@@ -9,6 +9,7 @@ from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.src.expert_model import (
     RoutedMultiExpertModel,
 )
+from mttl.models.modifiers.expert_containers.module_graph import Expert
 from mttl.models.modifiers.expert_containers import LoRAExpertContainer
 from mttl.models.modifiers.lora import LoRA
 from conftest import make_tiny_llama
@@ -141,7 +142,9 @@ class TestRoutedMultiExpertModel:
             "mod1" in routing_weights["model_layers_0_mlp_up_proj.selector"]
             and "mod2" in routing_weights["model_layers_0_mlp_up_proj.selector"]
         )
-        module.to_expert()
+        expert = module.to_expert()
+        assert isinstance(expert, Expert)
+        module.replace_container_with_expert("mod1")
         assert isinstance(module.model.model.layers[0].mlp.down_proj, LoRA)
 
     def test_add_expert_with_action_merge(self, tmp_exp_config):

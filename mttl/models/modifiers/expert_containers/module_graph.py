@@ -1,7 +1,7 @@
 import json
 import re
 import torch
-from typing import Dict
+from typing import Dict, Union
 import re
 from string import Template
 
@@ -19,10 +19,8 @@ class ExpertInfo:
 
     expert_name: str
     expert_task_name: str
-    expert_config: Dict
+    expert_config: Dict = None
     parent_node: str = None
-    expert_embeddings: Dict = None
-    expert_scores: Dict = None
 
     @property
     def model(self):
@@ -75,6 +73,10 @@ class Expert:
             expert_optimizer_state=ckpt["expert_optimizer_state"],
         )
 
+    @property
+    def name(self):
+        return self.expert_info.expert_name
+
 
 class Node:
     def __init__(self, name):
@@ -111,7 +113,7 @@ class Node:
         if not self.children:
             # consider this to be a leaf node
             # the name of leafs is their destination (path)
-            instantiation = [load_expert(self.name)]
+            instantiation = [load_expert(self.name, **kwargs)]
         else:
             # currently non-leaf nodes have at most one child
             instantiation = [self.children[0].instantiate(*args, **kwargs)[0]]
@@ -224,6 +226,7 @@ class LinearNode(OperatorNode):
         # now, merge with a given importance weight
         assert len(instantiation) == len(self.weights) + len(self.variables)
 
+        expert_parent = {}
         merged_weights = {}
         for i, (name, expert) in enumerate(instantiation.items()):
             if name in self.weights:
@@ -234,6 +237,7 @@ class LinearNode(OperatorNode):
                 assert (
                     weight is not None
                 ), f"Must pass the weight for node {param_name} to be able to instantiate"
+            expert_parent[name] = weight
 
             for k, v in expert.expert_weights.items():
                 value = v * torch.tensor(weight, dtype=v.dtype)
@@ -262,8 +266,20 @@ class ModuleGraph:
     # Operator-to-class mapping
     OPERATOR_CLASSES = {None: Node, "linear": LinearNode}
 
-    def __init__(self):
+    def __init__(self, expert_library: Dict[str, Expert] = None):
         self.nodes = {}
+        self.expert_library = expert_library  # expert_library is a dict of experts, can also be ExpertLibrary object
+
+    @classmethod
+    def from_expert_dict(
+        cls, expert_dict: Dict[str, Expert], module_name: str = "default"
+    ):
+        s = f"{module_name} -> linear("
+        for i, (name, _) in enumerate(expert_dict.items()):
+            s += f"{name}:${i},"
+        s = s[:-1] + ")"
+        graph = cls.from_string(s, expert_library=expert_dict)
+        return graph
 
     @classmethod
     def from_module_dict(cls, module_dict: dict):
@@ -293,8 +309,8 @@ class ModuleGraph:
         return "; ".join(graph_str)
 
     @classmethod
-    def from_string(self, s):
-        graph = ModuleGraph()
+    def from_string(self, s, **kwargs):
+        graph = ModuleGraph(**kwargs)
         parts = [p.strip() for p in s.split(";")]
 
         for part in parts:
@@ -350,7 +366,9 @@ class ModuleGraph:
     def create_modules(self, *args, **kwargs):
         root_modules = {}
         for root in self.roots:
-            root_modules[root.name] = root.instantiate(*args, **kwargs)[0]
+            root_modules[root.name] = root.instantiate(
+                *args, **kwargs, expert_dict=self.expert_library
+            )[0]
         return root_modules
 
     def get_variables(self):
@@ -362,10 +380,15 @@ class ModuleGraph:
 
 def load_expert(
     expert_path: str,
+    expert_dict: dict = None,
+    **kwargs,
 ):
     """Transforms a potentially lightning checkpoint into an Expert object."""
     # load the expert weights
     import os
+
+    if expert_dict is not None and expert_path in expert_dict:
+        return expert_dict[expert_path]
 
     logger.info(f"Attempting to load expert from {expert_path}")
     if os.path.isfile(expert_path) or os.path.isdir(expert_path):

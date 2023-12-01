@@ -1,6 +1,8 @@
 import sys
 import os
+import copy
 import torch
+from functools import partial
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
@@ -10,6 +12,52 @@ from mttl.callbacks import LossCallback
 from abc import ABC, abstractmethod, abstractproperty
 from mttl.datamodule.base import DefaultDataModule
 from mttl.evaluators import RougeEvaluator
+from mttl.datamodule.base import AutoDataModule
+from projects.wiki_experts.src.evolution.config import EvolExpertConfig
+from projects.wiki_experts.train_experts_main import get_datamodule
+
+
+def prepare_evaluator(
+    args: EvolExpertConfig,
+    dataset,
+    tasks,
+    split=None,
+    subsample=-1,
+    for_generation=None,
+):
+    if args.eval_metric == "loss":
+        EVAL_CLASS = TestLossEvaluator
+        for_generation = for_generation if for_generation is not None else False
+    elif args.eval_metric == "rougeL":
+        EVAL_CLASS = ExtendedRougeEvaluator
+        for_generation = for_generation if for_generation is not None else True
+    elif args.eval_metric == "acc":
+        assert "mmlu" in dataset
+        EVAL_CLASS = ExtendedMMLUEvaluator
+        for_generation = for_generation if for_generation is not None else True
+    else:
+        raise ValueError(f"Unknown eval metric {args.eval_metric}")
+
+    args_copy = copy.deepcopy(args)
+    args_copy.dataset = dataset
+    args_copy.finetune_task_name = tasks
+    args_copy.validation_portion = 0.0
+    dm = get_datamodule(args_copy, for_generation=for_generation)
+    if split is not None:
+        evaluator = EVAL_CLASS(
+            datamodule=dm,
+            subsample=subsample,
+            name=tasks,
+            split=split,
+            use_vllm=args.use_vllm,
+        )
+        return evaluator
+    return partial(
+        EVAL_CLASS,
+        datamodule=dm,
+        name=tasks,
+        use_vllm=args.use_vllm,
+    )
 
 
 class Evaluator(ABC):
@@ -33,15 +81,12 @@ class ExtendedRougeEvaluator(RougeEvaluator, Evaluator):
         super().__init__(datamodule, use_vllm=use_vllm)
         self.name = name
         self.split = split
-        self.n_samples = len(self.dm.test_dataloader(subsample=subsample).dataset)
-        self.datamodule = self.dm
+        self.subsample = subsample
 
     def evaluate(self, model):
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model.to(device)
-        rougeL = super().evaluate(
-            model, split=self.split, num_batches=self.n_samples, verbose=False
-        )
+        rougeL = super().evaluate(model, self.split, self.subsample, verbose=False)
         return {"all": {"mean": rougeL}, f"{self.name}": {"mean": rougeL}}
 
     def get_loss(self, model, **kwargs):
@@ -64,9 +109,10 @@ class TestLossEvaluator(LossCallback, Evaluator):
         subsample=-1,
         **kwargs,
     ):
+        self.split = split
         if split == "test":
             dataloader = datamodule.test_dataloader(subsample=subsample)
-        elif split == "val":
+        elif split in ["val", "valid", "validation"]:
             dataloader = datamodule.val_dataloader(subsample=subsample)
         elif split == "train":
             dataloader = datamodule.train_dataloader(subsample=subsample)
@@ -111,6 +157,7 @@ class ExtendedMMLUEvaluator(MMLUEvaluator, Evaluator):
         subsample=-1,
         use_vllm=False,
     ):
+        self.split = split
         assert split in ["test"]
         self.use_vllm = use_vllm
         super().__init__(datamodule.config, use_vllm=use_vllm)
