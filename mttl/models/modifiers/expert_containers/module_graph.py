@@ -266,7 +266,7 @@ class ModuleGraph:
     # Operator-to-class mapping
     OPERATOR_CLASSES = {None: Node, "linear": LinearNode}
 
-    def __init__(self, expert_library: Dict[str, Expert] = None):
+    def __init__(self, expert_library: Union[dict, "ExpertLibrary"] = None):
         self.nodes = {}
         self.expert_library = expert_library  # expert_library is a dict of experts, can also be ExpertLibrary object
 
