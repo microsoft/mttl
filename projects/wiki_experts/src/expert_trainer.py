@@ -20,14 +20,14 @@ class ExpertTrainer(EfficientCheckpointModule):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        # log hyperparameters
-        self.save_hyperparameters(ignore=["tokenizer", "model_object"])
+        self.tokenizer = kwargs.pop("tokenizer", None)
+        model_object = kwargs.pop("model_object", None)
 
-        self.tokenizer = kwargs["tokenizer"]
+        # log hyperparameters
+        self.save_hyperparameters(kwargs)
+
         self.model: AutoModelForCausalLM = None
         self.accumulate_metrics_batch = defaultdict(list)
-
-        model_object = kwargs.get("model_object", None)
 
         if model_object is None:
             from mttl.models.utils import model_loader_helper

@@ -71,6 +71,7 @@ class MultiExpertModel(ExpertTrainer):
         # we dont use any  model modifier for MultiExpertModel model by default.
         # If you want to use a model modifier, use one of the 'self.modify_weith...' methods.
         kwargs["model_modifier"] = None
+
         super().__init__(**kwargs)
 
         self.experts = []
@@ -219,6 +220,7 @@ class MultiExpertModel(ExpertTrainer):
 class MultiExpertModelRanker(MultiExpertModel):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+
         self.classifier = ExpertRanker(
             num_labels=kwargs["num_labels"],
             classifer_repo_id=kwargs["classifer_repo_id"],
@@ -289,6 +291,7 @@ class RoutedMultiExpertModel(MultiExpertModel):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+
         self.selectors: Dict[str:Selector] = torch.nn.ModuleDict()
 
     def load_expert(
