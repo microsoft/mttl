@@ -4,8 +4,10 @@
 # https://aka.ms/yaml
  
 trigger:
-- main
-- wiki-experts
+  branches:
+    include:
+    - main
+    - wiki-experts
 
 pool:
   vmImage: ubuntu-latest
