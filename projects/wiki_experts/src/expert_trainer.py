@@ -24,7 +24,7 @@ class ExpertTrainer(EfficientCheckpointModule):
         model_object = kwargs.pop("model_object", None)
 
         # log hyperparameters
-        self.save_hyperparameters(ignore=["tokenizer", "model_object"])
+        self.save_hyperparameters(kwargs, ignore=["tokenizer", "model_object"])
 
         self.model: AutoModelForCausalLM = None
         self.accumulate_metrics_batch = defaultdict(list)
