@@ -387,8 +387,10 @@ def active_task_iteration(
     task: str,
     expert_lib: HFExpertLibrary,
     module: MultiExpertModel,
+    ai=None,
 ):
     global a_i, log_prefix, log_row, default_score
+    a_i = ai if ai is not None else a_i
     log_row = {"act_i": a_i}
     log_row["task"] = task
     log_prefix = f"act_it:{a_i}/t:{task}"

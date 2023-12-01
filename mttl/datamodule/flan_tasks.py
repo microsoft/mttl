@@ -1,6 +1,7 @@
 # flan tasks without NIv2 template
 FLAN_SUB1 = [
-    "ai2_arc_ARC_Challenge_1_0_0",
+    # "ai2_arc_ARC_Challenge_1_0_0",
+    "dbpedia_14_given_a_choice_of_categories_"
 ]
 
 FLAN_SUB3 = [

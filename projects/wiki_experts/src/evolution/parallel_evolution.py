@@ -3,6 +3,7 @@ import sys
 import copy
 import torch
 import wandb
+import re
 import numpy as np
 import seaborn as sns
 from typing import Dict
@@ -46,15 +47,30 @@ from projects.wiki_experts.src.evolution.transfer_matrix import (
     eval_expert_on_task,
 )
 from projects.wiki_experts.src.evolution.sequential_evolution import *
-from huggingface_hub import create_repo, login
+from huggingface_hub import create_repo, login, HfApi
 
 # this script evolves a single task for 1 active iteration and commits it to the library
 
+ai = 0
 DEBUG = True
 if "AMLT_OUTPUT_DIR" in os.environ:
     DEBUG = False
 if DEBUG:
     print("!!!!!!!!!!!!!!!!!!!!!! DEBUG MODE")
+
+
+def find_ai(s):
+    match = re.search(r"_ai(\d+)$", s)
+    return int(match.group(1)) if match else 0
+
+
+def increase_ai(s):
+    ai = find_ai(s)
+    if ai == 0:
+        return f"{s}_ai1"
+    else:
+        name = s.split(f"_ai{ai}")[0]
+        return f"{name}_v{ai+1}"
 
 
 class ParallelEvolutionConfig(EvolExpertConfig):
@@ -67,9 +83,13 @@ def setup(args: ParallelEvolutionConfig):
     seed_everything(args.seed, workers=True)
     setup_logging(args.output_dir)
     args.n_active_iterations = 1
-    global wandb_logger
+    global wandb_logger, ai
     token = os.environ.get("HF_TOKEN", args.hf_token_hub)
     login(token=token)
+    user_name = HfApi().whoami(token=token)["name"]
+    ai = find_ai(args.to_repo_id)
+    args.to_repo_id = increase_ai(args.to_repo_id)
+    args.to_repo_id = f"{user_name}/{args.to_repo_id}"
     create_repo(args.to_repo_id, token=token, exist_ok=True)
     if not DEBUG:
         wandb_logger = init_wandb_logger(args)
@@ -116,15 +136,17 @@ def main(args: ParallelEvolutionConfig):
 
     for task in tasks:
         print("Evolving on task", task)
-        log_row: Dict = active_task_iteration(args, task, expert_lib, module=module)
+        log_row: Dict = active_task_iteration(
+            args, task, expert_lib, module=module, ai=ai
+        )
         tablelogger.log(log_row)
         tablelogger.log_table_wandb()
 
     # save the expert lib, send updates to remote
     remote_lib = HFExpertLibrary.upload_local(
-        expert_lib, args.to_repo_id, force=True, upload_aux_data=True
+        expert_lib, args.to_repo_id, force=True, upload_aux_data=True, only_tasks=tasks
     )
-    logger.info("Done, saving to repo ", args.to_repo_id)
+    logger.info(f"Done, saving to repo {args.to_repo_id}")
 
 
 if __name__ == "__main__":
