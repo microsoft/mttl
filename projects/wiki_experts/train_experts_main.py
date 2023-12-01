@@ -179,7 +179,7 @@ def run_multitask(args):
         elif val_check_interval > args.total_steps and args.total_steps != -1:
             val_check_interval = args.total_steps
 
-    callbacks.append(RougeCallback(gen_dm))
+    callbacks.append(RougeCallback(gen_dm, every_n_epochs=3))
 
     trainer = Trainer(
         devices=-1,
