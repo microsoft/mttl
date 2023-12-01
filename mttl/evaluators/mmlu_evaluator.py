@@ -8,7 +8,11 @@ import pytorch_lightning as pl
 
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.models.utils import transfer_batch_to_device
-from mttl.evaluators.base import compute_task_aggregation
+from mttl.evaluators.base import (
+    compute_task_aggregation,
+    Evaluator,
+    switch_to_eval_mode,
+)
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
 
 
@@ -25,21 +29,18 @@ def swap_model(model, state=None):
     return state
 
 
-class MMLUEvaluator(object):
+class MMLUEvaluator(Evaluator):
     def __init__(
-        self, config, max_input_length=None, split="test", device="cuda", use_vllm=False
+        self, config=None, max_input_length=None, device="cuda", use_vllm=False
     ):
-        from mttl.datamodule.mmlu_data_module import MMLUDataModule
+        super().__init__(config=config, device=device, use_vllm=use_vllm)
 
-        self.device = device
-        self.split = split
-        self.config = config
+        from mttl.datamodule.mmlu_data_module import MMLUDataModule
 
         if max_input_length is not None:
             self.config.max_input_length = max_input_length
 
         self.datamodule = MMLUDataModule(self.config, for_generation=True)
-        self.use_vllm = use_vllm
 
     def eval_vllm(self, model, generation_config, subsample, shuffle):
         model_hash = hashlib.sha256()
@@ -63,7 +64,7 @@ class MMLUEvaluator(object):
             dataloader = self.datamodule.val_dataloader()
 
         all_predictions, all_references, all_task_names = vllm_model.eval(
-            dataloader, generation_config, self.datamodule.tokenizer
+            dataloader, generation_config, self.tokenizer
         )
 
         free_memory()
@@ -77,13 +78,10 @@ class MMLUEvaluator(object):
         )
         return compute_task_aggregation(all_task_names, eval_metrics["exact_match"])
 
-    def evaluate(self, model, subsample=-1, shuffle=False, dataloader=None):
-        was_train = model.training
-        if was_train:
-            model.eval()
-
-        tokenizer = self.datamodule.tokenizer
-
+    @switch_to_eval_mode
+    def evaluate(
+        self, model, split="test", subsample=-1, shuffle=False, dataloader=None
+    ):
         if self.use_vllm:
             return self.eval_vllm(
                 model,
@@ -101,11 +99,7 @@ class MMLUEvaluator(object):
         all_task_names = []
         all_EM = []
 
-        if dataloader is None:
-            if self.split == "test":
-                dataloader = self.datamodule.test_dataloader(subsample, shuffle)
-            else:
-                dataloader = self.datamodule.val_dataloader()
+        dataloader = self.get_dataloader(split, subsample, shuffle)
 
         pbar = tqdm.tqdm(
             enumerate(dataloader),
@@ -120,7 +114,7 @@ class MMLUEvaluator(object):
 
             if self.config.model_family == "gpt":
                 max_length += batch["input_ids"].shape[-1]
-                extra_kwargs["pad_token_id"] = tokenizer.pad_token_id
+                extra_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
 
             batch = transfer_batch_to_device(batch, self.device)
             with torch.no_grad():
@@ -150,19 +144,27 @@ class MMLUEvaluator(object):
                     [
                         logits[
                             :,
-                            tokenizer(" A", add_special_tokens=False).input_ids[-1],
+                            self.tokenizer(" A", add_special_tokens=False).input_ids[
+                                -1
+                            ],
                         ],
                         logits[
                             :,
-                            tokenizer(" B", add_special_tokens=False).input_ids[-1],
+                            self.tokenizer(" B", add_special_tokens=False).input_ids[
+                                -1
+                            ],
                         ],
                         logits[
                             :,
-                            tokenizer(" C", add_special_tokens=False).input_ids[-1],
+                            self.tokenizer(" C", add_special_tokens=False).input_ids[
+                                -1
+                            ],
                         ],
                         logits[
                             :,
-                            tokenizer(" D", add_special_tokens=False).input_ids[-1],
+                            self.tokenizer(" D", add_special_tokens=False).input_ids[
+                                -1
+                            ],
                         ],
                     ],
                     dim=-1,
@@ -188,9 +190,6 @@ class MMLUEvaluator(object):
             pbar.set_description(
                 f"Task: {task_names[0] if task_names else None}, EM: {np.mean(all_EM):.4f}"
             )
-
-        if was_train:
-            model.train()
 
         eval_metrics = compute_metrics(
             all_predictions, [[r] for r in all_references], reduction="none"

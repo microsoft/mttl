@@ -10,7 +10,7 @@ from pathlib import Path
 
 from mttl.dataloader.ni_metrics import compute_metrics, compute_grouped_metrics
 from mttl.models.utils import transfer_batch_to_device
-from mttl.evaluators.base import mean_stderr
+from mttl.evaluators.base import Evaluator, mean_stderr, switch_to_eval_mode
 
 
 def decode(preds, tokenizer):
@@ -65,7 +65,7 @@ def compute_aggregation_and_maybe_save(
     return all_results
 
 
-class NIEvaluator(object):
+class NIEvaluator(Evaluator):
     def __init__(
         self,
         config,
@@ -74,34 +74,31 @@ class NIEvaluator(object):
         pred_output_file_path=None,
         device="cuda",
     ):
+        super().__init__(config=config, device=device)
+
         from mttl.datamodule.ni_data_module import NiDataModule
 
-        self.config = deepcopy(config)
-        self.device = device
         self.pred_output_file_path = (
             pred_output_file_path  # if not None, will trute generations into it
         )
 
-        # unrestricted input length for SNI pass -1
-        if max_input_length is not None:
-            self.config.max_input_length = max_input_length
+        if self.datamodule is None:
+            # unrestricted input length for SNI pass -1
+            if max_input_length is not None:
+                self.config.max_input_length = max_input_length
 
-        self.config.max_output_length = 128
-        self.config.num_pos_examples = num_pos_examples
-        self.config.use_task_descriptions = True
+            self.config.max_output_length = 128
+            self.config.num_pos_examples = num_pos_examples
+            self.config.use_task_descriptions = True
 
-        self.datamodule = NiDataModule(
-            self.config,
-            for_generation=True,
-        )
-        self.datamodule.setup("test")
+            self.datamodule = NiDataModule(
+                self.config,
+                for_generation=True,
+            )
 
-    def evaluate(self, model, subsample=-1):
-        was_train = model.training
-        if was_train:
-            model.eval()
-
-        tokenizer = self.datamodule.tokenizer
+    @switch_to_eval_mode
+    def evaluate(self, model, split="test", subsample=-1, shuffle=False):
+        dataloader = self.get_dataloader(split, subsample, shuffle)
 
         # DDP
         if hasattr(model, "module"):
@@ -111,7 +108,6 @@ class NIEvaluator(object):
         all_task_names = []
         all_rougeL = []
 
-        dataloader = self.datamodule.test_dataloader(subsample)
         if not self.pred_output_file_path is None:
             path = re.sub(r"/[^/]*$", "", self.pred_output_file_path)
             Path(path).mkdir(parents=True, exist_ok=True)
@@ -148,7 +144,7 @@ class NIEvaluator(object):
             if self.config.model_family == "gpt":
                 max_length += batch["input_ids"].shape[-1]
 
-                extra_kwargs["pad_token_id"] = tokenizer.pad_token_id
+                extra_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
 
             batch = transfer_batch_to_device(batch, self.device)
             with torch.no_grad():
@@ -176,7 +172,7 @@ class NIEvaluator(object):
             if self.config.model_family == "gpt":
                 predictions = predictions[:, batch["input_ids"].shape[-1] :]
 
-            predictions = decode(predictions, tokenizer)
+            predictions = decode(predictions, self.tokenizer)
             references = labels_texts
 
             all_predictions += predictions
@@ -211,9 +207,6 @@ class NIEvaluator(object):
         instance_ids = [id for id, instance in eval_instances.items()]
         all_references = [eval_instances[id]["references"] for id in instance_ids]
         eval_metrics = compute_metrics(all_predictions, all_references)
-
-        if was_train:
-            model.train()
 
         all_results = compute_aggregation_and_maybe_save(
             eval_metrics,
