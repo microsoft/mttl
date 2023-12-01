@@ -39,8 +39,18 @@ from mttl.models.modifiers.expert_containers.module_graph import (
 @dataclass
 class Score:
     name: str
-    value: np.ndarray
     task: str
+    split: str
+    value: np.ndarray = None
+    config: Dict[str, Any] = None
+
+    @property
+    def key(self):
+        return (self.name, self.task, self.split)
+
+    @property
+    def hash(self) -> str:
+        return str(self.key).encode()
 
     def dumps(self):
         return self.__dict__
@@ -434,18 +444,16 @@ class ExpertLibrary:
         metadata = self.data.pop(expert_name)
         self._update_readme()
 
-    def get_score(self, expert_name: str, task: str, score_name: str):
+    def get_score(self, expert_name: str, hash: str):
         try:
             scores = self.get_auxiliary_data(
                 data_type="scores", expert_name=expert_name
             )
         except ValueError:
             return None
-        if task not in scores:
+        if hash not in scores:
             return None
-        if score_name not in scores[task]:
-            return None
-        return Score(**scores[task][score_name])
+        return Score(**scores[hash])
 
     def add_score(self, expert_name: str, score: Score):
         if expert_name not in self.data:
@@ -462,11 +470,11 @@ class ExpertLibrary:
             scores = {}
 
         task = score.task
-        if task not in scores:
-            scores[task] = {}
-        if score.name in scores[task]:
+        if score.hash in scores:
             raise ValueError(f"Score {score.name} already exists for task {task}.")
-        scores[task][score.name] = score.dumps()
+        if score.value is None:
+            raise ValueError(f"Score {score.name} has no value and cannot be added.")
+        scores[score.hash] = score.dumps()
 
         buffer = io.BytesIO()
         torch.save(scores, buffer)
@@ -719,7 +727,7 @@ class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
         return new_lib
 
 
-def get_best_expert_for_task(library: HFExpertLibrary, task, score_name) -> Expert:
+def get_best_expert_for_task(library: HFExpertLibrary, task, hash) -> Expert:
     """
     Return the expert with the highest score on task. If none found, returns the last expert found.
     """
@@ -731,7 +739,7 @@ def get_best_expert_for_task(library: HFExpertLibrary, task, score_name) -> Expe
     for metadata in library.data.values():
         if metadata.expert_task_name != task:
             continue
-        score: Score = library.get_score(metadata.expert_name, task, score_name)
+        score: Score = library.get_score(metadata.expert_name, hash=hash)
         if score is None:
             continue
         if score > best_score:

@@ -59,7 +59,7 @@ log_prefix = None
 wandb_logger = None
 log_row = {}
 temp_dir = None
-default_score_name = None
+default_score: Score = None
 
 
 def log_best_weights(module_dict, best_weights, task, prefix=""):
@@ -104,7 +104,7 @@ def optimize_evol_expert_routing(
             get_loss=get_loss_function,
             budget=args.n_ng_iterations,
             base_module_name=get_best_expert_for_task(
-                expert_lib, task, default_score_name
+                expert_lib, task, default_score.hash
             ).name
             if args.init_router_best
             else None,
@@ -289,7 +289,7 @@ def retrieve_experts_for_task(
         return expert_lib
     expert_lib_copy = copy.deepcopy(expert_lib)
     task_module: Expert = get_best_expert_for_task(
-        expert_lib_copy, task, default_score_name
+        expert_lib_copy, task, default_score.hash
     )
     task_module_name = task_module.name
 
@@ -325,7 +325,7 @@ def retrieve_experts_for_task(
         scores = {}
         for k, exp in _expert_lib.items():
             score = expert_lib.get_score(
-                expert_name=k, task=task, score_name=f"{metric}_{split}"
+                expert_name=k, hash=Score(name=f"loss", task=task, split=split).hash
             )
             if score is not None:
                 scores[k] = score
@@ -339,7 +339,8 @@ def retrieve_experts_for_task(
         neg_losses = {**scores, **neg_losses}
         for k, v in neg_losses.items():
             expert_lib.add_score(
-                expert_name=k, score=Score(name=f"{metric}_{split}", task=task, value=v)
+                expert_name=k,
+                score=Score(name=f"loss", task=task, split=split, value=v),
             )
         sel_exp_names = sorted(neg_losses, key=neg_losses.get, reverse=True)[:sk]
 
@@ -349,7 +350,7 @@ def retrieve_experts_for_task(
         scores = {}
         for k, exp in _expert_lib.items():
             score = expert_lib.get_score(
-                expert_name=k, task=task, score_name=f"{metric}_{split}"
+                expert_name=k, hash=Score(name=f"rougeL", task=task, split=split).hash
             )
             if score is not None:
                 scores[k] = score
@@ -364,7 +365,8 @@ def retrieve_experts_for_task(
         # save into experts
         for k, v in rouge.items():
             expert_lib.add_score(
-                expert_name=k, score=Score(name=f"{metric}_{split}", task=task, value=v)
+                expert_name=k,
+                score=Score(name=f"rougeL", task=task, split=split, value=v),
             )
         sel_exp_names = sorted(scores, key=scores.get, reverse=True)[:sk]
 
@@ -389,8 +391,7 @@ def main(args: EvolExpertConfig):
     )
     expert_lib: ExpertLibrary = expert_lib
     module = None
-    global a_i, log_prefix, log_row, default_score_name
-    default_score_name = f"{args.eval_metric}_valid"
+    global a_i, log_prefix, log_row, default_score
 
     for it in range(args.n_active_iterations - iterations_run + 1):
         a_i = it + iterations_run
@@ -416,6 +417,7 @@ def main(args: EvolExpertConfig):
             log_row = {"act_i": a_i}
             log_row["task"] = task
             log_prefix = f"act_it:{a_i}/t:{task}"
+            default_score = Score(name=args.eval_metric, task=task, split="valid")
 
             evaluator_constructor = prepare_evaluator(args, args.dataset, tasks=task)
             evaluator_train = evaluator_constructor(
@@ -431,17 +433,20 @@ def main(args: EvolExpertConfig):
 
             assert task in expert_lib.tasks
             parent_exp: Expert = get_best_expert_for_task(
-                expert_lib, task, default_score_name
+                expert_lib, task, default_score.hash
             )
             base_perf = {
                 "train": expert_lib.get_score(
-                    parent_exp.name, task, f"{args.eval_metric}_train"
+                    expert_name=parent_exp.name,
+                    hash=Score(name=args.eval_metric, task=task, split="train").hash,
                 ),
                 "valid": expert_lib.get_score(
-                    parent_exp.name, task, f"{args.eval_metric}_valid"
+                    expert_name=parent_exp.name,
+                    hash=Score(name=args.eval_metric, task=task, split="valid").hash,
                 ),
                 "test": expert_lib.get_score(
-                    parent_exp.name, task, f"{args.eval_metric}_test"
+                    expert_name=parent_exp.name,
+                    hash=Score(name=args.eval_metric, task=task, split="test").hash,
                 ),
             }
 
@@ -471,25 +476,28 @@ def main(args: EvolExpertConfig):
                 expert_lib.add_score(
                     expert_name=parent_exp.name,
                     score=Score(
-                        name=f"{args.eval_metric}_test",
+                        name=args.eval_metric,
                         task=task,
                         value=base_perf["test"],
+                        split="test",
                     ),
                 )
                 expert_lib.add_score(
                     expert_name=parent_exp.name,
                     score=Score(
-                        name=f"{args.eval_metric}_train",
+                        name=args.eval_metric,
                         task=task,
                         value=base_perf["train"],
+                        split="train",
                     ),
                 )
                 expert_lib.add_score(
                     expert_name=parent_exp.name,
                     score=Score(
-                        name=f"{args.eval_metric}_valid",
+                        name=args.eval_metric,
                         task=task,
                         value=base_perf["valid"],
+                        split="valid",
                     ),
                 )
 
@@ -623,25 +631,28 @@ def main(args: EvolExpertConfig):
                     expert_lib.add_score(
                         expert_name=optimal_expert.name,
                         score=Score(
-                            name=f"{args.eval_metric}_test",
+                            name=args.eval_metric,
                             task=task,
                             value=optimized_perf["test"],
+                            split="test",
                         ),
                     )
                     expert_lib.add_score(
                         expert_name=optimal_expert.name,
                         score=Score(
-                            name=f"{args.eval_metric}_test",
+                            name=args.eval_metric,
                             task=task,
                             value=optimized_perf["test"],
+                            split="train",
                         ),
                     )
                     expert_lib.add_score(
                         expert_name=optimal_expert.name,
                         score=Score(
-                            name=f"{args.eval_metric}_train",
+                            name=args.eval_metric,
                             task=task,
                             value=optimized_perf["train"],
+                            split="train",
                         ),
                     )
             ########################################################################
