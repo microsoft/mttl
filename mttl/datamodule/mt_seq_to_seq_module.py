@@ -136,13 +136,13 @@ class FlanModule(DefaultDataModule):
     def setup_dataset(self):
         self.dataset = load_dataset(self.config.dataset)
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
-        if "split" not in dataset.column_names["train"]:
+        if "split" not in self.dataset.column_names["train"]:
             raise ValueError(
                 "Dataset must have a 'split' column, try removing the dataset manually from the cache."
             )
 
         if self.config.include_template_type != "*":
-            dataset = dataset.filter(
+            dataset = self.dataset.filter(
                 partial(
                     filter_template_type,
                     set(self.config.include_template_type.split(",")),
@@ -167,7 +167,7 @@ class FlanModule(DefaultDataModule):
             _,
             _,
         ) = maybe_filter_hf_dataset_by_task(
-            dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
+            self.dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
         )
 
         if "split" in dataset.column_names["train"]:
@@ -210,7 +210,7 @@ class T0FlatModule(DefaultDataModule):
             _,
             _,
         ) = maybe_filter_hf_dataset_by_task(
-            dataset, "task_name", self.config.finetune_task_name
+            self.dataset, "task_name", self.config.finetune_task_name
         )
 
         if self.config.use_templates_as_tasks:

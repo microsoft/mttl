@@ -108,7 +108,6 @@ class ExpertRanker:
         expert_prediction = [self.ids_to_tasks_names[i.item()] for i in expert_indices]
 
         print(expert_prediction)
-        print("begin test")
 
     def compute_expert_similarity(self):
         import numpy as np
@@ -161,6 +160,21 @@ class ExpertRanker:
 if __name__ == "__main__":
     config = ExpertConfig.parse()
     expert_ranker = ExpertRanker(config.num_labels, config.classifier_repo_id)
-    expert_ranker.compute_expert_similarity()
+
+    classifier = expert_ranker.get_classifier()
+    classifier.load_state_dict(torch.load(expert_ranker.classifier_ckpt)["state_dict"])
+    input_text = (
+        "if a horse at 2 years old has 3 legs, how many legs it has at 10 years old?"
+    )
+    logits = classifier([input_text])
+
+    expert_indices = logits.argmax(dim=1).cpu()
+    expert_prediction = [
+        expert_ranker.ids_to_tasks_names[i.item()] for i in expert_indices
+    ]
+
+    print(expert_prediction)
+
+    # expert_ranker.compute_expert_similarity()
     # expert_ranker.get_predict_retrieval()
     # expert_ranker.test_accuracy(config.dataset, config.model, config.finetune_task_name)
