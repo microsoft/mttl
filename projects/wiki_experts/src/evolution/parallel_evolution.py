@@ -143,7 +143,7 @@ def main(args: ParallelEvolutionConfig):
         tablelogger.log_table_wandb()
 
     # save the expert lib, send updates to remote
-    remote_lib = HFExpertLibrary.upload_local(
+    remote_lib = HFExpertLibrary.to_hf(
         expert_lib, args.to_repo_id, force=True, upload_aux_data=True, only_tasks=tasks
     )
     logger.info(f"Done, saving to repo {args.to_repo_id}")

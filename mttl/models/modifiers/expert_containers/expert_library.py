@@ -714,7 +714,7 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
 
 class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
     @classmethod
-    def upload_local(
+    def to_hf(
         cls,
         local_lib: LocalExpertLibrary,
         repo_id,
@@ -733,7 +733,7 @@ class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
             # upload modules that are not in the target repo + only upload modules for the specified tasks
             if (
                 expert.expert_info.expert_task_name not in only_tasks
-                and not expert.name in new_lib
+                and expert.name in new_lib
             ):
                 continue
             new_lib.add_expert(expert, name, force=force)
