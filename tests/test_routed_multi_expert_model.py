@@ -31,7 +31,7 @@ def tmp_exp_config(tmp_path):
 
 
 class TestRoutedMultiExpertModel:
-    def creat_dummy_expert(self, config: ExpertConfig, exp_name):
+    def create_dummy_expert(self, config: ExpertConfig, exp_name):
         # create random Lora
         exp_trainer = ExpertTrainer(
             model_object=make_tiny_llama(),
@@ -48,8 +48,8 @@ class TestRoutedMultiExpertModel:
         config: Config = tmp_exp_config
 
         config.router_selector = "task_selector"
-        exp1_dest = self.creat_dummy_expert(config, "exp1")
-        exp2_dest = self.creat_dummy_expert(config, "exp2")
+        exp1_dest = self.create_dummy_expert(config, "exp1")
+        exp2_dest = self.create_dummy_expert(config, "exp2")
         module_dict = {"mod1": exp1_dest, "mod2": exp2_dest, "default": exp1_dest}
 
         module = RoutedMultiExpertModel(
@@ -87,8 +87,8 @@ class TestRoutedMultiExpertModel:
         config: ExpertConfig = tmp_exp_config
 
         config.router_selector = "poly_router"
-        exp1_dest = self.creat_dummy_expert(config, "exp1")
-        exp2_dest = self.creat_dummy_expert(config, "exp2")
+        exp1_dest = self.create_dummy_expert(config, "exp1")
+        exp2_dest = self.create_dummy_expert(config, "exp2")
         module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
 
         module = RoutedMultiExpertModel(
@@ -149,8 +149,8 @@ class TestRoutedMultiExpertModel:
         config: ExpertConfig = tmp_exp_config
 
         config.router_selector = "poly_router"
-        exp1_dest = self.creat_dummy_expert(config, "exp1")
-        exp2_dest = self.creat_dummy_expert(config, "exp2")
+        exp1_dest = self.create_dummy_expert(config, "exp1")
+        exp2_dest = self.create_dummy_expert(config, "exp2")
         module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
 
         module = RoutedMultiExpertModel(
