@@ -4,6 +4,7 @@ import hashlib
 import numpy as np
 
 import os
+from mttl.evaluators.base import Evaluator, switch_to_eval_mode
 from mttl.evaluators.ni_evaluator import compute_metrics
 from mttl.evaluators.mmlu_evaluator import swap_model
 from mttl.models.utils import transfer_batch_to_device, EfficientCheckpointModule
@@ -20,23 +21,11 @@ def decode(preds, tokenizer):
     return preds
 
 
-class RougeEvaluator:
-    def __init__(
-        self, datamodule, device="cuda", use_vllm=False, split="val", subsample=-1
-    ):
-        super().__init__()
-        self.device = device
-        self.dm = datamodule
-        self.use_vllm = use_vllm
-        self.tokenizer = datamodule.tokenizer
-        self.max_output_length = datamodule.config.max_output_length
+class RougeEvaluator(Evaluator):
+    def __init__(self, datamodule, device="cuda", use_vllm=False):
+        super().__init__(datamodule=datamodule, device=device, use_vllm=use_vllm)
 
-        if split in ["val", "valid", "validation"]:
-            self.dataloader = self.dm.val_dataloader(subsample=subsample)
-        elif split in ["test", "testing"]:
-            self.dataloader = self.dm.test_dataloader(subsample=subsample)
-        else:
-            self.dataloader = self.dm.train_dataloader(subsample=subsample)
+        self.max_output_length = datamodule.config.max_output_length
 
     def evaluate_with_vllm(self, model, dataloader, num_batches=None, verbose=True):
         model_hash = hashlib.sha256()
@@ -66,34 +55,32 @@ class RougeEvaluator:
 
         return np.mean(all_rougeL)
 
-    def evaluate(self, model, num_batches=None, verbose=True):
+    @switch_to_eval_mode
+    def evaluate(
+        self, model, split="val", subsample=-1, num_batches=None, verbose=True
+    ):
+        dataloader = self.get_dataloader(split, subsample, shuffle=False)
+
+        if self.use_vllm:
+            return self.evaluate_with_vllm(model, dataloader, num_batches, verbose)
+
+        pbar = tqdm.tqdm(
+            enumerate(dataloader),
+            total=len(dataloader),
+        )
+
         extra_kwargs = {}
         extra_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
         extra_kwargs["eos_token_id"] = self.tokenizer.eos_token_id
-
         all_rougeL = []
-        if model.training:
-            was_training = True
-            model.eval()
 
-        with torch.no_grad():
-            dataloader = self.dataloader
+        for _, batch in pbar:
+            labels_texts = batch["labels_texts"]
+            sources_texts = batch["sources_texts"]
 
-            if self.use_vllm:
-                return self.evaluate_with_vllm(model, dataloader, num_batches, verbose)
-
-            pbar = tqdm.tqdm(
-                enumerate(dataloader),
-                total=len(dataloader),
-            )
-
-            for _, batch in pbar:
-                labels_texts = batch["labels_texts"]
-                sources_texts = batch["sources_texts"]
-
-                max_length = self.max_output_length
-                if self.dm.config.model_family == "gpt":
-                    max_length += batch["input_ids"].shape[-1]
+            max_length = self.max_output_length
+            if self.datamodule.config.model_family == "gpt":
+                max_length += batch["input_ids"].shape[-1]
 
                 batch = transfer_batch_to_device(batch, self.device)
                 if isinstance(model, EfficientCheckpointModule):
@@ -116,9 +103,9 @@ class RougeEvaluator:
                         **extra_kwargs,
                     )
 
-                predictions = predictions.sequences
-                if self.dm.config.model_family == "gpt":
-                    predictions = predictions[:, batch["input_ids"].shape[-1] :]
+            predictions = predictions.sequences
+            if self.datamodule.config.model_family == "gpt":
+                predictions = predictions[:, batch["input_ids"].shape[-1] :]
 
                 predictions = decode(predictions, self.tokenizer)
                 references = [[l] for l in labels_texts]
