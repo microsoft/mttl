@@ -295,14 +295,14 @@ class DefaultDataModule(LightningDataModule):
             collate_fn=self.collate_fn,
         )
 
-    def val_dataloader(self, subsample=None):
+    def val_dataloader(self, subsample=None, shuffle=False):
         dev_dataset = self.dev_dataset
         if subsample and subsample > 0:
             dev_dataset = subsample_dst(dev_dataset, subsample)
         return DataLoader(
             dev_dataset,
             batch_size=self.config.predict_batch_size,
-            shuffle=False,
+            shuffle=shuffle,
             num_workers=8,
             pin_memory=True,
             persistent_workers=False,
@@ -310,14 +310,14 @@ class DefaultDataModule(LightningDataModule):
             drop_last=False,
         )
 
-    def test_dataloader(self, subsample=None):
+    def test_dataloader(self, subsample=None, shuffle=False):
         test_dataset = self.test_dataset
         if subsample and subsample > 0:
             test_dataset = subsample_dst(test_dataset, subsample)
         return DataLoader(
             test_dataset,
             batch_size=self.config.predict_batch_size,
-            shuffle=False,
+            shuffle=shuffle,
             num_workers=8,
             pin_memory=True,
             persistent_workers=False,
