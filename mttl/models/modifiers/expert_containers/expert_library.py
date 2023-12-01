@@ -714,14 +714,26 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
 
 class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
     @classmethod
-    def from_local(
-        cls, local_lib: LocalExpertLibrary, repo_id, model_name=None, selection=None
+    def upload_local(
+        cls,
+        local_lib: LocalExpertLibrary,
+        repo_id,
+        model_name=None,
+        selection=None,
+        force=False,
+        upload_aux_data=False,
     ):
         new_lib = HFExpertLibrary(
             repo_id=repo_id, model_name=model_name, selection=selection, create=True
         )
         for name, expert in local_lib.items():
-            new_lib.add_expert(expert, name)
+            new_lib.add_expert(expert, name, force=force)
+        # also update the scores and embeddings?
+        if upload_aux_data:
+            scores = local_lib.get_auxiliary_data(data_type="scores")
+            for expert_name, expert_scores in scores.items():
+                for score in expert_scores.values():
+                    new_lib.add_score(expert_name, Score(**score))
 
         return new_lib
 
