@@ -75,15 +75,21 @@ class KVAdapter(Adapter, ModifyMixin):
                     self.attn_layer.inner_attn.softmax_scale,
                     self.attn_layer.inner_attn.drop.p,
                 )
-                self.attn_layer.inner_attn.forward = PhiSelfAttentionModule(
+                self.attn_layer.inner_attn = PhiSelfAttentionModule(
                     self.attn_layer.inner_attn.causal,
                     self.attn_layer.inner_attn.softmax_scale,
                     self.attn_layer.inner_attn.drop.p,
                 )
-                self.attn_layer.inner_attn._parent = self
-                self.attn_layer.inner_cross_attn._parent = self
+                self.attn_layer.inner_attn.forward = partial(
+                    self.attn_layer.inner_attn.forward, adapter=self
+                )
+                self.attn_layer.inner_cross_attn.forward = partial(
+                    self.attn_layer.inner_cross_attn.forward, adapter=self
+                )
             else:
-                raise ValueError()
+                raise ValueError(
+                    f"This type of layer is not supported by KVAdapter on phi-2: {type(attn_layer)}"
+                )
 
             assert self.soft_prompt_learn_kv, "phi only supports soft prompt kv"
             attn_layer.k_proj = attn_layer.v_proj = None
@@ -345,6 +351,7 @@ class PhiCrossAttentionModule(nn.Module):
         self,
         q: torch.FloatTensor,
         kv: torch.FloatTensor,
+        adapter: KVAdapter = None,
         causal: bool = None,
         key_padding_mask: Optional[torch.BoolTensor] = None,
         **kwargs,
@@ -387,11 +394,11 @@ class PhiCrossAttentionModule(nn.Module):
 
         """ Adapter Start """
         # adapter not precomputed, so we compute it
-        adapter_k, adapter_v = self._parent.get_kv_weights(None, None)
+        adapter_k, adapter_v = adapter.get_kv_weights(None, None)
 
         # remains to compute the attention score and add the result
-        adapter_weights = self._parent.route(q.transpose(1, 2), adapter_k)
-        adapter_output = self._parent.aggregate(adapter_weights, adapter_v).type_as(
+        adapter_weights = adapter.route(q.transpose(1, 2), adapter_k)
+        adapter_output = adapter.aggregate(adapter_weights, adapter_v).type_as(
             attn_output
         )
         attn_output = attn_output + adapter_output.transpose(1, 2)
@@ -415,6 +422,7 @@ class PhiSelfAttentionModule(nn.Module):
         self,
         qkv: torch.FloatTensor,
         causal: bool = None,
+        adapter: KVAdapter = None,
         key_padding_mask: Optional[torch.BoolTensor] = None,
         **kwargs,
     ) -> torch.FloatTensor:
@@ -447,11 +455,11 @@ class PhiSelfAttentionModule(nn.Module):
 
         """ Adapter Start """
         # adapter not precomputed, so we compute it
-        adapter_k, adapter_v = self._parent.get_kv_weights(None, None)
+        adapter_k, adapter_v = adapter.get_kv_weights(None, None)
 
         # remains to compute the attention score and add the result
-        adapter_weights = self._parent.route(q.transpose(1, 2), adapter_k)
-        adapter_output = self._parent.aggregate(adapter_weights, adapter_v).type_as(
+        adapter_weights = adapter.route(q.transpose(1, 2), adapter_k)
+        adapter_output = adapter.aggregate(adapter_weights, adapter_v).type_as(
             attn_output
         )
         attn_output = attn_output + adapter_output.transpose(1, 2)
