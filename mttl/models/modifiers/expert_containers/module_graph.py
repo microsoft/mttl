@@ -8,7 +8,6 @@ from string import Template
 from mttl.models.utils import download_from_hub
 from mttl.utils import get_checkpoint_path, logger
 from mttl.config import Config
-
 from dataclasses import dataclass
 
 
@@ -18,9 +17,30 @@ class ExpertInfo:
     Stuff that we want to save about experts but will never be passed from command line
     """
 
+    expert_name: str
+    expert_task_name: str
+    expert_config: Dict
     parent_node: str = None
-    expert_name: str = None
-    expert_task_name: str = None
+    expert_embeddings: Dict = None
+    expert_scores: Dict = None
+
+    @property
+    def model(self):
+        if "model" in self.expert_config:
+            return self.expert_config["model"]
+        return None
+
+    @property
+    def dataset(self):
+        if "dataset" in self.expert_config:
+            return self.expert_config["dataset"]
+        return None
+
+    @property
+    def model_modifier(self):
+        if "model_modifier" in self.expert_config:
+            return self.expert_config["model_modifier"]
+        return None
 
 
 class ExpertConfig(Config):
@@ -29,27 +49,30 @@ class ExpertConfig(Config):
 
 @dataclass
 class Expert:
-    expert_config: ExpertConfig
-    expert_weights: Dict[str, torch.Tensor]
     expert_info: ExpertInfo
+    expert_weights: Dict[str, torch.Tensor]
+    expert_optimizer_state: Dict[str, torch.Tensor] = None
+
+    @property
+    def expert_config(self):
+        # ensure back-compatibility
+        return Config(
+            kwargs=self.expert_info.expert_config, raise_error=False, silent=True
+        )
 
     def dumps(self):
         return {
-            "expert_config": self.expert_config.dumps(),
             "expert_info": self.expert_info.__dict__,
             "expert_weights": self.expert_weights,
+            "expert_optimizer_state": self.expert_optimizer_state,
         }
 
     @classmethod
     def loads(cls, ckpt):
         return cls(
-            expert_config=ExpertConfig(
-                kwargs=json.loads(ckpt["expert_config"]),
-                silent=True,
-                raise_error=False,
-            ),
             expert_info=ExpertInfo(**ckpt["expert_info"]),
             expert_weights=ckpt["expert_weights"],
+            expert_optimizer_state=ckpt["expert_optimizer_state"],
         )
 
 
@@ -224,7 +247,6 @@ class LinearNode(OperatorNode):
         exp_info.parent_node = self.get_name(**kwargs)
         return [
             Expert(
-                expert_config=config,
                 expert_weights=merged_weights,
                 expert_info=exp_info,
             )
@@ -340,8 +362,8 @@ class ModuleGraph:
 
 def load_expert(
     expert_path: str,
-    expert_name: str = None,
 ):
+    """Transforms a potentially lightning checkpoint into an Expert object."""
     # load the expert weights
     import os
 
@@ -354,32 +376,40 @@ def load_expert(
     logger.info(f"Loading expert from {expert_checkpoint}...")
     expert_checkpoint = torch.load(expert_checkpoint, map_location="cpu")
 
-    # remove tokenizer if ever is present
-    if "tokenizer" in expert_checkpoint["hyper_parameters"]:
-        del expert_checkpoint["hyper_parameters"]["tokenizer"]
+    if "hyper_parameters" in expert_checkpoint:
+        # this is a PL checkpoint
+        if "tokenizer" in expert_checkpoint["hyper_parameters"]:
+            del expert_checkpoint["hyper_parameters"]["tokenizer"]
 
-    expert_config = ExpertConfig(
-        kwargs=expert_checkpoint["hyper_parameters"],
-        silent=True,
-        raise_error=False,
-    )
-    expert_info = ExpertInfo(**expert_checkpoint.get("expert_info", {}))
+        expert_info_data = expert_checkpoint.get("expert_info", {})
 
-    expert_name = expert_name or expert_config.expert_name
-    if expert_name is None:
-        if expert_config.finetune_task_name is not None:
-            expert_name = expert_config.finetune_task_name
+        # fix bug in checkpoints
+        if "tokenizer" in expert_checkpoint["hyper_parameters"]:
+            expert_checkpoint["hyper_parameters"].pop("tokenizer")
+
+        if not expert_info_data.get("expert_config", None):
+            expert_info_data["expert_config"] = expert_checkpoint["hyper_parameters"]
         else:
-            expert_name = os.path.basename(expert_path)
-        logger.info(
-            "Assigning expert name, not found in checkpoint: {}".format(expert_name)
-        )
+            if "tokenizer" in expert_info_data["expert_config"]:
+                expert_info_data["expert_config"].pop("tokenizer")
 
-    expert_config.expert_name = expert_name
+        if not expert_info_data.get("expert_name", None):
+            expert_info_data["expert_name"] = expert_checkpoint["hyper_parameters"][
+                "expert_name"
+            ]
+        if not expert_info_data.get("expert_task_name", None):
+            expert_info_data["expert_task_name"] = expert_checkpoint[
+                "hyper_parameters"
+            ]["finetune_task_name"]
 
-    expert_weights = expert_checkpoint["state_dict"]
-    expert_weights = {k.replace("model.", "", 1): v for k, v in expert_weights.items()}
-    return Expert(expert_config, expert_weights, expert_info)
+        expert_info = ExpertInfo(**expert_info_data)
+        expert_weights = expert_checkpoint["state_dict"]
+        expert_weights = {
+            k.replace("model.", "", 1): v for k, v in expert_weights.items()
+        }
+        return Expert(expert_info, expert_weights)
+    else:
+        return Expert.loads(expert_checkpoint)
 
 
 if __name__ == "__main__":

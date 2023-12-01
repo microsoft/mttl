@@ -5,8 +5,8 @@ from mttl.models.llama_patch import replace_attn_with_flash_attn
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.routing import RoutingInfo
 from transformers import AutoModelForCausalLM
-from projects.wiki_experts.src.config import ExpertInfo
 
+from mttl.models.modifiers.expert_containers.module_graph import ExpertInfo
 from mttl.models.utils import (
     EfficientCheckpointModule,
     prepare_model_for_kbit_training,
@@ -20,16 +20,14 @@ class ExpertTrainer(EfficientCheckpointModule):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        # log hyperparameters
-        self.save_hyperparameters(kwargs, ignore=["tokenizer", "model_object"])
+        self.tokenizer = kwargs.pop("tokenizer", None)
+        model_object = kwargs.pop("model_object", None)
 
-        self.tokenizer = kwargs["tokenizer"]
-        self.expert_info = ExpertInfo(**kwargs.get("expert_info", {}))
+        # log hyperparameters
+        self.save_hyperparameters(kwargs)
 
         self.model: AutoModelForCausalLM = None
         self.accumulate_metrics_batch = defaultdict(list)
-
-        model_object = kwargs.get("model_object", None)
 
         if model_object is None:
             from mttl.models.utils import model_loader_helper
@@ -172,5 +170,13 @@ class ExpertTrainer(EfficientCheckpointModule):
         return generations
 
     def on_save_checkpoint(self, ckpt):
+        from mttl.models.utils import convert_hps_to_dict
+
         super().on_save_checkpoint(ckpt)
-        ckpt["expert_info"] = self.expert_info.__dict__
+        # inject expert info in the expert checkpoint
+        expert_info = ExpertInfo(
+            expert_name=self.hparams.expert_name,
+            expert_task_name=self.hparams.finetune_task_name,
+            expert_config=convert_hps_to_dict(self.hparams),
+        )
+        ckpt["expert_info"] = expert_info.__dict__

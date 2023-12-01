@@ -291,7 +291,7 @@ class DefaultDataModule(LightningDataModule):
             shuffle=True,
             num_workers=8,
             pin_memory=True,
-            persistent_workers=True,
+            persistent_workers=False,
             collate_fn=self.collate_fn,
         )
 
@@ -305,7 +305,7 @@ class DefaultDataModule(LightningDataModule):
             shuffle=False,
             num_workers=8,
             pin_memory=True,
-            persistent_workers=True,
+            persistent_workers=False,
             collate_fn=self.collate_fn,
             drop_last=False,
         )
@@ -320,7 +320,7 @@ class DefaultDataModule(LightningDataModule):
             shuffle=False,
             num_workers=8,
             pin_memory=True,
-            persistent_workers=True,
+            persistent_workers=False,
             collate_fn=self.collate_fn,
             drop_last=False,
         )
@@ -427,7 +427,7 @@ class AutoDataModule:
                 for_generation=for_generation,
                 val_mixin=val_mixin,
             )
-        elif "adauni" in name:
+        elif "adauni-v1-flat" in name or "platypus-flat" in name:
             return FlatMultiTaskModule(
                 FlatMultiTaskConfig(dataset=name, **kwargs),
                 for_generation=for_generation,
