@@ -34,8 +34,6 @@ def modify_transformer(transformer, modifier_config, model_modifier=None):
     import mttl.models.modifiers.hard_prompts  # noqa: F401
     from mttl.utils import logger
 
-    # import mttl.models.modifiers.prefix_tuning # noqa: F401
-
     # create a shared container for the task id
     transformer.task_id_container = {}
 
