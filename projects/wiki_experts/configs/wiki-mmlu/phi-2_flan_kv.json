@@ -5,7 +5,7 @@
     "n_skills": 1,
     "model_modifier": "kv_adapter",
     "modify_modules": ".*",
-    "modify_layers": ".*inner_attn.*|.*cross_attn.*",
+    "modify_layers": ".*mixer.*",
     "trainable_param_names": ".*adapter_query.*|.*adapter_gate.*", 
     "num_train_epochs": 10,
     "learning_rate": 5e-3,
@@ -22,5 +22,6 @@
     "max_input_length": 2048,
     "max_output_length": 128,
     "truncation_side": "left", 
-    "soft_prompt_learn_kv": true
+    "soft_prompt_learn_kv": true,
+    "soft_prompt_length": 15
 }
