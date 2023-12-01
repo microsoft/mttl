@@ -8,8 +8,7 @@ def test_expert_lib(mocker):
     assert len(library) == 2
     assert not library._sliced
 
-    module_name = list(library.keys())[0]
-    module_dump = library[module_name]
+    module_dump = library["abstract_algebra"]
 
     library._upload_metadata = mocker.MagicMock()
     library._upload_weights = mocker.MagicMock()
@@ -17,15 +16,12 @@ def test_expert_lib(mocker):
 
     # expert already there
     with pytest.raises(ValueError):
-        library.add_expert(module_dump, module_name)
+        library.add_expert(module_dump, "abstract_algebra")
 
     assert module_dump.expert_config.model == "phi-2"
     assert len(module_dump.expert_weights) == 128
     assert module_dump.expert_info.parent_node is None
-    assert (
-        module_dump.expert_info.expert_name
-        == "adversarial_qa_dbert_answer_the_following_q"
-    )
+    assert module_dump.expert_info.expert_name == "abstract_algebra"
 
     library.add_expert(module_dump, "new_module")
     assert library._upload_metadata.call_count == 1
