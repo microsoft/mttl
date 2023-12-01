@@ -718,15 +718,11 @@ class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
         cls,
         local_lib: LocalExpertLibrary,
         repo_id,
-        model_name=None,
-        selection=None,
         force=False,
         upload_aux_data=False,
         only_tasks=None,
     ):
-        new_lib = HFExpertLibrary(
-            repo_id=repo_id, model_name=model_name, selection=selection, create=True
-        )
+        new_lib = HFExpertLibrary(repo_id=repo_id, create=True)
 
         only_tasks = only_tasks or local_lib.tasks
         for name, expert in local_lib.items():
