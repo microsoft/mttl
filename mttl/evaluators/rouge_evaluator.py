@@ -59,9 +59,6 @@ class RougeEvaluator(Evaluator):
     def evaluate(
         self, model, split="val", subsample=-1, num_batches=None, verbose=True
     ):
-        was_training = model.training
-        model.eval()
-
         dataloader = self.get_dataloader(split, subsample, shuffle=False)
 
         if self.use_vllm:
@@ -126,8 +123,6 @@ class RougeEvaluator(Evaluator):
 
                 if num_batches is not None and len(all_rougeL) >= num_batches:
                     break
-                if was_training:
-                    model.train()
 
         del pbar, dataloader
         return np.mean(all_rougeL)
