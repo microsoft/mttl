@@ -252,7 +252,7 @@ class DefaultCollator:
     def __call__(self, batch: Dict):
         sources = [b["source"] for b in batch]
         labels = [b["target"] for b in batch]
-        task_ids = [b.get("task_id", 0) for b in batch]
+        task_ids = [b.get("task_id", -1) for b in batch]
         task_names = [b.get("task_name", None) for b in batch]
 
         output_batch = (
@@ -298,7 +298,7 @@ class DefaultDataModule(LightningDataModule):
             shuffle=True,
             num_workers=8,
             pin_memory=True,
-            persistent_workers=True,
+            persistent_workers=False,
             collate_fn=self.collate_fn,
         )
 
@@ -312,7 +312,7 @@ class DefaultDataModule(LightningDataModule):
             shuffle=False,
             num_workers=8,
             pin_memory=True,
-            persistent_workers=True,
+            persistent_workers=False,
             collate_fn=self.collate_fn,
             drop_last=False,
         )
@@ -327,7 +327,7 @@ class DefaultDataModule(LightningDataModule):
             shuffle=False,
             num_workers=8,
             pin_memory=True,
-            persistent_workers=True,
+            persistent_workers=False,
             collate_fn=self.collate_fn,
             drop_last=False,
         )

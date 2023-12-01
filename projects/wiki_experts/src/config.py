@@ -3,17 +3,6 @@ from mttl.config import Config
 import os
 
 
-@dataclass
-class ExpertInfo:
-    """
-    Stuff that we want to save about experts but will never be passed from command line
-    """
-
-    parent_node: str = None
-    expert_name: str = None
-    expert_task_name: str = None
-
-
 class ExpertConfig(Config):
     def _set_defaults(self):
         super()._set_defaults()

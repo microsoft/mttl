@@ -121,6 +121,7 @@ def run_multitask(args):
     # select dataloader
     model_class = ExpertTrainer
     dm = get_datamodule(args)
+    args.n_tasks = len(dm._task_names)
     gen_dm = get_datamodule(args, for_generation=True)
 
     # legit logging
@@ -141,7 +142,6 @@ def run_multitask(args):
         loggers.append(wandb_logger)
 
     module = model_class(**vars(args), tokenizer=dm.tokenizer).to("cuda")
-
     mlf_logger = get_mlf_logger()
     if mlf_logger:
         loggers.append(mlf_logger)
