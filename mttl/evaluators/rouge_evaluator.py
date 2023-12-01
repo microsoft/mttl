@@ -59,6 +59,9 @@ class RougeEvaluator(Evaluator):
     def evaluate(
         self, model, split="val", subsample=-1, num_batches=None, verbose=True
     ):
+        was_training = model.training
+        model.eval()
+
         dataloader = self.get_dataloader(split, subsample, shuffle=False)
 
         if self.use_vllm:

@@ -78,17 +78,15 @@ class ExtendedRougeEvaluator(RougeEvaluator, Evaluator):
     def __init__(
         self, datamodule, name="test", split="test", subsample=-1, use_vllm=False
     ):
-        super().__init__(
-            datamodule, use_vllm=use_vllm, split=split, subsample=subsample
-        )
+        super().__init__(datamodule, use_vllm=use_vllm)
         self.name = name
         self.split = split
-        self.datamodule = self.dm
+        self.subsample = subsample
 
     def evaluate(self, model):
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model.to(device)
-        rougeL = super().evaluate(model, verbose=False)
+        rougeL = super().evaluate(model, self.split, self.subsample, verbose=False)
         return {"all": {"mean": rougeL}, f"{self.name}": {"mean": rougeL}}
 
     def get_loss(self, model, **kwargs):
