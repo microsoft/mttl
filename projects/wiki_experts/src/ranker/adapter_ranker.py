@@ -110,9 +110,57 @@ class ExpertRanker:
         print(expert_prediction)
         print("begin test")
 
+    def compute_expert_similarity(self):
+        import numpy as np
+        import json
+
+        classifier = self.get_classifier()
+        classifier.load_state_dict(torch.load(self.classifier_ckpt)["state_dict"])
+        sim = classifier.classifier.weight @ classifier.classifier.weight.T
+
+        # get the top 5 experts for each expert
+        top_k = 5
+        top_k_sim, top_k_sim_indices = torch.topk(sim, top_k, dim=1)
+
+        # convert the tensor to cpu
+        top_k_sim_indices = top_k_sim_indices.cpu()
+
+        fout = open("top_5_random_5.jsonl", "w")
+        # print the top k experts for each expert
+        for i in range(top_k_sim_indices.shape[0]):
+            candidate_experts = []
+            for j in range(top_k_sim_indices.shape[1]):
+                # add a most similar one
+                candidate_experts.append(
+                    self.ids_to_tasks_names[top_k_sim_indices[i][j].item()]
+                )
+                # add a random one
+                candidate_experts.append(
+                    self.ids_to_tasks_names[np.random.randint(0, self.num_labels)]
+                )
+            fout.write(
+                json.dumps(
+                    {
+                        "task": self.ids_to_tasks_names[i],
+                        "candidate_experts": candidate_experts,
+                    }
+                )
+                + "\n"
+            )
+
+        # draw the similarity matrix using headmap
+
+        import matplotlib.pyplot as plt
+
+        plt.matshow(sim.detach().cpu().numpy())
+        plt.colorbar()
+        plt.show()
+        plt.savefig("similarity_matrix.png")
+
 
 if __name__ == "__main__":
     config = ExpertConfig.parse()
     expert_ranker = ExpertRanker(config.num_labels, config.classifier_repo_id)
-    expert_ranker.get_predict_retrieval()
+    expert_ranker.compute_expert_similarity()
+    # expert_ranker.get_predict_retrieval()
     # expert_ranker.test_accuracy(config.dataset, config.model, config.finetune_task_name)

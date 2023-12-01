@@ -312,8 +312,9 @@ class DefaultDataModule(LightningDataModule):
 
     def test_dataloader(self, subsample=None):
         test_dataset = self.test_dataset
-        if subsample and subsample > 0:
-            test_dataset = subsample_dst(test_dataset, subsample)
+        if subsample and len(test_dataset) > subsample and subsample > 0:
+            test_dataset = test_dataset.select(range(subsample))
+            # test_dataset = subsample_dst(test_dataset, subsample)
         return DataLoader(
             test_dataset,
             batch_size=self.config.predict_batch_size,

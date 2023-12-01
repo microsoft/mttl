@@ -310,6 +310,9 @@ class ExpertConfig(Config):
         self.retrieval_model = "classifier"
         self.expert_library_path = None
 
+        self.eval_metric = "loss"
+        self.use_vllm = False
+
     def post_init(self):
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size
