@@ -9,7 +9,6 @@ from mttl.models.utils import download_from_hub
 from mttl.utils import get_checkpoint_path, logger
 from mttl.config import Config
 from dataclasses import dataclass
-from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 
 
 @dataclass
@@ -267,9 +266,9 @@ class ModuleGraph:
     # Operator-to-class mapping
     OPERATOR_CLASSES = {None: Node, "linear": LinearNode}
 
-    def __init__(self, expert_library: Union[Dict, ExpertLibrary] = None):
+    def __init__(self, expert_library: Dict[str, Expert] = None):
         self.nodes = {}
-        self.expert_library = expert_library
+        self.expert_library = expert_library  # expert_library is a dict of experts, can also be ExpertLibrary object
 
     @classmethod
     def from_expert_dict(
