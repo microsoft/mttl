@@ -63,50 +63,50 @@ class KVAdapter(Adapter, ModifyMixin):
         funcType = types.MethodType
 
         # do not patch this layer multiple times, especially useful for container layers
-        if not getattr(attn_layer, "__is_kv_patched", False):
-            if "gpt-neo" in config.model:
-                self.attn_layer.forward = funcType(
-                    partial(gpt_neo_self_attention, adapter=self), self.attn_layer
+        if "gpt-neo" in config.model:
+            self.attn_layer.forward = funcType(
+                partial(gpt_neo_self_attention, adapter=self), self.attn_layer
+            )
+            attn_layer.hidden_size = attn_layer.embed_dim
+            self.device = self.attn_layer.q_proj.weight.device
+        elif "llama" in config.model:
+            self.attn_layer.forward = funcType(
+                partial(llama_self_attention, adapter=self), self.attn_layer
+            )
+            assert (
+                attn_layer.num_heads == attn_layer.num_key_value_heads
+            ), "which to pick for gate?"
+            self.device = self.attn_layer.q_proj.weight.device
+        elif "phi" in config.model:
+            if "mha" in str(type(attn_layer)).lower():
+                self.attn_layer.inner_cross_attn = PhiCrossAttentionModule(
+                    self.attn_layer.inner_attn.causal,
+                    self.attn_layer.inner_attn.softmax_scale,
+                    self.attn_layer.inner_attn.drop.p,
                 )
-                attn_layer.hidden_size = attn_layer.embed_dim
-            elif "llama" in config.model:
-                self.attn_layer.forward = funcType(
-                    partial(llama_self_attention, adapter=self), self.attn_layer
+                self.attn_layer.inner_attn = PhiSelfAttentionModule(
+                    self.attn_layer.inner_attn.causal,
+                    self.attn_layer.inner_attn.softmax_scale,
+                    self.attn_layer.inner_attn.drop.p,
                 )
-                assert (
-                    attn_layer.num_heads == attn_layer.num_key_value_heads
-                ), "which to pick for gate?"
-            elif "phi" in config.model:
-                if "mha" in str(type(attn_layer)).lower():
-                    self.attn_layer.inner_cross_attn = PhiCrossAttentionModule(
-                        self.attn_layer.inner_attn.causal,
-                        self.attn_layer.inner_attn.softmax_scale,
-                        self.attn_layer.inner_attn.drop.p,
-                    )
-                    self.attn_layer.inner_attn = PhiSelfAttentionModule(
-                        self.attn_layer.inner_attn.causal,
-                        self.attn_layer.inner_attn.softmax_scale,
-                        self.attn_layer.inner_attn.drop.p,
-                    )
-                    self.attn_layer.inner_attn.forward = partial(
-                        self.attn_layer.inner_attn.forward, adapter=self
-                    )
-                    self.attn_layer.inner_cross_attn.forward = partial(
-                        self.attn_layer.inner_cross_attn.forward, adapter=self
-                    )
-                else:
-                    raise ValueError(
-                        f"This type of layer is not supported by KVAdapter on phi-2: {type(attn_layer)}"
-                    )
-
-                assert self.soft_prompt_learn_kv, "phi only supports soft prompt kv"
-                attn_layer.k_proj = attn_layer.v_proj = None
-                attn_layer.num_heads = attn_layer.n_head
-                attn_layer.hidden_size = attn_layer.out_proj.weight.shape[0]
+                self.attn_layer.inner_attn.forward = partial(
+                    self.attn_layer.inner_attn.forward, adapter=self
+                )
+                self.attn_layer.inner_cross_attn.forward = partial(
+                    self.attn_layer.inner_cross_attn.forward, adapter=self
+                )
             else:
-                raise ValueError(f"{config.model} not supported for now.")
+                raise ValueError(
+                    f"This type of layer is not supported by KVAdapter on phi-2: {type(attn_layer)}"
+                )
 
-            setattr(attn_layer, "__is_kv_patched", True)
+            assert self.soft_prompt_learn_kv, "phi only supports soft prompt kv"
+            attn_layer.k_proj = attn_layer.v_proj = None
+            attn_layer.num_heads = attn_layer.n_head
+            attn_layer.hidden_size = attn_layer.out_proj.weight.shape[0]
+            self.device = attn_layer.out_proj.weight.device
+        else:
+            raise ValueError(f"{config.model} not supported for now.")
 
         self.create_for_layer(attn_layer)
 
@@ -114,14 +114,16 @@ class KVAdapter(Adapter, ModifyMixin):
         # create the gate, and embeddings here
         self.adapter_gate = torch.nn.Parameter(
             torch.zeros(1, attn_layer.num_heads, 1, 1),
-        )
+        ).to(self.device)
 
         if self.soft_prompt_learn_kv:
             out_dim = attn_layer.hidden_size * 2
         else:
             out_dim = attn_layer.hidden_size
 
-        self.adapter_query = nn.Embedding(self.soft_prompt_length, out_dim)
+        self.adapter_query = nn.Embedding(
+            self.soft_prompt_length, out_dim, device=self.device
+        )
 
     def load_adapter_weights(self, state_dict):
         # load the weights from state_dict

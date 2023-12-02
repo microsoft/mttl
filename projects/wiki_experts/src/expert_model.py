@@ -98,6 +98,16 @@ class MultiExpertModel(ExpertTrainer):
             )
             self.experts.append(module_name)
 
+    def delete_expert_container(self):
+        """
+        Replaces the expert container with the expert with the given name.
+        """
+        for _, module in self.model.named_modules():
+            for c_name, child in dict(module.named_children()).items():
+                if isinstance(child, ExpertContainer) and len(child.experts) > 0:
+                    setattr(module, c_name, child.layer)
+        self.experts = []
+
     def replace_container_with_expert(self, expert_name, get_expert_instance=True):
         """
         Replaces the expert container with the expert with the given name.

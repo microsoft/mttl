@@ -180,6 +180,7 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
         KVAdapter.__init__(self, config, layer)
 
         self.config = config
+        self.layer = layer
         self.selector: KVSelector = selector or KVTaskNameSelector()
         self.selector.info_container = task_id_container
         self.info_container = task_id_container

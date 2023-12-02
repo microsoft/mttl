@@ -181,6 +181,10 @@ class KVTaskNameSelector(KVSelector):
 
     def get_kv_weights(self, experts, k_proj, v_proj):
         task_names = self.info_container["routing_infos"].task_names
+
+        if task_names is None:
+            task_names = [self.default_expert_name]
+
         if len(set(task_names)) == 1:
             # broadcast along batch dim if only 1 task
             adapter_k, adapter_v = experts[task_names[0]].get_kv_weights(k_proj, v_proj)
@@ -194,6 +198,10 @@ class KVTaskNameSelector(KVSelector):
 
     def get_gate(self, experts, adapter_weights):
         task_names = self.info_container["routing_infos"].task_names
+
+        if task_names is None:
+            task_names = [self.default_expert_name]
+
         if len(set(task_names)) == 1:
             # broadcast along batch dim if only 1 task
             out = experts[task_names[0]].get_gate(adapter_weights)
