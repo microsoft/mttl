@@ -248,6 +248,36 @@ class MultiExpertModel(ExpertTrainer):
         return generations
 
 
+class ToolExpertModel(ExpertTrainer):
+    def forward(self, batch, reduction="mean"):
+        input_ids, labels = batch["input_ids"], batch["labels"]
+
+        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
+
+        outputs = self.model.forward(input_ids, attention_mask=batch["attention_mask"])
+
+        # calculate loss, could also be done inside of the model
+        bs = input_ids.size(0)
+        logits = outputs.logits
+        vocab_size = logits.size(-1)
+        labels = labels.squeeze(-1)
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+
+        # Flatten the tokens
+        loss_fct = torch.nn.CrossEntropyLoss(reduction=reduction)
+        shift_logits = shift_logits.view(-1, vocab_size)
+        shift_labels = shift_labels.view(-1)
+
+        # Enable model parallelism
+        shift_labels = shift_labels.to(shift_logits.device)
+        loss = loss_fct(shift_logits, shift_labels)
+        return loss
+
+    def get_loss(self, batch, reduction="none"):
+        return self.forward(batch, reduction)
+
+
 class MultiExpertModelRanker(MultiExpertModel):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

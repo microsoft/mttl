@@ -74,7 +74,6 @@ class ClassificationDataModuleAdaUni(DefaultDataModule):
         ) = maybe_filter_hf_dataset_by_task(
             dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
         )
-
         if "split" in dataset.column_names["train"]:
             self.train_dataset = train_dataset.filter(
                 lambda x: x["split"] == "train",
@@ -82,7 +81,7 @@ class ClassificationDataModuleAdaUni(DefaultDataModule):
                 desc="Creating train set",
             )
             self.dev_dataset = train_dataset.filter(
-                lambda x: x["split"] == "validation",
+                lambda x: x["split"] in ["validation", "valid"],
                 num_proc=n_proc,
                 desc="Creating valid set",
             )
@@ -95,6 +94,7 @@ class ClassificationDataModuleAdaUni(DefaultDataModule):
             self.train_dataset, self.dev_dataset = self.create_train_valid_split(
                 train_dataset
             )
+        if len(self.test_dataset) == 0:
             self.test_dataset = self.dev_dataset
         self.print_infos()
 

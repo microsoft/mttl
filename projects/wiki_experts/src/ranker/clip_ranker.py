@@ -3,8 +3,9 @@ from sentence_transformers import SentenceTransformer
 from projects.wiki_experts.src.ranker.clip_data_module import (
     CLIPExpertsDatamodule,
     CLIPExpertsConfig,
+    CLIPTripleDataModule,
 )
-from projects.wiki_experts.src.config import ids_to_tasks_names
+from projects.wiki_experts.src.config import ids_to_tasks_names, ids_to_tasks_names_ada
 import torch
 import pytorch_lightning as pl
 import torch.nn as nn
@@ -37,10 +38,10 @@ class TextEncoder(nn.Module):
 
 
 class ExpertEncoder(nn.Module):
-    def __init__(self, expert_dim: int = 512):
+    def __init__(self, expert_dim: int = 512, expert_num: int = 246):
         super().__init__()
 
-        self.expert_embedding = nn.Embedding(246, expert_dim)
+        self.expert_embedding = nn.Embedding(expert_num, expert_dim)
         self.model = nn.Linear(expert_dim, expert_dim)
 
     def forward(self, expert_id):
@@ -73,11 +74,20 @@ class CLIPRanker(pl.LightningModule):
         temperature: float = 0.07,
         text_embedding_dim: int = 384,
         expert_embedding_dim: int = 512,
+        expert_num: int = 246,
     ):
         super().__init__()
 
         self.text_encoder = TextEncoder()
-        self.expert_encoder = ExpertEncoder()
+        self.expert_encoder = ExpertEncoder(
+            expert_dim=expert_embedding_dim,
+            expert_num=expert_num,
+        )
+
+        if expert_num == 246:
+            self.ids_to_tasks_names = ids_to_tasks_names
+        elif expert_num == 440:
+            self.ids_to_tasks_names = ids_to_tasks_names_ada
 
         self.text_projection = ProjectionHead(embedding_dim=384)
         self.expert_projection = ProjectionHead(embedding_dim=expert_embedding_dim)
@@ -108,10 +118,10 @@ class CLIPRanker(pl.LightningModule):
         self,
     ):
         expert_embeddings = []
-        # we only need a 246 x 512 matrix for the expert embeddings
+        # we only need a num_experts x dimension matrix for the expert embeddings
         with torch.no_grad():
             expert_features = self.expert_encoder(
-                torch.tensor(list(ids_to_tasks_names.keys())).to(device)
+                torch.tensor(list(self.ids_to_tasks_names.keys())).to(device)
             )
             expert_embeddings.append(self.expert_projection(expert_features))
             return torch.cat(expert_embeddings)
@@ -133,7 +143,7 @@ class CLIPRanker(pl.LightningModule):
 
         values, indices = torch.topk(dot_similarity.squeeze(0), n)
         # now we only selet the top n experts
-        matches = [ids_to_tasks_names[idx[0].item()] for idx in indices]
+        matches = [self.ids_to_tasks_names[idx[0].item()] for idx in indices]
 
         return matches
 
@@ -156,20 +166,111 @@ class CLIPRanker(pl.LightningModule):
         return optimizer
 
 
-if __name__ == "__main__":
-    model = CLIPRanker()
-    model.to(device)
+class CLIPTripletRanker(CLIPRanker):
+    def __init__(
+        self,
+        temperature: float = 0.07,
+        text_embedding_dim: int = 384,
+        expert_embedding_dim: int = 512,
+        expert_num: int = 246,
+    ):
+        super().__init__(
+            temperature=temperature,
+            text_embedding_dim=text_embedding_dim,
+            expert_embedding_dim=expert_embedding_dim,
+            expert_num=expert_num,
+        )
 
-    model.load_state_dict(torch.load(os.environ["CLIP_CKPT"])["state_dict"])
+    def forward(self, batch):
+        # gettng the text features , positive, negatve expert
+        text_features = self.text_encoder(batch["input_texts"])
+        positive_expert_features = self.expert_encoder(
+            batch["positive_expert_id"].to(device)
+        )
+        negative_expert_features = self.expert_encoder(
+            batch["negative_expert_id"].to(device)
+        )
+
+        # Getting the expert and text embeddings with the same dimension
+        text_embeddings = self.text_projection(text_features)
+        positive_expert_embeddings = self.expert_projection(positive_expert_features)
+        negative_expert_embeddings = self.expert_projection(negative_expert_features)
+
+        # # l2 normalize the embeddings
+        text_embeddings = F.normalize(text_embeddings, dim=-1)
+        positive_expert_embeddings = F.normalize(positive_expert_embeddings, dim=-1)
+        negative_expert_embeddings = F.normalize(negative_expert_embeddings, dim=-1)
+
+        # Compute distances (positive and negative scores)
+        positive_score = torch.mean(
+            torch.nn.functional.pairwise_distance(
+                text_embeddings, positive_expert_embeddings, p=2
+            )
+        )
+        negative_score = torch.mean(
+            torch.nn.functional.pairwise_distance(
+                text_embeddings, negative_expert_embeddings, p=2
+            )
+        )
+
+        # calculate tripled loss
+        loss = nn.TripletMarginLoss(margin=1.0)(
+            text_embeddings, positive_expert_embeddings, negative_expert_embeddings
+        )
+
+        # log positive score and negative score
+        self.log(
+            "train/positive_score",
+            positive_score,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "train/negative_score",
+            negative_score,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+
+        return loss
+
+
+if __name__ == "__main__":
+    # model = CLIPRanker()
+    # model.to(device)
+
+    # model.load_state_dict(torch.load(os.environ["CLIP_CKPT"])["state_dict"])
+
+    # # test the model
+    # dataconfig = CLIPExpertsConfig(model="EleutherAI/gpt-neo-125m")
+    # dm = CLIPExpertsDatamodule(dataconfig)
+
+    # # get the expert embeddings
+    # expert_embeddings = model.get_expert_embeddings()
+    # print(expert_embeddings.shape)
+    # # get the top 5 experts for each example in the test set
+    # for batch in dm.test_dataloader(subsample=10):
+    #     print(model.predict_experts_using_clip(batch, expert_embeddings))
+    #     break
+
+    model = CLIPTripletRanker(expert_num=440)
+    model.to(device)
 
     # test the model
     dataconfig = CLIPExpertsConfig(model="EleutherAI/gpt-neo-125m")
-    dm = CLIPExpertsDatamodule(dataconfig)
+    dm = CLIPTripleDataModule(dataconfig)
+
+    # test forward
+    for batch in dm.val_dataloader(subsample=10):
+        print(model.forward(batch))
+        break
 
     # get the expert embeddings
     expert_embeddings = model.get_expert_embeddings()
     print(expert_embeddings.shape)
     # get the top 5 experts for each example in the test set
-    for batch in dm.test_dataloader(subsample=10):
+    for batch in dm.val_dataloader(subsample=10):
         print(model.predict_experts_using_clip(batch, expert_embeddings))
         break
