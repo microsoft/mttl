@@ -9,7 +9,7 @@ from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.src.expert_model import (
     RoutedMultiExpertModel,
 )
-from mttl.models.modifiers.expert_containers.module_graph import Expert
+from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
 from mttl.models.modifiers.expert_containers import LoRAExpertContainer
 from mttl.models.modifiers.lora import LoRA
 from conftest import make_tiny_llama
@@ -32,26 +32,29 @@ def tmp_exp_config(tmp_path):
 
 
 class TestRoutedMultiExpertModel:
-    def create_dummy_expert(self, config: ExpertConfig, exp_name):
-        # create random Lora
+    def create_dummy_expert(self, config: ExpertConfig, exp_name) -> Expert:
+        model_object = make_tiny_llama()
         exp_trainer = ExpertTrainer(
-            model_object=make_tiny_llama(),
             tokenizer=None,
+            expert_info={},
             **vars(config),
+            model_object=model_object,
         )
-        dir = str(config.output_dir / exp_name)
+        dir = f"{config.output_dir}/{exp_name}"
         os.makedirs(dir, exist_ok=True)
         checkpoint = exp_trainer.save_pretrained(dir)
-        return checkpoint
+        expert = load_expert(checkpoint, exp_name)
+        expert.expert_info.expert_name = exp_name
+        return expert
 
     def test_expert_selector_with_task_name_routing(self, tmp_exp_config):
         seed_everything(0)
         config: Config = tmp_exp_config
 
         config.router_selector = "task_selector"
-        exp1_dest = self.create_dummy_expert(config, "exp1")
-        exp2_dest = self.create_dummy_expert(config, "exp2")
-        module_dict = {"mod1": exp1_dest, "mod2": exp2_dest, "default": exp1_dest}
+        exp1 = self.create_dummy_expert(config, "exp1")
+        exp2 = self.create_dummy_expert(config, "exp2")
+        module_dict = {"mod1": exp1, "mod2": exp2, "default": exp1}
 
         module = RoutedMultiExpertModel(
             model_object=make_tiny_llama(),

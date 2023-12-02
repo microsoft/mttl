@@ -73,13 +73,7 @@ def increase_ai(s):
         return f"{name}_v{ai+1}"
 
 
-class ParallelEvolutionConfig(EvolExpertConfig):
-    def _set_defaults(self):
-        super()._set_defaults()
-        self.to_repo_id: str = None
-
-
-def setup(args: ParallelEvolutionConfig):
+def setup(args: EvolExpertConfig):
     seed_everything(args.seed, workers=True)
     setup_logging(args.output_dir)
     args.n_active_iterations = 1
@@ -124,7 +118,7 @@ def setup(args: ParallelEvolutionConfig):
     return exper_state, tasks
 
 
-def main(args: ParallelEvolutionConfig):
+def main(args: EvolExpertConfig):
     exper_state, tasks = setup(args)
     tablelogger, expert_lib, iterations_run = (
         exper_state.state.results_table,
@@ -143,12 +137,12 @@ def main(args: ParallelEvolutionConfig):
         tablelogger.log_table_wandb()
 
     # save the expert lib, send updates to remote
-    remote_lib = HFExpertLibrary.to_hf(
+    remote_lib = HFExpertLibrary.from_local(
         expert_lib, args.to_repo_id, force=True, upload_aux_data=True, only_tasks=tasks
     )
     logger.info(f"Done, saving to repo {args.to_repo_id}")
 
 
 if __name__ == "__main__":
-    args = ParallelEvolutionConfig.parse()
+    args = EvolExpertConfig.parse()
     main(args)

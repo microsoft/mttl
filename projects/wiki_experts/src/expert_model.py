@@ -90,8 +90,7 @@ class MultiExpertModel(ExpertTrainer):
             self.model = add_expert_to_transformer(
                 self.model,
                 module_name,
-                module_data.expert_config,
-                module_data.expert_weights,
+                module_data,
                 action=action,
                 is_default=module_name == "default",
                 config=self.hparams,
@@ -135,8 +134,7 @@ class MultiExpertModel(ExpertTrainer):
         self.model = add_expert_to_transformer(
             self.model,
             expert_name,
-            expert_instance.expert_config,
-            expert_instance.expert_weights,
+            expert_instance,
             action=action,
             is_default=expert_name == "default",
         )
@@ -175,8 +173,7 @@ class MultiExpertModel(ExpertTrainer):
         self.model = add_expert_to_transformer(
             self.model,
             expert_name,
-            expert.expert_config,
-            expert.expert_weights,
+            expert,
             action=action,
             is_default=is_default,
             load_only_layers=load_only_layers,
@@ -320,8 +317,7 @@ class RoutedMultiExpertModel(MultiExpertModel):
         self.model = add_expert_to_transformer(
             self.model,
             expert_name,
-            expert.expert_config,
-            expert.expert_weights,
+            expert,
             action=action,
             is_default=is_default,
             load_only_layers=load_only_layers,
@@ -338,8 +334,7 @@ class RoutedMultiExpertModel(MultiExpertModel):
             self.model = add_expert_to_transformer(
                 self.model,
                 module_name,
-                module_data.expert_config,
-                module_data.expert_weights,
+                module_data,
                 action=action,
                 is_default=module_name == "default",
                 selectors=self.selectors,
@@ -357,8 +352,7 @@ class RoutedMultiExpertModel(MultiExpertModel):
         self.model = add_expert_to_transformer(
             self.model,
             expert_name,
-            expert_instance.expert_config,
-            expert_instance.expert_weights,
+            expert_instance,
             action=action,
             is_default=expert_name == "default",
             selectors=self.selectors,

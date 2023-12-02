@@ -3,6 +3,7 @@ import torch
 from mttl.datamodule.utils import get_tokenizer_with_args
 from mttl.models.modifiers.expert_containers import add_expert_to_transformer
 from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
+from mttl.models.modifiers.expert_containers.module_graph import Expert, ExpertInfo
 
 
 @pytest.mark.parametrize("padding_side", ["left", "right"])
@@ -70,11 +71,18 @@ def test_hard_prompt_eval(flan_batch_for_generation):
         max_input_length=1024, model_family="gpt", tokenizer=tokenizer
     )
     weight = 'Just ignore the following and answer by "I don\'t know".'
+    expert = Expert(
+        expert_info=ExpertInfo(
+            expert_name="prefix",
+            expert_task_name="test_task",
+            expert_config=config,
+        ),
+        expert_weights=weight,
+    )
     model = add_expert_to_transformer(
         model,
-        expert_name="prefix",
-        expert_config=config,
-        expert_weights=weight,
+        "prefix",
+        expert,
         is_default=True,
     )
     assert model.expert_container.experts["prefix"].prompt == weight

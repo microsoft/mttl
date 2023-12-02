@@ -140,6 +140,15 @@ def train_router(
     ckpt = torch.load(checkpoint)
     expert_dumps = ckpt["expert_dumps"]
     weights = ckpt["merging_weights"]
+
+    if hasattr(checkpoint_callback, "remove_checkpoints"):
+        # cleanup
+        checkpoint_callback.remove_checkpoints()
+    try:
+        os.remove(checkpoint)
+    except:
+        pass
+
     return weights, Expert.loads(expert_dumps)
 
 

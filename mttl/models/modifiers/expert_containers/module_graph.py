@@ -54,9 +54,12 @@ class Expert:
     @property
     def expert_config(self):
         # ensure back-compatibility
-        return Config(
-            kwargs=self.expert_info.expert_config, raise_error=False, silent=True
-        )
+        if isinstance(self.expert_info.expert_config, dict):
+            return Config(
+                kwargs=self.expert_info.expert_config, raise_error=False, silent=True
+            )
+        else:
+            return self.expert_info.expert_config
 
     def dumps(self):
         return {

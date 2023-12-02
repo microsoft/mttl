@@ -8,6 +8,7 @@ from mttl.models.modifiers.lora import LoRA, SkilledLoRA
 from mttl.models.modifiers.kv_adapter import KVAdapter
 from mttl.models.modifiers.expert_containers.selectors import *
 from mttl.utils import logger
+from mttl.models.modifiers.expert_containers.module_graph import Expert
 
 
 class ExpertContainer:
@@ -26,9 +27,9 @@ class ExpertContainer:
     def forward(self, input, **kwargs):
         pass
 
-    def add_expert_to_selector(self, expert_name: str):
+    def add_expert_to_selector(self, expert_name: str, **kwargs):
         if expert_name in self.experts:
-            self.selector.add_expert(expert_name)
+            self.selector.add_expert(expert_name, **kwargs)
             self.selector.default_expert_name = self.default_expert_name
 
     def __getitem__(self, key):
@@ -36,6 +37,14 @@ class ExpertContainer:
 
     def __len__(self):
         return len(self.experts)
+
+    def filter_expert_weights(self, expert_weights):
+        # subset the relevant expert weights starting w __layer_name__
+        return {
+            k.replace(self.__layer_name__ + ".", ""): v
+            for k, v in expert_weights.items()
+            if k.startswith(self.__layer_name__)
+        }
 
 
 class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
@@ -60,12 +69,15 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
 
     def add_expert(
         self,
-        name: str,
-        expert_config: Any,
-        expert_weights: Dict[str, torch.Tensor],
+        name,
+        expert: Expert,
         action="merge",
         is_default=False,
     ) -> None:
+        expert_config = expert.expert_config
+        expert_task_name = expert.expert_info.expert_task_name
+        expert_weights = self.filter_expert_weights(expert.expert_weights)
+
         if name in self.experts:
             raise ValueError("An expert with name {} already exists.".format(name))
 
@@ -97,7 +109,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         if is_default:
             self.default_expert_name = name
 
-        self.add_expert_to_selector(name)
+        self.add_expert_to_selector(name, expert_task_name=expert_task_name)
 
     def get_merged_weights(self, weights=None, with_global_names=True):
         """
@@ -229,12 +241,15 @@ class KVExpertContainer(ExpertContainer, KVAdapter):
 
     def add_expert(
         self,
-        name: str,
-        expert_config: Any,
-        expert_weights: Dict[str, torch.Tensor],
+        name,
+        expert: Expert,
         action="route",
         is_default=False,
+        **kwargs,
     ) -> None:
+        expert_config = expert.expert_config
+        expert_weights = self.filter_expert_weights(expert.expert_weights)
+
         if name in self.experts:
             raise ValueError("An expert with name {} already exists.".format(name))
 

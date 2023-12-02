@@ -11,6 +11,7 @@ from matplotlib import pyplot as plt
 from huggingface_hub import login
 from tempfile import TemporaryDirectory
 from pytorch_lightning import seed_everything
+from huggingface_hub import create_repo, login, HfApi
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
@@ -22,6 +23,7 @@ from projects.wiki_experts.src.evolution.utils import (
 
 from mttl.models.modifiers.expert_containers.expert_library import (
     get_best_expert_for_task,
+    get_best_expert_for_score,
     LocalExpertLibrary,
     HFExpertLibrary,
     ExpertLibrary,
@@ -233,12 +235,12 @@ def setup(args: EvolExpertConfig):
     seed_everything(args.seed, workers=True)
     setup_logging(args.output_dir)
     global wandb_logger
+    wandb_logger = init_wandb_logger(args)
     if DEBUG:
         global temp_dir
         temp_dir = TemporaryDirectory(dir=args.output_dir + "/")
         local_lib_location = temp_dir.name
     else:
-        wandb_logger = init_wandb_logger(args)
         local_lib_location = os.path.join(args.output_dir, args.hf_repo_id)
 
     if args.hf_token_hub:
@@ -379,6 +381,7 @@ def retrieve_experts_for_task(
             list(expert_lib_copy.keys()), metric
         )
     )
+    logger.disabled = False
     return expert_lib_copy
 
 
@@ -409,7 +412,9 @@ def active_task_iteration(
         )
 
     assert task in expert_lib.tasks
-    parent_exp: Expert = get_best_expert_for_task(expert_lib, task, default_score.hash)
+    parent_exp: Expert = get_best_expert_for_score(expert_lib, default_score.hash)
+    if parent_exp is None:
+        parent_exp = get_best_expert_for_task(expert_lib, task, default_score.hash)
     base_perf = {
         "train": expert_lib.get_score(
             expert_name=parent_exp.name,
@@ -543,7 +548,7 @@ def active_task_iteration(
         optimal_expert.expert_info,
         expert_name=increase_version(parent_exp.name),
     )
-
+    optimal_expert.expert_info.expert_task_name = task
     logger.info(
         f"{log_prefix} Scores on of {task} :{log_row[f'{args.eval_metric}_test_selected']}"
     )
@@ -671,7 +676,31 @@ def main(args: EvolExpertConfig):
             tablelogger.log(log_row)
             tablelogger.log_table_wandb()
             exper_state.update(active_iteration=a_i)
-            exper_state.save()
+            logger.disabled = False
+            # exper_state.save()
+
+        # send updates to remote
+        if args.upload_lib_to_hub:
+            token = os.environ.get("HF_TOKEN", args.hf_token_hub)
+            login(token=token)
+            user_name = HfApi().whoami(token=token)["name"]
+
+            run_name: str = os.getenv("AMLT_JOB_NAME", "_test_evol")
+            # if args.to_repo_id is None:
+            #     args.to_repo_id = args.hf_repo_id + run_name
+            to_repo_id = user_name + "/" + run_name
+            create_repo(to_repo_id, token=token, exist_ok=True)
+            try:
+                remote_lib = HFExpertLibrary.from_local(
+                    expert_lib,
+                    to_repo_id,
+                    force=True,
+                    upload_aux_data=True,
+                    only_tasks=tasks,
+                )
+                logger.info(f"Done, saving to repo {to_repo_id}")
+            except Exception as e:
+                logger.info(f"Saving to repo {to_repo_id} failed with {e}")
 
 
 if __name__ == "__main__":

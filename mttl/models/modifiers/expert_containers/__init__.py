@@ -5,6 +5,7 @@ from mttl.models.modifiers.expert_containers.selectors import *
 from mttl.models.modifiers.expert_containers.expert_containers import *
 from mttl.models.modifiers.kv_adapter import KVAdapter
 from mttl.utils import logger
+from mttl.models.modifiers.expert_containers.module_graph import Expert
 
 
 def get_selector(config: Config, **kwargs):
@@ -68,14 +69,21 @@ def add_expert_library_to_transformer(
 def add_expert_to_transformer(
     transformer,
     expert_name,
-    expert_config,
-    expert_weights,
+    expert: Expert,
     action="route",
     is_default=False,
     load_only_layers=None,
     selectors={},
     config=None,
 ):
+    """
+    Params:
+        transformer: the transformer model to modify
+        Config: the config of the model to which the expert is added
+    """
+
+    expert_config = expert.expert_config
+
     from mttl.models.modifiers.modify_model import get_modifier_type
     from mttl.models.modifiers.expert_containers.hard_prompts_container import (
         add_hard_prompt_to_transformer,
@@ -91,8 +99,7 @@ def add_expert_to_transformer(
         return add_hard_prompt_to_transformer(
             transformer,
             expert_name,
-            expert_config,
-            expert_weights,
+            expert,
             action=action,
             is_default=is_default,
             selectors=selectors,
@@ -142,13 +149,6 @@ def add_expert_to_transformer(
                     else:
                         expert_container = layer
 
-                    # subset the relevant expert weights starting w __layer_name__
-                    subset_expert_weights = {
-                        k.replace(expert_container.__layer_name__ + ".", ""): v
-                        for k, v in expert_weights.items()
-                        if k.startswith(expert_container.__layer_name__)
-                    }
-
                     if load_only_layers:
                         layer_num = int(expert_container.__layer_name__.split(".")[2])
 
@@ -166,8 +166,7 @@ def add_expert_to_transformer(
                     added_layers.append(expert_container.__layer_name__)
                     expert_container.add_expert(
                         expert_name,
-                        expert_config,
-                        subset_expert_weights,
+                        expert,
                         action=action,
                         is_default=is_default,
                     )

@@ -14,6 +14,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 from mttl.models.modifiers.expert_containers.expert_library import (
     ExpertLibrary,
     HFExpertLibrary,
+    LocalExpertLibrary,
 )
 
 # from projects.wiki_experts.src.evolution.evolving_expert_library import (
@@ -155,9 +156,8 @@ def run_eval(args: EvolExpertConfig):
 
     print("###### Tasks", args.finetune_task_name)
     # can work with other library types as well, but need to implement clone and filter_with_tasks
-    expert_lib: ExpertLibrary = EvolvingHFExpertLibrary(
-        repo_id=args.hf_repo_id, model_name=args.model, keep_local=True
-    )
+
+    expert_lib: ExpertLibrary = HFExpertLibrary(repo_id=args.hf_repo_id)
     expert_lib = expert_lib.clone()
     expert_lib.filter_with_tasks(args.finetune_task_name)
     assert len(expert_lib) <= len(args.finetune_task_name) + 1

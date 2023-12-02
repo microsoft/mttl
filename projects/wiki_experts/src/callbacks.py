@@ -113,6 +113,10 @@ class RougeLCallback(cb.Callback):
             on_step=on_step,
         )
 
+    def remove_checkpoints(self):
+        if self._prev_checkpoint is not None and os.path.exists(self._prev_checkpoint):
+            os.remove(self._prev_checkpoint)
+
 
 class ValLossCheckpointCallback(cb.Callback):
     def __init__(self, args: ExpertConfig) -> None:

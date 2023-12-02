@@ -253,7 +253,7 @@ class SkilledLoRA(LoRA):
         # loras -- list of loras per example
         # weights -- list of weights for parallel loras
         weights = torch.stack(weights, dim=0)
-        if weights.shape[-1] == 1:
+        if weights.shape[-1] == 1 and len(loras) == input.shape[0]:
             loras = [lora[0] for lora in loras]
             return LoRA.parallel_linear_forward(input, loras)
 

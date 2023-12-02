@@ -48,6 +48,7 @@ class EvolExpertConfig(ExpertConfig):
         self.sk = -1
         self.retrieve_with = "lora_sim"  # random, lora_sim, loss, rougeL
         self.upload_lib_to_hub = False
+        self.to_repo_id: str = None
 
     def post_init(self):
         super().post_init()
@@ -57,3 +58,17 @@ class EvolExpertConfig(ExpertConfig):
                 self.finetune_task_name,
                 self.finetune_task_name,
             )
+
+    @property
+    def __key(self):
+        return (
+            self.eval_metric,
+            self.retrieve_with,
+            self.sk,
+            self.finetune_task_name,
+            self.evol_expert_routing,
+        )
+
+    @property
+    def hash(self):
+        return str.join("_", map(str, self.__key))
