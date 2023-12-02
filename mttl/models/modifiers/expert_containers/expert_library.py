@@ -714,14 +714,37 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
 
 class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
     @classmethod
-    def from_local(
-        cls, local_lib: LocalExpertLibrary, repo_id, model_name=None, selection=None
+    def to_hf(
+        cls,
+        local_lib: LocalExpertLibrary,
+        repo_id,
+        force=False,
+        upload_aux_data=False,
+        only_tasks=None,
     ):
-        new_lib = HFExpertLibrary(
-            repo_id=repo_id, model_name=model_name, selection=selection, create=True
-        )
+        new_lib = HFExpertLibrary(repo_id=repo_id, create=True)
+
+        only_tasks = only_tasks or local_lib.tasks
         for name, expert in local_lib.items():
-            new_lib.add_expert(expert, name)
+            # upload modules that are not in the target repo + only upload modules for the specified tasks
+            if (
+                expert.expert_info.expert_task_name not in only_tasks
+                and expert.name in new_lib
+            ):
+                continue
+            new_lib.add_expert(expert, name, force=force)
+        # also update the scores
+        if upload_aux_data:
+            scores = local_lib.get_auxiliary_data(data_type="scores")
+            for expert_name, expert_scores in scores.items():
+                for score in expert_scores.values():
+                    try:
+                        new_lib.add_score(expert_name, Score(**score))
+                    except ValueError as e:
+                        logger.error(e)
+                        continue
+
+            # TODO: upload the embeddings
 
         return new_lib
 
