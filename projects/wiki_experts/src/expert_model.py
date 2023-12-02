@@ -386,7 +386,21 @@ class RoutedMultiExpertModel(MultiExpertModel):
 
     def to_expert(self, weights: dict = None, with_global_names=True) -> Expert:
         """
-        Merges current experts together according to weights if given, otherwise uses router's weights
+        Converts the current expert model into an instance of the Expert class.
+
+        Args:
+            weights (dict, optional): A dictionary of weights to merge the experts. If not provided, the router's weights will be used.
+            with_global_names (bool, optional): Whether to include global names in the merged weights. Defaults to True.
+
+        Returns:
+            Expert: An instance of the Expert class.
+
+        Raises:
+            None
+
+        Example:
+            model = ExpertModel()
+            expert = model.to_expert(weights={'expert1': 0.5, 'expert2': 0.5}, with_global_names=True)
         """
         expert_weights = {}
         for _, module in self.model.named_modules():
