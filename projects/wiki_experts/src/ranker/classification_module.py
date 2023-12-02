@@ -1,16 +1,10 @@
 import torch
 from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
-from projects.wiki_experts.src.config import (
-    tasks_names_to_ids,
-    tasks_names_to_ids_ada,
-)
 from dataclasses import dataclass
 from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from datasets import load_dataset
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 import os
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 @dataclass
@@ -24,33 +18,18 @@ class DataCollatorForClassification:
         # change the tasks_names to tasks_ids
         inputs = [b["source"] for b in batch]
         targets = [b["target"] for b in batch]
+        task_name = [b["task_name"] for b in batch]
 
-        tasks_ids = [tasks_names_to_ids[b["task_name"]] for b in batch]
         return {
             "input": inputs,
             "target": targets,
-            "label": torch.tensor(tasks_ids),
+            "task_name": task_name,
         }
 
 
 @dataclass
-class ClassificationAdaUniConfig(DatasetConfig):
+class ClassificationFlatMutiTaskConfig(DatasetConfig):
     pass
-
-
-@dataclass
-class DataCollatorForClassificationAdaUni:
-    def __call__(self, batch):
-        # change the tasks_names to tasks_ids
-        inputs = [b["source"] for b in batch]
-        targets = [b["target"] for b in batch]
-
-        tasks_ids = [tasks_names_to_ids_ada[b["task_name"]] for b in batch]
-        return {
-            "input": inputs,
-            "target": targets,
-            "label": torch.tensor(tasks_ids),
-        }
 
 
 class ClassificationDataModule(FlanModule):
@@ -60,7 +39,7 @@ class ClassificationDataModule(FlanModule):
         return DataCollatorForClassification()
 
 
-class ClassificationDataModuleAdaUni(DefaultDataModule):
+class ClassificationDataModuleFlatMultiTask(DefaultDataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("ADAUNI_NUM_PROC_DATASETS", 16))
         dataset = load_dataset(self.config.dataset)
@@ -101,4 +80,4 @@ class ClassificationDataModuleAdaUni(DefaultDataModule):
     @property
     def collate_fn(self):
         # change the tasks_names to tasks_ids
-        return DataCollatorForClassificationAdaUni()
+        return DataCollatorForClassification()

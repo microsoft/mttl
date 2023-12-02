@@ -2,11 +2,12 @@
 from projects.wiki_experts.src.ranker.classification_module import (
     ClassificationDataModule,
     ClassificationConfig,
-    ClassificationDataModuleAdaUni,
-    ClassificationAdaUniConfig,
+    ClassificationDataModuleFlatMultiTask,
 )
 from projects.wiki_experts.src.config import ids_to_tasks_names, ids_to_tasks_names_ada
-from projects.wiki_experts.src.ranker.classifier_ranker import Classifier
+from projects.wiki_experts.src.ranker.classifier_ranker import (
+    SentenceTransformerClassifier,
+)
 from projects.wiki_experts.src.ranker.clip_ranker import CLIPRanker
 from sentence_transformers import SentenceTransformer
 from huggingface_hub import hf_hub_download
@@ -71,12 +72,12 @@ class ExpertRanker:
             )
             datamodule = ClassificationDataModule(classifier_config)
         elif "adauni" in dataset:
-            classifier_config = ClassificationAdaUniConfig(
+            classifier_config = ClassificationConfig(
                 dataset=dataset,
                 model=model,
                 finetune_task_name=fine_tune_task_name,
             )
-            datamodule = ClassificationDataModuleAdaUni(classifier_config)
+            datamodule = ClassificationDataModuleFlatMultiTask(classifier_config)
 
         classifier = self.get_classifier()
         classifier.load_state_dict(torch.load(self.classifier_ckpt)["state_dict"])
@@ -202,11 +203,11 @@ class ExpertRanker:
         classifier.load_state_dict(torch.load(self.classifier_ckpt)["state_dict"])
 
         # load some examples from test dataset
-        classifier_config = ClassificationAdaUniConfig(
+        classifier_config = ClassificationConfig(
             dataset="adauni",
             model="EleutherAI/gpt-neo-125m",
         )
-        datamodule = ClassificationDataModuleAdaUni(classifier_config)
+        datamodule = ClassificationDataModuleFlatMultiTask(classifier_config)
         datamodule.setup("test")
         test_dataloader = datamodule.test_dataloader()
         for batch in test_dataloader:
@@ -217,8 +218,10 @@ if __name__ == "__main__":
     config = ExpertConfig.parse()
     expert_ranker = ExpertRanker(config.num_labels, config.classifier_repo_id)
 
-    # classifier = expert_ranker.get_classifier()
-    # classifier.load_state_dict(torch.load(expert_ranker.classifier_ckpt)["state_dict"])
+    classifier = expert_ranker.get_classifier()
+    classifier.load_state_dict(torch.load(expert_ranker.classifier_ckpt)["state_dict"])
+    breakpoint()
+    print(classifier)
     # input_text = (
     #     "if a horse at 2 years old has 3 legs, how many legs it has at 10 years old?"
     # )
@@ -232,4 +235,4 @@ if __name__ == "__main__":
     # print(expert_prediction)
     # expert_ranker.compute_expert_similarity()
     # expert_ranker.get_predict_retrieval()
-    expert_ranker.test_accuracy(config.dataset, config.model, config.finetune_task_name)
+    # expert_ranker.test_accuracy(config.dataset, config.model, config.finetune_task_name)
