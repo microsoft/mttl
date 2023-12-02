@@ -11,6 +11,7 @@ from einops import rearrange, repeat
 from mttl.models.modifiers.base import Adapter, ModifierConfig, ModifyMixin
 from mttl.models.modifiers.poly import PolytroponConfig
 from mttl.models.modifiers.base import ModifyMixin, ModifierConfig
+import types
 
 # from mttl.models.modifiers.experts import Router
 
@@ -59,12 +60,17 @@ class KVAdapter(Adapter, ModifyMixin):
         self.learn_kv = config.soft_prompt_learn_kv
         self.soft_prompt_length = config.soft_prompt_length
         self.soft_prompt_learn_kv = config.soft_prompt_learn_kv
+        funcType = types.MethodType
 
         if "gpt-neo" in config.model:
-            self.attn_fwd = gpt_neo_self_attention
+            self.attn_layer.forward = funcType(
+                partial(gpt_neo_self_attention, adapter=self), self.attn_layer
+            )
             attn_layer.hidden_size = attn_layer.embed_dim
         elif "llama" in config.model:
-            self.attn_fwd = llama_self_attention
+            self.attn_layer.forward = funcType(
+                partial(llama_self_attention, adapter=self), self.attn_layer
+            )
             assert (
                 attn_layer.num_heads == attn_layer.num_key_value_heads
             ), "which to pick for gate?"
@@ -120,7 +126,7 @@ class KVAdapter(Adapter, ModifyMixin):
 
     def forward(self, *args, **kwargs):
         # This Should Wrap at the SelfAttentionLevel, so behaves as such
-        return self.attn_layer(*args, **kwargs)
+        return self.attn_layer.forward(*args, **kwargs)
 
     def get_kv_weights(self, k_proj, v_proj):
         """(1) Computes the key and value pairs to be used for augmented attention"""
@@ -178,8 +184,8 @@ def type_safe_linear(input, linear_layer):
 
 def llama_self_attention(
     self,
-    adapter: KVAdapter,
     hidden_states: torch.Tensor,
+    adapter: KVAdapter = None,
     attention_mask: Optional[torch.Tensor] = None,
     position_ids: Optional[torch.LongTensor] = None,
     past_key_value: Optional[Tuple[torch.Tensor]] = None,
@@ -284,8 +290,8 @@ def llama_self_attention(
 
 def gpt_neo_self_attention(
     self,
-    adapter: KVAdapter,
     hidden_states,
+    adapter: KVAdapter = None,
     attention_mask=None,
     layer_past=None,
     head_mask=None,
