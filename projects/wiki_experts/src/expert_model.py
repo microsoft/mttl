@@ -181,6 +181,29 @@ class MultiExpertModel(ExpertTrainer):
         if action != "merge":
             self.experts.append(expert_name)
 
+    def get_task_embeddings(self):
+        """
+        Retrieves the task embeddings for the loaded experts.
+
+        This method assumes that the names of the loaded experts correspond to the tasks they are made for.
+
+        Returns:
+        embeddings (dict): A dictionary containing the task embeddings for each expert.
+                           The keys are the expert names and the values are the corresponding embeddings.
+        """
+        if len(self.experts) == 0:
+            return self.extract_task_embeddings_lora()
+        embeddings = {}
+        for exp_name in self.experts.keys():
+            embeddings[exp_name] = (
+                self.extract_task_embeddings_lora(
+                    p_name_pattern=rf".*{exp_name}\..*lora.*"
+                )
+                .detach()
+                .cpu()
+            )
+        return embeddings
+
     def forward(self, batch, reduction="mean"):
         return super().forward(batch, reduction)
 
