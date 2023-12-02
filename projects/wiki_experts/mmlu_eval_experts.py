@@ -103,7 +103,6 @@ def run_eval(args):
 
     mmlu = MMLUEvaluator(
         args,
-        split=args.mmlu_test_split,
     )
     module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
 
@@ -115,7 +114,7 @@ def run_eval(args):
         module.load_from_graph_string(args.module_graph)
 
     module.to("cuda")
-    scores = mmlu.evaluate(module, subsample)
+    scores = mmlu.evaluate(module, split=args.mmlu_test_split, subsample=subsample)
 
     with open(args.output_dir + "/mmlu.json", "w") as f:
         import json
