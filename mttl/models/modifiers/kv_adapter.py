@@ -134,7 +134,7 @@ class KVAdapter(Adapter, ModifyMixin):
         out_shp = (
             1,
             self.soft_prompt_length,
-            self.attn_layer.n_head,
+            self.attn_layer.num_heads,
             self.attn_layer.head_dim,
         )
         adapter_k = adapter_k.view(*out_shp).transpose(1, 2)
