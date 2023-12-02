@@ -129,7 +129,7 @@ class KVAdapter(Adapter, ModifyMixin):
             adapter_k, adapter_v = self.adapter_query.weight.chunk(2, dim=-1)
         else:
             adapter_k = type_safe_linear(self.adapter_query.weight, k_proj)
-            adapter_v = type_safe_linear(self.adapter_query.weight, k_proj)
+            adapter_v = type_safe_linear(self.adapter_query.weight, v_proj)
 
         out_shp = (
             1,
