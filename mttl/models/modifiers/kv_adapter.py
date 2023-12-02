@@ -139,7 +139,6 @@ class KVAdapter(Adapter, ModifyMixin):
         )
         adapter_k = adapter_k.view(*out_shp).transpose(1, 2)
         adapter_v = adapter_v.view(*out_shp).transpose(1, 2)
-
         return adapter_k, adapter_v
 
     def get_gate(self, adapter_weights):
