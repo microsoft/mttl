@@ -93,7 +93,7 @@ class KVAdapter(Adapter, ModifyMixin):
 
             assert self.soft_prompt_learn_kv, "phi only supports soft prompt kv"
             attn_layer.k_proj = attn_layer.v_proj = None
-            self.num_heads = attn_layer.n_head
+            attn_layer.num_heads = attn_layer.n_head
             attn_layer.hidden_size = attn_layer.out_proj.weight.shape[0]
         else:
             raise ValueError(f"{config.model} not supported for now.")
@@ -103,7 +103,7 @@ class KVAdapter(Adapter, ModifyMixin):
     def create_for_layer(self, attn_layer):
         # create the gate, and embeddings here
         self.adapter_gate = torch.nn.Parameter(
-            torch.zeros(1, attn_layer.n_head, 1, 1),
+            torch.zeros(1, attn_layer.num_heads, 1, 1),
         )
 
         if self.soft_prompt_learn_kv:
