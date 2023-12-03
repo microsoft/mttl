@@ -194,7 +194,7 @@ class MultiExpertModel(ExpertTrainer):
         if len(self.experts) == 0:
             return self.extract_task_embeddings_lora()
         embeddings = {}
-        for exp_name in self.experts.keys():
+        for exp_name in self.experts:
             embeddings[exp_name] = (
                 self.extract_task_embeddings_lora(
                     p_name_pattern=rf".*{exp_name}\..*lora.*"
