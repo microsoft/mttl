@@ -128,6 +128,11 @@ class FlatMultiTaskModule(DefaultDataModule):
         if len(self.test_dataset) == 0:
             self.test_dataset = self.dev_dataset
 
+        # Wrap the datasets to also return the task_id
+        self.train_dataset = task_id_dataset(self.train_dataset, self._task_to_id)
+        self.dev_dataset = task_id_dataset(self.dev_dataset, self._task_to_id)
+        self.test_dataset = task_id_dataset(self.test_dataset, self._task_to_id)
+
         self.print_infos()
 
 
