@@ -35,6 +35,12 @@ from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.vllm_engines.engines import free_memory
 from mttl.models.modifiers.expert_containers.module_graph import Expert
 
+DEBUG = True
+if "AMLT_OUTPUT_DIR" in os.environ:
+    DEBUG = False
+if DEBUG:
+    print("!!!!!!!!!!!!!!!!!!!!!! DEBUG MODE")
+
 
 def eval_expert_on_task(
     task,
@@ -150,7 +156,8 @@ def run_eval(args: EvolExpertConfig):
     """
     seed_everything(args.seed, workers=True)
     setup_logging(args.output_dir)
-    # init_wandb_logger(args)
+    if not DEBUG:
+        init_wandb_logger(args)
     if args.hf_token_hub:
         login(token=args.hf_token_hub)
 
@@ -158,9 +165,7 @@ def run_eval(args: EvolExpertConfig):
     # can work with other library types as well, but need to implement clone and filter_with_tasks
 
     expert_lib: ExpertLibrary = HFExpertLibrary(repo_id=args.hf_repo_id)
-    expert_lib = expert_lib.clone()
-    expert_lib.filter_with_tasks(args.finetune_task_name)
-    assert len(expert_lib) <= len(args.finetune_task_name) + 1
+
     transfer_matrix: pd.DataFrame = produce_transfer_matrix(
         args, expert_lib, tasks=args.finetune_task_name
     )
