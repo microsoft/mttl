@@ -225,18 +225,17 @@ class SentenceTransformerClassifier(ExpertsRanker):
 
 
 if __name__ == "__main__":
-    model = SentenceTransformerClassifier(num_labels=439)
+    model = SentenceTransformerClassifier()
     model = model.from_pretrained(
         "classification_ranker_sordonia/adauni-v1-flat/classifier-epoch=00-val/loss=1.05.ckpt"
     )
     model.to(device)
     model.test_accuracy("sordonia/adauni-v1-flat", "EleutherAI/gpt-neo-125m", None)
-    # model.test_step(datamodule.test_dataloader(),)
 
-    # predict_experts = model.predict_experts_using_classifier(
-    #     [
-    #         "if a horse at 2 years old has 3 legs, how many legs it has at 10 years old?",
-    #         "if a horse at 2 years old has 3 legs, how many legs it has at 10 years old?",
-    #     ]
-    # )
-    # print(predict_experts)
+    predict_experts = model.predict_experts_using_classifier(
+        [
+            "if a horse at 2 years old has 3 legs, how many legs it has at 10 years old?",
+            "if a horse at 2 years old has 3 legs, how many legs it has at 10 years old?",
+        ]
+    )
+    print(predict_experts)

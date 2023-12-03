@@ -142,7 +142,7 @@ class FlanModule(DefaultDataModule):
             )
 
         if self.config.include_template_type != "*":
-            dataset = self.dataset.filter(
+            self.dataset = self.dataset.filter(
                 partial(
                     filter_template_type,
                     set(self.config.include_template_type.split(",")),
@@ -152,7 +152,7 @@ class FlanModule(DefaultDataModule):
             )
 
         if self.config.include_task_source != "*":
-            dataset = dataset.filter(
+            self.dataset = self.dataset.filter(
                 partial(
                     filter_task_source, set(self.config.include_task_source.split(","))
                 ),
@@ -170,7 +170,7 @@ class FlanModule(DefaultDataModule):
             self.dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
         )
 
-        if "split" in dataset.column_names["train"]:
+        if "split" in self.dataset.column_names["train"]:
             self.train_dataset = train_dataset.filter(
                 lambda x: x["split"] == "train",
                 num_proc=n_proc,

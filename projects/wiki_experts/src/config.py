@@ -254,7 +254,7 @@ tasks_names_to_ids = {
 # convert tasks_names_to_ids to tasks_ids_to_tasks_names
 ids_to_tasks_names = {v: k for k, v in tasks_names_to_ids.items()}
 
-with open("./configs/adauni_task_dict.json", "r") as fp:
+with open("projects/wiki_experts/configs/adauni_task_dict.json", "r") as fp:
     tasks_names_to_ids_ada = json.load(fp)
 
 ids_to_tasks_names_ada = {v: k for k, v in tasks_names_to_ids_ada.items()}

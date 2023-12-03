@@ -8,12 +8,14 @@ from projects.wiki_experts.src.expert_model import (
 from projects.wiki_experts.src.config import ExpertConfig
 
 
-def test_retrieval_routing():
+def test_classifier_routing():
     config = ExpertConfig()
     config.routing = "retrieval"
-    config.num_labels = 246
     config.model = "EleutherAI/gpt-neo-125m"
-    config.classifier_repo_id = "zhan1993/gpt-neo_classifier_ranker"
+    config.retrieval_model = "classifier"
+    config.expert_model_path = (
+        "zhan1993/adversarial_qa_dbert_answer_the_following_q_classifier"
+    )
 
     config.module_graph = "adversarial_qa_dbert_answer_the_following_q -> linear(zhan1993/gpt-neo_adversarial_qa_dbert_answer_the_following_q:0);"
     finetune_task_name = "adversarial_qa_dbert_answer_the_following_q"
@@ -34,7 +36,9 @@ def test_retrieval_routing():
     module.load_from_graph_string(config.module_graph)
     batch = next(iter(data_module.val_dataloader()))
 
-    prediction_experts = module.get_predicted_experts(batch)
+    prediction_experts = module.expert_ranker.get_predict_experts(
+        batch["sources_texts"]
+    )
     experts_selections = module.expert_retrieval(batch)
     assert len(prediction_experts) == 1
     assert prediction_experts[0] == "adversarial_qa_dbidaf_answer_the_following_q"
