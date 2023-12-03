@@ -72,6 +72,11 @@ class FlatMultiTaskConfig(DatasetConfig):
     augment_few_shot: int = 0
 
 
+def apply_source_template(source_template, example):
+    example["source"] = source_template.format(example["source"])
+    return example
+
+
 class FlatMultiTaskModule(DefaultDataModule):
     def setup_dataset(self):
         self.dataset = load_dataset(self.config.dataset)
@@ -92,13 +97,10 @@ class FlatMultiTaskModule(DefaultDataModule):
 
         if self.config.source_template is not None:
             # apply source template if specified
-            def apply_source_template(example):
-                example["source"] = self.config.source_template.format(
-                    example["source"]
-                )
-                return example
-
-            train_dataset = train_dataset.map(apply_source_template, num_proc=n_proc)
+            train_dataset = train_dataset.map(
+                partial(apply_source_template, self.config.source_template),
+                num_proc=n_proc,
+            )
 
         if self.config.augment_few_shot > 0:
             train_dataset_aug = augment_few_shot(
