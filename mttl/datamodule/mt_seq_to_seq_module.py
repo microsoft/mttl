@@ -2,7 +2,7 @@ from functools import partial
 from typing import List
 import os
 import torch
-from datasets import load_dataset
+from datasets import load_dataset, concatenate_datasets
 from typing import Dict
 from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
@@ -63,12 +63,13 @@ def augment_few_shot(self, dataset, num_samples):
             )
 
     augmented_dataset = Dataset.from_list(augmented_dataset)
-    return augmented_dataset
+    return concatenate_datasets([dataset, augmented_dataset])
 
 
 @dataclass
 class FlatMultiTaskConfig(DatasetConfig):
     source_template: str = None
+    augment_few_shot: int = 0
 
 
 class FlatMultiTaskModule(DefaultDataModule):
@@ -98,6 +99,13 @@ class FlatMultiTaskModule(DefaultDataModule):
                 return example
 
             train_dataset = train_dataset.map(apply_source_template, num_proc=n_proc)
+
+        if self.config.augment_few_shot > 0:
+            train_dataset_aug = augment_few_shot(
+                self, train_dataset, self.config.augment_few_shot
+            )
+            train_dataset_aug = train_dataset_aug.shuffle()
+            train_dataset = train_dataset_aug.select(range(len(train_dataset)))
 
         self.train_dataset = train_dataset.filter(
             lambda x: x["split"] == "train",

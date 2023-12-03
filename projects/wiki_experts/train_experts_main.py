@@ -100,6 +100,8 @@ def get_datamodule(args, for_generation=False):
     elif "adauni" in args.dataset:
         config = FlatMultiTaskConfig(
             **common_kwargs,
+            source_template=args.source_template,
+            augment_few_shot=args.augment_few_shot,
         )
         dm = FlatMultiTaskModule(config, for_generation=for_generation)
     else:
