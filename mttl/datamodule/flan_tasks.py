@@ -4,7 +4,8 @@ FLAN_SUB1 = [
     # "dbpedia_14_given_a_choice_of_categories_"
 ]
 
-FLAN_SUB3 = [
+FLAN_SUB3_with_new = [
+    "kilt_tasks_hotpotqa_combining_facts",
     "ai2_arc_ARC_Challenge_1_0_0",
     "dbpedia_14_given_a_list_of_category_what_does_the_title_belong_to",
     "web_questions_whats_the_answer",

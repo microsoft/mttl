@@ -64,6 +64,13 @@ temp_dir = None
 default_score: Score = None
 
 
+def get_task_expert(task, expert_lib):
+    parent_exp: Expert = get_best_expert_for_score(expert_lib, default_score.hash)
+    if parent_exp is None and task in expert_lib.tasks:
+        parent_exp = get_best_expert_for_task(expert_lib, task, default_score.hash)
+    return parent_exp
+
+
 def log_best_weights(module_dict, best_weights, task, prefix=""):
     if wandb.run is not None:
         wandb.log(
@@ -99,17 +106,15 @@ def optimize_evol_expert_routing(
             f"############ Optimizing with nevergrad for {task} for {args.n_ng_iterations} iterations"
         )
         get_loss_function = partial(get_loss, evaluator=evaluator_train)
+        base_module = get_task_expert(task, expert_lib)
+        base_module_name = base_module.name if base_module is not None else None
 
         optimizer = NGRoutingOptimizer(
             model=module,
             expert_lib=expert_lib,
             get_loss=get_loss_function,
             budget=args.n_ng_iterations,
-            base_module_name=get_best_expert_for_task(
-                expert_lib, task, default_score.hash
-            ).name
-            if args.init_router_best
-            else None,
+            base_module_name=base_module_name,
             action="route",
             regularizer_factor=args.regularizer_factor,
         )
@@ -265,7 +270,7 @@ def setup(args: EvolExpertConfig):
     tasks = args.finetune_task_name
     expert_lib = exper_state.state.expert_lib
     # remove tasks for which we dont have experts
-    tasks = [t for t in tasks if t in expert_lib.tasks]
+    # tasks = [t for t in tasks if t in expert_lib.tasks]
 
     print("###### Tasks", tasks)
     return exper_state, tasks
@@ -278,6 +283,7 @@ def retrieve_experts_for_task(
     expert_lib: ExpertLibrary,
     task,
     evaluator=None,
+    task_expert=None,
 ) -> ExpertLibrary:
     """
     Retrieves a set of sk experts that are most likley to be useful for the current task
@@ -290,20 +296,25 @@ def retrieve_experts_for_task(
     if metric not in ["random", "lora_sim", "loss", "rougeL"]:
         return expert_lib
     expert_lib_copy = copy.deepcopy(expert_lib)
-    task_module: Expert = get_best_expert_for_task(
-        expert_lib_copy, task, default_score.hash
-    )
-    task_module_name = task_module.name
+
+    if task_expert is None:
+        task_expert: Expert = get_task_expert(task, expert_lib)
 
     module = copy.deepcopy(module)
     if metric == "random":
-        keys = list(set(expert_lib.keys()) - {task_module_name})
+        if task_expert is None:
+            keys = list(set(expert_lib.keys()))
+        else:
+            keys = list(set(expert_lib.keys()) - {task_expert.name})
         sel_exp_names = np.random.choice(keys, sk, replace=False)
 
     if metric == "lora_sim":
+        if task_expert is None:
+            return expert_lib_copy
         module.load_from_module_dict(expert_lib_copy)
         from torch.nn.functional import cosine_similarity
 
+        task_module_name = task_expert.name
         # compute cosine similarity between each expert and current task's expert, keep top sk
         emb_tasks = module.get_task_embeddings()
         # compare this task's embed with  other
@@ -373,6 +384,7 @@ def retrieve_experts_for_task(
         sel_exp_names = sorted(scores, key=scores.get, reverse=True)[:sk]
 
     # create expert_library only with selected modules + the current task's module
+    task_module_name = task_expert.name if task_expert is not None else None
     for m in list(expert_lib_copy.keys()):
         if m not in sel_exp_names and m != task_module_name:
             expert_lib_copy.remove_expert(m)
@@ -411,10 +423,9 @@ def active_task_iteration(
             **vars(args), tokenizer=evaluator_train.tokenizer, device_map="cpu"
         )
 
-    assert task in expert_lib.tasks
-    parent_exp: Expert = get_best_expert_for_score(expert_lib, default_score.hash)
-    if parent_exp is None:
-        parent_exp = get_best_expert_for_task(expert_lib, task, default_score.hash)
+    # assert task in expert_lib.tasks
+    parent_exp: Expert = get_task_expert(task, expert_lib)
+
     base_perf = {
         "train": expert_lib.get_score(
             expert_name=parent_exp.name,
@@ -434,7 +445,7 @@ def active_task_iteration(
         base_perf["train"] is None
         or base_perf["valid"] is None
         or base_perf["valid"] is None
-    ):
+    ) and parent_exp is not None:
         logger.info(f"Evaluating base perf for {task}")
         if DEBUG:
             base_perf = {
@@ -480,10 +491,15 @@ def active_task_iteration(
                 split="valid",
             ),
         )
-
-    log_row[f"{args.eval_metric}_base_test"] = base_perf["test"]
-    log_row[f"{args.eval_metric}_base_train"] = base_perf["train"]
-    log_row[f"{args.eval_metric}_base_valid"] = base_perf["valid"]
+    log_row[f"{args.eval_metric}_base_test"] = (
+        base_perf["test"] if base_perf["test"] is not None else -10e10
+    )
+    log_row[f"{args.eval_metric}_base_train"] = (
+        base_perf["train"] if base_perf["test"] is not None else -10e10
+    )
+    log_row[f"{args.eval_metric}_base_valid"] = (
+        base_perf["valid"] if base_perf["test"] is not None else -10e10
+    )
 
     # optinally subset the expert library
     retrieved_expert_lib = retrieve_experts_for_task(
@@ -493,6 +509,7 @@ def active_task_iteration(
         expert_lib,
         task,
         evaluator=evaluator_valid,
+        task_expert=parent_exp,
     )
     # log retrieved experts
     log_row["retrieved_experts"] = str(list(retrieved_expert_lib.keys()))
@@ -544,10 +561,17 @@ def active_task_iteration(
     ########################################################################
     logger.info(f"Saving new module for {task}")
     # change name
-    optimal_expert.expert_info = replace(
-        optimal_expert.expert_info,
-        expert_name=increase_version(parent_exp.name),
-    )
+    if parent_exp is not None:
+        optimal_expert.expert_info = replace(
+            optimal_expert.expert_info,
+            expert_name=increase_version(parent_exp.name),
+        )
+    else:
+        optimal_expert.expert_info = replace(
+            optimal_expert.expert_info,
+            expert_name=f"expert_{task}",
+        )
+
     optimal_expert.expert_info.expert_task_name = task
     logger.info(
         f"{log_prefix} Scores on of {task} :{log_row[f'{args.eval_metric}_test_selected']}"
