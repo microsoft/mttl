@@ -5,7 +5,7 @@ FLAN_SUB1 = [
 ]
 
 FLAN_SUB3_with_new = [
-    "bool_q_1_0_0",
+    # "bool_q_1_0_0",
     "ai2_arc_ARC_Challenge_1_0_0",
     "dbpedia_14_given_a_list_of_category_what_does_the_title_belong_to",
     "web_questions_whats_the_answer",
