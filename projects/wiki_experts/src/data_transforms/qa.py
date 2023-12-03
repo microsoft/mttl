@@ -333,9 +333,7 @@ class QATransformModel(TransformModel):
                 instruction_dataset = self.generate_instructions_(
                     self._llm,
                     prev_dataset,
-                )
-                dump_jsonl_dataset(
-                    instruction_dataset, answ_filename if is_openai else inst_filename
+                    answ_filename if is_openai else inst_filename,
                 )
             else:
                 instruction_dataset = read_jsonl_dataset(inst_filename)
@@ -363,6 +361,7 @@ class QATransformModel(TransformModel):
         self,
         llm: AutoEngine,
         dataset,
+        dump_filename,
     ):
         """
         To generate instructions, we take num_contexts_per_document chunks of length max_context_length from each document,
@@ -387,20 +386,18 @@ class QATransformModel(TransformModel):
             print(context)
             print()
 
-        result = llm.generate(
-            templated_contexts,
-            top_p=self.config.top_p,
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens_instruction,
-        )
-        assert (
-            len(result.outputs) == len(templated_contexts) == len(result.finish_reason)
+        result = iter(
+            llm.generate(
+                templated_contexts,
+                top_p=self.config.top_p,
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens_instruction,
+            )
         )
 
         new_dataset = []
-        for entry, instruction, finish_reason in zip(
-            dataset, result.outputs, result.finish_reason
-        ):
+        for entry, output_and_reason in zip(dataset, result):
+            instruction, finish_reason = output_and_reason
             data = self.instruction_template.post_process_generation(instruction)
             if isinstance(data, list):
                 for d in data:
@@ -426,6 +423,7 @@ class QATransformModel(TransformModel):
                 )
                 copied_entry.update(data)
                 new_dataset.append(copied_entry)
+            dump_jsonl_dataset(new_dataset, dump_filename)
 
         print("Created a new instruction dataset of size:", len(new_dataset))
         return new_dataset
