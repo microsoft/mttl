@@ -96,12 +96,6 @@ class OAITemplate:
             "\n\nYour instruction should be grounded in the follwoing context:"
         )
         task_description += f"\n\n{context}"
-
-        # task_description += (
-        #     "\nWrite an instruction suitable for this given context. "
-        #     "Ensure it's complete, precise, and stands alone, without relying on provided context."
-        # )
-
         task_description += "\Also provide a concise response to the generated instruction.\
             \nRemember, your should generate one instruction reponse pair. Your instruction should be clear and comprehensive and should be suitable for the given context. Your instruction must be complete, meaning that is must contain all the neccessary context to follow.\
             \nPlease follow these guidelines when generating instructions and answers. Your role is vital in maintaining high standards of communication effectiveness.\
@@ -134,9 +128,6 @@ class OAITemplate_Batched:
     @classmethod
     def post_process_generation(cls, output):
         try:
-            import copy
-
-            originalk_out = copy.deepcopy(output)
             output = cls.transform_to_valid_list(output)
             outputs = eval(output)
         except Exception as e:
@@ -178,18 +169,12 @@ class OAITemplate_Batched:
         \n2. The language used for the instruction also should be diverse. For example, you should combine questions with imperative instructions.\
         \n3. The type of instructions should be diverse. Include diverse types of tasks like open-ended generation, multiple choice, classification, editing, etc.\
         \n4. A GPT language model should be able to complete the instruction. For example, do not ask the assistant to create any visual or audio output. For another example, do not ask the assistant to wake you up at 5pm or set a reminder because it cannot perform any action."
-        # \n5. The instructions should be in English.\
-        # task_description+="\n5. To increase diversity, include instructions with an input. The input field should\
-        # contain a specific example provided for the instruction. It should involve realistic data and\
-        # should not contain simple placeholders. The input should provide substantial content to make\
-        # the instruction challenging."
         task_description += f"\n5. The instructions should be 1 to 3 sentences long. Either an imperative sentence or a question is permitted.\
         \n6. Ensure diverse tasks are covered in the instructions and inputs, while focusing on the {domain} domain.\
         \n7. Provide a ground truth response for each of the 10 generated instruction.\
         \n8. Ensure that each instruction is complete, containing all the necessary context for successful execution."
-
         task_description += (
-            "\n9. Your instruction must be grounded in the follwoing context:"
+            "\n9. Your instruction must be grounded in the following context:"
         )
         task_description += f"\n\n{context}"
 
