@@ -243,8 +243,8 @@ class SkilledLoRA(LoRA):
             A = torch.einsum("bqs,sqdr->bqdr", (weights, self.lora_a))
             B = torch.einsum("bqs,srqd->brqd", (weights, self.lora_b))
 
-        A = A.view(bs, self.in_features, self.rank)
-        B = B.view(bs, self.rank, self.out_features)
+        A = A.reshape(bs, self.in_features, self.rank)
+        B = B.reshape(bs, self.rank, self.out_features)
         adapter_out = input_lora.bmm(A).bmm(B) * self.scaling
         return layer_out + adapter_out.to(input.dtype)
 
