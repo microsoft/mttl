@@ -62,6 +62,7 @@ wandb_logger = None
 log_row = {}
 temp_dir = None
 default_score: Score = None
+to_repo_id = None
 
 
 def get_task_expert(task, expert_lib):
@@ -162,6 +163,7 @@ def optimize_evol_expert_routing(
             if dm_train.for_generation
             else dm_train
         )
+
         assert dm_train.for_generation == False
         dm_eval = evaluator_valid.datamodule
 
@@ -189,6 +191,13 @@ def optimize_evol_expert_routing(
             logging_prefix=log_prefix,
             silent=not DEBUG,
         )
+
+        # cleanup: remove config_copy.output_dir stuff, as we have out expert already
+        if os.path.exists(config_copy.output_dir):
+            try:
+                os.system(f"rm -rf {config_copy.output_dir}")
+            except Exception as e:
+                logger.error(e)
 
         logger.info("Found best weights: {}".format(best_weights))
         log_row["weights"] = str(best_weights)
@@ -270,7 +279,19 @@ def setup(args: EvolExpertConfig):
     tasks = args.finetune_task_name
     expert_lib = exper_state.state.expert_lib
     # remove tasks for which we dont have experts
-    # tasks = [t for t in tasks if t in expert_lib.tasks]
+    tasks = [t for t in tasks if t in expert_lib.tasks]
+
+    if args.upload_lib_to_hub:
+        global to_repo_id
+        token = os.environ.get("HF_TOKEN", args.hf_token_hub)
+        login(token=token)
+        user_name = HfApi().whoami(token=token)["name"]
+
+        run_name: str = os.getenv("AMLT_JOB_NAME", "_test_evol")
+        # if args.to_repo_id is None:
+        #     args.to_repo_id = args.hf_repo_id + run_name
+        to_repo_id = user_name + "/" + run_name
+        create_repo(to_repo_id, token=token, exist_ok=True)
 
     print("###### Tasks", tasks)
     return exper_state, tasks
@@ -425,80 +446,81 @@ def active_task_iteration(
 
     # assert task in expert_lib.tasks
     parent_exp: Expert = get_task_expert(task, expert_lib)
+    if parent_exp is not None:
+        base_perf = {
+            "train": expert_lib.get_score(
+                expert_name=parent_exp.name,
+                hash=Score(name=args.eval_metric, task=task, split="train").hash,
+            ),
+            "valid": expert_lib.get_score(
+                expert_name=parent_exp.name,
+                hash=Score(name=args.eval_metric, task=task, split="valid").hash,
+            ),
+            "test": expert_lib.get_score(
+                expert_name=parent_exp.name,
+                hash=Score(name=args.eval_metric, task=task, split="test").hash,
+            ),
+        }
 
-    base_perf = {
-        "train": expert_lib.get_score(
-            expert_name=parent_exp.name,
-            hash=Score(name=args.eval_metric, task=task, split="train").hash,
-        ),
-        "valid": expert_lib.get_score(
-            expert_name=parent_exp.name,
-            hash=Score(name=args.eval_metric, task=task, split="valid").hash,
-        ),
-        "test": expert_lib.get_score(
-            expert_name=parent_exp.name,
-            hash=Score(name=args.eval_metric, task=task, split="test").hash,
-        ),
-    }
+        if (
+            base_perf["train"] is None
+            or base_perf["valid"] is None
+            or base_perf["valid"] is None
+        ):
+            logger.info(f"Evaluating base perf for {task}")
+            if DEBUG:
+                base_perf = {
+                    "test": np.random.random(),
+                    "train": np.random.random(),
+                    "valid": np.random.random(),
+                }
 
-    if (
-        base_perf["train"] is None
-        or base_perf["valid"] is None
-        or base_perf["valid"] is None
-    ) and parent_exp is not None:
-        logger.info(f"Evaluating base perf for {task}")
-        if DEBUG:
-            base_perf = {
-                "test": np.random.random(),
-                "train": np.random.random(),
-                "valid": np.random.random(),
-            }
+            else:
+                base_perf: dict = eval_expert_on_task(
+                    task,
+                    module,
+                    parent_exp,
+                    evaluator_train,
+                    evaluator_valid,
+                    evaluator_test,
+                )
 
-        else:
-            base_perf: dict = eval_expert_on_task(
-                task,
-                module,
-                parent_exp,
-                evaluator_train,
-                evaluator_valid,
-                evaluator_test,
+            expert_lib.add_score(
+                expert_name=parent_exp.name,
+                score=Score(
+                    name=args.eval_metric,
+                    task=task,
+                    value=base_perf["test"],
+                    split="test",
+                ),
+            )
+            expert_lib.add_score(
+                expert_name=parent_exp.name,
+                score=Score(
+                    name=args.eval_metric,
+                    task=task,
+                    value=base_perf["train"],
+                    split="train",
+                ),
+            )
+            expert_lib.add_score(
+                expert_name=parent_exp.name,
+                score=Score(
+                    name=args.eval_metric,
+                    task=task,
+                    value=base_perf["valid"],
+                    split="valid",
+                ),
             )
 
-        expert_lib.add_score(
-            expert_name=parent_exp.name,
-            score=Score(
-                name=args.eval_metric,
-                task=task,
-                value=base_perf["test"],
-                split="test",
-            ),
-        )
-        expert_lib.add_score(
-            expert_name=parent_exp.name,
-            score=Score(
-                name=args.eval_metric,
-                task=task,
-                value=base_perf["train"],
-                split="train",
-            ),
-        )
-        expert_lib.add_score(
-            expert_name=parent_exp.name,
-            score=Score(
-                name=args.eval_metric,
-                task=task,
-                value=base_perf["valid"],
-                split="valid",
-            ),
-        )
     log_row[f"{args.eval_metric}_base_test"] = (
-        base_perf["test"] if base_perf["test"] is not None else -10e10
+        base_perf["test"] if parent_exp is not None else -10e10
     )
     log_row[f"{args.eval_metric}_base_train"] = (
-        base_perf["train"] if base_perf["test"] is not None else -10e10
+        base_perf["train"] if parent_exp is not None else -10e10
     )
     log_row[f"{args.eval_metric}_base_valid"] = (
-        base_perf["valid"] if base_perf["test"] is not None else -10e10
+        base_perf["valid"] if parent_exp is not None else -10e10
     )
 
     # optinally subset the expert library
@@ -705,15 +727,6 @@ def main(args: EvolExpertConfig):
 
         # send updates to remote
         if args.upload_lib_to_hub:
-            token = os.environ.get("HF_TOKEN", args.hf_token_hub)
-            login(token=token)
-            user_name = HfApi().whoami(token=token)["name"]
-
-            run_name: str = os.getenv("AMLT_JOB_NAME", "_test_evol")
-            # if args.to_repo_id is None:
-            #     args.to_repo_id = args.hf_repo_id + run_name
-            to_repo_id = user_name + "/" + run_name
-            create_repo(to_repo_id, token=token, exist_ok=True)
             try:
                 remote_lib = HFExpertLibrary.from_local(
                     expert_lib,

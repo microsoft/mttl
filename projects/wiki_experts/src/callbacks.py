@@ -83,15 +83,14 @@ class RougeLCallback(cb.Callback):
             # p_sum = np.sum([p.detach().cpu().sum() for p in pl_module.parameters()])
         return super().on_before_optimizer_step(trainer, pl_module, optimizer)
 
-    def maybe_checkpoint_now(self, trainer):
+    def maybe_checkpoint_now(self, trainer: Trainer):
         if self.do_checkpoint and self._checkpoint_now:
             try:
-                dir_name = trainer.checkpoint_callback.dirpath
                 filename = (
-                    self.output_dir + f"{self.name}/" + f"{self.best_loss:.004f}.ckpt"
+                    self.output_dir + f"/{self.name}/" + f"{self.best_loss:.004f}.ckpt"
                 )
-                ckpt_path = os.path.join(dir_name, filename)
-                trainer.save_checkpoint(ckpt_path)
+                ckpt_path = os.path.join(filename)
+                trainer.save_checkpoint(ckpt_path, weights_only=True)
                 if (
                     self._prev_checkpoint is not None
                     and ckpt_path != self._prev_checkpoint

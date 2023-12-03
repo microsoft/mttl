@@ -20,21 +20,6 @@ from config import EvolExpertConfig
 from typing import List
 
 
-class SimpleLogger(pl.loggers.logger.DummyLogger):
-    def __init__(self, output_dir):
-        self.metrics = {}
-        os.makedirs(output_dir, exist_ok=True)
-        self.output_file = os.path.join(output_dir, "metrics.json")
-
-    def log_metrics(self, metrics, step=None):
-        for k, v in metrics.items():
-            if k not in self.metrics:
-                self.metrics[k] = []
-            self.metrics[k].append({"step": step, "value": v})
-        with open(self.output_file, "w") as f:
-            json.dump(self.metrics, f)
-
-
 def save_new_module(module_copy, args):
     # make Loras trainable
     module_copy.trainable_param_names = [
@@ -54,6 +39,7 @@ def train_router(
     logging_prefix="",
     silent=False,
 ):
+    logging_prefix = logging_prefix.replace("/", "_")
     seed_everything(args.seed, workers=True)
 
     module = RoutedMultiExpertModel(
@@ -73,8 +59,6 @@ def train_router(
     if args.tensorboard:
         tb_logger = pl.loggers.TensorBoardLogger(save_dir=args.output_dir)
         loggers.append(tb_logger)
-
-    loggers.append(SimpleLogger(args.output_dir))
 
     if silent:
         logger.disabled = True
@@ -115,6 +99,7 @@ def train_router(
         logger=loggers,
         log_every_n_steps=1,
         num_sanity_val_steps=0,
+        enable_checkpointing=False,
         default_root_dir=args.output_dir,
         max_epochs=args.num_train_epochs,
         max_steps=args.total_steps + 1 if args.total_steps != -1 else -1,

@@ -5,7 +5,7 @@ FLAN_SUB1 = [
 ]
 
 FLAN_SUB3_with_new = [
-    "kilt_tasks_hotpotqa_combining_facts",
+    "bool_q_1_0_0",
     "ai2_arc_ARC_Challenge_1_0_0",
     "dbpedia_14_given_a_list_of_category_what_does_the_title_belong_to",
     "web_questions_whats_the_answer",
@@ -31,6 +31,30 @@ FLAN_SUB19 = [
     "cos_e_v1_11_question_description_option_text",
     "wiki_hop_original_choose_best_object_interrogative_2",
     "quartz_read_passage_below_choose",
+]
+
+FLAN_SUB20 = [
+    "cos_e_v1_11_generate_explanation_given_text",
+    "app_reviews_convert_to_star_rating",
+    "trivia_qa_rc_1_1_0",
+    "wiqa_effect_with_label_answer",
+    "adversarial_qa_dbidaf_tell_what_it_is",
+    "super_glue_copa_1_0_2",
+    "duorc_ParaphraseRC_extract_answer",
+    "quail_context_question_description_text",
+    "bool_q_1_0_0",
+    "ropes_plain_bottom_hint",
+    "cos_e_v1_11_aligned_with_common_sense",
+    "sciq_Direct_Question",
+    "web_questions_question_answer",
+    "quartz_read_passage_below_choose",
+    "quoref_Read_And_Extract_",
+    "race_middle_Select_the_best_answer_generate_span_",
+    "adversarial_qa_droberta_tell_what_it_is",
+    "race_high_Select_the_best_answer",
+    "wmt16_translate_de_en_1_0_0",
+    "ai2_arc_ARC_Challenge_1_0_0",
+    "quarel_do_not_use",
 ]
 
 FLAN_TASKS = [

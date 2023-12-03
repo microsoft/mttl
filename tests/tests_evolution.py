@@ -1,12 +1,18 @@
 import numpy as np
 import os
 import pytest
+from pytorch_lightning import seed_everything
 from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
 from conftest import make_tiny_llama
+from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from projects.wiki_experts.src.evolution.sequential_evolution import (
+    retrieve_experts_for_task,
+)
+from projects.wiki_experts.src.evolution.evaluators import prepare_evaluator
 
 
 def create_dummy_expert(config: ExpertConfig, exp_name) -> Expert:
@@ -26,15 +32,6 @@ def create_dummy_expert(config: ExpertConfig, exp_name) -> Expert:
 
 def test_NGRoutingOptimizer(tmp_path):
     from transformers.models.llama.configuration_llama import LlamaConfig
-
-    small_config = LlamaConfig(
-        vocab_size=400,
-        hidden_size=512,
-        intermediate_size=1024,
-        num_hidden_layers=5,
-        num_attention_heads=8,
-        max_position_embeddings=512,
-    )
 
     config = ExpertConfig(
         kwargs={
@@ -80,6 +77,112 @@ def test_NGRoutingOptimizer(tmp_path):
 
     # assert that the second element of the result is a string
     assert isinstance(result[1], str)
+
+
+def test_expert_retrieval(tmp_path, mocker):
+    seed_everything(0)
+    return
+    config = ExpertConfig(
+        kwargs={
+            "model_modifier": "lora",
+            "modify_layers": "gate_proj|down_proj|up_proj",
+            "modify_modules": ".*mlp.*",
+            "trainable_param_names": ".*lora_[ab].*",
+            "output_dir": tmp_path,
+            "model": "",
+        }
+    )
+
+    exp_1: Expert = create_dummy_expert(config, "exp1")
+    exp_2: Expert = create_dummy_expert(config, "exp2")
+    exp_3: Expert = create_dummy_expert(config, "exp3")
+
+    # save some scores in Expert Infos
+    exp_2.save_score(
+        task_name="ai2_arc_ARC_Challenge_1_0_0", metric_name="loss_test", score=100
+    )
+    exp_2.save_score(
+        task_name="ai2_arc_ARC_Challenge_1_0_0", metric_name="rougeL_test", score=100
+    )
+    # create local expert library, with keys corresponding to task names
+    module_dict = {
+        "ai2_arc_ARC_Challenge_1_0_0": exp_1,
+        "best_performing_task": exp_2,
+        "default": exp_3,
+    }
+
+    expert_lib = HFExpertLibrary("sordonia/test-library")
+
+    task = "abstract_algebra"
+
+    module = MultiExpertModel(
+        tokenizer=None,
+        expert_info={},
+        **vars(config),
+    )
+
+    def evaluate(*args, **kwargs):
+        return {"all": {"mean": -1}, f"{task}": {"mean": -1}}
+
+    evaluator_constructor = prepare_evaluator(config, config.dataset, tasks=task)
+    evaluator = evaluator_constructor(split="test", subsample=100)
+
+    evaluator.evaluate = mocker.MagicMock(side_effect=evaluate)
+
+    # random retrieval
+    random_library = retrieve_experts_for_task(
+        1, "random", module, expert_lib, task, evaluator=None
+    )
+    # keep task's module in the library + 1 random expert
+    assert len(random_library) == 2
+    assert task in random_library
+    # lora_sim retrieval
+    lora_sim_library = retrieve_experts_for_task(
+        1, "lora_sim", module, expert_lib, task, evaluator=None
+    )
+    assert len(lora_sim_library) == 2
+    assert task in lora_sim_library
+    # loss retrieval
+    perf_library = retrieve_experts_for_task(
+        1, "loss", module, expert_lib, task, evaluator=evaluator
+    )
+    assert len(perf_library) == 2
+    # select task's module + "some_task_2" module as it has the largest score
+    assert "ai2_arc_ARC_Challenge_1_0_0" in perf_library
+    assert "best_performing_task" in perf_library
+    # rougeL retrieval
+    rouge_library = retrieve_experts_for_task(
+        1, "rougeL", module, expert_lib, task, evaluator=evaluator
+    )
+    assert len(rouge_library) == 2
+    # select task's module + "some_task_2" module as it has the largest score
+    assert "ai2_arc_ARC_Challenge_1_0_0" in rouge_library
+    assert "best_performing_task" in perf_library
+
+    # current task's module is not in the lilbrary:
+    task = "some_unknown_task"
+    random_library = retrieve_experts_for_task(1, "random", module, expert_lib, task)
+    assert len(random_library) == 1
+    lora_sim_library = retrieve_experts_for_task(
+        1, "lora_sim", module, expert_lib, task
+    )
+    assert len(lora_sim_library) == 3
+
+    # remock evaluators
+    task = "squad_v1_1_3_0_0"
+
+    def evaluate(*args, **kwargs):
+        return {"all": {"mean": -1}, f"{task}": {"mean": -1}}
+
+    perf_library = retrieve_experts_for_task(
+        1, "loss", module, expert_lib, task, evaluator=evaluator
+    )
+    assert len(perf_library) == 1
+
+    perf_library = retrieve_experts_for_task(
+        1, "rougeL", module, expert_lib, task, evaluator=evaluator
+    )
+    assert len(perf_library) == 1
 
 
 def test_train_router():
