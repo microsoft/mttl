@@ -239,6 +239,7 @@ class SkilledLoRA(LoRA):
                 A = self.lora_a[weights.long(), :, :, :]
                 B = self.lora_b[weights.long(), :, :, :]
         else:
+            weights = weights.to(self.lora_a.dtype)
             A = torch.einsum("bqs,sqdr->bqdr", (weights, self.lora_a))
             B = torch.einsum("bqs,srqd->brqd", (weights, self.lora_b))
 

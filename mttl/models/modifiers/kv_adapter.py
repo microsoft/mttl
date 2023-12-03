@@ -7,9 +7,11 @@ from mttl.models.modifiers import register_modifier
 from functools import partial
 from typing import Optional, Tuple
 from mttl.utils import logger
+from einops import rearrange, repeat
 from mttl.models.modifiers.base import Adapter, ModifierConfig, ModifyMixin
 from mttl.models.modifiers.poly import PolytroponConfig
 from mttl.models.modifiers.base import ModifyMixin, ModifierConfig
+import types
 
 # from mttl.models.modifiers.experts import Router
 
@@ -18,6 +20,7 @@ from transformers.models.llama.modeling_llama import apply_rotary_pos_emb
 
 @dataclass
 class KVAdapterConfig(ModifierConfig):
+    model: str = "gpt-neo"
     soft_prompt_length: int = 10
     soft_prompt_learn_kv: bool = True
     n_tasks: int = None
@@ -57,32 +60,69 @@ class KVAdapter(Adapter, ModifyMixin):
         self.learn_kv = config.soft_prompt_learn_kv
         self.soft_prompt_length = config.soft_prompt_length
         self.soft_prompt_learn_kv = config.soft_prompt_learn_kv
+        funcType = types.MethodType
 
+        # do not patch this layer multiple times, especially useful for container layers
         if "gpt-neo" in config.model:
-            self.attn_fwd = gpt_neo_self_attention
+            self.attn_layer.forward = funcType(
+                partial(gpt_neo_self_attention, adapter=self), self.attn_layer
+            )
             attn_layer.hidden_size = attn_layer.embed_dim
+            self.device = self.attn_layer.q_proj.weight.device
         elif "llama" in config.model:
-            self.attn_fwd = llama_self_attention
+            self.attn_layer.forward = funcType(
+                partial(llama_self_attention, adapter=self), self.attn_layer
+            )
             assert (
                 attn_layer.num_heads == attn_layer.num_key_value_heads
             ), "which to pick for gate?"
+            self.device = self.attn_layer.q_proj.weight.device
+        elif "phi" in config.model:
+            if "mha" in str(type(attn_layer)).lower():
+                self.attn_layer.inner_cross_attn = PhiCrossAttentionModule(
+                    self.attn_layer.inner_attn.causal,
+                    self.attn_layer.inner_attn.softmax_scale,
+                    self.attn_layer.inner_attn.drop.p,
+                )
+                self.attn_layer.inner_attn = PhiSelfAttentionModule(
+                    self.attn_layer.inner_attn.causal,
+                    self.attn_layer.inner_attn.softmax_scale,
+                    self.attn_layer.inner_attn.drop.p,
+                )
+                self.attn_layer.inner_attn.forward = partial(
+                    self.attn_layer.inner_attn.forward, adapter=self
+                )
+                self.attn_layer.inner_cross_attn.forward = partial(
+                    self.attn_layer.inner_cross_attn.forward, adapter=self
+                )
+            else:
+                raise ValueError(
+                    f"This type of layer is not supported by KVAdapter on phi-2: {type(attn_layer)}"
+                )
+
+            assert self.soft_prompt_learn_kv, "phi only supports soft prompt kv"
+            attn_layer.k_proj = attn_layer.v_proj = None
+            attn_layer.num_heads = attn_layer.n_head
+            attn_layer.hidden_size = attn_layer.out_proj.weight.shape[0]
+            self.device = attn_layer.out_proj.weight.device
         else:
             raise ValueError(f"{config.model} not supported for now.")
 
         self.create_for_layer(attn_layer)
 
     def create_for_layer(self, attn_layer):
-        # create the gate, and embeddings here
-        self.adapter_gate = torch.nn.Parameter(
-            torch.zeros(1, attn_layer.num_heads, 1, 1)
-        )
-
         if self.soft_prompt_learn_kv:
             out_dim = attn_layer.hidden_size * 2
         else:
             out_dim = attn_layer.hidden_size
 
-        self.adapter_query = nn.Embedding(self.soft_prompt_length, out_dim)
+        self.adapter_query = nn.Embedding(
+            self.soft_prompt_length, out_dim, device=self.device
+        )
+        # create the gate, and embeddings here
+        self.adapter_gate = torch.nn.Parameter(
+            torch.zeros(1, attn_layer.num_heads, 1, 1, device=self.device),
+        )
 
     def load_adapter_weights(self, state_dict):
         # load the weights from state_dict
@@ -91,7 +131,7 @@ class KVAdapter(Adapter, ModifyMixin):
 
     def forward(self, *args, **kwargs):
         # This Should Wrap at the SelfAttentionLevel, so behaves as such
-        return self.attn_fwd(self.attn_layer, self, *args, **kwargs)
+        return self.attn_layer.forward(*args, **kwargs)
 
     def get_kv_weights(self, k_proj, v_proj):
         """(1) Computes the key and value pairs to be used for augmented attention"""
@@ -100,7 +140,7 @@ class KVAdapter(Adapter, ModifyMixin):
             adapter_k, adapter_v = self.adapter_query.weight.chunk(2, dim=-1)
         else:
             adapter_k = type_safe_linear(self.adapter_query.weight, k_proj)
-            adapter_v = type_safe_linear(self.adapter_query.weight, k_proj)
+            adapter_v = type_safe_linear(self.adapter_query.weight, v_proj)
 
         out_shp = (
             1,
@@ -110,15 +150,16 @@ class KVAdapter(Adapter, ModifyMixin):
         )
         adapter_k = adapter_k.view(*out_shp).transpose(1, 2)
         adapter_v = adapter_v.view(*out_shp).transpose(1, 2)
-
         return adapter_k, adapter_v
 
     def get_gate(self, adapter_weights):
         """Fetch the 0-init gate"""
         return self.adapter_gate
 
-    def route(self, query, keys, attn_layer):
+    def route(self, query, keys, attn_layer=None):
         """(2) Compute The Standard Attention Scores in augmented attention"""
+        if attn_layer is None:
+            attn_layer = self.attn_layer
 
         adapter_logits = torch.matmul(
             query, keys.transpose(2, 3).type_as(query)
@@ -127,7 +168,6 @@ class KVAdapter(Adapter, ModifyMixin):
         adapter_weights = F.softmax(adapter_logits, dim=-1, dtype=torch.float32)
         gate_out = self.get_gate(adapter_weights)
         out = gate_out * adapter_weights.type_as(query)
-
         return out
 
     def aggregate(self, adapter_weights, adapter_v):
@@ -149,8 +189,8 @@ def type_safe_linear(input, linear_layer):
 
 def llama_self_attention(
     self,
-    adapter: KVAdapter,
     hidden_states: torch.Tensor,
+    adapter: KVAdapter = None,
     attention_mask: Optional[torch.Tensor] = None,
     position_ids: Optional[torch.LongTensor] = None,
     past_key_value: Optional[Tuple[torch.Tensor]] = None,
@@ -255,8 +295,8 @@ def llama_self_attention(
 
 def gpt_neo_self_attention(
     self,
-    adapter: KVAdapter,
     hidden_states,
+    adapter: KVAdapter = None,
     attention_mask=None,
     layer_past=None,
     head_mask=None,
@@ -304,3 +344,129 @@ def gpt_neo_self_attention(
         outputs += (attn_weights,)
 
     return outputs  # a, present, (attentions)
+
+
+class PhiCrossAttentionModule(nn.Module):
+    def __init__(self, causal, softmax_scale, attention_dropout):
+        super().__init__()
+
+        self.causal = causal
+        self.softmax_scale = softmax_scale
+        self.drop = nn.Dropout(attention_dropout)
+
+    def forward(
+        self,
+        q: torch.FloatTensor,
+        kv: torch.FloatTensor,
+        adapter: KVAdapter = None,
+        causal: bool = None,
+        key_padding_mask: Optional[torch.BoolTensor] = None,
+        **kwargs,
+    ) -> torch.FloatTensor:
+        batch_size, seqlen_q = q.shape[0], q.shape[1]
+        seqlen_k = kv.shape[1]
+
+        if kv.shape[3] != q.shape[2]:
+            kv = repeat(kv, "... hkv d -> ... (hkv g) d", g=q.shape[2] // kv.shape[3])
+        k, v = kv.unbind(dim=2)
+
+        causal = self.causal if causal is None else causal
+        softmax_scale = self.softmax_scale or 1.0 / math.sqrt(q.shape[-1])
+
+        scores = torch.einsum("bthd,bshd->bhts", q, k * softmax_scale)
+
+        if key_padding_mask is not None:
+            padding_mask = torch.full(
+                (batch_size, seqlen_k),
+                -10000.0,
+                dtype=scores.dtype,
+                device=scores.device,
+            )
+            padding_mask.masked_fill_(key_padding_mask, 0.0)
+
+            scores = scores + rearrange(padding_mask, "b s -> b 1 1 s")
+
+        if causal:
+            rows = rearrange(
+                torch.arange(seqlen_q, device=q.device, dtype=torch.long), "s -> s 1"
+            )
+            cols = torch.arange(seqlen_k, device=k.device, dtype=torch.long)
+            causal_mask = cols > rows + seqlen_k - seqlen_q
+
+            scores = scores.masked_fill(causal_mask, -10000.0)
+
+        attention = torch.softmax(scores, dim=-1, dtype=v.dtype)
+        attention = self.drop(attention)
+        attn_output = torch.einsum("bhts,bshd->bthd", attention, v)
+
+        """ Adapter Start """
+        # adapter not precomputed, so we compute it
+        adapter_k, adapter_v = adapter.get_kv_weights(None, None)
+
+        # remains to compute the attention score and add the result
+        adapter_weights = adapter.route(q.transpose(1, 2), adapter_k)
+        adapter_output = adapter.aggregate(adapter_weights, adapter_v).type_as(
+            attn_output
+        )
+        attn_output = attn_output + adapter_output.transpose(1, 2)
+        """ Adapter End """
+
+        return attn_output
+
+
+class PhiSelfAttentionModule(nn.Module):
+    def __init__(self, causal, softmax_scale, attention_dropout):
+        super().__init__()
+
+        self.causal = causal
+        self.softmax_scale = softmax_scale
+        self.drop = nn.Dropout(attention_dropout)
+
+    def forward(
+        self,
+        qkv: torch.FloatTensor,
+        causal: bool = None,
+        adapter: KVAdapter = None,
+        key_padding_mask: Optional[torch.BoolTensor] = None,
+        **kwargs,
+    ) -> torch.FloatTensor:
+        batch_size, seqlen = qkv.shape[0], qkv.shape[1]
+        q, k, v = qkv.unbind(dim=2)
+
+        causal = self.causal if causal is None else causal
+        softmax_scale = self.softmax_scale or 1.0 / math.sqrt(q.shape[-1])
+
+        scores = torch.einsum("bthd,bshd->bhts", q, k * softmax_scale)
+
+        if key_padding_mask is not None:
+            padding_mask = torch.full(
+                (batch_size, seqlen), -10000.0, dtype=scores.dtype, device=scores.device
+            )
+            padding_mask.masked_fill_(key_padding_mask, 0.0)
+
+            scores = scores + rearrange(padding_mask, "b s -> b 1 1 s")
+
+        if causal:
+            causal_mask = torch.triu(
+                torch.full((seqlen, seqlen), -10000.0, device=scores.device), 1
+            )
+            scores = scores + causal_mask.to(dtype=scores.dtype)
+
+        attention = torch.softmax(scores, dim=-1, dtype=v.dtype)
+        attention = self.drop(attention)
+
+        attn_output = torch.einsum("bhts,bshd->bthd", attention, v)
+
+        """ Adapter Start """
+        # adapter not precomputed, so we compute it
+        adapter_k, adapter_v = adapter.get_kv_weights(None, None)
+
+        # remains to compute the attention score and add the result
+        adapter_weights = adapter.route(q.transpose(1, 2), adapter_k)
+        adapter_output = adapter.aggregate(adapter_weights, adapter_v).type_as(
+            attn_output
+        )
+        attn_output = attn_output + adapter_output.transpose(1, 2)
+        """ Adapter End """
+
+        return attn_output

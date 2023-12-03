@@ -1,10 +1,13 @@
 from functools import partial
 from typing import List
 import os
-from datasets import load_dataset
+import torch
+from datasets import load_dataset, concatenate_datasets
+from typing import Dict
 from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 from dataclasses import dataclass
+from collections.abc import Iterable
 
 
 def augment_few_shot(self, dataset, num_samples):
@@ -60,12 +63,18 @@ def augment_few_shot(self, dataset, num_samples):
             )
 
     augmented_dataset = Dataset.from_list(augmented_dataset)
-    return augmented_dataset
+    return concatenate_datasets([dataset, augmented_dataset])
 
 
 @dataclass
 class FlatMultiTaskConfig(DatasetConfig):
     source_template: str = None
+    augment_few_shot: int = 0
+
+
+def apply_source_template(source_template, example):
+    example["source"] = source_template.format(example["source"])
+    return example
 
 
 class FlatMultiTaskModule(DefaultDataModule):
@@ -88,13 +97,17 @@ class FlatMultiTaskModule(DefaultDataModule):
 
         if self.config.source_template is not None:
             # apply source template if specified
-            def apply_source_template(example):
-                example["source"] = self.config.source_template.format(
-                    example["source"]
-                )
-                return example
+            train_dataset = train_dataset.map(
+                partial(apply_source_template, self.config.source_template),
+                num_proc=n_proc,
+            )
 
-            train_dataset = train_dataset.map(apply_source_template, num_proc=n_proc)
+        if self.config.augment_few_shot > 0:
+            train_dataset_aug = augment_few_shot(
+                self, train_dataset, self.config.augment_few_shot
+            )
+            train_dataset_aug = train_dataset_aug.shuffle()
+            train_dataset = train_dataset_aug.select(range(len(train_dataset)))
 
         self.train_dataset = train_dataset.filter(
             lambda x: x["split"] == "train",
@@ -130,6 +143,22 @@ def filter_template_type(include_template_type, example):
 
 def filter_task_source(include_task_source, example):
     return example["task_source"] in include_task_source
+
+
+def task_id_dataset(dataset, task_to_id):
+    """Wraps the getitem method to add the task_id to the example."""
+
+    def getitem(cls, index):
+        example = cls.old_getitem(index)
+        if isinstance(index, Iterable):
+            example["task_id"] = [task_to_id[task] for task in example["task_name"]]
+        else:
+            example["task_id"] = task_to_id[example["task_name"]]
+        return example
+
+    dataset.old_getitem = dataset.__getitem__
+    dataset.__getitem__ = lambda index: getitem(dataset, index)
+    return dataset
 
 
 class FlanModule(DefaultDataModule):
@@ -191,6 +220,12 @@ class FlanModule(DefaultDataModule):
                 train_dataset
             )
             self.test_dataset = self.dev_dataset
+
+        # Wrap the datasets to also return the task_id
+        self.train_dataset = task_id_dataset(self.train_dataset, self._task_to_id)
+        self.dev_dataset = task_id_dataset(self.dev_dataset, self._task_to_id)
+        self.test_dataset = task_id_dataset(self.test_dataset, self._task_to_id)
+
         self.print_infos()
 
 
@@ -201,7 +236,7 @@ class T0FlatConfig(DatasetConfig):
 
 class T0FlatModule(DefaultDataModule):
     def setup_dataset(self):
-        self.dataset = load_dataset(self.config.dataset)
+        dataset = load_dataset(self.config.dataset)
 
         (
             self._task_names,

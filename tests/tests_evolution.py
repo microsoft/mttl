@@ -1,17 +1,90 @@
+import numpy as np
 import os
-import sys
-import torch
-import torch.nn.functional as F
-from pytorch_lightning import seed_everything
-from mttl.models.modifiers.routing import RoutingInfo
-from mttl.models.modifiers import modify_transformer
-from mttl.models.modifiers.prompt_tuning import PromptTuning, PromptTuningConfig
+import pytest
 from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
+from projects.wiki_experts.src.expert_trainer import ExpertTrainer
+from projects.wiki_experts.src.config import ExpertConfig
+from projects.wiki_experts.src.expert_model import MultiExpertModel
+from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
+from conftest import make_tiny_llama
+
+
+def create_dummy_expert(config: ExpertConfig, exp_name) -> Expert:
+    model_object = make_tiny_llama()
+    exp_trainer = ExpertTrainer(
+        tokenizer=None,
+        expert_info={},
+        **vars(config),
+        model_object=model_object,
+    )
+    dir = f"{config.output_dir}/{exp_name}"
+    os.makedirs(dir, exist_ok=True)
+    checkpoint = exp_trainer.save_pretrained(dir)
+    expert = load_expert(checkpoint, exp_name)
+    return expert
+
+
+def test_NGRoutingOptimizer(tmp_path):
+    from transformers.models.llama.configuration_llama import LlamaConfig
+
+    small_config = LlamaConfig(
+        vocab_size=400,
+        hidden_size=512,
+        intermediate_size=1024,
+        num_hidden_layers=5,
+        num_attention_heads=8,
+        max_position_embeddings=512,
+    )
+
+    config = ExpertConfig(
+        kwargs={
+            "model_modifier": "lora",
+            "modify_layers": "gate_proj|down_proj|up_proj",
+            "modify_modules": ".*mlp.*",
+            "trainable_param_names": ".*lora_[ab].*",
+            "output_dir": tmp_path,
+            "model": "",
+        }
+    )
+    # create random Lora
+    expert = create_dummy_expert(config, "module1")
+
+    get_loss = lambda *args, **kwargs: 0.0
+
+    modules_2_dest = {"module1": expert}
+    model_object = make_tiny_llama()
+    config.model_modifier = None
+    model = MultiExpertModel(model_object=model_object, tokenizer=None, **vars(config))
+
+    # create an NGRoutingOptimizer instance
+    optimizer = NGRoutingOptimizer(
+        model=model,
+        expert_lib=modules_2_dest,
+        get_loss=get_loss,
+        budget=1,
+        task_name="new_task",
+        regularizer_factor=0.0,
+        action="route",
+    )
+
+    # call the optimize method
+    result = optimizer.optimize()
+
+    # assert that the result is a tuple with two elements
+    assert isinstance(result, tuple)
+    assert len(result) == 2
+
+    # assert that the first element of the result is a list
+    print(result[0].__class__)
+    assert isinstance(result[0], np.ndarray)
+
+    # assert that the second element of the result is a string
+    assert isinstance(result[1], str)
 
 
 def test_train_router():
     return
 
 
-def test_NGRoutingOptimizer():
-    return
+if __name__ == "__main__":
+    pytest.main([__file__])

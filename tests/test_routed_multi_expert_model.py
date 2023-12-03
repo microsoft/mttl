@@ -9,6 +9,7 @@ from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.src.expert_model import (
     RoutedMultiExpertModel,
 )
+from mttl.models.modifiers.expert_containers.module_graph import Expert
 from mttl.models.modifiers.expert_containers import LoRAExpertContainer
 from mttl.models.modifiers.lora import LoRA
 from conftest import make_tiny_llama
@@ -31,12 +32,11 @@ def tmp_exp_config(tmp_path):
 
 
 class TestRoutedMultiExpertModel:
-    def creat_dummy_expert(self, config: ExpertConfig, exp_name):
+    def create_dummy_expert(self, config: ExpertConfig, exp_name):
         # create random Lora
         exp_trainer = ExpertTrainer(
             model_object=make_tiny_llama(),
             tokenizer=None,
-            expert_info={},
             **vars(config),
         )
         dir = str(config.output_dir / exp_name)
@@ -49,8 +49,8 @@ class TestRoutedMultiExpertModel:
         config: Config = tmp_exp_config
 
         config.router_selector = "task_selector"
-        exp1_dest = self.creat_dummy_expert(config, "exp1")
-        exp2_dest = self.creat_dummy_expert(config, "exp2")
+        exp1_dest = self.create_dummy_expert(config, "exp1")
+        exp2_dest = self.create_dummy_expert(config, "exp2")
         module_dict = {"mod1": exp1_dest, "mod2": exp2_dest, "default": exp1_dest}
 
         module = RoutedMultiExpertModel(
@@ -88,8 +88,8 @@ class TestRoutedMultiExpertModel:
         config: ExpertConfig = tmp_exp_config
 
         config.router_selector = "poly_router"
-        exp1_dest = self.creat_dummy_expert(config, "exp1")
-        exp2_dest = self.creat_dummy_expert(config, "exp2")
+        exp1_dest = self.create_dummy_expert(config, "exp1")
+        exp2_dest = self.create_dummy_expert(config, "exp2")
         module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
 
         module = RoutedMultiExpertModel(
@@ -142,7 +142,9 @@ class TestRoutedMultiExpertModel:
             "mod1" in routing_weights["model_layers_0_mlp_up_proj.selector"]
             and "mod2" in routing_weights["model_layers_0_mlp_up_proj.selector"]
         )
-        module.merge_experts_together()
+        expert = module.to_expert()
+        assert isinstance(expert, Expert)
+        module.replace_container_with_expert("mod1")
         assert isinstance(module.model.model.layers[0].mlp.down_proj, LoRA)
 
     def test_add_expert_with_action_merge(self, tmp_exp_config):
@@ -150,8 +152,8 @@ class TestRoutedMultiExpertModel:
         config: ExpertConfig = tmp_exp_config
 
         config.router_selector = "poly_router"
-        exp1_dest = self.creat_dummy_expert(config, "exp1")
-        exp2_dest = self.creat_dummy_expert(config, "exp2")
+        exp1_dest = self.create_dummy_expert(config, "exp1")
+        exp2_dest = self.create_dummy_expert(config, "exp2")
         module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
 
         module = RoutedMultiExpertModel(
@@ -182,3 +184,7 @@ class TestRoutedMultiExpertModel:
         # Test Base Llama model
         output = module(batch)
         assert np.allclose(output.item(), 6.09, atol=0.1)
+
+
+if __name__ == "__main__":
+    pytest.main([__file__])

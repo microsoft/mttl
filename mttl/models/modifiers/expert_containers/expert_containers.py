@@ -99,7 +99,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
 
         self.add_expert_to_selector(name)
 
-    def merge_experts_together(self, weights=None):
+    def get_merged_weights(self, weights=None, with_global_names=True):
         """
         Merges experts to one expert according to weights, if weights are not given, it uses the selector to get the weights.
         Does not merge the layer.
@@ -114,13 +114,15 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
             expert_state_dict = expert.state_dict()
             weight = weights[name]
             for k, v in expert_state_dict.items():
+                if not "lora" in k:
+                    continue
                 value = weight * v
-                if k in merged_weights:
-                    merged_weights[k] += value
+                key = k if not with_global_names else self.layer_name + "." + k
+                if key in merged_weights:
+                    merged_weights[key] += value
                 else:
-                    merged_weights[k] = value
-        self.experts = nn.ModuleDict({})
-        self.add_expert("merged_expert", self.config, merged_weights, action="route")
+                    merged_weights[key] = value
+        return self.config, merged_weights
 
     def merge_with_layer(self):
         if len(self.experts) > 0:
@@ -155,7 +157,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                 ws.append(weight)
             assert len(exps) == len(ws)
             load_experts.append(exps)
-            weights.append(torch.tensor(ws))
+            weights.append(torch.stack(ws))
         return SkilledLoRA.parallel_linear_forward(input, load_experts, weights)
 
     def forward(self, input, **kwargs):
@@ -166,7 +168,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         return self.layer(input)
 
 
-class KVExpertContainer(ExpertContainer, KVAdapter):
+class KVExpertContainer(KVAdapter, ExpertContainer):
     """Expert Container for KVAdapters.
     Unlike the LoRAExpertContainer, the KVExpertContainer is a KVAdapter itself,
 
@@ -175,41 +177,40 @@ class KVExpertContainer(ExpertContainer, KVAdapter):
     """
 
     def __init__(self, config, task_id_container, layer, selector=None):
-        super(Adapter, self).__init__()
+        KVAdapter.__init__(self, config, layer)
 
         self.config = config
         self.layer = layer
         self.selector: KVSelector = selector or KVTaskNameSelector()
         self.selector.info_container = task_id_container
+        self.info_container = task_id_container
 
         # Check if layer is an attention layer :
-        if not hasattr(self.layer, "k_proj"):
+        if not hasattr(self.attn_layer, "k_proj") and self.config.model != "phi-2":
             raise ValueError(
                 "`KVExpertContainer` should wrap an attention layer. {}".format(
-                    self.layer.__class__.__name__
+                    self.attn_layer.__class__.__name__
                 )
             )
 
-        self.info_container = task_id_container
         self.default_expert_name = None
         self.experts = nn.ModuleDict({})
 
-        # Needed to mimich behavior of `KVAdapter`
-        self.an_expert = None
-
-    def __getattr__(self, name):
-        try:
-            return super(Adapter, self).__getattr__(name)
-        except AttributeError:
-            return getattr(self.an_expert, name)
-
     # Delegate Routing ops to the selectors
-    def route(self, query, keys, attn_layer):
+    def route(self, query, keys, attn_layer=None):
         if callable(getattr(self.selector, "route", None)):
             return self.selector.route(self.experts, query, keys, attn_layer)
 
         # This behavior is problematic! you need `get_gate` to call the adapter method
         return super().route(query, keys, attn_layer)
+
+    # Delegate Routing ops to the selectors
+    def aggregate(self, adapter_weights, adapter_v):
+        if callable(getattr(self.selector, "aggregate", None)):
+            return self.selector.aggregate(self.experts, adapter_weights, adapter_v)
+
+        # This behavior is problematic! you need `get_gate` to call the adapter method
+        return super().aggregate(adapter_weights, adapter_v)
 
     def get_kv_weights(self, k_proj, v_proj):
         return self.selector.get_kv_weights(self.experts, k_proj, v_proj)
@@ -231,16 +232,12 @@ class KVExpertContainer(ExpertContainer, KVAdapter):
         if action == "merge":
             raise ValueError("Merging is not supported for `KVAdapters`.")
 
-        expert_module = KVAdapter(expert_config, self.layer)
+        expert_module = KVAdapter(expert_config, self.attn_layer)
         expert_module.load_adapter_weights(expert_weights)
+
         self.experts[name] = expert_module
-        self.an_expert = expert_module
 
         if is_default:
             self.default_expert_name = name
 
         self.add_expert_to_selector(name)
-
-    def forward(self, *args, **kwargs):
-        # Copying the forward pass of KVAdapter, for some reason super() does not work
-        return self.attn_fwd(self.attn_layer, self, *args, **kwargs)

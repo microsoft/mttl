@@ -255,78 +255,68 @@ class CLIPTripletRanker(CLIPRanker):
 
 
 if __name__ == "__main__":
-    from projects.wiki_experts.src.config import ExpertConfig
+    # from projects.wiki_experts.src.config import ExpertConfig
 
-    args = ExpertConfig.parse()
-    model = CLIPRanker()
-    model.to(device)
+    # args = ExpertConfig.parse()
 
-    ## train the clip model
-    dataconfig = CLIPExpertsConfig(
-        dataset=args.dataset,
-        model=args.model,
-        train_batch_size=args.train_batch_size,
-        finetune_task_name=args.finetune_task_name,
-        predict_batch_size=args.predict_batch_size,
-    )
-    datamodule = CLIPExpertsDatamodule(dataconfig)
+    # ## train the clip model
+    # dataconfig = CLIPExpertsConfig(
+    #     dataset=args.dataset,
+    #     model=args.model,
+    #     train_batch_size=args.train_batch_size,
+    #     finetune_task_name=args.finetune_task_name,
+    #     predict_batch_size=args.predict_batch_size,
+    # )
+    # datamodule = CLIPExpertsDatamodule(dataconfig)
 
-    checkpoint_callback = pl.callbacks.ModelCheckpoint(
-        monitor="val/loss_epoch",
-        dirpath=f"clip_ranker_{args.exp_name}/",
-        filename="clip-{epoch:02d}-{val/loss:.2f}",
-        save_top_k=1,
-        mode="min",
-    )
+    # checkpoint_callback = pl.callbacks.ModelCheckpoint(
+    #     monitor="val/loss_epoch",
+    #     dirpath=f"clip_ranker_{args.exp_name}/",
+    #     filename="clip-{epoch:02d}-{val/loss:.2f}",
+    #     save_top_k=1,
+    #     mode="min",
+    # )
 
-    trainer = pl.Trainer(
-        max_epochs=args.num_train_epochs,
-        accelerator="gpu",
-        callbacks=[checkpoint_callback],
-        devices=1,
-        logger=None,
-        val_check_interval=0.25,
-        limit_val_batches=10,
-        limit_train_batches=10,
-    )
+    # trainer = pl.Trainer(
+    #     max_epochs=args.num_train_epochs,
+    #     accelerator="gpu",
+    #     callbacks=[checkpoint_callback],
+    #     devices=1,
+    #     logger=None,
+    #     val_check_interval=0.25,
+    #     limit_val_batches=10,
+    #     limit_train_batches=10,
+    # )
     # trainer.fit(model, datamodule)
 
-    # model.load_state_dict(torch.load(os.environ["CLIP_CKPT"])["state_dict"])
-    model.from_pretrained("zhan1993/clip_ranker_debug")
-
-    # test the model
-    dataconfig = CLIPExpertsConfig(model="EleutherAI/gpt-neo-125m")
-    dm = CLIPExpertsDatamodule(dataconfig)
+    model = CLIPRanker().from_pretrained("zhan1993/clip_ranker_debug").to(device)
 
     # get the top 5 experts for each example in the test set
     print(
         model.predict_experts_using_clip(
             [
-                "if a horse at 2 years old has 3 legs, how many legs it has at 10 years old?",
-                "if a horse at 2 years old has 3 legs, how many legs it has at 10 years old?",
+                "if a horse at 2 years old has 3 legs, how many legs it has at 10 years old?"
             ],
             top_n=1,
         ),
     )
 
-    breakpoint()
+    # model = CLIPTripletRanker(expert_num=440)
+    # model.to(device)
 
-    model = CLIPTripletRanker(expert_num=440)
-    model.to(device)
+    # # test the model
+    # dataconfig = CLIPExpertsConfig(model="EleutherAI/gpt-neo-125m")
+    # dm = CLIPTripleDataModule(dataconfig)
 
-    # test the model
-    dataconfig = CLIPExpertsConfig(model="EleutherAI/gpt-neo-125m")
-    dm = CLIPTripleDataModule(dataconfig)
+    # # test forward
+    # for batch in dm.val_dataloader(subsample=10):
+    #     print(model.forward(batch))
+    #     break
 
-    # test forward
-    for batch in dm.val_dataloader(subsample=10):
-        print(model.forward(batch))
-        break
-
-    # get the expert embeddings
-    expert_embeddings = model.get_expert_embeddings()
-    print(expert_embeddings.shape)
-    # get the top 5 experts for each example in the test set
-    for batch in dm.val_dataloader(subsample=10):
-        print(model.predict_experts_using_clip(batch, expert_embeddings))
-        break
+    # # get the expert embeddings
+    # expert_embeddings = model.get_expert_embeddings()
+    # print(expert_embeddings.shape)
+    # # get the top 5 experts for each example in the test set
+    # for batch in dm.val_dataloader(subsample=10):
+    #     print(model.predict_experts_using_clip(batch, expert_embeddings))
+    #     break

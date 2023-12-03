@@ -73,9 +73,10 @@ class MultiExpertSelector(torch.nn.Module, Selector):
         return [{k: v for k, v in zip(self.expert_names, module_weights)}]
 
     def get_routing_weights(self):
-        return self.forward()[0]
+        weights = self.forward()[0]
+        return {k: v.detach().item() for k, v in weights.items()}
 
-    def add_expert(self, expert_name: str):
+    def add_expert(self, expert_name: str, **kwargs):
         if expert_name not in self.expert_names:
             self.expert_names.append(expert_name)
             self.module_logits.data = torch.empty(len(self.expert_names)).uniform_(
@@ -106,7 +107,7 @@ class TaskNameSelector(torch.nn.Module, Selector):
                 raise ValueError("No default expert name set and no task names given!")
 
             routing_weights = [
-                {self.default_expert_name: 1.0} for _ in range(batch_size)
+                {self.default_expert_name: torch.tensor(1.0)} for _ in range(batch_size)
             ]
         else:
             task_names = self.info_container["routing_infos"].task_names
@@ -120,7 +121,9 @@ class TaskNameSelector(torch.nn.Module, Selector):
                     "Experts for all tasks have not been loaded! Set a default expert?"
                 )
 
-            routing_weights = [{task_name: 1.0} for task_name in task_names]
+            routing_weights = [
+                {task_name: torch.tensor(1.0)} for task_name in task_names
+            ]
         return routing_weights
 
     def add_expert(self, expert_name: str):
@@ -178,6 +181,10 @@ class KVTaskNameSelector(KVSelector):
 
     def get_kv_weights(self, experts, k_proj, v_proj):
         task_names = self.info_container["routing_infos"].task_names
+
+        if task_names is None:
+            task_names = [self.default_expert_name]
+
         if len(set(task_names)) == 1:
             # broadcast along batch dim if only 1 task
             adapter_k, adapter_v = experts[task_names[0]].get_kv_weights(k_proj, v_proj)
@@ -191,6 +198,10 @@ class KVTaskNameSelector(KVSelector):
 
     def get_gate(self, experts, adapter_weights):
         task_names = self.info_container["routing_infos"].task_names
+
+        if task_names is None:
+            task_names = [self.default_expert_name]
+
         if len(set(task_names)) == 1:
             # broadcast along batch dim if only 1 task
             out = experts[task_names[0]].get_gate(adapter_weights)
@@ -227,15 +238,6 @@ class KVConcatSelector(KVSelector, nn.Module):
         adapter_k, adapter_v = (torch.cat(tensors, dim=0) for tensors in out)
         n_experts, n_heads, soft_prompt_len, head_dim = adapter_k.size()
 
-        """
-        # NO (1, n_heads, n_experts * soft_prompt_len, head_dim)
-        adapter_k = adapter_k.transpose(1, 2).reshape(
-            1, n_heads, n_experts * soft_prompt_len, head_dim
-        )
-        adapter_v = adapter_v.transpose(1, 2).reshape(
-            1, n_heads, n_experts * soft_prompt_len, head_dim
-        )
-        """
         # (n_heads, n_experts * soft_prompt_len, head_dim)
         adapter_k = adapter_k.transpose(0, 1).reshape(
             1, n_heads, n_experts * soft_prompt_len, head_dim
@@ -257,49 +259,34 @@ class KVConcatSelector(KVSelector, nn.Module):
         all_gates = torch.cat(
             [kv_adapter.get_gate(adapter_weights) for kv_adapter in experts.values()]
         )
-
         # output : (bsz, n_heads, q_len, 1)
         out = torch.einsum("bhqe,ehab->bhqa", per_expert_weight, all_gates)
         return out
 
 
-@register_multi_expert_selector("kv_mean_selector")
-class KVMeanSelector(KVConcatSelector):
+class KVNormSelector(KVSelector):
     def route(self, experts, query, keys, attn_layer):
         """(2) Compute The Standard Attention Scores in augmented attention"""
+
+        query = F.normalize(query, dim=-1, p=2)
+        keys = F.normalize(keys, dim=-1, p=2)
 
         adapter_logits = torch.matmul(
             query, keys.transpose(2, 3).type_as(query)
         ) / math.sqrt(attn_layer.head_dim)
-
-        shp = adapter_logits.size()
-        adapter_logits = adapter_logits.view(
-            *adapter_logits.shape[:-1], self.n_experts, -1
-        )
-        # uniform over experts
-        adapter_weights = (
-            F.softmax(adapter_logits, dim=-1, dtype=torch.float32).view(shp)
-            / self.n_experts
-        )
-        gate_out = self.get_gate(experts, adapter_weights)
-        out = gate_out * adapter_weights.type_as(query)
-
-        return out
-
-
-@register_multi_expert_selector("kv_temp_selector")
-class KVTempSelector(KVConcatSelector):
-    def route(self, experts, query, keys, attn_layer):
-        """(2) Compute The Standard Attention Scores in augmented attention"""
-
-        adapter_logits = (
-            torch.matmul(query, keys.transpose(2, 3).type_as(query))
-            / math.sqrt(attn_layer.head_dim)
-            / 0.005
-        )
 
         adapter_weights = F.softmax(adapter_logits, dim=-1, dtype=torch.float32)
         gate_out = self.get_gate(experts, adapter_weights)
         out = gate_out * adapter_weights.type_as(query)
 
         return out
+
+
+@register_multi_expert_selector("kv_concat_norm_selector")
+class KVConcatNormSelector(KVConcatSelector, KVNormSelector):
+    pass
+
+
+@register_multi_expert_selector("kv_task_norm_selector")
+class KVTaskNameNormSelector(KVTaskNameSelector, KVNormSelector):
+    pass

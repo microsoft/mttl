@@ -226,16 +226,40 @@ class SentenceTransformerClassifier(ExpertsRanker):
 
 if __name__ == "__main__":
     model = SentenceTransformerClassifier()
-    model = model.from_pretrained(
-        "classification_ranker_sordonia/adauni-v1-flat/classifier-epoch=00-val/loss=1.05.ckpt"
-    )
+    model = model.from_pretrained("zhan1993/classifier_ranker")
     model.to(device)
-    model.test_accuracy("sordonia/adauni-v1-flat", "EleutherAI/gpt-neo-125m", None)
+    # model.test_accuracy("sordonia/adauni-v1-flat", "EleutherAI/gpt-neo-125m", None)
+    from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
+    from projects.wiki_experts.src.expert_model import MultiExpertModelRanker
+    from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRankerHelper
 
-    predict_experts = model.predict_experts_using_classifier(
-        [
-            "if a horse at 2 years old has 3 legs, how many legs it has at 10 years old?",
-            "if a horse at 2 years old has 3 legs, how many legs it has at 10 years old?",
-        ]
+    sources_texts = [
+        'Given the question: Given the following passage  "The earliest recorded Western philosophy of time was expounded by the ancient Egyptian thinker Ptahhotep (c. 2650–2600 BC), who said, "Do not lessen the time of following desire, for the wasting of time is an abomination to the spirit." The Vedas, the earliest texts on Indian philosophy and Hindu philosophy, dating back to the late 2nd millennium BC, describe ancient Hindu cosmology, in which the universe goes through repeated cycles of creation, destruction, and rebirth, with each cycle lasting 4,320,000 years. Ancient Greek philosophers, including Parmenides and Heraclitus, wrote essays on the nature of time.",  answer the following question. Note that the answer is present within the text.  Question: How many years do the Vedas have?\nThe answer is:'
+    ]
+
+    finetune_task_name = "adversarial_qa_dbert_answer_the_following_q"
+    data_module = FlanModule(
+        FlanConfig(
+            dataset="sordonia/flan-debug-flat",
+            model="EleutherAI/gpt-neo-125m",
+            finetune_task_name=finetune_task_name,
+            predict_batch_size=1,
+            include_template_type="*",
+        ),
+        for_generation=True,
     )
+
+    predict_experts = model.predict_experts_using_classifier(sources_texts)
     print(predict_experts)
+
+    from projects.wiki_experts.src.config import ExpertConfig
+
+    config = ExpertConfig()
+    config.routing = "retrieval"
+    config.model = "EleutherAI/gpt-neo-125m"
+    config.retrieval_model = "classifier"
+    config.expert_model_path = "zhan1993/classifier_ranker"
+
+    model = AdapterRankerHelper(config.retrieval_model, config.expert_model_path)
+    prediction_experts = model.ranker.predict_experts_using_classifier(sources_texts)
+    print(prediction_experts)

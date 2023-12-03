@@ -1,12 +1,14 @@
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import glob
 import io
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 import torch
 import os
+from tempfile import TemporaryDirectory
 import numpy as np
+from collections import defaultdict
 
 from huggingface_hub import (
     hf_hub_download,
@@ -20,6 +22,7 @@ from huggingface_hub import (
     create_repo,
     HfApi,
 )
+from functools import total_ordering
 from huggingface_hub.utils._errors import RepositoryNotFoundError
 
 from huggingface_hub import HfApi
@@ -28,20 +31,51 @@ from mttl.models.modifiers.expert_containers.module_graph import (
     Expert,
     load_expert,
     ExpertInfo,
+    ModuleGraph,
 )
 
 
+@total_ordering
 @dataclass
+class Score:
+    name: str
+    task: str
+    split: str
+    value: np.ndarray = None
+    config: Dict[str, Any] = None
+
+    @property
+    def key(self):
+        return (self.name, self.task, self.split)
+
+    @property
+    def hash(self) -> str:
+        return str(self.key).encode()
+
+    def dumps(self):
+        return self.__dict__
+
+    def __lt__(self, other):
+        if not isinstance(other, Score):
+            return self.value < other
+        return self.value < other.value
+
+    def __eq__(self, other):
+        if not isinstance(other, Score):
+            return self.value == other
+        return self.value == other.value
+
+
 class MetadataEntry(ExpertInfo):
     expert_deleted: bool = False
 
-    def dumps(self):
-        dump = ExpertInfo.dumps(self)
-        dump["expert_deleted"] = self.expert_deleted
-        return dump
-
     @classmethod
     def loads(cls, ckpt):
+        allowed_keys = MetadataEntry.__dataclass_fields__.keys()
+        contained_keys = list(ckpt.keys())
+        for k in contained_keys:
+            if k not in allowed_keys:
+                ckpt.pop(k)
         entry = cls(**ckpt)
         entry.expert_deleted = ckpt.get("expert_deleted", False)
         return entry
@@ -150,7 +184,14 @@ class LocalFSEngine(BackendEngine):
 
 
 class ExpertLibrary:
-    def __init__(self, repo_id, model_name=None, selection=None, create=False):
+    def __init__(
+        self,
+        repo_id,
+        model_name=None,
+        selection=None,
+        create=False,
+        ignore_sliced=False,
+    ):
         super().__init__()
 
         self.repo_id = repo_id
@@ -161,6 +202,8 @@ class ExpertLibrary:
         self._pending_operations = []
         self._pending_pre_uploads = []
         self.data = {}
+
+        self.ignore_sliced = ignore_sliced
 
         if "HF_TOKEN" in os.environ:
             self.login(token=os.environ["HF_TOKEN"])
@@ -173,6 +216,10 @@ class ExpertLibrary:
 
         self._build_lib()
         logger.info("Loaded %s experts from huggingface hub", len(self.data))
+
+    @property
+    def sliced(self):
+        return self._sliced and not self.ignore_sliced
 
     def _build_lib(self):
         self._sliced = False
@@ -277,20 +324,20 @@ class ExpertLibrary:
             expert_dump.expert_info.scores = scores
         return expert_dump
 
-    def __getitem__(self, model_name):
+    def __getitem__(self, expert_name):
         if self._in_transaction:
             raise ValueError(
                 "Cannot access library while in transaction. Finish current commit!"
             )
 
-        if model_name not in self.data:
-            raise ValueError(f"Expert {model_name} not found in repository.")
+        if expert_name not in self.data:
+            raise ValueError(f"Expert {expert_name} not found in repository.")
 
-        model = self._download_model(model_name)
+        model = self._download_model(expert_name)
         # Load the model from the downloaded file
         model = torch.load(model, map_location="cpu")
         return Expert(
-            expert_info=self.data[model_name],
+            expert_info=self.data[expert_name],
             expert_weights=model,
         )
 
@@ -300,14 +347,19 @@ class ExpertLibrary:
     def add_expert(
         self, expert_dump: Expert, expert_name: str = None, force: bool = False
     ):
-        if self._sliced:
+        if self.sliced:
             raise ValueError("Cannot add expert to sliced library.")
 
         if expert_name is not None:
-            expert_dump.expert_info.expert_name = expert_name
+            # why would we want to do it?
+            expert_dump.expert_info = replace(
+                expert_dump.expert_info, expert_name=expert_name
+            )
 
         if expert_dump.expert_info.expert_name in self.data and not force:
-            raise ValueError(f"Expert {expert_name} already exists!")
+            raise ValueError(
+                f"Expert {expert_dump.expert_info.expert_name} already exists!"
+            )
 
         if "." in expert_dump.expert_info.expert_name:
             raise ValueError("Expert name cannot contain dots.")
@@ -317,7 +369,6 @@ class ExpertLibrary:
 
         self._upload_weights(metadata.expert_name, expert_dump)
         self._upload_metadata(metadata)
-
         self.data[metadata.expert_name] = metadata
         self._update_readme()
 
@@ -326,15 +377,11 @@ class ExpertLibrary:
         data_type: str = "embeddings",
         expert_name: str = None,
     ) -> List[Any]:
-        files = snapshot_download(self.repo_id, allow_patterns=f"*.{data_type}")
-        if not files:
-            raise ValueError(
-                f"No data of type {data_type} found in repository. Did you compute it?"
-            )
+        path = self.snapshot_download(self.repo_id, allow_patterns=f"*.{data_type}")
 
         if expert_name:
-            filename = f"{expert_name}.{data_type}"
-            if filename not in files:
+            filename = os.path.join(path, f"{expert_name}.{data_type}")
+            if not os.path.isfile(filename):
                 raise ValueError(
                     f"Data of type {data_type} for expert {expert_name} not found in repository. Did you compute it?"
                 )
@@ -342,14 +389,14 @@ class ExpertLibrary:
         else:
             auxiliary_data = {}
             for key in self.keys():
-                filename = f"{key}.{data_type}"
-                if filename in files:
+                filename = os.path.join(path, f"{key}.{data_type}")
+                if os.path.isfile(filename):
                     auxiliary_data[f"{key}"] = torch.load(filename)
         return auxiliary_data
 
     def unremove_expert(self, expert_name: str):
         """Restore a previously soft-deleted expert."""
-        if self._sliced:
+        if self.sliced:
             raise ValueError("Cannot remove expert from sliced library.")
 
         list_of_files = self.list_repo_files(self.repo_id)
@@ -368,7 +415,7 @@ class ExpertLibrary:
 
         soft_delete: if True, the expert is not removed from the repository, but only marked as deleted.
         """
-        if self._sliced:
+        if self.sliced:
             raise ValueError("Cannot remove expert from sliced library.")
 
         if expert_name not in self.data:
@@ -393,38 +440,43 @@ class ExpertLibrary:
             metadata.expert_deleted = True
             self._upload_metadata(metadata)
 
-        self.data.pop(expert_name)
+        metadata = self.data.pop(expert_name)
         self._update_readme()
 
-    def add_scores(
-        self,
-        expert_name: str,
-        scores_config: Dict,
-        expert_scores: np.ndarray,
-    ):
+    def get_score(self, expert_name: str, hash: str):
+        try:
+            scores = self.get_auxiliary_data(
+                data_type="scores", expert_name=expert_name
+            )
+        except ValueError:
+            return None
+        if hash not in scores:
+            return None
+        return Score(**scores[hash])
+
+    def add_score(self, expert_name: str, score: Score):
         if expert_name not in self.data:
             raise ValueError(f"Expert {expert_name} not found in repository.")
-
-        if "name" not in scores_config:
-            raise ValueError("Embedding config must contain a name.")
 
         operations = []
         scores_file = f"{expert_name}.scores"
 
         scores = self.list_repo_files(self.repo_id)
         if scores_file in scores:
-            path = hf_hub_download(self.repo_id, filename=scores_file)
+            path = self.hf_hub_download(self.repo_id, filename=scores_file)
             scores = torch.load(path, map_location="cpu")
         else:
             scores = {}
 
-        scores[scores_config["name"]] = {
-            "scores": expert_scores,
-            "config": scores_config,
-        }
+        task = score.task
+        if score.hash in scores:
+            raise ValueError(f"Score {score.name} already exists for task {task}.")
+        if score.value is None:
+            raise ValueError(f"Score {score.name} has no value and cannot be added.")
+        scores[score.hash] = score.dumps()
 
         buffer = io.BytesIO()
-        torch.save(buffer, scores)
+        torch.save(scores, buffer)
         buffer.flush()
 
         addition_a = CommitOperationAdd(
@@ -459,7 +511,7 @@ class ExpertLibrary:
 
         embeddings = self.list_repo_files(self.repo_id)
         if embedding_file in embeddings:
-            path = snapshot_download(self.repo_id, allow_patterns=embedding_file)
+            path = self.hf_hub_download(self.repo_id, filename=embedding_file)
             embeddings = torch.load(path, map_location="cpu")
         else:
             embeddings = {}
@@ -470,7 +522,7 @@ class ExpertLibrary:
         }
 
         buffer = io.BytesIO()
-        torch.save(buffer, embedding_config)
+        torch.save(embeddings, buffer)
         buffer.flush()
 
         addition_a = CommitOperationAdd(
@@ -554,7 +606,7 @@ class ExpertLibrary:
         self.add_expert(expert_dump, expert_name=expert_name, force=force)
 
     def rename_expert(self, old_name, new_name):
-        if self._sliced:
+        if self.sliced:
             raise ValueError("Cannot rename expert in sliced library.")
 
         if old_name not in self.data:
@@ -593,25 +645,128 @@ class ExpertLibrary:
     @property
     def tasks(self):
         """
-        Assume that the experts' names correspond to the tasks they were trained on
+        Doesn't assume that the experts' names correspond to the tasks they were trained on
         """
-        return list(self.keys())
+        return [metadatum.expert_task_name for metadatum in self.data.values()]
 
-    def filter_with_tasks(self, tasks):
+    def __contains__(self, expert: Union[Expert, str]):
+        key = expert if isinstance(expert, str) else expert.expert_info.expert_name
+        return key in self.data
+
+    def replace_expert(self, old_expert: Expert, new_expert: Expert):
         """
-        Remove modules for tasks other than the ones in tasks.
+        Replace an expert with a new one.
         """
-        self._sliced = True
-        all_tasks = self.tasks
-
-        for t in all_tasks:
-            if t not in tasks:
-                self.data.pop(t, None)
-
-
-class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
-    pass
+        if old_expert in self:
+            self.remove_expert(old_expert.name, soft_delete=False)
+        return self.add_expert(new_expert)
 
 
 class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
-    pass
+    @classmethod
+    def from_old_version(cls, repo_id, destination):
+        import huggingface_hub
+
+        def _download_model(expert_name):
+            model_file = f"{expert_name}.ckpt"
+            model = hf_hub_download(repo_id, filename=model_file)
+            model = torch.load(model, map_location="cpu")
+            return model
+
+        if "HF_TOKEN" in os.environ:
+            login(token=os.environ["HF_TOKEN"])
+
+        metadata_dir = snapshot_download(repo_id, allow_patterns="*.meta")
+        new_lib = LocalExpertLibrary(repo_id=destination, create=False)
+
+        for file in glob.glob(f"{metadata_dir}/*.meta"):
+            metadatum = torch.load(file, map_location="cpu")
+            expert_info = ExpertInfo(
+                expert_config=json.loads(metadatum["expert_config"]),
+                expert_name=metadatum["expert_info"]["expert_name"],
+                expert_task_name=metadatum["expert_info"]["expert_task_name"],
+            )
+            model_weights = _download_model(expert_info.expert_name)
+            expert = Expert(expert_info=expert_info, expert_weights=model_weights)
+            if expert not in new_lib:
+                new_lib.add_expert(expert)
+        return new_lib
+
+    @classmethod
+    def from_remote(cls, remote_lib: ExpertLibrary, destination):
+        new_lib = LocalExpertLibrary(repo_id=destination)
+        for name, expert in remote_lib.items():
+            if expert not in new_lib:
+                new_lib.add_expert(expert)
+        return new_lib
+
+    def clone(self, destination):
+        """
+        Clone the library into a new repository.
+        """
+        destination = os.path.join(destination, self.repo_id)
+        new_lib = LocalExpertLibrary(repo_id=destination, create=True)
+        for name, expert in self.items():
+            if expert not in new_lib:
+                new_lib.add_expert(expert)
+        return new_lib
+
+
+class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
+    @classmethod
+    def to_hf(
+        cls,
+        local_lib: LocalExpertLibrary,
+        repo_id,
+        force=False,
+        upload_aux_data=False,
+        only_tasks=None,
+    ):
+        new_lib = HFExpertLibrary(repo_id=repo_id, create=True)
+
+        only_tasks = only_tasks or local_lib.tasks
+        for name, expert in local_lib.items():
+            # upload modules that are not in the target repo + only upload modules for the specified tasks
+            if (
+                expert.expert_info.expert_task_name not in only_tasks
+                and expert.name in new_lib
+            ):
+                continue
+            new_lib.add_expert(expert, name, force=force)
+        # also update the scores
+        if upload_aux_data:
+            scores = local_lib.get_auxiliary_data(data_type="scores")
+            for expert_name, expert_scores in scores.items():
+                for score in expert_scores.values():
+                    try:
+                        new_lib.add_score(expert_name, Score(**score))
+                    except ValueError as e:
+                        logger.error(e)
+                        continue
+
+            # TODO: upload the embeddings
+
+        return new_lib
+
+
+def get_best_expert_for_task(library: HFExpertLibrary, task, hash) -> Expert:
+    """
+    Return the expert with the highest score on task. If none found, returns the last expert found.
+    """
+    if task not in library.tasks:
+        raise ValueError(f"Task {task} not found in repository.")
+
+    best_expert = None
+    best_score = -np.inf
+    for metadata in library.data.values():
+        if metadata.expert_task_name != task:
+            continue
+        score: Score = library.get_score(metadata.expert_name, hash=hash)
+        if score is None:
+            continue
+        if score > best_score:
+            best_score = score
+            best_expert = metadata
+    if best_expert is None:
+        best_expert = metadata
+    return library[best_expert.expert_name]

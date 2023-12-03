@@ -123,19 +123,21 @@ class LossCallback(cb.Callback):
 
 
 class RougeCallback(cb.Callback):
-    def __init__(self, datamodule, device="cuda"):
+    def __init__(self, datamodule, device="cuda", every_n_epochs=1):
         super().__init__()
 
         from mttl.evaluators.rouge_evaluator import RougeEvaluator
 
         self.evaluator = RougeEvaluator(datamodule, device=device)
+        self.every_n_epochs = every_n_epochs
 
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:
-        rouge = self.evaluator.evaluate(pl_module, split="val")
+        if self.every_n_epochs > 0 and trainer.current_epoch % self.every_n_epochs == 0:
+            rouge = self.evaluator.evaluate(pl_module, split="val")
 
-        pl_module.log("val/rougeL", rouge, on_epoch=True, prog_bar=True)
+            pl_module.log("val/rougeL", rouge, on_epoch=True, prog_bar=True)
 
         return super().on_validation_epoch_end(trainer, pl_module)
 
@@ -257,11 +259,10 @@ class MMLUCallback(cb.Callback):
                 finetune_task_name=pl_module.hparams.finetune_task_name,
             )
             self.evaluator = MMLUEvaluator(
-                mmlu_data_config,
-                split=self.split,
+                config=mmlu_data_config,
             )
 
-        metrics = self.evaluator.evaluate(pl_module)
+        metrics = self.evaluator.evaluate(pl_module, split=self.split)
         return metrics
 
     def on_after_backward(self, *args, **kwargs):
@@ -283,6 +284,7 @@ class MMLUCallback(cb.Callback):
         )
         metrics = evaluator.evaluate(
             pl_module,
+            split=self.split,
             subsample=10,
         )
         pl_module.log(
@@ -314,12 +316,13 @@ class NICallback(cb.Callback):
         from mttl.evaluators import NIEvaluator
 
         evaluator = NIEvaluator(
-            pl_module.hparams,
+            config=pl_module.hparams,
             num_pos_examples=2,
             **self.eval_kwargs,
         )
         metrics = evaluator.evaluate(
             pl_module,
+            split="val",
             eval_batches=50,
         )
         pl_module.log(
@@ -329,87 +332,6 @@ class NICallback(cb.Callback):
             on_epoch=True,
             prog_bar=True,
         )
-
-
-class MiniProgress(cb.ProgressBar):
-    def __init__(self):
-        super().__init__()
-        self.averager = Averager(0.9)
-
-    def on_train_batch_start(
-        self, trainer, pl_module, batch: Any, batch_idx: int
-    ) -> None:
-        self.time_start = time.time()
-
-    def on_train_batch_end(
-        self,
-        trainer,
-        pl_module,
-        outputs,
-        batch,
-        batch_idx,
-    ) -> None:
-        self.time_end = time.time()
-        metrics = self.get_metrics(trainer, pl_module)
-        metrics = {k: v for k, v in metrics.items()}
-        it_per_sec = 1 / (self.time_end - self.time_start)
-
-        # num total steps will be min of num_training_batches and max_steps
-        if trainer.max_steps > -1:
-            num_total_steps = min(
-                trainer.num_training_batches * trainer.max_epochs, trainer.max_steps
-            )
-        else:
-            num_total_steps = (
-                trainer.num_training_batches // trainer.accumulate_grad_batches
-            ) * trainer.max_epochs
-
-        eta = (num_total_steps - batch_idx) / (
-            1.0 / ((self.time_end - self.time_start))
-        )
-
-        time_metrics = self.averager.update({"it/s": it_per_sec, "eta": eta})
-        for k, v in {**metrics, **time_metrics}.items():
-            if k == "eta":
-                metrics[k] = "{}".format(datetime.timedelta(seconds=v))
-            else:
-                metrics[k] = "{:.2f}".format(v) if isinstance(v, float) else v
-
-        msg_start = (
-            f"Trn - Epc {trainer.current_epoch} / {trainer.global_step} / {num_total_steps}"
-            + " | "
-        )
-        dict_msg = " | ".join([f"{k} -> {v}" for k, v in metrics.items()]) + " | "
-        msg = msg_start + dict_msg
-        logger.info(msg)
-
-    def on_validation_batch_start(
-        self, trainer, pl_module, batch: Any, batch_idx: int
-    ) -> None:
-        self.time_start = time.time()
-
-    def on_validation_batch_end(
-        self,
-        trainer,
-        pl_module,
-        outputs,
-        batch,
-        batch_idx,
-    ) -> None:
-        self.time_end = time.time()
-        metrics = self.get_metrics(trainer, pl_module)
-        metrics = {k: v for k, v in metrics.items()}
-        metrics["it/s"] = 1.0 / (self.time_end - self.time_start)
-        for k, v in metrics.items():
-            metrics[k] = "{:.2f}".format(v) if isinstance(v, float) else v
-
-        msg_start = (
-            f"Val - Epc {trainer.current_epoch} / {batch_idx} / {trainer.num_val_batches[0]}"
-            + " | "
-        )
-        dict_msg = " | ".join([f"{k} -> {v}" for k, v in metrics.items()]) + " | "
-        msg = msg_start + dict_msg
-        logger.info(msg)
 
 
 class ProgressCallback(cb.TQDMProgressBar):

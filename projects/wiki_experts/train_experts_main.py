@@ -100,6 +100,8 @@ def get_datamodule(args, for_generation=False):
     elif "adauni" in args.dataset:
         config = FlatMultiTaskConfig(
             **common_kwargs,
+            source_template=args.source_template,
+            augment_few_shot=args.augment_few_shot,
         )
         dm = FlatMultiTaskModule(config, for_generation=for_generation)
     else:
@@ -121,6 +123,7 @@ def run_multitask(args):
     # select dataloader
     model_class = ExpertTrainer
     dm = get_datamodule(args)
+    args.n_tasks = len(dm._task_names)
     gen_dm = get_datamodule(args, for_generation=True)
 
     # legit logging
@@ -141,7 +144,6 @@ def run_multitask(args):
         loggers.append(wandb_logger)
 
     module = model_class(**vars(args), tokenizer=dm.tokenizer).to("cuda")
-
     mlf_logger = get_mlf_logger()
     if mlf_logger:
         loggers.append(mlf_logger)
@@ -179,7 +181,7 @@ def run_multitask(args):
         elif val_check_interval > args.total_steps and args.total_steps != -1:
             val_check_interval = args.total_steps
 
-    callbacks.append(RougeCallback(gen_dm))
+    callbacks.append(RougeCallback(gen_dm, every_n_epochs=3))
 
     trainer = Trainer(
         devices=-1,

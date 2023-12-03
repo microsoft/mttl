@@ -7,8 +7,10 @@ from typing import Any, Dict, Union, Optional
 import torch
 from torch.utils.data import DataLoader, Dataset
 
+import numpy as np
 from mttl.utils import logger
 from mttl.datamodule.utils import get_tokenizer
+from datasets import Dataset as HFDataset
 
 
 @dataclass
@@ -250,7 +252,7 @@ class DefaultCollator:
     def __call__(self, batch: Dict):
         sources = [b["source"] for b in batch]
         labels = [b["target"] for b in batch]
-        task_ids = [b.get("task_id", 0) for b in batch]
+        task_ids = [b.get("task_id", -1) for b in batch]
         task_names = [b.get("task_name", None) for b in batch]
 
         output_batch = (
@@ -267,7 +269,7 @@ class DefaultCollator:
 
 
 def subsample_dst(dataset, subsample: int):
-    subsample = len(dataset) // subsample
+    subsample = max(len(dataset) // subsample, 1)
     if isinstance(dataset, torch.utils.data.Subset):
         idxs = dataset.indices
         idxs = idxs[:subsample]
@@ -276,6 +278,11 @@ def subsample_dst(dataset, subsample: int):
         idxs = torch.randperm(len(dataset))
         idxs = idxs[:subsample]
         dataset = torch.utils.data.Subset(dataset, idxs)
+    # hugginface datasets
+    elif isinstance(dataset, HFDataset):
+        # randomly select subsample indices
+        dataset = dataset.select(np.random.choice(len(dataset), subsample))
+
     return dataset
 
 
@@ -291,26 +298,26 @@ class DefaultDataModule(LightningDataModule):
             shuffle=True,
             num_workers=8,
             pin_memory=True,
-            persistent_workers=True,
+            persistent_workers=False,
             collate_fn=self.collate_fn,
         )
 
-    def val_dataloader(self, subsample=None):
+    def val_dataloader(self, subsample=None, shuffle=False):
         dev_dataset = self.dev_dataset
         if subsample and subsample > 0:
             dev_dataset = subsample_dst(dev_dataset, subsample)
         return DataLoader(
             dev_dataset,
             batch_size=self.config.predict_batch_size,
-            shuffle=False,
+            shuffle=shuffle,
             num_workers=8,
             pin_memory=True,
-            persistent_workers=True,
+            persistent_workers=False,
             collate_fn=self.collate_fn,
             drop_last=False,
         )
 
-    def test_dataloader(self, subsample=None):
+    def test_dataloader(self, subsample=None, shuffle=False):
         test_dataset = self.test_dataset
         if subsample and len(test_dataset) > subsample and subsample > 0:
             test_dataset = test_dataset.select(range(subsample))
@@ -318,10 +325,10 @@ class DefaultDataModule(LightningDataModule):
         return DataLoader(
             test_dataset,
             batch_size=self.config.predict_batch_size,
-            shuffle=False,
+            shuffle=shuffle,
             num_workers=8,
             pin_memory=True,
-            persistent_workers=True,
+            persistent_workers=False,
             collate_fn=self.collate_fn,
             drop_last=False,
         )

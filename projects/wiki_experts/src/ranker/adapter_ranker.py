@@ -22,14 +22,14 @@ class AdapterRankerHelper:
         self,
     ):
         if self.retrieval_model == "clip":
-            model = CLIPRanker()
-            model.from_pretrained(self.model_path)
-            model.to(device)
+            model = CLIPRanker().from_pretrained(self.model_path).to(device)
             return model
         elif self.retrieval_model == "classifier":
-            model = SentenceTransformerClassifier()
-            model.from_pretrained(self.model_path)
-            model.to(device)
+            model = (
+                SentenceTransformerClassifier()
+                .from_pretrained(self.model_path)
+                .to(device)
+            )
             return model
         else:
             raise ValueError(f"Unknown retrieval model: {self.retrieval_model}")

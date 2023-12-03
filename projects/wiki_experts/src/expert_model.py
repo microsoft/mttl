@@ -1,10 +1,10 @@
 import torch
+import copy
 import numpy as np
 from typing import Dict
-
+from tempfile import TemporaryDirectory
 from mttl.models.modifiers.routing import RoutingInfo
 from mttl.utils import logger
-from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
 from mttl.models.modifiers.expert_containers import ExpertContainer
 from mttl.models.modifiers.expert_containers import Selector
 from mttl.models.modifiers.expert_containers import (
@@ -14,6 +14,12 @@ from mttl.models.modifiers.expert_containers import (
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRankerHelper
+
+from mttl.models.modifiers.expert_containers.module_graph import Expert, ExpertInfo
+from mttl.models.modifiers.expert_containers.module_graph import (
+    ModuleGraph,
+    load_expert,
+)
 
 
 def push_expert_to_hub(
@@ -68,8 +74,8 @@ class MultiExpertModel(ExpertTrainer):
     def __init__(self, **kwargs: dict):
         # we dont use any  model modifier for MultiExpertModel model by default.
         # If you want to use a model modifier, use one of the 'self.modify_weith...' methods.
-        kwargs.pop("model_modifier", None)
-        super().__init__(model_modifier=None, **kwargs)
+        kwargs["model_modifier"] = None
+        super().__init__(**kwargs)
 
         self.experts = []
 
@@ -94,34 +100,66 @@ class MultiExpertModel(ExpertTrainer):
                 config=self.hparams,
             )
             self.experts.append(module_name)
-        self.expert_info.parent_node = graph.dumps()
 
-    def convert_container_to_expert(self, expert_name):
-        loaded_expert = None
+    def delete_expert_container(self):
+        """
+        Replaces the expert container with the expert with the given name.
+        """
+        for _, module in self.model.named_modules():
+            for c_name, child in dict(module.named_children()).items():
+                if isinstance(child, ExpertContainer) and len(child.experts) > 0:
+                    setattr(module, c_name, child.layer)
+        self.experts = []
+
+    def replace_container_with_expert(self, expert_name, get_expert_instance=True):
+        """
+        Replaces the expert container with the expert with the given name.
+        """
+        expert = None
         for _, module in self.model.named_modules():
             for c_name, child in dict(module.named_children()).items():
                 if isinstance(child, ExpertContainer) and len(child.experts) > 0:
                     setattr(module, c_name, child.experts[expert_name])
-                    if loaded_expert is None:
-                        loaded_expert = child.experts[expert_name]
+                    if expert is None:
+                        expert = child.experts[expert_name]
         # make sure hparams reflect the loaded expert
-        if loaded_expert:
-            self.hparams.update(loaded_expert.config.__dict__)
+        if expert:
+            self.hparams.update(expert.config.__dict__)
+        if get_expert_instance:
+            td = TemporaryDirectory()
+            expert_checkpoint = MultiExpertModel.save_pretrained(self, td.name)
+            expert: Expert = load_expert(expert_checkpoint)
+            return expert
+        return
 
     def load_from_module_dict(self, module_dict, action="route"):
         for module_name, destination in module_dict.items():
-            self.load_expert(
-                destination,
-                module_name,
-                action=action,
-                is_default=module_name == "default",
-            )
-        self.expert_info.parent_node = ModuleGraph.from_module_dict(module_dict).dumps()
+            if isinstance(destination, str):
+                self.load_expert(
+                    destination,
+                    module_name,
+                    action=action,
+                    is_default=module_name == "default",
+                )
+            elif isinstance(destination, Expert):
+                self.add_expert_instance(destination, module_name, action=action)
 
-    def load_from_graph_string(self, s, action="route"):
+    def add_expert_instance(self, expert_instance: Expert, expert_name, action="route"):
+        self.model = add_expert_to_transformer(
+            self.model,
+            expert_name,
+            expert_instance.expert_config,
+            expert_instance.expert_weights,
+            action=action,
+            is_default=expert_name == "default",
+        )
+        if action != "merge":
+            self.experts.append(expert_name)
+
+    def load_from_graph_string(self, s, action="route", **kwargs):
         from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
 
-        graph = ModuleGraph.from_string(s)
+        graph = ModuleGraph.from_string(s, **kwargs)
         self.load_from_graph(graph, action=action)
 
     def load_expert(
@@ -166,67 +204,12 @@ class MultiExpertModel(ExpertTrainer):
     def generation_config(self):
         return self.model.generation_config
 
-    def expert_choice(self, batch, **kwargs):
-        input_ids = batch["input_ids"]
-        mask = batch["attention_mask"]
-
-        # convert left to right padding here
-        def roll_along(arr, shifts, dim):
-            assert arr.ndim - 1 == shifts.ndim
-            dim %= arr.ndim
-            shape = (1,) * dim + (-1,) + (1,) * (arr.ndim - dim - 1)
-            dim_indices = torch.arange(arr.shape[dim]).reshape(shape).to(arr.device)
-            indices = (dim_indices - shifts.unsqueeze(dim)) % arr.shape[dim]
-            return torch.gather(arr, dim, indices)
-
-        input_ids = roll_along(input_ids, mask.sum(1), 1)
-        mask = input_ids.ne(0)
-        labels = torch.masked_fill(input_ids, ~mask, -100)
-
-        scores = []
-        for expert in self.experts:
-            batch["task_names"] = [expert for _ in range(batch["input_ids"].shape[0])]
-            self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
-                batch
-            )
-            outputs = self.model.forward(
-                input_ids,
-                attention_mask=mask,
-            )
-            # calculate loss, could also be done inside of the model
-            bs = input_ids.size(0)
-            logits = outputs.logits
-            vocab_size = logits.size(-1)
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-            # Flatten the tokens
-            loss_fct = torch.nn.CrossEntropyLoss(reduction="none")
-            shift_logits = shift_logits.view(-1, vocab_size)
-            shift_labels = shift_labels.view(-1)
-
-            # Enable model parallelism
-            shift_labels = shift_labels.to(shift_logits.device)
-            loss = loss_fct(shift_logits, shift_labels)
-            loss = loss.view((bs, -1)).sum(1)
-            # mean only non-zero
-            scores.append(loss.cpu())
-
-        scores = torch.stack(scores, 0)
-        expert_indices = scores.argmin(0)
-        return [self.experts[i] for i in expert_indices]
-
     def generate(
         self,
         batch,
         **kwargs,
     ):
-        if self.hparams.routing == "auto":
-            logger.info(
-                "Auto-routing... ground-truth tasks: {}".format(batch["task_names"])
-            )
-            batch["task_names"] = self.expert_choice(batch)
-            logger.info("Auto-route tasks: {}".format(batch["task_names"]))
-        elif self.hparams.routing == "first":
+        if self.hparams.routing == "first":
             batch["task_names"] = [
                 self.experts[0] for _ in range(batch["input_ids"].shape[0])
             ]
@@ -236,11 +219,11 @@ class MultiExpertModel(ExpertTrainer):
             batch["task_names"] = np.random.choice(
                 self.experts, batch["input_ids"].shape[0], replace=True
             ).tolist()
+
         if hasattr(self.model, "task_id_container"):
             self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
                 batch
             )
-
         generations = self.model.generate(
             inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
         )
@@ -363,13 +346,7 @@ class MultiExpertModelRanker(MultiExpertModel):
         batch,
         **kwargs,
     ):
-        if self.hparams.routing == "auto":
-            logger.info(
-                "Auto-routing... ground-truth tasks: {}".format(batch["task_names"])
-            )
-            batch["task_names"] = self.expert_choice(batch)
-            logger.info("Auto-route tasks: {}".format(batch["task_names"]))
-        elif self.hparams.routing == "first":
+        if self.hparams.routing == "first":
             batch["task_names"] = [
                 self.experts[0] for _ in range(batch["input_ids"].shape[0])
             ]
@@ -405,9 +382,6 @@ class RoutedMultiExpertModel(MultiExpertModel):
         super().__init__(**kwargs)
 
         self.selectors: Dict[str:Selector] = torch.nn.ModuleDict()
-        self.graph_string = self.expert_info.parent_node
-        if self.graph_string is not None:
-            self.load_from_graph_string(self.expert_info.parent_node, action="route")
 
     def load_expert(
         self,
@@ -419,7 +393,7 @@ class RoutedMultiExpertModel(MultiExpertModel):
     ):
         from mttl.models.modifiers.expert_containers.module_graph import load_expert
 
-        expert = load_expert(expert_path, expert_name=expert_name)
+        expert = load_expert(expert_path)
         if self.hparams.model != expert.expert_config.model:
             raise ValueError(
                 "The expert has been trained on top of a different model!"
@@ -468,13 +442,43 @@ class RoutedMultiExpertModel(MultiExpertModel):
             weights[selector.name] = selector.get_routing_weights()
         return weights
 
-    def merge_experts_together(self, weights: dict = None):
+    def add_expert_instance(self, expert_instance, expert_name, action="route"):
+        self.model = add_expert_to_transformer(
+            self.model,
+            expert_name,
+            expert_instance.expert_config,
+            expert_instance.expert_weights,
+            action=action,
+            is_default=expert_name == "default",
+            selectors=self.selectors,
+            config=self.hparams,
+        )
+        if action != "merge":
+            self.experts.append(expert_name)
+
+    def to_expert(self, weights: dict = None, with_global_names=True) -> Expert:
         """
         Merges current experts together according to weights if given, otherwise uses router's weights
         """
+        expert_weights = {}
         for _, module in self.model.named_modules():
             for c_name, child in dict(module.named_children()).items():
                 if isinstance(child, ExpertContainer) and len(child.experts) > 0:
                     # creates a single Lora
-                    child.merge_experts_together(weights)
-        self.convert_container_to_expert("merged_expert")
+                    exp_config, _weights = child.get_merged_weights(
+                        weights, with_global_names=with_global_names
+                    )
+                    expert_weights.update(_weights)
+        config_merged = copy.deepcopy(self.hparams)
+        config_merged.model_modifier = exp_config.model_modifier
+        expert_info = ExpertInfo(
+            self.hparams.finetune_task_name,
+            expert_task_name=self.hparams.finetune_task_name,
+            expert_config=config_merged,
+        )
+        return Expert(expert_info=expert_info, expert_weights=expert_weights)
+
+    def on_save_checkpoint(self, ckpt):
+        expert: Expert = self.to_expert()
+        ckpt["expert_dumps"] = expert.dumps()
+        ckpt["merging_weights"] = self.get_router_weights()
