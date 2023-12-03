@@ -1,13 +1,13 @@
 import pytorch_lightning as pl
-from sentence_transformers import SentenceTransformer
 from projects.wiki_experts.src.ranker.classification_module import (
     ClassificationDataModule,
     ClassificationConfig,
-    ClassificationDataModuleAdaUni,
-    ClassificationAdaUniConfig,
+    ClassificationDataModuleFlatMultiTask,
 )
 
-from projects.wiki_experts.src.ranker.classifier_ranker import Classifier
+from projects.wiki_experts.src.ranker.classifier_ranker import (
+    SentenceTransformerClassifier,
+)
 from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.src.ranker.clip_ranker import CLIPRanker, CLIPTripletRanker
 from projects.wiki_experts.src.ranker.clip_data_module import (
@@ -137,40 +137,23 @@ def train_classifier(args):
         wandb_logger.experiment.save("*.py")
         wandb_logger.experiment.save("*/*.py")
 
-    text_encoder = SentenceTransformer(
-        "all-MiniLM-L6-v2"
-    )  # You need to define your text encoder
+    module = SentenceTransformerClassifier(
+        num_labels=args.num_labels, text_encoder_trained=args.text_encoder_trained
+    )
 
-    # frozen the transformer parameters
-    auto_model = text_encoder._first_module().auto_model
-    for param in auto_model.parameters():
-        param.requires_grad = False
-
-    # load config
-    if "flan" in args.dataset:
-        config = ClassificationConfig(
-            dataset=args.dataset,
-            model=args.model,
-            train_batch_size=args.train_batch_size,
-            finetune_task_name=args.finetune_task_name,
-        )
-        # train the classifier
-        datamodule = ClassificationDataModule(config)
-    elif "adauni" in args.dataset:
-        config = ClassificationAdaUniConfig(
-            dataset=args.dataset,
-            model=args.model,
-            train_batch_size=args.train_batch_size,
-            finetune_task_name=args.finetune_task_name,
-        )
-        # train the classifier
-        datamodule = ClassificationDataModuleAdaUni(config)
-    classifier = Classifier(text_encoder, num_labels=args.num_labels)
+    config = ClassificationConfig(
+        dataset=args.dataset,
+        model=args.model,
+        train_batch_size=args.train_batch_size,
+        finetune_task_name=args.finetune_task_name,
+    )
+    # train the classifier
+    datamodule = ClassificationDataModuleFlatMultiTask(config)
 
     # add model checkpoint
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
         monitor="val/loss_epoch",
-        dirpath=f"classification_ranker_{args.dataset}/",
+        dirpath=f"classification_ranker_{args.dataset}",
         filename="classifier-{epoch:02d}-{val/loss:.2f}",
         save_top_k=1,
         mode="min",
@@ -182,8 +165,10 @@ def train_classifier(args):
         callbacks=[checkpoint_callback],
         devices=1,
         logger=wandb_logger,
+        # limit_val_batches=10,
+        # limit_train_batches=10,
     )
-    trainer.fit(classifier, datamodule)
+    trainer.fit(module, datamodule)
     if wandb_logger:
         wandb_logger.experiment.finish()
 

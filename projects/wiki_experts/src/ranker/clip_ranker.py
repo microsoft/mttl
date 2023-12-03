@@ -5,7 +5,14 @@ from projects.wiki_experts.src.ranker.clip_data_module import (
     CLIPExpertsConfig,
     CLIPTripleDataModule,
 )
-from projects.wiki_experts.src.config import ids_to_tasks_names, ids_to_tasks_names_ada
+from projects.wiki_experts.src.config import (
+    ids_to_tasks_names,
+    ids_to_tasks_names_ada,
+    tasks_names_to_ids,
+    tasks_names_to_ids_ada,
+)
+
+from projects.wiki_experts.src.ranker.experts_ranker import ExpertsRanker
 import torch
 import pytorch_lightning as pl
 import torch.nn as nn
@@ -68,15 +75,16 @@ class ProjectionHead(nn.Module):
         return x
 
 
-class CLIPRanker(pl.LightningModule):
+class CLIPRanker(ExpertsRanker):
     def __init__(
         self,
         temperature: float = 0.07,
         text_embedding_dim: int = 384,
         expert_embedding_dim: int = 512,
         expert_num: int = 246,
+        **kwargs,
     ):
-        super().__init__()
+        super().__init__(**kwargs)
 
         self.text_encoder = TextEncoder()
         self.expert_encoder = ExpertEncoder(
@@ -88,10 +96,11 @@ class CLIPRanker(pl.LightningModule):
             self.ids_to_tasks_names = ids_to_tasks_names
         elif expert_num == 440:
             self.ids_to_tasks_names = ids_to_tasks_names_ada
-
+        self.expert_num = expert_num
         self.text_projection = ProjectionHead(embedding_dim=384)
         self.expert_projection = ProjectionHead(embedding_dim=expert_embedding_dim)
         self.temperature = temperature
+        self.save_hyperparameters()
 
     def forward(self, batch):
         # gettng the expert and text features
@@ -126,14 +135,12 @@ class CLIPRanker(pl.LightningModule):
             expert_embeddings.append(self.expert_projection(expert_features))
             return torch.cat(expert_embeddings)
 
-    def predict_experts_using_clip(self, batch, expert_embeddings, n=1):
-        if "input_texts" in batch:
-            text_features = self.text_encoder(batch["input_texts"])
-        else:
-            text_features = self.text_encoder(batch["sources_texts"])
-
+    def predict_experts_using_clip(self, input_texts, top_n=1):
+        text_features = self.text_encoder(input_texts)
         # Getting the expert and text embeddings with the same dimension
         text_embeddings = self.text_projection(text_features)
+        # get expert_embedding
+        expert_embeddings = self.get_expert_embeddings()
 
         # l2 normalize the embeddings
         expert_embeddings = F.normalize(expert_embeddings, dim=-1)
@@ -141,9 +148,19 @@ class CLIPRanker(pl.LightningModule):
         # calculate the similarity
         dot_similarity = text_embeddings @ expert_embeddings.T / self.temperature
 
-        values, indices = torch.topk(dot_similarity.squeeze(0), n)
+        values, indices = torch.topk(dot_similarity.squeeze(0), top_n)
         # now we only selet the top n experts
-        matches = [self.ids_to_tasks_names[idx[0].item()] for idx in indices]
+
+        matches = []
+        if top_n == 1:
+            matches = [self.ids_to_tasks_names[idx.item()] for idx in indices]
+            return matches
+        for item in indices:
+            m = []
+            for idx in item:
+                m.append(self.ids_to_tasks_names[idx.item()])
+            m.append(self.ids_to_tasks_names[item.item()])
+            matches.append(m)
 
         return matches
 
@@ -238,22 +255,61 @@ class CLIPTripletRanker(CLIPRanker):
 
 
 if __name__ == "__main__":
-    # model = CLIPRanker()
-    # model.to(device)
+    from projects.wiki_experts.src.config import ExpertConfig
+
+    args = ExpertConfig.parse()
+    model = CLIPRanker()
+    model.to(device)
+
+    ## train the clip model
+    dataconfig = CLIPExpertsConfig(
+        dataset=args.dataset,
+        model=args.model,
+        train_batch_size=args.train_batch_size,
+        finetune_task_name=args.finetune_task_name,
+        predict_batch_size=args.predict_batch_size,
+    )
+    datamodule = CLIPExpertsDatamodule(dataconfig)
+
+    checkpoint_callback = pl.callbacks.ModelCheckpoint(
+        monitor="val/loss_epoch",
+        dirpath=f"clip_ranker_{args.exp_name}/",
+        filename="clip-{epoch:02d}-{val/loss:.2f}",
+        save_top_k=1,
+        mode="min",
+    )
+
+    trainer = pl.Trainer(
+        max_epochs=args.num_train_epochs,
+        accelerator="gpu",
+        callbacks=[checkpoint_callback],
+        devices=1,
+        logger=None,
+        val_check_interval=0.25,
+        limit_val_batches=10,
+        limit_train_batches=10,
+    )
+    # trainer.fit(model, datamodule)
 
     # model.load_state_dict(torch.load(os.environ["CLIP_CKPT"])["state_dict"])
+    model.from_pretrained("zhan1993/clip_ranker_debug")
 
-    # # test the model
-    # dataconfig = CLIPExpertsConfig(model="EleutherAI/gpt-neo-125m")
-    # dm = CLIPExpertsDatamodule(dataconfig)
+    # test the model
+    dataconfig = CLIPExpertsConfig(model="EleutherAI/gpt-neo-125m")
+    dm = CLIPExpertsDatamodule(dataconfig)
 
-    # # get the expert embeddings
-    # expert_embeddings = model.get_expert_embeddings()
-    # print(expert_embeddings.shape)
-    # # get the top 5 experts for each example in the test set
-    # for batch in dm.test_dataloader(subsample=10):
-    #     print(model.predict_experts_using_clip(batch, expert_embeddings))
-    #     break
+    # get the top 5 experts for each example in the test set
+    print(
+        model.predict_experts_using_clip(
+            [
+                "if a horse at 2 years old has 3 legs, how many legs it has at 10 years old?",
+                "if a horse at 2 years old has 3 legs, how many legs it has at 10 years old?",
+            ],
+            top_n=1,
+        ),
+    )
+
+    breakpoint()
 
     model = CLIPTripletRanker(expert_num=440)
     model.to(device)
