@@ -1,5 +1,6 @@
 import torch
 import copy
+import re
 import numpy as np
 from typing import Dict
 from tempfile import TemporaryDirectory
@@ -180,6 +181,23 @@ class MultiExpertModel(ExpertTrainer):
         )
         if action != "merge":
             self.experts.append(expert_name)
+
+    def extract_task_embeddings_lora(self, p_name_pattern=".*lora.*"):
+        """
+        Extracts task embeddings for parameters matching the given pattern.
+
+        Args:
+            p_name_pattern (str, optional): Regular expression pattern to match parameter names.
+                Defaults to ".*lora.*".
+
+        Returns:
+            torch.Tensor: Concatenated tensor of task embeddings for the matched parameters.
+        """
+        para_list = []
+        for name, param in self.model.named_parameters():
+            if re.fullmatch(p_name_pattern, name):
+                para_list.append(param.reshape(-1))
+        return torch.cat(para_list)
 
     def get_task_embeddings(self):
         """
