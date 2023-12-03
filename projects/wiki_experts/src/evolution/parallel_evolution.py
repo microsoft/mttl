@@ -59,12 +59,15 @@ def setup(args: EvolExpertConfig):
     args.n_active_iterations = 1
     global wandb_logger, ai
     token = os.environ.get("HF_TOKEN", args.hf_token_hub)
+
     login(token=token)
     user_name = HfApi().whoami(token=token)["name"]
-    ai = find_ai(args.to_repo_id)
-    args.to_repo_id = increase_ai(args.to_repo_id)
-    args.to_repo_id = f"{user_name}/{args.to_repo_id}"
+    ai = find_ai(args.hf_repo_id)
+    args.to_repo_id = increase_ai(args.hf_repo_id)
+    args.to_repo_id = f"{user_name}/{args.to_repo_id.split('/')[-1]}"
+    args.to_repo_id += "_debug" if DEBUG else ""
     create_repo(args.to_repo_id, token=token, exist_ok=True)
+
     if not DEBUG:
         wandb_logger = init_wandb_logger(args)
         local_lib_location = os.path.join(args.output_dir, args.to_repo_id)
@@ -92,7 +95,7 @@ def setup(args: EvolExpertConfig):
     tasks = args.finetune_task_name
     expert_lib = exper_state.state.expert_lib
     # remove tasks for which we dont have experts
-    tasks = [t for t in tasks if t in expert_lib.tasks]
+    # tasks = [t for t in tasks if t in expert_lib.tasks]
 
     print("###### Tasks", tasks)
     return exper_state, tasks
