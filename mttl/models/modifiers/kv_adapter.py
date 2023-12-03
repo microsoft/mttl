@@ -111,11 +111,6 @@ class KVAdapter(Adapter, ModifyMixin):
         self.create_for_layer(attn_layer)
 
     def create_for_layer(self, attn_layer):
-        # create the gate, and embeddings here
-        self.adapter_gate = torch.nn.Parameter(
-            torch.zeros(1, attn_layer.num_heads, 1, 1),
-        ).to(self.device)
-
         if self.soft_prompt_learn_kv:
             out_dim = attn_layer.hidden_size * 2
         else:
@@ -123,6 +118,10 @@ class KVAdapter(Adapter, ModifyMixin):
 
         self.adapter_query = nn.Embedding(
             self.soft_prompt_length, out_dim, device=self.device
+        )
+        # create the gate, and embeddings here
+        self.adapter_gate = torch.nn.Parameter(
+            torch.zeros(1, attn_layer.num_heads, 1, 1, device=self.device),
         )
 
     def load_adapter_weights(self, state_dict):
