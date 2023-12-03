@@ -1,15 +1,7 @@
 import os
 import sys
-import copy
-import torch
-import wandb
 import re
-import numpy as np
-import seaborn as sns
 from typing import Dict
-from dataclasses import replace
-from functools import partial
-from matplotlib import pyplot as plt
 from tempfile import TemporaryDirectory
 from pytorch_lightning import seed_everything
 
@@ -27,25 +19,13 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     ExpertLibrary,
     Score,
 )
-from projects.wiki_experts.src.evolution.train_router import train_router
-from projects.wiki_experts.src.evolution.evaluators import Evaluator, prepare_evaluator
-
-
-from mttl.models.modifiers.expert_containers.module_graph import Expert
 
 from projects.wiki_experts.src.evolution.config import (
     EvolExpertConfig,
     increase_version,
 )
-from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
 from mttl.utils import setup_logging, logger
-from projects.wiki_experts.src.expert_model import MultiExpertModel
 from projects.wiki_experts.src.evolution.experiment_state import ExperimentState
-from mttl.vllm_engines.engines import free_memory
-from projects.wiki_experts.src.evolution.transfer_matrix import (
-    eval_all_experts_on_task,
-    eval_expert_on_task,
-)
 from projects.wiki_experts.src.evolution.sequential_evolution import *
 from huggingface_hub import create_repo, login, HfApi
 

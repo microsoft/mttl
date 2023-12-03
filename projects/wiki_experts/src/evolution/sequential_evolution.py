@@ -630,10 +630,11 @@ def active_task_iteration(
     ########################################################################
     # replace the module in the expertlib with the new one or add new module
     if improved_on_valid or DEBUG:
+        parent_exp_name = "None" if parent_exp is None else parent_exp.name
         # make sure the library is on hf
         if args.new_module_action == "replace":
             logger.info(
-                f"!!!!!!!!!!!!! Module {parent_exp.name} \n for {task} is replaced in the dict with \n {optimal_expert.name}"
+                f"!!!!!!!!!!!!! Module {parent_exp_name} \n for {task} is replaced in the dict with \n {optimal_expert.name}"
             )
             expert_lib.replace_expert(parent_exp, optimal_expert)
 
@@ -641,7 +642,7 @@ def active_task_iteration(
             logger.info(
                 f"!!!!!!!!!!!!! Module {optimal_expert.name} \n for {task} is added to the library."
             )
-            assert optimal_expert.name != parent_exp.name
+            assert optimal_expert.name != parent_exp_name
             expert_lib.add_expert(optimal_expert)
         else:
             # new_module_path = optimal_expert.save(args.output_dir)

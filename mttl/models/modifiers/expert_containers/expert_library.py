@@ -657,7 +657,7 @@ class ExpertLibrary:
         """
         Replace an expert with a new one.
         """
-        if old_expert in self:
+        if old_expert in self and old_expert is not None:
             self.remove_expert(old_expert.name, soft_delete=True)
         return self.add_expert(new_expert)
 
