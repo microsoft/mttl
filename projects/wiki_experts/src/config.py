@@ -306,7 +306,7 @@ class ExpertConfig(Config):
 
         # training classfier routing
         self.num_labels = 246
-        self.classifier_repo_id = None
+        self.expert_model_path = None
         self.retrieval_model = "classifier"
         self.expert_library_path = None
         self.text_encoder_trained = False

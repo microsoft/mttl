@@ -1,6 +1,5 @@
 import pytorch_lightning as pl
 from projects.wiki_experts.src.ranker.classification_module import (
-    ClassificationDataModule,
     ClassificationConfig,
     ClassificationDataModuleFlatMultiTask,
 )

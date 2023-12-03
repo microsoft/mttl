@@ -49,9 +49,7 @@ class SentenceTransformerClassifier(ExpertsRanker):
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.text_encoder = self.text_encoder_init(
-            requires_grad=kwargs["text_encoder_trained"]
-        )
+        self.text_encoder = self.text_encoder_init(requires_grad=False)
         self.num_labels = num_labels
         # linear text encoder
         self.text_projecter = nn.Linear(transformer_embed_dim, hidden_size)
@@ -142,80 +140,34 @@ class SentenceTransformerClassifier(ExpertsRanker):
         self.log("test/acc", acc, on_epoch=True, prog_bar=True)
         return loss
 
-    def test_accuracy(self, dataset, model, fine_tune_task_name):
-        if "flan" in dataset:
-            classifier_config = ClassificationConfig(
-                dataset=dataset,
-                model=model,
-                finetune_task_name=fine_tune_task_name,
-            )
-            datamodule = ClassificationDataModule(classifier_config)
-        elif "adauni" in dataset:
-            classifier_config = ClassificationConfig(
-                dataset=dataset,
-                model=model,
-                finetune_task_name=fine_tune_task_name,
-            )
-            datamodule = ClassificationDataModuleFlatMultiTask(classifier_config)
+    def test_accuracy(self, dataset, data_model, fine_tune_task_name, model_path=""):
+        from projects.wiki_experts.src.ranker.classification_module import (
+            ClassificationConfig,
+            ClassificationDataModuleFlatMultiTask,
+        )
+        from tqdm import tqdm
+        import numpy as np
 
-        classifier = self.get_classifier()
-        classifier.load_state_dict(torch.load(self.classifier_ckpt)["state_dict"])
-        print("begin test")
-        pbar = tqdm.tqdm(
+        classifier_config = ClassificationConfig(
+            dataset=dataset,
+            model=data_model,
+            finetune_task_name=fine_tune_task_name,
+        )
+        datamodule = ClassificationDataModuleFlatMultiTask(classifier_config)
+
+        pbar = tqdm(
             enumerate(datamodule.test_dataloader()),
             total=len(datamodule.test_dataloader()),
         )
         acc_all = []
         for _, batch in pbar:
-            logits = classifier(batch["input"])
-            preds = torch.argmax(logits, dim=1)
-            acc = torch.sum(
-                preds == batch["label"].clone().detach().to(device)
-            ).item() / len(batch["label"])
+            preds = self.predict_experts_using_classifier(batch["input"])
 
-            # predict expert names
-            # print(
-            #     "predict experts",
-            #     [ids_to_tasks_names_ada[pred.item()] for pred in preds],
-            # )
+            acc = np.sum(np.array(preds) == np.array(batch["task_name"])) / len(preds)
             acc_all.append(acc)
             pbar.set_description(f"Accuracy: {sum(acc_all)/len(acc_all)}")
 
         print(f"Accuracy: {sum(acc_all)/len(acc_all)}")
-
-        # test mmlu accuracy
-        from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
-
-        datamodule = MMLUDataModule(
-            MMLUDataConfig(
-                "mmlu",
-                model="EleutherAI/gpt-neo-125m",
-                model_family="gpt",
-                train_batch_size=4,
-                predict_batch_size=4,
-                finetune_task_name=fine_tune_task_name,
-            ),
-            for_generation=True,
-        )
-
-        print("begin MMLU")
-        pbar = tqdm.tqdm(
-            enumerate(datamodule.test_dataloader()),
-            total=len(datamodule.test_dataloader()),
-        )
-
-        for _, batch in pbar:
-            logits = classifier(batch["sources_texts"])
-            preds = torch.argmax(logits, dim=1)
-            # acc = torch.sum(
-            #     preds == batch["label"].clone().detach().to(device)
-            # ).item() / len(batch["label"])
-
-            # predict expert names
-            print(
-                "predict experts",
-                [ids_to_tasks_names_ada[pred.item()] for pred in preds],
-            )
 
     def predict_experts_using_classifier(self, input_texts):
         logits = self(input_texts)
@@ -273,63 +225,18 @@ class SentenceTransformerClassifier(ExpertsRanker):
 
 
 if __name__ == "__main__":
-    # from projects.wiki_experts.src.ranker.classification_module import (
-    #     ClassificationDataModuleFlatMultiTask,
-    #     ClassificationConfig,
-    # )
-
-    # from pytorch_lightning import Trainer
-
-    # from projects.wiki_experts.src.config import ExpertConfig
-    # from pytorch_lightning.callbacks import ModelCheckpoint
-    # import os
-
-    # config = ExpertConfig.parse()
-    # dm = ClassificationDataModuleFlatMultiTask(
-    #     ClassificationConfig(
-    #         dataset=config.dataset,
-    #         model=config.model,
-    #         finetune_task_name=config.finetune_task_name,
-    #         train_batch_size=config.train_batch_size,
-    #         predict_batch_size=config.predict_batch_size,
-    #     )
-    # )
-
-    # module = SentenceTransformerClassifier(num_labels=439)
-    # module.to(device)
-    # # for batch in dm.train_dataloader():
-    # #     loss = model.training_step(batch, 0)
-    # #     print(loss)
-    # #     break
-    # task_name = "adversarial_qa_dbert_answer_the_following_q"
-
-    # checkpoint_callback = ModelCheckpoint(
-    #     dirpath=os.getcwd() + f"/checkpoints/{task_name}",
-    #     save_top_k=1,
-    #     verbose=True,
-    #     monitor="val/loss",
-    #     mode="min",
-    #     filename=f"{task_name}" + "-{val/loss:.004f}",
-    #     save_last=True,
-    # )
-
-    # trainer = Trainer(
-    #     callbacks=[checkpoint_callback],
-    #     max_epochs=3,
-    #     max_steps=20,
-    #     # val_check_interval=10,
-    # )
-    # trainer.fit(module, dm)
     model = SentenceTransformerClassifier(num_labels=439)
     model = model.from_pretrained(
-        "zhan1993/adversarial_qa_dbert_answer_the_following_q_classifier"
+        "classification_ranker_sordonia/adauni-v1-flat/classifier-epoch=00-val/loss=1.05.ckpt"
     )
     model.to(device)
+    model.test_accuracy("sordonia/adauni-v1-flat", "EleutherAI/gpt-neo-125m", None)
+    # model.test_step(datamodule.test_dataloader(),)
 
-    predict_experts = model.predict_experts_using_classifier(
-        [
-            "if a horse at 2 years old has 3 legs, how many legs it has at 10 years old?",
-            "if a horse at 2 years old has 3 legs, how many legs it has at 10 years old?",
-        ]
-    )
-    print(predict_experts)
+    # predict_experts = model.predict_experts_using_classifier(
+    #     [
+    #         "if a horse at 2 years old has 3 legs, how many legs it has at 10 years old?",
+    #         "if a horse at 2 years old has 3 legs, how many legs it has at 10 years old?",
+    #     ]
+    # )
+    # print(predict_experts)

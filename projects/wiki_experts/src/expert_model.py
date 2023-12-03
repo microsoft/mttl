@@ -13,8 +13,7 @@ from mttl.models.modifiers.expert_containers import (
 )
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
-from projects.wiki_experts.src.ranker.adapter_ranker import ExpertRanker
-from projects.wiki_experts.src.config import ids_to_tasks_names, ids_to_tasks_names_ada
+from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRankerHelper
 
 
 def push_expert_to_hub(
@@ -281,19 +280,11 @@ class ToolExpertModel(ExpertTrainer):
 class MultiExpertModelRanker(MultiExpertModel):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        if (
-            kwargs["routing"] == "retrieval"
-            and kwargs["retrieval_model"] == "classifier"
-        ):
-            self.classifier = ExpertRanker(
-                num_labels=kwargs["num_labels"],
-                classifier_repo_id=kwargs["classifier_repo_id"],
-            ).get_classifier()
-
-        if int(kwargs["num_labels"]) == 439:
-            self.ids_to_tasks_names = ids_to_tasks_names_ada
-        else:
-            self.ids_to_tasks_names = ids_to_tasks_names
+        if kwargs["routing"] == "retrieval":
+            self.expert_ranker = AdapterRankerHelper(
+                retrieval_model=kwargs["retrieval_model"],
+                model_path=kwargs["expert_model_path"],
+            )
 
     def load_from_library(self, library):
         import copy
@@ -330,26 +321,15 @@ class MultiExpertModelRanker(MultiExpertModel):
         for expert_name, _ in library.items():
             self.experts.append(expert_name)
 
-    def get_predicted_experts(self, batch):
+    def expert_retrieval(self, batch, **kwargs):
+        expert_selection = []
         if "inputs" in batch:
             input_texts = batch["inputs"]
         elif "sources_texts" in batch:
             input_texts = batch["sources_texts"]
         else:
             raise ValueError("No inputs found in batch!")
-        expert_logits = self.classifier(input_texts)
-        log_expert_logits = torch.log_softmax(expert_logits, dim=1)
-        # get the max log score
-        max_log_score = log_expert_logits.max(dim=1)
-        print("max log score: {}".format(max_log_score))
-        expert_indices = expert_logits.argmax(dim=1).cpu()
-        expert_prediction = [self.ids_to_tasks_names[i.item()] for i in expert_indices]
-        return expert_prediction
-
-    def expert_retrieval(self, batch, **kwargs):
-        expert_selection = []
-        # get the expert predictions
-        expert_prediction = self.get_predicted_experts(batch)
+        expert_prediction = self.expert_ranker.get_predict_experts(input_texts)
         print("predicted experts: {}".format(expert_prediction))
         for expert in expert_prediction:
             if expert in self.experts:
@@ -414,24 +394,6 @@ class MultiExpertModelRanker(MultiExpertModel):
             inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
         )
         return generations
-
-
-class MultiExpertModelClipRanker(MultiExpertModelRanker):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        if kwargs["retrieval_model"] == "clip":
-            self.clip_ranker = ExpertRanker(
-                num_labels=kwargs["num_labels"],
-                classifier_repo_id=kwargs["classifier_repo_id"],
-            ).get_clip_ranker()
-            self.expert_embeddings = self.clip_ranker.get_expert_embeddings()
-
-    def get_predicted_experts(self, batch):
-        # ToDo. give the input and return the experts.
-        experts_prediction = self.clip_ranker.predict_experts_using_clip(
-            batch, self.expert_embeddings
-        )
-        return experts_prediction
 
 
 class RoutedMultiExpertModel(MultiExpertModel):

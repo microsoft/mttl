@@ -8,10 +8,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from mttl.utils import setup_logging, logger
 
 # register models
-from projects.wiki_experts.src.expert_model import (
-    MultiExpertModelRanker,
-    MultiExpertModelClipRanker,
-)
+from projects.wiki_experts.src.expert_model import MultiExpertModelRanker
 from projects.wiki_experts.src.config import ExpertConfig
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
 
@@ -80,34 +77,24 @@ def run_eval(args):
 
     logger.info("Args: {}".format(args.to_json()))
 
-    # select dataloader
-    configuration = os.environ.get("FLAN_CONFIG", None)
-    logger.info("flan tasks names: {}".format(configuration))
     # add FlanEvaluator
     data_module = FlanModule(
         FlanConfig(
-            dataset="sordonia/flan-10k-flat",
-            model="EleutherAI/gpt-neo-125m",
-            finetune_task_name=configuration,
-            predict_batch_size=8,
+            dataset=args.dataset,
+            model=args.model,
+            finetune_task_name=args.finetune_task_name,
+            predict_batch_size=args.predict_batch_size,
         ),
         for_generation=True,
     )
 
     evaluator = RougeEvaluator(data_module)
     # load module
-    if args.retrieval_model == "clip":
-        print("Using clip model")
-        module = MultiExpertModelClipRanker(
-            **vars(args),
-            tokenizer=data_module.tokenizer,
-        )
-    else:
-        print("Using classifier model")
-        module = MultiExpertModelRanker(
-            **vars(args),
-            tokenizer=data_module.tokenizer,
-        )
+
+    module = MultiExpertModelRanker(
+        **vars(args),
+        tokenizer=data_module.tokenizer,
+    )
     if args.expert_library_path:
         library = HFExpertLibrary(args.expert_library_path)
         module.load_from_library(library)
