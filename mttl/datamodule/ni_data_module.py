@@ -26,7 +26,7 @@ class NiDataConfig(DatasetConfig):
     num_pos_examples: int = 0
     num_neg_examples: int = 0
     add_explanation: bool = False
-    sep_by_eos_token: bool = True
+    sep_by_eos_token: bool = False
     tk_instruct: bool = False
     max_num_instances_per_task: int = 100
 
