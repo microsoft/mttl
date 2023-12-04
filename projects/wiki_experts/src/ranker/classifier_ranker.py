@@ -183,7 +183,6 @@ class SentenceTransformerClassifier(ExpertsRanker):
         logits = softmax(logits)
 
         max_scores = logits.max(dim=1).values.cpu().detach().numpy()
-        breakpoint()
         return max_scores
 
     def compute_expert_similarity(self):
@@ -241,15 +240,15 @@ if __name__ == "__main__":
     model.test_accuracy(
         "sordonia/adauni-v1-flat",
         "EleutherAI/gpt-neo-125m",
-        fine_tune_task_name="anatomy",
+        fine_tune_task_name="astronomy",
     )
-    exit()
+
     # from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
     from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
     from projects.wiki_experts.src.expert_model import MultiExpertModelRanker
     from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRankerHelper
 
-    finetune_task_name = "anatomy"
+    finetune_task_name = "astronomy"
     data_module = MMLUDataModule(
         MMLUDataConfig(
             "mmlu",
