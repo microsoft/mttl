@@ -50,15 +50,6 @@ class EvolExpertConfig(ExpertConfig):
         self.upload_lib_to_hub = False
         self.to_repo_id: str = None
 
-    def post_init(self):
-        super().post_init()
-        if self.finetune_task_name is not None:
-            self.finetune_task_name = getattr(
-                mttl.datamodule.flan_tasks,
-                self.finetune_task_name,
-                self.finetune_task_name,
-            )
-
     @property
     def __key(self):
         return (

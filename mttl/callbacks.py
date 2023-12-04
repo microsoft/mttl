@@ -130,19 +130,22 @@ class RougeCallback(cb.Callback):
 
         self.evaluator = RougeEvaluator(datamodule, device=device)
         self.every_n_epochs = every_n_epochs
+        self.verbose = False
 
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:
         if self.every_n_epochs > 0 and trainer.current_epoch % self.every_n_epochs == 0:
-            rouge = self.evaluator.evaluate(pl_module, split="val")
+            rouge = self.evaluator.evaluate(
+                pl_module, split="val", verbose=self.verbose
+            )
 
             pl_module.log("val/rougeL", rouge, on_epoch=True, prog_bar=True)
 
         return super().on_validation_epoch_end(trainer, pl_module)
 
     def on_test_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        rouge = self.evaluator.evaluate(pl_module, split="test")
+        rouge = self.evaluator.evaluate(pl_module, split="test", verbose=self.verbose)
 
         pl_module.log("test/rougeL", rouge, on_epoch=True, prog_bar=True)
 
