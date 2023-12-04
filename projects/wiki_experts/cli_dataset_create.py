@@ -1891,6 +1891,19 @@ def create_adauni(hf_repo_id):
                 lambda x: not x["task_name"].startswith("niv2_"), num_proc=16
             )
             adauni.append(other_tasks)
+        elif dataset_name in [
+            "sordonia/platypus-flat",
+            "sordonia/ultrachat-32c-10k-flat",
+            "sordonia/mmlu-qa-fs-flat",
+        ]:
+            for task_name in set(dataset["task_name"]):
+                task_dataset = dataset.filter(
+                    lambda x: x["task_name"] == task_name, num_proc=16
+                )
+                task_dataset = task_dataset.select(
+                    range(min(10_000, len(task_dataset)))
+                )
+                adauni.append(task_dataset)
         else:
             adauni.append(dataset)
 
@@ -2063,7 +2076,7 @@ def main(task):
     elif task == "sni":
         create_sni("sordonia/sni-10k-flat")
     elif task == "adauni":
-        create_adauni("sordonia/adauni-v3-flat")
+        create_adauni("sordonia/adauni-v3-10k-flat")
     elif task == "argilla":
         create_argilla("sordonia/argilla_notus-flat")
     elif task == "aug-mmlu":
