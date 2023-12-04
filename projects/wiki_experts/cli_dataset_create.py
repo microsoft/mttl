@@ -1837,8 +1837,8 @@ def create_adauni(hf_repo_id):
     datasets = [
         "sordonia/flan-10k-flat",
         "sordonia/platypus-flat",
-        "sordonia/ultrachat-flat",
-        "sordonia/mmlu-qa-flat",
+        "sordonia/ultrachat-32c-10k-flat",
+        "sordonia/mmlu-qa-fs-flat",
     ]
 
     adauni = []
@@ -1851,23 +1851,29 @@ def create_adauni(hf_repo_id):
         dataset = dataset.remove_columns(list(to_remove))
 
         if dataset_name == "sordonia/flan-10k-flat":
-            ni_tasks = dataset.filter(lambda x: x["task_source"] == "NIv2", num_proc=16)
-            for category, tasks in NIV2_CATEGORY_TO_TASK_NO_MMLU.items():
-                category = category.replace(" ", "_").replace(".", "").lower().strip()
-                category_dataset = ni_tasks.filter(
-                    lambda x: x["task_name"] in tasks, num_proc=16
-                ).shuffle()
+            task_to_category = {
+                task: category.replace(" ", "_").replace(".", "").lower().strip()
+                for category, tasks in NIV2_CATEGORY_TO_TASK_NO_MMLU.items()
+                for task in tasks
+            }
 
-                def map_func(example):
+            def map_func(example):
+                if example["task_name"] in task_to_category:
+                    category = task_to_category[example["task_name"]]
                     example["task_source"] = example["task_name"]
                     example["task_name"] = f"niv2_{category}"
-                    return example
+                return example
 
-                category_dataset = category_dataset.shuffle().select(
+            dataset = dataset.map(map_func, num_proc=16)
+
+            for category, _ in NIV2_CATEGORY_TO_TASK_NO_MMLU.items():
+                category = category.replace(" ", "_").replace(".", "").lower().strip()
+                category_dataset = dataset.filter(
+                    lambda x: x["task_name"] == f"niv2_{category}", num_proc=16
+                )
+                category_dataset = category_dataset.select(
                     range(min(10_000, len(category_dataset)))
                 )
-                category_dataset = category_dataset.map(map_func, num_proc=16)
-
                 print(
                     "Built NIv2 category",
                     category,
@@ -1880,15 +1886,9 @@ def create_adauni(hf_repo_id):
                 adauni.append(category_dataset)
 
             other_tasks = dataset.filter(
-                lambda x: x["task_source"] != "NIv2", num_proc=16
+                lambda x: not x["task_name"].startswith("niv2_"), num_proc=16
             )
             adauni.append(other_tasks)
-        elif dataset_name == "sordonia/mmlu-qa-flat":
-            # augment the dataset few-shot
-            from mttl.datamodule.mt_seq_to_seq_module import augment_few_shot
-
-            augmented_dataset = augment_few_shot(dataset, 5)
-            adauni.append(augmented_dataset.shuffle())
         else:
             adauni.append(dataset)
 
@@ -1925,6 +1925,15 @@ def create_argilla(hf_repo_id):
     dataset = dataset.remove_columns(list(to_remove))
 
     dataset.push_to_hub(hf_repo_id)
+
+
+def create_augmented_mmlu(hf_repo_id):
+    dataset = load_dataset("sordonia/mmlu-qa-flat")["train"]
+    # augment the dataset few-shot
+    from mttl.datamodule.mt_seq_to_seq_module import augment_few_shot
+
+    augmented_dataset = augment_few_shot(dataset, 3)
+    augmented_dataset.shuffle().push_to_hub(hf_repo_id)
 
 
 def create_sni(hf_repo_id):
@@ -2055,6 +2064,10 @@ def main(task):
         create_adauni("sordonia/adauni-v3-flat")
     elif task == "argilla":
         create_argilla("sordonia/argilla_notus-flat")
+    elif task == "aug-mmlu":
+        create_augmented_mmlu("sordonia/mmlu-qa-fs-flat")
+    else:
+        raise ValueError("Unknown task")
 
 
 if __name__ == "__main__":
