@@ -16,7 +16,11 @@ def maybe_filter_hf_dataset_by_task(
         all_tasks = all_tasks.union(set(dataset["test"][task_field]))
 
     if task_names:
-        task_names = sorted(task_names.split(","))
+        task_names = (
+            sorted(task_names.split(","))
+            if isinstance(task_names, str)
+            else sorted(task_names)
+        )
         if not set(task_names).issubset(all_tasks):
             raise ValueError(
                 "task_names must be a subset of the available tasks. Got {} and {}".format(

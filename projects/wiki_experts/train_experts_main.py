@@ -1,8 +1,9 @@
 import os
 import sys
 import json
-import wandb
 import pytorch_lightning as pl
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import torch
 from huggingface_hub import login
@@ -109,7 +110,7 @@ def get_datamodule(args, for_generation=False):
     return dm
 
 
-def run_multitask(args):
+def run_multitask(args: ExpertConfig):
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file

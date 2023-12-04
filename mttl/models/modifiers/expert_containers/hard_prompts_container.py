@@ -7,6 +7,7 @@ from mttl.models.modifiers.expert_containers.selectors import Selector, TaskName
 from mttl.models.modifiers.expert_containers import ExpertContainer
 from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
 from mttl.models.modifiers.modify_model import register_modifier
+from mttl.models.modifiers.expert_containers.module_graph import Expert
 
 
 class HardPromptDecoderWrapper(nn.Module):
@@ -71,13 +72,14 @@ class HardPromptDecoderWrapper(nn.Module):
 def add_hard_prompt_to_transformer(
     transformer,
     expert_name,
-    expert_config,
-    expert_weights,
+    expert: Expert,
     action="route",
     is_default=False,
     selectors={},
     config=None,
 ):
+    expert_config = expert.expert_config
+    expert_weights = expert.expert_weights
     # create a shared prompt container holding the experts
     if not isinstance(transformer, HardPromptDecoderWrapper):
         expert_container = HardPromptExpertContainer(
