@@ -252,20 +252,24 @@ class SkilledLoRA(LoRA):
     def parallel_linear_forward(cls, input, loras: list, weights: list):
         # loras -- list of loras per example
         # weights -- list of weights for parallel loras
-        weights = torch.stack(weights, dim=0)
-        if weights.shape[-1] == 1 and len(loras) == input.shape[0]:
+        if len(loras[0]) == 1 and len(loras) == input.shape[0]:
+            # used for TaskName routing for example
+            # each sample is assigned different single Lora
             loras = [lora[0] for lora in loras]
             return LoRA.parallel_linear_forward(input, loras)
 
         if len(loras) == 1:
-            weights = weights.squeeze()
+            # same set of Loras for all examples in the batch
+            # mixed with the same weights for all examples in the batch
+            weights = torch.stack(weights, dim=0).squeeze()
             loras = loras[0]
-            # use same weights for all samples in the input
             return SkilledLoRA.weighted_merge_forward(
-                input, loras, weights, merge_after=True
+                input, loras, weights, merge_after=False
             )
-
-        raise NotImplementedError("Not Implemented yet")
+        # mixing with inout depentend weights
+        raise NotImplementedError(
+            "Mixing with inout depentend weights is not Implemented yet"
+        )
 
     @classmethod
     def weighted_merge_forward(cls, input, loras, weights, merge_after=False):
