@@ -13,7 +13,6 @@ from mttl.utils import setup_logging, logger
 from projects.wiki_experts.src.expert_model import (
     MultiExpertModel,
     MultiExpertModelRanker,
-    MultiExpertModelClipRanker,
 )
 from projects.wiki_experts.src.config import ExpertConfig
 
@@ -110,13 +109,7 @@ def run_eval(args):
         args,
     )
     # load module
-    if args.retrieval_model == "clip":
-        print("Using clip model")
-        module = MultiExpertModelClipRanker(
-            **vars(args),
-            tokenizer=mmlu.datamodule.tokenizer,
-        )
-    elif args.retrieval_model == "classifier":
+    if args.retrieval_model == "classifier":
         print("Using classifier model")
         module = MultiExpertModelRanker(
             **vars(args),
@@ -127,6 +120,7 @@ def run_eval(args):
 
     if args.expert_library_path:
         library = HFExpertLibrary(args.expert_library_path)
+        library.f
         module.load_from_library(library)
     elif args.load_module is not None:
         kwargs = parse_experts_to_load(args.load_module)
