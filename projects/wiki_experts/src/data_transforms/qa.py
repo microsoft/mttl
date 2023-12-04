@@ -126,12 +126,42 @@ class OAITemplate_Batched:
         return output
 
     @classmethod
+    def clean_response(cls, response):
+        response = response.strip()
+        if not response:
+            return INVALID_RESPONSE
+        if response[0] == "[" and response[-1] == "]":
+            response = response[1:-1]
+        if response[-1] in [";", ",", ":"]:
+            response = response[:-1]
+        if response[-1] not in [".", "?", "!"]:
+            response += "."
+        # this is very likely an instruction
+        if response.startswith("Please"):
+            return INVALID_RESPONSE
+        return response
+
+    @classmethod
+    def clean_instruction(cls, instruction):
+        instruction = instruction.strip()
+        if not instruction:
+            return INVALID_RESPONSE
+        if instruction[0] == "[" and instruction[-1] == "]":
+            instruction = instruction[1:-1]
+        if instruction[-1] in [";", ",", ":"]:
+            instruction = instruction[:-1]
+        if instruction[-1] not in [".", "?", "!"]:
+            instruction += "."
+        return instruction
+
+    @classmethod
     def post_process_generation(cls, output):
         try:
             output = cls.transform_to_valid_list(output)
             outputs = eval(output)
         except Exception as e:
             return {"instruction": INVALID_RESPONSE, "response": INVALID_RESPONSE}
+
         responses = []
         for o in outputs:
             try:
@@ -142,14 +172,16 @@ class OAITemplate_Batched:
 
                 instruction = o.split("Response:")[0]
                 instruction = re.split(r"Instruction\s*\d*:", instruction)[1].strip()
+
                 instruction = instruction.replace("#", "")
                 response = response.replace("#", "")
-                if instruction.endswith(","):
-                    instruction = instruction[:-1]
-                if response.endswith(","):
-                    response = response[:-1]
-                instruction = instruction.strip()
-                response = response.strip()
+
+                instruction = cls.clean_instruction(instruction.strip())
+                response = cls.clean_response(response.strip())
+
+                if instruction is INVALID_RESPONSE or response is INVALID_RESPONSE:
+                    raise ValueError("Invalid instruction or response.")
+
                 data = {
                     "instruction": instruction,
                     "response": response,
