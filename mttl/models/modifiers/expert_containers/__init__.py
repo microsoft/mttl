@@ -43,6 +43,15 @@ def get_container_class(modifier: str):
         raise ValueError(f"Cannot find modifier: {modifier}")
 
 
+def filter_expert_weights(layer_name, expert_weights):
+    # subset the relevant expert weights starting w __layer_name__
+    return {
+        k.replace(layer_name + ".", ""): v
+        for k, v in expert_weights.items()
+        if k.startswith(layer_name)
+    }
+
+
 def add_expert_library_to_transformer(
     transformer,
     expert_library,
@@ -167,6 +176,9 @@ def add_expert_to_transformer(
                     expert_container.add_expert(
                         expert_name,
                         expert,
+                        expert_weights=filter_expert_weights(
+                            expert_container.__layer_name__, expert.expert_weights
+                        ),
                         action=action,
                         is_default=is_default,
                     )

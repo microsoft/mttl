@@ -38,14 +38,6 @@ class ExpertContainer:
     def __len__(self):
         return len(self.experts)
 
-    def filter_expert_weights(self, expert_weights):
-        # subset the relevant expert weights starting w __layer_name__
-        return {
-            k.replace(self.__layer_name__ + ".", ""): v
-            for k, v in expert_weights.items()
-            if k.startswith(self.__layer_name__)
-        }
-
 
 class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
     def __init__(self, config, task_id_container, layer, selector=None):
@@ -71,12 +63,12 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         self,
         name,
         expert: Expert,
+        expert_weights,
         action="merge",
         is_default=False,
     ) -> None:
         expert_config = expert.expert_config
         expert_task_name = expert.expert_info.expert_task_name
-        expert_weights = self.filter_expert_weights(expert.expert_weights)
 
         if name in self.experts:
             raise ValueError("An expert with name {} already exists.".format(name))
@@ -243,12 +235,12 @@ class KVExpertContainer(ExpertContainer, KVAdapter):
         self,
         name,
         expert: Expert,
+        expert_weights,
         action="route",
         is_default=False,
         **kwargs,
     ) -> None:
         expert_config = expert.expert_config
-        expert_weights = self.filter_expert_weights(expert.expert_weights)
 
         if name in self.experts:
             raise ValueError("An expert with name {} already exists.".format(name))
