@@ -42,7 +42,7 @@ class DataCollatorForNI(DefaultCollator):
     return_tensors: str = "pt"
     add_task_name: bool = False
     add_task_definition: bool = True
-    sep_by_eos_token: bool = True
+    sep_by_eos_token: bool = False
     num_pos_examples: int = 0
     num_neg_examples: int = 0
     add_explanation: bool = False
