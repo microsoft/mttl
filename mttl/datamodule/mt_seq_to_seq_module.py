@@ -163,15 +163,15 @@ def task_id_dataset(dataset, task_to_id):
 
 class FlanModule(DefaultDataModule):
     def setup_dataset(self):
-        self.dataset = load_dataset(self.config.dataset)
+        dataset = load_dataset(self.config.dataset)
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
-        if "split" not in self.dataset.column_names["train"]:
+        if "split" not in dataset.column_names["train"]:
             raise ValueError(
                 "Dataset must have a 'split' column, try removing the dataset manually from the cache."
             )
 
         if self.config.include_template_type != "*":
-            self.dataset = self.dataset.filter(
+            dataset = dataset.filter(
                 partial(
                     filter_template_type,
                     set(self.config.include_template_type.split(",")),
@@ -181,7 +181,7 @@ class FlanModule(DefaultDataModule):
             )
 
         if self.config.include_task_source != "*":
-            self.dataset = self.dataset.filter(
+            dataset = dataset.filter(
                 partial(
                     filter_task_source, set(self.config.include_task_source.split(","))
                 ),
@@ -196,10 +196,10 @@ class FlanModule(DefaultDataModule):
             _,
             _,
         ) = maybe_filter_hf_dataset_by_task(
-            self.dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
+            dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
         )
 
-        if "split" in self.dataset.column_names["train"]:
+        if "split" in dataset.column_names["train"]:
             self.train_dataset = train_dataset.filter(
                 lambda x: x["split"] == "train",
                 num_proc=n_proc,
@@ -245,7 +245,7 @@ class T0FlatModule(DefaultDataModule):
             _,
             _,
         ) = maybe_filter_hf_dataset_by_task(
-            self.dataset, "task_name", self.config.finetune_task_name
+            dataset, "task_name", self.config.finetune_task_name
         )
 
         if self.config.use_templates_as_tasks:
