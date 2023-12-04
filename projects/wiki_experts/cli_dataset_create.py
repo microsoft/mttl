@@ -1851,10 +1851,11 @@ def create_adauni(hf_repo_id):
         dataset = dataset.remove_columns(list(to_remove))
 
         if dataset_name == "sordonia/flan-10k-flat":
-            ni_tasks = dataset.filter(lambda x: x["task_source"] == "NIv2")
+            ni_tasks = dataset.filter(lambda x: x["task_source"] == "NIv2", num_proc=16)
             for category, tasks in NIV2_CATEGORY_TO_TASK_NO_MMLU.items():
+                category = category.replace(" ", "_").replace(".", "").lower().strip()
                 category_dataset = ni_tasks.filter(
-                    lambda x: x["task_name"] in tasks
+                    lambda x: x["task_name"] in tasks, num_proc=16
                 ).shuffle()
 
                 def map_func(example):
@@ -1862,7 +1863,7 @@ def create_adauni(hf_repo_id):
                     example["task_name"] = f"niv2_{category}"
                     return example
 
-                category_dataset = category_dataset.select(
+                category_dataset = category_dataset.shuffle().select(
                     range(min(10_000, len(category_dataset)))
                 )
                 category_dataset = category_dataset.map(map_func, num_proc=16)
@@ -1874,9 +1875,13 @@ def create_adauni(hf_repo_id):
                     len(category_dataset),
                     "examples",
                 )
+                if len(category_dataset) < 1_000:
+                    continue
                 adauni.append(category_dataset)
 
-            other_tasks = dataset.filter(lambda x: x["task_source"] != "NIv2")
+            other_tasks = dataset.filter(
+                lambda x: x["task_source"] != "NIv2", num_proc=16
+            )
             adauni.append(other_tasks)
         elif dataset_name == "sordonia/mmlu-qa-flat":
             # augment the dataset few-shot
@@ -1890,6 +1895,36 @@ def create_adauni(hf_repo_id):
     print("Pushing to hub...")
     adauni = concatenate_datasets(adauni)
     adauni.push_to_hub(hf_repo_id)
+
+
+def create_argilla(hf_repo_id):
+    dataset = load_dataset("argilla/ultrafeedback-binarized-preferences")["train"]
+
+    def map_func(example):
+        example["task_source"] = example["source"]
+        example["task_name"] = example["source"]
+        example["source"] = example["instruction"]
+        example["target"] = example["chosen_response"]
+        return example
+
+    dataset = dataset.map(map_func, num_proc=16).shuffle()
+    len_dataset_ = len(dataset)
+
+    num_train = int(len_dataset_ * 0.95)
+
+    def assign_split(example, idx):
+        if idx < num_train:
+            return {"split": "train"}
+        else:
+            return {"split": "validation"}
+
+    dataset = dataset.map(assign_split, with_indices=True, num_proc=16)
+
+    columns = ["source", "target", "task_name", "task_source", "split"]
+    to_remove = set(dataset.column_names) - set(columns)
+    dataset = dataset.remove_columns(list(to_remove))
+
+    dataset.push_to_hub(hf_repo_id)
 
 
 def create_sni(hf_repo_id):
@@ -2018,6 +2053,8 @@ def main(task):
         create_sni("sordonia/sni-10k-flat")
     elif task == "adauni":
         create_adauni("sordonia/adauni-v3-flat")
+    elif task == "argilla":
+        create_argilla("sordonia/argilla_notus-flat")
 
 
 if __name__ == "__main__":
