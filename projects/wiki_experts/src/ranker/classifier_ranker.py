@@ -107,6 +107,10 @@ class SentenceTransformerClassifier(ExpertsRanker):
 
     def validation_step(self, batch, batch_idx):
         text_input, task_name = batch["input"], batch["task_name"]
+        # change the "niv2_misc." to "niv2_misc"
+        for i in range(len(task_name)):
+            if task_name[i] == "niv2_misc.":
+                task_name[i] = "niv2_misc"
         label = torch.tensor([self.tasks_names_to_ids[task] for task in task_name]).to(
             device
         )
