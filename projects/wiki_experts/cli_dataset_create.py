@@ -1858,13 +1858,14 @@ def create_adauni(hf_repo_id):
             }
 
             def map_func(example):
-                if example["task_name"] in task_to_category:
-                    category = task_to_category[example["task_name"]]
-                    example["task_source"] = example["task_name"]
-                    example["task_name"] = f"niv2_{category}"
-                else:
-                    example["task_source"] = example["task_name"]
-                    example["task_name"] = "niv2_no_category_found"
+                if example["task_source"] == "NIv2":
+                    if example["task_name"] in task_to_category:
+                        category = task_to_category[example["task_name"]]
+                        example["task_source"] = example["task_name"]
+                        example["task_name"] = f"niv2_{category}"
+                    else:
+                        example["task_source"] = example["task_name"]
+                        example["task_name"] = "niv2_no_category_found"
                 return example
 
             dataset = dataset.map(map_func, num_proc=16)
