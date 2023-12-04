@@ -1862,6 +1862,9 @@ def create_adauni(hf_repo_id):
                     category = task_to_category[example["task_name"]]
                     example["task_source"] = example["task_name"]
                     example["task_name"] = f"niv2_{category}"
+                else:
+                    example["task_source"] = example["task_name"]
+                    example["task_name"] = "niv2_no_category_found"
                 return example
 
             dataset = dataset.map(map_func, num_proc=16)
@@ -1881,8 +1884,6 @@ def create_adauni(hf_repo_id):
                     len(category_dataset),
                     "examples",
                 )
-                if len(category_dataset) < 1_000:
-                    continue
                 adauni.append(category_dataset)
 
             other_tasks = dataset.filter(
