@@ -150,7 +150,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         load_experts = []
         weights = []
 
-        for sample_weights in routing:
+        for sample_weights in routing:  # for each examplke in batch
             exps = []
             ws = []
             for expert_name, weight in sample_weights.items():

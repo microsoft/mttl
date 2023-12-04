@@ -39,7 +39,6 @@ def train_router(
     logging_prefix="",
     silent=False,
 ):
-    logging_prefix = logging_prefix.replace("/", "_")
     seed_everything(args.seed, workers=True)
 
     module = RoutedMultiExpertModel(
@@ -115,13 +114,14 @@ def train_router(
 
     # initial validation!
     trainer.fit(module, dm)
+    logger.disabled = False
 
     checkpoint = (
         checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
     )
+    logger.info(f"Loading best model from {checkpoint}")
     del module
     torch.cuda.empty_cache()
-    logger.disabled = False
     ckpt = torch.load(checkpoint)
     expert_dumps = ckpt["expert_dumps"]
     weights = ckpt["merging_weights"]

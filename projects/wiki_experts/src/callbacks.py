@@ -98,7 +98,7 @@ class RougeLCallback(cb.Callback):
                     os.remove(self._prev_checkpoint)
                 self._prev_checkpoint = ckpt_path
             except Exception as e:
-                logger.error(e)
+                logger.error("Error in checkpointing with RougeLCallback: " + str(e))
         self._checkpoint_now = False
 
     def test(self, pl_module: LightningModule):

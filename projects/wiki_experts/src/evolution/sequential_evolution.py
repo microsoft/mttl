@@ -429,7 +429,7 @@ def active_task_iteration(
     a_i = ai if ai is not None else a_i
     log_row = {"act_i": a_i}
     log_row["task"] = task
-    log_prefix = f"act_it:{a_i}/t:{task}"
+    log_prefix = f"act_it_{a_i}/t_{task}"
     default_score = Score(name=args.eval_metric, task=task, split="valid")
 
     evaluator_constructor = prepare_evaluator(args, args.dataset, tasks=task)
