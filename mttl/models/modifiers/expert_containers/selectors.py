@@ -6,6 +6,10 @@ from torch import nn
 from typing import Any, Dict
 from mttl.utils import logger
 import torch.nn.functional as F
+from mttl.models.modifiers.expert_containers.module_graph import (
+    ExpertInfo,
+    ExpertConfig,
+)
 
 
 MULTI_EXPERT_ROUTERS = {}
@@ -84,6 +88,55 @@ class MultiExpertSelector(torch.nn.Module, Selector):
             )
 
 
+@register_multi_expert_selector("poly_router_dir")
+class MultiExpertSelector(torch.nn.Module, Selector):
+    """
+    Implements routing at a per-layer or pe-model level. Initialized all experts' weights to 0 with the exception of the expert responsible for the curent task.'
+    """
+
+    def __init__(self, config, device="cuda", **kwargs) -> None:
+        super().__init__()
+        self.config: ExpertConfig = config
+        self.device = device
+
+        self.module_logits = torch.nn.ParameterDict()
+
+        self.__layer_name__ = f"poly_router_dir"
+
+        self.init_gap = [0, 0]
+        self.main_m = 1
+
+    @property
+    def name(self):
+        return f"{self.__layer_name__}"
+
+    def forward(self, *args, **kwargs):
+        return [self.module_logits]
+
+    def get_routing_weights(self):
+        weights = self.forward()[0]
+        return {k: v.detach().item() for k, v in weights.items()}
+
+    def add_expert(self, expert_name: str, expert_task_name: str, **kwargs):
+        """
+        Assume:
+        expert_task_name -- task name expert is pecialized in
+        self.config.finetune_task_name -- name of the task the model is currently trained on
+        """
+        init_gap = [0, 0]
+        main_m = 1
+        if expert_name not in self.module_logits:
+            if self.config.finetune_task_name == expert_task_name:
+                self.module_logits[expert_name] = torch.nn.Parameter(
+                    torch.ones(1).to(self.device)
+                )
+                self.module_logits[expert_name].data *= main_m
+            else:
+                self.module_logits[expert_name] = torch.nn.Parameter(
+                    torch.empty(1).uniform_(*init_gap).to(self.device)
+                )
+
+
 @register_multi_expert_selector("task_selector")
 class TaskNameSelector(torch.nn.Module, Selector):
     def __init__(self, config=None, info_container=None, **kwargs) -> None:
@@ -126,7 +179,8 @@ class TaskNameSelector(torch.nn.Module, Selector):
             ]
         return routing_weights
 
-    def add_expert(self, expert_name: str):
+    def add_expert(self, expert_name: str, *args, **kwargs):
+        # here we experts based on their name, which can be different from the task name
         if expert_name not in self.expert_names:
             self.expert_names.append(expert_name)
 
