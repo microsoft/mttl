@@ -34,6 +34,7 @@ class AdapterRankerHelper:
             return model
         elif self.ranker_model == "kate":
             model = KATERouter.from_pretrained(self.ranker_path)
+            return model
         else:
             raise ValueError(f"Unknown retrieval model: {self.ranker_model}")
 
