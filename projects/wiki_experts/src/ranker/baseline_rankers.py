@@ -3,9 +3,38 @@ from datasets import load_dataset
 from collections import Counter
 
 from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
+from mttl.utils import logger
+
 from sklearn.utils.extmath import safe_sparse_dot
+from huggingface_hub import (
+    upload_file,
+    create_repo,
+    login,
+    CommitOperationAdd,
+    create_commit,
+    preupload_lfs_files,
+)
+
 import torch
-import faiss
+
+try:
+    import faiss
+except:
+    logger.warn("Faiss not installed. KATE router will not work.")
+
+
+def upload_checkpoint(repo_id, filename, path_in_repo):
+    import os
+
+    login(os.environ["HF_TOKEN"])
+    create_repo(repo_id, repo_type="model", exist_ok=True)
+    additions = [
+        CommitOperationAdd(filename, path=path_in_repo),
+    ]
+    preupload_lfs_files(repo_id, additions=additions)
+    return create_commit(
+        repo_id, additions, commit_message=f"Add {filename} to repo {repo_id}."
+    )
 
 
 class Router:
@@ -76,7 +105,6 @@ class TFIDFRouter(Router):
 
     def save_pretrained(self, path, repo_id=None):
         import os
-        from huggingface_hub import upload_file
 
         os.makedirs(path, exist_ok=True)
         torch.save(
@@ -87,7 +115,7 @@ class TFIDFRouter(Router):
             path + "/model.ckpt",
         )
         if repo_id:
-            upload_file(path, repo_id)
+            upload_checkpoint(repo_id, path + "/model.ckpt", "model.ckpt")
 
     @classmethod
     def from_pretrained(cls, repo_id):
@@ -149,7 +177,6 @@ class KATERouter(Router):
 
     def save_pretrained(self, path, repo_id=None):
         import os
-        from huggingface_hub import upload_file
         from faiss import write_index
 
         os.makedirs(path, exist_ok=True)
@@ -163,22 +190,8 @@ class KATERouter(Router):
         write_index(self.index, path + "/index.faiss")
 
         if repo_id:
-            import huggingface_hub
-
-            huggingface_hub.login(os.environ["HF_TOKEN"])
-            huggingface_hub.create_repo(repo_id, repo_type="model", exist_ok=True)
-            additions = [
-                huggingface_hub.CommitOperationAdd(
-                    "model.ckpt", path=path + "/model.ckpt"
-                ),
-                huggingface_hub.CommitOperationAdd(
-                    "index.faiss", path=path + "/index.faiss"
-                ),
-            ]
-            huggingface_hub.preupload_lfs_files(repo_id, additions=additions)
-            huggingface_hub.create_commit(
-                repo_id, additions, commit_message="Add model.ckpt and index.faiss."
-            )
+            upload_checkpoint(repo_id, path + "/model.ckpt", "model.ckpt")
+            upload_checkpoint(repo_id, path + "/index.faiss", "index.faiss")
 
     @classmethod
     def from_pretrained(cls, path):
@@ -200,34 +213,3 @@ class KATERouter(Router):
         ranker.load_state_dict(ckpt["state_dict"])
         ranker.index = index
         return ranker
-
-
-def retrieve_mmlu(dataset_name="sordonia/adauni-v3-10k-flat", force=True):
-    import os
-
-    if os.path.exists("/data/alsordon/kate-router") and not force:
-        router = KATERouter.from_pretrained("/data/alsordon/kate-router")
-    else:
-        router = KATERouter(dataset_name=dataset_name)
-        router.train()
-        router.save_pretrained("/data/alsordon/kate-router")
-
-    datamodule = MMLUDataModule(
-        MMLUDataConfig(
-            "mmlu",
-            model="phi-2",
-            max_input_length=2048,
-            max_output_length=128,
-            predict_batch_size=1,
-        )
-    )
-
-    test_loader = datamodule.test_dataloader(shuffle=True)
-    for batch in test_loader:
-        text = batch["sources_texts"][0]
-        print(batch["task_names"][0])
-        results = router.predict_task(text)
-        print("Best tasks:", results)
-
-
-retrieve_mmlu()
