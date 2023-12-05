@@ -148,14 +148,14 @@ class KATERouter:
                 [
                     x[0]
                     for x in top_selected
-                    if x[0] in self.available_tasks or self.available_tasks is None
+                    if self.available_tasks is None or x[0] in self.available_tasks
                 ]
             )
             top_weights.append(
                 [
                     x[1]
                     for x in top_selected
-                    if x[0] in self.available_tasks or self.available_tasks is None
+                    if self.available_tasks is None or x[0] in self.available_tasks
                 ]
             )
         return top_tasks, top_weights
@@ -168,12 +168,12 @@ class KATERouter:
         tasks = [
             x[0]
             for x in top_selected
-            if x[0] in self.available_tasks or self.available_tasks is None
+            if self.available_tasks is None or x[0] in self.available_tasks
         ]
         weights = [
             x[1]
             for x in top_selected
-            if x[0] in self.available_tasks or self.available_tasks is None
+            if self.available_tasks is None or x[0] in self.available_tasks
         ]
         return tasks, weights
 
