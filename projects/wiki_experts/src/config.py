@@ -1,6 +1,6 @@
-from dataclasses import dataclass
-from mttl.config import Config
 import os
+
+from mttl.config import Config
 import mttl.datamodule.flan_tasks
 
 
@@ -40,10 +40,13 @@ class ExpertConfig(Config):
 
         # training expert
         self.eval_mmlu_flag = False
+        self.ranker_path = None
+        self.ranker_model = "classifier"
 
-        # training classfier routing
-        self.num_labels = 246
-        self.classifer_repo_id = None
+        # whether to train the backbone or not when training the ranker
+        self.text_encoder_trained = False
+        self.eval_metric = "loss"
+        self.use_vllm = False
 
     def post_init(self):
         if self.micro_batch_size is None:

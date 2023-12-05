@@ -5,6 +5,9 @@ from collections import Counter
 from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
 from mttl.utils import logger
 
+from torch import nn
+from projects.wiki_experts.src.ranker.base_ranker import Ranker
+
 from sklearn.utils.extmath import safe_sparse_dot
 from huggingface_hub import (
     upload_file,
@@ -16,6 +19,10 @@ from huggingface_hub import (
 )
 
 import torch
+
+from projects.wiki_experts.src.ranker.classifier_ranker import (
+    SentenceTransformerClassifier,
+)
 
 try:
     import faiss
@@ -29,7 +36,7 @@ def upload_checkpoint(repo_id, filename, path_in_repo):
     login(os.environ["HF_TOKEN"])
     create_repo(repo_id, repo_type="model", exist_ok=True)
     additions = [
-        CommitOperationAdd(filename, path=path_in_repo),
+        CommitOperationAdd(path_in_repo=path_in_repo, path_or_fileobj=filename),
     ]
     preupload_lfs_files(repo_id, additions=additions)
     return create_commit(
@@ -37,32 +44,7 @@ def upload_checkpoint(repo_id, filename, path_in_repo):
     )
 
 
-class Router:
-    def __init__(self, **kwargs):
-        self.config = kwargs
-        self.dataset = load_dataset(kwargs.get("dataset_name"))
-        self.vectorizer = None
-
-    def train(self):
-        raise NotImplementedError
-
-    def predict_task(self, query):
-        raise NotImplementedError
-
-    def state_dict(self):
-        raise NotImplementedError
-
-    def load_state_dict(self, state_dict):
-        raise NotImplementedError
-
-    def save_pretrained(self, path, repo_id=None):
-        raise NotImplementedError
-
-    def from_pretrained(self, path):
-        raise NotImplementedError
-
-
-class TFIDFRouter(Router):
+class TFIDFRouter:
     def __init__(self, **kwargs):
         self.config = kwargs
         self.dataset_name = kwargs.get("dataset_name")
@@ -134,7 +116,7 @@ class TFIDFRouter(Router):
         return ranker
 
 
-class KATERouter(Router):
+class KATERouter:
     def __init__(self, **kwargs):
         from sentence_transformers import SentenceTransformer
 
@@ -159,9 +141,22 @@ class KATERouter(Router):
         self.index.add(self.train_features)
         self.task_names = list(self.dataset["task_name"])
 
+    def predict_batch(self, batch):
+        query = self.embedder.encode(
+            batch["sources_texts"], show_progress_bar=False, device="cuda:0"
+        )
+        _, indices = self.index.search(query, 20)
+        top_tasks, top_weights = [], []
+        for _, idxs in enumerate(indices):
+            task_names = [self.task_names[int(idx)] for idx in idxs]
+            top_selected = Counter(task_names).most_common(3)
+            top_tasks.append([x[0] for x in top_selected])
+            top_weights.append([x[1] for x in top_selected])
+        return top_tasks, top_weights
+
     def predict_task(self, query):
         query = self.embedder.encode([query], show_progress_bar=False, device="cuda:0")
-        d, indices = self.index.search(query, 100)
+        d, indices = self.index.search(query, 20)
         results = {"task_name": [self.task_names[int(i)] for i in indices[0][:100]]}
         return Counter(results["task_name"]).most_common(3)
 
