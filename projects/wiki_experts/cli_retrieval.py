@@ -21,7 +21,6 @@ def norm_query(query):
 
 
 def search(index, query):
-    index = pt.IndexFactory.of(index)
     bm25 = pt.BatchRetrieve(
         index,
         verbose=True,
@@ -90,6 +89,7 @@ def do_retrieval(index, split, docs_json):
 
     # issue a query per subject
     documents_by_subject = {"_index_infos": read_infos(index)}
+    index = pt.IndexFactory.of(index)
 
     for subject, questions in tqdm.tqdm(group_by_subject.items()):
         results = search(index, questions)
