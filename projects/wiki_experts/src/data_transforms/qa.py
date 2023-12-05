@@ -96,12 +96,6 @@ class OAITemplate:
             "\n\nYour instruction should be grounded in the follwoing context:"
         )
         task_description += f"\n\n{context}"
-
-        # task_description += (
-        #     "\nWrite an instruction suitable for this given context. "
-        #     "Ensure it's complete, precise, and stands alone, without relying on provided context."
-        # )
-
         task_description += "\Also provide a concise response to the generated instruction.\
             \nRemember, your should generate one instruction reponse pair. Your instruction should be clear and comprehensive and should be suitable for the given context. Your instruction must be complete, meaning that is must contain all the neccessary context to follow.\
             \nPlease follow these guidelines when generating instructions and answers. Your role is vital in maintaining high standards of communication effectiveness.\
@@ -132,15 +126,42 @@ class OAITemplate_Batched:
         return output
 
     @classmethod
+    def clean_response(cls, response):
+        response = response.strip()
+        if not response:
+            return INVALID_RESPONSE
+        if response[0] == "[" and response[-1] == "]":
+            response = response[1:-1]
+        if response[-1] in [";", ",", ":"]:
+            response = response[:-1]
+        if response[-1] not in [".", "?", "!"]:
+            response += "."
+        # this is very likely an instruction
+        if response.startswith("Please"):
+            return INVALID_RESPONSE
+        return response
+
+    @classmethod
+    def clean_instruction(cls, instruction):
+        instruction = instruction.strip()
+        if not instruction:
+            return INVALID_RESPONSE
+        if instruction[0] == "[" and instruction[-1] == "]":
+            instruction = instruction[1:-1]
+        if instruction[-1] in [";", ",", ":"]:
+            instruction = instruction[:-1]
+        if instruction[-1] not in [".", "?", "!"]:
+            instruction += "."
+        return instruction
+
+    @classmethod
     def post_process_generation(cls, output):
         try:
-            import copy
-
-            originalk_out = copy.deepcopy(output)
             output = cls.transform_to_valid_list(output)
             outputs = eval(output)
         except Exception as e:
             return {"instruction": INVALID_RESPONSE, "response": INVALID_RESPONSE}
+
         responses = []
         for o in outputs:
             try:
@@ -151,14 +172,16 @@ class OAITemplate_Batched:
 
                 instruction = o.split("Response:")[0]
                 instruction = re.split(r"Instruction\s*\d*:", instruction)[1].strip()
+
                 instruction = instruction.replace("#", "")
                 response = response.replace("#", "")
-                if instruction.endswith(","):
-                    instruction = instruction[:-1]
-                if response.endswith(","):
-                    response = response[:-1]
-                instruction = instruction.strip()
-                response = response.strip()
+
+                instruction = cls.clean_instruction(instruction.strip())
+                response = cls.clean_response(response.strip())
+
+                if instruction is INVALID_RESPONSE or response is INVALID_RESPONSE:
+                    raise ValueError("Invalid instruction or response.")
+
                 data = {
                     "instruction": instruction,
                     "response": response,
@@ -178,18 +201,12 @@ class OAITemplate_Batched:
         \n2. The language used for the instruction also should be diverse. For example, you should combine questions with imperative instructions.\
         \n3. The type of instructions should be diverse. Include diverse types of tasks like open-ended generation, multiple choice, classification, editing, etc.\
         \n4. A GPT language model should be able to complete the instruction. For example, do not ask the assistant to create any visual or audio output. For another example, do not ask the assistant to wake you up at 5pm or set a reminder because it cannot perform any action."
-        # \n5. The instructions should be in English.\
-        # task_description+="\n5. To increase diversity, include instructions with an input. The input field should\
-        # contain a specific example provided for the instruction. It should involve realistic data and\
-        # should not contain simple placeholders. The input should provide substantial content to make\
-        # the instruction challenging."
         task_description += f"\n5. The instructions should be 1 to 3 sentences long. Either an imperative sentence or a question is permitted.\
         \n6. Ensure diverse tasks are covered in the instructions and inputs, while focusing on the {domain} domain.\
         \n7. Provide a ground truth response for each of the 10 generated instruction.\
         \n8. Ensure that each instruction is complete, containing all the necessary context for successful execution."
-
         task_description += (
-            "\n9. Your instruction must be grounded in the follwoing context:"
+            "\n9. Your instruction must be grounded in the following context:"
         )
         task_description += f"\n\n{context}"
 
@@ -348,9 +365,7 @@ class QATransformModel(TransformModel):
                 instruction_dataset = self.generate_instructions_(
                     self._llm,
                     prev_dataset,
-                )
-                dump_jsonl_dataset(
-                    instruction_dataset, answ_filename if is_openai else inst_filename
+                    answ_filename if is_openai else inst_filename,
                 )
             else:
                 instruction_dataset = read_jsonl_dataset(inst_filename)
@@ -378,6 +393,7 @@ class QATransformModel(TransformModel):
         self,
         llm: AutoEngine,
         dataset,
+        dump_filename,
     ):
         """
         To generate instructions, we take num_contexts_per_document chunks of length max_context_length from each document,
@@ -402,20 +418,18 @@ class QATransformModel(TransformModel):
             print(context)
             print()
 
-        result = llm.generate(
-            templated_contexts,
-            top_p=self.config.top_p,
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens_instruction,
-        )
-        assert (
-            len(result.outputs) == len(templated_contexts) == len(result.finish_reason)
+        result = iter(
+            llm.generate(
+                templated_contexts,
+                top_p=self.config.top_p,
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens_instruction,
+            )
         )
 
         new_dataset = []
-        for entry, instruction, finish_reason in zip(
-            dataset, result.outputs, result.finish_reason
-        ):
+        for entry, output_and_reason in zip(dataset, result):
+            instruction, finish_reason = output_and_reason
             data = self.instruction_template.post_process_generation(instruction)
             if isinstance(data, list):
                 for d in data:
@@ -441,6 +455,7 @@ class QATransformModel(TransformModel):
                 )
                 copied_entry.update(data)
                 new_dataset.append(copied_entry)
+            dump_jsonl_dataset(new_dataset, dump_filename)
 
         print("Created a new instruction dataset of size:", len(new_dataset))
         return new_dataset

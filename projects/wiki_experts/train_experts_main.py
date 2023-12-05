@@ -1,8 +1,11 @@
 import os
 import sys
 import json
-import wandb
 import pytorch_lightning as pl
+
+from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import torch
 from huggingface_hub import login
@@ -97,7 +100,7 @@ def get_datamodule(args, for_generation=False):
             include_template_type="*",
         )
         dm = FlanModule(config, for_generation=for_generation)
-    elif "adauni" in args.dataset:
+    elif "flat" in args.dataset:
         config = FlatMultiTaskConfig(
             **common_kwargs,
             source_template=args.source_template,
@@ -109,7 +112,7 @@ def get_datamodule(args, for_generation=False):
     return dm
 
 
-def run_multitask(args):
+def run_multitask(args: ExpertConfig):
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file
@@ -213,6 +216,10 @@ def run_multitask(args):
     checkpoint = (
         checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
     )
+
+    if args.hf_lib_id and checkpoint:
+        library = HFExpertLibrary(args.hf_lib_id, create=True)
+        library.add_expert_from_ckpt(checkpoint)
 
     if args.hf_repo_id and checkpoint:
         from projects.wiki_experts.src.expert_model import push_expert_to_hub

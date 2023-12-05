@@ -1,6 +1,6 @@
 {
     "type": "QATransformConfig",
-    "model_setting": "openai_batched_long",
+    "model_setting": "openai_batched",
     "icl_examples": 0,
     "icl_dataset": "lukaemon/mmlu",
     "icl_split": "validation",

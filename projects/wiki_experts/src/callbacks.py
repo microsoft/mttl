@@ -38,7 +38,7 @@ class RougeLCallback(cb.Callback):
         self.datamodule = datamodule
         self.eval_every_opt_step = eval_every_opt_step
         # save best perf
-        self._best_loss = None
+        self._best_rouge = None
         # checkpointing
         self.do_checkpoint = checkpoint_oracle
         self._checkpoint_now = False
@@ -59,17 +59,17 @@ class RougeLCallback(cb.Callback):
 
     @property
     def best_loss(self):
-        return self._best_loss
+        return self._best_rouge
 
     @best_loss.setter
     def best_loss(self, value):
-        if self._best_loss is None:
-            self._best_loss = value
+        if self._best_rouge is None:
+            self._best_rouge = value
             self._checkpoint_now = True
         else:
-            if value < self._best_loss:
+            if value > self._best_rouge:
                 self._checkpoint_now = True
-                self._best_loss = value
+                self._best_rouge = value
 
     def on_before_optimizer_step(
         self, trainer: Trainer, pl_module: LightningModule, optimizer: Optimizer
@@ -83,14 +83,13 @@ class RougeLCallback(cb.Callback):
             # p_sum = np.sum([p.detach().cpu().sum() for p in pl_module.parameters()])
         return super().on_before_optimizer_step(trainer, pl_module, optimizer)
 
-    def maybe_checkpoint_now(self, trainer):
+    def maybe_checkpoint_now(self, trainer: Trainer):
         if self.do_checkpoint and self._checkpoint_now:
             try:
-                dir_name = trainer.checkpoint_callback.dirpath
                 filename = (
-                    self.output_dir + f"{self.name}/" + f"{self.best_loss:.004f}.ckpt"
+                    self.output_dir + f"/{self.name}/" + f"{self.best_loss:.004f}.ckpt"
                 )
-                ckpt_path = os.path.join(dir_name, filename)
+                ckpt_path = os.path.join(filename)
                 trainer.save_checkpoint(ckpt_path)
                 if (
                     self._prev_checkpoint is not None
@@ -99,7 +98,7 @@ class RougeLCallback(cb.Callback):
                     os.remove(self._prev_checkpoint)
                 self._prev_checkpoint = ckpt_path
             except Exception as e:
-                logger.error(e)
+                logger.error("Error in checkpointing with RougeLCallback: " + str(e))
         self._checkpoint_now = False
 
     def test(self, pl_module: LightningModule):
@@ -112,6 +111,10 @@ class RougeLCallback(cb.Callback):
             metrics,
             on_step=on_step,
         )
+
+    def remove_checkpoints(self):
+        if self._prev_checkpoint is not None and os.path.exists(self._prev_checkpoint):
+            os.remove(self._prev_checkpoint)
 
 
 class ValLossCheckpointCallback(cb.Callback):

@@ -653,12 +653,12 @@ class ExpertLibrary:
         key = expert if isinstance(expert, str) else expert.expert_info.expert_name
         return key in self.data
 
-    def replace_expert(self, old_expert: Expert, new_expert: Expert):
+    def replace_expert(self, old_expert: Expert, new_expert: Expert, soft_delete=True):
         """
         Replace an expert with a new one.
         """
-        if old_expert in self:
-            self.remove_expert(old_expert.name, soft_delete=False)
+        if old_expert in self and old_expert is not None:
+            self.remove_expert(old_expert.name, soft_delete=soft_delete)
         return self.add_expert(new_expert)
 
 
@@ -714,7 +714,7 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
 
 class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
     @classmethod
-    def to_hf(
+    def from_local(
         cls,
         local_lib: LocalExpertLibrary,
         repo_id,
@@ -722,31 +722,48 @@ class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
         upload_aux_data=False,
         only_tasks=None,
     ):
-        new_lib = HFExpertLibrary(repo_id=repo_id, create=True)
+        remote_lib = HFExpertLibrary(repo_id=repo_id, create=True)
 
         only_tasks = only_tasks or local_lib.tasks
         for name, expert in local_lib.items():
-            # upload modules that are not in the target repo + only upload modules for the specified tasks
+            if expert.name not in remote_lib:
+                remote_lib.add_expert(expert, name, force=force)
+
+        # delete experts that are in remote_lib but were deleted from the local_lib
+        for name, expert in remote_lib.items():
             if (
-                expert.expert_info.expert_task_name not in only_tasks
-                and expert.name in new_lib
+                name not in local_lib.keys()
+                and expert.expert_info.expert_task_name in only_tasks
             ):
-                continue
-            new_lib.add_expert(expert, name, force=force)
+                remote_lib.remove_expert(name, soft_delete=True)
+
         # also update the scores
         if upload_aux_data:
             scores = local_lib.get_auxiliary_data(data_type="scores")
             for expert_name, expert_scores in scores.items():
                 for score in expert_scores.values():
                     try:
-                        new_lib.add_score(expert_name, Score(**score))
+                        remote_lib.add_score(expert_name, Score(**score))
                     except ValueError as e:
                         logger.error(e)
                         continue
 
             # TODO: upload the embeddings
 
-        return new_lib
+        return remote_lib
+
+
+def get_best_expert_for_score(library: HFExpertLibrary, hash) -> Expert:
+    best_expert = None
+    best_score = -np.inf
+    for metadata in library.data.values():
+        score: Score = library.get_score(metadata.expert_name, hash=hash)
+        if score is None:
+            continue
+        if score > best_score:
+            best_score = score
+            best_expert = metadata
+    return library[best_expert.expert_name] if best_expert is not None else None
 
 
 def get_best_expert_for_task(library: HFExpertLibrary, task, hash) -> Expert:
@@ -759,14 +776,15 @@ def get_best_expert_for_task(library: HFExpertLibrary, task, hash) -> Expert:
     best_expert = None
     best_score = -np.inf
     for metadata in library.data.values():
-        if metadata.expert_task_name != task:
-            continue
+        # if metadata.expert_task_name != task:
+        #     continue
         score: Score = library.get_score(metadata.expert_name, hash=hash)
         if score is None:
+            if metadata.expert_task_name == task:
+                best_expert = metadata
             continue
         if score > best_score:
             best_score = score
             best_expert = metadata
-    if best_expert is None:
-        best_expert = metadata
+    assert best_expert is not None
     return library[best_expert.expert_name]

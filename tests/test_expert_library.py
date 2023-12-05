@@ -18,7 +18,7 @@ def test_expert_lib(mocker):
     with pytest.raises(ValueError):
         library.add_expert(module_dump, "abstract_algebra")
 
-    assert module_dump.expert_config.model == "phi-2"
+    assert module_dump.expert_info.model == "phi-2"
     assert len(module_dump.expert_weights) == 128
     assert module_dump.expert_info.parent_node is None
     assert module_dump.expert_info.expert_name == "abstract_algebra"

@@ -1,5 +1,6 @@
 import torch
 import copy
+import re
 import numpy as np
 from typing import Dict
 from tempfile import TemporaryDirectory
@@ -93,8 +94,7 @@ class MultiExpertModel(ExpertTrainer):
             self.model = add_expert_to_transformer(
                 self.model,
                 module_name,
-                module_data.expert_config,
-                module_data.expert_weights,
+                module_data,
                 action=action,
                 is_default=module_name == "default",
                 config=self.hparams,
@@ -148,8 +148,7 @@ class MultiExpertModel(ExpertTrainer):
         self.model = add_expert_to_transformer(
             self.model,
             expert_name,
-            expert_instance.expert_config,
-            expert_instance.expert_weights,
+            expert_instance,
             action=action,
             is_default=expert_name == "default",
         )
@@ -188,14 +187,53 @@ class MultiExpertModel(ExpertTrainer):
         self.model = add_expert_to_transformer(
             self.model,
             expert_name,
-            expert.expert_config,
-            expert.expert_weights,
+            expert,
             action=action,
             is_default=is_default,
             load_only_layers=load_only_layers,
         )
         if action != "merge":
             self.experts.append(expert_name)
+
+    def extract_task_embeddings_lora(self, p_name_pattern=".*lora.*"):
+        """
+        Extracts task embeddings for parameters matching the given pattern.
+
+        Args:
+            p_name_pattern (str, optional): Regular expression pattern to match parameter names.
+                Defaults to ".*lora.*".
+
+        Returns:
+            torch.Tensor: Concatenated tensor of task embeddings for the matched parameters.
+        """
+        para_list = []
+        for name, param in self.model.named_parameters():
+            if re.fullmatch(p_name_pattern, name):
+                para_list.append(param.reshape(-1))
+        return torch.cat(para_list)
+
+    def get_task_embeddings(self):
+        """
+        Retrieves the task embeddings for the loaded experts.
+
+        This method assumes that the names of the loaded experts correspond to the tasks they are made for.
+
+        Returns:
+        embeddings (dict): A dictionary containing the task embeddings for each expert.
+                           The keys are the expert names and the values are the corresponding embeddings.
+        """
+        if len(self.experts) == 0:
+            return self.extract_task_embeddings_lora()
+        embeddings = {}
+        for exp_name in self.experts:
+            embeddings[exp_name] = (
+                self.extract_task_embeddings_lora(
+                    p_name_pattern=rf".*{exp_name}\..*lora.*"
+                )
+                .detach()
+                .cpu()
+            )
+        return embeddings
 
     def forward(self, batch, reduction="mean"):
         return super().forward(batch, reduction)
@@ -391,8 +429,7 @@ class RoutedMultiExpertModel(MultiExpertModel):
         self.model = add_expert_to_transformer(
             self.model,
             expert_name,
-            expert.expert_config,
-            expert.expert_weights,
+            expert,
             action=action,
             is_default=is_default,
             load_only_layers=load_only_layers,
@@ -409,8 +446,7 @@ class RoutedMultiExpertModel(MultiExpertModel):
             self.model = add_expert_to_transformer(
                 self.model,
                 module_name,
-                module_data.expert_config,
-                module_data.expert_weights,
+                module_data,
                 action=action,
                 is_default=module_name == "default",
                 selectors=self.selectors,
@@ -428,8 +464,7 @@ class RoutedMultiExpertModel(MultiExpertModel):
         self.model = add_expert_to_transformer(
             self.model,
             expert_name,
-            expert_instance.expert_config,
-            expert_instance.expert_weights,
+            expert_instance,
             action=action,
             is_default=expert_name == "default",
             selectors=self.selectors,
@@ -440,7 +475,21 @@ class RoutedMultiExpertModel(MultiExpertModel):
 
     def to_expert(self, weights: dict = None, with_global_names=True) -> Expert:
         """
-        Merges current experts together according to weights if given, otherwise uses router's weights
+        Converts the current expert model into an instance of the Expert class.
+
+        Args:
+            weights (dict, optional): A dictionary of weights to merge the experts. If not provided, the router's weights will be used.
+            with_global_names (bool, optional): Whether to include global names in the merged weights. Defaults to True.
+
+        Returns:
+            Expert: An instance of the Expert class.
+
+        Raises:
+            None
+
+        Example:
+            model = ExpertModel()
+            expert = model.to_expert(weights={'expert1': 0.5, 'expert2': 0.5}, with_global_names=True)
         """
         expert_weights = {}
         for _, module in self.model.named_modules():
