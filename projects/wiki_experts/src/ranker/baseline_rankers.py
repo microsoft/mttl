@@ -2,15 +2,11 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from datasets import load_dataset
 from collections import Counter
 
-from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
 from mttl.utils import logger
-
 from torch import nn
-from projects.wiki_experts.src.ranker.base_ranker import Ranker
 
 from sklearn.utils.extmath import safe_sparse_dot
 from huggingface_hub import (
-    upload_file,
     create_repo,
     login,
     CommitOperationAdd,
@@ -20,9 +16,6 @@ from huggingface_hub import (
 
 import torch
 
-from projects.wiki_experts.src.ranker.classifier_ranker import (
-    SentenceTransformerClassifier,
-)
 
 try:
     import faiss

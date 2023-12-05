@@ -109,8 +109,7 @@ def run_eval(args):
         args,
     )
     # load module
-    if args.ranker_model == "classifier":
-        print("Using classifier model")
+    if args.ranker_model in ["classifier", "kate"]:
         module = MultiExpertModelRanker(
             **vars(args),
             tokenizer=mmlu.datamodule.tokenizer,
