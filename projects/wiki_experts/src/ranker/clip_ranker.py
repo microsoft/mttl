@@ -1,17 +1,5 @@
 # implements the CLIPRanker class
 from sentence_transformers import SentenceTransformer
-from projects.wiki_experts.src.ranker.clip_data_module import (
-    CLIPExpertsDatamodule,
-    CLIPExpertsConfig,
-    CLIPTripleDataModule,
-)
-from projects.wiki_experts.src.config import (
-    ids_to_tasks_names,
-    ids_to_tasks_names_ada,
-    tasks_names_to_ids,
-    tasks_names_to_ids_ada,
-)
-
 from projects.wiki_experts.src.ranker.experts_ranker import ExpertsRanker
 import torch
 import pytorch_lightning as pl

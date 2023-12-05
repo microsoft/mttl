@@ -114,6 +114,7 @@ class KATERouter:
         from sentence_transformers import SentenceTransformer
 
         self.config = kwargs
+        self.available_tasks = None
         self.dataset_name = kwargs.get("dataset_name")
         self.embedder = SentenceTransformer("all-mpnet-base-v2")
 
@@ -150,8 +151,11 @@ class KATERouter:
     def predict_task(self, query):
         query = self.embedder.encode([query], show_progress_bar=False, device="cuda:0")
         d, indices = self.index.search(query, 20)
-        results = {"task_name": [self.task_names[int(i)] for i in indices[0][:100]]}
-        return Counter(results["task_name"]).most_common(3)
+        results = [self.task_names[int(i)] for i in indices[0][:100]]
+        top_selected = Counter(results).most_common(3)
+        tasks = [x[0] for x in top_selected]
+        weights = [x[1] for x in top_selected]
+        return tasks, weights
 
     def state_dict(self):
         return {
@@ -162,6 +166,9 @@ class KATERouter:
     def load_state_dict(self, state_dict):
         self.config = state_dict["config"]
         self.task_names = state_dict["train_task_names"]
+
+    def set_available_tasks(self, available_tasks):
+        self.available_tasks = available_tasks
 
     def save_pretrained(self, path, repo_id=None):
         import os
