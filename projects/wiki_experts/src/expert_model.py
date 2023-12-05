@@ -10,7 +10,6 @@ from mttl.models.modifiers.expert_containers import ExpertContainer
 from mttl.models.modifiers.expert_containers import Selector
 from mttl.models.modifiers.expert_containers import (
     add_expert_to_transformer,
-    add_expert_library_to_transformer,
 )
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
@@ -271,11 +270,11 @@ class MultiExpertModel(ExpertTrainer):
 class MultiExpertModelRanker(MultiExpertModel):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        if kwargs["routing"] == "retrieval":
-            self.expert_ranker = AdapterRankerHelper(
-                retrieval_model=kwargs["retrieval_model"],
-                model_path=kwargs["expert_model_path"],
-            )
+
+        self.expert_ranker = AdapterRankerHelper(
+            ranker_model=kwargs["ranker_model"],
+            ranker_path=kwargs["ranker_path"],
+        )
 
     def load_from_library(self, library):
         import copy
