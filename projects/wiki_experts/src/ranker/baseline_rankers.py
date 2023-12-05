@@ -139,22 +139,42 @@ class KATERouter:
         query = self.embedder.encode(
             batch["sources_texts"], show_progress_bar=False, device="cuda:0"
         )
-        _, indices = self.index.search(query, 20)
+        _, indices = self.index.search(query, 200)
         top_tasks, top_weights = [], []
         for _, idxs in enumerate(indices):
             task_names = [self.task_names[int(idx)] for idx in idxs]
             top_selected = Counter(task_names).most_common(3)
-            top_tasks.append([x[0] for x in top_selected])
-            top_weights.append([x[1] for x in top_selected])
+            top_tasks.append(
+                [
+                    x[0]
+                    for x in top_selected
+                    if x[0] in self.available_tasks or self.available_tasks is None
+                ]
+            )
+            top_weights.append(
+                [
+                    x[1]
+                    for x in top_selected
+                    if x[0] in self.available_tasks or self.available_tasks is None
+                ]
+            )
         return top_tasks, top_weights
 
     def predict_task(self, query):
         query = self.embedder.encode([query], show_progress_bar=False, device="cuda:0")
-        d, indices = self.index.search(query, 20)
-        results = [self.task_names[int(i)] for i in indices[0][:100]]
+        _, indices = self.index.search(query, 200)
+        results = [self.task_names[int(i)] for i in indices[0]]
         top_selected = Counter(results).most_common(3)
-        tasks = [x[0] for x in top_selected]
-        weights = [x[1] for x in top_selected]
+        tasks = [
+            x[0]
+            for x in top_selected
+            if x[0] in self.available_tasks or self.available_tasks is None
+        ]
+        weights = [
+            x[1]
+            for x in top_selected
+            if x[0] in self.available_tasks or self.available_tasks is None
+        ]
         return tasks, weights
 
     def state_dict(self):
