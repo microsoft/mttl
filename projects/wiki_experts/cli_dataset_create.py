@@ -1,7 +1,9 @@
+from collections import defaultdict
 import itertools
 import json
 import click
 from datasets import load_dataset, concatenate_datasets, Dataset
+import numpy as np
 from promptsource import templates
 import tqdm
 from mttl.datamodule.t0_data_module import apply_template
@@ -1698,6 +1700,18 @@ NIV2_CATEGORY_TO_TASK_NO_MMLU = {
 }
 
 
+def select_cutoff_by_task_name(dataset, cutoff=10_000):
+    indices = []
+    task_name_to_id = defaultdict(list)
+    for i, task_name in enumerate(dataset["task_name"]):
+        task_name_to_id[task_name].append(i)
+    for task_name, indices_ in task_name_to_id.items():
+        np.random.shuffle(indices_)
+        indices.extend(indices_[:cutoff])
+    print("Cutting off dataset:", len(indices), " / ", len(dataset))
+    return dataset.select(indices)
+
+
 def download_t0(cutoff=-1, per_task=True):
     dataset_folder = "t0_task"
     dataset = t0_dataset_readers.T0MixtureReader(
@@ -1838,7 +1852,7 @@ def create_adauni(hf_repo_id):
         "sordonia/flan-10k-flat",
         "sordonia/platypus-flat",
         "sordonia/ultrachat-32c-10k-flat",
-        "sordonia/mmlu-qa-fs-flat",
+        "sordonia/mmlu-qa-aug-10k-flat",
     ]
 
     adauni = []
@@ -1894,7 +1908,7 @@ def create_adauni(hf_repo_id):
         elif dataset_name in [
             "sordonia/platypus-flat",
             "sordonia/ultrachat-32c-10k-flat",
-            "sordonia/mmlu-qa-fs-flat",
+            "sordonia/mmlu-qa-aug-10k-flat",
         ]:
             for task_name in set(dataset["task_name"]):
                 task_dataset = dataset.filter(
@@ -1943,12 +1957,29 @@ def create_argilla(hf_repo_id):
 
 
 def create_augmented_mmlu(hf_repo_id):
+    # Augment mmlu data with some templates and few shot examples
+    templates = [
+        "Instruct: {}\nResponse:",
+        "Question: {}\nAnswer:",
+        "Q: {}\nA:",
+    ]
     dataset = load_dataset("sordonia/mmlu-qa-flat")["train"]
     # augment the dataset few-shot
-    from mttl.datamodule.mt_seq_to_seq_module import augment_few_shot
+    from mttl.datamodule.mt_seq_to_seq_module import (
+        augment_few_shot,
+        apply_source_template,
+    )
 
-    augmented_dataset = augment_few_shot(dataset, 3)
-    augmented_dataset.shuffle().push_to_hub(hf_repo_id)
+    datasets = []
+    for template in templates:
+        dataset_i = dataset.map(
+            lambda x: apply_source_template(template, x), num_proc=16
+        )
+        dataset_i = augment_few_shot(dataset_i, 5)
+        datasets.append(dataset_i)
+
+    dataset = concatenate_datasets(datasets)
+    select_cutoff_by_task_name(dataset, cutoff=10_000).push_to_hub(hf_repo_id)
 
 
 def create_sni(hf_repo_id):
@@ -2080,7 +2111,7 @@ def main(task):
     elif task == "argilla":
         create_argilla("sordonia/argilla_notus-flat")
     elif task == "aug-mmlu":
-        create_augmented_mmlu("sordonia/mmlu-qa-fs-flat")
+        create_augmented_mmlu("sordonia/mmlu-qa-aug-10k-flat")
     else:
         raise ValueError("Unknown task")
 
