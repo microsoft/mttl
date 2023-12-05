@@ -290,20 +290,17 @@ class MultiExpertModelRanker(MultiExpertModel):
         add_expert_to_transformer(
             self.model,
             "default",
-            module_dump.expert_config,
-            weights,
+            module_dump,
             action="route",
             is_default=True,
         )
-
         self.experts.append("default")
 
         for expert_name, expert_dump in library.items():
             add_expert_to_transformer(
                 self.model,
                 expert_name,
-                expert_dump.expert_config,
-                expert_dump.expert_weights,
+                expert_dump,
                 action="route",
                 is_default=expert_name == "default",
             )
@@ -319,7 +316,9 @@ class MultiExpertModelRanker(MultiExpertModel):
             input_texts = batch["sources_texts"]
         else:
             raise ValueError("No inputs found in batch!")
-        expert_prediction = self.expert_ranker.get_predict_experts(input_texts)
+
+        expert_prediction = self.expert_ranker.predict_batch(input_texts)
+
         print("predicted experts: {}".format(expert_prediction))
         for expert in expert_prediction:
             if expert in self.experts:
@@ -327,7 +326,6 @@ class MultiExpertModelRanker(MultiExpertModel):
             else:
                 # set the empty expert
                 expert_selection.append("default")
-
         return expert_selection
 
     def get_retrieval_accuracy(self, dataloader):
