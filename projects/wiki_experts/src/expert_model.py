@@ -293,6 +293,18 @@ class MultiExpertModelRanker(MultiExpertModel):
 
         return expert_selection
 
+    def convert_container_to_expert(self, expert_name):
+        loaded_expert = None
+        for _, module in self.model.named_modules():
+            for c_name, child in dict(module.named_children()).items():
+                if isinstance(child, ExpertContainer) and len(child.experts) > 0:
+                    setattr(module, c_name, child.experts[expert_name])
+                    if loaded_expert is None:
+                        loaded_expert = child.experts[expert_name]
+        # make sure hparams reflect the loaded expert
+        if loaded_expert:
+            self.hparams.update(loaded_expert.config.__dict__)
+
     def get_retrieval_accuracy(self, dataloader):
         all_acc = []
         for batch in dataloader:
