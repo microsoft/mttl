@@ -1,11 +1,10 @@
 import pytorch_lightning as pl
-from projects.wiki_experts.src.ranker.classification_module import (
-    ClassificationConfig,
-    ClassificationDataModuleFlatMultiTask,
-)
-
 from projects.wiki_experts.src.ranker.classifier_ranker import (
     SentenceTransformerClassifier,
+)
+from mttl.datamodule.mt_seq_to_seq_module import (
+    FlatMultiTaskConfig,
+    FlatMultiTaskModule,
 )
 from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.src.ranker.clip_ranker import CLIPRanker, CLIPTripletRanker
@@ -60,8 +59,6 @@ def train_triplet_clip(args):
         devices=1,
         logger=wandb_logger,
         val_check_interval=0.25,
-        # limit_val_batches=10,
-        # limit_train_batches=10,
     )
     trainer.fit(model, datamodule)
     if wandb_logger:
@@ -111,8 +108,6 @@ def train_clip(args):
         devices=1,
         logger=wandb_logger,
         val_check_interval=0.25,
-        # limit_val_batches=10,
-        # limit_train_batches=10,
     )
     trainer.fit(model, datamodule)
     if wandb_logger:
@@ -136,18 +131,20 @@ def train_classifier(args):
         wandb_logger.experiment.save("*.py")
         wandb_logger.experiment.save("*/*.py")
 
-    module = SentenceTransformerClassifier(
-        num_labels=args.num_labels, text_encoder_trained=args.text_encoder_trained
-    )
+    # train the classifier
+    if "flat" not in args.dataset:
+        raise ValueError("Only flat datamodule supported for now.")
 
-    config = ClassificationConfig(
+    config = FlatMultiTaskConfig(
         dataset=args.dataset,
         model=args.model,
         train_batch_size=args.train_batch_size,
         finetune_task_name=args.finetune_task_name,
     )
-    # train the classifier
-    datamodule = ClassificationDataModuleFlatMultiTask(config)
+    datamodule = FlatMultiTaskModule(config)
+    module = SentenceTransformerClassifier(
+        labels=datamodule.task_names, text_encoder_trained=args.text_encoder_trained
+    )
 
     # add model checkpoint
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
@@ -164,8 +161,6 @@ def train_classifier(args):
         callbacks=[checkpoint_callback],
         devices=1,
         logger=wandb_logger,
-        # limit_val_batches=10,
-        # limit_train_batches=10,
     )
     trainer.fit(module, datamodule)
     if wandb_logger:

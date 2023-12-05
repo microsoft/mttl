@@ -1,3 +1,4 @@
+from projects.wiki_experts.src.ranker.baseline_rankers import KATERouter
 from projects.wiki_experts.src.ranker.classifier_ranker import (
     SentenceTransformerClassifier,
 )
@@ -11,37 +12,37 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class AdapterRankerHelper:
     def __init__(
         self,
-        retrieval_model,
-        model_path,
+        ranker_model,
+        ranker_path,
     ):
-        self.retrieval_model = retrieval_model
-        self.model_path = model_path
+        self.ranker_model = ranker_model
+        self.ranker_path = ranker_path
         self.ranker = self.get_ranker_instance()
 
     def get_ranker_instance(
         self,
     ):
-        if self.retrieval_model == "clip":
-            model = CLIPRanker().from_pretrained(self.model_path).to(device)
+        if self.ranker_model == "clip":
+            model = CLIPRanker().from_pretrained(self.ranker_path).to(device)
             return model
-        elif self.retrieval_model == "classifier":
+        elif self.ranker_model == "classifier":
             model = (
                 SentenceTransformerClassifier()
-                .from_pretrained(self.model_path)
+                .from_pretrained(self.ranker_path)
                 .to(device)
             )
             return model
+        elif self.ranker_model == "kate":
+            model = KATERouter.from_pretrained(self.ranker_path)
+            return model
         else:
-            raise ValueError(f"Unknown retrieval model: {self.retrieval_model}")
+            raise ValueError(f"Unknown retrieval model: {self.ranker_model}")
 
-    def get_predict_experts(
-        self,
-        input_texts,
-    ):
-        if isinstance(self.ranker, CLIPRanker):
-            return self.ranker.predict_experts_using_clip(input_texts, top_n=1)
-        elif isinstance(self.ranker, SentenceTransformerClassifier):
-            return self.ranker.predict_experts_using_classifier(input_texts)
+    def predict_task(self, query):
+        return self.ranker.predict_task(query)
+
+    def predict_batch(self, batch):
+        return self.ranker.predict_batch(batch)
 
 
 if __name__ == "__main__":

@@ -6,12 +6,6 @@ import torch.nn.functional as F
 from transformers import T5Tokenizer, T5ForConditionalGeneration
 from sentence_transformers import SentenceTransformer
 from projects.wiki_experts.src.ranker.experts_ranker import ExpertsRanker
-from projects.wiki_experts.src.config import (
-    tasks_names_to_ids_ada,
-    tasks_names_to_ids,
-    ids_to_tasks_names,
-    ids_to_tasks_names_ada,
-)
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -43,33 +37,21 @@ class SentenceTransformerClassifier(ExpertsRanker):
     # define the classifier, the x is the input, the task_id or expert_id is the label
     def __init__(
         self,
-        num_labels=439,
+        labels,
         hidden_size=768,
         transformer_embed_dim=384,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.text_encoder = self.text_encoder_init(requires_grad=False)
-        self.num_labels = num_labels
+        self.labels_texts = labels
+        self.task_names_to_ids = {task: i for i, task in enumerate(labels)}
+        self.num_labels = len(labels)
+
         # linear text encoder
         self.text_projecter = nn.Linear(transformer_embed_dim, hidden_size)
-        self.out_projecter = nn.Linear(hidden_size, num_labels)
-        if num_labels == 439:
-            self.tasks_names_to_ids = tasks_names_to_ids_ada
-            self.ids_to_tasks_names = ids_to_tasks_names_ada
-        else:
-            self.ids_to_tasks_names = ids_to_tasks_names
-            self.tasks_names_to_ids = tasks_names_to_ids
+        self.out_projecter = nn.Linear(hidden_size, self.num_labels)
         self.save_hyperparameters(ignore=["text_encoder"])
-
-    def text_encoder_init(self, requires_grad=False):
-        text_encoder = SentenceTransformer("all-MiniLM-L6-v2")
-
-        # frozen the transformer parameters
-        auto_model = text_encoder._first_module().auto_model
-        for param in auto_model.parameters():
-            param.requires_grad = requires_grad
-        return text_encoder
 
     def forward(self, x):
         # Encode the text input
@@ -80,21 +62,44 @@ class SentenceTransformerClassifier(ExpertsRanker):
         logits = self.out_projecter(text_output_projecter)
         return logits
 
+    def predict_task(self, query):
+        assert type(query) == str
+        probs = torch.softmax(self.forward(query), -1)
+        results = torch.argsort(probs, dim=1, descending=True)
+        return [self.labels_texts[int(i)] for i in results[0][:3]], [
+            probs[0][i] for i in results[0][:3]
+        ]
+
+    def predict_batch(self, batch):
+        query = batch["sources_texts"]
+        probs = torch.softmax(self.forward(query), -1)
+        top_tasks, top_weights = [], []
+        for _, probs_ in enumerate(probs):
+            best_index = probs_.argsort(descending=True)
+            top_tasks.append([self.labels_texts[i] for i in best_index[:3]])
+            top_weights.append([probs_[i] for i in best_index[:3]])
+        return top_tasks, top_weights
+
+    def text_encoder_init(self, requires_grad=False):
+        text_encoder = SentenceTransformer("all-MiniLM-L6-v2")
+
+        # frozen the transformer parameters
+        auto_model = text_encoder._first_module().auto_model
+        for param in auto_model.parameters():
+            param.requires_grad = requires_grad
+        return text_encoder
+
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
         return optimizer
 
     def training_step(self, batch, batch_idx):
         text_input, task_name = batch["input"], batch["task_name"]
-        # change the "niv2_misc." to "niv2_misc"
-        for i in range(len(task_name)):
-            if task_name[i] == "niv2_misc.":
-                task_name[i] = "niv2_misc"
-        label = torch.tensor([self.tasks_names_to_ids[task] for task in task_name]).to(
+        labels = torch.tensor([self.tasks_names_to_ids[task] for task in task_name]).to(
             device
         )
         logits = self(text_input)
-        loss = F.cross_entropy(logits, label)
+        loss = F.cross_entropy(logits, labels)
         self.log(
             "train/loss",
             loss,
@@ -147,35 +152,6 @@ class SentenceTransformerClassifier(ExpertsRanker):
         acc = torch.sum(preds == label).item() / len(label)
         self.log("test/acc", acc, on_epoch=True, prog_bar=True)
         return loss
-
-    def test_accuracy(self, dataset, data_model, fine_tune_task_name):
-        from projects.wiki_experts.src.ranker.classification_module import (
-            ClassificationConfig,
-            ClassificationDataModuleFlatMultiTask,
-        )
-        from tqdm import tqdm
-        import numpy as np
-
-        classifier_config = ClassificationConfig(
-            dataset=dataset,
-            model=data_model,
-            finetune_task_name=fine_tune_task_name,
-        )
-        datamodule = ClassificationDataModuleFlatMultiTask(classifier_config)
-
-        pbar = tqdm(
-            enumerate(datamodule.test_dataloader()),
-            total=len(datamodule.test_dataloader()),
-        )
-        acc_all = []
-        for _, batch in pbar:
-            preds = self.predict_experts_using_classifier(batch["input"])
-
-            acc = np.sum(np.array(preds) == np.array(batch["task_name"])) / len(preds)
-            acc_all.append(acc)
-            pbar.set_description(f"Accuracy: {sum(acc_all)/len(acc_all)}")
-
-        print(f"Accuracy: {sum(acc_all)/len(acc_all)}")
 
     def predict_experts_using_classifier(self, input_texts):
         logits = self(input_texts)
@@ -239,53 +215,3 @@ class SentenceTransformerClassifier(ExpertsRanker):
         plt.colorbar()
         plt.show()
         plt.savefig("similarity_matrix.png")
-
-
-if __name__ == "__main__":
-    model = SentenceTransformerClassifier()
-    model = model.from_pretrained("zhan1993/classifier_ranker")
-    model.to(device)
-    model.test_accuracy(
-        "sordonia/adauni-v1-flat",
-        "EleutherAI/gpt-neo-125m",
-        fine_tune_task_name="astronomy",
-    )
-
-    # from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
-    from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
-    from projects.wiki_experts.src.expert_model import MultiExpertModelRanker
-    from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRankerHelper
-
-    finetune_task_name = "astronomy"
-    data_module = MMLUDataModule(
-        MMLUDataConfig(
-            "mmlu",
-            model="EleutherAI/gpt-neo-125m",
-            model_family="gpt",
-            train_batch_size=4,
-            predict_batch_size=4,
-            finetune_task_name=finetune_task_name,
-        ),
-        for_generation=True,
-    )
-
-    dm = data_module.val_dataloader()
-    batch = next(iter(dm))
-
-    predict_experts = model.predict_experts_using_classifier(batch["sources_texts"])
-    print(predict_experts)
-
-    predict_scores = model.predict_scores_using_classifier(batch["sources_texts"])
-    print(predict_scores)
-
-    # from projects.wiki_experts.src.config import ExpertConfig
-
-    # config = ExpertConfig()
-    # config.routing = "retrieval"
-    # config.model = "EleutherAI/gpt-neo-125m"
-    # config.retrieval_model = "classifier"
-    # config.expert_model_path = "zhan1993/classifier_ranker"
-
-    # model = AdapterRankerHelper(config.retrieval_model, config.expert_model_path)
-    # prediction_experts = model.ranker.predict_experts_using_classifier(sources_texts)
-    # print(prediction_experts)

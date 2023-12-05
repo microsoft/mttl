@@ -2,7 +2,6 @@ from mttl.datamodule.base import DefaultDataModule, DatasetConfig, DefaultCollat
 from dataclasses import dataclass
 from datasets import load_dataset
 import os
-from projects.wiki_experts.src.config import tasks_names_to_ids, tasks_names_to_ids_ada
 import torch
 
 
@@ -17,7 +16,7 @@ class DataCollatorForCLIPExperts(DefaultCollator):
         sources = [b["input_texts"] for b in batch]
         accuracy = [b["score"] for b in batch]
         experts_names = [b["expert_name"] for b in batch]
-        experts_ids = [tasks_names_to_ids[e] for e in experts_names]
+        experts_ids = [self.task_to_id[e] for e in experts_names]
 
         return {
             "input_texts": sources,
@@ -33,8 +32,8 @@ class DataCollatorForCLIPExpertsTriple(DefaultCollator):
         sources = [b["input"] for b in batch]
         positive_experts = [b["m1"] for b in batch]
         negative_experts = [b["m2"] for b in batch]
-        positive_expert_id = [tasks_names_to_ids_ada[e] for e in positive_experts]
-        negative_expert_id = [tasks_names_to_ids_ada[e] for e in negative_experts]
+        positive_expert_id = [self.task_to_id[e] for e in positive_experts]
+        negative_expert_id = [self.task_to_id[e] for e in negative_experts]
 
         return {
             "input_texts": sources,
@@ -157,6 +156,7 @@ class CLIPExpertsDatamodule(DefaultDataModule):
             return_tensors="pt",
             model_family=self.config.model_family,
             for_generation=self.for_generation,
+            task_to_id=self._task_to_id,
         )
 
 
@@ -224,13 +224,5 @@ class CLIPTripleDataModule(DefaultDataModule):
             return_tensors="pt",
             model_family=self.config.model_family,
             for_generation=self.for_generation,
+            task_to_id=self._task_to_id,
         )
-
-
-# print(tasks_names_to_ids_ada["default"])
-# dm = CLIPTripleDataModule(CLIPExpertsConfig(model="EleutherAI/gpt-neo-125m"))
-# dm.setup_dataset()
-
-# for batch in dm.test_dataloader():
-#     print(batch)
-#     break

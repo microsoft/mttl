@@ -109,8 +109,7 @@ def run_eval(args):
         args,
     )
     # load module
-    if args.retrieval_model == "classifier":
-        print("Using classifier model")
+    if args.ranker_model in ["classifier", "kate"]:
         module = MultiExpertModelRanker(
             **vars(args),
             tokenizer=mmlu.datamodule.tokenizer,
@@ -118,8 +117,8 @@ def run_eval(args):
     else:
         module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
 
-    if args.expert_library_path:
-        library = HFExpertLibrary(args.expert_library_path)
+    if args.hf_lib_id:
+        library = HFExpertLibrary(args.hf_lib_id)
         module.load_from_library(library)
     elif args.load_module is not None:
         kwargs = parse_experts_to_load(args.load_module)
