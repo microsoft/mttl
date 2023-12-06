@@ -156,10 +156,10 @@ class MultiExpertModel(ExpertTrainer):
         if action != "merge":
             self.experts.append(expert_name)
 
-    def load_from_graph_string(self, s, action="route", **kwargs):
+    def load_from_graph_string(self, s, action="route", expert_library=None):
         from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
 
-        graph = ModuleGraph.from_string(s, **kwargs)
+        graph = ModuleGraph.from_string(s, expert_library=expert_library)
         self.load_from_graph(graph, action=action)
 
     def load_expert(
@@ -248,17 +248,6 @@ class MultiExpertModel(ExpertTrainer):
         batch,
         **kwargs,
     ):
-        if self.hparams.routing == "first":
-            batch["task_names"] = [
-                self.experts[0] for _ in range(batch["input_ids"].shape[0])
-            ]
-        elif self.hparams.routing == "random":
-            import numpy as np
-
-            batch["task_names"] = np.random.choice(
-                self.experts, batch["input_ids"].shape[0], replace=True
-            ).tolist()
-
         if hasattr(self.model, "task_id_container"):
             self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
                 batch
@@ -271,6 +260,8 @@ class MultiExpertModel(ExpertTrainer):
 
 class MultiExpertModelRanker(MultiExpertModel):
     def __init__(self, **kwargs):
+        kwargs["router_selector"] = "info_selector"
+
         super().__init__(**kwargs)
 
         self.expert_ranker = AdapterRankerHelper(
@@ -287,14 +278,16 @@ class MultiExpertModelRanker(MultiExpertModel):
         # fill all the weights with zeros
         # deep copy the weights
         weights = copy.deepcopy(module_dump.expert_weights)
-        for key, value in weights.items():
+        for _, value in weights.items():
             value.fill_(0)
+
         add_expert_to_transformer(
             self.model,
             "default",
             module_dump,
             action="route",
             is_default=True,
+            config=self.hparams,
         )
         self.experts.append("default")
 
@@ -307,42 +300,34 @@ class MultiExpertModelRanker(MultiExpertModel):
                 expert_dump,
                 action="route",
                 is_default=expert_name == "default",
+                config=self.hparams,
             )
 
         for expert_name, _ in library.items():
             self.experts.append(expert_name)
-
-    def get_retrieval_accuracy(self, dataloader):
-        all_acc = []
-        for batch in dataloader:
-            expert_prediction = self.get_predicted_experts(batch)
-            expert_selection = []
-            for expert in expert_prediction:
-                if expert in self.experts:
-                    expert_selection.append(expert)
-                else:
-                    # randomly select an expert
-                    expert_selection.append(
-                        self.experts[np.random.randint(len(self.experts))]
-                    )
-            acc = np.array(expert_selection) == np.array(batch["task_names"])
-            all_acc.extend(acc)
-        acc_score = sum(all_acc) / len(all_acc)
-        return acc_score
 
     def generate(
         self,
         batch,
         **kwargs,
     ):
-        task_names, weights = self.expert_ranker.predict_batch(batch)
-        batch["task_names"] = [task_name[0] for task_name in task_names]
-        print("Predicted: ", batch["task_names"])
-
         if hasattr(self.model, "task_id_container"):
             self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
                 batch
             )
+
+        mod_names, mod_weights = self.expert_ranker.predict_batch(batch)
+
+        # fill in the weights for the routing selector, for now just take the first one
+        self.model.task_id_container["routing_infos"].routing_modules = [
+            [t[0]] for t in mod_names
+        ]
+        self.model.task_id_container["routing_infos"].routing_weights = [
+            [1.0] for _ in mod_weights
+        ]
+
+        logger.debug(f"Most similar: {str(mod_names)}")
+        logger.debug(f"Most similar weights: {str(mod_weights)}")
 
         generations = self.model.generate(
             inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs

@@ -1,3 +1,4 @@
+import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from datasets import load_dataset
 from collections import Counter
@@ -151,13 +152,12 @@ class KATERouter:
                     if self.available_tasks is None or x[0] in self.available_tasks
                 ]
             )
-            top_weights.append(
-                [
-                    x[1]
-                    for x in top_selected
-                    if self.available_tasks is None or x[0] in self.available_tasks
-                ]
-            )
+            ws = [
+                x[1]
+                for x in top_selected
+                if self.available_tasks is None or x[0] in self.available_tasks
+            ]
+            top_weights.append(np.asarray(ws) / (np.asarray(ws).sum() + 1e-6))
         return top_tasks, top_weights
 
     def predict_task(self, query):

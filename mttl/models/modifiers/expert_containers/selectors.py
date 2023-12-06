@@ -137,14 +137,14 @@ class MultiExpertSelector(torch.nn.Module, Selector):
                 )
 
 
-@register_multi_expert_selector("routing_infos_selector")
+@register_multi_expert_selector("info_selector")
 class RoutingInfosContainerSelector(torch.nn.Module, Selector):
     """A simple selector that looks for routing information in the info container."""
 
     def __init__(self, config=None, info_container=None, **kwargs) -> None:
         super().__init__()
         self.info_container = info_container
-        self.__layer_name__ = f"routing_infos_selector"
+        self.__layer_name__ = f"info_selector"
         self.expert_names = []
         self.default_expert_name = None
 
