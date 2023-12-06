@@ -37,16 +37,17 @@ class SentenceTransformerClassifier(ExpertsRanker):
     # define the classifier, the x is the input, the task_id or expert_id is the label
     def __init__(
         self,
-        labels,
+        task_names=[],
         hidden_size=768,
         transformer_embed_dim=384,
+        freeze_text_encoder=True,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.text_encoder = self.text_encoder_init(requires_grad=False)
-        self.labels_texts = labels
-        self.task_names_to_ids = {task: i for i, task in enumerate(labels)}
-        self.num_labels = len(labels)
+        self.text_encoder = self.text_encoder_init(False)
+        self.labels_texts = task_names
+        self.task_names_to_ids = {task: i for i, task in enumerate(task_names)}
+        self.num_labels = len(task_names)
 
         # linear text encoder
         self.text_projecter = nn.Linear(transformer_embed_dim, hidden_size)
@@ -94,11 +95,11 @@ class SentenceTransformerClassifier(ExpertsRanker):
         return optimizer
 
     def training_step(self, batch, batch_idx):
-        text_input, task_name = batch["input"], batch["task_name"]
-        labels = torch.tensor([self.tasks_names_to_ids[task] for task in task_name]).to(
+        sources_texts, task_names = batch["sources_texts"], batch["task_names"]
+        labels = torch.tensor([self.task_names_to_ids[task] for task in task_names]).to(
             device
         )
-        logits = self(text_input)
+        logits = self(sources_texts)
         loss = F.cross_entropy(logits, labels)
         self.log(
             "train/loss",
@@ -106,20 +107,16 @@ class SentenceTransformerClassifier(ExpertsRanker):
             on_step=True,
             on_epoch=True,
             prog_bar=True,
-            batch_size=len(batch["input"]),
+            batch_size=len(batch["sources_texts"]),
         )
         return loss
 
     def validation_step(self, batch, batch_idx):
-        text_input, task_name = batch["input"], batch["task_name"]
-        # change the "niv2_misc." to "niv2_misc"
-        for i in range(len(task_name)):
-            if task_name[i] == "niv2_misc.":
-                task_name[i] = "niv2_misc"
-        label = torch.tensor([self.tasks_names_to_ids[task] for task in task_name]).to(
+        sources_texts, task_names = batch["sources_texts"], batch["task_names"]
+        label = torch.tensor([self.task_names_to_ids[task] for task in task_names]).to(
             device
         )
-        logits = self(text_input)
+        logits = self(sources_texts)
         loss = F.cross_entropy(logits, label)
         self.log(
             "val/loss",
@@ -127,16 +124,16 @@ class SentenceTransformerClassifier(ExpertsRanker):
             on_step=True,
             on_epoch=True,
             prog_bar=True,
-            batch_size=len(batch["input"]),
+            batch_size=len(batch["sources_texts"]),
         )
         return loss
 
     def test_step(self, batch, batch_idx):
-        text_input, task_name = batch["input"], batch["task_name"]
-        label = torch.tensor([self.tasks_names_to_ids[task] for task in task_name]).to(
+        sources_texts, task_names = batch["sources_texts"], batch["task_names"]
+        label = torch.tensor([self.task_names_to_ids[task] for task in task_names]).to(
             device
         )
-        logits = self(text_input)
+        logits = self(sources_texts)
         loss = F.cross_entropy(logits, label)
         self.log(
             "test/loss",
@@ -144,7 +141,7 @@ class SentenceTransformerClassifier(ExpertsRanker):
             on_step=True,
             on_epoch=True,
             prog_bar=True,
-            batch_size=len(batch["input"]),
+            batch_size=len(batch["sources_texts"]),
         )
 
         # compute the accuracy
@@ -152,13 +149,6 @@ class SentenceTransformerClassifier(ExpertsRanker):
         acc = torch.sum(preds == label).item() / len(label)
         self.log("test/acc", acc, on_epoch=True, prog_bar=True)
         return loss
-
-    def predict_experts_using_classifier(self, input_texts):
-        logits = self(input_texts)
-
-        expert_indices = logits.argmax(dim=1).cpu()
-        expert_prediction = [self.ids_to_tasks_names[i.item()] for i in expert_indices]
-        return expert_prediction
 
     def predict_scores_using_classifier(self, input_texts):
         logits = self(input_texts)

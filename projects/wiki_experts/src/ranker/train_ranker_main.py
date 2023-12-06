@@ -6,7 +6,7 @@ from mttl.datamodule.mt_seq_to_seq_module import (
     FlatMultiTaskConfig,
     FlatMultiTaskModule,
 )
-from projects.wiki_experts.src.config import ExpertConfig
+from projects.wiki_experts.src.ranker.config import RankerConfig
 from projects.wiki_experts.src.ranker.clip_ranker import CLIPRanker, CLIPTripletRanker
 from projects.wiki_experts.src.ranker.clip_data_module import (
     CLIPExpertsDatamodule,
@@ -14,6 +14,7 @@ from projects.wiki_experts.src.ranker.clip_data_module import (
     CLIPTripleDataModule,
 )
 import os
+from pytorch_lightning import seed_everything
 
 
 def train_triplet_clip(args):
@@ -116,6 +117,7 @@ def train_clip(args):
 
 def train_classifier(args):
     # using wandb project
+    seed_everything(args.seed, workers=True)
     wandb_logger = None
     if os.environ.get("WANDB_API_KEY") or args.wandb_project:
         import wandb
@@ -142,14 +144,14 @@ def train_classifier(args):
         finetune_task_name=args.finetune_task_name,
     )
     datamodule = FlatMultiTaskModule(config)
-    module = SentenceTransformerClassifier(
-        labels=datamodule.task_names, text_encoder_trained=args.text_encoder_trained
-    )
+    module = SentenceTransformerClassifier(task_names=datamodule.task_names)
 
     # add model checkpoint
+
+    datapath = f"classification_ranker_{args.dataset}"
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
         monitor="val/loss_epoch",
-        dirpath=f"classification_ranker_{args.dataset}",
+        dirpath=datapath,
         filename="classifier-{epoch:02d}-{val/loss:.2f}",
         save_top_k=1,
         mode="min",
@@ -161,6 +163,8 @@ def train_classifier(args):
         callbacks=[checkpoint_callback],
         devices=1,
         logger=wandb_logger,
+        limit_train_batches=10,
+        limit_val_batches=10,
     )
     trainer.fit(module, datamodule)
     if wandb_logger:
@@ -168,10 +172,28 @@ def train_classifier(args):
 
 
 if __name__ == "__main__":
-    args = ExpertConfig.parse()
-    if args.retrieval_model == "classifier":
-        train_classifier(args)
-    elif args.retrieval_model == "clip":
-        train_clip(args)
-    elif args.retrieval_model == "clip_triplet":
-        train_triplet_clip(args)
+    args = RankerConfig.parse()
+    # if args.ranker_model == "classifier":
+    #     train_classifier(args)
+    # elif args.ranker_model == "clip":
+    #     train_clip(args)
+    # elif args.ranker_model == "clip_triplet":
+    #     train_triplet_clip(args)
+
+    from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRankerHelper
+
+    expert_ranker = AdapterRankerHelper(
+        ranker_model="classifier",
+        ranker_path="/projects/futhark1/data/wzm289/code/lucas_mttl/projects/wiki_experts/classification_ranker_sordonia/adauni-v1-flat/classifier-epoch=00-val/loss=6.02.ckpt",
+    )
+
+    config = FlatMultiTaskConfig(
+        dataset=args.dataset,
+        model=args.model,
+        train_batch_size=args.train_batch_size,
+        finetune_task_name=args.finetune_task_name,
+    )
+    datamodule = FlatMultiTaskModule(config)
+    dataset = datamodule.val_dataloader()
+    batch = next(iter(dataset))
+    print(expert_ranker.predict_batch(batch))

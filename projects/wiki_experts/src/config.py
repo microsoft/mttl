@@ -38,16 +38,6 @@ class ExpertConfig(Config):
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
 
-        # training expert
-        self.eval_mmlu_flag = False
-        self.ranker_path = None
-        self.ranker_model = "classifier"
-
-        # whether to train the backbone or not when training the ranker
-        self.text_encoder_trained = False
-        self.eval_metric = "loss"
-        self.use_vllm = False
-
     def post_init(self):
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size
