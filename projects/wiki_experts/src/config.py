@@ -41,7 +41,7 @@ class ExpertConfig(Config):
         # training expert
         self.eval_mmlu_flag = False
         self.ranker_path = None
-        self.ranker_model = "classifier"
+        self.ranker_model = None
 
         # whether to train the backbone or not when training the ranker
         self.text_encoder_trained = False
