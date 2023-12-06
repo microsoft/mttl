@@ -55,7 +55,7 @@ class Selector:
 @register_multi_expert_selector("poly_router")
 class MultiExpertSelector(torch.nn.Module, Selector):
     """
-    Implements routing at a per-layer or pe-model level
+    Implements routing at a per-layer or per-model level
     """
 
     def __init__(self, config, info_container=None, **kwargs) -> None:
@@ -135,6 +135,41 @@ class MultiExpertSelector(torch.nn.Module, Selector):
                 self.module_logits[expert_name] = torch.nn.Parameter(
                     torch.empty(1).uniform_(*init_gap).to(self.device)
                 )
+
+
+@register_multi_expert_selector("routing_infos_selector")
+class RoutingInfosContainerSelector(torch.nn.Module, Selector):
+    """A simple selector that looks for routing information in the info container."""
+
+    def __init__(self, config=None, info_container=None, **kwargs) -> None:
+        super().__init__()
+        self.info_container = info_container
+        self.__layer_name__ = f"routing_infos_selector"
+        self.expert_names = []
+        self.default_expert_name = None
+
+    def forward(self, *args, **kwargs):
+        # try to infer batch size
+        if "routing_infos" not in self.info_container:
+            raise ValueError("routing_infos not in info_container")
+
+        assert hasattr(self.info_container["routing_infos"], "routing_modules")
+        assert hasattr(self.info_container["routing_infos"], "routing_weights")
+
+        routing_mods = self.info_container["routing_infos"].routing_modules
+        routing_weights = self.info_container["routing_infos"].routing_weights
+
+        return [
+            dict(zip(routing_m, torch.tensor(routing_w)))
+            for routing_m, routing_w in zip(routing_mods, routing_weights)
+        ]
+
+    def add_expert(self, expert_name: str, *args, **kwargs):
+        pass
+
+    @property
+    def name(self):
+        return f"{self.__layer_name__}"
 
 
 @register_multi_expert_selector("task_selector")
