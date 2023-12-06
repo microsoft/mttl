@@ -109,23 +109,26 @@ def run_eval(args):
         args,
     )
     # load module
-    if args.ranker_model in ["classifier", "kate"]:
+    if args.ranker_model is not None:
         module = MultiExpertModelRanker(
-            **vars(args),
-            tokenizer=mmlu.datamodule.tokenizer,
+            **vars(args), tokenizer=mmlu.datamodule.tokenizer
         )
     else:
         module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
 
     if args.hf_lib_id:
         library = HFExpertLibrary(args.hf_lib_id)
-        module.load_from_library(library)
-    elif args.load_module is not None:
+    else:
+        library = None
+
+    if args.load_module is not None:
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:
             module.load_expert(**expert_kwargs)
     elif args.module_graph is not None:
-        module.load_from_graph_string(args.module_graph)
+        module.load_from_graph_string(args.module_graph, expert_library=library)
+    else:
+        module.load_from_library(library)
 
     module.to("cuda")
     scores = mmlu.evaluate(module, split=args.mmlu_test_split, subsample=subsample)
