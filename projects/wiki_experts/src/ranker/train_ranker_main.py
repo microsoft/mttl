@@ -32,7 +32,6 @@ def train_triplet_clip(args):
         )
         wandb_logger.experiment.save("*.py")
         wandb_logger.experiment.save("*/*.py")
-    model = CLIPTripletRanker(expert_num=440)
 
     # test the model
     dataconfig = CLIPExpertsConfig(
@@ -43,6 +42,7 @@ def train_triplet_clip(args):
         predict_batch_size=args.predict_batch_size,
     )
     datamodule = CLIPTripleDataModule(dataconfig)
+    model = CLIPTripletRanker(expert_names=datamodule.task_names)
 
     # add model checkpoint
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
@@ -163,8 +163,6 @@ def train_classifier(args):
         callbacks=[checkpoint_callback],
         devices=1,
         logger=wandb_logger,
-        limit_train_batches=10,
-        limit_val_batches=10,
     )
     trainer.fit(module, datamodule)
     if wandb_logger:
@@ -173,12 +171,12 @@ def train_classifier(args):
 
 if __name__ == "__main__":
     args = RankerConfig.parse()
-    # if args.ranker_model == "classifier":
-    #     train_classifier(args)
-    # elif args.ranker_model == "clip":
-    #     train_clip(args)
-    # elif args.ranker_model == "clip_triplet":
-    #     train_triplet_clip(args)
+    if args.ranker_model == "classifier":
+        train_classifier(args)
+    elif args.ranker_model == "clip":
+        train_clip(args)
+    elif args.ranker_model == "clip_triplet":
+        train_triplet_clip(args)
 
     from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRankerHelper
 

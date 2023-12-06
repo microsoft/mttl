@@ -337,7 +337,7 @@ class MultiExpertModelRanker(MultiExpertModel):
     ):
         task_names, weights = self.expert_ranker.predict_batch(batch)
         batch["task_names"] = [task_name[0] for task_name in task_names]
-        print("Predicted: ", batch["task_names"])
+        # print("Predicted: ", batch["task_names"])
 
         if hasattr(self.model, "task_id_container"):
             self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(

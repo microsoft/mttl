@@ -69,23 +69,22 @@ class CLIPRanker(ExpertsRanker):
         temperature: float = 0.07,
         text_embedding_dim: int = 384,
         expert_embedding_dim: int = 512,
-        expert_num: int = 246,
+        expert_names: list = [],
         **kwargs,
     ):
         super().__init__(**kwargs)
+        assert len(expert_names) > 0
 
         self.text_encoder = TextEncoder()
+        self.expert_num = len(expert_names)
         self.expert_encoder = ExpertEncoder(
             expert_dim=expert_embedding_dim,
-            expert_num=expert_num,
+            expert_num=self.expert_num,
         )
-
-        if expert_num == 246:
-            self.ids_to_tasks_names = ids_to_tasks_names
-        elif expert_num == 440:
-            self.ids_to_tasks_names = ids_to_tasks_names_ada
-        self.expert_num = expert_num
-        self.text_projection = ProjectionHead(embedding_dim=384)
+        expert_names.append("default")
+        self.ids_to_tasks_names = {i: task for i, task in enumerate(expert_names)}
+        self.tasks_names_to_ids = {task: i for i, task in enumerate(expert_names)}
+        self.text_projection = ProjectionHead(embedding_dim=text_embedding_dim)
         self.expert_projection = ProjectionHead(embedding_dim=expert_embedding_dim)
         self.temperature = temperature
         self.save_hyperparameters()
@@ -177,13 +176,14 @@ class CLIPTripletRanker(CLIPRanker):
         temperature: float = 0.07,
         text_embedding_dim: int = 384,
         expert_embedding_dim: int = 512,
-        expert_num: int = 246,
+        expert_names: list = [],
     ):
+        assert len(expert_names) > 0
         super().__init__(
             temperature=temperature,
             text_embedding_dim=text_embedding_dim,
             expert_embedding_dim=expert_embedding_dim,
-            expert_num=expert_num,
+            expert_names=expert_names,
         )
 
     def forward(self, batch):
@@ -243,6 +243,7 @@ class CLIPTripletRanker(CLIPRanker):
 
 
 if __name__ == "__main__":
+    pass
     # from projects.wiki_experts.src.config import ExpertConfig
 
     # args = ExpertConfig.parse()
@@ -277,17 +278,17 @@ if __name__ == "__main__":
     # )
     # trainer.fit(model, datamodule)
 
-    model = CLIPRanker().from_pretrained("zhan1993/clip_ranker_debug").to(device)
+    # model = CLIPRanker().to(device)
 
     # get the top 5 experts for each example in the test set
-    print(
-        model.predict_experts_using_clip(
-            [
-                "if a horse at 2 years old has 3 legs, how many legs it has at 10 years old?"
-            ],
-            top_n=1,
-        ),
-    )
+    # print(
+    #     model.predict_experts_using_clip(
+    #         [
+    #             "if a horse at 2 years old has 3 legs, how many legs it has at 10 years old?"
+    #         ],
+    #         top_n=1,
+    #     ),
+    # )
 
     # model = CLIPTripletRanker(expert_num=440)
     # model.to(device)
