@@ -105,8 +105,6 @@ def run_eval(args):
     else:
         subsample = None
 
-    print(args.finetune_task_name, args.load_module, args.checkpoint)
-
     mmlu = MMLUEvaluator(
         args,
     )
@@ -117,11 +115,6 @@ def run_eval(args):
         )
     else:
         module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
-        module.load_state_dict(
-            torch.load(
-                "/projects/futhark1/data/wzm289/code/lucas_mttl/loss=0.9626.ckpt"
-            )["state_dict"]
-        )
 
     if args.hf_lib_id:
         library = HFExpertLibrary(args.hf_lib_id)
