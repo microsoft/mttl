@@ -177,21 +177,6 @@ def add_expert_to_transformer(
                         expert_container.__layer_name__, expert.expert_weights
                     )
 
-                    if config.baseline:
-                        expert_weights = {k: v * 0.0 for k, v in expert_weights.items()}
-
-                    if config.sparsity:
-                        # sparsify the expert weights by removing the ones that are close to zero
-                        # use torch.topk to get the smallest values in the weights then set them to zero
-                        for k, v in expert_weights.items():
-                            smallest_weights = torch.topk(
-                                v.view(-1),
-                                int(v.nelement() * config.sparsity),
-                                largest=False,
-                            )
-                            v.view(-1)[smallest_weights.indices] = 0.0
-                            expert_weights[k] = v
-
                     expert_container.add_expert(
                         expert_name,
                         expert,
