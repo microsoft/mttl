@@ -319,7 +319,7 @@ class MultiExpertModelRanker(MultiExpertModel):
             m for m in mod_names
         ]
         self.model.task_id_container["routing_infos"].routing_weights = [
-            list(np.array(w) / (np.sum(w) + 1.0)) for w in mod_weights
+            list(np.array(w) / np.sum(w)) for w in mod_weights
         ]
 
         # infos
