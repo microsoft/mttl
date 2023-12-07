@@ -14,28 +14,6 @@ from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRanker
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-class T5Classifier(pl.LightningModule):
-    def __init__(
-        self,
-    ):
-        super().__init__()
-
-        self.tokenizer = T5Tokenizer.from_pretrained("t5-small")
-        self.model = T5ForConditionalGeneration.from_pretrained("t5-small")
-
-    def forward(self, inputs, labels=None):
-        outputs = self.model(inputs, labels=labels)
-        return outputs
-
-    def training_step(self, batch):
-        inputs = batch["input_ids"]
-        labels = batch["labels"]
-
-        outputs = self(inputs, labels=labels)
-        loss = outputs.loss
-        return loss
-
-
 class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
     # define the classifier, the x is the input, the task_id or expert_id is the label
     def __init__(

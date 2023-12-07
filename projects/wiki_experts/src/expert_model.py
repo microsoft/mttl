@@ -162,12 +162,12 @@ class MultiExpertModel(ExpertTrainer):
         graph = ModuleGraph.from_string(s, expert_library=expert_library)
         self.load_from_graph(graph, action=action)
 
-    def load_from_library(self, library):
+    def load_from_library(self, library, subsample_library_experts=0):
         import copy
 
         keys = list(library.keys())
         if self.hparams.subsample_library_experts > 0:
-            keys = np.random.permutation(keys)[: self.hparams.subsample_library_experts]
+            keys = np.random.permutation(keys)[:subsample_library_experts]
 
         # fill all the weights with zeros after deep copying the weights
         module_dump = library[keys[0]]
