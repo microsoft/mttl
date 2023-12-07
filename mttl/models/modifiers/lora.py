@@ -296,17 +296,19 @@ class SkilledLoRA(LoRA):
             skilled_loras_a = skilled_loras_a.squeeze(0)
             skilled_loras_b = skilled_loras_b.squeeze(0)
             weights = weights.squeeze(0)
+            scaling = scaling.squeeze(0)
 
-            A = torch.einsum("bs,sdr->bdr", (weights, skilled_loras_a))
-            B = torch.einsum("bs,srd->brd", (weights, skilled_loras_b))
+            A = torch.einsum("s,sdr->dr", (weights, skilled_loras_a))
+            B = torch.einsum("s,srd->rd", (weights, skilled_loras_b))
 
             # (n_examples, seq_len, out_features)
-            adapter_out = torch.bmm(torch.bmm(input, A), B) * scaling.mean()
+            adapter_out = torch.matmul(torch.matmul(input, A), B) * scaling
         else:
             A = torch.einsum("bs,bsdr->bdr", (weights, skilled_loras_a))
             B = torch.einsum("bs,bsrd->brd", (weights, skilled_loras_b))
+
             # (n_examples, seq_len, out_features)
-            adapter_out = torch.bmm(torch.bmm(input, A), B) * scaling.mean()
+            adapter_out = torch.bmm(torch.bmm(input, A), B) * scaling
         return layer_out + adapter_out.to(dtype=layer_out.dtype)
 
 
