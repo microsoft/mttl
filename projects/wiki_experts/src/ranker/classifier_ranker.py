@@ -6,7 +6,9 @@ import torch.nn.functional as F
 
 from transformers import T5Tokenizer, T5ForConditionalGeneration
 from sentence_transformers import SentenceTransformer
-from projects.wiki_experts.src.ranker.experts_ranker import ExpertsRanker
+
+from mttl.models.utils import EfficientCheckpointModule
+from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRanker
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -34,7 +36,7 @@ class T5Classifier(pl.LightningModule):
         return loss
 
 
-class SentenceTransformerClassifier(ExpertsRanker):
+class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
     # define the classifier, the x is the input, the task_id or expert_id is the label
     def __init__(
         self,
@@ -43,7 +45,8 @@ class SentenceTransformerClassifier(ExpertsRanker):
         transformer_embed_dim=384,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        EfficientCheckpointModule.__init__(self, **kwargs)
+
         self.text_encoder = self.text_encoder_init(requires_grad=False)
         self.ids_to_tasks_names = task_names
         self.task_names_to_ids = {task: i for i, task in enumerate(task_names)}

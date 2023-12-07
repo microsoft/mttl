@@ -3,9 +3,6 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from datasets import load_dataset
 from collections import Counter
 
-from mttl.utils import logger
-from torch import nn
-
 from sklearn.utils.extmath import safe_sparse_dot
 from huggingface_hub import (
     create_repo,
@@ -17,6 +14,8 @@ from huggingface_hub import (
 
 import torch
 
+from mttl.utils import logger
+from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRanker
 
 try:
     import faiss
@@ -38,7 +37,7 @@ def upload_checkpoint(repo_id, filename, path_in_repo):
     )
 
 
-class TFIDFRouter:
+class TFIDFRanker(AdapterRanker):
     def __init__(self, **kwargs):
         self.config = kwargs
         self.dataset_name = kwargs.get("dataset_name")
@@ -93,6 +92,9 @@ class TFIDFRouter:
         if repo_id:
             upload_checkpoint(repo_id, path + "/model.ckpt", "model.ckpt")
 
+    def predict_batch(self, batch, n=1):
+        return super().predict_batch(batch, n)
+
     @classmethod
     def from_pretrained(cls, repo_id):
         import os
@@ -110,7 +112,7 @@ class TFIDFRouter:
         return ranker
 
 
-class KATERouter:
+class KATERanker(AdapterRanker):
     def __init__(self, **kwargs):
         from sentence_transformers import SentenceTransformer
 
