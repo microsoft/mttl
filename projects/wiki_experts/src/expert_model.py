@@ -166,8 +166,8 @@ class MultiExpertModel(ExpertTrainer):
         import copy
 
         keys = list(library.keys())
-        if self.hparams.subsample_experts > 0:
-            keys = np.random.permutation(keys)[: self.hparams.subsample_experts]
+        if self.hparams.subsample_library_experts > 0:
+            keys = np.random.permutation(keys)[: self.hparams.subsample_library_experts]
 
         # fill all the weights with zeros after deep copying the weights
         module_dump = library[keys[0]]
