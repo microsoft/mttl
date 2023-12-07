@@ -165,13 +165,14 @@ class MultiExpertModel(ExpertTrainer):
     def load_from_library(self, library):
         import copy
 
-        module_name = list(library.keys())[0]
-        module_dump = library[module_name]
+        keys = list(library.keys())
+        if self.hparams.subsample_experts > 0:
+            keys = np.random.permutation(keys)[: self.hparams.subsample_experts]
 
-        # fill all the weights with zeros
-        # deep copy the weights
-        weights = copy.deepcopy(module_dump.expert_weights)
-        for _, value in weights.items():
+        # fill all the weights with zeros after deep copying the weights
+        module_dump = library[keys[0]]
+        module_dump = copy.deepcopy(module_dump)
+        for _, value in module_dump.expert_weights.items():
             value.fill_(0)
 
         add_expert_to_transformer(
@@ -182,11 +183,6 @@ class MultiExpertModel(ExpertTrainer):
             is_default=True,
             config=self.hparams,
         )
-        self.experts.append("default")
-
-        keys = list(library.keys())
-        if self.hparams.subsample_experts > 0:
-            keys = np.random.permutation(keys)[: self.hparams.subsample_experts]
 
         for expert_name in tqdm.tqdm(keys, desc="Loading experts..."):
             expert_dump = library[expert_name]
@@ -315,7 +311,9 @@ class MultiExpertModelRanker(MultiExpertModel):
                 batch
             )
 
-        mod_names, mod_weights = self.expert_ranker.predict_batch(batch, n=1)
+        self.expert_ranker.set_available_tasks(self.experts)
+        mod_names, mod_weights = self.expert_ranker.predict_batch(batch, n=2)
+
         # fill in the weights for the routing selector, for now just take the first one
         self.model.task_id_container["routing_infos"].routing_modules = [
             m for m in mod_names

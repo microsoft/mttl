@@ -19,6 +19,8 @@ class ExpertConfig(Config):
         self.baseline = False
         # sparsify adapter weights to this sparsity level
         self.sparsity = 0.0
+        # only use a very small portion of the available experts
+        self.subsample_library_experts = 0
 
         self.expert_name = None
         self.routing = "subject"
