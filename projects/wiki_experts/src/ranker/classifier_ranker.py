@@ -21,7 +21,6 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
         task_names,
         hidden_size=768,
         transformer_embed_dim=384,
-        freeze_text_encoder=True,
         **kwargs,
     ):
         EfficientCheckpointModule.__init__(self, **kwargs)

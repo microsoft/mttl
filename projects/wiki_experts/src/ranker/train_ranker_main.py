@@ -6,7 +6,6 @@ from mttl.datamodule.mt_seq_to_seq_module import (
     FlatMultiTaskConfig,
     FlatMultiTaskModule,
 )
-from projects.wiki_experts.src.ranker.config import RankerConfig
 from projects.wiki_experts.src.ranker.clip_ranker import CLIPRanker, CLIPTripletRanker
 from projects.wiki_experts.src.ranker.clip_data_module import (
     CLIPExpertsDatamodule,

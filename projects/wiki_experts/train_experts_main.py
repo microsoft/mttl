@@ -142,10 +142,6 @@ def run_multitask(args: ExpertConfig):
 
     module = model_class(**vars(args), tokenizer=dm.tokenizer)
 
-    # test the gpu issue
-    for i in module.model.named_parameters():
-        print(f"{i[0]} -> {i[1].device}")
-
     mlf_logger = get_mlf_logger()
     if mlf_logger:
         loggers.append(mlf_logger)
