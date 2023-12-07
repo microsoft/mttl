@@ -19,8 +19,8 @@ class AdapterRankerHelper:
             model = CLIPRanker().from_pretrained(ranker_path).to(device)
             return model
         elif ranker_model == "classifier":
-            model = (
-                SentenceTransformerClassifier().from_pretrained(ranker_path).to(device)
+            model = SentenceTransformerClassifier.from_pretrained(ranker_path).to(
+                device
             )
             return model
         elif ranker_model == "kate":
