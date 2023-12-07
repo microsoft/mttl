@@ -258,7 +258,13 @@ class SkilledLoRA(LoRA):
         merge_after: bool = False,
     ):
         """
-        Meging loras into one loa accroding to the weights
+        Executes multiple skilled loras in parallel.
+
+        I.e. this is useful for the situations in which each example in the batch
+        need to be processed by a different combination of skills.
+              --> skills     --> weights
+        ex1 : [a, d, f]     [0.1, 0.2, 0.7]
+        ex2 : [c, g, h]     [0.3, 0.4, 0.3]
         """
         if len(set([lora.layer for lora in loras])) > 1:
             raise ValueError("Cannot parallelize loras applied to different layers.")
