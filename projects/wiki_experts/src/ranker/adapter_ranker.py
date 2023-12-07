@@ -2,12 +2,6 @@ import torch
 
 from abc import ABC, abstractmethod
 
-from projects.wiki_experts.src.ranker.baseline_rankers import KATERanker
-from projects.wiki_experts.src.ranker.classifier_ranker import (
-    SentenceTransformerClassifier,
-)
-from projects.wiki_experts.src.ranker.clip_ranker import CLIPRanker
-
 
 class AdapterRanker(ABC):
     @abstractmethod
@@ -24,6 +18,12 @@ class AdapterRanker(ABC):
 class AdapterRankerHelper:
     @staticmethod
     def get_ranker_instance(ranker_model, ranker_path, device="cuda"):
+        from projects.wiki_experts.src.ranker.baseline_rankers import KATERanker
+        from projects.wiki_experts.src.ranker.classifier_ranker import (
+            SentenceTransformerClassifier,
+        )
+        from projects.wiki_experts.src.ranker.clip_ranker import CLIPRanker
+
         if not torch.cuda.is_available() and device == "cuda":
             device = "cpu"
 

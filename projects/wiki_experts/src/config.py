@@ -21,6 +21,10 @@ class ExpertConfig(Config):
         self.sparsity = 0.0
         # only use a very small portion of the available experts
         self.subsample_library_experts = 0
+        # rank / retrieve top k experts
+        self.ranker_top_k = 1
+        self.ranker_path = None
+        self.ranker_model = None
 
         self.expert_name = None
         self.routing = "subject"
@@ -47,8 +51,6 @@ class ExpertConfig(Config):
 
         # training expert
         self.eval_mmlu_flag = False
-        self.ranker_path = None
-        self.ranker_model = None
 
         # whether to train the backbone or not when training the ranker
         self.text_encoder_trained = False

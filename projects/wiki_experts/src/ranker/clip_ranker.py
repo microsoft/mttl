@@ -1,12 +1,15 @@
 # implements the CLIPRanker class
 from sentence_transformers import SentenceTransformer
-from projects.wiki_experts.src.ranker.experts_ranker import ExpertsRanker
 import torch
 import pytorch_lightning as pl
 import torch.nn as nn
 import torch.nn.functional as F
 import tqdm
 import os
+
+from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRanker
+from mttl.models.utils import EfficientCheckpointModule
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -63,9 +66,10 @@ class ProjectionHead(nn.Module):
         return x
 
 
-class CLIPRanker(ExpertsRanker):
+class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
     def __init__(
         self,
+        task_names,
         temperature: float = 0.07,
         text_embedding_dim: int = 384,
         expert_embedding_dim: int = 512,
@@ -79,11 +83,7 @@ class CLIPRanker(ExpertsRanker):
             expert_dim=expert_embedding_dim,
             expert_num=expert_num,
         )
-
-        if expert_num == 246:
-            self.ids_to_tasks_names = ids_to_tasks_names
-        elif expert_num == 440:
-            self.ids_to_tasks_names = ids_to_tasks_names_ada
+        self.ids_to_tasks_names = task_names
         self.expert_num = expert_num
         self.text_projection = ProjectionHead(embedding_dim=384)
         self.expert_projection = ProjectionHead(embedding_dim=expert_embedding_dim)
@@ -240,71 +240,3 @@ class CLIPTripletRanker(CLIPRanker):
         )
 
         return loss
-
-
-if __name__ == "__main__":
-    # from projects.wiki_experts.src.config import ExpertConfig
-
-    # args = ExpertConfig.parse()
-
-    # ## train the clip model
-    # dataconfig = CLIPExpertsConfig(
-    #     dataset=args.dataset,
-    #     model=args.model,
-    #     train_batch_size=args.train_batch_size,
-    #     finetune_task_name=args.finetune_task_name,
-    #     predict_batch_size=args.predict_batch_size,
-    # )
-    # datamodule = CLIPExpertsDatamodule(dataconfig)
-
-    # checkpoint_callback = pl.callbacks.ModelCheckpoint(
-    #     monitor="val/loss_epoch",
-    #     dirpath=f"clip_ranker_{args.exp_name}/",
-    #     filename="clip-{epoch:02d}-{val/loss:.2f}",
-    #     save_top_k=1,
-    #     mode="min",
-    # )
-
-    # trainer = pl.Trainer(
-    #     max_epochs=args.num_train_epochs,
-    #     accelerator="gpu",
-    #     callbacks=[checkpoint_callback],
-    #     devices=1,
-    #     logger=None,
-    #     val_check_interval=0.25,
-    #     limit_val_batches=10,
-    #     limit_train_batches=10,
-    # )
-    # trainer.fit(model, datamodule)
-
-    model = CLIPRanker().from_pretrained("zhan1993/clip_ranker_debug").to(device)
-
-    # get the top 5 experts for each example in the test set
-    print(
-        model.predict_experts_using_clip(
-            [
-                "if a horse at 2 years old has 3 legs, how many legs it has at 10 years old?"
-            ],
-            top_n=1,
-        ),
-    )
-
-    # model = CLIPTripletRanker(expert_num=440)
-    # model.to(device)
-
-    # # test the model
-    # dataconfig = CLIPExpertsConfig(model="EleutherAI/gpt-neo-125m")
-    # dm = CLIPTripleDataModule(dataconfig)
-
-    # # test forward
-    # for batch in dm.val_dataloader(subsample=10):
-    #     print(model.forward(batch))
-    #     break
-
-    # # get the expert embeddings
-    # expert_embeddings = model.get_expert_embeddings()
-    # print(expert_embeddings.shape)
-    # # get the top 5 experts for each example in the test set
-    # for batch in dm.val_dataloader(subsample=10):
-    #     print(model.predict_experts_using_clip(batch, expert_embeddings))
-    #     break
