@@ -16,31 +16,25 @@ class DataCollatorForCLIPExperts(DefaultCollator):
         sources = [b["input_texts"] for b in batch]
         accuracy = [b["score"] for b in batch]
         experts_names = [b["expert_name"] for b in batch]
-        experts_ids = [self.task_to_id[e] for e in experts_names]
 
         return {
-            "input_texts": sources,
+            "sources_texts": sources,
             "accuracy": accuracy,
-            "expert_name": experts_names,
-            "expert_id": torch.LongTensor(experts_ids),
+            "expert_names": experts_names,
         }
 
 
 @dataclass
 class DataCollatorForCLIPExpertsTriple(DefaultCollator):
     def __call__(self, batch):
-        sources = [b["input"] for b in batch]
-        positive_experts = [b["m1"] for b in batch]
-        negative_experts = [b["m2"] for b in batch]
-        positive_expert_id = [self.task_to_id[e] for e in positive_experts]
-        negative_expert_id = [self.task_to_id[e] for e in negative_experts]
+        sources = [b["sources_texts"] for b in batch]
+        positive_experts = [b["positive_expert_names"] for b in batch]
+        negative_experts = [b["negative_expert_names"] for b in batch]
 
         return {
-            "input_texts": sources,
-            "positive_experts": positive_experts,
-            "negative_experts": negative_experts,
-            "positive_expert_id": torch.LongTensor(positive_expert_id),
-            "negative_expert_id": torch.LongTensor(negative_expert_id),
+            "sources_texts": sources,
+            "positive_expert_names": positive_experts,
+            "negative_expert_names": negative_experts,
         }
 
 
@@ -156,7 +150,6 @@ class CLIPExpertsDatamodule(DefaultDataModule):
             return_tensors="pt",
             model_family=self.config.model_family,
             for_generation=self.for_generation,
-            task_to_id=self._task_to_id,
         )
 
 
@@ -224,5 +217,4 @@ class CLIPTripleDataModule(DefaultDataModule):
             return_tensors="pt",
             model_family=self.config.model_family,
             for_generation=self.for_generation,
-            task_to_id=self._task_to_id,
         )
