@@ -253,7 +253,7 @@ class SkilledLoRA(LoRA):
     def parallel_linear_weighted_forward(
         cls,
         input: torch.Tensor,
-        loras: List["SkilledLoRAView"],
+        skilled_loras: List["SkilledLoRAView"],
         weights: List[torch.Tensor],
         merge_after: bool = False,
     ):
@@ -262,51 +262,51 @@ class SkilledLoRA(LoRA):
 
         I.e. this is useful for the situations in which each example in the batch
         need to be processed by a different combination of skills.
-              --> skills     --> weights
+              --> skills    --> weights
         ex1 : [a, d, f]     [0.1, 0.2, 0.7]
         ex2 : [c, g, h]     [0.3, 0.4, 0.3]
         """
-        if len(set([lora.layer for lora in loras])) > 1:
+        if merge_after:
+            raise NotImplementedError("`merge_after` is not implemented for now.")
+
+        if len(set([lora.layer for lora in skilled_loras])) > 1:
             raise ValueError("Cannot parallelize loras applied to different layers.")
 
-        device = loras[0].lora_a.device
-        lora_a = torch.stack([lora.lora_a for lora in loras], dim=0)
-        lora_b = torch.stack([lora.lora_b for lora in loras], dim=0)
+        device = skilled_loras[0].lora_a.device
+        skilled_loras_a = torch.stack([lora.lora_a for lora in skilled_loras], dim=0)
+        skilled_loras_b = torch.stack([lora.lora_b for lora in skilled_loras], dim=0)
         weights = torch.stack(weights, dim=0).to(device)
 
-        assert lora_a.shape[3] == 1, "Only 1 split is supported for now."
-        assert lora_b.shape[4] == 1, "Only 1 split is supported for now."
-        lora_a = lora_a.squeeze(3)
-        lora_b = lora_b.squeeze(4)
+        assert skilled_loras_a.shape[3] == 1, "Only 1 split is supported for now."
+        assert skilled_loras_b.shape[4] == 1, "Only 1 split is supported for now."
+        skilled_loras_a = skilled_loras_a.squeeze(3)
+        skilled_loras_b = skilled_loras_b.squeeze(4)
 
         # (n_examples,)
         scaling = torch.cat(
-            [torch.FloatTensor([lora.scaling]) for lora in loras], dim=0
+            [torch.FloatTensor([lora.scaling]) for lora in skilled_loras], dim=0
         ).to(device=device)
 
-        layer_out = loras[0].layer(input)
-        input = input.to(dtype=loras[0].lora_a.dtype)
+        layer_out = skilled_loras[0].layer(input)
+        input = input.to(dtype=skilled_loras[0].lora_a.dtype)
 
-        if lora_a.shape[0] == 1:
+        # no batch!
+        if skilled_loras_a.shape[0] == 1:
             # skilled lora is shared across all examples, remove batch dimension
-            lora_a = lora_a.squeeze(0)
-            lora_b = lora_b.squeeze(0)
+            skilled_loras_a = skilled_loras_a.squeeze(0)
+            skilled_loras_b = skilled_loras_b.squeeze(0)
             weights = weights.squeeze(0)
 
-            raise NotImplementedError("Not implemented for now.")
+            A = torch.einsum("bs,sdr->bdr", (weights, skilled_loras_a))
+            B = torch.einsum("bs,srd->brd", (weights, skilled_loras_b))
+
+            # (n_examples, seq_len, out_features)
+            adapter_out = torch.bmm(torch.bmm(input, A), B) * scaling.mean()
         else:
-            if merge_after:
-                adapter_out_a = torch.einsum("bsd,bkdr->bskr", (input, lora_a))
-                adapter_out_b = torch.einsum("bskr,bkrd->bskd", (adapter_out_a, lora_b))
-                adapter_out = (
-                    torch.einsum("bskd,bk->bsd", (adapter_out_b, weights))
-                    * scaling.mean()
-                )
-            else:
-                A = torch.einsum("bs,bsdr->bdr", (weights, lora_a))
-                B = torch.einsum("bs,bsrd->brd", (weights, lora_b))
-                # (n_examples, seq_len, out_features)
-                adapter_out = torch.bmm(torch.bmm(input, A), B) * scaling.mean()
+            A = torch.einsum("bs,bsdr->bdr", (weights, skilled_loras_a))
+            B = torch.einsum("bs,bsrd->brd", (weights, skilled_loras_b))
+            # (n_examples, seq_len, out_features)
+            adapter_out = torch.bmm(torch.bmm(input, A), B) * scaling.mean()
         return layer_out + adapter_out.to(dtype=layer_out.dtype)
 
 
