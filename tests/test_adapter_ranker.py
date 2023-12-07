@@ -36,14 +36,14 @@ def test_clip_routing():
     prediction_experts = module.expert_ranker.predict_batch(batch)
     assert len(prediction_experts) == 2
     assert isinstance(module.expert_ranker, CLIPRanker)
-    assert prediction_experts[0][0][0] == "wiki_qa_Decide_good_answer"
+    assert prediction_experts[0][0] == "race_high_Select_the_best_answer_generate_span_"
 
 
 def test_classifier_routing():
     config = ExpertConfig()
     config.model = "EleutherAI/gpt-neo-125m"
     config.ranker_model = "classifier"
-    config.ranker_path = "zhan1993/classifier_ranker_new"
+    config.ranker_path = "zhan1993/classifier_ranker_debug"
     finetune_task_name = "adversarial_qa_dbert_answer_the_following_q"
 
     data_module = FlanModule(

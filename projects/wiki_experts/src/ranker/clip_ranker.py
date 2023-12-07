@@ -149,7 +149,6 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
         text_embeddings = F.normalize(text_embeddings, dim=-1)
         # calculate the similarity and normalize
         dot_similarity = F.softmax(text_embeddings @ expert_embeddings.T, dim=-1)
-        print("dot_similarity", dot_similarity)
         values, indices = torch.topk(dot_similarity.squeeze(0), n)
         # now we only selet the top n experts
 
