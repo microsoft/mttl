@@ -128,7 +128,8 @@ def run_eval(args):
     elif args.module_graph is not None:
         module.load_from_graph_string(args.module_graph, expert_library=library)
     elif library is not None:
-        module.load_from_library(library)
+        if not args.baseline:
+            module.load_from_library(library, args.subsample_library_experts)
 
     module.to("cuda")
     scores = mmlu.evaluate(module, split=args.mmlu_test_split, subsample=subsample)
