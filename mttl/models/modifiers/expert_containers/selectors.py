@@ -160,7 +160,7 @@ class RoutingInfosContainerSelector(torch.nn.Module, Selector):
         routing_weights = self.info_container["routing_infos"].routing_weights
 
         return [
-            dict(zip(routing_m, torch.tensor(routing_w)))
+            dict(zip(routing_m, torch.tensor(routing_w).float()))
             for routing_m, routing_w in zip(routing_mods, routing_weights)
         ]
 

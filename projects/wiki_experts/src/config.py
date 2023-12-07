@@ -15,6 +15,11 @@ class ExpertConfig(Config):
         self.hf_lib_id = None
         self.hf_repo_id = None
 
+        # just a lame flag to 0 out all adapter weights
+        self.baseline = False
+        # sparsify adapter weights to this sparsity level
+        self.sparsity = 0.0
+
         self.expert_name = None
         self.routing = "subject"
         self.mmlu_test_split = "test"

@@ -136,45 +136,27 @@ class KATERouter:
         self.index.add(self.train_features)
         self.task_names = list(self.dataset["task_name"])
 
-    def predict_batch(self, batch):
+    def predict_batch(self, batch, n=2):
         query = self.embedder.encode(
             batch["sources_texts"], show_progress_bar=False, device="cuda:0"
         )
-        _, indices = self.index.search(query, 200)
+        _, indices = self.index.search(query, 100)
         top_tasks, top_weights = [], []
         for _, idxs in enumerate(indices):
             task_names = [self.task_names[int(idx)] for idx in idxs]
-            top_selected = Counter(task_names).most_common(3)
-            top_tasks.append(
-                [
-                    x[0]
-                    for x in top_selected
-                    if self.available_tasks is None or x[0] in self.available_tasks
-                ]
-            )
-            ws = [
-                x[1]
-                for x in top_selected
-                if self.available_tasks is None or x[0] in self.available_tasks
-            ]
+            top_selected = Counter(task_names).most_common(n)
+            top_tasks.append([x[0] for x in top_selected])
+            ws = [x[1] for x in top_selected]
             top_weights.append(np.asarray(ws) / (np.asarray(ws).sum() + 1e-6))
         return top_tasks, top_weights
 
-    def predict_task(self, query):
+    def predict_task(self, query, n=1):
         query = self.embedder.encode([query], show_progress_bar=False, device="cuda:0")
-        _, indices = self.index.search(query, 200)
+        _, indices = self.index.search(query, 1000)
         results = [self.task_names[int(i)] for i in indices[0]]
-        top_selected = Counter(results).most_common(3)
-        tasks = [
-            x[0]
-            for x in top_selected
-            if self.available_tasks is None or x[0] in self.available_tasks
-        ]
-        weights = [
-            x[1]
-            for x in top_selected
-            if self.available_tasks is None or x[0] in self.available_tasks
-        ]
+        top_selected = Counter(results).most_common(n)
+        tasks = [x[0] for x in top_selected]
+        weights = [x[1] for x in top_selected]
         return tasks, weights
 
     def state_dict(self):

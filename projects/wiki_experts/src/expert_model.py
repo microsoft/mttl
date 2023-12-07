@@ -162,6 +162,44 @@ class MultiExpertModel(ExpertTrainer):
         graph = ModuleGraph.from_string(s, expert_library=expert_library)
         self.load_from_graph(graph, action=action)
 
+    def load_from_library(self, library):
+        import copy
+
+        module_name = list(library.keys())[0]
+        module_dump = library[module_name]
+
+        # fill all the weights with zeros
+        # deep copy the weights
+        weights = copy.deepcopy(module_dump.expert_weights)
+        for _, value in weights.items():
+            value.fill_(0)
+
+        add_expert_to_transformer(
+            self.model,
+            "default",
+            module_dump,
+            action="route",
+            is_default=True,
+            config=self.hparams,
+        )
+        self.experts.append("default")
+
+        keys = list(library.keys())
+        if self.hparams.subsample_experts > 0:
+            keys = np.random.permutation(keys)[: self.hparams.subsample_experts]
+
+        for expert_name in tqdm.tqdm(keys, desc="Loading experts..."):
+            expert_dump = library[expert_name]
+            add_expert_to_transformer(
+                self.model,
+                expert_name,
+                expert_dump,
+                action="route",
+                is_default=expert_name == "default",
+                config=self.hparams,
+            )
+            self.experts.append(expert_name)
+
     def load_expert(
         self,
         expert_path: str,
@@ -260,51 +298,12 @@ class MultiExpertModel(ExpertTrainer):
 
 class MultiExpertModelRanker(MultiExpertModel):
     def __init__(self, **kwargs):
-        kwargs["router_selector"] = "info_selector"
-
         super().__init__(**kwargs)
 
-        self.expert_ranker = AdapterRankerHelper(
+        self.expert_ranker = AdapterRankerHelper.get_ranker_instance(
             ranker_model=kwargs["ranker_model"],
             ranker_path=kwargs["ranker_path"],
         )
-
-    def load_from_library(self, library):
-        import copy
-
-        module_name = list(library.keys())[0]
-        module_dump = library[module_name]
-
-        # fill all the weights with zeros
-        # deep copy the weights
-        weights = copy.deepcopy(module_dump.expert_weights)
-        for _, value in weights.items():
-            value.fill_(0)
-
-        add_expert_to_transformer(
-            self.model,
-            "default",
-            module_dump,
-            action="route",
-            is_default=True,
-            config=self.hparams,
-        )
-        self.experts.append("default")
-
-        for expert_name, expert_dump in tqdm.tqdm(
-            library.items(), desc="Loading experts..."
-        ):
-            add_expert_to_transformer(
-                self.model,
-                expert_name,
-                expert_dump,
-                action="route",
-                is_default=expert_name == "default",
-                config=self.hparams,
-            )
-
-        for expert_name, _ in library.items():
-            self.experts.append(expert_name)
 
     def generate(
         self,
@@ -316,18 +315,18 @@ class MultiExpertModelRanker(MultiExpertModel):
                 batch
             )
 
-        mod_names, mod_weights = self.expert_ranker.predict_batch(batch)
-
+        mod_names, mod_weights = self.expert_ranker.predict_batch(batch, n=1)
         # fill in the weights for the routing selector, for now just take the first one
         self.model.task_id_container["routing_infos"].routing_modules = [
-            [t[0]] for t in mod_names
+            m for m in mod_names
         ]
         self.model.task_id_container["routing_infos"].routing_weights = [
-            [1.0] for _ in mod_weights
+            list(np.array(w) / (np.sum(w) + 1.0)) for w in mod_weights
         ]
 
-        logger.debug(f"Most similar: {str(mod_names)}")
-        logger.debug(f"Most similar weights: {str(mod_weights)}")
+        # infos
+        logger.info(f"Most similar: {str(mod_names)}")
+        logger.info(f"Most similar weights: {str(mod_weights)}")
 
         generations = self.model.generate(
             inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
@@ -442,6 +441,7 @@ class RoutedMultiExpertModel(MultiExpertModel):
                         weights, with_global_names=with_global_names
                     )
                     expert_weights.update(_weights)
+
         config_merged = copy.deepcopy(self.hparams)
         config_merged.model_modifier = exp_config.model_modifier
         expert_info = ExpertInfo(

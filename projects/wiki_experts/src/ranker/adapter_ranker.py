@@ -10,39 +10,24 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class AdapterRankerHelper:
-    def __init__(
-        self,
+    @staticmethod
+    def get_ranker_instance(
         ranker_model,
         ranker_path,
     ):
-        self.ranker_model = ranker_model
-        self.ranker_path = ranker_path
-        self.ranker = self.get_ranker_instance()
-
-    def get_ranker_instance(
-        self,
-    ):
-        if self.ranker_model == "clip":
-            model = CLIPRanker().from_pretrained(self.ranker_path).to(device)
+        if ranker_model == "clip":
+            model = CLIPRanker().from_pretrained(ranker_path).to(device)
             return model
-        elif self.ranker_model == "classifier":
+        elif ranker_model == "classifier":
             model = (
-                SentenceTransformerClassifier()
-                .from_pretrained(self.ranker_path)
-                .to(device)
+                SentenceTransformerClassifier().from_pretrained(ranker_path).to(device)
             )
             return model
-        elif self.ranker_model == "kate":
-            model = KATERouter.from_pretrained(self.ranker_path)
+        elif ranker_model == "kate":
+            model = KATERouter.from_pretrained(ranker_path)
             return model
         else:
-            raise ValueError(f"Unknown retrieval model: {self.ranker_model}")
-
-    def predict_task(self, query):
-        return self.ranker.predict_task(query)
-
-    def predict_batch(self, batch):
-        return self.ranker.predict_batch(batch)
+            raise ValueError(f"Unknown retrieval model: {ranker_model}")
 
 
 if __name__ == "__main__":
