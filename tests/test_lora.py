@@ -8,7 +8,7 @@ from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.lora import LoRAConfig, LoRA
 
 
-def test_llama_adapter():
+def test_lora_adapter():
     os.environ["CONFIG_PATH"] = "./"
 
     seed_everything(0)
