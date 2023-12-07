@@ -262,9 +262,17 @@ class SkilledLoRA(LoRA):
 
         I.e. this is useful for the situations in which each example in the batch
         need to be processed by a different combination of skills.
-              --> skills    --> weights
-        ex1 : [a, d, f]     [0.1, 0.2, 0.7]
-        ex2 : [c, g, h]     [0.3, 0.4, 0.3]
+              --> skills     --> weights
+        ex1 : [[a, d, f]     [[0.1, 0.2, 0.7]
+        ex2 :  [c, g, h]]     [0.3, 0.4, 0.3]]
+
+        This also handles the case in which the same skilled lora is applied to multiple example
+        i.e.:
+
+              --> skills      --> weights
+        *   : [[a, d, f]]     [[0.1, 0.2, 0.7]]
+
+        in this case, we broadcast the same combination to all the examples in the batch.
         """
         if merge_after:
             raise NotImplementedError("`merge_after` is not implemented for now.")
