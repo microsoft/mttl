@@ -165,7 +165,7 @@ class CLIPRanker(ExpertsRanker):
             on_epoch=True,
             prog_bar=True,
             logger=True,
-            batch_size=len(batch["input_texts"]),
+            batch_size=len(batch["sources_texts"]),
         )
         return loss
 
@@ -178,7 +178,7 @@ class CLIPRanker(ExpertsRanker):
             on_epoch=True,
             prog_bar=True,
             logger=True,
-            batch_size=len(batch["input_texts"]),
+            batch_size=len(batch["sources_texts"]),
         )
         return loss
 
