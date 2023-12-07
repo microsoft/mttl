@@ -127,7 +127,7 @@ def run_eval(args):
             module.load_expert(**expert_kwargs)
     elif args.module_graph is not None:
         module.load_from_graph_string(args.module_graph, expert_library=library)
-    else:
+    elif library is not None:
         module.load_from_library(library)
 
     module.to("cuda")
