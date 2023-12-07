@@ -1,7 +1,7 @@
 from pyparsing import abstractmethod
 import torch
 from torch import nn
-from typing import Any, Dict
+from typing import Any, Dict, List
 from mttl.models.modifiers.base import MergeableAdapter, ModifyMixin
 from mttl.models.modifiers.base import Adapter, MergeableAdapter, ModifyMixin
 from mttl.models.modifiers.lora import LoRA, SkilledLoRA, SkilledLoRAView
@@ -138,7 +138,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                 self.merged_expert_names.append(name)
                 self.experts.pop(name)
 
-    def route(self, input, routing: list[dict[str, torch.Tensor]]):
+    def route(self, input, routing: List[Dict[str, torch.Tensor]]):
         batch_experts, batch_weights = [], []
 
         for example_routing in routing:  # for each example in batch

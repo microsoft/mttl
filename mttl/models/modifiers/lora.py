@@ -250,6 +250,10 @@ class SkilledLoRA(LoRA):
         return layer_out + adapter_out.to(input.dtype)
 
     @classmethod
+    def parallel_linear_forward(cls, input, skilled_loras, weights):
+        return cls.parallel_linear_weighted_forward(input, skilled_loras, weights)
+
+    @classmethod
     def parallel_linear_weighted_forward(
         cls,
         input: torch.Tensor,
@@ -285,10 +289,10 @@ class SkilledLoRA(LoRA):
         skilled_loras_b = torch.stack([lora.lora_b for lora in skilled_loras], dim=0)
         weights = torch.stack(weights, dim=0).to(device)
 
-        assert skilled_loras_a.shape[3] == 1, "Only 1 split is supported for now."
-        assert skilled_loras_b.shape[4] == 1, "Only 1 split is supported for now."
-        skilled_loras_a = skilled_loras_a.squeeze(3)
-        skilled_loras_b = skilled_loras_b.squeeze(4)
+        assert skilled_loras_a.shape[2] == 1, "Only 1 split is supported for now."
+        assert skilled_loras_b.shape[3] == 1, "Only 1 split is supported for now."
+        skilled_loras_a = skilled_loras_a.squeeze(2)
+        skilled_loras_b = skilled_loras_b.squeeze(3)
 
         # (n_examples,)
         scaling = torch.cat(
@@ -316,7 +320,13 @@ class SkilledLoRA(LoRA):
             B = torch.einsum("bs,bsrd->brd", (weights, skilled_loras_b))
 
             # (n_examples, seq_len, out_features)
-            adapter_out = torch.bmm(torch.bmm(input, A), B) * scaling
+            if input.ndim == 2:
+                partial_out = torch.einsum("bd,bdr->br", (input, A))
+                adapter_out = torch.einsum("br,brd->bd", (partial_out, B))
+            else:
+                partial_out = torch.einsum("bsd,bdr->bsr", (input, A))
+                adapter_out = torch.einsum("bsr,brd->bsd", (partial_out, B))
+            adapter_out = adapter_out * scaling
         return layer_out + adapter_out.to(dtype=layer_out.dtype)
 
 
@@ -351,10 +361,10 @@ class SkilledLoRAView(SkilledLoRA):
         layer = loras[0].layer
         skilled_lora = cls(config, layer)
         skilled_lora.lora_a = torch.stack(
-            [lora.lora_a.unsqueeze(1) for lora in loras], dim=0
+            [lora.lora_a for lora in loras].unsqueeze(1), dim=0
         )
         skilled_lora.lora_b = torch.stack(
-            [lora.lora_b.unsqueeze(2) for lora in loras], dim=0
+            [lora.lora_b for lora in loras].unsqueeze(2), dim=0
         )
         return skilled_lora
 

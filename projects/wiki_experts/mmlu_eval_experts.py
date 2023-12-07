@@ -74,8 +74,6 @@ def parse_experts_to_load(experts_to_load):
 
 
 def run_eval(args):
-    import torch
-
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file
