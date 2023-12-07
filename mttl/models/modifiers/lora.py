@@ -361,11 +361,11 @@ class SkilledLoRAView(SkilledLoRA):
         layer = loras[0].layer
         skilled_lora = cls(config, layer)
         skilled_lora.lora_a = torch.stack(
-            [lora.lora_a for lora in loras].unsqueeze(1), dim=0
-        )
+            [lora.lora_a for lora in loras], dim=0
+        ).unsqueeze(1)
         skilled_lora.lora_b = torch.stack(
-            [lora.lora_b for lora in loras].unsqueeze(2), dim=0
-        )
+            [lora.lora_b for lora in loras], dim=0
+        ).unsqueeze(2)
         return skilled_lora
 
 

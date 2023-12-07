@@ -111,3 +111,16 @@ def test_skilled_lora_parallel_merge_with_weights():
     assert output[0, 0, 0].item() == 1.5
     assert output[1, 0, 0].item() == 4.0
     assert output.shape == (2, 3, 2)
+
+
+def test_skilled_lora_view():
+    layer = torch.nn.Linear(1, 2, bias=False)
+    adapter_config = LoRAConfig(lora_rank=5)
+    lora1 = LoRA(adapter_config, layer)
+    lora2 = LoRA(adapter_config, layer)
+    lora3 = LoRA(adapter_config, layer)
+    skilled_lora = SkilledLoRAView.from_loras([lora1, lora2, lora3])
+    assert skilled_lora.lora_a.shape == torch.Size([3, 1, 1, 5])
+    assert skilled_lora.lora_b.shape == torch.Size([3, 5, 1, 2])
+    assert skilled_lora.rank == 5
+    assert skilled_lora.alpha == adapter_config.lora_alpha

@@ -14,10 +14,9 @@ from projects.wiki_experts.src.config import ExpertConfig
 
 def test_clip_routing():
     config = ExpertConfig()
-    config.routing = "retrieval"
+    config.ranker_model = "clip"
+    config.ranker_path = "zhan1993/clip_ranker_debug"
     config.model = "EleutherAI/gpt-neo-125m"
-    config.retrieval_model = "clip"
-    config.expert_model_path = "zhan1993/clip_ranker_debug"
     finetune_task_name = "adversarial_qa_dbert_answer_the_following_q"
     data_module = FlanModule(
         FlanConfig(
@@ -34,22 +33,19 @@ def test_clip_routing():
         **vars(config), device_map="cpu", tokenizer=data_module.tokenizer
     )
     batch = next(iter(data_module.val_dataloader()))
-    prediction_experts = module.expert_ranker.get_predict_experts(
-        batch["sources_texts"]
-    )
-    experts_selections = module.expert_retrieval(batch)
+    prediction_experts = module.expert_ranker.predict_batch(batch)
     assert len(prediction_experts) == 1
-    assert isinstance(module.expert_ranker.ranker, CLIPRanker)
-    assert experts_selections[0] == "default"
+    assert isinstance(module.expert_ranker, CLIPRanker)
+    assert prediction_experts[0][0] == "default"
 
 
 def test_classifier_routing():
     config = ExpertConfig()
-    config.routing = "retrieval"
     config.model = "EleutherAI/gpt-neo-125m"
-    config.retrieval_model = "classifier"
-    config.expert_model_path = "zhan1993/classifier_ranker"
+    config.ranker_model = "classifier"
+    config.ranker_path = "zhan1993/classifier_ranker_new"
     finetune_task_name = "adversarial_qa_dbert_answer_the_following_q"
+
     data_module = FlanModule(
         FlanConfig(
             dataset="sordonia/flan-debug-flat",
@@ -65,15 +61,10 @@ def test_classifier_routing():
         **vars(config), device_map="cpu", tokenizer=data_module.tokenizer
     )
     batch = next(iter(data_module.val_dataloader()))
-    prediction_experts = module.expert_ranker.get_predict_experts(
-        batch["sources_texts"]
-    )
-    experts_selections = module.expert_retrieval(batch)
-
-    assert len(prediction_experts) == 1
-    assert isinstance(module.expert_ranker.ranker, SentenceTransformerClassifier)
-    assert prediction_experts[0] == "stream_qed_ii"
-    assert experts_selections[0] == "default"
+    prediction_experts = module.expert_ranker.predict_batch(batch)
+    assert len(prediction_experts) == 2  # experts and names
+    assert isinstance(module.expert_ranker, SentenceTransformerClassifier)
+    assert prediction_experts[0][0][0] == "stream_qed_ii"
 
 
 def test_expert_model_generate():
