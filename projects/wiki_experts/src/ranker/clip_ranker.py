@@ -56,7 +56,6 @@ class ProjectionHead(nn.Module):
             nn.Linear(embedding_dim, projection_dim),
             nn.GELU(),
             nn.Linear(projection_dim, projection_dim),
-            nn.Dropout(dropout),
         )
         self.layer_norm = nn.LayerNorm(projection_dim)
 
@@ -73,24 +72,28 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
         temperature: float = 0.07,
         text_embedding_dim: int = 384,
         expert_embedding_dim: int = 512,
+        projection_dim: int = 512,
         **kwargs,
     ):
         super().__init__(**kwargs)
         assert len(task_names) > 0
-
         self.text_encoder = TextEncoder()
         expert_names = task_names
         self.expert_num = len(expert_names)
-        expert_names.append("default")
         self.expert_encoder = ExpertEncoder(
             expert_dim=expert_embedding_dim,
-            expert_num=len(expert_names),
+            expert_num=self.expert_num,
         )
+        self.projection_dim = projection_dim
 
         self.ids_to_tasks_names = {i: task for i, task in enumerate(expert_names)}
         self.tasks_names_to_ids = {task: i for i, task in enumerate(expert_names)}
-        self.text_projection = ProjectionHead(embedding_dim=text_embedding_dim)
-        self.expert_projection = ProjectionHead(embedding_dim=expert_embedding_dim)
+        self.text_projection = ProjectionHead(
+            embedding_dim=text_embedding_dim, projection_dim=projection_dim
+        )
+        self.expert_projection = ProjectionHead(
+            embedding_dim=expert_embedding_dim, projection_dim=projection_dim
+        )
         self.temperature = temperature
         self.save_hyperparameters()
 
@@ -122,49 +125,51 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
     def get_expert_embeddings(
         self,
     ):
-        expert_embeddings = []
         # we only need a num_experts x dimension matrix for the expert embeddings
         with torch.no_grad():
-            expert_features = self.expert_encoder(
+            expert_embeddings = self.expert_encoder(
                 torch.tensor(list(self.ids_to_tasks_names.keys())).to(device)
             )
-            expert_embeddings.append(self.expert_projection(expert_features))
-            return torch.cat(expert_embeddings)
+            return expert_embeddings
 
     def predict_task(self, query, n=1):
         raise NotImplementedError("Not implemented yet.")
 
+    @torch.no_grad()
     def predict_batch(self, batch, n=1):
-        raise NotImplementedError("Not implemented yet.")
-
-    def predict_experts_using_clip(self, input_texts, top_n=1):
-        text_features = self.text_encoder(input_texts)
+        text_features = self.text_encoder(batch["sources_texts"])
         # Getting the expert and text embeddings with the same dimension
         text_embeddings = self.text_projection(text_features)
+
         # get expert_embedding
         expert_embeddings = self.get_expert_embeddings()
-
         # l2 normalize the embeddings
+
         expert_embeddings = F.normalize(expert_embeddings, dim=-1)
         text_embeddings = F.normalize(text_embeddings, dim=-1)
-        # calculate the similarity
-        dot_similarity = text_embeddings @ expert_embeddings.T / self.temperature
-
-        values, indices = torch.topk(dot_similarity.squeeze(0), top_n)
+        # calculate the similarity and normalize
+        dot_similarity = F.softmax(text_embeddings @ expert_embeddings.T, dim=-1)
+        print("dot_similarity", dot_similarity)
+        values, indices = torch.topk(dot_similarity.squeeze(0), n)
         # now we only selet the top n experts
 
-        matches = []
-        if top_n == 1:
-            matches = [self.ids_to_tasks_names[idx.item()] for idx in indices]
-            return matches
-        for item in indices:
-            m = []
-            for idx in item:
-                m.append(self.ids_to_tasks_names[idx.item()])
-            m.append(self.ids_to_tasks_names[item.item()])
-            matches.append(m)
+        expert_prediction = []
+        expert_weights = []
 
-        return matches
+        if n == 1:
+            expert_prediction = [self.ids_to_tasks_names[idx.item()] for idx in indices]
+            expert_weights = [weight.item() for weight in values]
+            return expert_prediction, expert_weights
+        for i, item in enumerate(indices):
+            m = []
+            w = []
+            for j, idx in enumerate(item):
+                m.append(self.ids_to_tasks_names[idx.item()])
+                w.append(values[i][j].item())
+            expert_prediction.append(m)
+            expert_weights.append(w)
+
+        return expert_prediction, expert_weights
 
     def training_step(self, batch, batch_idx):
         loss = self.forward(batch)

@@ -34,9 +34,9 @@ def test_clip_routing():
     )
     batch = next(iter(data_module.val_dataloader()))
     prediction_experts = module.expert_ranker.predict_batch(batch)
-    assert len(prediction_experts) == 1
+    assert len(prediction_experts) == 2
     assert isinstance(module.expert_ranker, CLIPRanker)
-    assert prediction_experts[0][0] == "default"
+    assert prediction_experts[0][0][0] == "wiki_qa_Decide_good_answer"
 
 
 def test_classifier_routing():

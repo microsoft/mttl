@@ -99,8 +99,9 @@ def train_clip(args):
     )
 
     datamodule = CLIPExpertsDatamodule(dataconfig)
-
-    model = CLIPRanker(task_names=datamodule.task_names)
+    task_names = datamodule.task_names
+    task_names.append("default")
+    model = CLIPRanker(task_names=task_names)
 
     # add model checkpoint
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
@@ -178,6 +179,8 @@ def train_classifier(args):
 
 
 if __name__ == "__main__":
+    from projects.wiki_experts.src.ranker.config import RankerConfig
+
     args = RankerConfig.parse()
     if args.ranker_model == "classifier":
         train_classifier(args)
@@ -185,21 +188,3 @@ if __name__ == "__main__":
         train_clip(args)
     elif args.ranker_model == "clip_triplet":
         train_triplet_clip(args)
-
-    # from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRankerHelper
-
-    # expert_ranker = AdapterRankerHelper(
-    #     ranker_model="classifier",
-    #     ranker_path="/projects/futhark1/data/wzm289/code/lucas_mttl/projects/wiki_experts/classification_ranker_sordonia/adauni-v1-flat/classifier-epoch=00-val/loss=6.02.ckpt",
-    # )
-
-    # config = FlatMultiTaskConfig(
-    #     dataset=args.dataset,
-    #     model=args.model,
-    #     train_batch_size=args.train_batch_size,
-    #     finetune_task_name=args.finetune_task_name,
-    # )
-    # datamodule = FlatMultiTaskModule(config)
-    # dataset = datamodule.val_dataloader()
-    # batch = next(iter(dataset))
-    # print(expert_ranker.predict_batch(batch))
