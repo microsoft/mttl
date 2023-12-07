@@ -312,15 +312,11 @@ class MultiExpertModelRanker(MultiExpertModel):
             )
 
         self.expert_ranker.set_available_tasks(self.experts)
-        mod_names, mod_weights = self.expert_ranker.predict_batch(batch, n=2)
+        mod_names, mod_weights = self.expert_ranker.predict_batch(batch, n=3)
 
         # fill in the weights for the routing selector, for now just take the first one
-        self.model.task_id_container["routing_infos"].routing_modules = [
-            m for m in mod_names
-        ]
-        self.model.task_id_container["routing_infos"].routing_weights = [
-            list(np.array(w) / np.sum(w)) for w in mod_weights
-        ]
+        self.model.task_id_container["routing_infos"].routing_modules = mod_names
+        self.model.task_id_container["routing_infos"].routing_weights = mod_weights
 
         # infos
         logger.info(f"Most similar: {str(mod_names)}")

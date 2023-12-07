@@ -136,19 +136,22 @@ class KATERouter:
         self.index.add(self.train_features)
         self.task_names = list(self.dataset["task_name"])
 
-    def predict_batch(self, batch, n=2):
+    def predict_batch(self, batch, n=1):
         query = self.embedder.encode(
             batch["sources_texts"], show_progress_bar=False, device="cuda:0"
         )
         _, indices = self.index.search(query, 100)
         top_tasks, top_weights = [], []
+
         for _, idxs in enumerate(indices):
             task_names = [self.task_names[int(idx)] for idx in idxs]
             top_selected = Counter(task_names).most_common(n)
             top_tasks.append([x[0] for x in top_selected])
-            ws = [x[1] for x in top_selected]
-            top_weights.append(np.asarray(ws) / (np.asarray(ws).sum() + 1e-6))
-        return top_tasks, top_weights
+            top_weights.append([x[1] for x in top_selected])
+
+        top_weights = np.exp(np.array(top_weights))
+        top_weights = top_weights / top_weights.sum(axis=1, keepdims=True)
+        return top_tasks, top_weights.tolist()
 
     def predict_task(self, query, n=1):
         query = self.embedder.encode([query], show_progress_bar=False, device="cuda:0")
@@ -168,9 +171,6 @@ class KATERouter:
     def load_state_dict(self, state_dict):
         self.config = state_dict["config"]
         self.task_names = state_dict["train_task_names"]
-
-    def set_available_tasks(self, available_tasks):
-        self.available_tasks = available_tasks
 
     def save_pretrained(self, path, repo_id=None):
         import os

@@ -98,10 +98,11 @@ class SentenceTransformerClassifier(ExpertsRanker):
             for indices in expert_indices.indices
         ]
         expert_weights = [
-            [np.exp(weight.item()) for weight in weights]
-            for weights in expert_indices.values
+            [weight.item() for weight in weights] for weights in expert_indices.values
         ]
-        return expert_prediction, expert_weights
+        expert_weights = np.exp(np.array(expert_weights))
+        expert_weights = expert_weights / expert_weights.sum(axis=1, keepdims=True)
+        return expert_prediction, expert_weights.tolist()
 
     def text_encoder_init(self, requires_grad=False):
         text_encoder = SentenceTransformer("all-MiniLM-L6-v2")
