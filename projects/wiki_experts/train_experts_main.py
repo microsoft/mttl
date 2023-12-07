@@ -146,7 +146,12 @@ def run_multitask(args: ExpertConfig):
         wandb_logger.experiment.save("*.py")
         loggers.append(wandb_logger)
 
-    module = model_class(**vars(args), tokenizer=dm.tokenizer).to("cuda")
+    module = model_class(**vars(args), tokenizer=dm.tokenizer)
+
+    # test the gpu issue
+    for i in module.model.named_parameters():
+        print(f"{i[0]} -> {i[1].device}")
+
     mlf_logger = get_mlf_logger()
     if mlf_logger:
         loggers.append(mlf_logger)

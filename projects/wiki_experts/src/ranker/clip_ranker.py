@@ -77,11 +77,12 @@ class CLIPRanker(ExpertsRanker):
 
         self.text_encoder = TextEncoder()
         self.expert_num = len(expert_names)
+        expert_names.append("default")
         self.expert_encoder = ExpertEncoder(
             expert_dim=expert_embedding_dim,
-            expert_num=self.expert_num,
+            expert_num=len(expert_names),
         )
-        expert_names.append("default")
+
         self.ids_to_tasks_names = {i: task for i, task in enumerate(expert_names)}
         self.tasks_names_to_ids = {task: i for i, task in enumerate(expert_names)}
         self.text_projection = ProjectionHead(embedding_dim=text_embedding_dim)
@@ -91,7 +92,11 @@ class CLIPRanker(ExpertsRanker):
 
     def forward(self, batch):
         # gettng the expert and text features
-        expert_features = self.expert_encoder(batch["expert_id"].to(device))
+        expert_ids = [
+            self.tasks_names_to_ids[expert_name]
+            for expert_name in batch["expert_names"]
+        ]
+        expert_features = self.expert_encoder(torch.tensor(expert_ids).to(device))
         text_features = self.text_encoder(batch["input_texts"])
 
         # Getting the expert and text embeddings with the same dimension
@@ -105,7 +110,7 @@ class CLIPRanker(ExpertsRanker):
         logits = text_embeddings @ expert_embeddings.T / self.temperature
 
         # symmetric loss function
-        labels = torch.arange(len(batch["expert_id"])).to(self.device)
+        labels = torch.arange(len(batch["expert_names"])).to(self.device)
         loss = F.cross_entropy(logits, labels) + F.cross_entropy(logits.T, labels) / 2
 
         return loss
@@ -154,14 +159,26 @@ class CLIPRanker(ExpertsRanker):
     def training_step(self, batch, batch_idx):
         loss = self.forward(batch)
         self.log(
-            "train/loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
+            "train/loss",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+            batch_size=len(batch["input_texts"]),
         )
         return loss
 
     def validation_step(self, batch, batch_idx):
         loss = self.forward(batch)
         self.log(
-            "val/loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
+            "val/loss",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+            batch_size=len(batch["input_texts"]),
         )
         return loss
 
@@ -188,12 +205,18 @@ class CLIPTripletRanker(CLIPRanker):
 
     def forward(self, batch):
         # gettng the text features , positive, negatve expert
-        text_features = self.text_encoder(batch["input_texts"])
+        text_features = self.text_encoder(batch["sources_texts"])
+        positive_expert_ids = [
+            self.tasks_names_to_ids[e] for e in batch["positive_expert_names"]
+        ]
+        negative_expert_ids = [
+            self.tasks_names_to_ids[e] for e in batch["negative_expert_names"]
+        ]
         positive_expert_features = self.expert_encoder(
-            batch["positive_expert_id"].to(device)
+            torch.tensor(positive_expert_ids).to(device)
         )
         negative_expert_features = self.expert_encoder(
-            batch["negative_expert_id"].to(device)
+            torch.tensor(negative_expert_ids).to(device)
         )
 
         # Getting the expert and text embeddings with the same dimension
@@ -230,6 +253,7 @@ class CLIPTripletRanker(CLIPRanker):
             on_step=True,
             on_epoch=True,
             prog_bar=True,
+            batch_size=len(batch["sources_texts"]),
         )
         self.log(
             "train/negative_score",
@@ -237,6 +261,7 @@ class CLIPTripletRanker(CLIPRanker):
             on_step=True,
             on_epoch=True,
             prog_bar=True,
+            batch_size=len(batch["sources_texts"]),
         )
 
         return loss

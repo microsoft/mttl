@@ -32,7 +32,6 @@ def train_triplet_clip(args):
         )
         wandb_logger.experiment.save("*.py")
         wandb_logger.experiment.save("*/*.py")
-
     # test the model
     dataconfig = CLIPExpertsConfig(
         dataset=args.dataset,
@@ -42,12 +41,21 @@ def train_triplet_clip(args):
         predict_batch_size=args.predict_batch_size,
     )
     datamodule = CLIPTripleDataModule(dataconfig)
-    model = CLIPTripletRanker(expert_names=datamodule.task_names)
+
+    # noqa this is not reasonable
+    tempconfig = FlatMultiTaskConfig(
+        dataset=args.dataset,
+        model=args.model,
+        train_batch_size=args.train_batch_size,
+        finetune_task_name=args.finetune_task_name,
+    )
+    tempdatamodule = FlatMultiTaskModule(tempconfig)
+    model = CLIPTripletRanker(expert_names=tempdatamodule.task_names)
 
     # add model checkpoint
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
         monitor="val/loss_epoch",
-        dirpath=f"clip_ranker_{args.exp_name}/",
+        dirpath=f"clip_triplet_ranker_{args.exp_name}/",
         filename="clip-{epoch:02d}-{val/loss:.2f}",
         save_top_k=1,
         mode="min",
@@ -81,7 +89,6 @@ def train_clip(args):
         )
         wandb_logger.experiment.save("*.py")
         wandb_logger.experiment.save("*/*.py")
-    model = CLIPRanker()
 
     # test the model
     dataconfig = CLIPExpertsConfig(
@@ -91,7 +98,10 @@ def train_clip(args):
         finetune_task_name=args.finetune_task_name,
         predict_batch_size=args.predict_batch_size,
     )
+
     datamodule = CLIPExpertsDatamodule(dataconfig)
+
+    model = CLIPRanker(expert_names=datamodule.task_names)
 
     # add model checkpoint
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
@@ -148,10 +158,9 @@ def train_classifier(args):
 
     # add model checkpoint
 
-    datapath = f"classification_ranker_{args.dataset}"
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
         monitor="val/loss_epoch",
-        dirpath=datapath,
+        dirpath=f"classification_ranker_{args.exp_name}",
         filename="classifier-{epoch:02d}-{val/loss:.2f}",
         save_top_k=1,
         mode="min",
@@ -178,20 +187,20 @@ if __name__ == "__main__":
     elif args.ranker_model == "clip_triplet":
         train_triplet_clip(args)
 
-    from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRankerHelper
+    # from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRankerHelper
 
-    expert_ranker = AdapterRankerHelper(
-        ranker_model="classifier",
-        ranker_path="/projects/futhark1/data/wzm289/code/lucas_mttl/projects/wiki_experts/classification_ranker_sordonia/adauni-v1-flat/classifier-epoch=00-val/loss=6.02.ckpt",
-    )
+    # expert_ranker = AdapterRankerHelper(
+    #     ranker_model="classifier",
+    #     ranker_path="/projects/futhark1/data/wzm289/code/lucas_mttl/projects/wiki_experts/classification_ranker_sordonia/adauni-v1-flat/classifier-epoch=00-val/loss=6.02.ckpt",
+    # )
 
-    config = FlatMultiTaskConfig(
-        dataset=args.dataset,
-        model=args.model,
-        train_batch_size=args.train_batch_size,
-        finetune_task_name=args.finetune_task_name,
-    )
-    datamodule = FlatMultiTaskModule(config)
-    dataset = datamodule.val_dataloader()
-    batch = next(iter(dataset))
-    print(expert_ranker.predict_batch(batch))
+    # config = FlatMultiTaskConfig(
+    #     dataset=args.dataset,
+    #     model=args.model,
+    #     train_batch_size=args.train_batch_size,
+    #     finetune_task_name=args.finetune_task_name,
+    # )
+    # datamodule = FlatMultiTaskModule(config)
+    # dataset = datamodule.val_dataloader()
+    # batch = next(iter(dataset))
+    # print(expert_ranker.predict_batch(batch))
