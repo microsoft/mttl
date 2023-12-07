@@ -423,6 +423,8 @@ def model_loader_helper(model_name, device_map="auto", load_in_8bit=False):
         )
     else:
         model_object = AutoModelForCausalLM.from_pretrained(
-            model_name, device_map=device_map
+            model_name,
+            device_map=device_map,
+            load_in_8bit=load_in_8bit,
         )
     return model_object

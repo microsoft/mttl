@@ -21,6 +21,7 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
         task_names,
         hidden_size=768,
         transformer_embed_dim=384,
+        freeze_text_encoder=True,
         **kwargs,
     ):
         EfficientCheckpointModule.__init__(self, **kwargs)
@@ -99,11 +100,11 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
         return optimizer
 
     def training_step(self, batch, batch_idx):
-        text_input, task_name = batch["input"], batch["task_name"]
-        labels = torch.tensor([self.tasks_names_to_ids[task] for task in task_name]).to(
+        sources_texts, task_names = batch["sources_texts"], batch["task_names"]
+        labels = torch.tensor([self.task_names_to_ids[task] for task in task_names]).to(
             device
         )
-        logits = self(text_input)
+        logits = self(sources_texts)
         loss = F.cross_entropy(logits, labels)
         self.log(
             "train/loss",
@@ -111,20 +112,16 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
             on_step=True,
             on_epoch=True,
             prog_bar=True,
-            batch_size=len(batch["input"]),
+            batch_size=len(batch["sources_texts"]),
         )
         return loss
 
     def validation_step(self, batch, batch_idx):
-        text_input, task_name = batch["input"], batch["task_name"]
-        # change the "niv2_misc." to "niv2_misc"
-        for i in range(len(task_name)):
-            if task_name[i] == "niv2_misc.":
-                task_name[i] = "niv2_misc"
-        label = torch.tensor([self.tasks_names_to_ids[task] for task in task_name]).to(
+        sources_texts, task_names = batch["sources_texts"], batch["task_names"]
+        label = torch.tensor([self.task_names_to_ids[task] for task in task_names]).to(
             device
         )
-        logits = self(text_input)
+        logits = self(sources_texts)
         loss = F.cross_entropy(logits, label)
         self.log(
             "val/loss",
@@ -132,16 +129,16 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
             on_step=True,
             on_epoch=True,
             prog_bar=True,
-            batch_size=len(batch["input"]),
+            batch_size=len(batch["sources_texts"]),
         )
         return loss
 
     def test_step(self, batch, batch_idx):
-        text_input, task_name = batch["input"], batch["task_name"]
-        label = torch.tensor([self.tasks_names_to_ids[task] for task in task_name]).to(
+        sources_texts, task_names = batch["sources_texts"], batch["task_names"]
+        label = torch.tensor([self.task_names_to_ids[task] for task in task_names]).to(
             device
         )
-        logits = self(text_input)
+        logits = self(sources_texts)
         loss = F.cross_entropy(logits, label)
         self.log(
             "test/loss",
@@ -149,7 +146,7 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
             on_step=True,
             on_epoch=True,
             prog_bar=True,
-            batch_size=len(batch["input"]),
+            batch_size=len(batch["sources_texts"]),
         )
 
         # compute the accuracy
