@@ -134,6 +134,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         self.experts.clear()
 
     def route(self, input, selection, **kwargs):
+        """Depending on the selection output, we and merge differently."""
         from mttl.models.modifiers.lora import SkilledLoRA, SkilledLoRAView
 
         if isinstance(selection, BatchModulesAndWeightsSelectorOutput):

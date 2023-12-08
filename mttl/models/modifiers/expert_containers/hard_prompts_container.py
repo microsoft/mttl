@@ -163,7 +163,7 @@ class HardPromptExpertContainer(ExpertContainer):
     def forward(self, input_ids, attention_mask=None, labels=None, **kwargs):
         if len(self.experts) > 0:
             selection = self.selector(
-                input_ids=input_ids, attention_mask=attention_mask, labels=labels
+                input_ids, attention_mask=attention_mask, labels=labels
             )
             return self.route(
                 input_ids, selection, attention_mask=attention_mask, labels=labels
