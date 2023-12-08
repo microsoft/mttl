@@ -31,7 +31,9 @@ class TextEncoder(nn.Module):
                 param.requires_grad = False
 
     def forward(self, x):
-        outputs = torch.tensor(self.transformer_encoder.encode(x)).to(device)
+        outputs = self.transformer_encoder.encode(
+            x, show_progress_bar=False, device=device, convert_to_tensor=True
+        )
         return outputs
 
 
