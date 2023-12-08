@@ -430,11 +430,11 @@ class RoutedMultiExpertModel(MultiExpertModel):
         """
         expert_weights = {}
         for _, module in self.model.named_modules():
-            for c_name, child in dict(module.named_children()).items():
+            for _, child in dict(module.named_children()).items():
                 if isinstance(child, ExpertContainer) and len(child.experts) > 0:
                     # creates a single Lora
                     exp_config, _weights = child.get_merged_weights(
-                        weights, with_global_names=with_global_names
+                        with_global_names=with_global_names, weights=weights
                     )
                     expert_weights.update(_weights)
 

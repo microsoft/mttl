@@ -1,15 +1,13 @@
 from abc import abstractproperty
+from typing import Dict
 from pyparsing import abstractmethod
 import torch
 import math
 from torch import nn
-from typing import Any, Dict
-from mttl.utils import logger
 import torch.nn.functional as F
-from mttl.models.modifiers.expert_containers.module_graph import (
-    ExpertInfo,
-    ExpertConfig,
-)
+
+from mttl.utils import logger
+from mttl.models.modifiers.expert_containers.module_graph import ExpertConfig
 
 
 MULTI_EXPERT_ROUTERS = {}
@@ -25,60 +23,121 @@ def register_multi_expert_selector(name):
                 f"Cannot register duplicate multi-expert selector ({name})"
             )
         MULTI_EXPERT_ROUTERS[name] = fn
+        fn.__layer_name__ = name
         return fn
 
     return _thunk
 
 
-class Selector:
-    @abstractmethod
-    def forward(self, input, **kwargs) -> list:
-        pass
-
-    @abstractmethod
-    def get_routing_weights(self):
-        pass
-
-    @abstractproperty
-    def name(self):
-        pass
-
-    def add_expert(self, expert_name: str):
-        if expert_name not in self.expert_names:
-            self.expert_names.append(expert_name)
-
-    def add_experts(self, expet_names: list):
-        for expert_name in expet_names:
-            self.add_expert(expert_name)
-
-
-@register_multi_expert_selector("poly_router")
-class MultiExpertSelector(torch.nn.Module, Selector):
-    """
-    Implements routing at a per-layer or per-model level
-    """
-
-    def __init__(self, config, info_container=None, **kwargs) -> None:
+class Selector(nn.Module):
+    def __init__(self, config, info_container, **kwargs):
         super().__init__()
+
         self.config = config
-        self.expert_names: list = []
+        self.info_container = info_container
+        self.expert_names = []
 
-        self.module_logits = nn.Parameter(torch.empty(1).uniform_(-1e-3, 1e-3))
+    @abstractmethod
+    def forward(self, container, input, **kwargs) -> list:
+        pass
 
-        self.__layer_name__ = f"poly_router"
+    def get_merged_weights(self, container, **selector_kwargs) -> Dict:
+        return {}
 
     @property
     def name(self):
         return f"{self.__layer_name__}"
 
-    def forward(self, *args, **kwargs):
+    @abstractproperty
+    def add_expert(self, expert_name: str, **kwargs):
+        pass
+
+
+def no_merge_op(container, input, names):
+    from mttl.models.modifiers.expert_containers.expert_containers import (
+        LoRAExpertContainer,
+        KVExpertContainer,
+    )
+    from mttl.models.modifiers.expert_containers.hard_prompts_container import (
+        HardPromptExpertContainer,
+    )
+
+    if type(container) == LoRAExpertContainer:
+        from mttl.models.modifiers.lora import LoRA
+
+        return LoRA.parallel_linear_forward(
+            input, [container.get(name) for name in names]
+        )
+    else:
+        raise NotImplementedError()
+
+
+def linear_merge(container, input, names, weights):
+    from mttl.models.modifiers.expert_containers.expert_containers import (
+        LoRAExpertContainer,
+        KVExpertContainer,
+    )
+    from mttl.models.modifiers.expert_containers.hard_prompts_container import (
+        HardPromptExpertContainer,
+    )
+
+    if type(container) == LoRAExpertContainer:
+        from mttl.models.modifiers.lora import SkilledLoRA, SkilledLoRAView
+
+        skilled_lora = SkilledLoRAView.from_loras(
+            [container.get(expert_name) for expert_name in names]
+        )
+        return SkilledLoRA.parallel_linear_weighted_forward(
+            input, [skilled_lora], [weights]
+        )
+    else:
+        raise NotImplementedError()
+
+
+@register_multi_expert_selector("poly_router")
+class PolySelector(Selector):
+    """
+    Implements routing at a per-layer or per-model level
+    """
+
+    def __init__(self, config, info_container=None, **kwargs) -> None:
+        super().__init__(config, info_container)
+
+        self.module_logits = nn.Parameter(torch.empty(1).uniform_(-1e-3, 1e-3))
+
+    def _get_weights(self):
         module_logits = torch.sigmoid(self.module_logits)
         module_weights = module_logits / (module_logits.sum(dim=-1, keepdim=True) + EPS)
-        return [{k: v for k, v in zip(self.expert_names, module_weights)}]
+        return module_weights
+
+    def forward(self, container, input, *args, **kwargs):
+        return linear_merge(container, input, self.expert_names, self._get_weights())
+
+    def get_merged_weights(self, container, **selector_kwargs) -> Dict:
+        """Return the merged weights for the experts in the container."""
+        if selector_kwargs.get("weights", None) is None:
+            weights = self.get_routing_weights()
+
+        merged_weights = {}
+        for name, expert in container.experts.items():
+            assert name in weights, f"Weight for expert {name} is not given"
+            expert_state_dict = expert.state_dict()
+            weight = weights[name]
+
+            for k, v in expert_state_dict.items():
+                if not "lora" in k:
+                    continue
+                value = weight * v
+                if k in merged_weights:
+                    merged_weights[k] += value
+                else:
+                    merged_weights[k] = value
+        return merged_weights
 
     def get_routing_weights(self):
-        weights = self.forward()[0]
-        return {k: v.detach().item() for k, v in weights.items()}
+        return {
+            k: v.detach().item() for k, v in zip(self.expert_names, self._get_weights())
+        }
 
     def add_expert(self, expert_name: str, **kwargs):
         if expert_name not in self.expert_names:
@@ -89,33 +148,15 @@ class MultiExpertSelector(torch.nn.Module, Selector):
 
 
 @register_multi_expert_selector("poly_router_dir")
-class MultiExpertSelector(torch.nn.Module, Selector):
-    """
-    Implements routing at a per-layer or pe-model level. Initialized all experts' weights to 0 with the exception of the expert responsible for the curent task.'
-    """
+class PolySelectorDirect(PolySelector):
+    def __init__(self, config, info_container=None, **kwargs) -> None:
+        super().__init__(config, info_container)
 
-    def __init__(self, config, device="cuda", **kwargs) -> None:
-        super().__init__()
-        self.config: ExpertConfig = config
-        self.device = device
+        self.module_logits = nn.ParameterDict()
 
-        self.module_logits = torch.nn.ParameterDict()
-
-        self.__layer_name__ = f"poly_router_dir"
-
-        self.init_gap = [0, 0]
-        self.main_m = 1
-
-    @property
-    def name(self):
-        return f"{self.__layer_name__}"
-
-    def forward(self, *args, **kwargs):
-        return [self.module_logits]
-
-    def get_routing_weights(self):
-        weights = self.forward()[0]
-        return {k: v.detach().item() for k, v in weights.items()}
+    def _get_weights(self):
+        weights = [self.module_logits[k] for k in self.expert_names]
+        return weights
 
     def add_expert(self, expert_name: str, expert_task_name: str, **kwargs):
         """
@@ -125,6 +166,7 @@ class MultiExpertSelector(torch.nn.Module, Selector):
         """
         init_gap = [0, 0]
         main_m = 1
+
         if expert_name not in self.module_logits:
             if self.config.finetune_task_name == expert_task_name:
                 self.module_logits[expert_name] = torch.nn.Parameter(
@@ -138,17 +180,15 @@ class MultiExpertSelector(torch.nn.Module, Selector):
 
 
 @register_multi_expert_selector("info_selector")
-class RoutingInfosContainerSelector(torch.nn.Module, Selector):
+class RoutingInfosContainerSelector(Selector):
     """A simple selector that looks for routing information in the info container."""
 
     def __init__(self, config=None, info_container=None, **kwargs) -> None:
-        super().__init__()
-        self.info_container = info_container
-        self.__layer_name__ = f"info_selector"
-        self.expert_names = []
+        super().__init__(config, info_container)
+
         self.default_expert_name = None
 
-    def forward(self, *args, **kwargs):
+    def forward(self, container, input, *args, **kwargs):
         # try to infer batch size
         if "routing_infos" not in self.info_container:
             raise ValueError("routing_infos not in info_container")
@@ -159,29 +199,17 @@ class RoutingInfosContainerSelector(torch.nn.Module, Selector):
         routing_mods = self.info_container["routing_infos"].routing_modules
         routing_weights = self.info_container["routing_infos"].routing_weights
 
-        return [
-            dict(zip(routing_m, torch.tensor(routing_w).float()))
-            for routing_m, routing_w in zip(routing_mods, routing_weights)
-        ]
-
-    def add_expert(self, expert_name: str, *args, **kwargs):
-        pass
-
-    @property
-    def name(self):
-        return f"{self.__layer_name__}"
+        return linear_merge(container, input, routing_mods, routing_weights)
 
 
 @register_multi_expert_selector("task_selector")
-class TaskNameSelector(torch.nn.Module, Selector):
+class TaskNameSelector(Selector):
     def __init__(self, config=None, info_container=None, **kwargs) -> None:
-        super().__init__()
-        self.info_container = info_container
-        self.__layer_name__ = f"task_selector"
-        self.expert_names = []
+        super().__init__(config, info_container)
+
         self.default_expert_name = None
 
-    def forward(self, *args, **kwargs):
+    def forward(self, container, input, *args, **kwargs):
         # try to infer batch size
         if "routing_infos" not in self.info_container:
             if "input_ids" in kwargs:
@@ -194,9 +222,7 @@ class TaskNameSelector(torch.nn.Module, Selector):
             if not self.default_expert_name:
                 raise ValueError("No default expert name set and no task names given!")
 
-            routing_weights = [
-                {self.default_expert_name: torch.tensor(1.0)} for _ in range(batch_size)
-            ]
+            modules = [self.default_expert_name for _ in range(batch_size)]
         else:
             task_names = self.info_container["routing_infos"].task_names
 
@@ -208,20 +234,13 @@ class TaskNameSelector(torch.nn.Module, Selector):
                 raise ValueError(
                     "Experts for all tasks have not been loaded! Set a default expert?"
                 )
-
-            routing_weights = [
-                {task_name: torch.tensor(1.0)} for task_name in task_names
-            ]
-        return routing_weights
+            modules = task_names
+        return no_merge_op(container, input, modules)
 
     def add_expert(self, expert_name: str, *args, **kwargs):
         # here we experts based on their name, which can be different from the task name
         if expert_name not in self.expert_names:
             self.expert_names.append(expert_name)
-
-    @property
-    def name(self):
-        return f"{self.__layer_name__}"
 
 
 class KVSelector(Selector):
@@ -262,10 +281,8 @@ class KVTaskNameSelector(KVSelector):
     """Selects KVAdapters based on the task name."""
 
     def __init__(self, config=None, info_container=None, **kwargs) -> None:
-        super().__init__()
-        self.info_container = info_container
-        self.__layer_name__ = f"task_selector"
-        self.expert_names = []
+        super().__init__(config, info_container)
+
         self.default_expert_name = None
 
     def get_kv_weights(self, experts, k_proj, v_proj):
@@ -308,11 +325,8 @@ class KVConcatSelector(KVSelector, nn.Module):
     """
 
     def __init__(self, config=None, info_container=None, **kwargs) -> None:
-        super().__init__()
-        self.config = config
-        self.info_container = info_container
-        self.__layer_name__ = f"task_selector"
-        self.expert_names = []
+        super().__init__(config, info_container)
+
         self.default_expert_name = None
 
     def get_kv_weights(self, experts, k_proj, v_proj):
@@ -334,7 +348,6 @@ class KVConcatSelector(KVSelector, nn.Module):
         adapter_v = adapter_v.transpose(0, 1).reshape(
             1, n_heads, n_experts * soft_prompt_len, head_dim
         )
-
         return adapter_k, adapter_v
 
     def get_gate(self, experts, adapter_weights):
