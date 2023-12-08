@@ -1,5 +1,5 @@
 from abc import abstractproperty
-from typing import Dict
+from typing import Dict, List
 from pyparsing import abstractmethod
 import torch
 import math
@@ -48,7 +48,7 @@ class Selector(nn.Module):
     def name(self):
         return f"{self.__layer_name__}"
 
-    @abstractproperty
+    @abstractmethod
     def add_expert(self, expert_name: str, **kwargs):
         pass
 
@@ -89,6 +89,32 @@ def linear_merge(container, input, names, weights):
         )
         return SkilledLoRA.parallel_linear_weighted_forward(
             input, [skilled_lora], [weights]
+        )
+    else:
+        raise NotImplementedError()
+
+
+def skilled_linear_merge(
+    container, input, names: List[List[str]], weights: List[List[float]]
+):
+    from mttl.models.modifiers.expert_containers.expert_containers import (
+        LoRAExpertContainer,
+        KVExpertContainer,
+    )
+    from mttl.models.modifiers.expert_containers.hard_prompts_container import (
+        HardPromptExpertContainer,
+    )
+
+    if type(container) == LoRAExpertContainer:
+        from mttl.models.modifiers.lora import SkilledLoRA, SkilledLoRAView
+
+        skilled_loras = [
+            SkilledLoRAView.from_loras([container.get(x_name) for x_name in b_names])
+            for b_names in names
+        ]
+        weights = [torch.tensor(x_weights) for x_weights in weights]
+        return SkilledLoRA.parallel_linear_weighted_forward(
+            input, skilled_loras, weights
         )
     else:
         raise NotImplementedError()
@@ -199,7 +225,7 @@ class RoutingInfosContainerSelector(Selector):
         routing_mods = self.info_container["routing_infos"].routing_modules
         routing_weights = self.info_container["routing_infos"].routing_weights
 
-        return linear_merge(container, input, routing_mods, routing_weights)
+        return skilled_linear_merge(container, input, routing_mods, routing_weights)
 
 
 @register_multi_expert_selector("task_selector")
@@ -237,7 +263,7 @@ class TaskNameSelector(Selector):
             modules = task_names
         return no_merge_op(container, input, modules)
 
-    def add_expert(self, expert_name: str, *args, **kwargs):
+    def add_expert(self, expert_name: str, **kwargs):
         # here we experts based on their name, which can be different from the task name
         if expert_name not in self.expert_names:
             self.expert_names.append(expert_name)
