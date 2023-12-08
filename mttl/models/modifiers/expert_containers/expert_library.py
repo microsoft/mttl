@@ -9,6 +9,7 @@ import os
 from tempfile import TemporaryDirectory
 import numpy as np
 from collections import defaultdict
+from projects.wiki_experts.src.evolution.config import find_version
 
 from huggingface_hub import (
     hf_hub_download,
@@ -647,7 +648,12 @@ class ExpertLibrary:
         """
         Doesn't assume that the experts' names correspond to the tasks they were trained on
         """
-        return [metadatum.expert_task_name for metadatum in self.data.values()]
+        tasks = set()
+        for metadatum in self.data.values():
+            if isinstance(metadatum.expert_task_name, list):
+                continue
+            tasks.add(metadatum.expert_task_name)
+        return list(tasks)
 
     def __contains__(self, expert: Union[Expert, str]):
         key = expert if isinstance(expert, str) else expert.expert_info.expert_name
@@ -660,6 +666,13 @@ class ExpertLibrary:
         if old_expert in self and old_expert is not None:
             self.remove_expert(old_expert.name, soft_delete=soft_delete)
         return self.add_expert(new_expert)
+
+    def get_experts_for_task(self, task):
+        return [
+            metadatum
+            for metadatum in self.data.values()
+            if metadatum.expert_task_name == task
+        ]
 
 
 class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
@@ -696,6 +709,14 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
     def from_remote(cls, remote_lib: ExpertLibrary, destination):
         new_lib = LocalExpertLibrary(repo_id=destination)
         for name, expert in remote_lib.items():
+            if expert not in new_lib:
+                new_lib.add_expert(expert)
+        return new_lib
+
+    @classmethod
+    def from_expet_dict(cls, expert_dict: Dict[str, Expert], destination):
+        new_lib = LocalExpertLibrary(repo_id=destination)
+        for name, expert in expert_dict.items():
             if expert not in new_lib:
                 new_lib.add_expert(expert)
         return new_lib
@@ -751,6 +772,20 @@ class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
             # TODO: upload the embeddings
 
         return remote_lib
+
+
+def remove_outdated_experts_from_library(library: HFExpertLibrary):
+    for task in library.tasks:
+        experts = library.get_experts_for_task(task)
+        if len(experts) <= 1:
+            continue
+        version = [find_version(metadatum.expert_name) for metadatum in experts]
+        arg_max = np.argmax(version)
+        for i, metadatum in enumerate(experts):
+            if isinstance(metadatum.expert_task_name, list):
+                library.remove_expert(metadatum.expert_name, soft_delete=True)
+            if i != arg_max:
+                library.remove_expert(metadatum.expert_name, soft_delete=True)
 
 
 def get_best_expert_for_score(library: HFExpertLibrary, hash) -> Expert:

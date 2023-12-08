@@ -50,6 +50,9 @@ class EvolExpertConfig(ExpertConfig):
         self.upload_lib_to_hub = False
         self.to_repo_id: str = None
 
+        self.evolution_warmup_steps = 0
+        self.evol_n_eval_times = 10
+
     @property
     def __key(self):
         return (

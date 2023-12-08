@@ -13,6 +13,7 @@ class ExpertConfig(Config):
         self.tensorboard = False
         self.hf_token_hub = None
         self.hf_repo_id = None
+        self.run_name = "default"
 
         self.expert_name = None
         self.routing = "subject"
@@ -40,6 +41,7 @@ class ExpertConfig(Config):
         # training classfier routing
         self.num_labels = 246
         self.classifer_repo_id = None
+        self.subsample_train_set = -1
 
     def post_init(self):
         if self.micro_batch_size is None:

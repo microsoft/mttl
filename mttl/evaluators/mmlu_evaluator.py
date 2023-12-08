@@ -93,6 +93,7 @@ class MMLUEvaluator(Evaluator):
         # DDP
         if hasattr(model, "module"):
             model = model.module
+        model.to(self.device)
 
         all_predictions = []
         all_references = []

@@ -24,6 +24,60 @@ def decode(preds, tokenizer):
     return preds
 
 
+class RougeCallbackTestPerEpoch(cb.Callback):
+    def __init__(
+        self,
+        datamodule,
+        checkpointing_callback: cb.Callback,
+        name="test_rougeL_per_epoch",
+    ):
+        self.name = name
+        self.datamodule = datamodule
+        self.evaluator = RougeEvaluator(datamodule)
+        self.checkpointing_callback = checkpointing_callback
+        self.epoch = 0
+
+    def on_train_epoch_end(self, trainer: Trainer, pl_module: ExpertTrainer) -> None:
+        # test best model sofar
+        pl_module_device = pl_module.device
+        pl_module.to("cpu")
+        copy_pl_module = copy.deepcopy(pl_module)
+        copy_pl_module.to(pl_module_device)
+
+        best_model_path = (
+            self.checkpointing_callback.best_model_path
+            or self.checkpointing_callback.last_model_path
+        )
+
+        copy_pl_module.from_pretrained(best_model_path)
+        metrics_test = self.test(copy_pl_module, split="test")
+
+        pl_module.log(f"test/{self.name}", metrics_test, on_epoch=True, prog_bar=True)
+
+        del copy_pl_module
+        pl_module.to(pl_module_device)
+        self.epoch += 1
+        return super().on_train_epoch_end(trainer, pl_module)
+
+        if self.do_checkpoint and self._checkpoint_now:
+            try:
+                filename = (
+                    self.output_dir
+                    + f"/{self.name}_val_epoch{self.epoch}/"
+                    + f"{self.best_loss:.004f}.ckpt"
+                )
+                ckpt_path = os.path.join(filename)
+                trainer.save_checkpoint(ckpt_path)
+                self._prev_checkpoint = ckpt_path
+            except Exception as e:
+                logger.error("Error in checkpointing with RougeLCallback: " + str(e))
+        self._checkpoint_now = False
+
+    def test(self, pl_module: LightningModule, split="val"):
+        rougeL = self.evaluator.evaluate(pl_module, verbose=False, split=split)
+        return rougeL
+
+
 class RougeLCallback(cb.Callback):
     def __init__(
         self,

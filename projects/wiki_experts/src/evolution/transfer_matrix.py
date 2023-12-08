@@ -15,6 +15,7 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     ExpertLibrary,
     HFExpertLibrary,
     LocalExpertLibrary,
+    remove_outdated_experts_from_library,
 )
 
 # from projects.wiki_experts.src.evolution.evolving_expert_library import (
@@ -33,7 +34,7 @@ from mttl.utils import setup_logging, logger
 # register models
 from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.vllm_engines.engines import free_memory
-from mttl.models.modifiers.expert_containers.module_graph import Expert
+from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
 
 DEBUG = True
 if "AMLT_OUTPUT_DIR" in os.environ:
@@ -138,6 +139,9 @@ def produce_transfer_matrix(
         transfer_table.log(log_row)
         transfer_table.log_table_wandb()
 
+    transfer_table.means()
+    transfer_table.log_table_wandb()
+
     transfer_matrix = transfer_table.df
     if wandb.run is not None:
         _size = 1 * len(transfer_matrix.columns)
@@ -163,8 +167,19 @@ def run_eval(args: EvolExpertConfig):
 
     print("###### Tasks", args.finetune_task_name)
     # can work with other library types as well, but need to implement clone and filter_with_tasks
-
-    expert_lib: ExpertLibrary = HFExpertLibrary(repo_id=args.hf_repo_id)
+    if os.path.isfile(args.hf_repo_id):
+        # testing a single model
+        expert = load_expert(args.hf_repo_id)
+        expert.expert_info.expert_name = "joint"
+        expert.expert_info.expert_task_name = "FLAN_19"
+        expert_lib = LocalExpertLibrary.from_expet_dict(
+            {args.hf_repo_id: expert}, destination="/tmp"
+        )
+    else:
+        expert_lib: LocalExpertLibrary = LocalExpertLibrary.from_remote(
+            HFExpertLibrary(repo_id=args.hf_repo_id), destination="/tmp"
+        )
+        remove_outdated_experts_from_library(expert_lib)
 
     transfer_matrix: pd.DataFrame = produce_transfer_matrix(
         args, expert_lib, tasks=args.finetune_task_name

@@ -38,6 +38,14 @@ class TableLogger:
     def get_table(self):
         return self.df
 
+    def means(self):
+        # calculate mean for each row, column and diagonal of self.df
+        # filter numeric columns
+        df_numeric = self.df.select_dtypes(include=[np.number])
+        self.df["mean"] = df_numeric.mean(axis=1)
+        self.df.loc["mean"] = df_numeric.mean(axis=0)
+        self.df.loc["mean", "mean"] = np.diag(df_numeric).mean()
+
     def log_table_wandb(self):
         if wandb.run is not None:
             wandb.log({"table": wandb.Table(data=self.get_table())})
@@ -64,7 +72,7 @@ def init_wandb_logger(args):
     if args.wandb_project is None:
         args.wandb_project = os.environ.get("WANDB_PROJECT", "MMLU_ninja_merge")
     if args.wandb_project:
-        run_name = os.getenv("AMLT_JOB_NAME", f"{args.model}")
+        run_name = os.getenv("AMLT_JOB_NAME", f"{args.run_name}")
         # wandb.init(
         #     project=args.wandb_project,
         #     name=run_name,

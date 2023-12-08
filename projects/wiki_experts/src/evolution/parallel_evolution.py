@@ -28,6 +28,7 @@ from mttl.utils import setup_logging, logger
 from projects.wiki_experts.src.evolution.experiment_state import ExperimentState
 from projects.wiki_experts.src.evolution.sequential_evolution import *
 from huggingface_hub import create_repo, login, HfApi
+from projects.wiki_experts.src.evolution.evaluators import MMLUEvalCallback
 
 # this script evolves a single task for 1 active iteration and commits it to the library
 
@@ -92,7 +93,11 @@ def setup(args: EvolExpertConfig):
     if args.experiment_state_path is not None:
         exper_state.load_from_path(args.experiment_state_path)
 
-    tasks = args.finetune_task_name
+    tasks = (
+        args.finetune_task_name
+        if isinstance(args.finetune_task_name, list)
+        else args.finetune_task_name.split(",")
+    )
     expert_lib = exper_state.state.expert_lib
     # remove tasks for which we dont have experts
     # tasks = [t for t in tasks if t in expert_lib.tasks]
@@ -111,10 +116,19 @@ def main(args: EvolExpertConfig):
     expert_lib: ExpertLibrary = expert_lib
     module = None
 
+    callbacks = [partial(MMLUEvalCallback, name="mmlu_test_callback", split="test")]
+    # evaluator_valid = partial(MMLUEvalCallback, name="mmlu_valid_callback", split="valid")
+
     for task in tasks:
         print("Evolving on task", task)
         log_row: Dict = active_task_iteration(
-            args, task, expert_lib, module=module, ai=ai
+            args,
+            task,
+            expert_lib,
+            module=module,
+            ai=ai,
+            callbacks=callbacks,
+            wandb_logger_local=wandb_logger,
         )
         tablelogger.log(log_row)
         tablelogger.log_table_wandb()

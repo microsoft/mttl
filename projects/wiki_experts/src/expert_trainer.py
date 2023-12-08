@@ -11,6 +11,7 @@ from mttl.models.utils import (
     EfficientCheckpointModule,
     prepare_model_for_kbit_training,
 )
+from mttl.models.modifiers.expert_containers.module_graph import Expert
 
 
 torch.set_float32_matmul_precision("high")
@@ -168,6 +169,12 @@ class ExpertTrainer(EfficientCheckpointModule):
             inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
         )
         return generations
+
+    def load_expert(self, expert: Expert):
+        keys = self.model.load_state_dict(expert.expert_weights, strict=False)
+        assert (
+            sum(["lora" in k for k in keys.missing_keys]) == 0
+        ), "Some keys are missing"
 
     def on_save_checkpoint(self, ckpt):
         from mttl.models.utils import convert_hps_to_dict

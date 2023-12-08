@@ -48,7 +48,7 @@ class SimpleLogger(pl.loggers.logger.DummyLogger):
             json.dump(self.metrics, f)
 
 
-def get_datamodule(args, for_generation=False):
+def get_datamodule(args, for_generation=False, subsample=-1):
     # refactor all the common arguments below into a dict common kwargs
     common_kwargs = {
         "model": args.model,
@@ -62,6 +62,7 @@ def get_datamodule(args, for_generation=False):
         "truncation_side": args.truncation_side,
         "dataset": args.dataset.replace("qa:", "").replace("raw_docs:", ""),
         "train_on_inputs": False,
+        "subsample": subsample,
     }
     if args.dataset.startswith("qa:"):
         config = PlatypusConfig(**common_kwargs)
@@ -99,6 +100,11 @@ def get_datamodule(args, for_generation=False):
         )
         dm = FlanModule(config, for_generation=for_generation)
     elif "adauni" in args.dataset:
+        config = FlatMultiTaskConfig(
+            **common_kwargs,
+        )
+        dm = FlatMultiTaskModule(config, for_generation=for_generation)
+    elif "flat" in args.dataset:
         config = FlatMultiTaskConfig(
             **common_kwargs,
         )
