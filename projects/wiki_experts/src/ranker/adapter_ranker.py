@@ -22,13 +22,19 @@ class AdapterRankerHelper:
         from projects.wiki_experts.src.ranker.classifier_ranker import (
             SentenceTransformerClassifier,
         )
-        from projects.wiki_experts.src.ranker.clip_ranker import CLIPRanker
+        from projects.wiki_experts.src.ranker.clip_ranker import (
+            CLIPRanker,
+            CLIPTripletRanker,
+        )
 
         if not torch.cuda.is_available() and device == "cuda":
             device = "cpu"
 
         if ranker_model == "clip":
             model = CLIPRanker.from_pretrained(ranker_path).to(device)
+            return model
+        elif ranker_model == "clip_triplet":
+            model = CLIPTripletRanker.from_pretrained(ranker_path).to(device)
             return model
         elif ranker_model == "classifier":
             model = SentenceTransformerClassifier.from_pretrained(ranker_path).to(

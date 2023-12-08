@@ -131,7 +131,6 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
         for task in available_tasks:
             if "default" in task:
                 continue
-            breakpoint()
             self.available_mask[self.tasks_names_to_ids[task]] = 1.0
 
     def get_expert_embeddings(
@@ -220,6 +219,7 @@ class CLIPTripletRanker(CLIPRanker):
         text_embedding_dim: int = 384,
         expert_embedding_dim: int = 512,
         task_names: list = [],
+        projection_dim: int = 512,
     ):
         assert len(task_names) > 0
         super().__init__(
@@ -227,6 +227,7 @@ class CLIPTripletRanker(CLIPRanker):
             text_embedding_dim=text_embedding_dim,
             expert_embedding_dim=expert_embedding_dim,
             task_names=task_names,
+            projection_dim=projection_dim,
         )
 
     def set_available_tasks(self, available_tasks):
