@@ -48,7 +48,7 @@ class Selector(nn.Module):
     def name(self):
         return f"{self.__layer_name__}"
 
-    @abstractproperty
+    @abstractmethod
     def add_expert(self, expert_name: str, **kwargs):
         pass
 
@@ -237,7 +237,7 @@ class TaskNameSelector(Selector):
             modules = task_names
         return no_merge_op(container, input, modules)
 
-    def add_expert(self, expert_name: str, *args, **kwargs):
+    def add_expert(self, expert_name: str, **kwargs):
         # here we experts based on their name, which can be different from the task name
         if expert_name not in self.expert_names:
             self.expert_names.append(expert_name)
