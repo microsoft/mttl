@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import List
+import numpy as np
 import torch
 from torch import nn
 import math
@@ -285,6 +286,10 @@ class SkilledLoRA(LoRA):
             raise ValueError("Cannot parallelize loras applied to different layers.")
 
         device = skilled_loras[0].lora_a.device
+        n_skills = skilled_loras[0].lora_a.shape[0]
+        assert np.all(skl.n_skills == n_skills for skl in skilled_loras)
+
+        num_skilled_loras = len(skilled_loras)
         skilled_loras_a = torch.stack([lora.lora_a for lora in skilled_loras], dim=0)
         skilled_loras_b = torch.stack([lora.lora_b for lora in skilled_loras], dim=0)
         weights = torch.stack(weights, dim=0).to(device)
@@ -302,9 +307,8 @@ class SkilledLoRA(LoRA):
         layer_out = skilled_loras[0].layer(input)
         input = input.to(dtype=skilled_loras[0].lora_a.dtype)
 
-        # no batch!
-        if skilled_loras_a.shape[0] == 1:
-            # skilled lora is shared across all examples, remove batch dimension
+        if num_skilled_loras == 1:
+            # no batch, skilled lora is shared across all examples, remove batch dimension
             skilled_loras_a = skilled_loras_a.squeeze(0)
             skilled_loras_b = skilled_loras_b.squeeze(0)
             weights = weights.squeeze(0)
@@ -315,6 +319,12 @@ class SkilledLoRA(LoRA):
 
             # (n_examples, seq_len, out_features)
             adapter_out = torch.matmul(torch.matmul(input, A), B) * scaling
+        elif n_skills == 1:
+            # this is basically standard lora forward, we are here by accident
+            # !!!warning!!!! this ignores the weights
+            return LoRA.parallel_linear_forward(
+                input, [sk_lora.to_loras()[0] for sk_lora in skilled_loras]
+            )
         else:
             A = torch.einsum("bs,bsdr->bdr", (weights, skilled_loras_a))
             B = torch.einsum("bs,bsrd->brd", (weights, skilled_loras_b))
@@ -330,6 +340,19 @@ class SkilledLoRA(LoRA):
         return layer_out + adapter_out.to(dtype=layer_out.dtype)
 
 
+class LoRAView(LoRA):
+    """
+    Avoid initializing parameters, the parameters are just a view
+    on a bunch of other LoRAs parameters stacked together.
+    """
+
+    def create_for_layer(self, layer):
+        pass
+
+    def reset_parameters(self):
+        pass
+
+
 class SkilledLoRAView(SkilledLoRA):
     """
     Avoid initializing parameters, the parameters are just a view
@@ -341,6 +364,22 @@ class SkilledLoRAView(SkilledLoRA):
 
     def reset_parameters(self):
         pass
+
+    def to_loras(self):
+        """
+        Create a list of loras from a skilled lora
+        """
+        if self.n_splits > 1:
+            raise ValueError("Cannot convert a skilled lora with n_splits > 1.")
+
+        loras = []
+        for i in range(self.n_skills):
+            lora = LoRAView(self.config, self.layer)
+            # squeeze n_splits if any
+            lora.lora_a = self.lora_a[i].squeeze()
+            lora.lora_b = self.lora_b[i].squeeze()
+            loras.append(lora)
+        return loras
 
     @classmethod
     def from_loras(cls, loras):
