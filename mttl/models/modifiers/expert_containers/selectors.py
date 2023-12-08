@@ -1,5 +1,5 @@
 from abc import abstractproperty
-from typing import Dict
+from typing import Dict, List
 from pyparsing import abstractmethod
 import torch
 import math
@@ -94,7 +94,9 @@ def linear_merge(container, input, names, weights):
         raise NotImplementedError()
 
 
-def skilled_linear_merge(container, input, names, weights):
+def skilled_linear_merge(
+    container, input, names: List[List[str]], weights: List[List[float]]
+):
     from mttl.models.modifiers.expert_containers.expert_containers import (
         LoRAExpertContainer,
         KVExpertContainer,
@@ -110,6 +112,7 @@ def skilled_linear_merge(container, input, names, weights):
             SkilledLoRAView.from_loras([container.get(x_name) for x_name in b_names])
             for b_names in names
         ]
+        weights = [torch.tensor(x_weights) for x_weights in weights]
         return SkilledLoRA.parallel_linear_weighted_forward(
             input, skilled_loras, weights
         )
