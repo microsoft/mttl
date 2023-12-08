@@ -94,6 +94,8 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
         self.expert_projection = ProjectionHead(
             embedding_dim=expert_embedding_dim, projection_dim=projection_dim
         )
+        # mask for available tasks
+        self.available_mask: torch.Tensor = torch.ones(self.expert_num)
         self.temperature = temperature
         self.save_hyperparameters()
 
@@ -121,6 +123,16 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
         loss = F.cross_entropy(logits, labels) + F.cross_entropy(logits.T, labels) / 2
 
         return loss
+
+    def set_available_tasks(self, available_tasks):
+        """Set the available tasks for the classifier."""
+        self.available_mask.fill_(0.0)
+
+        for task in available_tasks:
+            if "default" in task:
+                continue
+            breakpoint()
+            self.available_mask[self.tasks_names_to_ids[task]] = 1.0
 
     def get_expert_embeddings(
         self,
