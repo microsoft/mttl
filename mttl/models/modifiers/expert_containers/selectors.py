@@ -94,6 +94,29 @@ def linear_merge(container, input, names, weights):
         raise NotImplementedError()
 
 
+def skilled_linear_merge(container, input, names, weights):
+    from mttl.models.modifiers.expert_containers.expert_containers import (
+        LoRAExpertContainer,
+        KVExpertContainer,
+    )
+    from mttl.models.modifiers.expert_containers.hard_prompts_container import (
+        HardPromptExpertContainer,
+    )
+
+    if type(container) == LoRAExpertContainer:
+        from mttl.models.modifiers.lora import SkilledLoRA, SkilledLoRAView
+
+        skilled_loras = [
+            SkilledLoRAView.from_loras([container.get(x_name) for x_name in b_names])
+            for b_names in names
+        ]
+        return SkilledLoRA.parallel_linear_weighted_forward(
+            input, skilled_loras, weights
+        )
+    else:
+        raise NotImplementedError()
+
+
 @register_multi_expert_selector("poly_router")
 class PolySelector(Selector):
     """
@@ -199,7 +222,7 @@ class RoutingInfosContainerSelector(Selector):
         routing_mods = self.info_container["routing_infos"].routing_modules
         routing_weights = self.info_container["routing_infos"].routing_weights
 
-        return linear_merge(container, input, routing_mods, routing_weights)
+        return skilled_linear_merge(container, input, routing_mods, routing_weights)
 
 
 @register_multi_expert_selector("task_selector")
