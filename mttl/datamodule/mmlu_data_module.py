@@ -185,9 +185,10 @@ class DataCollatorForMMLU(DefaultCollator):
         return output_batch
 
 
+@dataclass
 class MMLUDataConfig(DatasetConfig):
-    augment_mmlu: bool = False
     few_shot: bool = True
+    augment_mmlu: bool = False
 
 
 class MMLUDataModule(DefaultDataModule):

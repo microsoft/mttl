@@ -59,7 +59,8 @@ def push_expert_to_hub(
 
     # model is definitely from HF
     model_name = ckpt["hyper_parameters"]["model"]
-    model_name = model_name.partition("/")[-1]
+    if "/" in model_name:
+        model_name = model_name.partition("/")[-1]
 
     repo_id = f"{hf_user_id}/expert__{model_name}__{dataset_name}__{expert_name}"
 

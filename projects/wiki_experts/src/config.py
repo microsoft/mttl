@@ -49,6 +49,7 @@ class ExpertConfig(Config):
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
 
+        self.eval_mmlu_few_shot = True  # use few-shot for mmlu, default
         self.eval_mmlu_flag = False
         self.eval_metric = "loss"
         self.use_vllm = False

@@ -6,6 +6,7 @@ from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibra
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
+from mttl.datamodule.mmlu_data_module import MMLUDataConfig
 from mttl.evaluators import MMLUEvaluator
 from mttl.utils import setup_logging, logger
 
@@ -103,9 +104,15 @@ def run_eval(args):
     else:
         subsample = None
 
-    mmlu = MMLUEvaluator(
-        args,
+    config = MMLUDataConfig(
+        model=args.model,
+        model_family=args.model_family,
+        max_input_length=args.max_input_length,
+        finetune_task_name=args.finetune_task_name,
+        few_shot=args.eval_mmlu_few_shot,
     )
+    mmlu = MMLUEvaluator(config)
+
     # load module
     if args.ranker_model is not None:
         module = MultiExpertModelRanker(
@@ -130,7 +137,9 @@ def run_eval(args):
             module.load_from_library(library, args.subsample_library_experts)
 
     module.to("cuda")
-    scores = mmlu.evaluate(module, split=args.mmlu_test_split, subsample=subsample)
+    scores = mmlu.evaluate(
+        module, split=args.mmlu_test_split, subsample=subsample, shuffle=True
+    )
 
     with open(args.output_dir + "/mmlu.json", "w") as f:
         import json
