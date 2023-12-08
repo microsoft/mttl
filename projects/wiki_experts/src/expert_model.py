@@ -69,11 +69,6 @@ def push_expert_to_hub(
 
 
 class MultiExpertModel(ExpertTrainer):
-    """
-    MultiExpert models handels multiple experts with ExpertContainer and allows to route to different experts.
-    You can add modifiers using one of the 'self.modify_weith...' methods.
-    """
-
     def __init__(self, **kwargs: dict):
         # we dont use any  model modifier for MultiExpertModel model by default.
         # If you want to use a model modifier, use one of the 'self.modify_weith...' methods.
