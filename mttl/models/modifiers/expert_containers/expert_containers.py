@@ -28,9 +28,8 @@ class ExpertContainer:
         pass
 
     def add_expert_to_selector(self, expert_name: str, **kwargs):
-        if expert_name in self.experts:
-            self.selector.add_expert(expert_name, **kwargs)
-            self.selector.default_expert_name = self.default_expert_name
+        self.selector.add_expert(expert_name, **kwargs)
+        self.selector.default_expert_name = self.default_expert_name
 
     def get(self, key):
         if key not in self.experts:

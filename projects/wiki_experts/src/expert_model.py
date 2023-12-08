@@ -39,33 +39,32 @@ def push_expert_to_hub(
     if use_last is True, then uses the last checkpoint `last.ckpt` instead
     of the one with lowest validation loss.
     """
+    from mttl.models.modifiers.expert_containers.module_graph import load_expert
     from mttl.utils import get_checkpoint_path
 
-    if auto_search:
-        ckpt_path = get_checkpoint_path(ckpt_path, use_last=use_last)
+    expert = load_expert(get_checkpoint_path(ckpt_path, use_last=use_last))
 
-    ckpt = torch.load(ckpt_path)
-
-    if expert_name is None:
-        for key in ["expert_name", "finetune_task_name"]:
-            expert_name = ckpt["hyper_parameters"].get(key)
-            if expert_name is not None:
-                break
-
-    dataset_name = ckpt["hyper_parameters"]["dataset"]
+    dataset_name = expert.expert_config.dataset
     # handle the case where dataset is from huggingface
     if "/" in dataset_name:
         dataset_name = dataset_name.partition("/")[-1]
 
     # model is definitely from HF
-    model_name = ckpt["hyper_parameters"]["model"]
+    model_name = expert.expert_config.model
     if "/" in model_name:
         model_name = model_name.partition("/")[-1]
+
+    if expert_name is not None:
+        expert.expert_info.expert_name = expert_name
+    else:
+        expert_name = expert.expert_info.expert_name
+
+    assert expert_name is not None
 
     repo_id = f"{hf_user_id}/expert__{model_name}__{dataset_name}__{expert_name}"
 
     logger.info("Uploading checkpoint {} --> {}".format(ckpt_path, repo_id))
-    convert_and_push_to_hub(ckpt_path, repo_id, auto_search=False, use_last=False)
+    convert_and_push_to_hub(expert, repo_id)
 
 
 class MultiExpertModel(ExpertTrainer):
