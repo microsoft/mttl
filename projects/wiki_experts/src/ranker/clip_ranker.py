@@ -217,6 +217,16 @@ class CLIPTripletRanker(CLIPRanker):
             task_names=task_names,
         )
 
+    def set_available_tasks(self, available_tasks):
+        """Set the available tasks for the classifier."""
+        self.available_mask.fill_(0.0)
+
+        for task in available_tasks:
+            if "default" in task:
+                continue
+
+            self.available_mask[self.task_names_to_ids[task]] = 1.0
+
     def forward(self, batch):
         # gettng the text features , positive, negatve expert
         text_features = self.text_encoder(batch["sources_texts"])

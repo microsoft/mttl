@@ -49,6 +49,8 @@ def train_triplet_clip(args):
         finetune_task_name=args.finetune_task_name,
     )
     tempdatamodule = FlatMultiTaskModule(tempconfig)
+    task_names = tempdatamodule.task_names
+    task_names.append("default")
     model = CLIPTripletRanker(task_names=tempdatamodule.task_names)
 
     # add model checkpoint
