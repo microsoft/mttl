@@ -1,10 +1,10 @@
 from pyparsing import abstractmethod
 import torch
 from torch import nn
-from typing import Any, Dict
+from typing import Any, Dict, List
 from mttl.models.modifiers.base import MergeableAdapter, ModifyMixin
 from mttl.models.modifiers.base import Adapter, MergeableAdapter, ModifyMixin
-from mttl.models.modifiers.lora import LoRA, SkilledLoRA
+from mttl.models.modifiers.lora import LoRA, SkilledLoRA, SkilledLoRAView
 from mttl.models.modifiers.kv_adapter import KVAdapter
 from mttl.models.modifiers.expert_containers.selectors import *
 from mttl.utils import logger
@@ -138,14 +138,12 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                 self.merged_expert_names.append(name)
                 self.experts.pop(name)
 
-    def route(self, input, routing: list):
-        load_experts = []
-        weights = []
+    def route(self, input, routing: List[Dict[str, torch.Tensor]]):
+        batch_experts, batch_weights = [], []
 
-        for sample_weights in routing:  # for each examplke in batch
-            exps = []
-            ws = []
-            for expert_name, weight in sample_weights.items():
+        for example_routing in routing:  # for each example in batch
+            ex_experts, ex_weights = [], []
+            for expert_name, expert_weight in example_routing.items():
                 if expert_name not in self.experts:
                     if not self.default_expert_name:
                         raise ValueError(
@@ -157,12 +155,17 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                         selected_expert = self.default_expert_name
                 else:
                     selected_expert = expert_name
-                exps.append(self.experts[selected_expert])
-                ws.append(weight)
-            assert len(exps) == len(ws)
-            load_experts.append(exps)
-            weights.append(torch.stack(ws))
-        return SkilledLoRA.parallel_linear_forward(input, load_experts, weights)
+                ex_experts.append(self.experts[selected_expert])
+                ex_weights.append(expert_weight)
+            batch_experts.append(ex_experts)
+            batch_weights.append(torch.stack(ex_weights))
+
+        batch_experts = [
+            SkilledLoRAView.from_loras(experts) for experts in batch_experts
+        ]
+        return SkilledLoRA.parallel_linear_weighted_forward(
+            input, batch_experts, batch_weights, merge_after=False
+        )
 
     def forward(self, input, **kwargs):
         if len(self.experts) > 0:

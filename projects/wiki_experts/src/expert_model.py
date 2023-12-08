@@ -4,20 +4,24 @@ import re
 import numpy as np
 from typing import Dict
 from tempfile import TemporaryDirectory
+
+import tqdm
 from mttl.models.modifiers.routing import RoutingInfo
 from mttl.utils import logger
 from mttl.models.modifiers.expert_containers import ExpertContainer
 from mttl.models.modifiers.expert_containers import Selector
-from mttl.models.modifiers.expert_containers import add_expert_to_transformer
+from mttl.models.modifiers.expert_containers import (
+    add_expert_to_transformer,
+)
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
-from projects.wiki_experts.src.ranker.adapter_ranker import ExpertRanker
+from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRankerHelper
+
 from mttl.models.modifiers.expert_containers.module_graph import Expert, ExpertInfo
 from mttl.models.modifiers.expert_containers.module_graph import (
     ModuleGraph,
     load_expert,
 )
-from projects.wiki_experts.src.ranker.classification_module import ids_to_tasks_names
 
 
 def push_expert_to_hub(
@@ -152,11 +156,45 @@ class MultiExpertModel(ExpertTrainer):
         if action != "merge":
             self.experts.append(expert_name)
 
-    def load_from_graph_string(self, s, action="route", **kwargs):
+    def load_from_graph_string(self, s, action="route", expert_library=None):
         from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
 
-        graph = ModuleGraph.from_string(s, **kwargs)
+        graph = ModuleGraph.from_string(s, expert_library=expert_library)
         self.load_from_graph(graph, action=action)
+
+    def load_from_library(self, library, subsample_library_experts=0):
+        import copy
+
+        keys = list(library.keys())
+        if self.hparams.subsample_library_experts > 0:
+            keys = np.random.permutation(keys)[:subsample_library_experts]
+
+        # fill all the weights with zeros after deep copying the weights
+        module_dump = library[keys[0]]
+        module_dump = copy.deepcopy(module_dump)
+        for _, value in module_dump.expert_weights.items():
+            value.fill_(0)
+
+        add_expert_to_transformer(
+            self.model,
+            "default",
+            module_dump,
+            action="route",
+            is_default=True,
+            config=self.hparams,
+        )
+
+        for expert_name in tqdm.tqdm(keys, desc="Loading experts..."):
+            expert_dump = library[expert_name]
+            add_expert_to_transformer(
+                self.model,
+                expert_name,
+                expert_dump,
+                action="route",
+                is_default=expert_name == "default",
+                config=self.hparams,
+            )
+            self.experts.append(expert_name)
 
     def load_expert(
         self,
@@ -244,17 +282,6 @@ class MultiExpertModel(ExpertTrainer):
         batch,
         **kwargs,
     ):
-        if self.hparams.routing == "first":
-            batch["task_names"] = [
-                self.experts[0] for _ in range(batch["input_ids"].shape[0])
-            ]
-        elif self.hparams.routing == "random":
-            import numpy as np
-
-            batch["task_names"] = np.random.choice(
-                self.experts, batch["input_ids"].shape[0], replace=True
-            ).tolist()
-
         if hasattr(self.model, "task_id_container"):
             self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
                 batch
@@ -269,62 +296,33 @@ class MultiExpertModelRanker(MultiExpertModel):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        self.classifier = ExpertRanker(
-            num_labels=kwargs["num_labels"],
-            classifer_repo_id=kwargs["classifer_repo_id"],
-        ).get_classifer()
-
-    def get_predicted_experts(self, batch):
-        if "inputs" in batch:
-            input_texts = batch["inputs"]
-        elif "sources_texts" in batch:
-            input_texts = batch["sources_texts"]
-        else:
-            raise ValueError("No inputs found in batch!")
-        expert_logits = self.classifier(input_texts)
-        expert_indices = expert_logits.argmax(dim=1).cpu()
-        expert_prediction = [ids_to_tasks_names[i.item()] for i in expert_indices]
-        return expert_prediction
-
-    def expert_retrieval(self, batch, **kwargs):
-        expert_selection = []
-        # get the expert predictions
-        expert_prediction = self.get_predicted_experts(batch)
-        print("predicted experts: {}".format(expert_prediction))
-        for expert in expert_prediction:
-            if expert in self.experts:
-                expert_selection.append(expert)
-            else:
-                # randomly select an expert
-                expert_selection.append(
-                    self.experts[np.random.randint(len(self.experts))]
-                )
-
-        return expert_selection
+        self.expert_ranker = AdapterRankerHelper.get_ranker_instance(
+            ranker_model=kwargs["ranker_model"],
+            ranker_path=kwargs["ranker_path"],
+        )
 
     def generate(
         self,
         batch,
         **kwargs,
     ):
-        if self.hparams.routing == "first":
-            batch["task_names"] = [
-                self.experts[0] for _ in range(batch["input_ids"].shape[0])
-            ]
-        elif self.hparams.routing == "random":
-            import numpy as np
-
-            batch["task_names"] = np.random.choice(
-                self.experts, batch["input_ids"].shape[0], replace=True
-            ).tolist()
-        elif self.hparams.routing == "retrieval":
-            logger.info("retrieval routing")
-            batch["task_names"] = self.expert_retrieval(batch)
-
         if hasattr(self.model, "task_id_container"):
             self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
                 batch
             )
+
+        self.expert_ranker.set_available_tasks(self.experts)
+        mod_names, mod_weights = self.expert_ranker.predict_batch(
+            batch, n=self.hparams.ranker_top_k
+        )
+
+        # fill in the weights for the routing selector, for now just take the first one
+        self.model.task_id_container["routing_infos"].routing_modules = mod_names
+        self.model.task_id_container["routing_infos"].routing_weights = mod_weights
+
+        # infos
+        logger.info(f"Most similar: {str(mod_names)}")
+        logger.info(f"Most similar weights: {str(mod_weights)}")
 
         generations = self.model.generate(
             inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
@@ -439,6 +437,7 @@ class RoutedMultiExpertModel(MultiExpertModel):
                         weights, with_global_names=with_global_names
                     )
                     expert_weights.update(_weights)
+
         config_merged = copy.deepcopy(self.hparams)
         config_merged.model_modifier = exp_config.model_modifier
         expert_info = ExpertInfo(

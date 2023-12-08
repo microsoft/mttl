@@ -1,6 +1,6 @@
-from dataclasses import dataclass
-from mttl.config import Config
 import os
+
+from mttl.config import Config
 import mttl.datamodule.flan_tasks
 
 
@@ -14,6 +14,17 @@ class ExpertConfig(Config):
         self.hf_token_hub = None
         self.hf_lib_id = None
         self.hf_repo_id = None
+
+        # just a lame flag to 0 out all adapter weights
+        self.baseline = False
+        # sparsify adapter weights to this sparsity level
+        self.sparsity = 0.0
+        # only use a very small portion of the available experts
+        self.subsample_library_experts = 0
+        # rank / retrieve top k experts
+        self.ranker_top_k = 1
+        self.ranker_path = None
+        self.ranker_model = None
 
         self.expert_name = None
         self.routing = "subject"
@@ -38,12 +49,9 @@ class ExpertConfig(Config):
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
 
-        # training expert
         self.eval_mmlu_flag = False
-
-        # training classfier routing
-        self.num_labels = 246
-        self.classifer_repo_id = None
+        self.eval_metric = "loss"
+        self.use_vllm = False
 
     def post_init(self):
         if self.micro_batch_size is None:

@@ -2,6 +2,7 @@ import os
 import sys
 from huggingface_hub import login
 from pytorch_lightning import seed_everything
+from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -9,7 +10,10 @@ from mttl.evaluators import MMLUEvaluator
 from mttl.utils import setup_logging, logger
 
 # register models
-from projects.wiki_experts.src.expert_model import MultiExpertModel
+from projects.wiki_experts.src.expert_model import (
+    MultiExpertModel,
+    MultiExpertModelRanker,
+)
 from projects.wiki_experts.src.config import ExpertConfig
 
 
@@ -99,19 +103,31 @@ def run_eval(args):
     else:
         subsample = None
 
-    print(args.finetune_task_name, args.load_module, args.checkpoint)
-
     mmlu = MMLUEvaluator(
         args,
     )
-    module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
+    # load module
+    if args.ranker_model is not None:
+        module = MultiExpertModelRanker(
+            **vars(args), tokenizer=mmlu.datamodule.tokenizer
+        )
+    else:
+        module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
+
+    if args.hf_lib_id:
+        library = HFExpertLibrary(args.hf_lib_id)
+    else:
+        library = None
 
     if args.load_module is not None:
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:
             module.load_expert(**expert_kwargs)
     elif args.module_graph is not None:
-        module.load_from_graph_string(args.module_graph)
+        module.load_from_graph_string(args.module_graph, expert_library=library)
+    elif library is not None:
+        if not args.baseline:
+            module.load_from_library(library, args.subsample_library_experts)
 
     module.to("cuda")
     scores = mmlu.evaluate(module, split=args.mmlu_test_split, subsample=subsample)

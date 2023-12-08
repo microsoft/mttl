@@ -5,17 +5,18 @@ from projects.wiki_experts.src.expert_model import (
     MultiExpertModelRanker,
     MultiExpertModel,
 )
+from projects.wiki_experts.src.ranker.classifier_ranker import (
+    SentenceTransformerClassifier,
+)
+from projects.wiki_experts.src.ranker.clip_ranker import CLIPRanker
 from projects.wiki_experts.src.config import ExpertConfig
 
 
-def test_retrieval_routing():
+def test_clip_routing():
     config = ExpertConfig()
-    config.routing = "retrieval"
-    config.num_labels = 246
+    config.ranker_model = "clip"
+    config.ranker_path = "zhan1993/clip_ranker_debug"
     config.model = "EleutherAI/gpt-neo-125m"
-    config.classifer_repo_id = "zhan1993/gpt-neo_classifer_ranker"
-
-    config.module_graph = "adversarial_qa_dbert_answer_the_following_q -> linear(zhan1993/gpt-neo_adversarial_qa_dbert_answer_the_following_q:0);"
     finetune_task_name = "adversarial_qa_dbert_answer_the_following_q"
     data_module = FlanModule(
         FlanConfig(
@@ -31,14 +32,39 @@ def test_retrieval_routing():
     module = MultiExpertModelRanker(
         **vars(config), device_map="cpu", tokenizer=data_module.tokenizer
     )
-    module.load_from_graph_string(config.module_graph)
     batch = next(iter(data_module.val_dataloader()))
+    prediction_experts = module.expert_ranker.predict_batch(batch)
+    assert len(prediction_experts) == 2
+    assert isinstance(module.expert_ranker, CLIPRanker)
+    assert prediction_experts[0][0] == "race_high_Select_the_best_answer_generate_span_"
 
-    prediction_experts = module.get_predicted_experts(batch)
-    experts_selections = module.expert_retrieval(batch)
-    assert len(prediction_experts) == 1
-    assert prediction_experts[0] == "adversarial_qa_dbidaf_answer_the_following_q"
-    assert experts_selections[0] == "adversarial_qa_dbert_answer_the_following_q"
+
+def test_classifier_routing():
+    config = ExpertConfig()
+    config.model = "EleutherAI/gpt-neo-125m"
+    config.ranker_model = "classifier"
+    config.ranker_path = "zhan1993/classifier_ranker_debug"
+    finetune_task_name = "adversarial_qa_dbert_answer_the_following_q"
+
+    data_module = FlanModule(
+        FlanConfig(
+            dataset="sordonia/flan-debug-flat",
+            model="EleutherAI/gpt-neo-125m",
+            finetune_task_name=finetune_task_name,
+            predict_batch_size=1,
+            include_template_type="*",
+        ),
+        for_generation=True,
+    )
+
+    module = MultiExpertModelRanker(
+        **vars(config), device_map="cpu", tokenizer=data_module.tokenizer
+    )
+    batch = next(iter(data_module.val_dataloader()))
+    prediction_experts = module.expert_ranker.predict_batch(batch)
+    assert len(prediction_experts) == 2  # experts and names
+    assert isinstance(module.expert_ranker, SentenceTransformerClassifier)
+    assert prediction_experts[0][0][0] == "stream_qed_ii"
 
 
 def test_expert_model_generate():

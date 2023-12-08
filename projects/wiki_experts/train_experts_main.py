@@ -74,12 +74,6 @@ def get_datamodule(args, for_generation=False):
             text_field="facts" if "facts" in args.dataset else "text",
         )
         dm = FactsLMDataModule(config, for_generation=for_generation)
-    elif "platypus" in args.dataset:
-        config = PlatypusConfig(
-            **common_kwargs,
-            train_on_reverse=args.dataset == "inverse-platypus",
-        )
-        dm = PlatypusModule(config, for_generation=for_generation)
     elif "oa1" in args.dataset:
         config = OA1Config(
             **common_kwargs,
@@ -146,7 +140,8 @@ def run_multitask(args: ExpertConfig):
         wandb_logger.experiment.save("*.py")
         loggers.append(wandb_logger)
 
-    module = model_class(**vars(args), tokenizer=dm.tokenizer).to("cuda")
+    module = model_class(**vars(args), tokenizer=dm.tokenizer)
+
     mlf_logger = get_mlf_logger()
     if mlf_logger:
         loggers.append(mlf_logger)

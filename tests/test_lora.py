@@ -5,10 +5,16 @@ import torch.nn.functional as F
 from pytorch_lightning import seed_everything
 from mttl.models.modifiers.routing import RoutingInfo
 from mttl.models.modifiers import modify_transformer
-from mttl.models.modifiers.lora import LoRAConfig, LoRA
+from mttl.models.modifiers.lora import (
+    LoRAConfig,
+    LoRA,
+    SkilledLoRAConfig,
+    SkilledLoRAView,
+    SkilledLoRA,
+)
 
 
-def test_llama_adapter():
+def test_lora_adapter():
     os.environ["CONFIG_PATH"] = "./"
 
     seed_everything(0)
@@ -53,3 +59,68 @@ def test_llama_adapter():
     loss = model(**batch).loss
 
     assert pytest.approx(loss.item(), 0.0001) == 6.0908
+
+
+def test_skilled_lora_parallel_merge_with_weights():
+    layer = torch.nn.Linear(1, 2, bias=False)
+    layer.weight.requires_grad = False
+    layer.weight.fill_(0.0)
+
+    config = SkilledLoRAConfig(n_skills=2, n_splits=1, lora_alpha=1, lora_rank=1)
+
+    ada1 = SkilledLoRAView(config, layer)
+    ada1.lora_a = torch.randn(2, 1, 1, config.lora_rank)
+    ada1.lora_b = torch.ones(2, config.lora_rank, 1, 2)
+
+    ada2 = SkilledLoRAView(config, layer)
+    ada2.lora_a = torch.randn(2, 1, 1, config.lora_rank)
+    ada2.lora_b = torch.ones(2, config.lora_rank, 1, 2)
+
+    # fill some dummy values
+    ada1.lora_a[0, :].fill_(1.0)
+    ada1.lora_a[1, :].fill_(2.0)
+    ada2.lora_a[0, :].fill_(3.0)
+    ada2.lora_a[1, :].fill_(4.0)
+
+    input = torch.ones(2, 1)
+    # the weights are interpolating the skills in ada1
+    output = SkilledLoRA.parallel_linear_forward(
+        input, [ada1], [torch.tensor([0.5, 0.5])]
+    )
+    assert output[0, 0].item() == 1.5
+    assert output.shape == (2, 2)
+
+    output = SkilledLoRA.parallel_linear_forward(
+        input, [ada1, ada2], [torch.tensor([0.5, 0.5]), torch.tensor([0.0, 1.0])]
+    )
+    assert output[0, 0].item() == 1.5
+    assert output[1, 0].item() == 4.0
+    assert output.shape == (2, 2)
+
+    input = torch.ones(2, 3, 1)
+    # the weights are interpolating the skills in ada1
+    output = SkilledLoRA.parallel_linear_forward(
+        input, [ada1], [torch.tensor([0.5, 0.5])]
+    )
+    assert output[0, 0, 0].item() == 1.5
+    assert output.shape == (2, 3, 2)
+
+    output = SkilledLoRA.parallel_linear_forward(
+        input, [ada1, ada2], [torch.tensor([0.5, 0.5]), torch.tensor([0.0, 1.0])]
+    )
+    assert output[0, 0, 0].item() == 1.5
+    assert output[1, 0, 0].item() == 4.0
+    assert output.shape == (2, 3, 2)
+
+
+def test_skilled_lora_view():
+    layer = torch.nn.Linear(1, 2, bias=False)
+    adapter_config = LoRAConfig(lora_rank=5)
+    lora1 = LoRA(adapter_config, layer)
+    lora2 = LoRA(adapter_config, layer)
+    lora3 = LoRA(adapter_config, layer)
+    skilled_lora = SkilledLoRAView.from_loras([lora1, lora2, lora3])
+    assert skilled_lora.lora_a.shape == torch.Size([3, 1, 1, 5])
+    assert skilled_lora.lora_b.shape == torch.Size([3, 5, 1, 2])
+    assert skilled_lora.rank == 5
+    assert skilled_lora.alpha == adapter_config.lora_alpha
