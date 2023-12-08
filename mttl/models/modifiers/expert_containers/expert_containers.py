@@ -133,9 +133,34 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         self.merged_expert_names.extend(self.experts)
         self.experts.clear()
 
+    def route(self, input, selection, **kwargs):
+        from mttl.models.modifiers.lora import SkilledLoRA, SkilledLoRAView
+
+        if isinstance(selection, BatchModulesAndWeightsSelectorOutput):
+            skilled_loras = [
+                SkilledLoRAView.from_loras([self.get(x_name) for x_name in b_modules])
+                for b_modules in selection.modules
+            ]
+            weights = [torch.tensor(x_weights) for x_weights in selection.weights]
+            return SkilledLoRA.parallel_linear_weighted_forward(
+                input, skilled_loras, weights
+            )
+        elif isinstance(selection, ModulesAndWeightsSelectorOutput):
+            skilled_lora = SkilledLoRAView.from_loras(
+                [self.get(module) for module in selection.modules]
+            )
+            return SkilledLoRA.parallel_linear_weighted_forward(
+                input, [skilled_lora], [selection.weights]
+            )
+        elif isinstance(selection, ModulesSelectorOutput):
+            return LoRA.parallel_linear_forward(
+                input, [self.get(module) for module in selection.modules]
+            )
+
     def forward(self, input, **kwargs):
         if len(self.experts) > 0:
-            return self.selector(self, input, **kwargs)
+            selection = self.selector(input, **kwargs)
+            return self.route(input, selection, **kwargs)
         return self.layer(input)
 
 

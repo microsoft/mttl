@@ -140,13 +140,15 @@ class MultiExpertModel(ExpertTrainer):
             elif isinstance(destination, Expert):
                 self.add_expert_instance(destination, module_name, action=action)
 
-    def add_expert_instance(self, expert_instance: Expert, expert_name, action="route"):
+    def add_expert_instance(
+        self, expert_instance: Expert, expert_name, action="route", is_default=False
+    ):
         self.model = add_expert_to_transformer(
             self.model,
             expert_name,
             expert_instance,
             action=action,
-            is_default=expert_name == "default",
+            is_default=expert_name == "default" or is_default,
         )
         if action != "merge":
             self.experts.append(expert_name)

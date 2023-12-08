@@ -3,7 +3,11 @@ from torch import nn
 from typing import Any, Dict
 from mttl.models.modifiers.base import ModifyMixin
 
-from mttl.models.modifiers.expert_containers.selectors import Selector, TaskNameSelector
+from mttl.models.modifiers.expert_containers.selectors import (
+    Selector,
+    TaskNameSelector,
+    ModulesSelectorOutput,
+)
 from mttl.models.modifiers.expert_containers import ExpertContainer
 from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
 from mttl.models.modifiers.modify_model import register_modifier
@@ -56,13 +60,12 @@ class HardPromptDecoderWrapper(nn.Module):
         return out
 
     def generate(self, *args, **kwargs):
-        if len(args) > 0:
+        if len(args) == 1:
             input_ids = args[0]
-            args = args[1:]
         else:
-            input_ids = kwargs["input_ids"]
+            input_ids = kwargs["inputs"]
         (
-            kwargs["input_ids"],
+            kwargs["inputs"],
             kwargs["attention_mask"],
             _,
         ) = self.expert_container.forward(input_ids, kwargs["attention_mask"])
@@ -140,19 +143,16 @@ class HardPromptExpertContainer(ExpertContainer):
         self.experts[expert.name] = expert_module
         self.add_expert_to_selector(name)
 
-    def route(self, input_ids, routing: list, attention_mask=None, labels=None):
-        load_experts = []
-
-        for sample_weights in routing:
-            if len(sample_weights) > 1:
-                raise ValueError(
-                    "HardPromptExpertContainer only supports one expert per task."
-                )
-            selected_expert = list(sample_weights.keys())[0]
-            load_experts.append(self.experts[selected_expert])
-        return HardPrompt.parallel_forward(
-            load_experts, input_ids, attention_mask, labels
-        )
+    def route(self, input_ids, selection, attention_mask=None, labels=None):
+        if isinstance(selection, ModulesSelectorOutput):
+            return HardPrompt.parallel_forward(
+                [self.get(module) for module in selection.modules],
+                input_ids,
+                attention_mask,
+                labels,
+            )
+        else:
+            raise ValueError("Cannot process the desired selection.")
 
     def __getitem__(self, key):
         return self.experts[key]
@@ -162,10 +162,10 @@ class HardPromptExpertContainer(ExpertContainer):
 
     def forward(self, input_ids, attention_mask=None, labels=None, **kwargs):
         if len(self.experts) > 0:
-            weights: list = self.selector(
+            selection = self.selector(
                 input_ids=input_ids, attention_mask=attention_mask, labels=labels
             )
             return self.route(
-                input_ids, attention_mask=attention_mask, labels=labels, routing=weights
+                input_ids, selection, attention_mask=attention_mask, labels=labels
             )
         return input_ids, attention_mask, labels

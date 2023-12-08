@@ -317,8 +317,7 @@ class SkilledLoRA(LoRA):
             A = torch.einsum("s,sdr->dr", (weights, skilled_loras_a))
             B = torch.einsum("s,srd->rd", (weights, skilled_loras_b))
 
-            # (n_examples, seq_len, out_features)
-            adapter_out = torch.matmul(torch.matmul(input, A), B) * scaling[:, None]
+            adapter_out = torch.matmul(torch.matmul(input, A), B) * scaling
         elif n_skills == 1:
             # this is basically standard lora forward, we are here by accident
             # !!!warning!!!! this ignores the weights

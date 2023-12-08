@@ -43,6 +43,7 @@ class ExpertConfig(Config):
         self.eval_test_set_callback_every = 0
         self.eval_rougeL_callback_every = 0
         self.test_sets_callbacks = []
+        self.mmlu_use_hard_prompt = None
 
         self.use_custom_valid_callback = False  # if True use custom callback to early top on eval loss  instead of lightning callback
 
