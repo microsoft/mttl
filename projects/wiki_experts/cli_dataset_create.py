@@ -1847,6 +1847,27 @@ def download_flan(cutoff=10_000, filter_zs=False):
         print("# Valid", len(task_dataset.filter(lambda x: x["split"] == "validation")))
 
 
+def create_platypus_templated(hf_repo_id):
+    from mttl.dataloader.platypus_dataset_reader import PlatypusDataset
+
+    rng = np.random.RandomState(42)
+    dataset = PlatypusDataset()
+
+    examples = []
+    for example in dataset:
+        examples.append(
+            {
+                "source": example["source"],
+                "target": example["target"],
+                "task_name": example["data_source"],
+                "task_source": "platypus",
+                "split": rng.choice(["train", "validation"], p=[0.95, 0.05]),
+            }
+        )
+
+    Dataset.from_list(examples).push_to_hub(hf_repo_id)
+
+
 def create_adauni(hf_repo_id):
     datasets = [
         "sordonia/flan-10k-flat",
@@ -2112,6 +2133,8 @@ def main(task):
         create_argilla("sordonia/argilla_notus-flat")
     elif task == "aug-mmlu":
         create_augmented_mmlu("sordonia/mmlu-qa-aug-10k-flat")
+    elif task == "platypus-templated":
+        create_platypus_templated("sordonia/platypus-templated-flat")
     else:
         raise ValueError("Unknown task")
 

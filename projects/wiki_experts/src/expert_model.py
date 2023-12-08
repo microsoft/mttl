@@ -215,12 +215,12 @@ class MultiExpertModel(ExpertTrainer):
                 )
             )
 
+        if expert_name is None:
+            expert_name = expert.name
+
         logger.info(
             f"Adding expert with name {expert_name}... with action ... {action}!"
         )
-
-        if expert_name is None:
-            expert_name = expert.name
 
         self.model = add_expert_to_transformer(
             self.model,
