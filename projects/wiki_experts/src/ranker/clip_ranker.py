@@ -213,33 +213,6 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
 
 
 class CLIPTripletRanker(CLIPRanker):
-    def __init__(
-        self,
-        temperature: float = 0.07,
-        text_embedding_dim: int = 384,
-        expert_embedding_dim: int = 512,
-        task_names: list = [],
-        projection_dim: int = 512,
-    ):
-        assert len(task_names) > 0
-        super().__init__(
-            temperature=temperature,
-            text_embedding_dim=text_embedding_dim,
-            expert_embedding_dim=expert_embedding_dim,
-            task_names=task_names,
-            projection_dim=projection_dim,
-        )
-
-    def set_available_tasks(self, available_tasks):
-        """Set the available tasks for the classifier."""
-        self.available_mask.fill_(0.0)
-
-        for task in available_tasks:
-            if "default" in task:
-                continue
-
-            self.available_mask[self.task_names_to_ids[task]] = 1.0
-
     def forward(self, batch):
         # gettng the text features , positive, negatve expert
         text_features = self.text_encoder(batch["sources_texts"])
