@@ -80,6 +80,7 @@ def add_hard_prompt_to_transformer(
 ):
     expert_config = expert.expert_config
     expert_weights = expert.expert_weights
+
     # create a shared prompt container holding the experts
     if not isinstance(transformer, HardPromptDecoderWrapper):
         expert_container = HardPromptExpertContainer(
@@ -92,7 +93,7 @@ def add_hard_prompt_to_transformer(
 
     transformer.add_expert(
         expert_name,
-        expert_config,
+        expert,
         expert_weights,
         action=action,
         is_default=is_default,
@@ -115,7 +116,7 @@ class HardPromptExpertContainer(ExpertContainer):
     def add_expert(
         self,
         name: str,
-        expert_config: Any,
+        expert: Expert,
         expert_weights: Dict[str, torch.Tensor],
         action="route",
         is_default=False,
@@ -131,18 +132,13 @@ class HardPromptExpertContainer(ExpertContainer):
         if is_default:
             self.default_expert_name = name
 
-        if get_modifier_type(expert_config) == "hard_prompt":
-            expert_module = HardPrompt(expert_config, prompt_init=expert_weights)
+        if get_modifier_type(expert.expert_config) == "hard_prompt":
+            expert_module = HardPrompt(expert.expert_config, prompt_init=expert_weights)
         else:
             raise NotImplementedError("Not implemented for this modifier.")
 
-        self.experts[name] = expert_module
+        self.experts[expert.name] = expert_module
         self.add_expert_to_selector(name)
-
-    def add_expert_to_selector(self, expert_name: str):
-        if expert_name in self.experts:
-            self.selector.add_expert(expert_name)
-            self.selector.default_expert_name = self.default_expert_name
 
     def route(self, input_ids, routing: list, attention_mask=None, labels=None):
         load_experts = []
