@@ -4,6 +4,7 @@ import torch
 from typing import Dict, Union
 import re
 from string import Template
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 
 from mttl.models.utils import download_from_hub
 from mttl.utils import get_checkpoint_path, logger
@@ -79,6 +80,10 @@ class Expert:
     @property
     def name(self):
         return self.expert_info.expert_name
+
+    @name.setter
+    def set_name(self, name):
+        self.expert_info.expert_name = name
 
 
 class Node:
@@ -383,15 +388,16 @@ class ModuleGraph:
 
 def load_expert(
     expert_path: str,
-    expert_dict: dict = None,
+    expert_dict_or_lib: Union[Dict, "ExpertLibrary"] = None,
+    expert_name: str = None,
     **kwargs,
 ):
     """Transforms a potentially lightning checkpoint into an Expert object."""
     # load the expert weights
     import os
 
-    if expert_dict is not None and expert_path in expert_dict:
-        return expert_dict[expert_path]
+    if expert_dict_or_lib is not None and expert_path in expert_dict_or_lib:
+        return expert_dict_or_lib[expert_path]
 
     logger.info(f"Attempting to load expert from {expert_path}")
     if os.path.isfile(expert_path) or os.path.isdir(expert_path):
@@ -433,9 +439,14 @@ def load_expert(
         expert_weights = {
             k.replace("model.", "", 1): v for k, v in expert_weights.items()
         }
-        return Expert(expert_info, expert_weights)
+        expert = Expert(expert_info, expert_weights)
     else:
-        return Expert.loads(expert_checkpoint)
+        expert = Expert.loads(expert_checkpoint)
+
+    # override expert name
+    if expert_name is not None:
+        expert.name = expert_name
+    return expert
 
 
 if __name__ == "__main__":

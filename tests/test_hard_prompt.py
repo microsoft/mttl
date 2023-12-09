@@ -81,7 +81,6 @@ def test_hard_prompt_eval(flan_batch_for_generation):
     )
     model = add_expert_to_transformer(
         model,
-        "prefix",
         expert,
         is_default=True,
     )

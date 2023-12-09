@@ -145,10 +145,10 @@ def run_eval(args):
             tokenizer=module.tokenizer,
         )
         expert = Expert(
-            expert_info=ExpertInfo("hard_prompt", None, config),
+            expert_info=ExpertInfo("hard_prompt", config=config),
             expert_weights=args.mmlu_use_hard_prompt,
         )
-        module.add_expert_instance(expert, "hard_prompt", "route", is_default=True)
+        module.add_expert_instance(expert, action="route", is_default=True)
 
     module.to("cuda")
     scores = mmlu.evaluate(
