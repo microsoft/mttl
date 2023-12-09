@@ -146,13 +146,8 @@ class MultiExpertModel(ExpertTrainer):
         action="route",
         is_default=False,
     ):
-        if expert_name is None:
-            expert_name = expert_instance.name
-        else:
+        if expert_name is not None:
             expert_instance.name = expert_name
-
-        if expert_name is None:
-            raise ValueError("Expert name cannot be None!")
 
         self.model = add_expert_to_transformer(
             self.model,
@@ -161,7 +156,7 @@ class MultiExpertModel(ExpertTrainer):
             is_default=expert_name == "default" or is_default,
         )
         if action != "merge":
-            self.experts.append(expert_name)
+            self.experts.append(expert.name)
 
     def load_from_graph_string(self, s, action="route", expert_library=None):
         from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
