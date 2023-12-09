@@ -211,9 +211,9 @@ class MMLUDataModule(DefaultDataModule):
             test_dataset,
             batch_size=self.config.predict_batch_size,
             shuffle=shuffle,
-            num_workers=16,
+            num_workers=8,
             pin_memory=True,
-            persistent_workers=True,
+            persistent_workers=False,
             collate_fn=self.collate_fn,
         )
 
