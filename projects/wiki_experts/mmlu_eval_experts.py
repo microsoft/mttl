@@ -112,6 +112,7 @@ def run_eval(args):
         max_input_length=args.max_input_length,
         finetune_task_name=args.finetune_task_name,
         few_shot=args.eval_mmlu_few_shot,
+        predict_batch_size=args.predict_batch_size,
     )
     mmlu = MMLUEvaluator(config)
 

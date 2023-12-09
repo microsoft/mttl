@@ -9,9 +9,6 @@ import torch.nn.functional as F
 
 from mttl.utils import logger
 
-from mttl.models.modifiers.hard_prompts import HardPrompt
-from mttl.models.modifiers.expert_containers.module_graph import ExpertConfig
-
 
 MULTI_EXPERT_ROUTERS = {}
 EPS = 1e-8
@@ -32,6 +29,28 @@ def register_multi_expert_selector(name):
     return _thunk
 
 
+@dataclass
+class SelectorOutput:
+    pass
+
+
+@dataclass
+class ModulesAndWeightsSelectorOutput(SelectorOutput):
+    modules: List[str]
+    weights: Union[List[float], torch.Tensor]
+
+
+@dataclass
+class BatchModulesAndWeightsSelectorOutput(SelectorOutput):
+    modules: List[List[str]]
+    weights: Union[List[List[float]], torch.Tensor]
+
+
+@dataclass
+class ModulesSelectorOutput(SelectorOutput):
+    modules: List[str]
+
+
 class Selector(nn.Module):
     def __init__(self, config, info_container, **kwargs):
         super().__init__()
@@ -41,7 +60,7 @@ class Selector(nn.Module):
         self.expert_names = []
 
     @abstractmethod
-    def forward(self, input, **kwargs) -> list:
+    def forward(self, input, **kwargs) -> SelectorOutput:
         pass
 
     def get_merged_weights(self, container, **selector_kwargs) -> Dict:
@@ -54,23 +73,6 @@ class Selector(nn.Module):
     @abstractmethod
     def add_expert(self, expert_name: str, **kwargs):
         pass
-
-
-@dataclass
-class ModulesAndWeightsSelectorOutput:
-    modules: List[str]
-    weights: Union[List[float], torch.Tensor]
-
-
-@dataclass
-class BatchModulesAndWeightsSelectorOutput:
-    modules: List[List[str]]
-    weights: Union[List[List[float]], torch.Tensor]
-
-
-@dataclass
-class ModulesSelectorOutput:
-    modules: List[str]
 
 
 @register_multi_expert_selector("poly_router")
@@ -89,7 +91,7 @@ class PolySelector(Selector):
         module_weights = module_logits / (module_logits.sum(dim=-1, keepdim=True) + EPS)
         return module_weights
 
-    def forward(self, input, *args, **kwargs):
+    def forward(self, input, **kwargs) -> ModulesAndWeightsSelectorOutput:
         weights = self._get_weights()
         modules = self.expert_names
         return ModulesAndWeightsSelectorOutput(modules, weights)
@@ -169,7 +171,7 @@ class RoutingInfosContainerSelector(Selector):
 
         self.default_expert_name = None
 
-    def forward(self, input, *args, **kwargs):
+    def forward(self, input, **kwargs) -> BatchModulesAndWeightsSelectorOutput:
         # try to infer batch size
         if "routing_infos" not in self.info_container:
             raise ValueError("routing_infos not in info_container")
@@ -189,7 +191,7 @@ class TaskNameSelector(Selector):
 
         self.default_expert_name = None
 
-    def forward(self, input, *args, **kwargs):
+    def forward(self, input, **kwargs) -> ModulesSelectorOutput:
         # try to infer batch size
         if "routing_infos" not in self.info_container:
             if "input_ids" in kwargs:
