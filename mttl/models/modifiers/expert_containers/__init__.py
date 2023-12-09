@@ -174,13 +174,8 @@ def add_expert_to_transformer(
                                 continue
 
                     added_layers.append(expert_container.__layer_name__)
-                    expert_weights = filter_expert_weights(
-                        expert_container.__layer_name__, expert.expert_weights
-                    )
-
                     expert_container.add_expert(
                         expert,
-                        expert_weights,
                         action=action,
                         is_default=is_default,
                     )
