@@ -4,7 +4,6 @@ import torch
 from typing import Dict, Union
 import re
 from string import Template
-from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 
 from mttl.models.utils import download_from_hub
 from mttl.utils import get_checkpoint_path, logger
@@ -19,7 +18,7 @@ class ExpertInfo:
     """
 
     expert_name: str
-    expert_task_name: str
+    expert_task_name: str = None
     expert_config: Dict = None
     parent_node: str = None
 
