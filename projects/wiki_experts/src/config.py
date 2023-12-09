@@ -43,13 +43,13 @@ class ExpertConfig(Config):
         self.eval_test_set_callback_every = 0
         self.eval_rougeL_callback_every = 0
         self.test_sets_callbacks = []
-        self.mmlu_use_hard_prompt = None
 
         self.use_custom_valid_callback = False  # if True use custom callback to early top on eval loss  instead of lightning callback
 
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
 
+        self.mmlu_use_hard_prompt = None
         self.eval_mmlu_few_shot = True  # use few-shot for mmlu, default
         self.eval_mmlu_flag = False
         self.eval_metric = "loss"

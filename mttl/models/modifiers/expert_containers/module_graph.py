@@ -81,7 +81,7 @@ class Expert:
         return self.expert_info.expert_name
 
     @name.setter
-    def set_name(self, name):
+    def name(self, name):
         self.expert_info.expert_name = name
 
 

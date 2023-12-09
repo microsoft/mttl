@@ -179,7 +179,6 @@ def add_expert_to_transformer(
                     )
 
                     expert_container.add_expert(
-                        expert_name,
                         expert,
                         expert_weights,
                         action=action,
