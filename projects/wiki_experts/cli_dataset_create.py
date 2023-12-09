@@ -1977,14 +1977,27 @@ def create_argilla(hf_repo_id):
     dataset.push_to_hub(hf_repo_id)
 
 
-def create_augmented_mmlu(hf_repo_id):
+def augment_with_templates_and_few_shot(
+    hf_repo_id,
+    source_hf_dataset_id=None,
+    from_dataset=None,
+    n_shot=5,
+    cutoff=10_000,
+):
     # Augment mmlu data with some templates and few shot examples
     templates = [
         "Instruct: {}\nResponse:",
         "Question: {}\nAnswer:",
         "Q: {}\nA:",
     ]
-    dataset = load_dataset("sordonia/mmlu-qa-flat")["train"]
+
+    if source_hf_dataset_id:
+        dataset = load_dataset(source_hf_dataset_id)["train"]
+    elif from_dataset:
+        dataset = from_dataset
+    else:
+        raise ValueError("Must provide either source_hf_dataset_id or from_dataset")
+
     # augment the dataset few-shot
     from mttl.datamodule.mt_seq_to_seq_module import (
         augment_few_shot,
@@ -1996,11 +2009,11 @@ def create_augmented_mmlu(hf_repo_id):
         dataset_i = dataset.map(
             lambda x: apply_source_template(template, x), num_proc=16
         )
-        dataset_i = augment_few_shot(dataset_i, 5)
+        dataset_i = augment_few_shot(dataset_i, n_shot)
         datasets.append(dataset_i)
 
     dataset = concatenate_datasets(datasets)
-    select_cutoff_by_task_name(dataset, cutoff=10_000).push_to_hub(hf_repo_id)
+    select_cutoff_by_task_name(dataset, cutoff=cutoff).push_to_hub(hf_repo_id)
 
 
 def create_sni(hf_repo_id):
@@ -2116,6 +2129,97 @@ def create_data(dataset_folder, hf_destination, flat=True):
         dataset_dict.push_to_hub(hf_destination, token=hf_token)
 
 
+def create_tags(repo_id):
+    # for few-shot tags, we use the flan-10k-flat dataset
+    tags = [
+        "zero_shot",
+        "few_shot",
+        "long_answer",
+        "short_answer",
+        "option_answer",
+    ]
+
+    def add_tag(example, tag):
+        example["tags"] = "|".join([example.get("tags", ""), tag])
+        return example
+
+    def assign_zero_and_few_shot(example):
+        if "opt" in example["template_type"]:
+            add_tag(example, "option_answer")
+        if "zs" in example["template_type"]:
+            add_tag(example, "zero_shot")
+        if "fs" in example["template_type"]:
+            add_tag(example, "few_shot")
+        if "task_source" in example:
+            if "few_shot_mmlu-oai" in example["task_source"]:
+                add_tag(example, "few_shot")
+            elif "mmlu-oai" in example["task_source"]:
+                add_tag(example, "zero_shot")
+        return example
+
+    def compute_answer_length(dataset):
+        full_length = []
+        for target in dataset["target"]:
+            full_length.append(len(target))
+
+        median_length = np.median(full_length)
+        dataset.map(
+            lambda x: add_tag(x, "short_answer")
+            if len(x["target"]) < median_length
+            else add_tag(x, "long_answer")
+        )
+
+    dataset = load_dataset("sordonia/flan-10k-flat")["train"]
+    # zero and few shot assigned
+    dataset = dataset.map(assign_zero_and_few_shot, num_proc=16)
+
+
+def create_mmlu_platy():
+    from datasets import DatasetInfo
+
+    dataset = load_dataset("sordonia/qa-platy_icl0_clen128_maxD-1_maxC5000_0")
+    examples = []
+    num_examples = 0
+    for split in dataset.keys():
+        for example in dataset[split]:
+            num_examples += 1
+            # do some basic data filtering
+            if "### Instruction:" in example["instruction"]:
+                continue
+            if (
+                "I am sorry" in example["response"]
+                or "I am not sure" in example["response"]
+                or "I think" in example["response"]
+            ):
+                continue
+            # filter if response is a question
+            if example["response"].strip().endswith("?"):
+                continue
+            if "https://" in example["response"]:
+                continue
+            if not example["response"].endswith("."):
+                example["response"] += "."
+            examples.append(
+                {
+                    "source": example["instruction"].strip(),
+                    "target": example["response"].strip(),
+                    "task_name": split,
+                    "task_source": "platy-mmlu",
+                    "split": np.random.choice(["train", "validation"], p=[0.95, 0.05]),
+                }
+            )
+
+    print("Length of dataset:", num_examples)
+    print("Length of dataset:", len(examples))
+
+    dataset = Dataset.from_list(
+        examples, info=DatasetInfo(description="icl0_clen128_maxD-1_maxC5000_0")
+    )
+    augment_with_templates_and_few_shot(
+        "sordonia/mmlu-qa-platy-v1-flat", from_dataset=dataset
+    )
+
+
 @click.command()
 @click.argument("task")
 def main(task):
@@ -2131,10 +2235,12 @@ def main(task):
         create_adauni("sordonia/adauni-v3-10k-flat")
     elif task == "argilla":
         create_argilla("sordonia/argilla_notus-flat")
-    elif task == "aug-mmlu":
-        create_augmented_mmlu("sordonia/mmlu-qa-aug-10k-flat")
     elif task == "platypus-templated":
         create_platypus_templated("sordonia/platypus-templated-flat")
+    elif task == "tags":
+        create_tags("sordonia/adauni-v4-10k-flat")
+    elif task == "transform-platy":
+        create_mmlu_platy()
     else:
         raise ValueError("Unknown task")
 
