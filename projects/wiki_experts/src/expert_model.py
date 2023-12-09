@@ -153,10 +153,10 @@ class MultiExpertModel(ExpertTrainer):
             self.model,
             expert_instance,
             action=action,
-            is_default=expert_name == "default" or is_default,
+            is_default=expert_instance.name == "default" or is_default,
         )
         if action != "merge":
-            self.experts.append(expert.name)
+            self.experts.append(expert_instance.name)
 
     def load_from_graph_string(self, s, action="route", expert_library=None):
         from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph

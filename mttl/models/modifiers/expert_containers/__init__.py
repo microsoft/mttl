@@ -109,7 +109,6 @@ def add_expert_to_transformer(
     if model_modifier == "hard_prompt":
         return add_hard_prompt_to_transformer(
             transformer,
-            expert_name,
             expert,
             action=action,
             is_default=is_default,

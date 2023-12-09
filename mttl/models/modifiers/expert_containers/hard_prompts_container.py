@@ -74,7 +74,6 @@ class HardPromptDecoderWrapper(nn.Module):
 
 def add_hard_prompt_to_transformer(
     transformer,
-    expert_name,
     expert: Expert,
     action="route",
     is_default=False,
@@ -95,7 +94,6 @@ def add_hard_prompt_to_transformer(
         transformer = HardPromptDecoderWrapper(config, transformer, expert_container)
 
     transformer.add_expert(
-        expert_name,
         expert,
         expert_weights,
         action=action,
@@ -118,7 +116,6 @@ class HardPromptExpertContainer(ExpertContainer):
 
     def add_expert(
         self,
-        name: str,
         expert: Expert,
         expert_weights: Dict[str, torch.Tensor],
         action="route",
@@ -126,14 +123,16 @@ class HardPromptExpertContainer(ExpertContainer):
     ) -> None:
         from mttl.models.modifiers.modify_model import get_modifier_type
 
-        if name in self.experts:
-            raise ValueError("An expert with name {} already exists.".format(name))
+        if expert.name in self.experts:
+            raise ValueError(
+                "An expert with name {} already exists.".format(expert.name)
+            )
 
         if action == "merge":
             raise ValueError("Merging is not supported for hard prompts.")
 
         if is_default:
-            self.default_expert_name = name
+            self.default_expert_name = expert.name
 
         if get_modifier_type(expert.expert_config) == "hard_prompt":
             expert_module = HardPrompt(expert.expert_config, prompt_init=expert_weights)
@@ -141,7 +140,7 @@ class HardPromptExpertContainer(ExpertContainer):
             raise NotImplementedError("Not implemented for this modifier.")
 
         self.experts[expert.name] = expert_module
-        self.add_expert_to_selector(name)
+        self.add_expert_to_selector(expert.name)
 
     def route(self, input_ids, selection, attention_mask=None, labels=None):
         if isinstance(selection, ModulesSelectorOutput):
