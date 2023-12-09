@@ -166,6 +166,8 @@ def train_classifier(args):
     )
     datamodule = FlatMultiTaskModule(config)
     module = SentenceTransformerClassifier(task_names=datamodule.task_names)
+    if args.ranker_path:
+        module = module.from_pretrained(args.ranker_path)
 
     # add model checkpoint
 
