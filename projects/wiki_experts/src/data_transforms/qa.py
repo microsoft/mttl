@@ -304,13 +304,13 @@ class MMLUICLSampler:
         self.use_options = use_options
 
     def sample(self, num_examples, subject):
-        dataset = self.dataset[subject].shuffle()
         examples = []
-        for i in range(num_examples):
-            example = dataset[i]["input"]
+        indices = np.random.choice(len(self.dataset), size=num_examples, replace=False)
+        for idx in indices:
+            example = self.dataset[subject][idx]["input"]
             if self.use_options:
                 for ans_option in ["A", "B", "C", "D"]:
-                    option = f"\n{ans_option}: " + dataset[i][ans_option]
+                    option = f"\n{ans_option}: " + self.dataset[idx][ans_option]
                     example += option
             examples.append(example)
         return examples
@@ -396,8 +396,8 @@ class QATransformModel(TransformModel):
                 answer_dataset = self.generate_answers_(
                     self._llm,
                     instruction_dataset,
+                    answ_filename,
                 )
-                dump_jsonl_dataset(answer_dataset, answ_filename)
             else:
                 answer_dataset = read_jsonl_dataset(answ_filename)
             prev_dataset = answer_dataset
@@ -482,6 +482,7 @@ class QATransformModel(TransformModel):
         self,
         llm: AutoEngine,
         dataset,
+        dump_filename,
     ):
         requests = []
         for instance in tqdm.tqdm(dataset):
@@ -501,16 +502,15 @@ class QATransformModel(TransformModel):
                 stream=True,
             )
         )
-        assert len(result.outputs) == len(requests)
 
         new_dataset = []
-        for entry, response, log_p, reason in zip(
-            dataset, result.outputs, result.cumulative_logprobs, result.finish_reason
-        ):
+        for entry, output_and_reason in zip(dataset, result):
+            response, finish_reason = output_and_reason
+
             import copy
 
             data = self.response_template.post_process_generation(response)
-            if reject_output(data["response"], reason):
+            if reject_output(data["response"], finish_reason):
                 continue
 
             # lets also avoid outputs that contains repetitions of the same sentence more than once
@@ -523,10 +523,10 @@ class QATransformModel(TransformModel):
                 {
                     "response": data["response"],
                     "author_response": str(llm.model_name),
-                    "normalized_cumul_logprob_response": log_p,
                 }
             )
             new_dataset.append(entry)
+            dump_jsonl_dataset(new_dataset, dump_filename)
 
         print("Created a new answer dataset of size:", len(new_dataset))
         return new_dataset
