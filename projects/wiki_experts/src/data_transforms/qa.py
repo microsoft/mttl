@@ -305,7 +305,9 @@ class MMLUICLSampler:
 
     def sample(self, num_examples, subject):
         examples = []
-        indices = np.random.choice(len(self.dataset), size=num_examples, replace=False)
+        indices = np.random.choice(
+            len(self.dataset[subject]), size=num_examples, replace=False
+        )
         for idx in indices:
             idx = int(idx)
             example = self.dataset[subject][idx]["input"]
