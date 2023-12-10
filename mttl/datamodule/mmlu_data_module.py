@@ -237,7 +237,7 @@ class MMLUDataModule(DefaultDataModule):
             model_family=self.config.model_family,
             for_generation=self.for_generation,
             task_to_id=self.task_to_id,
-            few_shot=self.config.few_shot,
+            few_shot=self.config.eval_mmlu_few_shot,
         )
 
     def setup_dataset(self, stage=None):

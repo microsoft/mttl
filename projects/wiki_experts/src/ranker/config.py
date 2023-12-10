@@ -7,6 +7,7 @@ class RankerConfig(ExpertConfig):
         # training expert
         self.ranker_model = "classifier"
         self.ranker_path = None
+        self.subsample = -1
 
     def post_init(self):
         if self.micro_batch_size is None:
