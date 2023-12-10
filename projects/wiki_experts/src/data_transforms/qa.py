@@ -313,7 +313,7 @@ class MMLUICLSampler:
                         f"\n{ans_option}: " + self.dataset[subject][idx][ans_option]
                     )
                     example += option
-            examples.append((example, self.dataset[subject][idx]["output"]))
+            examples.append((example, self.dataset[subject][idx]["target"]))
         return examples
 
 
