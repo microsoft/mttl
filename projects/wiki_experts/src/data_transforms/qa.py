@@ -145,6 +145,8 @@ class OAITemplate_Batched:
             return INVALID_RESPONSE
         if response[0] == "[" and response[-1] == "]":
             response = response[1:-1]
+        if response[-1] == ">":
+            response = response[:-1]
         if response[-1] in [";", ",", ":"]:
             response = response[:-1]
         if response[-1] not in [".", "?", "!"]:
@@ -157,8 +159,10 @@ class OAITemplate_Batched:
     @classmethod
     def clean_instruction(cls, instruction):
         instruction = instruction.strip()
-        if not instruction:
+        if len(instruction) < 2:
             return INVALID_RESPONSE
+        if instruction[0] == "<":
+            instruction = instruction[1:]
         if instruction[0] == "[" and instruction[-1] == "]":
             instruction = instruction[1:-1]
         if instruction[-1] in [";", ",", ":"]:
@@ -288,7 +292,13 @@ class QATransformConfig(TransformConfig):
 
 
 class MMLUICLSampler:
-    def __init__(self, dataset="lukaemon/mmlu", split="validation", use_options=True):
+    def __init__(
+        self,
+        dataset="lukaemon/mmlu",
+        split="validation",
+        use_options=True,
+        use_target=True,
+    ):
         from datasets import get_dataset_config_names
 
         subject_names = get_dataset_config_names(dataset)
@@ -298,6 +308,7 @@ class MMLUICLSampler:
         for subject in subject_names:
             self.dataset[subject] = load_dataset(dataset, subject, split=split)
         self.use_options = use_options
+        self.use_target = use_target
 
     def sample(self, num_examples, subject):
         examples = []
@@ -313,7 +324,9 @@ class MMLUICLSampler:
                         f"\n{ans_option}: " + self.dataset[subject][idx][ans_option]
                     )
                     example += option
-            examples.append((example, self.dataset[subject][idx]["target"]))
+                if self.use_target:
+                    example += f"\n### Response: {self.dataset[subject][idx]['target']}"
+            examples.append(example)
         return examples
 
 
@@ -545,6 +558,7 @@ class QATransformModel(TransformModel):
         print("Filtering subjects:", filter_subject)
 
         pbar = tqdm.tqdm(filter_subject)
+
         for subject in pbar:
             subject_data = dataset[dataset["subject"] == subject]
             subject_data.sort_values(by="dfq", ascending=False, inplace=True)
