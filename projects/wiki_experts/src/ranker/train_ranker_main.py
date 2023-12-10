@@ -114,6 +114,9 @@ def train_clip(args):
     task_names.append("default")
     model = CLIPRanker(task_names=task_names)
 
+    if args.ranker_path:
+        model = CLIPRanker.from_pretrained(args.ranker_path)
+
     # add model checkpoint
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
         monitor="val/loss_epoch",
@@ -186,6 +189,7 @@ def train_classifier(args):
         callbacks=[checkpoint_callback],
         devices=1,
         logger=wandb_logger,
+        val_check_interval=0.25,
     )
     trainer.fit(module, datamodule)
     if wandb_logger:

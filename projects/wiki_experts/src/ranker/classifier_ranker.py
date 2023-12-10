@@ -23,7 +23,7 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
         transformer_embed_dim=384,
         **kwargs,
     ):
-        EfficientCheckpointModule.__init__(self, **kwargs)
+        super().__init__(**kwargs)
 
         self.text_encoder = self.text_encoder_init(requires_grad=False)
         self.ids_to_tasks_names = task_names
