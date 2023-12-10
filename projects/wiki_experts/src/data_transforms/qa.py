@@ -260,8 +260,8 @@ QA_MODEL_SETTINGS = {
         response_template=QAPlatyResponseGenerationTemplate(),
     ),
     "openai": QAModelSetting(
-        inverse_model_path="gpt-35-turbo-instruct",
-        model_path="gpt-35-turbo-instruct",
+        inverse_model_path="gpt-35-turbo",
+        model_path="gpt-35-turbo",
         instruction_template=OAITemplate(),
         response_template=OAITemplate(),
     ),
@@ -313,7 +313,9 @@ class MMLUICLSampler:
             example = self.dataset[subject][idx]["input"]
             if self.use_options:
                 for ans_option in ["A", "B", "C", "D"]:
-                    option = f"\n{ans_option}: " + self.dataset[idx][ans_option]
+                    option = (
+                        f"\n{ans_option}: " + self.dataset[subject][idx][ans_option]
+                    )
                     example += option
             examples.append(example)
         return examples
