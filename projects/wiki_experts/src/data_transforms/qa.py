@@ -93,6 +93,8 @@ class OAITemplate:
                 response = response[:-1]
             if response[-1] not in [".", "?", "!"]:
                 response[-1] += "."
+
+            data = {"instruction": instruction, "response": response}
         except:
             data = {"instruction": INVALID_RESPONSE, "response": INVALID_RESPONSE}
         return data
