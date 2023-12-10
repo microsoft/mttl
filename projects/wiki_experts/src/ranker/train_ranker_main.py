@@ -165,9 +165,10 @@ def train_classifier(args):
         finetune_task_name=args.finetune_task_name,
     )
     datamodule = FlatMultiTaskModule(config)
-    module = SentenceTransformerClassifier(task_names=datamodule.task_names)
     if args.ranker_path:
-        module = module.from_pretrained(args.ranker_path)
+        module = SentenceTransformerClassifier.from_pretrained(args.ranker_path)
+    else:
+        module = SentenceTransformerClassifier(task_names=datamodule.task_names)
 
     # add model checkpoint
 
@@ -185,6 +186,8 @@ def train_classifier(args):
         callbacks=[checkpoint_callback],
         devices=1,
         logger=wandb_logger,
+        limit_train_batches=10,
+        limit_val_batches=10,
     )
     trainer.fit(module, datamodule)
     if wandb_logger:
