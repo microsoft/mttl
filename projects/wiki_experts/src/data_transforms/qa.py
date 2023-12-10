@@ -67,6 +67,7 @@ class OAITemplate:
         try:
             if "### Response:" in output:
                 instruction, _, response = output.split("### Response:")
+                instruction = instruction.split("### Instruction:")[1]
                 instruction = instruction.strip()
                 response = response.strip()
             else:
@@ -106,13 +107,12 @@ Your instruction must be complete, in the sense that it must not need to have ac
                 task_description += f"\n\n### Response:\n{icl_output}"
             task_description += "\n\n"
 
-        task_description += "Remember, your should generate one instruction reponse pair.\
+        task_description += "This is the context.\n\n## Context:\n" + context
+
+        task_description += "\n\nRemember, your should generate one instruction reponse pair. \
 Format your output as follows:\
 \n\n### Instruction:\n<your instruction>\
 \n\n### Response:\n<your response>"
-
-        task_description += "\n\n## Context:\n" + context
-        task_description += "\n\n## Instruction:\n"
         return task_description
 
 
@@ -544,16 +544,15 @@ class QATransformModel(TransformModel):
 
         print("Filtering subjects:", filter_subject)
 
-        for subject in filter_subject:
+        pbar = tqdm.tqdm(filter_subject)
+        for subject in pbar:
             subject_data = dataset[dataset["subject"] == subject]
             subject_data.sort_values(by="dfq", ascending=False, inplace=True)
 
             subject_contexts = []
             num_contexts_per_doc = [0]
 
-            for i in tqdm.tqdm(
-                range(len(subject_data)), desc=f"Processing {subject}..."
-            ):
+            for i in range(len(subject_data)):
                 document = subject_data.iloc[i]
                 text = document["text"]
 
@@ -611,11 +610,8 @@ class QATransformModel(TransformModel):
                     )
                     break
 
-            print(
-                "Contexts per document (Avg/Min/Max):",
-                np.mean(num_contexts_per_doc),
-                np.min(num_contexts_per_doc),
-                np.max(num_contexts_per_doc),
+            pbar.set_description_str(
+                f"Subject: {subject}, Contexts: {len(subject_contexts)}..."
             )
 
             for context in subject_contexts:
