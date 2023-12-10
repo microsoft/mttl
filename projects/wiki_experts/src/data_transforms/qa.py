@@ -146,8 +146,6 @@ class OAITemplate_Batched:
             return INVALID_RESPONSE
         if response[0] == "[" and response[-1] == "]":
             response = response[1:-1]
-        if response[-1] == ">":
-            response = response[:-1]
         if response[-1] in [";", ",", ":"]:
             response = response[:-1]
         if response[-1] not in [".", "?", "!"]:
@@ -160,10 +158,8 @@ class OAITemplate_Batched:
     @classmethod
     def clean_instruction(cls, instruction):
         instruction = instruction.strip()
-        if len(instruction) < 2:
+        if not instruction:
             return INVALID_RESPONSE
-        if instruction[0] == "<":
-            instruction = instruction[1:]
         if instruction[0] == "[" and instruction[-1] == "]":
             instruction = instruction[1:-1]
         if instruction[-1] in [";", ",", ":"]:
@@ -232,26 +228,13 @@ class OAITemplate_Batched:
             task_description += f"\n10. Strive to match the style, tone, and length of these examples of good instructions:\n"
             for icl_example in icl_examples:
                 task_description += f"\n### Instruction:\n{icl_example['instruction']}"
-
+                task_description += f"\n{icl_example['options']}"
             task_description += "\n\n"
 
         task_description += f"Output format: please format your generated instructions and responses as a list, where each pair of instruction and response is enclosed in angle brackets < and >, and formated as: < ### Instruction: [generated instruction], ### Response: [response] >.\
             \nPlease follow these guidelines carefully when generating instructions and responses. Your role is vital in maintaining high standards of communication effectiveness."
         task_description += "\nYour output in the required format:"
         return task_description
-
-
-@dataclass
-class ICLExample:
-    instruction: str
-    options: str
-    response: str
-
-    def __repr__(self):
-        return f"{self.instruction}\nOptions:\n{self.options}\nAnswer:\n{self.response}"
-
-    def __str__(self):
-        return self.__repr__()
 
 
 class OAITemplate_Batched_MultiChoice:
