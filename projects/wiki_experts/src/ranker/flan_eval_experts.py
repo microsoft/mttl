@@ -1,14 +1,23 @@
 import os
 import sys
 from pytorch_lightning import seed_everything
-from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
+from mttl.datamodule.mt_seq_to_seq_module import (
+    FlanModule,
+    FlanConfig,
+    FlatMultiTaskConfig,
+    FlatMultiTaskModule,
+)
+
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from mttl.utils import setup_logging, logger
 
 # register models
-from projects.wiki_experts.src.expert_model import MultiExpertModelRanker
+from projects.wiki_experts.src.expert_model import (
+    MultiExpertModelRanker,
+    MultiExpertModel,
+)
 from projects.wiki_experts.src.config import ExpertConfig
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
 
@@ -78,8 +87,9 @@ def run_eval(args):
     logger.info("Args: {}".format(args.to_json()))
 
     # add FlanEvaluator
-    data_module = FlanModule(
-        FlanConfig(
+
+    data_module = FlatMultiTaskModule(
+        FlatMultiTaskConfig(
             dataset=args.dataset,
             model=args.model,
             finetune_task_name=args.finetune_task_name,
@@ -90,12 +100,17 @@ def run_eval(args):
 
     evaluator = RougeEvaluator(data_module)
     # load module
-
-    module = MultiExpertModelRanker(
-        **vars(args),
-        tokenizer=data_module.tokenizer,
-    )
-    if args.expert_library_path:
+    if args.ranker_model:
+        module = MultiExpertModelRanker(
+            **vars(args),
+            tokenizer=data_module.tokenizer,
+        )
+    else:
+        module = MultiExpertModel(
+            **vars(args),
+            tokenizer=data_module.tokenizer,
+        )
+    if args.hf_lib_id:
         library = HFExpertLibrary(args.expert_library_path)
         module.load_from_library(library)
     elif args.load_module is not None:
@@ -107,11 +122,7 @@ def run_eval(args):
 
     module.to("cuda")
     # evaluate all the category
-    rouge = evaluator.evaluate(module, split="test", verbose=False)
-
-    if args.routing == "retrieval":
-        accuracy = module.get_retrieval_accuracy(data_module.val_dataloader())
-        logger.info("Accuracy: {}".format(accuracy))
+    rouge = evaluator.evaluate(module, split="test", verbose=False, subsample=100)
     logger.info("Flan rouge: {}".format(rouge))
     del module
 
