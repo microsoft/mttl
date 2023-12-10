@@ -111,7 +111,7 @@ def run_eval(args):
             tokenizer=data_module.tokenizer,
         )
     if args.hf_lib_id:
-        library = HFExpertLibrary(args.expert_library_path)
+        library = HFExpertLibrary(args.hf_lib_id)
         module.load_from_library(library)
     elif args.load_module is not None:
         kwargs = parse_experts_to_load(args.load_module)
