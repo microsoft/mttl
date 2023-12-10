@@ -1,5 +1,6 @@
 from abc import abstractproperty
-from typing import Dict, List
+from dataclasses import dataclass
+from typing import Dict, List, Union
 from pyparsing import abstractmethod
 import torch
 import math
@@ -7,7 +8,6 @@ from torch import nn
 import torch.nn.functional as F
 
 from mttl.utils import logger
-from mttl.models.modifiers.expert_containers.module_graph import ExpertConfig
 
 
 MULTI_EXPERT_ROUTERS = {}
@@ -29,6 +29,28 @@ def register_multi_expert_selector(name):
     return _thunk
 
 
+@dataclass
+class SelectorOutput:
+    pass
+
+
+@dataclass
+class ModulesAndWeightsSelectorOutput(SelectorOutput):
+    modules: List[str]
+    weights: Union[List[float], torch.Tensor]
+
+
+@dataclass
+class BatchModulesAndWeightsSelectorOutput(SelectorOutput):
+    modules: List[List[str]]
+    weights: Union[List[List[float]], torch.Tensor]
+
+
+@dataclass
+class ModulesSelectorOutput(SelectorOutput):
+    modules: List[str]
+
+
 class Selector(nn.Module):
     def __init__(self, config, info_container, **kwargs):
         super().__init__()
@@ -38,7 +60,7 @@ class Selector(nn.Module):
         self.expert_names = []
 
     @abstractmethod
-    def forward(self, container, input, **kwargs) -> list:
+    def forward(self, input, **kwargs) -> SelectorOutput:
         pass
 
     def get_merged_weights(self, container, **selector_kwargs) -> Dict:
@@ -51,73 +73,6 @@ class Selector(nn.Module):
     @abstractmethod
     def add_expert(self, expert_name: str, **kwargs):
         pass
-
-
-def no_merge_op(container, input, names):
-    from mttl.models.modifiers.expert_containers.expert_containers import (
-        LoRAExpertContainer,
-        KVExpertContainer,
-    )
-    from mttl.models.modifiers.expert_containers.hard_prompts_container import (
-        HardPromptExpertContainer,
-    )
-
-    if type(container) == LoRAExpertContainer:
-        from mttl.models.modifiers.lora import LoRA
-
-        return LoRA.parallel_linear_forward(
-            input, [container.get(name) for name in names]
-        )
-    else:
-        raise NotImplementedError()
-
-
-def linear_merge(container, input, names, weights):
-    from mttl.models.modifiers.expert_containers.expert_containers import (
-        LoRAExpertContainer,
-        KVExpertContainer,
-    )
-    from mttl.models.modifiers.expert_containers.hard_prompts_container import (
-        HardPromptExpertContainer,
-    )
-
-    if type(container) == LoRAExpertContainer:
-        from mttl.models.modifiers.lora import SkilledLoRA, SkilledLoRAView
-
-        skilled_lora = SkilledLoRAView.from_loras(
-            [container.get(expert_name) for expert_name in names]
-        )
-        return SkilledLoRA.parallel_linear_weighted_forward(
-            input, [skilled_lora], [weights]
-        )
-    else:
-        raise NotImplementedError()
-
-
-def skilled_linear_merge(
-    container, input, names: List[List[str]], weights: List[List[float]]
-):
-    from mttl.models.modifiers.expert_containers.expert_containers import (
-        LoRAExpertContainer,
-        KVExpertContainer,
-    )
-    from mttl.models.modifiers.expert_containers.hard_prompts_container import (
-        HardPromptExpertContainer,
-    )
-
-    if type(container) == LoRAExpertContainer:
-        from mttl.models.modifiers.lora import SkilledLoRA, SkilledLoRAView
-
-        skilled_loras = [
-            SkilledLoRAView.from_loras([container.get(x_name) for x_name in b_names])
-            for b_names in names
-        ]
-        weights = [torch.tensor(x_weights) for x_weights in weights]
-        return SkilledLoRA.parallel_linear_weighted_forward(
-            input, skilled_loras, weights
-        )
-    else:
-        raise NotImplementedError()
 
 
 @register_multi_expert_selector("poly_router")
@@ -136,8 +91,10 @@ class PolySelector(Selector):
         module_weights = module_logits / (module_logits.sum(dim=-1, keepdim=True) + EPS)
         return module_weights
 
-    def forward(self, container, input, *args, **kwargs):
-        return linear_merge(container, input, self.expert_names, self._get_weights())
+    def forward(self, input, **kwargs) -> ModulesAndWeightsSelectorOutput:
+        weights = self._get_weights()
+        modules = self.expert_names
+        return ModulesAndWeightsSelectorOutput(modules, weights)
 
     def get_merged_weights(self, container, **selector_kwargs) -> Dict:
         """Return the merged weights for the experts in the container."""
@@ -181,7 +138,7 @@ class PolySelectorDirect(PolySelector):
         self.module_logits = nn.ParameterDict()
 
     def _get_weights(self):
-        weights = [self.module_logits[k] for k in self.expert_names]
+        weights = torch.tensor([self.module_logits[k] for k in self.expert_names])
         return weights
 
     def add_expert(self, expert_name: str, expert_task_name: str, **kwargs):
@@ -214,7 +171,7 @@ class RoutingInfosContainerSelector(Selector):
 
         self.default_expert_name = None
 
-    def forward(self, container, input, *args, **kwargs):
+    def forward(self, input, **kwargs) -> BatchModulesAndWeightsSelectorOutput:
         # try to infer batch size
         if "routing_infos" not in self.info_container:
             raise ValueError("routing_infos not in info_container")
@@ -224,8 +181,7 @@ class RoutingInfosContainerSelector(Selector):
 
         routing_mods = self.info_container["routing_infos"].routing_modules
         routing_weights = self.info_container["routing_infos"].routing_weights
-
-        return skilled_linear_merge(container, input, routing_mods, routing_weights)
+        return BatchModulesAndWeightsSelectorOutput(routing_mods, routing_weights)
 
 
 @register_multi_expert_selector("task_selector")
@@ -235,15 +191,13 @@ class TaskNameSelector(Selector):
 
         self.default_expert_name = None
 
-    def forward(self, container, input, *args, **kwargs):
+    def forward(self, input, **kwargs) -> ModulesSelectorOutput:
         # try to infer batch size
         if "routing_infos" not in self.info_container:
             if "input_ids" in kwargs:
                 batch_size = kwargs["input_ids"].size(0)
             else:
-                raise ValueError(
-                    "routing_infos not in info_container and cannot infer batch size."
-                )
+                batch_size = input.shape[0]
 
             if not self.default_expert_name:
                 raise ValueError("No default expert name set and no task names given!")
@@ -261,7 +215,7 @@ class TaskNameSelector(Selector):
                     "Experts for all tasks have not been loaded! Set a default expert?"
                 )
             modules = task_names
-        return no_merge_op(container, input, modules)
+        return ModulesSelectorOutput(modules)
 
     def add_expert(self, expert_name: str, **kwargs):
         # here we experts based on their name, which can be different from the task name

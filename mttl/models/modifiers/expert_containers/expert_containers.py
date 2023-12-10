@@ -15,9 +15,7 @@ class ExpertContainer:
     @abstractmethod
     def add_expert(
         self,
-        name: str,
-        expert_config: Any,
-        expert_weights: Dict[str, torch.Tensor],
+        expert: Expert,
         action="merge",
         is_default=False,
     ) -> None:
@@ -71,17 +69,22 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
 
     def add_expert(
         self,
-        name,
         expert: Expert,
-        expert_weights,
         action="merge",
         is_default=False,
     ) -> None:
+        from mttl.models.modifiers.expert_containers import filter_expert_weights
+
         expert_config = expert.expert_config
         expert_task_name = expert.expert_info.expert_task_name
+        expert_weights = filter_expert_weights(
+            self.__layer_name__, expert.expert_weights
+        )
 
-        if name in self.experts:
-            raise ValueError("An expert with name {} already exists.".format(name))
+        if expert.name in self.experts:
+            raise ValueError(
+                "An expert with name {} already exists.".format(expert.name)
+            )
 
         if is_default and action == "merge":
             raise ValueError(
@@ -99,19 +102,21 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
             # weight is merged with layer so we can discard it now
             if expert_config.model_modifier == "lora":
                 expert_module.merge_with_layer()
-                self.merged_expert_names.append(name)
+                self.merged_expert_names.append(expert.name)
             else:
                 raise NotImplementedError("Merging experts only supports LoRA experts.")
         else:
             # we keep track of the expert weights
-            if name in self.experts:
-                raise ValueError("An expert with name {} already exists.".format(name))
-            self.experts[name] = expert_module
+            if expert.name in self.experts:
+                raise ValueError(
+                    "An expert with name {} already exists.".format(expert.name)
+                )
+            self.experts[expert.name] = expert_module
 
         if is_default:
-            self.default_expert_name = name
+            self.default_expert_name = expert.name
 
-        self.add_expert_to_selector(name, expert_task_name=expert_task_name)
+        self.add_expert_to_selector(expert.name, expert_task_name=expert_task_name)
 
     def get_merged_weights(self, with_global_names=True, **merger_kwargs):
         """
@@ -133,9 +138,35 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         self.merged_expert_names.extend(self.experts)
         self.experts.clear()
 
+    def route(self, input, selection, **kwargs):
+        """Depending on the selection output, we and merge differently."""
+        from mttl.models.modifiers.lora import SkilledLoRA, SkilledLoRAView
+
+        if isinstance(selection, BatchModulesAndWeightsSelectorOutput):
+            skilled_loras = [
+                SkilledLoRAView.from_loras([self.get(x_name) for x_name in b_modules])
+                for b_modules in selection.modules
+            ]
+            weights = [torch.tensor(x_weights) for x_weights in selection.weights]
+            return SkilledLoRA.parallel_linear_weighted_forward(
+                input, skilled_loras, weights
+            )
+        elif isinstance(selection, ModulesAndWeightsSelectorOutput):
+            skilled_lora = SkilledLoRAView.from_loras(
+                [self.get(module) for module in selection.modules]
+            )
+            return SkilledLoRA.parallel_linear_weighted_forward(
+                input, [skilled_lora], [selection.weights]
+            )
+        elif isinstance(selection, ModulesSelectorOutput):
+            return LoRA.parallel_linear_forward(
+                input, [self.get(module) for module in selection.modules]
+            )
+
     def forward(self, input, **kwargs):
         if len(self.experts) > 0:
-            return self.selector(self, input, **kwargs)
+            selection = self.selector(input, **kwargs)
+            return self.route(input, selection, **kwargs)
         return self.layer(input)
 
 
@@ -195,17 +226,22 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
 
     def add_expert(
         self,
-        name,
         expert: Expert,
-        expert_weights,
         action="route",
         is_default=False,
         **kwargs,
     ) -> None:
-        expert_config = expert.expert_config
+        from mttl.models.modifiers.expert_containers import filter_expert_weights
 
-        if name in self.experts:
-            raise ValueError("An expert with name {} already exists.".format(name))
+        expert_config = expert.expert_config
+        expert_weights = filter_expert_weights(
+            self.__layer_name__, expert.expert_weights
+        )
+
+        if expert.name in self.experts:
+            raise ValueError(
+                "An expert with name {} already exists.".format(expert.name)
+            )
 
         if action == "merge":
             raise ValueError("Merging is not supported for `KVAdapters`.")
@@ -213,9 +249,9 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
         expert_module = KVAdapter(expert_config, self.attn_layer)
         expert_module.load_adapter_weights(expert_weights)
 
-        self.experts[name] = expert_module
+        self.experts[expert.name] = expert_module
 
         if is_default:
-            self.default_expert_name = name
+            self.default_expert_name = expert.name
 
-        self.add_expert_to_selector(name)
+        self.add_expert_to_selector(expert.name)

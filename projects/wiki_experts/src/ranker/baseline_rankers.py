@@ -138,6 +138,9 @@ class KATERanker(AdapterRanker):
         self.index.add(self.train_features)
         self.task_names = list(self.dataset["task_name"])
 
+    def set_available_tasks(self, available_tasks):
+        self.available_tasks = available_tasks
+
     def predict_batch(self, batch, n=1):
         query = self.embedder.encode(
             batch["sources_texts"], show_progress_bar=False, device="cuda:0"
@@ -147,6 +150,11 @@ class KATERanker(AdapterRanker):
 
         for _, idxs in enumerate(indices):
             task_names = [self.task_names[int(idx)] for idx in idxs]
+            task_names = [
+                task_name
+                for task_name in task_names
+                if task_name in self.available_tasks
+            ]
             top_selected = Counter(task_names).most_common(n)
             top_tasks.append([x[0] for x in top_selected])
             top_weights.append([x[1] for x in top_selected])
@@ -158,8 +166,11 @@ class KATERanker(AdapterRanker):
     def predict_task(self, query, n=1):
         query = self.embedder.encode([query], show_progress_bar=False, device="cuda:0")
         _, indices = self.index.search(query, 1000)
-        results = [self.task_names[int(i)] for i in indices[0]]
-        top_selected = Counter(results).most_common(n)
+        task_names = [self.task_names[int(i)] for i in indices[0]]
+        task_names = [
+            task_name for task_name in task_names if task_name in self.available_tasks
+        ]
+        top_selected = Counter(task_names).most_common(n)
         tasks = [x[0] for x in top_selected]
         weights = [x[1] for x in top_selected]
         return tasks, weights

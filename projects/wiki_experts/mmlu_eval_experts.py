@@ -3,6 +3,8 @@ import sys
 from huggingface_hub import login
 from pytorch_lightning import seed_everything
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.models.modifiers.expert_containers.module_graph import Expert, ExpertInfo
+from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -110,6 +112,7 @@ def run_eval(args):
         max_input_length=args.max_input_length,
         finetune_task_name=args.finetune_task_name,
         few_shot=args.eval_mmlu_few_shot,
+        predict_batch_size=args.predict_batch_size,
     )
     mmlu = MMLUEvaluator(config)
 
@@ -135,6 +138,18 @@ def run_eval(args):
     elif library is not None:
         if not args.baseline:
             module.load_from_library(library, args.subsample_library_experts)
+
+    if args.mmlu_use_hard_prompt:
+        config = HardPromptConfig(
+            max_input_length=args.max_input_length,
+            model_family=args.model_family,
+            tokenizer=module.tokenizer,
+        )
+        expert = Expert(
+            expert_info=ExpertInfo("hard_prompt", expert_config=config),
+            expert_weights=args.mmlu_use_hard_prompt,
+        )
+        module.add_expert_instance(expert, action="route", is_default=True)
 
     module.to("cuda")
     scores = mmlu.evaluate(

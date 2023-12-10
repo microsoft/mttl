@@ -1,9 +1,10 @@
+from collections import defaultdict
 from dataclasses import dataclass
 import numpy as np
 import os
+
 from datasets import load_dataset
 import tqdm
-import json
 import re
 
 from mttl.dataloader.platypus_dataset_reader import (
@@ -65,41 +66,54 @@ class OAITemplate:
     @classmethod
     def post_process_generation(cls, output):
         try:
-            if "Response:" in output:
-                response = output.split("Response:")[1].strip()
+            if "### Response:" in output:
+                instruction, _, response = output.split("### Response:")
+                instruction = instruction.split("### Instruction:")[1]
+                instruction = instruction.strip()
+                response = response.strip()
             else:
                 raise
 
-            instruction = output.split("Response:")[0]
-            if "Instruction:" in instruction:
-                instruction = instruction.split("Instruction:")[1].strip()
-                data = {
-                    "instruction": instruction.replace("#", ""),
-                    "response": response.replace("#", ""),
-                }
-            else:
+            if not instruction or not response:
                 raise
+
+            # this is very likely an instruction
+            if response.startswith("Please"):
+                raise
+
+            if instruction[-1] in [";", ",", ":"]:
+                instruction = instruction[:-1]
+            if instruction[-1] not in [".", "?", "!"]:
+                instruction += "."
+            if response[-1] in [";", ",", ":"]:
+                response = response[:-1]
+            if response[-1] not in [".", "?", "!"]:
+                response[-1] += "."
+
+            data = {"instruction": instruction, "response": response}
         except:
             data = {"instruction": INVALID_RESPONSE, "response": INVALID_RESPONSE}
         return data
 
     @classmethod
     def apply(cls, context, output, icl_examples=None, **kwargs):
-        task_description = "\nYour task is to generate a clear, comprehensive and context-independent instruction that can be followed without relying on external information."
+        task_description = "Your task is to generate a clear instruction and corresponding response. To formulate your instruction, you will be given a context.\
+Please use the context to formulate an instruction that is clear and comprehensive.\
+Your instruction must be complete, in the sense that it must not need to have access to the context in order to be followed."
+
         if icl_examples is not None:
-            task_description += f"\n\n Here are examples of some good, strive to match the style, tone, and length of these examples:\n"
-            for icl_example in icl_examples:
-                task_description += f"\n### Instruction:\n{icl_example}"
+            task_description += f"\nHere are examples of some good instructions and responses formulated under different contexts. Strive to match the style, tone, and length of these examples:\n"
+            for icl_input, icl_output in icl_examples:
+                task_description += f"\n\n### Instruction:\n{icl_input}"
+                task_description += f"\n\n### Response:\n{icl_output}"
             task_description += "\n\n"
 
-        task_description += (
-            "\n\nYour instruction should be grounded in the follwoing context:"
-        )
-        task_description += f"\n\n{context}"
-        task_description += "\Also provide a concise response to the generated instruction.\
-            \nRemember, your should generate one instruction reponse pair. Your instruction should be clear and comprehensive and should be suitable for the given context. Your instruction must be complete, meaning that is must contain all the neccessary context to follow.\
-            \nPlease follow these guidelines when generating instructions and answers. Your role is vital in maintaining high standards of communication effectiveness.\
-            \nFormat your ourput as follows: ### Instruction: <your instruction> ### Response: <your response>."
+        task_description += "This is the context.\n\n## Context:\n" + context
+
+        task_description += "\n\nRemember, your should generate one instruction reponse pair. \
+Format your output as follows:\
+\n\n### Instruction:\n<your instruction>\
+\n\n### Response:\n<your response>"
         return task_description
 
 
@@ -213,13 +227,91 @@ class OAITemplate_Batched:
         if icl_examples is not None:
             task_description += f"\n10. Strive to match the style, tone, and length of these examples of good instructions:\n"
             for icl_example in icl_examples:
-                task_description += f"\n### Instruction:\n{icl_example}"
-
+                task_description += f"\n### Instruction:\n{icl_example['instruction']}"
+                task_description += f"\n{icl_example['options']}"
             task_description += "\n\n"
 
         task_description += f"Output format: please format your generated instructions and responses as a list, where each pair of instruction and response is enclosed in angle brackets < and >, and formated as: < ### Instruction: [generated instruction], ### Response: [response] >.\
             \nPlease follow these guidelines carefully when generating instructions and responses. Your role is vital in maintaining high standards of communication effectiveness."
         task_description += "\nYour output in the required format:"
+        return task_description
+
+
+class OAITemplate_Batched_MultiChoice:
+    @classmethod
+    def post_process_generation(cls, generated_output):
+        # Regular expression pattern to split the string into problem, options, and response
+        pattern = r"### Problem:\s*(.*?)\s*### Options:\s*(.*?)\s*### Response:\s*(.*?)\s*(?=##|$)"
+
+        # Find all matches in the input string
+        matches = re.findall(pattern, generated_output, re.DOTALL)
+
+        data = []
+        for match in matches:
+            if not len(match) == 3:
+                # skipping item
+                continue
+
+            instruction = match[0].strip()
+            options = match[1].strip()
+            response = match[2].strip()
+
+            if not instruction or not options or not response:
+                # skipping item
+                continue
+
+            options_split = re.split(r"\s*[A-D]\.\s*", options)
+            if not len(options_split) == 5:
+                # skipping item
+                continue
+
+            instruction = (
+                "Question:\n{instruction}\nChoices:\n{options}\nAnswer:".format(
+                    instruction=instruction, options=options
+                )
+            )
+            data.append({"instruction": instruction, "response": response})
+        return data
+
+    @classmethod
+    def apply(cls, context, output, domain, icl_examples=None):
+        domain = domain.replace("_", " ")
+        batch_size = "five"
+        task_description = f"""Your task is to come up with a set of {batch_size} diverse multiple-choice problems, each with their answer options and ground-truth response about the following domain: {domain}.
+
+Please stick to the following format for your output:
+
+## Example [number of the example]
+### Problem:
+[your generated problem]
+
+### Options:
+A. [your first generated options]
+B. [your second generated options]
+C. [your third generated options]
+D. [your fourth generated options]
+
+### Response:
+[the correct response, which should be A., B., C. or D.]
+
+For example:
+
+## Example 1
+### Problem:
+{icl_examples[0]['instruction']}
+
+### Options:
+{icl_examples[0]['options']}
+
+### Response:
+{icl_examples[0]['response']}
+
+You can take inspiration from the following context to generate your questions:
+
+{context}
+
+Now generate {batch_size} diverse problems with their options and responses. Please follow these guidelines carefully when generating problems and responses:
+"""
         return task_description
 
 
@@ -254,6 +346,12 @@ QA_MODEL_SETTINGS = {
         instruction_template=OAITemplate_Batched(),
         response_template=OAITemplate_Batched(),
     ),
+    "openai_batched_multichoice": QAModelSetting(
+        inverse_model_path="gpt-35-turbo",
+        model_path="gpt-35-turbo",
+        instruction_template=OAITemplate_Batched_MultiChoice(),
+        response_template=OAITemplate_Batched_MultiChoice(),
+    ),
 }
 
 
@@ -275,26 +373,40 @@ class QATransformConfig(TransformConfig):
 
 
 class MMLUICLSampler:
-    def __init__(self, dataset="lukaemon/mmlu", split="validation", use_options=True):
-        from datasets import get_dataset_config_names
-
-        subject_names = get_dataset_config_names(dataset)
+    def __init__(
+        self,
+        dataset="lukaemon/mmlu",
+        split="validation",
+        use_options=True,
+    ):
         logger.info("Creating MMLU ICL Sampler...")
 
-        self.dataset = {}
-        for subject in subject_names:
-            self.dataset[subject] = load_dataset(dataset, subject, split=split)
+        self.dataset = dataset
+        self.split = split
         self.use_options = use_options
+        self._cache_dataset = defaultdict(lambda: None)
 
     def sample(self, num_examples, subject):
-        dataset = self.dataset[subject].shuffle()
         examples = []
-        for i in range(num_examples):
-            example = dataset[i]["input"]
-            if self.use_options:
-                for ans_option in ["A", "B", "C", "D"]:
-                    option = f"\n{ans_option}: " + dataset[i][ans_option]
-                    example += option
+        if subject not in self._cache_dataset:
+            dataset = load_dataset(self.dataset, subject, split=self.split)
+            self._cache_dataset[subject] = dataset
+        else:
+            dataset = self._cache_dataset[subject]
+
+        indices = np.random.choice(len(dataset), size=num_examples, replace=False)
+        for idx in indices:
+            idx = int(idx)
+            example = dataset[idx]["input"]
+            options = ""
+            for ans_option in ["A", "B", "C", "D"]:
+                options += (f"{ans_option}. " + dataset[idx][ans_option]) + "\n"
+            options = options.strip()
+            example = {
+                "instruction": example,
+                "options": options,
+                "response": dataset[idx]["target"],
+            }
             examples.append(example)
         return examples
 
@@ -379,8 +491,8 @@ class QATransformModel(TransformModel):
                 answer_dataset = self.generate_answers_(
                     self._llm,
                     instruction_dataset,
+                    answ_filename,
                 )
-                dump_jsonl_dataset(answer_dataset, answ_filename)
             else:
                 answer_dataset = read_jsonl_dataset(answ_filename)
             prev_dataset = answer_dataset
@@ -424,6 +536,7 @@ class QATransformModel(TransformModel):
                 top_p=self.config.top_p,
                 temperature=self.config.temperature,
                 max_tokens=self.config.max_tokens_instruction,
+                stream=True,
             )
         )
 
@@ -435,6 +548,7 @@ class QATransformModel(TransformModel):
                 for d in data:
                     if reject_output(d["instruction"], finish_reason):
                         continue
+
                     copied_entry = copy.deepcopy(entry)
                     copied_entry.update(
                         {
@@ -455,6 +569,7 @@ class QATransformModel(TransformModel):
                 )
                 copied_entry.update(data)
                 new_dataset.append(copied_entry)
+
             dump_jsonl_dataset(new_dataset, dump_filename)
 
         print("Created a new instruction dataset of size:", len(new_dataset))
@@ -464,6 +579,7 @@ class QATransformModel(TransformModel):
         self,
         llm: AutoEngine,
         dataset,
+        dump_filename,
     ):
         requests = []
         for instance in tqdm.tqdm(dataset):
@@ -474,22 +590,24 @@ class QATransformModel(TransformModel):
                 )
             )
 
-        result = llm.generate(
-            requests,
-            top_p=self.config.top_p,
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens_response,
+        result = iter(
+            llm.generate(
+                requests,
+                top_p=self.config.top_p,
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens_response,
+                stream=True,
+            )
         )
-        assert len(result.outputs) == len(requests)
 
         new_dataset = []
-        for entry, response, log_p, reason in zip(
-            dataset, result.outputs, result.cumulative_logprobs, result.finish_reason
-        ):
+        for entry, output_and_reason in zip(dataset, result):
+            response, finish_reason = output_and_reason
+
             import copy
 
             data = self.response_template.post_process_generation(response)
-            if reject_output(data["response"], reason):
+            if reject_output(data["response"], finish_reason):
                 continue
 
             # lets also avoid outputs that contains repetitions of the same sentence more than once
@@ -502,10 +620,10 @@ class QATransformModel(TransformModel):
                 {
                     "response": data["response"],
                     "author_response": str(llm.model_name),
-                    "normalized_cumul_logprob_response": log_p,
                 }
             )
             new_dataset.append(entry)
+            dump_jsonl_dataset(new_dataset, dump_filename)
 
         print("Created a new answer dataset of size:", len(new_dataset))
         return new_dataset
@@ -518,20 +636,21 @@ class QATransformModel(TransformModel):
         converted_dataset = []
 
         if type(filter_subjects) == str:
-            filter_subject = getattr(mmlu_subject_configs, filter_subjects)
+            filter_subject = getattr(
+                mmlu_subject_configs, filter_subjects, filter_subjects.split(",")
+            )
 
         print("Filtering subjects:", filter_subject)
 
-        for subject in filter_subject:
+        pbar = tqdm.tqdm(filter_subject)
+
+        for subject in pbar:
             subject_data = dataset[dataset["subject"] == subject]
-            subject_data.sort_values(by="dfq", ascending=False, inplace=True)
+            subject_data = subject_data.sort_values(by="dfq", ascending=False)
 
             subject_contexts = []
             num_contexts_per_doc = [0]
-
-            for i in tqdm.tqdm(
-                range(len(subject_data)), desc=f"Processing {subject}..."
-            ):
+            for i in range(len(subject_data)):
                 document = subject_data.iloc[i]
                 text = document["text"]
 
@@ -570,10 +689,6 @@ class QATransformModel(TransformModel):
                     self.config.max_contexts_per_subject > 0
                     and len(subject_contexts) > self.config.max_contexts_per_subject
                 ):
-                    print(
-                        "Breaking early due to max_contexts_per_subject settings. ",
-                        len(subject_contexts),
-                    )
                     subject_contexts = subject_contexts[
                         : self.config.max_contexts_per_subject
                     ]
@@ -583,17 +698,10 @@ class QATransformModel(TransformModel):
                     self.config.max_documents_per_subject > 0
                     and i > self.config.max_documents_per_subject
                 ):
-                    print(
-                        "Breaking early due to max_documents_per_subject settings. ",
-                        len(subject_contexts),
-                    )
                     break
 
-            print(
-                "Contexts per document (Avg/Min/Max):",
-                np.mean(num_contexts_per_doc),
-                np.min(num_contexts_per_doc),
-                np.max(num_contexts_per_doc),
+            pbar.set_description_str(
+                f"Subject: {subject}, Contexts: {len(subject_contexts)}..."
             )
 
             for context in subject_contexts:
