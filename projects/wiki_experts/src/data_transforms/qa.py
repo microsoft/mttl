@@ -65,24 +65,18 @@ class OAITemplate:
     @classmethod
     def post_process_generation(cls, output):
         try:
-            if "Response:" in output:
-                response = output.split("Response:")[1].strip()
+            if "### Response:" in output:
+                instruction, _, response = output.split("### Response:")
+                instruction = instruction.strip()
+                response = response.strip()
             else:
                 raise
 
-            instruction = output.split("Response:")[0]
-            if "Instruction:" in instruction:
-                instruction = instruction.split("Instruction:")[1].strip()
-                instruction = instruction.replace("#", "").strip()
-                response = response.replace("#", "").strip()
-            else:
+            if not instruction or not response:
                 raise
 
             # this is very likely an instruction
             if response.startswith("Please"):
-                raise
-
-            if not instruction:
                 raise
 
             if instruction[-1] in [";", ",", ":"]:
@@ -101,24 +95,24 @@ class OAITemplate:
 
     @classmethod
     def apply(cls, context, output, icl_examples=None, **kwargs):
-        task_description = "\nYou will be given a context. Your task is to generate a clear, comprehensive and context-independent instruction that can be followed without relying on external information."
+        task_description = "Your task is to generate a clear instruction and corresponding response. To formulate your instruction, you will be given a context.\
+Please use the context to formulate an instruction that is clear and comprehensive.\
+Your instruction must be complete, in the sense that it must not need to have access to the context in order to be followed."
 
         if icl_examples is not None:
-            task_description += f"\nHere are examples of some good instructions formulated under different contexts. Strive to match the style, tone, and length of these examples:\n"
-            for icl_example in icl_examples:
-                task_description += f"\n\n### Instruction:\n{icl_example}"
+            task_description += f"\nHere are examples of some good instructions and responses formulated under different contexts. Strive to match the style, tone, and length of these examples:\n"
+            for icl_input, icl_output in icl_examples:
+                task_description += f"\n\n### Instruction:\n{icl_input}"
+                task_description += f"\n\n### Response:\n{icl_output}"
             task_description += "\n\n"
 
-        task_description += (
-            "\n\nYour instruction should be grounded in the following context:\n\n"
-        )
-        task_description += f"### Context:\n{context}"
-        task_description += "\n\nAlso provide a concise response to the generated instruction.\
- Remember, your should generate one instruction reponse pair.\
- Your instruction should be clear and comprehensive and should be suitable for the given context. Your instruction must be complete, in the sense that it must not need to have access to the context in order to be followed. Please follow these guidelines when generating instructions and answers.\
- Format your output as follows:\
+        task_description += "Remember, your should generate one instruction reponse pair.\
+Format your output as follows:\
 \n\n### Instruction:\n<your instruction>\
 \n\n### Response:\n<your response>"
+
+        task_description += "\n\n## Context:\n" + context
+        task_description += "\n\n## Instruction:\n"
         return task_description
 
 
@@ -319,7 +313,7 @@ class MMLUICLSampler:
                         f"\n{ans_option}: " + self.dataset[subject][idx][ans_option]
                     )
                     example += option
-            examples.append(example)
+            examples.append((example, self.dataset[subject][idx]["output"]))
         return examples
 
 
