@@ -110,13 +110,13 @@ class OAITemplate:
         task_description += (
             "\n\nYour instruction should be grounded in the following context:\n\n"
         )
-        task_description += f"### Context\n{context}"
+        task_description += f"### Context:\n{context}"
         task_description += "\n\nAlso provide a concise response to the generated instruction.\
  Remember, your should generate one instruction reponse pair.\
  Your instruction should be clear and comprehensive and should be suitable for the given context. Your instruction must be complete, in the sense that it must not need to have access to the context in order to be followed. Please follow these guidelines when generating instructions and answers.\
  Format your output as follows:\
-\n\n### Instruction\n<your instruction>\
-\n\n### Response\n<your response>"
+\n\n### Instruction:\n<your instruction>\
+\n\n### Response:\n<your response>"
         return task_description
 
 
@@ -260,8 +260,8 @@ QA_MODEL_SETTINGS = {
         response_template=QAPlatyResponseGenerationTemplate(),
     ),
     "openai": QAModelSetting(
-        inverse_model_path="gpt-35-turbo",
-        model_path="gpt-35-turbo",
+        inverse_model_path="gpt-35-turbo-instruct",
+        model_path="gpt-35-turbo-instruct",
         instruction_template=OAITemplate(),
         response_template=OAITemplate(),
     ),
@@ -307,6 +307,7 @@ class MMLUICLSampler:
         examples = []
         indices = np.random.choice(len(self.dataset), size=num_examples, replace=False)
         for idx in indices:
+            idx = int(idx)
             example = self.dataset[subject][idx]["input"]
             if self.use_options:
                 for ans_option in ["A", "B", "C", "D"]:
