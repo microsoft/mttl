@@ -2197,8 +2197,8 @@ def create_mmlu_platy():
                 continue
             if "https://" in example["response"]:
                 continue
-            if not example["response"].endswith("."):
-                example["response"] += "."
+            if not example["response"].strip().endswith("."):
+                example["response"] = example["response"].strip() + "."
             examples.append(
                 {
                     "source": example["instruction"].strip(),

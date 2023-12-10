@@ -73,33 +73,50 @@ class OAITemplate:
             instruction = output.split("Response:")[0]
             if "Instruction:" in instruction:
                 instruction = instruction.split("Instruction:")[1].strip()
-                data = {
-                    "instruction": instruction.replace("#", ""),
-                    "response": response.replace("#", ""),
-                }
+                instruction = instruction.replace("#", "").strip()
+                response = response.replace("#", "").strip()
             else:
                 raise
+
+            # this is very likely an instruction
+            if response.startswith("Please"):
+                raise
+
+            if not instruction:
+                raise
+
+            if instruction[-1] in [";", ",", ":"]:
+                instruction = instruction[:-1]
+            if instruction[-1] not in [".", "?", "!"]:
+                instruction += "."
+            if response[-1] in [";", ",", ":"]:
+                response = response[:-1]
+            if response[-1] not in [".", "?", "!"]:
+                response[-1] += "."
         except:
             data = {"instruction": INVALID_RESPONSE, "response": INVALID_RESPONSE}
         return data
 
     @classmethod
     def apply(cls, context, output, icl_examples=None, **kwargs):
-        task_description = "\nYour task is to generate a clear, comprehensive and context-independent instruction that can be followed without relying on external information."
+        task_description = "\nYou will be given a context. Your task is to generate a clear, comprehensive and context-independent instruction that can be followed without relying on external information."
+
         if icl_examples is not None:
-            task_description += f"\n\n Here are examples of some good, strive to match the style, tone, and length of these examples:\n"
+            task_description += f"\nHere are examples of some good instructions formulated under different contexts. Strive to match the style, tone, and length of these examples:\n"
             for icl_example in icl_examples:
-                task_description += f"\n### Instruction:\n{icl_example}"
+                task_description += f"\n\n### Instruction:\n{icl_example}"
             task_description += "\n\n"
 
         task_description += (
-            "\n\nYour instruction should be grounded in the follwoing context:"
+            "\n\nYour instruction should be grounded in the following context:\n\n"
         )
-        task_description += f"\n\n{context}"
-        task_description += "\Also provide a concise response to the generated instruction.\
-            \nRemember, your should generate one instruction reponse pair. Your instruction should be clear and comprehensive and should be suitable for the given context. Your instruction must be complete, meaning that is must contain all the neccessary context to follow.\
-            \nPlease follow these guidelines when generating instructions and answers. Your role is vital in maintaining high standards of communication effectiveness.\
-            \nFormat your ourput as follows: ### Instruction: <your instruction> ### Response: <your response>."
+        task_description += f"### Context\n{context}"
+        task_description += "\n\nAlso provide a concise response to the generated instruction.\
+ Remember, your should generate one instruction reponse pair.\
+ Your instruction should be clear and comprehensive and should be suitable for the given context. Your instruction must be complete, in the sense that it must not need to have access to the context in order to be followed. Please follow these guidelines when generating instructions and answers.\
+ Format your output as follows:\
+\n\n### Instruction\n<your instruction>\
+\n\n### Response\n<your response>"
         return task_description
 
 
@@ -424,6 +441,7 @@ class QATransformModel(TransformModel):
                 top_p=self.config.top_p,
                 temperature=self.config.temperature,
                 max_tokens=self.config.max_tokens_instruction,
+                stream=True,
             )
         )
 
@@ -474,11 +492,14 @@ class QATransformModel(TransformModel):
                 )
             )
 
-        result = llm.generate(
-            requests,
-            top_p=self.config.top_p,
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens_response,
+        result = iter(
+            llm.generate(
+                requests,
+                top_p=self.config.top_p,
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens_response,
+                stream=True,
+            )
         )
         assert len(result.outputs) == len(requests)
 
