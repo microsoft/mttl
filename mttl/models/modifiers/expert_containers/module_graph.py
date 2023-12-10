@@ -433,6 +433,10 @@ def load_expert(
                 "hyper_parameters"
             ]["finetune_task_name"]
 
+        # back-compatibility, we removed this
+        expert_info_data.pop("expert_embeddings", None)
+        expert_info_data.pop("expert_scores", None)
+
         expert_info = ExpertInfo(**expert_info_data)
         expert_weights = expert_checkpoint["state_dict"]
         expert_weights = {
