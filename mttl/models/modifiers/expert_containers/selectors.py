@@ -197,9 +197,7 @@ class TaskNameSelector(Selector):
             if "input_ids" in kwargs:
                 batch_size = kwargs["input_ids"].size(0)
             else:
-                raise ValueError(
-                    "routing_infos not in info_container and cannot infer batch size."
-                )
+                batch_size = input.shape[0]
 
             if not self.default_expert_name:
                 raise ValueError("No default expert name set and no task names given!")
