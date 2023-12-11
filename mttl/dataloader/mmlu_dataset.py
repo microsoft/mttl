@@ -26,6 +26,9 @@ _URL = "data.tar"
 
 
 choices = ["A", "B", "C", "D"]
+mmlu_prompt_definition = (
+    "The following are multiple choice questions (with answers) about {}.\n\n"
+)
 
 
 def format_subject(subject):
@@ -256,7 +259,7 @@ class MMLUDataset(datasets.GeneratorBasedBuilder):
                         break
 
                 prompt_end = format_example(test_df, i, include_answer=False)
-                prompt_def = "The following are multiple choice questions (with answers) about {}.\n\n".format(
+                prompt_def = mmlu_prompt_definition.format(
                     format_subject(subject).strip()
                 )
                 prompt_pos = ""

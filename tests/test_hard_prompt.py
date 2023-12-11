@@ -58,7 +58,7 @@ def test_hard_prompt_eval(flan_batch_for_generation):
     )
 
     outputs = model.generate(
-        input_ids=flan_batch_for_generation["input_ids"],
+        inputs=flan_batch_for_generation["input_ids"],
         attention_mask=flan_batch_for_generation["attention_mask"],
         pad_token_id=tokenizer.pad_token_id,
         max_length=flan_batch_for_generation["input_ids"].shape[1] + 20,
@@ -81,14 +81,13 @@ def test_hard_prompt_eval(flan_batch_for_generation):
     )
     model = add_expert_to_transformer(
         model,
-        "prefix",
         expert,
         is_default=True,
     )
     assert model.expert_container.experts["prefix"].prompt == weight
 
     outputs_with_prompt = model.generate(
-        input_ids=flan_batch_for_generation["input_ids"],
+        inputs=flan_batch_for_generation["input_ids"],
         attention_mask=flan_batch_for_generation["attention_mask"],
         pad_token_id=tokenizer.pad_token_id,
         max_length=flan_batch_for_generation["input_ids"].shape[1] + 20,

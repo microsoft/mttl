@@ -23,10 +23,8 @@ def transfer_batch_to_device(batch, device):
 
 
 def convert_and_push_to_hub(
-    ckpt_path,
+    expert,
     repo_id,
-    auto_search=True,
-    use_last=False,
 ) -> None:
     """Searches into local path for the checkpoint with lowest validation loss,
     then uploads that.
@@ -35,17 +33,15 @@ def convert_and_push_to_hub(
     of the one with lowest validation loss.
     """
     import huggingface_hub
-    from mttl.utils import get_checkpoint_path
+    import io
 
-    if auto_search:
-        ckpt_path = get_checkpoint_path(ckpt_path, use_last=use_last)
+    with io.BytesIO() as buffer:
+        torch.save(expert.dumps(), buffer)
 
-    logger.info("Uploading checkpoint at {}".format(ckpt_path))
-
-    huggingface_hub.create_repo(repo_id, repo_type="model", exist_ok=True)
-    huggingface_hub.upload_file(
-        path_or_fileobj=ckpt_path, repo_id=repo_id, path_in_repo=CHECKPOINT_PATH_IN_HUB
-    )
+        huggingface_hub.create_repo(repo_id, repo_type="model", exist_ok=True)
+        huggingface_hub.upload_file(
+            path_or_fileobj=buffer, repo_id=repo_id, path_in_repo=CHECKPOINT_PATH_IN_HUB
+        )
 
 
 def download_from_hub(repo_id) -> str:

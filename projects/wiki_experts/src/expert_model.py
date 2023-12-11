@@ -39,40 +39,35 @@ def push_expert_to_hub(
     if use_last is True, then uses the last checkpoint `last.ckpt` instead
     of the one with lowest validation loss.
     """
+    from mttl.models.modifiers.expert_containers.module_graph import load_expert
     from mttl.utils import get_checkpoint_path
 
-    if auto_search:
-        ckpt_path = get_checkpoint_path(ckpt_path, use_last=use_last)
+    expert = load_expert(get_checkpoint_path(ckpt_path, use_last=use_last))
 
-    ckpt = torch.load(ckpt_path)
-
-    if expert_name is None:
-        for key in ["expert_name", "finetune_task_name"]:
-            expert_name = ckpt["hyper_parameters"].get(key)
-            if expert_name is not None:
-                break
-
-    dataset_name = ckpt["hyper_parameters"]["dataset"]
+    dataset_name = expert.expert_config.dataset
     # handle the case where dataset is from huggingface
     if "/" in dataset_name:
         dataset_name = dataset_name.partition("/")[-1]
 
     # model is definitely from HF
-    model_name = ckpt["hyper_parameters"]["model"]
-    model_name = model_name.partition("/")[-1]
+    model_name = expert.expert_config.model
+    if "/" in model_name:
+        model_name = model_name.partition("/")[-1]
+
+    if expert_name is not None:
+        expert.expert_info.expert_name = expert_name
+    else:
+        expert_name = expert.expert_info.expert_name
+
+    assert expert_name is not None
 
     repo_id = f"{hf_user_id}/expert__{model_name}__{dataset_name}__{expert_name}"
 
     logger.info("Uploading checkpoint {} --> {}".format(ckpt_path, repo_id))
-    convert_and_push_to_hub(ckpt_path, repo_id, auto_search=False, use_last=False)
+    convert_and_push_to_hub(expert, repo_id)
 
 
 class MultiExpertModel(ExpertTrainer):
-    """
-    MultiExpert models handels multiple experts with ExpertContainer and allows to route to different experts.
-    You can add modifiers using one of the 'self.modify_weith...' methods.
-    """
-
     def __init__(self, **kwargs: dict):
         # we dont use any  model modifier for MultiExpertModel model by default.
         # If you want to use a model modifier, use one of the 'self.modify_weith...' methods.
@@ -88,19 +83,18 @@ class MultiExpertModel(ExpertTrainer):
         return weights
 
     def load_from_graph(self, graph: ModuleGraph, action="route", **kwargs):
-        for module_name, module_data in graph.create_modules(
+        for _, module in graph.create_modules(
             base_hparams=self.hparams, **kwargs
         ).items():
-            print("Loading module: {}".format(module_name))
+            print("Loading module: {}".format(module.name))
             self.model = add_expert_to_transformer(
                 self.model,
-                module_name,
-                module_data,
+                module,
                 action=action,
-                is_default=module_name == "default",
+                is_default=module.name == "default",
                 config=self.hparams,
             )
-            self.experts.append(module_name)
+            self.experts.append(module.name)
 
     def delete_expert_container(self):
         """
@@ -145,16 +139,24 @@ class MultiExpertModel(ExpertTrainer):
             elif isinstance(destination, Expert):
                 self.add_expert_instance(destination, module_name, action=action)
 
-    def add_expert_instance(self, expert_instance: Expert, expert_name, action="route"):
+    def add_expert_instance(
+        self,
+        expert_instance: Expert,
+        expert_name=None,
+        action="route",
+        is_default=False,
+    ):
+        if expert_name is not None:
+            expert_instance.name = expert_name
+
         self.model = add_expert_to_transformer(
             self.model,
-            expert_name,
             expert_instance,
             action=action,
-            is_default=expert_name == "default",
+            is_default=expert_instance.name == "default" or is_default,
         )
         if action != "merge":
-            self.experts.append(expert_name)
+            self.experts.append(expert_instance.name)
 
     def load_from_graph_string(self, s, action="route", expert_library=None):
         from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
@@ -170,15 +172,15 @@ class MultiExpertModel(ExpertTrainer):
             keys = np.random.permutation(keys)[:subsample_library_experts]
 
         # fill all the weights with zeros after deep copying the weights
-        module_dump = library[keys[0]]
-        module_dump = copy.deepcopy(module_dump)
-        for _, value in module_dump.expert_weights.items():
+        expert = library[keys[0]]
+        expert = copy.deepcopy(expert)
+        for _, value in expert.expert_weights.items():
             value.fill_(0)
+        expert.name = "default"
 
         add_expert_to_transformer(
             self.model,
-            "default",
-            module_dump,
+            expert,
             action="route",
             is_default=True,
             config=self.hparams,
@@ -188,7 +190,6 @@ class MultiExpertModel(ExpertTrainer):
             expert_dump = library[expert_name]
             add_expert_to_transformer(
                 self.model,
-                expert_name,
                 expert_dump,
                 action="route",
                 is_default=expert_name == "default",
@@ -207,6 +208,7 @@ class MultiExpertModel(ExpertTrainer):
         from mttl.models.modifiers.expert_containers.module_graph import load_expert
 
         expert = load_expert(expert_path, expert_name=expert_name)
+
         if self.hparams.model != expert.expert_config.model:
             raise ValueError(
                 "The expert has been trained on top of a different model!"
@@ -221,14 +223,13 @@ class MultiExpertModel(ExpertTrainer):
 
         self.model = add_expert_to_transformer(
             self.model,
-            expert_name,
             expert,
             action=action,
             is_default=is_default,
             load_only_layers=load_only_layers,
         )
         if action != "merge":
-            self.experts.append(expert_name)
+            self.experts.append(expert.name)
 
     def extract_task_embeddings_lora(self, p_name_pattern=".*lora.*"):
         """
@@ -300,6 +301,7 @@ class MultiExpertModelRanker(MultiExpertModel):
             ranker_model=kwargs["ranker_model"],
             ranker_path=kwargs["ranker_path"],
         )
+        self.hparams.selector = "info_selector"
 
     def generate(
         self,
@@ -313,10 +315,15 @@ class MultiExpertModelRanker(MultiExpertModel):
 
         self.expert_ranker.set_available_tasks(self.experts)
         mod_names, mod_weights = self.expert_ranker.predict_batch(
-            batch, n=self.hparams.ranker_top_k
+            batch,
+            n=self.hparams.ranker_top_k,
         )
 
         # fill in the weights for the routing selector, for now just take the first one
+        # mod_names = [['mod1', 'mod2'], ['mod3', 'mod4']]
+        # mod_wgths = [[0.5, 0.5], [0.3, 0.7]]
+        # mod_names = [['default', 'mod1']]
+        # mod_wgths = [[0.7, 0.3]]
         self.model.task_id_container["routing_infos"].routing_modules = mod_names
         self.model.task_id_container["routing_infos"].routing_weights = mod_weights
 
@@ -350,7 +357,8 @@ class RoutedMultiExpertModel(MultiExpertModel):
     ):
         from mttl.models.modifiers.expert_containers.module_graph import load_expert
 
-        expert = load_expert(expert_path)
+        expert = load_expert(expert_path, expert_name=expert_name)
+
         if self.hparams.model != expert.expert_config.model:
             raise ValueError(
                 "The expert has been trained on top of a different model!"
@@ -360,12 +368,11 @@ class RoutedMultiExpertModel(MultiExpertModel):
             )
 
         logger.info(
-            f"Adding expert with name {expert_name}... with action ... {action}!"
+            f"Adding expert with name {expert.name}... with action ... {action}!"
         )
 
         self.model = add_expert_to_transformer(
             self.model,
-            expert_name,
             expert,
             action=action,
             is_default=is_default,
@@ -374,22 +381,21 @@ class RoutedMultiExpertModel(MultiExpertModel):
             config=self.hparams,
         )
         if action != "merge":
-            self.experts.append(expert_name)
+            self.experts.append(expert.name)
 
     def load_from_graph(self, graph, action="route", **kwargs):
-        for module_name, module_data in graph.create_modules(
+        for _, module in graph.create_modules(
             base_hparams=self.hparams, **kwargs
         ).items():
             self.model = add_expert_to_transformer(
                 self.model,
-                module_name,
-                module_data,
+                module,
                 action=action,
-                is_default=module_name == "default",
+                is_default=module.name == "default",
                 selectors=self.selectors,
                 config=self.hparams,
             )
-            self.experts.append(module_name)
+            self.experts.append(module.name)
 
     def get_router_weights(self):
         weights = {}
@@ -397,18 +403,21 @@ class RoutedMultiExpertModel(MultiExpertModel):
             weights[selector.name] = selector.get_routing_weights()
         return weights
 
-    def add_expert_instance(self, expert_instance, expert_name, action="route"):
+    def add_expert_instance(self, expert_instance, expert_name=None, action="route"):
+        if expert_name is not None:
+            expert_instance.name = expert_name
+
         self.model = add_expert_to_transformer(
             self.model,
-            expert_name,
             expert_instance,
             action=action,
             is_default=expert_name == "default",
             selectors=self.selectors,
             config=self.hparams,
         )
+
         if action != "merge":
-            self.experts.append(expert_name)
+            self.experts.append(expert_instance.name)
 
     def to_expert(self, weights: dict = None, with_global_names=True) -> Expert:
         """
@@ -430,11 +439,11 @@ class RoutedMultiExpertModel(MultiExpertModel):
         """
         expert_weights = {}
         for _, module in self.model.named_modules():
-            for c_name, child in dict(module.named_children()).items():
+            for _, child in dict(module.named_children()).items():
                 if isinstance(child, ExpertContainer) and len(child.experts) > 0:
                     # creates a single Lora
                     exp_config, _weights = child.get_merged_weights(
-                        weights, with_global_names=with_global_names
+                        with_global_names=with_global_names, weights=weights
                     )
                     expert_weights.update(_weights)
 
