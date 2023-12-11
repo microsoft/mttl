@@ -301,7 +301,7 @@ class MultiExpertModelRanker(MultiExpertModel):
             ranker_model=kwargs["ranker_model"],
             ranker_path=kwargs["ranker_path"],
         )
-        self.hparams.selector = "info_selector"
+        self.hparams.router_selector = "info_selector"
 
     def generate(
         self,

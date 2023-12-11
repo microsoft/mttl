@@ -189,7 +189,8 @@ def train_classifier(args):
         callbacks=[checkpoint_callback],
         devices=1,
         logger=wandb_logger,
-        val_check_interval=0.25,
+        val_check_interval=0.5,
+        limit_val_batches=0.5,
     )
     trainer.fit(module, datamodule)
     if wandb_logger:

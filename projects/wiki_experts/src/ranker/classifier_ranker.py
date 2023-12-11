@@ -56,8 +56,10 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
         for task in available_tasks:
             if "default" in task:
                 continue
-
-            self.available_mask[self.task_names_to_ids[task]] = 1.0
+            if (
+                task in self.task_names_to_ids
+            ):  # sometimes we train filtering classifiers on a subset of the tasks
+                self.available_mask[self.task_names_to_ids[task]] = 1.0
 
     def predict_task(self, query, n=1):
         raise NotImplementedError("Not implemented yet.")
@@ -74,6 +76,7 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
         logits = logits - max_logits
 
         expert_indices = torch.topk(logits, k=n, dim=1)
+
         expert_prediction = [
             [self.ids_to_tasks_names[index.item()] for index in indices]
             for indices in expert_indices.indices
@@ -83,6 +86,7 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
         ]
         expert_weights = np.exp(np.array(expert_weights))
         expert_weights = expert_weights / expert_weights.sum(axis=1, keepdims=True)
+
         return expert_prediction, expert_weights.tolist()
 
     def text_encoder_init(self, requires_grad=False):
