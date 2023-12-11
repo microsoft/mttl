@@ -27,6 +27,10 @@ class ModifierConfig(object):
     modify_modules: str = ".*"
     modify_layers: str = ".*"
 
+    def __eq__(self, other):
+        # compare all the attributes
+        return self.__dict__ == other.__dict__
+
 
 class ModifyMixin(nn.Module):
     @classmethod
