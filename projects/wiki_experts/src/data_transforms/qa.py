@@ -260,16 +260,31 @@ class OAITemplate_Batched_MultiChoice:
                 # skipping item
                 continue
 
-            options_split = re.split(r"\s*[A-D]\.\s*", options)
-            if not len(options_split) == 5:
+            choices = re.findall(r"(\w)\. ([^\n]+)", choices)
+            if len(choices) != 4:
                 # skipping item
                 continue
 
+            # error in the labels
+            labels = [c[0] for c in choices]
+            if labels != ["A", "B", "C", "D"]:
+                continue
+
+            # check if the response is valid
             if response[0] not in ["A", "B", "C", "D"]:
                 continue
 
-            # only take the first letter of the response
+            # take first letter in response
             response = response[0]
+
+            # re-assign options to create balanced labels
+            np.random.shuffle(choices)
+            labels, texts = zip(*choices)
+
+            response = "ABCD"[labels.index(response)]
+            options = "\n".join(
+                [f"{label}. {text}" for label, text in zip("ABCD", texts[:4])]
+            )
 
             instruction = (
                 "Question:\n{instruction}\nChoices:\n{options}\nAnswer:".format(
