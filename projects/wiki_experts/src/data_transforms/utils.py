@@ -2,7 +2,7 @@ import json
 import os
 import re
 from datasets import load_dataset
-
+import numpy as np
 from mttl.utils import retry_with_exponential_backoff
 
 
@@ -31,12 +31,7 @@ def reject_output(output, finish_reason):
     # common error here is that instruxtions starts with BEGININPUT + some nonsense, let evoid it
     # usually, if the instruction is too long, its a bad one
     # or if it stopped due to max tokens
-    return (
-        output is INVALID_RESPONSE
-        or "BEGININPUT" in output
-        or not output.strip()
-        or finish_reason != "stop"
-    )
+    return output is INVALID_RESPONSE or finish_reason != "stop"
 
 
 def read_jsonl_dataset(filename):
@@ -54,7 +49,6 @@ def upload_to_hf_(
     create_split=False,
 ):
     import pandas as pd
-    from datasets import DatasetDict
     import huggingface_hub
 
     hf_token = os.environ.get("HF_TOKEN")
@@ -76,7 +70,7 @@ def upload_to_hf_(
         test_ids = []
 
         for sub in subjects:
-            dts_subject = dataset.filter(lambda x: x["subject"] == sub)
+            dts_subject = dataset.filter(lambda x: x["subject"] == sub, num_proc=16)
             context_ids = list(set(dts_subject["id"]))
             train_ids = train_ids + context_ids[: int(len(context_ids) * 0.95)]
             valid_ids = valid_ids + context_ids[int(len(context_ids) * 0.95) :]
@@ -102,11 +96,55 @@ def upload_to_hf_(
             example["split"] = example["split"]
             return example
 
-        dataset = dataset.map(
-            rename_columns,
-            num_proc=16,
-            remove_columns=["instruction", "response", "subject"],
-        )
+        if configuration is not None and "multichoice" in configuration.model_setting:
+
+            def normalize_response_and_shuffle_options(example):
+                if example["response"][0] not in "ABCD":
+                    example["response"] = "invalid"
+                    return example
+
+                example["response"] = example["response"][0]
+                # Find all matches in the input string
+                pattern = r"Question:\n(.*?)\nChoices:\n(.*?)\nAnswer:"
+                question, choices = re.findall(
+                    pattern, example["instruction"], re.DOTALL
+                )[0]
+                choices = re.findall(r"(\w)\. ([^\n]+)", choices)
+
+                if len(choices) != 4:
+                    example["response"] = "invalid"
+                    return example
+
+                # error in the labels
+                labels = [c[0] for c in choices]
+                if labels != ["A", "B", "C", "D"]:
+                    example["response"] = "invalid"
+                    return example
+
+                # restrict the number of options to 4 and re-assign options
+                np.random.shuffle(choices)
+                labels, texts = zip(*choices)
+
+                # case in which the new answer is not in ABCD
+                new_answer = "ABCD"[labels.index(example["response"])]
+                new_choices = "\n".join(
+                    [f"{label}. {text}" for label, text in zip("ABCD", texts[:4])]
+                )
+                example[
+                    "instruction"
+                ] = f"Question:\n{question}\nChoices:\n{new_choices}\nAnswer:"
+                example["response"] = new_answer
+                return example
+
+            dataset = (
+                dataset.map(normalize_response_and_shuffle_options, num_proc=16)
+                .filter(lambda x: x["response"] != "invalid", num_proc=16)
+                .map(
+                    rename_columns,
+                    num_proc=16,
+                    remove_columns=["instruction", "response", "subject"],
+                )
+            )
 
     dataset.push_to_hub(hf_destination, token=hf_token)
 
