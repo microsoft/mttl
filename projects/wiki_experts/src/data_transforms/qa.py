@@ -247,6 +247,13 @@ class OAITemplate_Batched_MultiChoice:
         # Find all matches in the input string
         matches = re.findall(pattern, generated_output, re.DOTALL)
 
+        # If nothing is found, try without the options, sometimes it forgets them
+        if not matches:
+            pattern = (
+                r"### Problem:\s*(.*?)\n\n(.*?)\s*### Response:\s*(.*?)\s*(?=##|$)"
+            )
+            matches = re.findall(pattern, generated_output, re.DOTALL)
+
         data = []
         for match in matches:
             if not len(match) == 3:
@@ -588,7 +595,9 @@ class QATransformModel(TransformModel):
             if not data:
                 print("Skipping generations from context id:", entry["id"])
                 with open(dump_filename + "_discarded", "a") as f:
-                    f.write(json.dumps({"generation": instruction}) + "\n")
+                    copied_entry = copy.deepcopy(entry)
+                    copied_entry["generation"] = instruction
+                    f.write(json.dumps(copied_entry) + "\n")
 
             for d in data:
                 if reject_output(d["instruction"], finish_reason):
