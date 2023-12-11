@@ -265,6 +265,12 @@ class OAITemplate_Batched_MultiChoice:
                 # skipping item
                 continue
 
+            if response[0] not in ["A", "B", "C", "D"]:
+                continue
+
+            # only take the first letter of the response
+            response = response[0]
+
             instruction = (
                 "Question:\n{instruction}\nChoices:\n{options}\nAnswer:".format(
                     instruction=instruction, options=options
