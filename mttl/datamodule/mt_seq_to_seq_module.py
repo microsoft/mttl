@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from collections.abc import Iterable
 
 
-def augment_few_shot(self, dataset, num_samples):
+def augment_few_shot(dataset, num_samples, tokenizer=None, max_input_length=None):
     """Augment the dataset with few-shot examples."""
     import numpy as np
     import tqdm
@@ -42,15 +42,17 @@ def augment_few_shot(self, dataset, num_samples):
                 + "\n\n"
             )
             prompt = context + examples[index]["source"]
-            input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids
 
-            while (
-                input_ids.shape[-1] > self.config.max_input_length
-                and len(context.split("\n\n")) > 2
-            ):
-                context = "\n\n".join(context.split("\n\n")[:-2]) + "\n\n"
-                prompt = context + examples[index]["source"]
-                input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids
+            if tokenizer is not None and max_input_length is not None:
+                input_ids = tokenizer(prompt, return_tensors="pt").input_ids
+
+                while (
+                    input_ids.shape[-1] > max_input_length
+                    and len(context.split("\n\n")) > 2
+                ):
+                    context = "\n\n".join(context.split("\n\n")[:-2]) + "\n\n"
+                    prompt = context + examples[index]["source"]
+                    input_ids = tokenizer(prompt, return_tensors="pt").input_ids
 
             augmented_dataset.append(
                 {
@@ -104,7 +106,10 @@ class FlatMultiTaskModule(DefaultDataModule):
 
         if self.config.augment_few_shot > 0:
             train_dataset_aug = augment_few_shot(
-                self, train_dataset, self.config.augment_few_shot
+                train_dataset,
+                self.config.augment_few_shot,
+                tokenizer=self.tokenizer,
+                max_input_length=self.config.max_input_length,
             )
             train_dataset_aug = train_dataset_aug.shuffle()
             train_dataset = train_dataset_aug.select(range(len(train_dataset)))

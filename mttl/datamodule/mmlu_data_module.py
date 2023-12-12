@@ -128,6 +128,7 @@ class DataCollatorForMMLU(DefaultCollator):
     for_generation: bool = False
     model_family: str = "seq2seq"
     task_to_id: dict = None
+    few_shot: bool = True
 
     def __call__(self, batch, return_tensors=None):
         if return_tensors is None:
@@ -136,27 +137,30 @@ class DataCollatorForMMLU(DefaultCollator):
         sources = []
 
         for instance in batch:
-            prompt = (
-                instance["Definition"]
-                + instance["Positive Examples"]
-                + instance["Instance"]["Input"]
-            )
-            input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids
-
-            while (
-                input_ids.shape[-1] > self.max_input_length
-                and len(instance["Positive Examples"].split("\n\n")) > 2
-            ):
-                instance["Positive Examples"] = (
-                    "\n\n".join(instance["Positive Examples"].split("\n\n")[:-2])
-                    + "\n\n"
-                )
+            if self.few_shot:
                 prompt = (
                     instance["Definition"]
                     + instance["Positive Examples"]
                     + instance["Instance"]["Input"]
                 )
                 input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids
+
+                while (
+                    input_ids.shape[-1] > self.max_input_length
+                    and len(instance["Positive Examples"].split("\n\n")) > 2
+                ):
+                    instance["Positive Examples"] = (
+                        "\n\n".join(instance["Positive Examples"].split("\n\n")[:-2])
+                        + "\n\n"
+                    )
+                    prompt = (
+                        instance["Definition"]
+                        + instance["Positive Examples"]
+                        + instance["Instance"]["Input"]
+                    )
+                    input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids
+            else:
+                prompt = instance["Definition"] + instance["Instance"]["Input"]
 
             sources.append(prompt)
 
@@ -181,7 +185,9 @@ class DataCollatorForMMLU(DefaultCollator):
         return output_batch
 
 
+@dataclass
 class MMLUDataConfig(DatasetConfig):
+    few_shot: bool = True
     augment_mmlu: bool = False
 
 
@@ -205,9 +211,9 @@ class MMLUDataModule(DefaultDataModule):
             test_dataset,
             batch_size=self.config.predict_batch_size,
             shuffle=shuffle,
-            num_workers=16,
+            num_workers=8,
             pin_memory=True,
-            persistent_workers=True,
+            persistent_workers=False,
             collate_fn=self.collate_fn,
         )
 
@@ -231,6 +237,7 @@ class MMLUDataModule(DefaultDataModule):
             model_family=self.config.model_family,
             for_generation=self.for_generation,
             task_to_id=self.task_to_id,
+            few_shot=self.config.few_shot,
         )
 
     def setup_dataset(self, stage=None):

@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+from typing import List
+import numpy as np
 import torch
 from torch import nn
 import math
@@ -150,7 +152,7 @@ class LoRA(MergeableAdapter, ModifyMixin):
         # (n_examples,)
         scaling = torch.cat(
             [torch.FloatTensor([lora.scaling]) for lora in loras], dim=0
-        ).to(device=lora_a.device)
+        ).to(device=lora_a.device, dtype=lora_a.dtype)
 
         # (n_examples, seq_len, out_features)
         layer_out = loras[0].layer(input)
@@ -249,60 +251,164 @@ class SkilledLoRA(LoRA):
         return layer_out + adapter_out.to(input.dtype)
 
     @classmethod
-    def parallel_linear_forward(cls, input, loras: list, weights: list):
-        # loras -- list of loras per example
-        # weights -- list of weights for parallel loras
-        weights = torch.stack(weights, dim=0)
-        if weights.shape[-1] == 1:
-            loras = [lora[0] for lora in loras]
-            return LoRA.parallel_linear_forward(input, loras)
-
-        if len(loras) == 1:
-            weights = weights.squeeze()
-            loras = loras[0]
-            # use same weights for all samples in the input
-            return SkilledLoRA.weighted_merge_forward(
-                input, loras, weights, merge_after=True
-            )
-
-        raise NotImplementedError("Not Implemented yet")
+    def parallel_linear_forward(cls, input, skilled_loras, weights):
+        return cls.parallel_linear_weighted_forward(input, skilled_loras, weights)
 
     @classmethod
-    def weighted_merge_forward(cls, input, loras, weights, merge_after=False):
+    def parallel_linear_weighted_forward(
+        cls,
+        input: torch.Tensor,
+        skilled_loras: List["SkilledLoRAView"],
+        weights: List[torch.Tensor],
+        merge_after: bool = False,
+    ):
         """
-        Meging loras into one loa accroding to the weights
+        Executes multiple skilled loras in parallel.
+
+        I.e. this is useful for the situations in which each example in the batch
+        need to be processed by a different combination of skills.
+              --> skills     --> weights
+        ex1 : [[a, d, f]     [[0.1, 0.2, 0.7]
+        ex2 :  [c, g, h]]     [0.3, 0.4, 0.3]]
+
+        This also handles the case in which the same skilled lora is applied to multiple example
+        i.e.:
+
+              --> skills      --> weights
+        *   : [[a, d, f]]     [[0.1, 0.2, 0.7]]
+
+        in this case, we broadcast the same combination to all the examples in the batch.
         """
-        if any([lora.merged_with_layer for lora in loras]):
-            raise ValueError("Cannot parallelize merged loras.")
-        if len(set([lora.layer for lora in loras])) > 1:
+        if merge_after:
+            raise NotImplementedError("`merge_after` is not implemented for now.")
+
+        if len(set([lora.layer for lora in skilled_loras])) > 1:
             raise ValueError("Cannot parallelize loras applied to different layers.")
 
-        # (n_skills, in_features, rank)
-        lora_a = torch.stack([lora.lora_a for lora in loras], dim=0)
-        # (n_skills, rank, out_features)
-        lora_b = torch.stack([lora.lora_b for lora in loras], dim=0)
+        device = skilled_loras[0].lora_a.device
+        n_skills = skilled_loras[0].lora_a.shape[0]
+        assert np.all(skl.n_skills == n_skills for skl in skilled_loras)
+
+        num_skilled_loras = len(skilled_loras)
+        skilled_loras_a = torch.stack([lora.lora_a for lora in skilled_loras], dim=0)
+        skilled_loras_b = torch.stack([lora.lora_b for lora in skilled_loras], dim=0)
+        weights = torch.stack(weights, dim=0).to(device)
+
+        assert skilled_loras_a.shape[2] == 1, "Only 1 split is supported for now."
+        assert skilled_loras_b.shape[3] == 1, "Only 1 split is supported for now."
+        skilled_loras_a = skilled_loras_a.squeeze(2)
+        skilled_loras_b = skilled_loras_b.squeeze(3)
+
+        # up-type the input for lora computation
+        input_lora = input.to(dtype=skilled_loras[0].lora_a.dtype)
+
         # (n_examples,)
         scaling = torch.cat(
-            [torch.FloatTensor([lora.scaling]) for lora in loras], dim=0
-        ).to(device=lora_a.device)
-        weights = torch.stack([weight.squeeze() for weight in weights], dim=0)
-        layer_out = loras[0].layer(input)
-        # make sure input is in the same dtype as lora. By default it is likley to be in float16 (if we lad LLama model in float16). Butloas here can be in float32
-        input = input.to(dtype=lora_a.dtype)
-        if merge_after:
-            adapter_out_a = torch.einsum("bsd,kdr->bskr", (input, lora_a))
-            adapter_out_b = torch.einsum("bskr,krd->bskd", (adapter_out_a, lora_b))
-            adapter_out = (
-                torch.einsum("bskd,k->bsd", (adapter_out_b, weights)) * scaling.mean()
+            [torch.FloatTensor([lora.scaling]) for lora in skilled_loras], dim=0
+        ).to(device=device, dtype=skilled_loras[0].lora_a.dtype)
+
+        if num_skilled_loras == 1:
+            # no batch, skilled lora is shared across all examples, remove batch dimension
+            skilled_loras_a = skilled_loras_a.squeeze(0)
+            skilled_loras_b = skilled_loras_b.squeeze(0)
+            weights = weights.squeeze(0)
+            scaling = scaling.squeeze(0)
+
+            A = torch.einsum("s,sdr->dr", (weights, skilled_loras_a))
+            B = torch.einsum("s,srd->rd", (weights, skilled_loras_b))
+
+            # scaling is a float (only 1 skilled lora)
+            adapter_out = torch.matmul(torch.matmul(input_lora, A), B) * scaling
+        elif n_skills == 1:
+            # this is basically standard lora forward, we are here by accident
+            # !!!warning!!!! this ignores the weights
+            return LoRA.parallel_linear_forward(
+                input, [sk_lora.to_loras()[0] for sk_lora in skilled_loras]
             )
         else:
-            # merge lors according to the weights, As and Bs seperately
-            A = torch.einsum("s,sdr->dr", (weights, lora_a))
-            B = torch.einsum("s,srd->rd", (weights, lora_b))
+            A = torch.einsum("bs,bsdr->bdr", (weights, skilled_loras_a))
+            B = torch.einsum("bs,bsrd->brd", (weights, skilled_loras_b))
 
             # (n_examples, seq_len, out_features)
-            adapter_out = torch.matmul(torch.matmul(input, A), B) * scaling.mean()
+            if input_lora.ndim == 2:
+                partial_out = torch.einsum("bd,bdr->br", (input_lora, A))
+                adapter_out = torch.einsum("br,brd->bd", (partial_out, B))
+                adapter_out = adapter_out * scaling[:, None]
+            else:
+                partial_out = torch.einsum("bsd,bdr->bsr", (input_lora, A))
+                adapter_out = torch.einsum("bsr,brd->bsd", (partial_out, B))
+                adapter_out = adapter_out * scaling[:, None, None]
+
+        layer_out = skilled_loras[0].layer(input)
         return layer_out + adapter_out.to(dtype=layer_out.dtype)
+
+
+class LoRAView(LoRA):
+    """
+    Avoid initializing parameters, the parameters are just a view
+    on a bunch of other LoRAs parameters stacked together.
+    """
+
+    def create_for_layer(self, layer):
+        pass
+
+    def reset_parameters(self):
+        pass
+
+
+class SkilledLoRAView(SkilledLoRA):
+    """
+    Avoid initializing parameters, the parameters are just a view
+    on a bunch of other LoRAs parameters stacked together.
+    """
+
+    def create_for_layer(self, layer):
+        pass
+
+    def reset_parameters(self):
+        pass
+
+    def to_loras(self):
+        """
+        Create a list of loras from a skilled lora
+        """
+        if self.n_splits > 1:
+            raise ValueError("Cannot convert a skilled lora with n_splits > 1.")
+
+        loras = []
+        for i in range(self.n_skills):
+            lora = LoRAView(self.config, self.layer)
+            # squeeze n_splits if any
+            lora.lora_a = self.lora_a[i].squeeze()
+            lora.lora_b = self.lora_b[i].squeeze()
+            loras.append(lora)
+        return loras
+
+    @classmethod
+    def from_loras(cls, loras):
+        """
+        Create a skilled lora from a list of loras
+        """
+        if len(set([lora.layer for lora in loras])) > 1:
+            raise ValueError("Cannot create a SkilledLora from different loras.")
+
+        config = SkilledLoRAConfig(
+            lora_rank=loras[0].config.lora_rank,
+            lora_alpha=loras[0].config.lora_alpha,
+            lora_dropout=loras[0].config.lora_dropout,
+            lora_init_b_random=loras[0].config.lora_init_b_random,
+            n_skills=len(loras),
+            n_splits=1,
+        )
+        layer = loras[0].layer
+        skilled_lora = cls(config, layer)
+        skilled_lora.lora_a = torch.stack(
+            [lora.lora_a for lora in loras], dim=0
+        ).unsqueeze(1)
+        skilled_lora.lora_b = torch.stack(
+            [lora.lora_b for lora in loras], dim=0
+        ).unsqueeze(2)
+        return skilled_lora
 
 
 class SkilledLoRA_MergeLoraAfterOP(SkilledLoRA):

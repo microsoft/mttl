@@ -1,8 +1,11 @@
 import os
 import sys
 import json
-import wandb
 import pytorch_lightning as pl
+
+from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import torch
 from huggingface_hub import login
@@ -71,12 +74,6 @@ def get_datamodule(args, for_generation=False):
             text_field="facts" if "facts" in args.dataset else "text",
         )
         dm = FactsLMDataModule(config, for_generation=for_generation)
-    elif "platypus" in args.dataset:
-        config = PlatypusConfig(
-            **common_kwargs,
-            train_on_reverse=args.dataset == "inverse-platypus",
-        )
-        dm = PlatypusModule(config, for_generation=for_generation)
     elif "oa1" in args.dataset:
         config = OA1Config(
             **common_kwargs,
@@ -97,7 +94,7 @@ def get_datamodule(args, for_generation=False):
             include_template_type="*",
         )
         dm = FlanModule(config, for_generation=for_generation)
-    elif "adauni" in args.dataset:
+    elif "flat" in args.dataset:
         config = FlatMultiTaskConfig(
             **common_kwargs,
             source_template=args.source_template,
@@ -109,7 +106,7 @@ def get_datamodule(args, for_generation=False):
     return dm
 
 
-def run_multitask(args):
+def run_multitask(args: ExpertConfig):
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file
@@ -143,7 +140,8 @@ def run_multitask(args):
         wandb_logger.experiment.save("*.py")
         loggers.append(wandb_logger)
 
-    module = model_class(**vars(args), tokenizer=dm.tokenizer).to("cuda")
+    module = model_class(**vars(args), tokenizer=dm.tokenizer)
+
     mlf_logger = get_mlf_logger()
     if mlf_logger:
         loggers.append(mlf_logger)
@@ -213,6 +211,10 @@ def run_multitask(args):
     checkpoint = (
         checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
     )
+
+    if args.hf_lib_id and checkpoint:
+        library = HFExpertLibrary(args.hf_lib_id, create=True)
+        library.add_expert_from_ckpt(checkpoint)
 
     if args.hf_repo_id and checkpoint:
         from projects.wiki_experts.src.expert_model import push_expert_to_hub

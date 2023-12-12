@@ -18,7 +18,7 @@ class ExpertInfo:
     """
 
     expert_name: str
-    expert_task_name: str
+    expert_task_name: str = None
     expert_config: Dict = None
     parent_node: str = None
 
@@ -54,9 +54,12 @@ class Expert:
     @property
     def expert_config(self):
         # ensure back-compatibility
-        return Config(
-            kwargs=self.expert_info.expert_config, raise_error=False, silent=True
-        )
+        if isinstance(self.expert_info.expert_config, dict):
+            return Config(
+                kwargs=self.expert_info.expert_config, raise_error=False, silent=True
+            )
+        else:
+            return self.expert_info.expert_config
 
     def dumps(self):
         return {
@@ -76,6 +79,10 @@ class Expert:
     @property
     def name(self):
         return self.expert_info.expert_name
+
+    @name.setter
+    def name(self, name):
+        self.expert_info.expert_name = name
 
 
 class Node:
@@ -380,15 +387,16 @@ class ModuleGraph:
 
 def load_expert(
     expert_path: str,
-    expert_dict: dict = None,
+    expert_dict_or_lib: Union[Dict, "ExpertLibrary"] = None,
+    expert_name: str = None,
     **kwargs,
 ):
     """Transforms a potentially lightning checkpoint into an Expert object."""
     # load the expert weights
     import os
 
-    if expert_dict is not None and expert_path in expert_dict:
-        return expert_dict[expert_path]
+    if expert_dict_or_lib is not None and expert_path in expert_dict_or_lib:
+        return expert_dict_or_lib[expert_path]
 
     logger.info(f"Attempting to load expert from {expert_path}")
     if os.path.isfile(expert_path) or os.path.isdir(expert_path):
@@ -425,14 +433,23 @@ def load_expert(
                 "hyper_parameters"
             ]["finetune_task_name"]
 
+        # back-compatibility, we removed this
+        expert_info_data.pop("expert_embeddings", None)
+        expert_info_data.pop("expert_scores", None)
+
         expert_info = ExpertInfo(**expert_info_data)
         expert_weights = expert_checkpoint["state_dict"]
         expert_weights = {
             k.replace("model.", "", 1): v for k, v in expert_weights.items()
         }
-        return Expert(expert_info, expert_weights)
+        expert = Expert(expert_info, expert_weights)
     else:
-        return Expert.loads(expert_checkpoint)
+        expert = Expert.loads(expert_checkpoint)
+
+    # override expert name
+    if expert_name is not None:
+        expert.name = expert_name
+    return expert
 
 
 if __name__ == "__main__":

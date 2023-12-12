@@ -1,6 +1,7 @@
-from dataclasses import dataclass
-from mttl.config import Config
 import os
+
+from mttl.config import Config
+import mttl.datamodule.flan_tasks
 
 
 class ExpertConfig(Config):
@@ -11,7 +12,19 @@ class ExpertConfig(Config):
         self.wandb_project = None
         self.tensorboard = False
         self.hf_token_hub = None
+        self.hf_lib_id = None
         self.hf_repo_id = None
+
+        # just a lame flag to 0 out all adapter weights
+        self.baseline = False
+        # sparsify adapter weights to this sparsity level
+        self.sparsity = 0.0
+        # only use a very small portion of the available experts
+        self.subsample_library_experts = 0
+        # rank / retrieve top k experts
+        self.ranker_top_k = 1
+        self.ranker_path = None
+        self.ranker_model = None
 
         self.expert_name = None
         self.routing = "subject"
@@ -36,12 +49,11 @@ class ExpertConfig(Config):
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
 
-        # training expert
+        self.mmlu_use_hard_prompt = None
+        self.eval_mmlu_few_shot = True  # use few-shot for mmlu, default
         self.eval_mmlu_flag = False
-
-        # training classfier routing
-        self.num_labels = 246
-        self.classifer_repo_id = None
+        self.eval_metric = "loss"
+        self.use_vllm = False
 
     def post_init(self):
         if self.micro_batch_size is None:
@@ -52,3 +64,11 @@ class ExpertConfig(Config):
             self.train_batch_size // self.micro_batch_size
         )
         self.train_batch_size = self.micro_batch_size
+
+        if self.finetune_task_name is not None:
+            if self.finetune_task_name in mttl.datamodule.flan_tasks.__dict__.keys():
+                self.finetune_task_name = getattr(
+                    mttl.datamodule.flan_tasks,
+                    self.finetune_task_name,
+                    self.finetune_task_name,
+                )

@@ -16,7 +16,7 @@ def cli():
 @click.option(
     "--seed-dataset", type=str, default="sordonia/my-wiki-latex_mmlu_from_valid_all"
 )
-@click.option("--subjects", type=str, default="SUB_10")
+@click.option("--subjects", type=str, default="ALL")
 @click.option("--config", type=str, required=True)
 @click.option("--output_path", type=str, required=False, default="./")
 @click.option("--upload_to_hub", type=bool, required=False, default=False)

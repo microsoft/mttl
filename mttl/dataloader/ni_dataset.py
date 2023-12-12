@@ -51,11 +51,13 @@ class NIConfig(datasets.BuilderConfig):
         *args,
         data_dir=None,
         task_dir=None,
+        task_name=None,
         max_num_instances_per_task=None,
         max_num_instances_per_eval_task=None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
+        self.task_name: str = task_name
         self.data_dir: str = data_dir
         self.task_dir: str = task_dir
         self.max_num_instances_per_task: int = max_num_instances_per_task
@@ -130,6 +132,7 @@ class NIOriginalDataset(datasets.GeneratorBasedBuilder):
                 gen_kwargs={
                     "path": os.path.join(data_dir, "train_tasks.txt"),
                     "task_dir": task_dir,
+                    "task_name": self.config.task_name,
                     "max_num_instances_per_task": self.config.max_num_instances_per_task,
                     "subset": "train",
                 },
@@ -139,6 +142,7 @@ class NIOriginalDataset(datasets.GeneratorBasedBuilder):
                 gen_kwargs={
                     "path": os.path.join(data_dir, "test_tasks.txt"),
                     "task_dir": task_dir,
+                    "task_name": self.config.task_name,
                     "max_num_instances_per_task": self.config.max_num_instances_per_task,
                     "subset": "validation",
                 },
@@ -148,6 +152,7 @@ class NIOriginalDataset(datasets.GeneratorBasedBuilder):
                 gen_kwargs={
                     "path": os.path.join(data_dir, "test_tasks.txt"),
                     "task_dir": task_dir,
+                    "task_name": self.config.task_name,
                     "max_num_instances_per_task": self.config.max_num_instances_per_eval_task,
                     "subset": "test",
                 },
@@ -155,14 +160,25 @@ class NIOriginalDataset(datasets.GeneratorBasedBuilder):
         ]
 
     def _generate_examples(
-        self, path=None, task_dir=None, max_num_instances_per_task=None, subset=None
+        self,
+        path=None,
+        task_dir=None,
+        task_name=None,
+        max_num_instances_per_task=None,
+        subset=None,
     ):
         """Yields examples."""
         logger.info(f"Generating tasks from = {path}")
 
         with open(path, encoding="utf-8") as split_f:
             for line in split_f:
-                task_name = line.strip()
+                task_name_ = line.strip()
+
+                if task_name is not None and task_name_ != task_name:
+                    continue
+                else:
+                    task_name = task_name_
+
                 task_path = os.path.join(task_dir, task_name + ".json")
 
                 with open(task_path, encoding="utf-8") as task_f:

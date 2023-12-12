@@ -2,14 +2,21 @@ import os
 import sys
 from huggingface_hub import login
 from pytorch_lightning import seed_everything
+from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.models.modifiers.expert_containers.module_graph import Expert, ExpertInfo
+from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
+from mttl.datamodule.mmlu_data_module import MMLUDataConfig
 from mttl.evaluators import MMLUEvaluator
 from mttl.utils import setup_logging, logger
 
 # register models
-from projects.wiki_experts.src.expert_model import MultiExpertModel
+from projects.wiki_experts.src.expert_model import (
+    MultiExpertModel,
+    MultiExpertModelRanker,
+)
 from projects.wiki_experts.src.config import ExpertConfig
 
 
@@ -99,22 +106,55 @@ def run_eval(args):
     else:
         subsample = None
 
-    print(args.finetune_task_name, args.load_module, args.checkpoint)
-
-    mmlu = MMLUEvaluator(
-        args,
+    config = MMLUDataConfig(
+        model=args.model,
+        model_family=args.model_family,
+        max_input_length=args.max_input_length,
+        finetune_task_name=args.finetune_task_name,
+        few_shot=args.eval_mmlu_few_shot,
+        predict_batch_size=args.predict_batch_size,
     )
-    module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
+    mmlu = MMLUEvaluator(config)
+
+    # load module
+    if args.ranker_model is not None:
+        module = MultiExpertModelRanker(
+            **vars(args), tokenizer=mmlu.datamodule.tokenizer
+        )
+    else:
+        module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
+
+    if args.hf_lib_id:
+        library = HFExpertLibrary(args.hf_lib_id)
+    else:
+        library = None
 
     if args.load_module is not None:
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:
             module.load_expert(**expert_kwargs)
     elif args.module_graph is not None:
-        module.load_from_graph_string(args.module_graph)
+        module.load_from_graph_string(args.module_graph, expert_library=library)
+    elif library is not None:
+        if not args.baseline:
+            module.load_from_library(library, args.subsample_library_experts)
+
+    if args.mmlu_use_hard_prompt:
+        config = HardPromptConfig(
+            max_input_length=args.max_input_length,
+            model_family=args.model_family,
+            tokenizer=module.tokenizer,
+        )
+        expert = Expert(
+            expert_info=ExpertInfo("hard_prompt", expert_config=config),
+            expert_weights=args.mmlu_use_hard_prompt,
+        )
+        module.add_expert_instance(expert, action="route", is_default=True)
 
     module.to("cuda")
-    scores = mmlu.evaluate(module, split=args.mmlu_test_split, subsample=subsample)
+    scores = mmlu.evaluate(
+        module, split=args.mmlu_test_split, subsample=subsample, shuffle=True
+    )
 
     with open(args.output_dir + "/mmlu.json", "w") as f:
         import json
