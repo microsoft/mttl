@@ -15,6 +15,27 @@ from mttl.models.modifiers.routing import RoutingMixin
 PromptTuningRouting = None
 
 
+def two_d_roll_along(data, offsets):
+    bs, sq, dim = data.shape
+    assert offsets.shape == (bs,), breakpoint()
+
+    data_flat = data.view(bs, sq * dim)
+    arr_flat = torch.arange(sq * dim, device=data.device).view(1, sq * dim)
+    idx_flat = (arr_flat - offsets.view(-1, 1) * dim) % (sq * dim)
+    out = torch.gather(data_flat, 1, idx_flat)
+    return out.view(bs, sq, dim)
+
+
+# assume left padding
+def roll_along(arr, shifts, dim):
+    assert arr.ndim - 1 == shifts.ndim
+    dim %= arr.ndim
+    shape = (1,) * dim + (-1,) + (1,) * (arr.ndim - dim - 1)
+    dim_indices = torch.arange(arr.shape[dim]).reshape(shape).to(arr.device)
+    indices = (dim_indices - shifts.unsqueeze(dim)) % arr.shape[dim]
+    return torch.gather(arr, dim, indices)
+
+
 class DecoderPromptTuningWrapper(torch.nn.Module):
     def __init__(self, config, transformer, soft_prompt):
         super().__init__()
@@ -46,8 +67,36 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
         input_embeds = self.transformer.get_input_embeddings()(input_ids)
         soft_prompts = self.soft_prompt(input_ids)
 
+        # make sure we have the right padding
+        assert (
+            attention_mask[:, 0].sum() >= attention_mask[:, -1].sum()
+        ), "expected right-padded input"
+
+        # Assumes ExpertTrainer here. Removing the labels so as to not trigger an automatic loss computation
+        labels = self.task_id_container["routing_infos"].labels
+
         # preprend the soft prompt
-        input_embeds = torch.cat((soft_prompts, input_embeds), dim=1)
+        if self.config.prompt_placement == "prefix":
+            input_embeds = torch.cat((soft_prompts, input_embeds), dim=1)
+        elif self.config.prompt_placement == "suffix":
+            assert labels is not None  # we are not generating.
+
+            is_label = (labels != -100).int()
+            # If there are multiple maximal values then the indices of the first maximal value are returned.
+            label_starts = is_label.argmax(1)
+
+            # put labels in front
+            rolled_input_embeds = two_d_roll_along(input_embeds, -label_starts)
+            new_input_embeds = torch.cat((soft_prompts, rolled_input_embeds), dim=1)
+
+            # roll back, to put input in front
+            new_input_embeds = two_d_roll_along(new_input_embeds, label_starts)
+
+            input_embeds = new_input_embeds
+        else:
+            raise NotImplementedError(
+                f"Unknown prompt placement: {self.config.prompt_placement}"
+            )
 
         # expand the attention mask
         attention_mask = torch.cat(
@@ -57,13 +106,19 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
         kwargs["attention_mask"] = attention_mask
         kwargs["inputs_embeds"] = input_embeds
 
+        # TODO: can we just expand the labels to handle soft prompts ?
         out = self.transformer(*(), **kwargs)
 
         # We need to remove remove the soft prompt so as to preserve
         # alignment with the labels
-        out.logits = out.logits[:, self.config.soft_prompt_length :, :]
+        if self.config.prompt_placement == "prefix":
+            out.logits = out.logits[:, self.config.soft_prompt_length :, :]
+        elif self.config.prompt_placement == "suffix":
+            # remove the soft prompt logits
+            rolled_logits = two_d_roll_along(out.logits, -label_starts)
+            chunked_logits = rolled_logits[:, self.config.soft_prompt_length :, :]
+            out.logits = two_d_roll_along(chunked_logits, label_starts)
 
-        # TODO: are we missing something else ?
         return out
 
     def generate(self, *args, **kwargs):
@@ -89,35 +144,23 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
             first_valid_idx = (attn_mask == 0).sum(1)
             bs, seq_len, embed_dim = input_embeds.size()
             soft_prompt_len = soft_prompt.size(1)
+            device = soft_prompt.device
 
             """ 1. Add soft prompt output """
-            # create container
-            output = soft_prompt.new_zeros(bs, soft_prompt_len + seq_len, embed_dim)
-            device = output.device
+            if self.config.prompt_placement == "prefix":
+                # let's try a cleaner version with rolling
+                ex_lens = model_kwargs["attention_mask"].sum(1)
 
-            # copy the soft prompt, padding left
-            soft_prompt_idx = first_valid_idx.view(-1, 1) + torch.arange(
-                soft_prompt_len, device=device
-            ).view(1, -1)
-            output.scatter_(
-                dim=1,
-                index=soft_prompt_idx.unsqueeze(-1).expand(-1, -1, embed_dim),
-                src=soft_prompt,
-            )
+                right_padded_input_ids = roll_along(input_ids, ex_lens, 1)
+                right_input_embeds = self.transformer.get_input_embeddings()(
+                    right_padded_input_ids
+                )
+                right_output = torch.cat((soft_prompt, right_input_embeds), dim=1)
+                output = two_d_roll_along(right_output, -(ex_lens + soft_prompt_len))
 
-            # copy the input embeddings, padding left
-            input_embeds_idx = (
-                torch.arange(seq_len, device=device).view(1, -1).repeat(bs, 1)
-            )
-            # shift non-padding tokens to the right by `soft_prompt_len`
-            input_embeds_idx[attn_mask == 1] += soft_prompt_len
-
-            # don't copy the pad token embeddings from `input_embeds`
-            output.scatter_(
-                dim=1,
-                index=input_embeds_idx.unsqueeze(-1).expand(-1, -1, embed_dim),
-                src=input_embeds.type_as(output),
-            )
+            elif self.config.prompt_placement == "suffix":
+                # we are already padded left, so we can just concat right
+                output = torch.cat((input_embeds, soft_prompt), dim=1)
 
             model_kwargs["inputs_embeds"] = output.type_as(input_embeds)
             model_kwargs["input_ids"] = None
@@ -191,7 +234,7 @@ class PromptTuningModifyMixin(ModifyMixin):
 
 @dataclass
 class PromptTuningConfig(KVAdapterConfig):
-    pass
+    prompt_placement = "prefix"
 
 
 @register_modifier("prompt_tuning", config_cls=PromptTuningConfig)
