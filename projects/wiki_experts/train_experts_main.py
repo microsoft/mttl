@@ -186,6 +186,7 @@ def run_multitask(args: ExpertConfig):
         accelerator="gpu",
         logger=loggers,
         log_every_n_steps=1,
+        limit_val_batches=10,
         num_sanity_val_steps=0,
         default_root_dir=args.output_dir,
         max_epochs=args.num_train_epochs,
