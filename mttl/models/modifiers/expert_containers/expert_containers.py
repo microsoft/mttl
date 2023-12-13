@@ -12,7 +12,12 @@ from mttl.models.modifiers.expert_containers.module_graph import Expert
 
 
 class ExpertContainer:
-    def __init__(self):
+    def __init__(self, config, task_id_container, layer, selector=None):
+        self.config = config
+        self.layer = layer
+        self.task_id_container = task_id_container
+        self.selector = selector or TaskNameSelector(task_id_container)
+
         self.experts = None
         self.expert_infos = {}
         self.expert_names = []
@@ -58,12 +63,9 @@ class ExpertContainer:
 
 class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
     def __init__(self, config, task_id_container, layer, selector=None):
-        super().__init__()
         MergeableAdapter.__init__(self)
 
-        self.config = config
-        self.layer = layer
-        self.selector = selector or TaskNameSelector(task_id_container)
+        super().__init__(config, task_id_container, layer, selector)
 
         if not isinstance(self.layer, nn.Linear):
             raise ValueError(
@@ -262,11 +264,12 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
     """
 
     def __init__(self, config, task_id_container, layer, selector=None):
-        KVAdapter.__init__(self, config, layer)
-
-        self.config = config
-        self.layer = layer
-        self.selector: KVSelector = selector or KVTaskNameSelector(task_id_container)
+        super().__init__(
+            config,
+            task_id_container,
+            layer,
+            selector or KVTaskNameSelector(task_id_container),
+        )
 
         # Check if layer is an attention layer :
         if not hasattr(self.attn_layer, "k_proj") and self.config.model != "phi-2":

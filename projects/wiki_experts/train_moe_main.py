@@ -5,7 +5,7 @@ import pytorch_lightning as pl
 
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 from mttl.models.modifiers.lora import LoRAConfig
-from projects.wiki_experts.src.expert_model import MultiExpertModel
+from projects.wiki_experts.src.expert_model import MoETrainer, MultiExpertModel
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -112,14 +112,11 @@ def run_multitask(args: ExpertConfig):
         wandb_logger.experiment.save("*.py")
         loggers.append(wandb_logger)
 
-    args.router_selector = "moe_rkhs_router"
     args.trainable_param_names = args.trainable_param_names + "|.*rkhs.*"
-    args.hidden_dim = 2560
 
-    module = MultiExpertModel(**vars(args), tokenizer=dm.tokenizer)
-    module.add_empty_expert("e1", args)
-    module.add_empty_expert("e2", args)
-    module.add_empty_expert("e3", args)
+    module = MoETrainer(**vars(args), tokenizer=dm.tokenizer)
+    for i in range(8):
+        module.add_empty_expert(f"e{i}", args)
 
     mlf_logger = get_mlf_logger()
     if mlf_logger:

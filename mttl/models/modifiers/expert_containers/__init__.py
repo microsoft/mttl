@@ -24,15 +24,13 @@ def _extract_identifier(string, match_on="coder"):
     same underlying selector
     e.g. 'block' : 'encoder.block.0.layer.0.SelfAttention' -> 'encoder.block.0'
     """
-    assert match_on in [
-        "coarsegrained",
-        "finegrained",
-    ], "For expert router only coarsegrained and finegrained are supported"
-
     if match_on == "finegrained":
         return string.replace(".", "_")
     if match_on == "coarsegrained":
         return "shared"
+    pos = string.find(f"{match_on}.")
+    if pos > 0:
+        return string[:pos]
     return string
 
 
@@ -82,7 +80,6 @@ def add_expert_to_transformer(
     expert: Expert,
     action: str = "route",
     is_default: bool = False,
-    load_only_layers: int = None,
     routing_config: RoutingConfig = None,
     training_config: Config = None,
 ):
@@ -166,20 +163,6 @@ def add_expert_to_transformer(
                         )
                     else:
                         expert_container = layer
-
-                    if load_only_layers:
-                        layer_num = int(expert_container.__layer_name__.split(".")[2])
-
-                        pos = load_only_layers.find("-")
-                        sel = int(load_only_layers.replace("-", ""))
-
-                        if pos == 0:
-                            # add until layer number excluded
-                            if layer_num >= sel:
-                                continue
-                        else:
-                            if layer_num < sel:
-                                continue
 
                     added_layers.append(expert_container.__layer_name__)
                     expert_container.add_expert(

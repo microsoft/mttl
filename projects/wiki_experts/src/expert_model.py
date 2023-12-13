@@ -170,6 +170,7 @@ class MultiExpertModel(ExpertTrainer):
             ),
         )
         self.add_expert_instance(new_expert)
+        logger.info("Added empty expert: {}".format(expert_name))
 
     def add_expert_instance(
         self,
@@ -350,6 +351,57 @@ class MultiExpertModelRanker(MultiExpertModel):
             inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
         )
         return generations
+
+
+class MoETrainer(MultiExpertModel):
+    def __init__(self, **kwargs):
+        kwargs["router_selector"] = "moe_rkhs_router"
+        kwargs["router_granularity"] = "mlp"
+        super().__init__(**kwargs)
+
+    def training_step(self, batch, _):
+        loss = self.forward(batch)
+        total_loss = loss
+
+        if self.model.task_id_container["routing_gates"]:
+            num = 0.0
+            entropy = 0.0
+            xentropy = 0.0
+
+            for values in self.model.task_id_container["routing_gates"]:
+                # compute MI loss
+                values = values.to(torch.float32)
+                values = values.view(-1, values.shape[-1])
+                probs = torch.softmax(values, -1)
+                entropy += -(probs.mean(0) * torch.log(probs.mean(0))).sum(-1)
+                xentropy += -(probs * torch.log(probs)).sum(-1).mean(0)
+                num += 1.0
+
+            self.model.task_id_container["routing_gates"].clear()
+
+            mi_loss = (-entropy + xentropy) / num
+            total_loss += 10 * mi_loss
+            self.log(
+                f"{self._log_pref}train/route_ent",
+                xentropy / num,
+                on_step=True,
+                prog_bar=True,
+            )
+            self.log(
+                f"{self._log_pref}train/mi_loss",
+                mi_loss,
+                on_step=True,
+                prog_bar=True,
+            )
+
+        self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
+        self.log(
+            f"{self._log_pref}train/total_loss", total_loss, on_step=True, prog_bar=True
+        )
+
+        for i, pg in enumerate(self.optimizers().optimizer.param_groups):
+            self.log(f"train/lr_{i}", pg["lr"])
+        return total_loss
 
 
 class RoutedMultiExpertModel(MultiExpertModel):

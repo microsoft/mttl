@@ -191,12 +191,16 @@ class RoutingInfo:
 
 
 class RoutingMixin:
-    def __init__(self, task_id_ptr, *args, **kwargs) -> None:
-        self.task_id_ptr = task_id_ptr
+    def __init__(self, info_container, *args, **kwargs) -> None:
+        self._info_container = info_container
+
+    @property
+    def info_container(self):
+        return self._info_container
 
     @property
     def routing_infos(self) -> RoutingInfo:
-        return self.task_id_ptr.get("routing_infos", None)
+        return self.info_container.get("routing_infos", None)
 
 
 class RouterModifyMixin(ModifyMixin):

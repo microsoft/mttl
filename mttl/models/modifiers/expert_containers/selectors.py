@@ -5,6 +5,7 @@ from pyparsing import abstractmethod
 import torch
 import math
 from torch import nn
+from functools import lru_cache
 import torch.nn.functional as F
 from mttl.models.modifiers.routing import RoutingMixin
 
@@ -28,6 +29,23 @@ def register_multi_expert_selector(name):
         return fn
 
     return _thunk
+
+
+def block_cached_call(func):
+    """Caches forward pass of the selector in case this selector is shared across layer of the same type."""
+
+    def wrapper(self, *args, **kwargs):
+        if not hasattr(self.routing_infos, "_selector_cache_calls"):
+            self.routing_infos._selector_cache_calls = {}
+
+        if self.__layer_name__ not in self.routing_infos._selector_cache_calls:
+            self.routing_infos._selector_cache_calls[self.__layer_name__] = func(
+                self, *args, **kwargs
+            )
+
+        return self.routing_infos._selector_cache_calls[self.__layer_name__]
+
+    return wrapper
 
 
 @dataclass
@@ -198,6 +216,7 @@ class MOERKHSSelector(Selector):
         input_view = input.view(-1, input.shape[-1])
         return self.rkhs_hid(input_view).reshape(input.shape[0], input.shape[1], -1)
 
+    @block_cached_call
     def forward(
         self, input, **kwargs
     ) -> BatchAndSequenceModulesAndWeightsSelectorOutput:
@@ -214,13 +233,9 @@ class MOERKHSSelector(Selector):
         # we cast back to the input dtype
         routing_weights = routing_weights.to(input.dtype)
 
-        aux_losses = self.routing_infos.aux_losses.get(f"moe_balance_loss", [])
-        aux_losses.append(
-            self.load_balancing_loss_func(
-                router_logits, self.rkhs_embeddings.data.shape[0], self.topk
-            )
-        )
-        self.routing_infos.aux_losses[f"moe_balance_loss"] = aux_losses
+        g = self.info_container.get("routing_gates", [])
+        g.append(router_logits)
+        self.info_container["routing_gates"] = g
 
         return BatchAndSequenceModulesAndWeightsSelectorOutput(
             indices=selected_experts, weights=routing_weights
@@ -233,15 +248,18 @@ class MOERKHSSelector(Selector):
         raise ValueError("Not supported for MOESelector.")
 
     def add_expert(self, expert_name: str, **kwargs):
-        self.rkhs_embeddings.data = torch.cat(
-            [
-                self.rkhs_embeddings.data,
-                torch.zeros(1, 128, device=self.rkhs_embeddings.device).uniform_(
-                    -0.02, 0.02
-                ),
-            ],
-            dim=0,
-        )
+        """It is important to guard against multiple calls as this can be called multiple times."""
+        if expert_name not in self.expert_names:
+            self.expert_names.append(expert_name)
+            self.rkhs_embeddings.data = torch.cat(
+                [
+                    self.rkhs_embeddings.data,
+                    torch.zeros(1, 128, device=self.rkhs_embeddings.device).uniform_(
+                        -0.02, 0.02
+                    ),
+                ],
+                dim=0,
+            )
 
 
 @register_multi_expert_selector("poly_router_dir")
