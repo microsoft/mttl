@@ -159,13 +159,13 @@ class MultiExpertModel(ExpertTrainer):
     def add_empty_expert(
         self,
         expert_name,
-        expert_config,
+        expert_config=None,
     ):
         """Adds a new empty expert to the model."""
         new_expert = Expert(
             expert_info=ExpertInfo(
                 expert_name,
-                expert_config=expert_config,
+                expert_config=expert_config or self.hparams.__dict__,
                 expert_task_name=self.hparams.finetune_task_name,
             ),
         )
@@ -357,7 +357,13 @@ class MoETrainer(MultiExpertModel):
     def __init__(self, **kwargs):
         kwargs["router_selector"] = "moe_rkhs_router"
         kwargs["router_granularity"] = "mlp"
+        kwargs["num_experts"] = 8
+
         super().__init__(**kwargs)
+
+        # 8 experts
+        for i in range(self.hparams.num_experts):
+            self.add_empty_expert(f"e{i}", self.hparams)
 
     def training_step(self, batch, _):
         loss = self.forward(batch)

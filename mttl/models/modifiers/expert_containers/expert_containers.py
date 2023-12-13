@@ -64,7 +64,6 @@ class ExpertContainer:
 class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
     def __init__(self, config, task_id_container, layer, selector=None):
         MergeableAdapter.__init__(self)
-
         super().__init__(config, task_id_container, layer, selector)
 
         if not isinstance(self.layer, nn.Linear):

@@ -115,8 +115,6 @@ def run_multitask(args: ExpertConfig):
     args.trainable_param_names = args.trainable_param_names + "|.*rkhs.*"
 
     module = MoETrainer(**vars(args), tokenizer=dm.tokenizer)
-    for i in range(8):
-        module.add_empty_expert(f"e{i}", args)
 
     mlf_logger = get_mlf_logger()
     if mlf_logger:
@@ -164,7 +162,7 @@ def run_multitask(args: ExpertConfig):
         log_every_n_steps=1,
         num_sanity_val_steps=0,
         default_root_dir=args.output_dir,
-        max_epochs=args.num_train_epochs,
+        max_epochs=args.num_train_epochs if not args.total_steps else None,
         max_steps=args.total_steps + 1 if args.total_steps != -1 else -1,
         gradient_clip_val=args.max_grad_norm,
         strategy=args.compute_strategy if args.compute_strategy else "auto",
