@@ -7,6 +7,7 @@ from typing import Any, Dict, Union, Optional
 import torch
 from torch.utils.data import DataLoader, Dataset
 
+import sys
 import numpy as np
 from mttl.utils import logger
 from mttl.datamodule.utils import get_tokenizer
@@ -252,7 +253,7 @@ class DefaultCollator:
     def __call__(self, batch: Dict):
         sources = [b["source"] for b in batch]
         labels = [b["target"] for b in batch]
-        task_ids = [b.get("task_id", -1) for b in batch]
+        task_ids = [b.get("task_id", sys.maxsize) for b in batch]
         task_names = [b.get("task_name", None) for b in batch]
 
         output_batch = (
