@@ -282,12 +282,11 @@ class SkilledLoRA(LoRA):
 
         This also handles the case in which the same skilled lora is applied to multiple example
         i.e.:
-
               --> skills      --> weights
         *   : [[a, d, f]]     [[0.1, 0.2, 0.7]]
 
         It also handles another case, in which we have a single skilled lora applied with different weights
-
+        i.e.:
         *   : [[a, d, f]]     [[0.1, 0.2, 0.7],
                                [0.3, 0.4, 0.3]]
 
@@ -326,6 +325,7 @@ class SkilledLoRA(LoRA):
 
         # up-type the input for lora computation
         input_lora = input.to(dtype=skilled_loras[0].lora_a.dtype)
+        weights = weights.to(dtype=skilled_loras[0].lora_a.dtype)
 
         # apply some dropout
         input_lora = skilled_loras[0].dropout_layer(input_lora)
@@ -353,7 +353,10 @@ class SkilledLoRA(LoRA):
                 A = torch.einsum("bs,sdr->bdr", (weights, skilled_loras_a))
                 B = torch.einsum("bs,srd->brd", (weights, skilled_loras_b))
 
-                adapter_out = torch.matmul(torch.matmul(input_lora, A), B) * scaling
+                adapter_out = (
+                    torch.bmm(torch.bmm(input_lora.unsqueeze(1), A), B).squeeze()
+                    * scaling
+                )
         elif n_skills == 1:
             # this is basically standard lora forward, we are here by accident
             # !!!warning!!!! this ignores the weights

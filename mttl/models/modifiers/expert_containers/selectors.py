@@ -190,8 +190,8 @@ class MOERKHSSelector(Selector):
 
         self.topk = 2
         self.input_dim = kwargs["layer"].weight.data.shape[-1]
-        self.rkhs_exp = nn.Linear(128, 1024)
-        self.rkhs_hid = nn.Linear(self.input_dim, 1024)
+        self.rkhs_exp = nn.Linear(128, 512)
+        self.rkhs_hid = nn.Linear(self.input_dim, 512)
         self.rkhs_embeddings = nn.Parameter(torch.empty((0, 128)))
 
     def _get_weights(self, input):
