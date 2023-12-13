@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from types import MethodType
-from dataclasses import dataclass
-from typing import List
+from dataclasses import dataclass, field, fields
+from typing import Dict, List
 import re
 
 from mttl.models.modifiers.base import Adapter, ModifyMixin
@@ -155,6 +155,7 @@ class RoutingInfo:
     labels: torch.Tensor = None
     input_ids: torch.Tensor = None
     task_weights: torch.nn.ParameterDict = None
+    aux_losses: Dict = field(default_factory=dict)
 
     @classmethod
     def from_batch(cls, batch: dict, **kwargs):
@@ -195,7 +196,7 @@ class RoutingMixin:
 
     @property
     def routing_infos(self) -> RoutingInfo:
-        return self.task_id_ptr["routing_infos"]
+        return self.task_id_ptr.get("routing_infos", None)
 
 
 class RouterModifyMixin(ModifyMixin):

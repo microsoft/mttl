@@ -6,9 +6,7 @@ import json
 from typing import Any, Dict, List, Union
 import torch
 import os
-from tempfile import TemporaryDirectory
 import numpy as np
-from collections import defaultdict
 
 from huggingface_hub import (
     hf_hub_download,
@@ -31,7 +29,6 @@ from mttl.models.modifiers.expert_containers.module_graph import (
     Expert,
     load_expert,
     ExpertInfo,
-    ModuleGraph,
 )
 
 
@@ -320,6 +317,7 @@ class ExpertLibrary:
             scores = self.get_auxiliary_data(
                 data_type="scores", expert_name=expert_name
             )
+            # inject auxiliary data into the expert
             expert_dump.expert_info.embeddings = embeddings
             expert_dump.expert_info.scores = scores
         return expert_dump

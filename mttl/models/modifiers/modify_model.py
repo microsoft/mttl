@@ -1,5 +1,6 @@
 from mttl.utils import logger
 
+
 MODIFIERS = {}
 CONFIGS_TO_MODIFIERS = {}
 
@@ -25,7 +26,9 @@ def get_modifier_type(config, model_modifier=None):
     return model_modifier
 
 
-def modify_transformer(transformer, modifier_config, model_modifier=None):
+def modify_transformer(
+    transformer, modifier_config, model_modifier=None, **modifier_kwargs
+):
     import mttl.models.modifiers.lora  # noqa: F401
     import mttl.models.modifiers.poly  # noqa: F401
     import mttl.models.modifiers.routing  # noqa: F401
@@ -36,6 +39,8 @@ def modify_transformer(transformer, modifier_config, model_modifier=None):
 
     # create a shared container for the task id
     transformer.task_id_container = {}
+    # create a shared container for the possible routers
+    transformer.selectors = {}
 
     # set all params to not require grad
     for param in transformer.parameters():

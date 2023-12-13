@@ -301,7 +301,9 @@ class SkilledLoRA(LoRA):
         num_skilled_loras = len(skilled_loras)
         skilled_loras_a = torch.stack([lora.lora_a for lora in skilled_loras], dim=0)
         skilled_loras_b = torch.stack([lora.lora_b for lora in skilled_loras], dim=0)
-        weights = torch.stack(weights, dim=0).to(device)
+
+        if type(weights) == list:
+            weights = torch.stack(weights, dim=0).to(device)
 
         assert skilled_loras_a.shape[2] == 1, "Only 1 split is supported for now."
         assert skilled_loras_b.shape[3] == 1, "Only 1 split is supported for now."

@@ -6,6 +6,7 @@ import torch
 import math
 from torch import nn
 import torch.nn.functional as F
+from mttl.models.modifiers.routing import RoutingMixin
 
 from mttl.utils import logger
 
@@ -30,6 +31,14 @@ def register_multi_expert_selector(name):
 
 
 @dataclass
+class RoutingConfig:
+    # what type of selector to use
+    router_selector: str
+    # the granularity of the selector (which layers use the same selectors)
+    router_granularity: str = "*"
+
+
+@dataclass
 class SelectorOutput:
     pass
 
@@ -47,16 +56,21 @@ class BatchModulesAndWeightsSelectorOutput(SelectorOutput):
 
 
 @dataclass
+class BatchAndSequenceModulesAndWeightsSelectorOutput(SelectorOutput):
+    indices: torch.Tensor
+    weights: Union[List[List[float]], torch.Tensor]
+
+
+@dataclass
 class ModulesSelectorOutput(SelectorOutput):
     modules: List[str]
 
 
-class Selector(nn.Module):
-    def __init__(self, config, info_container, **kwargs):
-        super().__init__()
+class Selector(RoutingMixin, nn.Module):
+    def __init__(self, info_container, **kwargs):
+        nn.Module.__init__(self)
+        RoutingMixin.__init__(self, info_container)
 
-        self.config = config
-        self.info_container = info_container
         self.expert_names = []
 
     @abstractmethod
@@ -81,8 +95,8 @@ class PolySelector(Selector):
     Implements routing at a per-layer or per-model level
     """
 
-    def __init__(self, config, info_container=None, **kwargs) -> None:
-        super().__init__(config, info_container)
+    def __init__(self, info_container=None, **kwargs) -> None:
+        super().__init__(info_container)
 
         self.module_logits = nn.Parameter(torch.empty(1).uniform_(-1e-3, 1e-3))
 
@@ -130,12 +144,113 @@ class PolySelector(Selector):
             )
 
 
+@register_multi_expert_selector("moe_rkhs_router")
+class MOERKHSSelector(Selector):
+    def load_balancing_loss_func(
+        self, gate_logits: torch.Tensor, num_experts: torch.Tensor, top_k=2
+    ) -> float:
+        if gate_logits is None:
+            return 0
+
+        if isinstance(gate_logits, tuple):
+            # cat along the layers?
+            gate_logits = torch.cat(gate_logits, dim=0)
+
+        routing_weights, selected_experts = torch.topk(gate_logits, top_k, dim=-1)
+        routing_weights = routing_weights.softmax(dim=-1)
+
+        # cast the expert indices to int64, otherwise one-hot encoding will fail
+        if selected_experts.dtype != torch.int64:
+            selected_experts = selected_experts.to(torch.int64)
+
+        if len(selected_experts.shape) == 2:
+            selected_experts = selected_experts.unsqueeze(2)
+
+        expert_mask = torch.nn.functional.one_hot(selected_experts, num_experts)
+
+        # For a given token, determine if it was routed to a given expert.
+        expert_mask = torch.max(expert_mask, axis=-2).values
+
+        # cast to float32 otherwise mean will fail
+        expert_mask = expert_mask.to(torch.float32)
+        tokens_per_group_and_expert = torch.mean(expert_mask, axis=-1)
+        router_prob_per_group_and_expert = torch.mean(routing_weights, axis=-1)
+
+        return torch.mean(
+            tokens_per_group_and_expert * router_prob_per_group_and_expert
+        ) * (num_experts**2)
+
+    def __init__(self, info_container=None, **kwargs) -> None:
+        super().__init__(info_container)
+
+        if "layer" not in kwargs:
+            raise ValueError(
+                "MOERKHSSelector requires a layer to be passed in kwargs to infer the input dimension."
+            )
+
+        self.topk = 2
+        self.input_dim = kwargs["layer"].weight.data.shape[-1]
+        self.rkhs_exp = nn.Linear(128, 1024)
+        self.rkhs_hid = nn.Linear(self.input_dim, 1024)
+        self.rkhs_embeddings = nn.Parameter(torch.empty((0, 128)))
+
+    def _get_weights(self, input):
+        input_view = input.view(-1, input.shape[-1])
+        return self.rkhs_hid(input_view).reshape(*input.shape)
+
+    def forward(
+        self, input, **kwargs
+    ) -> BatchAndSequenceModulesAndWeightsSelectorOutput:
+        rkhs_enc = self._get_weights(input)
+        rkhs_emb = self.rkhs_exp(self.rkhs_embeddings)
+
+        router_logits = torch.matmul(rkhs_enc, rkhs_emb.T)
+        routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
+        routing_weights, selected_experts = torch.topk(
+            routing_weights, self.topk, dim=-1
+        )
+        routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
+
+        # we cast back to the input dtype
+        routing_weights = routing_weights.to(input.dtype)
+
+        aux_losses = self.routing_infos.aux_losses.get(f"moe_balance_loss", [])
+        aux_losses.append(
+            self.load_balancing_loss_func(
+                router_logits, self.rkhs_embeddings.data.shape[0], self.topk
+            )
+        )
+        self.routing_infos.aux_losses[f"moe_balance_loss"] = aux_losses
+
+        return BatchAndSequenceModulesAndWeightsSelectorOutput(
+            indices=selected_experts, weights=routing_weights
+        )
+
+    def get_merged_weights(self, container, **selector_kwargs) -> Dict:
+        raise ValueError("Not supported for MOESelector.")
+
+    def get_routing_weights(self):
+        raise ValueError("Not supported for MOESelector.")
+
+    def add_expert(self, expert_name: str, **kwargs):
+        self.rkhs_embeddings.data = torch.cat(
+            [
+                self.rkhs_embeddings.data,
+                torch.zeros(1, 128, device=self.rkhs_embeddings.device).uniform_(
+                    -0.02, 0.02
+                ),
+            ],
+            dim=0,
+        )
+
+
 @register_multi_expert_selector("poly_router_dir")
 class PolySelectorDirect(PolySelector):
     def __init__(self, config, info_container=None, **kwargs) -> None:
-        super().__init__(config, info_container)
+        super().__init__(info_container)
 
         self.module_logits = nn.ParameterDict()
+        self.training_config = kwargs["training_config"]
 
     def _get_weights(self):
         weights = torch.tensor([self.module_logits[k] for k in self.expert_names])
@@ -151,7 +266,9 @@ class PolySelectorDirect(PolySelector):
         main_m = 1
 
         if expert_name not in self.module_logits:
-            if self.config.finetune_task_name == expert_task_name:
+            # TODO: this is very error prone, e.g. when you reload this model, this cannot be inited
+            # @Oleksiy do you need this?
+            if self.training_config.finetune_task_name == expert_task_name:
                 self.module_logits[expert_name] = torch.nn.Parameter(
                     torch.ones(1).to(self.device)
                 )
@@ -166,34 +283,33 @@ class PolySelectorDirect(PolySelector):
 class RoutingInfosContainerSelector(Selector):
     """A simple selector that looks for routing information in the info container."""
 
-    def __init__(self, config=None, info_container=None, **kwargs) -> None:
-        super().__init__(config, info_container)
+    def __init__(self, info_container=None, **kwargs) -> None:
+        super().__init__(info_container)
 
         self.default_expert_name = None
 
     def forward(self, input, **kwargs) -> BatchModulesAndWeightsSelectorOutput:
-        # try to infer batch size
-        if "routing_infos" not in self.info_container:
-            raise ValueError("routing_infos not in info_container")
+        if not hasattr(self.routing_infos, "routing_modules"):
+            raise ValueError("routing_modules not in routing_infos")
 
-        assert hasattr(self.info_container["routing_infos"], "routing_modules")
-        assert hasattr(self.info_container["routing_infos"], "routing_weights")
+        if not hasattr(self.routing_infos, "routing_weights"):
+            raise ValueError("routing_weights not in routing_infos")
 
-        routing_mods = self.info_container["routing_infos"].routing_modules
-        routing_weights = self.info_container["routing_infos"].routing_weights
+        routing_mods = self.routing_infos.routing_modules
+        routing_weights = self.routing_infos.routing_weights
         return BatchModulesAndWeightsSelectorOutput(routing_mods, routing_weights)
 
 
 @register_multi_expert_selector("task_selector")
 class TaskNameSelector(Selector):
-    def __init__(self, config=None, info_container=None, **kwargs) -> None:
-        super().__init__(config, info_container)
+    def __init__(self, info_container, **kwargs) -> None:
+        super().__init__(info_container)
 
         self.default_expert_name = None
 
     def forward(self, input, **kwargs) -> ModulesSelectorOutput:
         # try to infer batch size
-        if "routing_infos" not in self.info_container:
+        if not self.routing_infos.task_names:
             if "input_ids" in kwargs:
                 batch_size = kwargs["input_ids"].size(0)
             else:
@@ -204,7 +320,7 @@ class TaskNameSelector(Selector):
 
             modules = [self.default_expert_name for _ in range(batch_size)]
         else:
-            task_names = self.info_container["routing_infos"].task_names
+            task_names = self.routing_infos.task_names
 
             if (
                 any(task_name not in self.expert_names for task_name in task_names)
@@ -215,6 +331,7 @@ class TaskNameSelector(Selector):
                     "Experts for all tasks have not been loaded! Set a default expert?"
                 )
             modules = task_names
+
         return ModulesSelectorOutput(modules)
 
     def add_expert(self, expert_name: str, **kwargs):
@@ -260,13 +377,13 @@ class KVSelector(Selector):
 class KVTaskNameSelector(KVSelector):
     """Selects KVAdapters based on the task name."""
 
-    def __init__(self, config=None, info_container=None, **kwargs) -> None:
-        super().__init__(config, info_container)
+    def __init__(self, info_container=None, **kwargs) -> None:
+        super().__init__(info_container)
 
         self.default_expert_name = None
 
     def get_kv_weights(self, experts, k_proj, v_proj):
-        task_names = self.info_container["routing_infos"].task_names
+        task_names = self.routing_infos.task_names
 
         if task_names is None:
             task_names = [self.default_expert_name]
@@ -283,7 +400,7 @@ class KVTaskNameSelector(KVSelector):
         return out
 
     def get_gate(self, experts, adapter_weights):
-        task_names = self.info_container["routing_infos"].task_names
+        task_names = self.routing_infos.task_names
 
         if task_names is None:
             task_names = [self.default_expert_name]
@@ -304,8 +421,8 @@ class KVConcatSelector(KVSelector, nn.Module):
     model's internal attention mechanism take care of routing in a task agnostic way
     """
 
-    def __init__(self, config=None, info_container=None, **kwargs) -> None:
-        super().__init__(config, info_container)
+    def __init__(self, info_container=None, **kwargs) -> None:
+        super().__init__(info_container)
 
         self.default_expert_name = None
 

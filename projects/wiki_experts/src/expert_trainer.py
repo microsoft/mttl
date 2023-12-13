@@ -90,6 +90,18 @@ class ExpertTrainer(EfficientCheckpointModule):
         loss = self.forward(batch)
         total_loss = loss
 
+        if self.model.task_id_container["routing_infos"].aux_losses:
+            for loss, values in self.model.task_id_container[
+                "routing_infos"
+            ].aux_losses.items():
+                total_loss += 0.1 * torch.mean(values)
+                self.log(
+                    f"{self._log_pref}train/{loss}",
+                    torch.mean(values),
+                    on_step=True,
+                    prog_bar=True,
+                )
+
         self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
         self.log(
             f"{self._log_pref}train/total_loss", total_loss, on_step=True, prog_bar=True

@@ -48,7 +48,7 @@ class ExpertConfig(Config):
 @dataclass
 class Expert:
     expert_info: ExpertInfo
-    expert_weights: Dict[str, torch.Tensor]
+    expert_weights: Dict[str, torch.Tensor] = None
     expert_optimizer_state: Dict[str, torch.Tensor] = None
 
     @property

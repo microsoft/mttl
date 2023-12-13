@@ -12,6 +12,12 @@ from mttl.models.modifiers.expert_containers.module_graph import Expert
 
 
 class ExpertContainer:
+    def __init__(self):
+        self.experts = None
+        self.expert_infos = {}
+        self.expert_names = []
+        self.default_expert_name = None
+
     @abstractmethod
     def add_expert(
         self,
@@ -29,7 +35,10 @@ class ExpertContainer:
         self.selector.add_expert(expert_name, **kwargs)
         self.selector.default_expert_name = self.default_expert_name
 
-    def get(self, key):
+    def get(self, key: Union[int, str]):
+        if type(key) == int:
+            key = self.expert_names[key]
+
         if key not in self.experts:
             if self.default_expert_name is None:
                 raise ValueError(
@@ -50,10 +59,11 @@ class ExpertContainer:
 class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
     def __init__(self, config, task_id_container, layer, selector=None):
         super().__init__()
+        MergeableAdapter.__init__(self)
+
         self.config = config
         self.layer = layer
-        self.selector = selector or TaskNameSelector()
-        self.selector.info_container = task_id_container
+        self.selector = selector or TaskNameSelector(task_id_container)
 
         if not isinstance(self.layer, nn.Linear):
             raise ValueError(
@@ -62,10 +72,37 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                 )
             )
 
-        self.info_container = task_id_container
         self.default_expert_name = None
         self.merged_expert_names = []
+        self.expert_names = []
+
         self.experts = nn.ModuleDict({})
+        self._experts_embeddings = nn.ParameterDict({})
+
+    @property
+    def expert_embeddings(self):
+        if self._expert_embeddings is not None:
+            return self._expert_embeddings
+
+        self._expert_embeddings = []
+        for expert_name in self.expert_names:
+            device = self.experts[expert_name].lora_a.weight.device
+
+            expert_info = self.expert_infos[expert_name]
+            expert_embedding = expert_info.expert_embedding
+            self._expert_embeddings.append(torch.tensor(expert_embedding))
+
+        self._expert_embeddings = torch.stack(self._expert_embeddings, dim=0).to(
+            device=device
+        )
+        return self._expert_embeddings
+
+    def add_expert_embedding(self, expert: Expert):
+        if hasattr(expert.expert_info, "expert_embedding"):
+            expert_embedding = expert.expert_info.expert_embedding
+            self._experts_embeddings[expert.name] = torch.tensor(expert_embedding)
+        else:
+            self._experts_embeddings[expert.name] = None
 
     def add_expert(
         self,
@@ -77,9 +114,13 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
 
         expert_config = expert.expert_config
         expert_task_name = expert.expert_info.expert_task_name
-        expert_weights = filter_expert_weights(
-            self.__layer_name__, expert.expert_weights
-        )
+
+        if expert.expert_weights is not None:
+            expert_weights = filter_expert_weights(
+                self.__layer_name__, expert.expert_weights
+            )
+        else:
+            expert_weights = None
 
         if expert.name in self.experts:
             raise ValueError(
@@ -94,9 +135,11 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         # hack this for now, but build a proper config for each module
         if expert_config.model_modifier == "lora":
             expert_module = LoRA(expert_config, self.layer)
-            expert_module.load_lora_weights(expert_weights)
+
+            if expert_weights is not None:
+                expert_module.load_lora_weights(expert_weights)
         else:
-            raise NotImplementedError("ExpertContainer only supports LoRA experts.")
+            raise NotImplementedError("LoRAExpertContainer only supports LoRA experts.")
 
         if action == "merge":
             # weight is merged with layer so we can discard it now
@@ -116,6 +159,10 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         if is_default:
             self.default_expert_name = expert.name
 
+        self.expert_names.append(expert.name)
+        self.expert_infos[expert.name] = expert.expert_info
+
+        self.add_expert_embedding(expert)
         self.add_expert_to_selector(expert.name, expert_task_name=expert_task_name)
 
     def get_merged_weights(self, with_global_names=True, **merger_kwargs):
@@ -162,6 +209,20 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
             return LoRA.parallel_linear_forward(
                 input, [self.get(module) for module in selection.modules]
             )
+        elif isinstance(selection, BatchAndSequenceModulesAndWeightsSelectorOutput):
+            indices = selection.indices.reshape(-1, selection.indices.shape[-1])
+            weights = selection.weights.reshape(-1, selection.weights.shape[-1])
+            skilled_loras = [
+                SkilledLoRAView.from_loras([self.get(int(index)) for index in b_index])
+                for b_index in indices
+            ]
+            module_output = SkilledLoRA.parallel_linear_weighted_forward(
+                input.view(-1, input.size(-1)),
+                skilled_loras,
+                weights,
+                merge_after=False,
+            )
+            return module_output.view(input.shape[0], input.shape[1], -1)
 
     def forward(self, input, **kwargs):
         if len(self.experts) > 0:
@@ -183,9 +244,7 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
 
         self.config = config
         self.layer = layer
-        self.selector: KVSelector = selector or KVTaskNameSelector()
-        self.selector.info_container = task_id_container
-        self.info_container = task_id_container
+        self.selector: KVSelector = selector or KVTaskNameSelector(task_id_container)
 
         # Check if layer is an attention layer :
         if not hasattr(self.attn_layer, "k_proj") and self.config.model != "phi-2":

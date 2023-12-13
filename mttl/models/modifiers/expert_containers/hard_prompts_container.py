@@ -15,11 +15,10 @@ from mttl.models.modifiers.expert_containers.module_graph import Expert
 
 
 class HardPromptDecoderWrapper(nn.Module):
-    def __init__(self, config, transformer, expert_container):
+    def __init__(self, transformer, expert_container):
         super().__init__()
 
         self.transformer = transformer
-        self.config = config
         self.expert_container = expert_container
         self.transformer_prepare_inputs_for_generation = (
             transformer.prepare_inputs_for_generation
@@ -77,8 +76,6 @@ def add_hard_prompt_to_transformer(
     expert: Expert,
     action="route",
     is_default=False,
-    selectors={},
-    config=None,
 ):
     expert_config = expert.expert_config
     expert_weights = expert.expert_weights
@@ -91,7 +88,7 @@ def add_hard_prompt_to_transformer(
             selector=None,
         )
         # patch the decoder
-        transformer = HardPromptDecoderWrapper(config, transformer, expert_container)
+        transformer = HardPromptDecoderWrapper(transformer, expert_container)
 
     transformer.add_expert(
         expert,
@@ -106,10 +103,8 @@ class HardPromptExpertContainer(ExpertContainer):
     def __init__(self, config, task_id_container, selector=None):
         super().__init__()
         self.config = config
-        self.selector: Selector = selector or TaskNameSelector()
-        self.selector.info_container = task_id_container
+        self.selector: Selector = selector or TaskNameSelector(task_id_container)
 
-        self.info_container = task_id_container
         self.default_expert_name = None
         self.merged_expert_names = []
         self.experts = nn.ModuleDict({})
