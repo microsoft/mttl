@@ -6,6 +6,7 @@ from typing import Dict, List
 from tempfile import TemporaryDirectory
 
 import tqdm
+from mttl.models.modifiers.lora import LoRAConfig
 from mttl.models.modifiers.routing import RoutingInfo
 from mttl.utils import logger
 from mttl.models.modifiers.expert_containers import ExpertContainer
@@ -363,7 +364,14 @@ class MoETrainer(MultiExpertModel):
 
         # 8 experts
         for i in range(self.hparams.num_experts):
-            self.add_empty_expert(f"e{i}", self.hparams)
+            self.add_empty_expert(
+                f"e{i}",
+                LoRAConfig(
+                    lora_alpha=self.hparams.lora_alpha,
+                    lora_dropout=self.hparams.lora_dropout,
+                    lora_rank=self.hparams.lora_rank,
+                ),
+            )
 
     def training_step(self, batch, _):
         loss = self.forward(batch)
