@@ -43,6 +43,11 @@ class LoRA(MergeableAdapter, ModifyMixin):
         self.forward_fn = None
         self.layer = layer
 
+        if self.dropout > 0.0:
+            self.dropout_layer = nn.Dropout(self.dropout)
+        else:
+            self.dropout_layer = lambda x: x
+
         if hasattr(layer, "weight"):
             self.weight = layer.weight
 
@@ -132,6 +137,7 @@ class LoRA(MergeableAdapter, ModifyMixin):
             return output
         else:
             input_lora = input.to(self.lora_a.dtype)
+            input_lora = self.dropout_layer(input_lora)
             adapter_out = (
                 torch.matmul(torch.matmul(input_lora, self.lora_a), self.lora_b)
                 * self.scaling
@@ -157,6 +163,7 @@ class LoRA(MergeableAdapter, ModifyMixin):
         # (n_examples, seq_len, out_features)
         layer_out = loras[0].layer(input)
         input_lora = input.to(loras[0].lora_a.dtype)
+        input_lora = loras[0].dropout_layer(input_lora)
 
         adapter_out = (
             torch.bmm(torch.bmm(input_lora, lora_a), lora_b) * scaling[:, None, None]
@@ -221,6 +228,8 @@ class SkilledLoRA(LoRA):
     def forward_linear_(self, input, weights):
         layer_out = self.layer(input)
         input_lora = input.to(self.lora_a.dtype)
+        input_lora = self.dropout_layer(input_lora)
+
         bs = input.size(0)
 
         # these are task ids
@@ -301,6 +310,9 @@ class SkilledLoRA(LoRA):
 
         # up-type the input for lora computation
         input_lora = input.to(dtype=skilled_loras[0].lora_a.dtype)
+
+        # apply some dropout
+        input_lora = skilled_loras[0].dropout_layer(input_lora)
 
         # (n_examples,)
         scaling = torch.cat(
@@ -425,7 +437,12 @@ class SkilledLoRA_MergeLoraAfterOP(SkilledLoRA):
             return super().forward_linear_(input, weights)
 
         layer_out = self.layer(input)
+
+        # uptype
         input_lora = input.to(self.lora_a.dtype)
+
+        # some dropout
+        input_lora = self.dropout_layer(input_lora)
 
         bs, _, _ = weights.size()
         adapter_out = torch.einsum(
