@@ -47,6 +47,7 @@ def upload_to_hf_(
     configuration=None,
     flat=False,
     create_split=False,
+    aug_few_shot=-1,
 ):
     import pandas as pd
     import huggingface_hub
@@ -101,6 +102,16 @@ def upload_to_hf_(
             num_proc=16,
             remove_columns=["instruction", "response", "subject"],
         )
+
+        if aug_few_shot > 0:
+            # augment the dataset few-shot
+            from mttl.datamodule.mt_seq_to_seq_module import (
+                augment_few_shot,
+            )
+            from datasets import concatenate_datasets
+
+            aug_dataset = augment_few_shot(dataset, aug_few_shot)
+            dataset = concatenate_datasets([aug_dataset, dataset])
 
     dataset.push_to_hub(hf_destination, token=hf_token)
 
