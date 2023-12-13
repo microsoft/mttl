@@ -1,6 +1,8 @@
 from dataclasses import dataclass
+import re
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from mttl.models.modifiers import register_modifier
 from mttl.models.modifiers.base import Adapter, ModifierConfig, ModifyMixin
 from transformers.modeling_utils import PreTrainedModel
@@ -15,7 +17,20 @@ from mttl.models.modifiers.routing import RoutingMixin
 PromptTuningRouting = None
 
 
+def roll_along(arr, shifts, dim):
+    """Roll each row/col of a specific dimension according to the specified shifts"""
+
+    assert arr.ndim - 1 == shifts.ndim
+    dim %= arr.ndim
+    shape = (1,) * dim + (-1,) + (1,) * (arr.ndim - dim - 1)
+    dim_indices = torch.arange(arr.shape[dim]).reshape(shape).to(arr.device)
+    indices = (dim_indices - shifts.unsqueeze(dim)) % arr.shape[dim]
+    return torch.gather(arr, dim, indices)
+
+
 def two_d_roll_along(data, offsets):
+    """Specific version of roll along to handle a `dim` axis"""
+
     bs, sq, dim = data.shape
     assert offsets.shape == (bs,), breakpoint()
 
@@ -26,14 +41,83 @@ def two_d_roll_along(data, offsets):
     return out.view(bs, sq, dim)
 
 
-# assume left padding
-def roll_along(arr, shifts, dim):
-    assert arr.ndim - 1 == shifts.ndim
-    dim %= arr.ndim
-    shape = (1,) * dim + (-1,) + (1,) * (arr.ndim - dim - 1)
-    dim_indices = torch.arange(arr.shape[dim]).reshape(shape).to(arr.device)
-    indices = (dim_indices - shifts.unsqueeze(dim)) % arr.shape[dim]
-    return torch.gather(arr, dim, indices)
+def recursive_getattr(obj, attr_str):
+    """Given a state_dict string, recursively get the object"""
+
+    # Regular expression to match 'attr', 'attr[index]', followed by '.attr[index]' etc.
+    pattern = r"([^\[\].]+)(\[\d+\])?"
+    matches = re.finditer(pattern, attr_str)
+
+    for match in matches:
+        attr, index = match.groups()
+        obj = getattr(obj, attr)
+
+        if index:
+            obj = obj[int(index.strip("[]"))]
+
+        # Check if the current match is at the end of the string
+        if match.end() == len(attr_str):
+            return obj
+
+    return obj
+
+
+def recursive_setattr(parent_obj, attr_str, value):
+    """Given a state_dict string, recursively get and set the object"""
+
+    # Regular expression to match 'attr', 'attr[index]', followed by '.attr[index]' etc.
+    pattern = r"([^\[\].]+)(\[\d+\])?"
+    matches = re.finditer(pattern, attr_str)
+    obj = parent_obj
+
+    n_matches = 0
+    for match in matches:
+        n_matches += 1
+        attr, index = match.groups()
+        parent_obj = obj
+        obj = getattr(parent_obj, attr)
+
+        if index:
+            obj = obj[int(index.strip("[]"))]
+
+        # Check if the current match is at the end of the string
+        if match.end() == len(attr_str):
+            setattr(parent_obj, attr, value)
+            return
+
+    raise AttributeError(f"attribute not found: {attr_str}")
+
+
+def get_input_embeddings_pointer(transformer):
+    embeds = transformer.get_input_embeddings()
+    for parent_module in transformer.modules():
+        for name, child_module in parent_module.named_modules():
+            if child_module is embeds:
+                name = re.sub(
+                    r"\.(\d+)\.", r"[\1].", name
+                )  # layer.0.wte -> layers[0].wte
+                assert recursive_getattr(parent_module, name) is embeds
+                return name, parent_module
+
+    raise ValueError("Could not find input embeddings pointer")
+
+
+class ExtendedEmbedding(nn.Module):
+    """Extends nn.Embedding to accomodate soft prompts"""
+
+    def __init__(self, config, input_embeds, n_new_tokens):
+        super().__init__()
+        self.config = config
+        self.input_embeds = nn.Parameter(input_embeds)
+
+        # topk initialization
+        self.new_embeds = nn.Parameter(input_embeds[:n_new_tokens].clone().detach())
+
+    def forward(self, input_ids):
+        # 1) concat the embeddings, and run fwd pass
+        all_embeds = torch.cat((self.new_embeds, self.input_embeds), dim=0)
+        out = F.embedding(input_ids, all_embeds)
+        return out
 
 
 class DecoderPromptTuningWrapper(torch.nn.Module):
@@ -64,8 +148,12 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
             input_ids = kwargs.pop("input_ids")
 
         attention_mask = kwargs.get("attention_mask", None)
-        input_embeds = self.transformer.get_input_embeddings()(input_ids)
-        soft_prompts = self.soft_prompt(input_ids)
+        old_input_ids = input_ids
+        old_attn_mask = attention_mask
+        old_kwargs = {"attention_mask": old_attn_mask, "input_ids": old_input_ids}
+
+        # soft prompt will return indices for the correct prompt
+        soft_prompt_indices = self.soft_prompt(input_ids)
 
         # make sure we have the right padding
         assert (
@@ -77,7 +165,7 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
 
         # preprend the soft prompt
         if self.config.prompt_placement == "prefix":
-            input_embeds = torch.cat((soft_prompts, input_embeds), dim=1)
+            input_ids = torch.cat((soft_prompt_indices, input_ids), dim=1)
         elif self.config.prompt_placement == "suffix":
             assert labels is not None  # we are not generating.
 
@@ -86,13 +174,12 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
             label_starts = is_label.argmax(1)
 
             # put labels in front
-            rolled_input_embeds = two_d_roll_along(input_embeds, -label_starts)
-            new_input_embeds = torch.cat((soft_prompts, rolled_input_embeds), dim=1)
+            rolled_input_ids = roll_along(input_ids, -label_starts, 1)
+            input_ids = torch.cat((soft_prompt_indices, rolled_input_ids), dim=1)
 
             # roll back, to put input in front
-            new_input_embeds = two_d_roll_along(new_input_embeds, label_starts)
+            input_ids = roll_along(input_ids, label_starts, 1)
 
-            input_embeds = new_input_embeds
         else:
             raise NotImplementedError(
                 f"Unknown prompt placement: {self.config.prompt_placement}"
@@ -100,14 +187,46 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
 
         # expand the attention mask
         attention_mask = torch.cat(
-            (torch.ones_like(soft_prompts[:, :, 0]), attention_mask), dim=1
+            (torch.ones_like(soft_prompt_indices), attention_mask), dim=1
         )
 
         kwargs["attention_mask"] = attention_mask
-        kwargs["inputs_embeds"] = input_embeds
+        kwargs["input_ids"] = input_ids
 
         # TODO: can we just expand the labels to handle soft prompts ?
+        # TODO: remove !
+        self.transformer.eval()
+
         out = self.transformer(*(), **kwargs)
+
+        def check_if_align(old_kw, new_kw, max_len, up_to=None):
+            old_attn_mask, old_input_ids = old_kw["attention_mask"], old_kw["input_ids"]
+            new_attn_mask, new_input_ids = new_kw["attention_mask"], new_kw["input_ids"]
+
+            old_attn_mask = old_attn_mask[:, :max_len]
+            old_input_ids = old_input_ids[:, :max_len]
+            new_attn_mask = new_attn_mask[:, :max_len]
+            new_input_ids = new_input_ids[:, :max_len]
+
+            if up_to is not None:
+                assert torch.all(old_attn_mask[:, :up_to] == new_attn_mask[:, :up_to])
+                assert torch.all(old_input_ids[:, :up_to] == new_input_ids[:, :up_to])
+
+            old_kw = {"attention_mask": old_attn_mask, "input_ids": old_input_ids}
+            new_kw = {"attention_mask": new_attn_mask, "input_ids": new_input_ids}
+
+            assert not self.transformer.training
+            out_old = self.transformer(*(), **old_kw)
+            out_new = self.transformer(*(), **new_kw)
+
+            if up_to is not None:
+                old_logits = out_old.logits[:, :up_to]
+                new_logits = out_new.logits[:, :up_to]
+            else:
+                old_logits = out_old.logits
+                new_logits = out_new.logits
+
+            return torch.allclose(old_logits, new_logits)
 
         # We need to remove remove the soft prompt so as to preserve
         # alignment with the labels
@@ -115,9 +234,38 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
             out.logits = out.logits[:, self.config.soft_prompt_length :, :]
         elif self.config.prompt_placement == "suffix":
             # remove the soft prompt logits
-            rolled_logits = two_d_roll_along(out.logits, -label_starts)
-            chunked_logits = rolled_logits[:, self.config.soft_prompt_length :, :]
-            out.logits = two_d_roll_along(chunked_logits, label_starts)
+
+            # This is always True
+            print(
+                "a",
+                check_if_align(
+                    old_kwargs,
+                    kwargs,
+                    input_ids.size(-1) - soft_prompt_indices.size(-1),
+                    label_starts.min().item(),
+                ),
+            )
+
+            # This is always False
+            print(
+                "b",
+                check_if_align(
+                    old_kwargs,
+                    kwargs,
+                    input_ids.size(-1) - soft_prompt_indices.size(-1) + 1,
+                    label_starts.min().item(),
+                ),
+            )
+
+            # So things go south as soon as we go beyond the original input length
+            breakpoint()
+            # check_if_align(old_kwargs, kwargs, 65, 65)
+            # rolled_logits = two_d_roll_along(out.logits, -label_starts)
+            # chunked_logits = rolled_logits[:, self.config.soft_prompt_length :, :]
+            # out.logits = two_d_roll_along(chunked_logits, label_starts)
+
+            # TODO: MAKE THIS OK (this is a temporary hack so that code compiles) !
+            out.logits = out.logits[:, self.config.soft_prompt_length :, :]
 
         return out
 
@@ -199,7 +347,7 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
         return model_kwargs
 
 
-def modify_with_prompt_tuning(cls, transformer, config):
+def modify_with_prompt_tuning(soft_prompt_cls, embed_cls, transformer, config):
     """Wrap the forward pass of the model with a hook that takes extracts the embeddings
     from the `input_ids`, gets the embeddings from the soft prompt and stiches them together.
     """
@@ -212,24 +360,27 @@ def modify_with_prompt_tuning(cls, transformer, config):
 
     task_id_container = transformer.task_id_container
 
-    input_embeddings = transformer.get_input_embeddings()
-    config.vocab_embed_dim = input_embeddings.embedding_dim
+    embed_name, parent_mod = get_input_embeddings_pointer(transformer)
+    input_embeds = recursive_getattr(parent_mod, embed_name)
+    assert isinstance(input_embeds, nn.Embedding)
 
-    soft_prompt = cls(
+    # Create new embeddings and assign to transformer, replacing existing one
+    ext_embeds = embed_cls(config, input_embeds.weight, config.soft_prompt_length)
+
+    recursive_setattr(parent_mod, embed_name, ext_embeds)
+
+    # Replace in the original model
+    config.vocab_embed_dim = input_embeds.embedding_dim
+
+    soft_prompt = soft_prompt_cls(
         config=config,
         task_id_ptr=task_id_container,
-        base_input_embeddings=input_embeddings,
+        base_input_embeddings=input_embeds,
     )
 
     return DecoderPromptTuningWrapper(
         config=config, transformer=transformer, soft_prompt=soft_prompt
     )
-
-
-class PromptTuningModifyMixin(ModifyMixin):
-    @classmethod
-    def modify_transformer(cls, transformer, config):
-        return modify_with_prompt_tuning(cls, transformer, config)
 
 
 @dataclass
@@ -238,7 +389,7 @@ class PromptTuningConfig(KVAdapterConfig):
 
 
 @register_modifier("prompt_tuning", config_cls=PromptTuningConfig)
-class PromptTuning(Adapter, PromptTuningModifyMixin):
+class PromptTuning(Adapter, ModifyMixin):
     def __init__(self, base_input_embeddings, config, *args, **kwargs):
         super().__init__()
 
@@ -246,29 +397,23 @@ class PromptTuning(Adapter, PromptTuningModifyMixin):
         self.embed_dim = config.vocab_embed_dim
         self.prompt_length = config.soft_prompt_length
 
-        base_input_embeddings = base_input_embeddings.cpu()
-        self.prompt_embedding = nn.Embedding(self.prompt_length, self.embed_dim)
-
-        # initialize from the base model
-        mean = base_input_embeddings.weight.mean(0)
-        std = base_input_embeddings.weight.std(0)
-
-        # TODO: Revisit this initialization
-        new_weight = torch.randn_like(self.prompt_embedding.weight) * (std / 2) + mean
-        self.prompt_embedding.weight.data.copy_(new_weight)
+        # build indices for the prompt
+        self.prompt_indices = (
+            torch.arange(self.prompt_length, dtype=torch.long)
+            + base_input_embeddings.num_embeddings
+        )
 
     def forward(self, input_ids, *args, **kwargs):
-        bs, seq_len = input_ids.size()
-        return self.prompt_embedding.weight.unsqueeze(0).expand(bs, -1, -1)
+        prompt_indices = self.prompt_indices.to(input_ids.device)
+        return prompt_indices.unsqueeze(0).expand(input_ids.size(0), -1)
+
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        return modify_with_prompt_tuning(cls, ExtendedEmbedding, transformer, config)
 
 
-@dataclass
-class AlphaPromptTuningConfig(KVAdapterConfig):
-    pass
-
-
-@register_modifier("alpha_prompt_tuning", config_cls=AlphaPromptTuningConfig)
-class AlphaPromptTuning(Adapter, PromptTuningModifyMixin):
+@register_modifier("alpha_prompt_tuning", config_cls=PromptTuningConfig)
+class AlphaPromptTuning(Adapter, ModifyMixin):
     def __init__(self, base_input_embeddings, config, task_id_ptr, *args, **kwargs):
         super().__init__()
 
@@ -313,7 +458,7 @@ class PolyPromptTuningConfig(PolyKVAdapterConfig):
 
 
 @register_modifier("poly_prompt_tuning", config_cls=PolyPromptTuningConfig)
-class PolyPromptTuning(Adapter, RoutingMixin, PromptTuningModifyMixin):
+class PolyPromptTuning(Adapter, RoutingMixin, ModifyMixin):
     def __init__(self, base_input_embeddings, config, task_id_ptr, *args, **kwargs):
         super(Adapter, self).__init__()
         super(RoutingMixin, self).__init__(task_id_ptr)
