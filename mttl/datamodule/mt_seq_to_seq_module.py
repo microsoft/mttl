@@ -133,11 +133,6 @@ class FlatMultiTaskModule(DefaultDataModule):
         if len(self.test_dataset) == 0:
             self.test_dataset = self.dev_dataset
 
-        # Wrap the datasets to also return the task_id
-        self.train_dataset = task_id_dataset(self.train_dataset, self._task_to_id)
-        self.dev_dataset = task_id_dataset(self.dev_dataset, self._task_to_id)
-        self.test_dataset = task_id_dataset(self.test_dataset, self._task_to_id)
-
         self.print_infos()
 
 
@@ -153,22 +148,6 @@ def filter_template_type(include_template_type, example):
 
 def filter_task_source(include_task_source, example):
     return example["task_source"] in include_task_source
-
-
-def task_id_dataset(dataset, task_to_id):
-    """Wraps the getitem method to add the task_id to the example."""
-
-    def getitem(cls, index):
-        example = cls.old_getitem(index)
-        if isinstance(index, Iterable):
-            example["task_id"] = [task_to_id[task] for task in example["task_name"]]
-        else:
-            example["task_id"] = task_to_id[example["task_name"]]
-        return example
-
-    dataset.old_getitem = dataset.__getitem__
-    dataset.__getitem__ = lambda index: getitem(dataset, index)
-    return dataset
 
 
 class FlanModule(DefaultDataModule):
@@ -232,10 +211,6 @@ class FlanModule(DefaultDataModule):
             self.test_dataset = self.dev_dataset
 
         # Wrap the datasets to also return the task_id
-        self.train_dataset = task_id_dataset(self.train_dataset, self._task_to_id)
-        self.dev_dataset = task_id_dataset(self.dev_dataset, self._task_to_id)
-        self.test_dataset = task_id_dataset(self.test_dataset, self._task_to_id)
-
         self.print_infos()
 
 
