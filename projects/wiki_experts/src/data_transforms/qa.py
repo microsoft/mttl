@@ -344,6 +344,107 @@ Now generate {batch_size} diverse problems each with four options (A, B, C, D) a
         return task_description
 
 
+class OAITemplate_Batched_MultiChoice_CoT:
+    @classmethod
+    def post_process_generation(cls, generated_output):
+        # Regular expression pattern to split the string into problem, options, and response
+        pattern = r"### Problem:\s*(.*?)\n(.*?)\s*### Response:\s*(.*?)\s*(?=##|$)"
+
+        # Find all matches in the input string
+        matches = re.findall(pattern, generated_output, re.DOTALL)
+
+        data = []
+        for match in matches:
+            if not len(match) == 3:
+                # skipping item
+                continue
+
+            instruction = match[0].strip()
+            options = match[1].strip()
+            response = match[2].strip()
+
+            if not instruction or not options or not response:
+                # skipping item
+                continue
+
+            choices = re.findall(r"(\w)\. ([^\n]+)", options)
+            if len(choices) != 4:
+                # skipping item
+                continue
+
+            # error in the labels
+            labels = [c[0] for c in choices]
+            if labels != ["A", "B", "C", "D"]:
+                continue
+
+            # check if the response is valid
+            if response[0] not in ["A", "B", "C", "D"]:
+                continue
+
+            # take first letter in response
+            response = response[0]
+
+            # re-assign options to create balanced labels
+            np.random.shuffle(choices)
+            labels, texts = zip(*choices)
+
+            response = "ABCD"[labels.index(response)]
+            options = "\n".join(
+                [f"{label}. {text}" for label, text in zip("ABCD", texts[:4])]
+            )
+
+            instruction = (
+                "Question:\n{instruction}\nChoices:\n{options}\nAnswer:".format(
+                    instruction=instruction, options=options
+                )
+            )
+            data.append({"instruction": instruction, "response": response})
+        return data
+
+    @classmethod
+    def apply(cls, context, output, domain, icl_examples=None):
+        domain = domain.replace("_", " ")
+        batch_size = "five"
+        task_description = f"""Your task is to come up with a set of {batch_size} diverse multiple-choice problems, each with their answer options and ground-truth response about the following domain: {domain}.
+
+Please stick to the following format for your output:
+
+## Example [number of the example]
+### Problem:
+[your generated problem]
+A. [your first generated option]
+B. [your second generated option]
+C. [your third generated option]
+D. [your fourth generated option]
+
+### Response:
+[the correct response, which should be A, B, C or D]
+
+For example:
+
+## Example 1
+### Problem:
+{icl_examples[0]['instruction']}
+{icl_examples[0]['options']}
+
+### Response:
+{icl_examples[0]['response']}
+
+Carefully analyze the following context to generate your questions:
+
+### Context:
+{context}
+
+Summarize the above context into 5 sentences. A reader should understand the summary without access to the context. Write each sentence in the following format:
+
+### Sentence [number of the sentence]
+[your sentence]
+
+Then, generate {batch_size} diverse problems relevant to each sentence, each with four options (A, B, C, D) and a response. Please follow the guidelines carefully when generating problems and responses:
+"""
+        return task_description
+
+
 @dataclass
 class QAModelSetting:
     inverse_model_path: str
@@ -380,6 +481,12 @@ QA_MODEL_SETTINGS = {
         model_path="gpt-35-turbo",
         instruction_template=OAITemplate_Batched_MultiChoice(),
         response_template=OAITemplate_Batched_MultiChoice(),
+    ),
+    "openai_batched_multichoice_cot": QAModelSetting(
+        inverse_model_path="gpt-35-turbo",
+        model_path="gpt-35-turbo",
+        instruction_template=OAITemplate_Batched_MultiChoice_CoT(),
+        response_template=OAITemplate_Batched_MultiChoice_CoT(),
     ),
 }
 
