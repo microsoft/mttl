@@ -372,6 +372,7 @@ class MoETrainer(MultiExpertModel):
                     lora_alpha=self.hparams.lora_alpha,
                     lora_dropout=self.hparams.lora_dropout,
                     lora_rank=self.hparams.lora_rank,
+                    lora_init_b_random=True,
                 ),
             )
 
@@ -396,7 +397,7 @@ class MoETrainer(MultiExpertModel):
             self.model.task_id_container["routing_gates"].clear()
 
             mi_loss = (-entropy + xentropy) / num
-            total_loss += 10 * mi_loss
+            total_loss += 2.0 * mi_loss
             self.log(
                 f"{self._log_pref}train/route_ent",
                 xentropy / num,

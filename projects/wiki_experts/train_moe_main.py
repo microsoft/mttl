@@ -147,13 +147,19 @@ def run_multitask(args: ExpertConfig):
     if val_check_interval == -1 or val_check_interval is None:
         val_check_interval = None
     else:
-        val_check_interval = args.gradient_accumulation_steps * args.eval_every
+        val_check_interval = args.eval_every
         if val_check_interval > len(dm.train_dataloader()):
             val_check_interval = len(dm.train_dataloader())
         elif val_check_interval > args.total_steps and args.total_steps != -1:
             val_check_interval = args.total_steps
 
-    callbacks.append(RougeCallback(gen_dm, every_n_epochs=3))
+    logger.warn("Validitating every {} steps!".format(val_check_interval))
+
+    # evaluate 500 batches generation
+    num_batches = min(len(gen_dm.val_dataloader()), 500)
+    subsample = len(gen_dm.val_dataloader()) / num_batches
+
+    callbacks.append(RougeCallback(gen_dm, every_n_epochs=3, subsample=int(subsample)))
 
     trainer = Trainer(
         devices=-1,
@@ -171,6 +177,7 @@ def run_multitask(args: ExpertConfig):
         precision=int(args.precision)
         if args.precision in ["16", "32"]
         else args.precision,
+        limit_val_batches=500,
         val_check_interval=val_check_interval,
     )
 

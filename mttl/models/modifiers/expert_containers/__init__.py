@@ -28,9 +28,9 @@ def _extract_identifier(string, match_on="coder"):
         return string.replace(".", "_")
     if match_on == "coarsegrained":
         return "shared"
-    pos = string.find(f"{match_on}.")
+    pos = string.find(f"{match_on}")
     if pos > 0:
-        return string[:pos]
+        return string[: pos + len(match_on)]
     return string
 
 
@@ -125,29 +125,34 @@ def add_expert_to_transformer(
                     total_layers += 1
                     layer_name = f"{m_name}.{c_name}"
 
-                    if routing_config is not None:
-                        identifier = _extract_identifier(
-                            layer_name, routing_config.router_granularity
-                        )
-
-                        if identifier not in transformer.selectors.keys():
-                            # Special case when you have a decoder layer in an enc-dec model
-                            transformer.selectors[identifier] = get_selector(
-                                routing_config,
-                                info_container=transformer.task_id_container,
-                                layer=layer,
-                                training_config=training_config,
-                            )
-                            transformer.selectors[identifier].__layer_name__ = (
-                                identifier + ".selector"
-                            )
-                            selector = transformer.selectors[identifier]
-                    else:
+                    if not isinstance(layer, ExpertContainer):
                         selector = None
 
-                    if not isinstance(layer, ExpertContainer):
-                        # create an expert lora container
-                        # TODO: possibly remove task_id_container from the initialization here
+                        if routing_config is not None:
+                            identifier = _extract_identifier(
+                                layer_name, routing_config.router_granularity
+                            )
+
+                            if identifier not in transformer.selectors.keys():
+                                # Special case when you have a decoder layer in an enc-dec model
+                                transformer.selectors[identifier] = get_selector(
+                                    routing_config,
+                                    info_container=transformer.task_id_container,
+                                    layer=layer,
+                                    training_config=training_config,
+                                )
+                                transformer.selectors[identifier].__layer_name__ = (
+                                    identifier + ".selector"
+                                )
+                                selector: Selector = transformer.selectors[identifier]
+                            else:
+                                # create a view on an existing selector for all the "shared" layers
+                                # these don't hold params, are not registered as modules, and read from the cache
+                                # of their parent "real" selector
+                                selector: SelectorView = transformer.selectors[
+                                    identifier
+                                ].create_view()
+
                         CONTAINER_CLASS = get_container_class(model_modifier)
                         expert_container = CONTAINER_CLASS(
                             expert_config,

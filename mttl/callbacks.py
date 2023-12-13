@@ -123,7 +123,7 @@ class LossCallback(cb.Callback):
 
 
 class RougeCallback(cb.Callback):
-    def __init__(self, datamodule, device="cuda", every_n_epochs=1):
+    def __init__(self, datamodule, device="cuda", every_n_epochs=1, subsample=-1):
         super().__init__()
 
         from mttl.evaluators.rouge_evaluator import RougeEvaluator
@@ -131,13 +131,14 @@ class RougeCallback(cb.Callback):
         self.evaluator = RougeEvaluator(datamodule, device=device)
         self.every_n_epochs = every_n_epochs
         self.verbose = False
+        self.subsample = subsample
 
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:
         if self.every_n_epochs > 0 and trainer.current_epoch % self.every_n_epochs == 0:
             rouge = self.evaluator.evaluate(
-                pl_module, split="val", verbose=self.verbose
+                pl_module, split="val", verbose=self.verbose, subsample=self.subsample
             )
 
             pl_module.log("val/rougeL", rouge, on_epoch=True, prog_bar=True)
@@ -145,7 +146,9 @@ class RougeCallback(cb.Callback):
         return super().on_validation_epoch_end(trainer, pl_module)
 
     def on_test_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        rouge = self.evaluator.evaluate(pl_module, split="test", verbose=self.verbose)
+        rouge = self.evaluator.evaluate(
+            pl_module, split="test", verbose=self.verbose, subsample=self.subsample
+        )
 
         pl_module.log("test/rougeL", rouge, on_epoch=True, prog_bar=True)
 
