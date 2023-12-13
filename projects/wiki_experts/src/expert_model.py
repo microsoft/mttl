@@ -377,7 +377,7 @@ class MoETrainer(MultiExpertModel):
 
     def training_step(self, batch, _):
         loss = self.forward(batch)
-        total_loss = loss
+        total_loss = loss.clone()
 
         if self.model.task_id_container["routing_gates"]:
             num = 0.0
@@ -417,7 +417,7 @@ class MoETrainer(MultiExpertModel):
 
         for i, pg in enumerate(self.optimizers().optimizer.param_groups):
             self.log(f"train/lr_{i}", pg["lr"])
-        return total_loss
+        return loss
 
 
 class RoutedMultiExpertModel(MultiExpertModel):
