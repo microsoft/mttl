@@ -204,7 +204,7 @@ class MOERKHSSelector(Selector):
         rkhs_enc = self._get_weights(input)
         rkhs_emb = self.rkhs_exp(self.rkhs_embeddings)
 
-        router_logits = torch.bmm(rkhs_enc, rkhs_emb.T)
+        router_logits = torch.matmul(rkhs_enc, rkhs_emb.T)
         routing_weights = F.softmax(router_logits, dim=-1, dtype=torch.float)
         routing_weights, selected_experts = torch.topk(
             routing_weights, self.topk, dim=-1
