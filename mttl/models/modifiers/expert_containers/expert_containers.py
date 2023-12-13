@@ -3,10 +3,10 @@ import torch
 from torch import nn
 from typing import Any, Dict, List
 from mttl.models.modifiers.base import MergeableAdapter, ModifyMixin
-from mttl.models.modifiers.base import Adapter, MergeableAdapter, ModifyMixin
-from mttl.models.modifiers.lora import LoRA, SkilledLoRA, SkilledLoRAView
+from mttl.models.modifiers.lora import LoRA
 from mttl.models.modifiers.kv_adapter import KVAdapter
 from mttl.models.modifiers.expert_containers.selectors import *
+from mttl.models.modifiers.modify_model import get_modifier_type
 from mttl.utils import logger
 from mttl.models.modifiers.expert_containers.module_graph import Expert
 
@@ -134,7 +134,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
             )
 
         # hack this for now, but build a proper config for each module
-        if expert_config.model_modifier == "lora":
+        if get_modifier_type(self.config) == "lora":
             expert_module = LoRA(expert_config, self.layer)
 
             if expert_weights is not None:
