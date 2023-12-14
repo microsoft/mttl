@@ -305,9 +305,6 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
             len(load_result.unexpected_keys) == 0
         ), f"Load model failed, unexpected keys {load_result.unexpected_keys.__str__()}"
 
-    def transfer_batch_to_device(self, batch, device, dataloader_idx):
-        return transfer_batch_to_device(batch, device)
-
     def configure_optimizers(self):
         args = self.hparams
         self.ml_optimizer = self.ml_scheduler = None
