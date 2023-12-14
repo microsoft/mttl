@@ -207,7 +207,9 @@ class ExpertLibrary:
 
         try:
             if create:
-                self.create_repo(repo_id, repo_type="model", exist_ok=True)
+                self.create_repo(
+                    repo_id, repo_type="model", exist_ok=True, private=True
+                )
         except Exception as e:
             logger.error("Error creating repo %s\n", repo_id)
 
