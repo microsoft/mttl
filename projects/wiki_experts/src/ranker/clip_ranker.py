@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import tqdm
 import os
+import numpy as np
 
 from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRanker
 from mttl.models.utils import EfficientCheckpointModule
@@ -28,7 +29,7 @@ class TextEncoder(nn.Module):
         auto_model = self.transformer_encoder._first_module().auto_model
         if not trainable:
             for param in auto_model.parameters():
-                param.requires_grad = False
+                param.requires_grad = True
 
     def forward(self, x):
         outputs = self.transformer_encoder.encode(
@@ -42,6 +43,7 @@ class ExpertEncoder(nn.Module):
         super().__init__()
 
         self.expert_embedding = nn.Embedding(expert_num, expert_dim)
+        self.expert_embedding.weight.requires_grad = True
         self.model = nn.Linear(expert_dim, expert_dim)
 
     def forward(self, expert_id):
@@ -105,7 +107,7 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
         # gettng the expert and text features
         expert_ids = [
             self.tasks_names_to_ids[expert_name]
-            for expert_name in batch["expert_names"]
+            for expert_name in batch["positive_expert_names"]
         ]
         expert_features = self.expert_encoder(torch.tensor(expert_ids).to(device))
         text_features = self.text_encoder(batch["sources_texts"])
@@ -121,7 +123,7 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
         logits = text_embeddings @ expert_embeddings.T / self.temperature
 
         # symmetric loss function
-        labels = torch.arange(len(batch["expert_names"])).to(self.device)
+        labels = torch.arange(len(batch["positive_expert_names"])).to(self.device)
         loss = F.cross_entropy(logits, labels) + F.cross_entropy(logits.T, labels) / 2
 
         return loss
@@ -140,13 +142,38 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
     ):
         # we only need a num_experts x dimension matrix for the expert embeddings
         with torch.no_grad():
-            expert_embeddings = self.expert_encoder(
+            expert_features = self.expert_encoder(
                 torch.tensor(list(self.ids_to_tasks_names.keys())).to(device)
             )
+            expert_embeddings = self.expert_projection(expert_features)
             return expert_embeddings
 
     def predict_task(self, query, n=1):
-        raise NotImplementedError("Not implemented yet.")
+        # Getting the expert and text embeddings with the same dimension
+        text_features = self.text_encoder(query)
+        text_embeddings = self.text_projection(text_features)
+
+        # get expert_embedding
+        expert_embeddings = self.get_expert_embeddings()
+
+        # l2 normalize the embeddings
+        expert_embeddings = F.normalize(expert_embeddings, dim=-1)
+        text_embeddings = F.normalize(text_embeddings, dim=-1)
+        # calculate the similarity and normalize
+        dot_similarity = text_embeddings @ expert_embeddings.T / self.temperature
+        expert_indices = torch.topk(dot_similarity.squeeze(0), k=n)
+
+        expert_prediction = [
+            [self.ids_to_tasks_names[index.item()] for index in indices]
+            for indices in expert_indices.indices
+        ]
+        expert_weights = [
+            [weight.item() for weight in weights] for weights in expert_indices.values
+        ]
+        expert_weights = np.exp(np.array(expert_weights))
+        expert_weights = expert_weights / expert_weights.sum(axis=1, keepdims=True)
+
+        return expert_prediction, expert_weights.tolist()
 
     @torch.no_grad()
     def predict_batch(self, batch, n=1):
@@ -162,26 +189,19 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
         text_embeddings = F.normalize(text_embeddings, dim=-1)
         # calculate the similarity and normalize
         dot_similarity = F.softmax(text_embeddings @ expert_embeddings.T, dim=-1)
-        values, indices = torch.topk(dot_similarity.squeeze(0), n)
-        # now we only selet the top n experts
+        expert_indices = torch.topk(dot_similarity.squeeze(0), k=n)
 
-        expert_prediction = []
-        expert_weights = []
+        expert_prediction = [
+            [self.ids_to_tasks_names[index.item()] for index in indices]
+            for indices in expert_indices.indices
+        ]
+        expert_weights = [
+            [weight.item() for weight in weights] for weights in expert_indices.values
+        ]
+        expert_weights = np.exp(np.array(expert_weights))
+        expert_weights = expert_weights / expert_weights.sum(axis=1, keepdims=True)
 
-        if n == 1:
-            expert_prediction = [self.ids_to_tasks_names[idx.item()] for idx in indices]
-            expert_weights = [weight.item() for weight in values]
-            return expert_prediction, expert_weights
-        for i, item in enumerate(indices):
-            m = []
-            w = []
-            for j, idx in enumerate(item):
-                m.append(self.ids_to_tasks_names[idx.item()])
-                w.append(values[i][j].item())
-            expert_prediction.append(m)
-            expert_weights.append(w)
-
-        return expert_prediction, expert_weights
+        return expert_prediction, expert_weights.tolist()
 
     def training_step(self, batch, batch_idx):
         loss = self.forward(batch)
@@ -242,16 +262,8 @@ class CLIPTripletRanker(CLIPRanker):
         negative_expert_embeddings = F.normalize(negative_expert_embeddings, dim=-1)
 
         # Compute distances (positive and negative scores)
-        positive_score = torch.mean(
-            torch.nn.functional.pairwise_distance(
-                text_embeddings, positive_expert_embeddings, p=2
-            )
-        )
-        negative_score = torch.mean(
-            torch.nn.functional.pairwise_distance(
-                text_embeddings, negative_expert_embeddings, p=2
-            )
-        )
+        positive_score = torch.mean(text_embeddings @ positive_expert_embeddings.T)
+        negative_score = torch.mean(text_embeddings @ negative_expert_embeddings.T)
 
         # calculate tripled loss
         loss = nn.TripletMarginLoss(margin=1.0)(

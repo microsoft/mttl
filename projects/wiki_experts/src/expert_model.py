@@ -22,6 +22,7 @@ from mttl.models.modifiers.expert_containers.module_graph import (
     ModuleGraph,
     load_expert,
 )
+import os
 
 
 def push_expert_to_hub(
@@ -283,10 +284,17 @@ class MultiExpertModel(ExpertTrainer):
         batch,
         **kwargs,
     ):
+        if self.hparams.routing == "random":
+            import numpy as np
+
+            batch["task_names"] = np.random.choice(
+                self.experts, batch["input_ids"].shape[0], replace=True
+            ).tolist()
         if hasattr(self.model, "task_id_container"):
             self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
                 batch
             )
+
         generations = self.model.generate(
             inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
         )
@@ -302,6 +310,9 @@ class MultiExpertModelRanker(MultiExpertModel):
             ranker_path=kwargs["ranker_path"],
         )
         self.hparams.router_selector = "info_selector"
+        self.fout = open(
+            os.path.join(self.hparams.output_dir, "analyse_predict_expert.txt"), "w"
+        )
 
     def generate(
         self,
@@ -327,7 +338,14 @@ class MultiExpertModelRanker(MultiExpertModel):
         self.model.task_id_container["routing_infos"].routing_modules = mod_names
         self.model.task_id_container["routing_infos"].routing_weights = mod_weights
 
-        # infos
+        for e, task_name in enumerate(batch["task_names"]):
+            logger.info(
+                "task_name:{}.... predict experts: {}".format(
+                    task_name, mod_names[e][0]
+                )
+            )
+            self.fout.write(task_name + "\t" + mod_names[e][0] + "\n")
+        self.fout.flush()
         logger.info(f"Most similar: {str(mod_names)}")
         logger.info(f"Most similar weights: {str(mod_weights)}")
 

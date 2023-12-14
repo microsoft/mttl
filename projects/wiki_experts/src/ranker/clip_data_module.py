@@ -111,7 +111,7 @@ class CLIPExpertsDatamodule(DefaultDataModule):
             _,
         ) = maybe_filter_hf_dataset_by_key(
             dataset,
-            key="expert_name",
+            key="positive_expert_names",
             task_names=self.config.finetune_task_name,
             n_proc=n_proc,
         )

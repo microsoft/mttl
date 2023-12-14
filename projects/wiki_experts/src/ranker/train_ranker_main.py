@@ -46,7 +46,6 @@ def train_triplet_clip(args):
         dataset=args.dataset,
         model=args.model,
         train_batch_size=args.train_batch_size,
-        finetune_task_name=args.finetune_task_name,
     )
     tempdatamodule = FlatMultiTaskModule(tempconfig)
     task_names = tempdatamodule.task_names
@@ -55,11 +54,9 @@ def train_triplet_clip(args):
 
     # add model checkpoint
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
-        monitor="val/loss_epoch",
         dirpath=f"clip_triplet_ranker_{args.exp_name}/",
         filename="clip-{epoch:02d}-{val/loss:.2f}",
-        save_top_k=1,
-        mode="min",
+        save_last=True,
     )
 
     trainer = pl.Trainer(
@@ -68,7 +65,7 @@ def train_triplet_clip(args):
         callbacks=[checkpoint_callback],
         devices=1,
         logger=wandb_logger,
-        val_check_interval=0.25,
+        val_check_interval=0.5,
     )
     trainer.fit(model, datamodule)
     if wandb_logger:
@@ -100,14 +97,11 @@ def train_clip(args):
         predict_batch_size=args.predict_batch_size,
     )
 
-    datamodule = CLIPExpertsDatamodule(dataconfig)
+    datamodule = CLIPTripleDataModule(dataconfig)
 
     # noqa this is not reasonable
     tempconfig = FlatMultiTaskConfig(
-        dataset=args.dataset,
-        model=args.model,
-        train_batch_size=args.train_batch_size,
-        finetune_task_name=args.finetune_task_name,
+        dataset=args.dataset, model=args.model, train_batch_size=args.train_batch_size
     )
     tempdatamodule = FlatMultiTaskModule(tempconfig)
     task_names = tempdatamodule.task_names
@@ -132,7 +126,7 @@ def train_clip(args):
         callbacks=[checkpoint_callback],
         devices=1,
         logger=wandb_logger,
-        val_check_interval=0.25,
+        val_check_interval=0.5,
     )
     trainer.fit(model, datamodule)
     if wandb_logger:
