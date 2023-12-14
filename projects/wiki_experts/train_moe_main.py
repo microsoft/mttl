@@ -165,7 +165,8 @@ def run_multitask(args: ExpertConfig):
 
     trainer = Trainer(
         devices=-1,
-        accelerator="gpu",
+        accelerator="auto",
+        strategy="ddp_find_unused_parameters_true",
         logger=loggers,
         log_every_n_steps=1,
         num_sanity_val_steps=0,
@@ -173,7 +174,6 @@ def run_multitask(args: ExpertConfig):
         max_epochs=args.num_train_epochs if not args.total_steps else None,
         max_steps=args.total_steps + 1 if args.total_steps != -1 else -1,
         gradient_clip_val=args.max_grad_norm,
-        strategy=args.compute_strategy if args.compute_strategy else "auto",
         callbacks=callbacks,
         accumulate_grad_batches=args.gradient_accumulation_steps,
         precision=int(args.precision)

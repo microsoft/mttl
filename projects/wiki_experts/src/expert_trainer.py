@@ -35,7 +35,7 @@ class ExpertTrainer(EfficientCheckpointModule):
             model_object = model_loader_helper(
                 self.hparams.model,
                 load_in_8bit=self.hparams.load_in_8bit,
-                device_map=getattr(self.hparams, "device_map", "auto"),
+                device_map=getattr(self.hparams, "device_map", "cpu"),
             )
 
         if self.hparams.load_in_8bit:
@@ -172,6 +172,7 @@ class ExpertTrainer(EfficientCheckpointModule):
         from mttl.models.utils import convert_hps_to_dict
 
         super().on_save_checkpoint(ckpt)
+
         # inject expert info in the expert checkpoint
         expert_info = ExpertInfo(
             expert_name=self.hparams.expert_name,
