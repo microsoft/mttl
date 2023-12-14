@@ -159,7 +159,9 @@ def run_multitask(args: ExpertConfig):
     num_batches = min(len(gen_dm.val_dataloader()), 500)
     subsample = len(gen_dm.val_dataloader()) / num_batches
 
-    callbacks.append(RougeCallback(gen_dm, every_n_epochs=3, subsample=int(subsample)))
+    callbacks.append(
+        RougeCallback(gen_dm, every_n_epochs=3, subsample=int(subsample), max_length=3)
+    )
 
     trainer = Trainer(
         devices=-1,

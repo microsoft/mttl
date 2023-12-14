@@ -397,7 +397,7 @@ class MoETrainer(MultiExpertModel):
             self.model.task_id_container["routing_gates"].clear()
 
             mi_loss = (-entropy + xentropy) / num
-            total_loss += 2.0 * mi_loss
+            total_loss += 2.5 * mi_loss
             self.log(
                 f"{self._log_pref}train/route_ent",
                 xentropy / num,

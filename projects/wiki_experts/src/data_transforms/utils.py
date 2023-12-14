@@ -72,12 +72,16 @@ def upload_to_hf_(
 
         for sub in subjects:
             dts_subject = dataset.filter(lambda x: x["subject"] == sub, num_proc=16)
+
             if cutoff > 0:
-                dts_subject = dts_subject.shuffle().select(range(cutoff))
+                dts_subject = dts_subject.shuffle(42).select(
+                    range(min(len(dts_subject), cutoff))
+                )
 
             context_ids = list(dts_subject["id"])
             train_ids = train_ids + context_ids[: int(len(context_ids) * 0.95)]
             valid_ids = valid_ids + context_ids[int(len(context_ids) * 0.95) :]
+
             print(sub, len(context_ids))
             print("train", len(train_ids))
             print("valid", len(valid_ids))
