@@ -184,6 +184,7 @@ class ExpertLibrary:
     def __init__(
         self,
         repo_id,
+        hf_token_hub=None,
         model_name=None,
         selection=None,
         create=False,
@@ -202,8 +203,8 @@ class ExpertLibrary:
 
         self.ignore_sliced = ignore_sliced
 
-        if "HF_TOKEN" in os.environ:
-            self.login(token=os.environ["HF_TOKEN"])
+        if "HF_TOKEN" in os.environ or hf_token_hub:
+            self.login(token=os.environ.get("HF_TOKEN", hf_token_hub))
 
         try:
             if create:
