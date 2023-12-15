@@ -308,14 +308,14 @@ class MultiExpertModel(ExpertTrainer):
 
 class MultiExpertModelRanker(MultiExpertModel):
     def __init__(self, **kwargs):
+        kwargs["router_selector"] = "info_selector"
+
         super().__init__(**kwargs)
 
         self.expert_ranker = AdapterRankerHelper.get_ranker_instance(
             ranker_model=kwargs["ranker_model"],
             ranker_path=kwargs["ranker_path"],
         )
-        # always use routing info container selector
-        self.routing_config = RoutingInfoContainerConfig()
 
     def generate(
         self,
