@@ -103,8 +103,10 @@ def test_auto_modifier_config():
     config.model_modifier = "lora"
     config.lora_rank = 12
     config.lora_dropout = 0.52
+    config.modify_modules = ".*mlpU.*"
 
     lora_config = AutoModifierConfig.from_training_config(config)
     assert type(lora_config) == LoRAConfig
     assert lora_config.lora_rank == 12
     assert lora_config.lora_dropout == 0.52
+    assert lora_config.modify_modules == ".*mlpU.*"

@@ -6,8 +6,12 @@ from typing import Dict, List
 from tempfile import TemporaryDirectory
 
 import tqdm
+from mttl.models.modifiers.expert_containers.expert_containers import (
+    LoRAExpertContainer,
+)
 from mttl.models.modifiers.lora import LoRAConfig
 from mttl.models.modifiers.routing import RoutingInfo
+from mttl.models.utils import convert_hps_to_dict
 from mttl.utils import logger
 from mttl.models.modifiers.expert_containers import ExpertContainer
 from mttl.models.modifiers.expert_containers import Selector, RoutingConfig
@@ -45,13 +49,13 @@ def push_expert_to_hub(
 
     expert = load_expert(get_checkpoint_path(ckpt_path, use_last=use_last))
 
-    dataset_name = expert.expert_config.dataset
+    dataset_name = expert.training_config.dataset
     # handle the case where dataset is from huggingface
     if "/" in dataset_name:
         dataset_name = dataset_name.partition("/")[-1]
 
     # model is definitely from HF
-    model_name = expert.expert_config.model
+    model_name = expert.training_config.model
     if "/" in model_name:
         model_name = model_name.partition("/")[-1]
 
@@ -231,11 +235,11 @@ class MultiExpertModel(ExpertTrainer):
 
         expert = load_expert(expert_path, expert_name=expert_name)
 
-        if self.hparams.model != expert.expert_config.model:
+        if self.hparams.model != expert.training_config.model:
             raise ValueError(
                 "The expert has been trained on top of a different model!"
                 " Detected: {} - Expected: {}".format(
-                    expert.expert_config.model, self.hparams.model
+                    expert.training_config.model, self.hparams.model
                 )
             )
 
@@ -358,12 +362,11 @@ class MoETrainer(MultiExpertModel):
     def __init__(self, **kwargs):
         kwargs["router_selector"] = "moe_rkhs_router"
         kwargs["router_granularity"] = "mlp"
-        kwargs["num_experts"] = 8
 
         super().__init__(**kwargs)
 
         # 8 experts
-        for i in range(self.hparams.num_experts):
+        for i in range(self.hparams.moe_num_experts):
             self.add_empty_expert(
                 f"e{i}",
                 LoRAConfig(
@@ -450,22 +453,22 @@ class RoutedMultiExpertModel(MultiExpertModel):
 
         expert_weights = {}
         for container in self.experts_containers:
-            # creates a single Lora
-            exp_config, _weights = container.get_merged_weights(
+            assert type(container) == LoRAExpertContainer
+
+            expert_config, _weights = container.get_merged_weights(
                 with_global_names=with_global_names, weights=weights
             )
             expert_weights.update(_weights)
 
-        config_merged = copy.deepcopy(self.hparams)
-        config_merged.model_modifier = exp_config.model_modifier
         expert_info = ExpertInfo(
-            self.hparams.finetune_task_name,
+            expert_name=self.hparams.finetune_task_name,
             expert_task_name=self.hparams.finetune_task_name,
-            expert_config=config_merged,
+            training_config=self.training_config,
+            expert_config=expert_config,
         )
         return Expert(expert_info=expert_info, expert_weights=expert_weights)
 
     def on_save_checkpoint(self, ckpt):
         expert: Expert = self.to_expert()
-        ckpt["expert_dumps"] = expert.dumps()
+        ckpt["expert_dumps"] = expert.asdict()
         ckpt["merging_weights"] = self.get_router_weights()

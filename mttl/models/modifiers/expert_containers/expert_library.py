@@ -618,7 +618,6 @@ class ExpertLibrary:
 
         metadata = self.data[old_name]
         metadata.expert_name = new_name
-        metadata.expert_config.expert_name = new_name
 
         self.data[new_name] = metadata
         self.data.pop(old_name)

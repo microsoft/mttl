@@ -4,8 +4,6 @@ import json
 import pytorch_lightning as pl
 
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
-from mttl.models.modifiers.lora import LoRAConfig
-from projects.wiki_experts.src.expert_model import MoETrainer, MultiExpertModel
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -16,8 +14,6 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 import json
 
 from mttl.datamodule.mt_seq_to_seq_module import (
-    FlanConfig,
-    FlanModule,
     FlatMultiTaskConfig,
     FlatMultiTaskModule,
 )
@@ -25,16 +21,7 @@ from mttl.datamodule.mt_seq_to_seq_module import (
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.callbacks import RougeCallback
-from mttl.datamodule.oasst1_module import OA1Config, OA1Module
-from mttl.datamodule.facts_lm_module import FactsLMConfig, FactsLMDataModule
-from mttl.datamodule.platypus_module import (
-    PlatypusModule,
-    PlatypusConfig,
-    PlatypusQAModule,
-)
 from mttl.utils import get_mlf_logger, setup_logging, logger
-
-from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
 
 

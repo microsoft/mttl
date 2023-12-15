@@ -1,27 +1,67 @@
 from pyparsing import abstractmethod
 import torch
 from torch import nn
-from typing import Any, Dict, List
-from mttl.models.modifiers.base import MergeableAdapter, ModifyMixin
-from mttl.models.modifiers.lora import LoRA
-from mttl.models.modifiers.kv_adapter import KVAdapter
+from typing import List
+from mttl.config import Config
+from mttl.models.modifiers.base import (
+    AutoModifierConfig,
+    MergeableAdapter,
+    ModifierConfig,
+    ModifyMixin,
+)
+from mttl.models.modifiers.lora import LoRA, LoRAConfig
+from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
 from mttl.models.modifiers.expert_containers.selectors import *
 from mttl.models.modifiers.modify_model import get_modifier_type
-from mttl.utils import logger
 from mttl.models.modifiers.expert_containers.module_graph import Expert
 
 
 class ExpertContainer:
+    __supports_configs__ = []
+
     def __init__(self, config, task_id_container, layer, selector=None):
         self.config = config
         self.layer = layer
         self.task_id_container = task_id_container
         self.selector = selector or TaskNameSelector(task_id_container)
 
-        self.experts = None
+        self.experts: dict = None
         self.expert_infos = {}
         self.expert_names = []
         self.default_expert_name = None
+
+    def _add_expert(self, expert_name, expert_info, expert_module):
+        self.expert_infos[expert_name] = expert_info
+        self.expert_names.append(expert_name)
+        self.experts[expert_name] = expert_module
+        self.add_expert_to_selector(expert_name, expert_info=expert_info)
+
+    def _check_config(self, expert_config: Union[Config, ModifierConfig]):
+        """Checks if the config is supported and converts it to the supported config type if needed."""
+        if isinstance(expert_config, Config):
+            # patches the config to be a LoRAConfig for the future
+            from mttl.models.modifiers.base import AutoModifierConfig
+
+            expert_config = AutoModifierConfig.from_training_config(expert_config)
+
+        if type(expert_config) not in self.__supports_configs__:
+            raise ValueError(
+                "Unsupported expert config type {} for this type of expert container.".format(
+                    type(expert_config)
+                )
+            )
+
+    def export_experts(self) -> List[Expert]:
+        experts = []
+        for name, expert_module in self.experts.items():
+            expert = Expert(
+                expert_info=self.expert_infos[name],
+                expert_weights={
+                    self.layer_name + "." + n: v for n, v in expert_module.state_dict()
+                },
+            )
+            experts.append(expert)
+        return experts
 
     @abstractmethod
     def add_expert(
@@ -31,6 +71,10 @@ class ExpertContainer:
         is_default=False,
     ) -> None:
         pass
+
+    @property
+    def layer_name(self):
+        return self.__layer_name__
 
     @abstractmethod
     def forward(self, input, **kwargs):
@@ -62,6 +106,8 @@ class ExpertContainer:
 
 
 class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
+    __supports_configs__ = [LoRAConfig]
+
     def __init__(self, config, task_id_container, layer, selector=None):
         MergeableAdapter.__init__(self)
         super().__init__(config, task_id_container, layer, selector)
@@ -73,37 +119,8 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                 )
             )
 
-        self.default_expert_name = None
         self.merged_expert_names = []
-        self.expert_names = []
-
         self.experts = nn.ModuleDict({})
-        self._experts_embeddings = nn.ParameterDict({})
-
-    @property
-    def expert_embeddings(self):
-        if self._expert_embeddings is not None:
-            return self._expert_embeddings
-
-        self._expert_embeddings = []
-        for expert_name in self.expert_names:
-            device = self.experts[expert_name].lora_a.weight.device
-
-            expert_info = self.expert_infos[expert_name]
-            expert_embedding = expert_info.expert_embedding
-            self._expert_embeddings.append(torch.tensor(expert_embedding))
-
-        self._expert_embeddings = torch.stack(self._expert_embeddings, dim=0).to(
-            device=device
-        )
-        return self._expert_embeddings
-
-    def add_expert_embedding(self, expert: Expert):
-        if hasattr(expert.expert_info, "expert_embedding"):
-            expert_embedding = expert.expert_info.expert_embedding
-            self._experts_embeddings[expert.name] = torch.tensor(expert_embedding)
-        else:
-            self._experts_embeddings[expert.name] = None
 
     def add_expert(
         self,
@@ -112,9 +129,6 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         is_default=False,
     ) -> None:
         from mttl.models.modifiers.expert_containers import filter_expert_weights
-
-        expert_config = expert.expert_config
-        expert_task_name = expert.expert_info.expert_task_name
 
         if expert.expert_weights is not None:
             expert_weights = filter_expert_weights(
@@ -133,38 +147,29 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                 "Cannot set is_default if this expert is merged, change to 'route'."
             )
 
-        # hack this for now, but build a proper config for each module
-        if get_modifier_type(self.config) == "lora":
-            expert_module = LoRA(expert_config, self.layer)
+        expert_config = AutoModifierConfig.from_training_config(expert.expert_config)
+        self._check_config(expert_config)
 
-            if expert_weights is not None:
-                expert_module.load_lora_weights(expert_weights)
-        else:
-            raise NotImplementedError("LoRAExpertContainer only supports LoRA experts.")
+        expert_module = LoRA(expert_config, self.layer)
+        if expert_weights is not None:
+            expert_module.load_lora_weights(expert_weights)
 
         if action == "merge":
             # weight is merged with layer so we can discard it now
-            if expert_config.model_modifier == "lora":
-                expert_module.merge_with_layer()
-                self.merged_expert_names.append(expert.name)
-            else:
-                raise NotImplementedError("Merging experts only supports LoRA experts.")
+            expert_module.merge_with_layer()
+            self.merged_expert_names.append(expert.name)
+
         else:
             # we keep track of the expert weights
             if expert.name in self.experts:
                 raise ValueError(
                     "An expert with name {} already exists.".format(expert.name)
                 )
-            self.experts[expert.name] = expert_module
 
-        if is_default:
-            self.default_expert_name = expert.name
+            if is_default:
+                self.default_expert_name = expert.name
 
-        self.expert_names.append(expert.name)
-        self.expert_infos[expert.name] = expert.expert_info
-
-        self.add_expert_embedding(expert)
-        self.add_expert_to_selector(expert.name, expert_task_name=expert_task_name)
+            self._add_expert(expert.name, expert.expert_info, expert_module)
 
     def get_merged_weights(self, with_global_names=True, **merger_kwargs):
         """
@@ -262,6 +267,8 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
     See `KVAdapter` for info on the control flow of the forward pass.
     """
 
+    __supports_configs__ = [KVAdapterConfig]
+
     def __init__(self, config, task_id_container, layer, selector=None):
         super().__init__(
             config,
@@ -316,7 +323,6 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
     ) -> None:
         from mttl.models.modifiers.expert_containers import filter_expert_weights
 
-        expert_config = expert.expert_config
         expert_weights = filter_expert_weights(
             self.__layer_name__, expert.expert_weights
         )
@@ -329,12 +335,13 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
         if action == "merge":
             raise ValueError("Merging is not supported for `KVAdapters`.")
 
+        expert_config = AutoModifierConfig.from_training_config(expert.expert_config)
+        self._check_config(expert_config)
+
         expert_module = KVAdapter(expert_config, self.attn_layer)
         expert_module.load_adapter_weights(expert_weights)
-
-        self.experts[expert.name] = expert_module
 
         if is_default:
             self.default_expert_name = expert.name
 
-        self.add_expert_to_selector(expert.name)
+        self._add_expert(expert.name, expert.expert_info, expert_module)

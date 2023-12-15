@@ -1,9 +1,10 @@
-import json
 import re
 import torch
 from typing import Dict, Union
 import re
 from string import Template
+from mttl.models.modifiers.base import AutoModifierConfig, ModifierConfig
+from mttl.models.modifiers.modify_model import CONFIGS_TO_MODIFIERS
 
 from mttl.models.utils import download_from_hub
 from mttl.utils import get_checkpoint_path, logger
@@ -19,30 +20,63 @@ class ExpertInfo:
 
     expert_name: str
     expert_task_name: str = None
-    expert_config: Dict = None
     parent_node: str = None
+    # configuration for this expert, i.e. a modifier config
+    expert_config: ModifierConfig = None
+    # configuration with which the expert was trained, i.e. a training config
+    training_config: Config = None
+
+    @classmethod
+    def fromdict(cls, data):
+        # back-compatibility: in the previously stored checkpoints, expert_config was the training_config
+        expert_config = None
+        training_config = None
+        if "expert_config" in data:
+            try:
+                expert_config = AutoModifierConfig.from_training_config(
+                    data["expert_config"]
+                )
+            except:
+                # we are probably in the old format
+                training_config = Config.fromdict(data["expert_config"])
+                expert_config = AutoModifierConfig.from_training_config(training_config)
+
+        if "training_config" in data:
+            # convert it to the generic Config object
+            training_config = Config.fromdict(data["training_config"])
+
+        if training_config is None:
+            training_config = expert_config
+
+        data["expert_config"] = expert_config
+        data["training_config"] = training_config
+        return cls(**data)
+
+    def asdict(self) -> Dict:
+        data = {
+            "expert_name": self.expert_name,
+            "expert_task_name": self.expert_task_name,
+            "parent_node": self.parent_node,
+        }
+        if self.expert_config:
+            data["expert_config"] = self.expert_config.asdict()
+        if self.training_config:
+            data["training_config"] = self.training_config.asdict()
+        return data
 
     @property
     def model(self):
-        if "model" in self.expert_config:
-            return self.expert_config["model"]
-        return None
+        return self.training_config.model
 
     @property
     def dataset(self):
-        if "dataset" in self.expert_config:
-            return self.expert_config["dataset"]
-        return None
+        return self.training_config.dataset
 
     @property
     def model_modifier(self):
-        if "model_modifier" in self.expert_config:
-            return self.expert_config["model_modifier"]
-        return None
-
-
-class ExpertConfig(Config):
-    pass
+        if self.expert_config is not None:
+            return CONFIGS_TO_MODIFIERS.get(type(self.expert_config), None)
+        return self.training_config.model_modifier
 
 
 @dataclass
@@ -51,30 +85,26 @@ class Expert:
     expert_weights: Dict[str, torch.Tensor] = None
     expert_optimizer_state: Dict[str, torch.Tensor] = None
 
-    @property
-    def expert_config(self):
-        # ensure back-compatibility
-        if isinstance(self.expert_info.expert_config, dict):
-            return Config(
-                kwargs=self.expert_info.expert_config, raise_error=False, silent=True
-            )
-        else:
-            return self.expert_info.expert_config
+    @classmethod
+    def fromdict(cls, data):
+        data["expert_info"] = ExpertInfo.fromdict(data["expert_info"])
+        return cls(**data)
 
-    def dumps(self):
+    @property
+    def training_config(self) -> Config:
+        # back-compatibility, returns expert config
+        return self.expert_info.training_config
+
+    @property
+    def expert_config(self) -> ModifierConfig:
+        return self.expert_info.expert_config
+
+    def asdict(self):
         return {
-            "expert_info": self.expert_info.__dict__,
+            "expert_info": self.expert_info.asdict(),
             "expert_weights": self.expert_weights,
             "expert_optimizer_state": self.expert_optimizer_state,
         }
-
-    @classmethod
-    def loads(cls, ckpt):
-        return cls(
-            expert_info=ExpertInfo(**ckpt["expert_info"]),
-            expert_weights=ckpt["expert_weights"],
-            expert_optimizer_state=ckpt["expert_optimizer_state"],
-        )
 
     @property
     def name(self):
@@ -254,7 +284,7 @@ class LinearNode(OperatorNode):
                     merged_weights[k] = value
 
         exp_info: ExpertInfo = first_module.expert_info
-        config: ExpertConfig = first_module.expert_config
+        config: ModifierConfig = first_module.expert_config
         exp_info.parent_node = self.get_name(**kwargs)
         return [
             Expert(
@@ -437,14 +467,18 @@ def load_expert(
         expert_info_data.pop("expert_embeddings", None)
         expert_info_data.pop("expert_scores", None)
 
-        expert_info = ExpertInfo(**expert_info_data)
         expert_weights = expert_checkpoint["state_dict"]
         expert_weights = {
             k.replace("model.", "", 1): v for k, v in expert_weights.items()
         }
-        expert = Expert(expert_info, expert_weights)
+        expert = Expert.fromdict(
+            {
+                "expert_info": expert_info_data,
+                "expert_weights": expert_weights,
+            }
+        )
     else:
-        expert = Expert.loads(expert_checkpoint)
+        expert = Expert.fromdict(expert_checkpoint)
 
     # override expert name
     if expert_name is not None:
