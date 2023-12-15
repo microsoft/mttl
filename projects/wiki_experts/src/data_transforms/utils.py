@@ -112,7 +112,7 @@ def upload_to_hf_(
 
         datasets.append(dataset_subject)
 
-    dataset = concatenate_datasets(dataset_subject).shuffle(seed)
+    dataset = concatenate_datasets(datasets).shuffle(seed)
     dataset.push_to_hub(hf_destination, token=hf_token)
     dataset.to_json(
         f"{hf_destination.replace('/', '_')}.json", orient="records", lines=True
