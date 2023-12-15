@@ -29,7 +29,7 @@ class TextEncoder(nn.Module):
         auto_model = self.transformer_encoder._first_module().auto_model
         if not trainable:
             for param in auto_model.parameters():
-                param.requires_grad = True
+                param.requires_grad = False
 
     def forward(self, x):
         outputs = self.transformer_encoder.encode(
