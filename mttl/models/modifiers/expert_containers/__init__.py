@@ -10,12 +10,12 @@ from mttl.utils import logger
 from mttl.models.modifiers.expert_containers.module_graph import Expert
 
 
-def get_selector(routing_config, info_container, **kwargs):
-    if routing_config.router_selector not in MULTI_EXPERT_SELECTORS:
-        raise ValueError(f"Cannot find selector: {routing_config.router_selector}")
+def get_selector(routing_config: SelectorConfig, info_container: Dict, **kwargs):
+    """Returns a selector object for the given routing_config."""
+    router_selector = MULTI_EXPERT_CONFIGS_TO_SELECTORS[routing_config]
 
-    return MULTI_EXPERT_SELECTORS[routing_config.router_selector](
-        info_container, **kwargs
+    return MULTI_EXPERT_SELECTORS[router_selector](
+        routing_config, info_container, **kwargs
     )
 
 

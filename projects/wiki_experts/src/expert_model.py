@@ -1,5 +1,4 @@
 import torch
-import copy
 import re
 import numpy as np
 from typing import Dict, List
@@ -9,12 +8,16 @@ import tqdm
 from mttl.models.modifiers.expert_containers.expert_containers import (
     LoRAExpertContainer,
 )
+
 from mttl.models.modifiers.lora import LoRAConfig
 from mttl.models.modifiers.routing import RoutingInfo
-from mttl.models.utils import convert_hps_to_dict
 from mttl.utils import logger
 from mttl.models.modifiers.expert_containers import ExpertContainer
-from mttl.models.modifiers.expert_containers import Selector, RoutingConfig
+from mttl.models.modifiers.expert_containers.selectors import (
+    Selector,
+    RoutingInfoContainerConfig,
+)
+
 from mttl.models.modifiers.expert_containers import (
     add_expert_to_transformer,
 )
@@ -79,13 +82,6 @@ class MultiExpertModel(ExpertTrainer):
         kwargs["model_modifier"] = None
         super().__init__(**kwargs)
 
-        if self.hparams.router_selector is not None:
-            self.routing_config = RoutingConfig(
-                self.hparams.router_selector,
-                self.hparams.router_granularity,
-            )
-
-        self.training_config = self.hparams
         self.experts_names = []
 
     @property
@@ -318,11 +314,8 @@ class MultiExpertModelRanker(MultiExpertModel):
             ranker_model=kwargs["ranker_model"],
             ranker_path=kwargs["ranker_path"],
         )
-
-        # always use info selector
-        self.routing_config = RoutingConfig(
-            router_selector="info_selector",
-        )
+        # always use routing info container selector
+        self.routing_config = RoutingInfoContainerConfig()
 
     def generate(
         self,

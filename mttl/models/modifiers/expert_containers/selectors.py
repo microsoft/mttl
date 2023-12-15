@@ -227,7 +227,7 @@ class PolySelector(Selector):
     Implements routing at a per-layer or per-model level
     """
 
-    def __init__(self, config=None, info_container=None, **kwargs) -> None:
+    def __init__(self, config, info_container, **kwargs) -> None:
         super().__init__(config, info_container)
 
         self.module_logits = nn.Parameter(torch.empty(1).uniform_(-1e-3, 1e-3))
@@ -284,7 +284,7 @@ class MOERKHSSelectorConfig(SelectorConfig):
 
 @register_multi_expert_selector("moe_rkhs_router", MOERKHSSelectorConfig)
 class MOERKHSSelector(Selector):
-    def __init__(self, config, info_container=None, **kwargs) -> None:
+    def __init__(self, config, info_container, **kwargs) -> None:
         super().__init__(config, info_container)
 
         if "layer" not in kwargs:
@@ -364,7 +364,7 @@ class PolySelectorDirectConfig(SelectorConfig):
 
 @register_multi_expert_selector("poly_router_dir", PolySelectorDirectConfig)
 class PolySelectorDirect(PolySelector):
-    def __init__(self, config=None, info_container=None, **kwargs) -> None:
+    def __init__(self, config, info_container, **kwargs) -> None:
         super().__init__(config, info_container)
 
         self.module_logits = nn.ParameterDict()
@@ -407,7 +407,7 @@ class RoutingInfoContainerConfig(SelectorConfig):
 class RoutingInfosContainerSelector(Selector):
     """A simple selector that looks for routing information in the info container."""
 
-    def __init__(self, config=None, info_container=None, **kwargs) -> None:
+    def __init__(self, config, info_container, **kwargs) -> None:
         super().__init__(config, info_container)
 
         self.default_expert_name = None
@@ -433,7 +433,7 @@ class TaskSelectorConfig(SelectorConfig):
 @register_multi_expert_selector("task_selector", TaskSelectorConfig)
 class TaskNameSelector(Selector):
     def __init__(self, info_container, **kwargs) -> None:
-        super().__init__(info_container)
+        super().__init__(TaskSelectorConfig(), info_container)
 
         self.default_expert_name = None
 
