@@ -101,7 +101,8 @@ def add_hard_prompt_to_transformer(
 
 class HardPromptExpertContainer(ExpertContainer):
     def __init__(self, config, task_id_container, selector=None):
-        super().__init__()
+        super().__init__(config, task_id_container, layer=None)
+
         self.config = config
         self.selector: Selector = selector or TaskNameSelector(task_id_container)
 
