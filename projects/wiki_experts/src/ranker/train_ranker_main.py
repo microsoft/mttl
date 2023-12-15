@@ -17,6 +17,7 @@ from pytorch_lightning import seed_everything
 
 
 def train_triplet_clip(args):
+    seed_everything(args.seed, workers=True)
     wandb_logger = None
     if os.environ.get("WANDB_API_KEY") or args.wandb_project:
         import wandb
@@ -30,7 +31,7 @@ def train_triplet_clip(args):
             settings=wandb.Settings(start_method="fork"),
         )
         wandb_logger.experiment.save("*.py")
-        wandb_logger.experiment.save("*/*.py")
+        wandb_logger.experiment.save("*/ranker/*.py")
     # test the model
     dataconfig = CLIPExpertsConfig(
         dataset=args.dataset,
@@ -54,9 +55,11 @@ def train_triplet_clip(args):
 
     # add model checkpoint
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
+        monitor="val/loss_epoch",
         dirpath=f"clip_triplet_ranker_{args.exp_name}/",
         filename="clip-{epoch:02d}-{val/loss:.2f}",
-        save_last=True,
+        save_top_k=1,
+        mode="min",
     )
 
     trainer = pl.Trainer(
@@ -73,6 +76,7 @@ def train_triplet_clip(args):
 
 
 def train_clip(args):
+    seed_everything(args.seed, workers=True)
     wandb_logger = None
     if os.environ.get("WANDB_API_KEY") or args.wandb_project:
         import wandb
