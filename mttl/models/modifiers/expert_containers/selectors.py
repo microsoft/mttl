@@ -92,6 +92,10 @@ class Selector(RoutingMixin, nn.Module):
     def forward(self, input, **kwargs) -> SelectorOutput:
         pass
 
+    @property
+    def views(self):
+        return self.selector_views
+
     def get_merged_weights(self, container, **selector_kwargs) -> Dict:
         return {}
 
@@ -101,9 +105,6 @@ class Selector(RoutingMixin, nn.Module):
         these don't hold params, are not registered as modules, and read from the cache
         of their parent "real" selector.
         """
-        for view in self.selector_views:
-            view.clear_selector_cache = False
-
         selector_view = SelectorView(self, len(self.selector_views))
         self.selector_views.append(selector_view)
         return selector_view
@@ -128,6 +129,9 @@ class SelectorView:
     def __init__(self, selector, id):
         self._id = id
         self.selector = selector
+        # only the last view clears the cache
+        for view in self.selector.views:
+            view.clear_cache = False
         self.clear_cache = True
 
     def __call__(self, *args, **kwargs):
@@ -289,7 +293,7 @@ class PolySelectorDirect(PolySelector):
         weights = torch.tensor([self.module_logits[k] for k in self.expert_names])
         return weights
 
-    def add_expert(self, expert_name: str, expert_task_name: str, **kwargs):
+    def add_expert(self, expert_name: str, **kwargs):
         """
         Assume:
         expert_task_name -- task name expert is pecialized in
@@ -298,6 +302,7 @@ class PolySelectorDirect(PolySelector):
         init_gap = [0, 0]
         main_m = 1
 
+        expert_task_name = kwargs["expert_info"].expert_task_name
         if expert_name not in self.module_logits:
             # TODO: this is very error prone, e.g. when you reload this model, this cannot be inited
             # @Oleksiy do you need this?
@@ -342,7 +347,7 @@ class TaskNameSelector(Selector):
         self.default_expert_name = None
 
     @cache_if_views
-    def forward_selector(self, input, **kwargs) -> ModulesSelectorOutput:
+    def forward(self, input, **kwargs) -> ModulesSelectorOutput:
         # try to infer batch size
         if not self.routing_infos.task_names:
             if "input_ids" in kwargs:

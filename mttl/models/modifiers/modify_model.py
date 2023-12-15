@@ -31,12 +31,6 @@ def get_modifier_type(config, model_modifier=None):
 def modify_transformer(
     transformer, modifier_config, model_modifier=None, **modifier_kwargs
 ):
-    import mttl.models.modifiers.lora  # noqa: F401
-    import mttl.models.modifiers.poly  # noqa: F401
-    import mttl.models.modifiers.routing  # noqa: F401
-    import mttl.models.modifiers.prompt_tuning  # noqa: F401
-    import mttl.models.modifiers.kv_adapter  # noqa: F401
-    import mttl.models.modifiers.hard_prompts  # noqa: F401
     from mttl.utils import logger
 
     # create a shared container for the task id
@@ -48,8 +42,9 @@ def modify_transformer(
     for param in transformer.parameters():
         param.requires_grad = False
 
-    if hasattr(modifier_config, "model_modifier") and (
-        modifier_config.model_modifier is None
+    if modifier_config is None or (
+        hasattr(modifier_config, "model_modifier")
+        and (modifier_config.model_modifier is None)
     ):
         # set all params to require grad
         for param in transformer.parameters():
