@@ -48,6 +48,7 @@ def upload_to_hf_(
     create_split=False,
     aug_few_shot=-1,
     cutoff=0,
+    seed=42,
 ):
     import pandas as pd
     import huggingface_hub
@@ -61,41 +62,38 @@ def upload_to_hf_(
         hf_destination = f"{hf_user}/{dts_name}"
 
     dataset = load_dataset("json", data_files=dataset_path)["train"]
+    rng = np.random.RandomState(seed)
 
     if create_split:
         pd = dataset.to_pandas()
         subjects = pd["subject"].unique()
 
-        train_ids = []
-        valid_ids = []
-        test_ids = []
-        ds = []
-
+        ds, tids = [], set()
         for sub in subjects:
             dataset_subject = dataset.filter(lambda x: x["subject"] == sub, num_proc=16)
 
             if cutoff > 0:
-                dataset_subject = dataset_subject.shuffle(42).select(
+                dataset_subject = dataset_subject.shuffle(seed).select(
                     range(min(len(dataset_subject), cutoff))
                 )
 
-            context_ids = list(dataset_subject["id"])
-            train_ids = train_ids + context_ids[: int(len(context_ids) * 0.95)]
-            valid_ids = valid_ids + context_ids[int(len(context_ids) * 0.95) :]
+            # split 0.95 of ids for train, 0.05 for valid
+            ids = list(set(dataset_subject["id"]))
+            rng.shuffle(ids)
+            stids = ids[: int(len(ids) * 0.95)]
+            tids.update(stids)
 
-            print(sub, len(context_ids))
-            print("train", len(train_ids))
-            print("valid", len(valid_ids))
+            print(
+                f"Subject {sub} has {len(ids)} examples, {len(stids)} for train, {len(ids) - len(stids)} for valid."
+            )
             ds.append(dataset_subject)
 
-        # creates a split column for each task (subject)
-        def create_split_column(example):
-            return (
-                {"split": "train"} if example["id"] in train_ids else {"split": "valid"}
-            )
+    # creates a split column for each task (subject)
+    def create_split_column(example):
+        return {"split": "train"} if example["id"] in tids else {"split": "valid"}
 
-        dataset = concatenate_datasets(ds)
-        dataset = dataset.map(create_split_column, num_proc=16)
+    dataset = concatenate_datasets(ds)
+    dataset = dataset.map(create_split_column, num_proc=16)
 
     def rename_columns(example):
         example["source"] = example["instruction"]
@@ -119,9 +117,12 @@ def upload_to_hf_(
         from datasets import concatenate_datasets
 
         aug_dataset = augment_few_shot(dataset, aug_few_shot)
-        dataset = concatenate_datasets([aug_dataset, dataset])
+        dataset = concatenate_datasets([aug_dataset, dataset]).shuffle(seed)
 
     dataset.push_to_hub(hf_destination, token=hf_token)
+    dataset.to_json(
+        f"{hf_destination.replace('/', '_')}.json", orient="records", lines=True
+    )
 
     if configuration is not None:
         from huggingface_hub import HfApi
