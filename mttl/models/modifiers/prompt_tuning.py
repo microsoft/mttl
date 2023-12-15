@@ -123,7 +123,7 @@ class ExtendedEmbedding(nn.Module):
 
     def forward(self, input_ids):
         # 1) concat the embeddings, and run fwd pass
-        all_embeds = torch.cat((self.new_embeds, self.input_embeds), dim=0)
+        all_embeds = torch.cat((self.input_embeds, self.new_embeds), dim=0)
         out = F.embedding(input_ids, all_embeds)
         return out
 
