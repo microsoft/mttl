@@ -31,6 +31,7 @@ class ExpertInfo:
         # back-compatibility: in the previously stored checkpoints, expert_config was the training_config
         expert_config = None
         training_config = None
+
         if "expert_config" in data:
             try:
                 expert_config = AutoModifierConfig.from_training_config(
@@ -48,9 +49,13 @@ class ExpertInfo:
         if training_config is None:
             training_config = expert_config
 
-        data["expert_config"] = expert_config
-        data["training_config"] = training_config
-        return cls(**data)
+        kwargs = {}
+        for key in cls.__dataclass_fields__.keys():
+            kwargs[key] = data.get(key, None)
+
+        kwargs["expert_config"] = expert_config
+        kwargs["training_config"] = training_config
+        return cls(**kwargs)
 
     def asdict(self) -> Dict:
         data = {

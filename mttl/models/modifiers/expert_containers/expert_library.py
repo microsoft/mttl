@@ -49,7 +49,11 @@ class Score:
     def hash(self) -> str:
         return str(self.key).encode()
 
-    def dumps(self):
+    @classmethod
+    def fromdict(self, data):
+        return Score(**data)
+
+    def asdict(self):
         return self.__dict__
 
     def __lt__(self, other):
@@ -67,15 +71,15 @@ class MetadataEntry(ExpertInfo):
     expert_deleted: bool = False
 
     @classmethod
-    def loads(cls, ckpt):
-        allowed_keys = MetadataEntry.__dataclass_fields__.keys()
-        contained_keys = list(ckpt.keys())
-        for k in contained_keys:
-            if k not in allowed_keys:
-                ckpt.pop(k)
-        entry = cls(**ckpt)
-        entry.expert_deleted = ckpt.get("expert_deleted", False)
-        return entry
+    def fromdict(cls, data):
+        metadata_entry = super(MetadataEntry, cls).fromdict(data)
+        metadata_entry.expert_deleted = data.get("expert_deleted", False)
+        return metadata_entry
+
+    def asdict(self):
+        data = super().asdict()
+        data.update({"expert_deleted": self.expert_deleted})
+        return data
 
 
 class BackendEngine:
@@ -234,7 +238,7 @@ class ExpertLibrary:
             raise e
 
         metadata = [
-            MetadataEntry.loads(torch.load(file, map_location="cpu"))
+            MetadataEntry.fromdict(torch.load(file, map_location="cpu"))
             for file in glob.glob(f"{metadata_dir}/*.meta")
         ]
 
@@ -286,7 +290,7 @@ class ExpertLibrary:
 
     def _upload_metadata(self, metadata):
         buffer = io.BytesIO()
-        torch.save(metadata.__dict__, buffer)
+        torch.save(metadata.asdict(), buffer)
         buffer.flush()
 
         addition = CommitOperationAdd(
@@ -366,7 +370,7 @@ class ExpertLibrary:
             raise ValueError("Expert name cannot contain dots.")
 
         # convert to metadata entry
-        metadata = MetadataEntry.loads(expert_dump.expert_info.__dict__)
+        metadata = MetadataEntry.fromdict(expert_dump.expert_info.asdict())
 
         self._upload_weights(metadata.expert_name, expert_dump)
         self._upload_metadata(metadata)
@@ -405,7 +409,7 @@ class ExpertLibrary:
             raise ValueError(f"Expert {expert_name} not found in repository.")
 
         path = self.hf_hub_download(self.repo_id, filename=f"{expert_name}.meta")
-        metadata = MetadataEntry.loads(torch.load(path, map_location="cpu"))
+        metadata = MetadataEntry.fromdict(torch.load(path, map_location="cpu"))
         metadata.expert_deleted = False
 
         self._upload_metadata(metadata)
@@ -474,7 +478,7 @@ class ExpertLibrary:
             raise ValueError(f"Score {score.name} already exists for task {task}.")
         if score.value is None:
             raise ValueError(f"Score {score.name} has no value and cannot be added.")
-        scores[score.hash] = score.dumps()
+        scores[score.hash] = score.asdict()
 
         buffer = io.BytesIO()
         torch.save(scores, buffer)
@@ -681,13 +685,14 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
 
         for file in glob.glob(f"{metadata_dir}/*.meta"):
             metadatum = torch.load(file, map_location="cpu")
-            expert_info = ExpertInfo(
-                expert_config=json.loads(metadatum["expert_config"]),
-                expert_name=metadatum["expert_info"]["expert_name"],
-                expert_task_name=metadatum["expert_info"]["expert_task_name"],
-            )
+
+            expert_info_data = metadatum["expert_info"]
+            expert_info_data["expert_config"] = metadatum["expert_config"]
+
+            expert_info = ExpertInfo.fromdict(expert_info_data)
             model_weights = _download_model(expert_info.expert_name)
             expert = Expert(expert_info=expert_info, expert_weights=model_weights)
+
             if expert not in new_lib:
                 new_lib.add_expert(expert)
         return new_lib
