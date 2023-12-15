@@ -355,6 +355,7 @@ class MoETrainer(MultiExpertModel):
     def __init__(self, **kwargs):
         kwargs["router_selector"] = "moe_rkhs_router"
         kwargs["router_granularity"] = "mlp"
+        kwargs["emb_dim"] = kwargs["moe_emb_dim"]
 
         super().__init__(**kwargs)
 
