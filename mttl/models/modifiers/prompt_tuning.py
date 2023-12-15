@@ -12,7 +12,7 @@ from mttl.models.modifiers.kv_adapter import (
 )
 from mttl.models.modifiers.poly import PolytroponSelector
 from mttl.models.modifiers.routing import RoutingMixin
-
+from mttl.models.modifiers.debug_utils import check_if_align, monitor_transformer
 
 PromptTuningRouting = None
 
@@ -28,17 +28,25 @@ def roll_along(arr, shifts, dim):
     return torch.gather(arr, dim, indices)
 
 
-def two_d_roll_along(data, offsets):
-    """Specific version of roll along to handle a `dim` axis"""
+def remove_soft_prompts(logits, label_starts, soft_prompt_length):
+    """Given logits with soft prompts, remove them to recover original shape"""
 
-    bs, sq, dim = data.shape
-    assert offsets.shape == (bs,), breakpoint()
+    bs, seq_len, vocab_size = logits.shape
+    flat_logits = logits.view(bs * seq_len, vocab_size)
 
-    data_flat = data.view(bs, sq * dim)
-    arr_flat = torch.arange(sq * dim, device=data.device).view(1, sq * dim)
-    idx_flat = (arr_flat - offsets.view(-1, 1) * dim) % (sq * dim)
-    out = torch.gather(data_flat, 1, idx_flat)
-    return out.view(bs, sq, dim)
+    bs_idx = torch.arange(bs, device=logits.device).view(-1, 1)
+    soft_prompt_idx = label_starts.view(-1, 1) + torch.arange(
+        soft_prompt_length, device=logits.device
+    ).view(1, -1)
+    flat_soft_prompt_idx = soft_prompt_idx + bs_idx * seq_len
+
+    is_soft_prompt = torch.zeros(bs * seq_len, dtype=torch.bool, device=logits.device)
+    is_soft_prompt[flat_soft_prompt_idx] = True
+    not_soft_prompt = ~is_soft_prompt
+
+    return flat_logits[not_soft_prompt].reshape(
+        bs, seq_len - soft_prompt_length, vocab_size
+    )
 
 
 def recursive_getattr(obj, attr_str):
@@ -193,79 +201,16 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
         kwargs["attention_mask"] = attention_mask
         kwargs["input_ids"] = input_ids
 
-        # TODO: can we just expand the labels to handle soft prompts ?
-        # TODO: remove !
-        self.transformer.eval()
-
         out = self.transformer(*(), **kwargs)
-
-        def check_if_align(old_kw, new_kw, max_len, up_to=None):
-            old_attn_mask, old_input_ids = old_kw["attention_mask"], old_kw["input_ids"]
-            new_attn_mask, new_input_ids = new_kw["attention_mask"], new_kw["input_ids"]
-
-            old_attn_mask = old_attn_mask[:, :max_len]
-            old_input_ids = old_input_ids[:, :max_len]
-            new_attn_mask = new_attn_mask[:, :max_len]
-            new_input_ids = new_input_ids[:, :max_len]
-
-            if up_to is not None:
-                assert torch.all(old_attn_mask[:, :up_to] == new_attn_mask[:, :up_to])
-                assert torch.all(old_input_ids[:, :up_to] == new_input_ids[:, :up_to])
-
-            old_kw = {"attention_mask": old_attn_mask, "input_ids": old_input_ids}
-            new_kw = {"attention_mask": new_attn_mask, "input_ids": new_input_ids}
-
-            assert not self.transformer.training
-            out_old = self.transformer(*(), **old_kw)
-            out_new = self.transformer(*(), **new_kw)
-
-            if up_to is not None:
-                old_logits = out_old.logits[:, :up_to]
-                new_logits = out_new.logits[:, :up_to]
-            else:
-                old_logits = out_old.logits
-                new_logits = out_new.logits
-
-            return torch.allclose(old_logits, new_logits)
-
         # We need to remove remove the soft prompt so as to preserve
         # alignment with the labels
         if self.config.prompt_placement == "prefix":
             out.logits = out.logits[:, self.config.soft_prompt_length :, :]
         elif self.config.prompt_placement == "suffix":
             # remove the soft prompt logits
-
-            # This is always True
-            print(
-                "a",
-                check_if_align(
-                    old_kwargs,
-                    kwargs,
-                    input_ids.size(-1) - soft_prompt_indices.size(-1),
-                    label_starts.min().item(),
-                ),
+            out.logits = remove_soft_prompts(
+                out.logits, label_starts, self.config.soft_prompt_length
             )
-
-            # This is always False
-            print(
-                "b",
-                check_if_align(
-                    old_kwargs,
-                    kwargs,
-                    input_ids.size(-1) - soft_prompt_indices.size(-1) + 1,
-                    label_starts.min().item(),
-                ),
-            )
-
-            # So things go south as soon as we go beyond the original input length
-            breakpoint()
-            # check_if_align(old_kwargs, kwargs, 65, 65)
-            # rolled_logits = two_d_roll_along(out.logits, -label_starts)
-            # chunked_logits = rolled_logits[:, self.config.soft_prompt_length :, :]
-            # out.logits = two_d_roll_along(chunked_logits, label_starts)
-
-            # TODO: MAKE THIS OK (this is a temporary hack so that code compiles) !
-            out.logits = out.logits[:, self.config.soft_prompt_length :, :]
 
         return out
 
@@ -282,36 +227,45 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
     def prepare_inputs_for_generation(self, *args, **kwargs):
         # Should be padded (**left**)
         model_kwargs = self.transformer_prepare_inputs_for_generation(*args, **kwargs)
-        if model_kwargs["past_key_values"] is None:
+
+        # Some useful information :
+        # We expert `past_key_values` to already cache the soft prompts
+        # However, the attention mask and position are not aware that we have extended the context
+
+        # The last condition is specific to Phi-2
+        if (
+            model_kwargs["past_key_values"] is None
+            or getattr(model_kwargs["past_key_values"], "seqlen_offset", -1) == 0
+        ):
             input_ids, attn_mask = (
                 model_kwargs["input_ids"],
                 model_kwargs["attention_mask"],
             )
-            input_embeds = self.transformer.get_input_embeddings()(input_ids)
-            soft_prompt = self.soft_prompt(model_kwargs["input_ids"])
-            first_valid_idx = (attn_mask == 0).sum(1)
-            bs, seq_len, embed_dim = input_embeds.size()
-            soft_prompt_len = soft_prompt.size(1)
-            device = soft_prompt.device
+            bs = input_ids.size(0)
+            soft_prompt_len = self.config.soft_prompt_length
+            device = input_ids.device
 
             """ 1. Add soft prompt output """
             if self.config.prompt_placement == "prefix":
                 # let's try a cleaner version with rolling
                 ex_lens = model_kwargs["attention_mask"].sum(1)
 
+                # pad left -> right
                 right_padded_input_ids = roll_along(input_ids, ex_lens, 1)
-                right_input_embeds = self.transformer.get_input_embeddings()(
-                    right_padded_input_ids
+                soft_prompt_indices = self.soft_prompt(right_padded_input_ids)
+                input_ids = torch.cat(
+                    (soft_prompt_indices, right_padded_input_ids), dim=1
                 )
-                right_output = torch.cat((soft_prompt, right_input_embeds), dim=1)
-                output = two_d_roll_along(right_output, -(ex_lens + soft_prompt_len))
+
+                # pad right -> left
+                input_ids = roll_along(input_ids, -(ex_lens + soft_prompt_len), 1)
 
             elif self.config.prompt_placement == "suffix":
                 # we are already padded left, so we can just concat right
-                output = torch.cat((input_embeds, soft_prompt), dim=1)
+                soft_prompt_indices = self.soft_prompt(input_ids)
+                input_ids = torch.cat((input_ids, soft_prompt_indices), dim=1)
 
-            model_kwargs["inputs_embeds"] = output.type_as(input_embeds)
-            model_kwargs["input_ids"] = None
+            model_kwargs["input_ids"] = input_ids
 
             """ 2. Adjust Decoder Attention Mask """
             model_kwargs["attention_mask"] = torch.cat(
@@ -319,15 +273,17 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
             )
 
             """ 3. Adjust Position ids """
-            position_ids = model_kwargs["position_ids"]
-            model_kwargs["position_ids"] = torch.cat(
-                (
-                    position_ids,
-                    position_ids[:, -1].view(-1, 1)
-                    + torch.arange(soft_prompt_len, device=device).view(1, -1),
-                ),
-                dim=1,
-            )
+            if "position_ids" in model_kwargs:
+                position_ids = model_kwargs["position_ids"]
+                model_kwargs["position_ids"] = torch.cat(
+                    (
+                        position_ids,
+                        position_ids[:, -1].view(-1, 1)
+                        + torch.arange(soft_prompt_len, device=device).view(1, -1),
+                    ),
+                    dim=1,
+                )
+
         else:
             """1. Adjust Decoder Attention Mask"""
             attn_mask = model_kwargs["attention_mask"]
@@ -342,7 +298,14 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
             )
 
             """ 2. Adjust Position ids """
-            model_kwargs["position_ids"] += self.config.soft_prompt_length
+            if "position_ids" in model_kwargs:
+                model_kwargs["position_ids"] += self.config.soft_prompt_length
+
+            if hasattr(model_kwargs["past_key_values"], "seqlen_offset"):
+                # Phi-2
+                model_kwargs[
+                    "past_key_values"
+                ].seqlen_offset += self.config.soft_prompt_length
 
         return model_kwargs
 
