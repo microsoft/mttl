@@ -22,6 +22,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.callbacks import RougeCallback
 from mttl.utils import get_mlf_logger, setup_logging, logger
+from projects.wiki_experts.src.expert_model import MoETrainer
 from projects.wiki_experts.src.config import ExpertConfig
 
 

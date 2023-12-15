@@ -9,9 +9,9 @@ import torch.nn.functional as F
 from mttl.models.modifiers.routing import RoutingMixin
 
 
-MULTI_EXPERT_SELECTORS = {}
-MULTI_EXPERT_SELECTORS_TO_CONFIGS = {}
-MULTI_EXPERT_CONFIGS_TO_SELECTORS = {}
+SELECTORS_NAME_TO_KLASS = {}
+SELECTORS_CONFIG_TO_KLASS = {}
+SELECTORS_NAME_TO_CONFIG = {}
 
 
 EPS = 1e-8
@@ -21,21 +21,28 @@ def register_multi_expert_selector(name, config_cls):
     print("Registering multi-expert selector..." + name)
 
     def _thunk(fn):
-        if name in MULTI_EXPERT_SELECTORS:
+        if name in SELECTORS_NAME_TO_KLASS:
             raise ValueError(
                 f"Cannot register duplicate multi-expert selector ({name})."
             )
 
-        if config_cls in MULTI_EXPERT_CONFIGS_TO_SELECTORS:
+        if config_cls in SELECTORS_CONFIG_TO_KLASS:
             raise ValueError(f"Cannot register with config class ({config_cls}).")
 
-        MULTI_EXPERT_SELECTORS[name] = fn
-        MULTI_EXPERT_CONFIGS_TO_SELECTORS[config_cls] = name
-        MULTI_EXPERT_SELECTORS_TO_CONFIGS[name] = config_cls
+        SELECTORS_NAME_TO_KLASS[name] = fn
+        SELECTORS_CONFIG_TO_KLASS[config_cls] = fn
+        SELECTORS_NAME_TO_CONFIG[name] = config_cls
         fn.__layer_name__ = name
         return fn
 
     return _thunk
+
+
+def get_selector(routing_config: "SelectorConfig", info_container: Dict, **kwargs):
+    """Returns a selector object for the given routing_config."""
+    return SELECTORS_CONFIG_TO_KLASS[routing_config.__class__](
+        info_container, config=routing_config, **kwargs
+    )
 
 
 @dataclass
@@ -53,7 +60,7 @@ class SelectorConfig:
 
         data = asdict(self)
         # store the model modifier for easy loading
-        data["router_selector"] = MULTI_EXPERT_CONFIGS_TO_SELECTORS[type(self)]
+        data["selector_config"] = self.__class__.__name__
         return data
 
     @classmethod
@@ -69,9 +76,8 @@ class SelectorConfig:
 class AutoSelectorConfig(object):
     @classmethod
     def fromdict(cls, dumped: Dict) -> SelectorConfig:
-        modifier = dumped.pop("router_selector")
-        klass = MULTI_EXPERT_CONFIGS_TO_SELECTORS[modifier]
-        return klass(**dumped)
+        klass = dumped.pop("selector_config")
+        return eval(klass)(**dumped)
 
     @staticmethod
     def from_training_config(
@@ -88,14 +94,12 @@ class AutoSelectorConfig(object):
         if training_config.router_selector is None:
             return None
 
-        if training_config.router_selector not in MULTI_EXPERT_SELECTORS_TO_CONFIGS:
+        if training_config.router_selector not in SELECTORS_NAME_TO_KLASS:
             raise ValueError(
                 f"Selector '{training_config.router_selector}' not found, has it been registered?"
             )
 
-        config_klass = MULTI_EXPERT_SELECTORS_TO_CONFIGS[
-            training_config.router_selector
-        ]
+        config_klass = SELECTORS_NAME_TO_CONFIG[training_config.router_selector]
         return config_klass.from_training_config(training_config)
 
 
@@ -140,7 +144,7 @@ def cache_if_views(func):
 
 
 class Selector(RoutingMixin, nn.Module):
-    def __init__(self, config, info_container, **kwargs):
+    def __init__(self, info_container, config=None, **kwargs):
         nn.Module.__init__(self)
         RoutingMixin.__init__(self, info_container)
 
@@ -227,8 +231,8 @@ class PolySelector(Selector):
     Implements routing at a per-layer or per-model level
     """
 
-    def __init__(self, config, info_container, **kwargs) -> None:
-        super().__init__(config, info_container)
+    def __init__(self, info_container, **kwargs) -> None:
+        super().__init__(info_container)
 
         self.module_logits = nn.Parameter(torch.empty(1).uniform_(-1e-3, 1e-3))
 
@@ -284,8 +288,8 @@ class MOERKHSSelectorConfig(SelectorConfig):
 
 @register_multi_expert_selector("moe_rkhs_router", MOERKHSSelectorConfig)
 class MOERKHSSelector(Selector):
-    def __init__(self, config, info_container, **kwargs) -> None:
-        super().__init__(config, info_container)
+    def __init__(self, info_container, config, **kwargs) -> None:
+        super().__init__(info_container, config)
 
         if "layer" not in kwargs:
             raise ValueError(
@@ -364,8 +368,8 @@ class PolySelectorDirectConfig(SelectorConfig):
 
 @register_multi_expert_selector("poly_router_dir", PolySelectorDirectConfig)
 class PolySelectorDirect(PolySelector):
-    def __init__(self, config, info_container, **kwargs) -> None:
-        super().__init__(config, info_container)
+    def __init__(self, info_container, **kwargs) -> None:
+        super().__init__(info_container)
 
         self.module_logits = nn.ParameterDict()
         self.training_config = kwargs["training_config"]
@@ -407,8 +411,8 @@ class RoutingInfoContainerConfig(SelectorConfig):
 class RoutingInfosContainerSelector(Selector):
     """A simple selector that looks for routing information in the info container."""
 
-    def __init__(self, config, info_container, **kwargs) -> None:
-        super().__init__(config, info_container)
+    def __init__(self, info_container, **kwargs) -> None:
+        super().__init__(info_container)
 
         self.default_expert_name = None
 
@@ -426,14 +430,14 @@ class RoutingInfosContainerSelector(Selector):
 
 
 @dataclass
-class TaskSelectorConfig(SelectorConfig):
+class TaskNameSelectorConfig(SelectorConfig):
     pass
 
 
-@register_multi_expert_selector("task_selector", TaskSelectorConfig)
+@register_multi_expert_selector("task_selector", TaskNameSelectorConfig)
 class TaskNameSelector(Selector):
     def __init__(self, info_container, **kwargs) -> None:
-        super().__init__(TaskSelectorConfig(), info_container)
+        super().__init__(info_container)
 
         self.default_expert_name = None
 

@@ -110,3 +110,15 @@ def test_auto_modifier_config():
     assert lora_config.lora_rank == 12
     assert lora_config.lora_dropout == 0.52
     assert lora_config.modify_modules == ".*mlpU.*"
+
+
+def test_dump_load_selector_config():
+    from mttl.models.modifiers.expert_containers.selectors import (
+        AutoSelectorConfig,
+        MOERKHSSelectorConfig,
+    )
+
+    dump = MOERKHSSelectorConfig(emb_dim=12345).asdict()
+    test = AutoSelectorConfig.fromdict(dump)
+    assert test.emb_dim == 12345
+    assert type(test) == MOERKHSSelectorConfig

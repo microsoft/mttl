@@ -3,20 +3,11 @@ from mttl.config import Config
 from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from mttl.models.modifiers.expert_containers.selectors import (
     SelectorConfig,
-    MULTI_EXPERT_SELECTORS,
+    get_selector,
 )
 from mttl.models.modifiers.expert_containers.expert_containers import *
 from mttl.utils import logger
 from mttl.models.modifiers.expert_containers.module_graph import Expert
-
-
-def get_selector(routing_config: SelectorConfig, info_container: Dict, **kwargs):
-    """Returns a selector object for the given routing_config."""
-    router_selector = MULTI_EXPERT_CONFIGS_TO_SELECTORS[routing_config]
-
-    return MULTI_EXPERT_SELECTORS[router_selector](
-        routing_config, info_container, **kwargs
-    )
 
 
 def _extract_identifier(string, match_on="coder"):
