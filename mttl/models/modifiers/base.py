@@ -31,6 +31,33 @@ class ModifierConfig(object):
         # compare all the attributes
         return self.__dict__ == other.__dict__
 
+    @classmethod
+    def from_training_config(cls, training_config: "Config"):
+        """Build modifier config from the training config."""
+        kwargs = {}
+        for key, value in cls.__dict__.items():
+            if key in training_config.__dict__:
+                kwargs[key] = training_config.__dict__[key]
+        return cls(**kwargs)
+
+
+class AutoModifierConfig(object):
+    @staticmethod
+    def from_training_config(training_config: "Config"):
+        """Build modifier config from the training config."""
+        from mttl.models.modifiers.modify_model import MODIFIERS_TO_CONFIGS
+
+        if training_config.model_modifier is None:
+            raise ValueError("Model modifier not set in the training config!")
+
+        if training_config.model_modifier not in MODIFIERS_TO_CONFIGS:
+            raise ValueError(
+                f"Model modifier '{training_config.model_modifier}' not found, has it been registered?"
+            )
+
+        config_klass = MODIFIERS_TO_CONFIGS[training_config.model_modifier]
+        return config_klass.from_training_config(training_config)
+
 
 class ModifyMixin(nn.Module):
     @classmethod

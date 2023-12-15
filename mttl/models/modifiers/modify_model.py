@@ -1,8 +1,9 @@
-from mttl.utils import logger
-
-
+# stores modifiers across the mttl lib
 MODIFIERS = {}
+# stores mapping from configs to modifiers
 CONFIGS_TO_MODIFIERS = {}
+# stores mapping from modifiers to configs
+MODIFIERS_TO_CONFIGS = {}
 
 
 def register_modifier(name, config_cls=None):
@@ -15,6 +16,7 @@ def register_modifier(name, config_cls=None):
 
         if config_cls is not None:
             CONFIGS_TO_MODIFIERS[config_cls] = name
+            MODIFIERS_TO_CONFIGS[name] = config_cls
         return klass
 
     return _thunk
