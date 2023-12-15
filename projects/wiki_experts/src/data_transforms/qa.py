@@ -407,7 +407,21 @@ class OAITemplate_Batched_MultiChoice_CoT:
         batch_size = "five"
         task_description = f"""Your task is to come up with a set of {batch_size} diverse multiple-choice problems, each with their answer options and ground-truth response about the following domain: {domain}.
 
-Please stick to the following format for your output:
+Carefully analyze the following context to generate your questions:
+
+### Context:
+{context}
+
+First, identify five (5) important concepts, which could be names, entities or facts from the above context. Write each concept in the following format:
+
+### Concepts:
+1. [your first generated concept]
+2. [your second generated concept]
+3. [your third generated concept]
+4. [your fourth generated concept]
+5. [your fifth generated concept]
+
+Then, generate {batch_size} diverse problems relevant to each concept, each with four options (A, B, C, D) and a response. Please stick to the following format for your output:
 
 ## Example [number of the example]
 ### Problem:
@@ -430,17 +444,7 @@ For example:
 ### Response:
 {icl_examples[0]['response']}
 
-Carefully analyze the following context to generate your questions:
-
-### Context:
-{context}
-
-Summarize the above context into 5 sentences. A reader should understand the summary without access to the context. Write each sentence in the following format:
-
-### Sentence [number of the sentence]
-[your sentence]
-
-Then, generate {batch_size} diverse problems relevant to each sentence, each with four options (A, B, C, D) and a response. Please follow the guidelines carefully when generating problems and responses:
+Please follow the guidelines carefully when generating problems and responses:
 """
         return task_description
 

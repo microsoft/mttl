@@ -44,7 +44,7 @@ class ExpertTrainer(EfficientCheckpointModule):
             model_object = prepare_model_for_kbit_training(model_object)
 
         # rebuild the training config, a bit cumbersome, but that's life
-        self.training_config = ExpertConfig.from_dict(kwargs)
+        self.training_config = ExpertConfig.fromdict(kwargs)
         # init the transformer just with the modifier config, this avoids
         # passing the whole training config to the modify_transformer func
         self.modifier_config = AutoModifierConfig.from_training_config(
