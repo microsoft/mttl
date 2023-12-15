@@ -50,6 +50,8 @@ class ExpertTrainer(EfficientCheckpointModule):
         self.modifier_config = AutoModifierConfig.from_training_config(
             self.training_config
         )
+        self.routing_config = SelectorConfig.from_training_config(self.training_config)
+
         self.model = modify_transformer(model_object, self.modifier_config)
 
         # replace w flash attn!

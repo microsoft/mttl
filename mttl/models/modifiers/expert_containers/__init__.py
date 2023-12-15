@@ -2,8 +2,8 @@ import re
 from mttl.config import Config
 from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from mttl.models.modifiers.expert_containers.selectors import (
-    RoutingConfig,
-    MULTI_EXPERT_ROUTERS,
+    SelectorConfig,
+    MULTI_EXPERT_SELECTORS,
 )
 from mttl.models.modifiers.expert_containers.expert_containers import *
 from mttl.utils import logger
@@ -11,10 +11,10 @@ from mttl.models.modifiers.expert_containers.module_graph import Expert
 
 
 def get_selector(routing_config, info_container, **kwargs):
-    if routing_config.router_selector not in MULTI_EXPERT_ROUTERS:
+    if routing_config.router_selector not in MULTI_EXPERT_SELECTORS:
         raise ValueError(f"Cannot find selector: {routing_config.router_selector}")
 
-    return MULTI_EXPERT_ROUTERS[routing_config.router_selector](
+    return MULTI_EXPERT_SELECTORS[routing_config.router_selector](
         info_container, **kwargs
     )
 
@@ -58,7 +58,7 @@ def add_expert_library_to_transformer(
     action: str = "route",
     default_expert: str = None,
     load_only_layers: int = None,
-    routing_config: RoutingConfig = None,
+    routing_config: SelectorConfig = None,
     training_config: Config = None,
 ):
     for expert_name, expert_dump in expert_library.items():
@@ -80,7 +80,7 @@ def add_expert_to_transformer(
     expert: Expert,
     action: str = "route",
     is_default: bool = False,
-    routing_config: RoutingConfig = None,
+    routing_config: SelectorConfig = None,
     training_config: Config = None,
 ):
     """

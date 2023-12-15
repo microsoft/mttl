@@ -5,26 +5,33 @@ from pyparsing import abstractmethod
 import torch
 import math
 from torch import nn
-from functools import lru_cache
 import torch.nn.functional as F
 from mttl.models.modifiers.routing import RoutingMixin
 
-from mttl.utils import logger
+
+MULTI_EXPERT_SELECTORS = {}
+MULTI_EXPERT_SELECTORS_TO_CONFIGS = {}
+MULTI_EXPERT_CONFIGS_TO_SELECTORS = {}
 
 
-MULTI_EXPERT_ROUTERS = {}
 EPS = 1e-8
 
 
-def register_multi_expert_selector(name):
+def register_multi_expert_selector(name, config_cls):
     print("Registering multi-expert selector..." + name)
 
     def _thunk(fn):
-        if name in MULTI_EXPERT_ROUTERS:
+        if name in MULTI_EXPERT_SELECTORS:
             raise ValueError(
-                f"Cannot register duplicate multi-expert selector ({name})"
+                f"Cannot register duplicate multi-expert selector ({name})."
             )
-        MULTI_EXPERT_ROUTERS[name] = fn
+
+        if config_cls in MULTI_EXPERT_CONFIGS_TO_SELECTORS:
+            raise ValueError(f"Cannot register with config class ({config_cls}).")
+
+        MULTI_EXPERT_SELECTORS[name] = fn
+        MULTI_EXPERT_CONFIGS_TO_SELECTORS[config_cls] = name
+        MULTI_EXPERT_SELECTORS_TO_CONFIGS[name] = config_cls
         fn.__layer_name__ = name
         return fn
 
@@ -32,11 +39,64 @@ def register_multi_expert_selector(name):
 
 
 @dataclass
-class RoutingConfig:
-    # what type of selector to use
-    router_selector: str
+class SelectorConfig:
     # the granularity of the selector (which layers use the same selectors)
     router_granularity: str = "*"
+
+    def __eq__(self, other):
+        # compare all the attributes
+        return self.__dict__ == other.__dict__
+
+    def asdict(self) -> Dict:
+        """Dump the config to a string."""
+        from dataclasses import asdict
+
+        data = asdict(self)
+        # store the model modifier for easy loading
+        data["router_selector"] = MULTI_EXPERT_CONFIGS_TO_SELECTORS[type(self)]
+        return data
+
+    @classmethod
+    def from_training_config(cls, training_config: "Config"):
+        """Build modifier config from the training config."""
+        kwargs = {}
+        for key, _ in cls.__dataclass_fields__.items():
+            if hasattr(training_config, key):
+                kwargs[key] = getattr(training_config, key)
+        return cls(**kwargs)
+
+
+class AutoSelectorConfig(object):
+    @classmethod
+    def fromdict(cls, dumped: Dict) -> SelectorConfig:
+        modifier = dumped.pop("router_selector")
+        klass = MULTI_EXPERT_CONFIGS_TO_SELECTORS[modifier]
+        return klass(**dumped)
+
+    @staticmethod
+    def from_training_config(
+        training_config: Union["Config", SelectorConfig]
+    ) -> Union[SelectorConfig, None]:
+        """Build modifier config from the training config.
+
+        Returns None if no modifier is set.
+        """
+        if isinstance(training_config, SelectorConfig):
+            # nothing to do here
+            return training_config
+
+        if training_config.router_selector is None:
+            return None
+
+        if training_config.router_selector not in MULTI_EXPERT_SELECTORS_TO_CONFIGS:
+            raise ValueError(
+                f"Selector '{training_config.router_selector}' not found, has it been registered?"
+            )
+
+        config_klass = MULTI_EXPERT_SELECTORS_TO_CONFIGS[
+            training_config.router_selector
+        ]
+        return config_klass.from_training_config(training_config)
 
 
 @dataclass
@@ -80,10 +140,11 @@ def cache_if_views(func):
 
 
 class Selector(RoutingMixin, nn.Module):
-    def __init__(self, info_container, **kwargs):
+    def __init__(self, config, info_container, **kwargs):
         nn.Module.__init__(self)
         RoutingMixin.__init__(self, info_container)
 
+        self.config = config
         self.expert_names = []
         self.selector_views = []
         self.forward_cache = None
@@ -155,14 +216,19 @@ class SelectorView:
         pass
 
 
-@register_multi_expert_selector("poly_router")
+@dataclass
+class PolySelectorConfig(SelectorConfig):
+    pass
+
+
+@register_multi_expert_selector("poly_router", PolySelectorConfig)
 class PolySelector(Selector):
     """
     Implements routing at a per-layer or per-model level
     """
 
-    def __init__(self, info_container=None, **kwargs) -> None:
-        super().__init__(info_container)
+    def __init__(self, config=None, info_container=None, **kwargs) -> None:
+        super().__init__(config, info_container)
 
         self.module_logits = nn.Parameter(torch.empty(1).uniform_(-1e-3, 1e-3))
 
@@ -210,10 +276,16 @@ class PolySelector(Selector):
         )
 
 
-@register_multi_expert_selector("moe_rkhs_router")
+@dataclass
+class MOERKHSSelectorConfig(SelectorConfig):
+    rkhs_dim: int = 512
+    emb_dim: int = 128
+
+
+@register_multi_expert_selector("moe_rkhs_router", MOERKHSSelectorConfig)
 class MOERKHSSelector(Selector):
-    def __init__(self, info_container=None, **kwargs) -> None:
-        super().__init__(info_container)
+    def __init__(self, config, info_container=None, **kwargs) -> None:
+        super().__init__(config, info_container)
 
         if "layer" not in kwargs:
             raise ValueError(
@@ -222,12 +294,16 @@ class MOERKHSSelector(Selector):
 
         self.topk = 2
         self.input_dim = kwargs["layer"].weight.data.shape[-1]
+        self.rkhs_dim = config.rkhs_dim
+        self.emb_dim = config.emb_dim
 
         device = kwargs["layer"].weight.device
 
-        self.rkhs_exp = nn.Linear(128, 512, device=device)
-        self.rkhs_hid = nn.Linear(self.input_dim, 512, device=device)
-        self.rkhs_embeddings = nn.Parameter(torch.empty((0, 128), device=device))
+        self.rkhs_exp = nn.Linear(self.emb_dim, self.rkhs_dim, device=device)
+        self.rkhs_hid = nn.Linear(self.input_dim, self.rkhs_dim, device=device)
+        self.rkhs_embeddings = nn.Parameter(
+            torch.empty((0, self.emb_dim), device=device)
+        )
 
     def _get_weights(self, input):
         input_view = input.view(-1, input.shape[-1])
@@ -273,18 +349,23 @@ class MOERKHSSelector(Selector):
         self.rkhs_embeddings.data = torch.cat(
             [
                 self.rkhs_embeddings.data,
-                torch.zeros(1, 128, device=self.rkhs_embeddings.device).uniform_(
-                    -0.02, 0.02
-                ),
+                torch.zeros(
+                    1, self.emb_dim, device=self.rkhs_embeddings.device
+                ).uniform_(-0.02, 0.02),
             ],
             dim=0,
         )
 
 
-@register_multi_expert_selector("poly_router_dir")
+@dataclass
+class PolySelectorDirectConfig(SelectorConfig):
+    pass
+
+
+@register_multi_expert_selector("poly_router_dir", PolySelectorDirectConfig)
 class PolySelectorDirect(PolySelector):
-    def __init__(self, config, info_container=None, **kwargs) -> None:
-        super().__init__(info_container)
+    def __init__(self, config=None, info_container=None, **kwargs) -> None:
+        super().__init__(config, info_container)
 
         self.module_logits = nn.ParameterDict()
         self.training_config = kwargs["training_config"]
@@ -317,12 +398,17 @@ class PolySelectorDirect(PolySelector):
                 )
 
 
-@register_multi_expert_selector("info_selector")
+@dataclass
+class RoutingInfoContainerConfig(SelectorConfig):
+    pass
+
+
+@register_multi_expert_selector("info_selector", RoutingInfoContainerConfig)
 class RoutingInfosContainerSelector(Selector):
     """A simple selector that looks for routing information in the info container."""
 
-    def __init__(self, info_container=None, **kwargs) -> None:
-        super().__init__(info_container)
+    def __init__(self, config=None, info_container=None, **kwargs) -> None:
+        super().__init__(config, info_container)
 
         self.default_expert_name = None
 
@@ -339,7 +425,12 @@ class RoutingInfosContainerSelector(Selector):
         return BatchModulesAndWeightsSelectorOutput(routing_mods, routing_weights)
 
 
-@register_multi_expert_selector("task_selector")
+@dataclass
+class TaskSelectorConfig(SelectorConfig):
+    pass
+
+
+@register_multi_expert_selector("task_selector", TaskSelectorConfig)
 class TaskNameSelector(Selector):
     def __init__(self, info_container, **kwargs) -> None:
         super().__init__(info_container)
@@ -411,7 +502,12 @@ class KVSelector(Selector):
         return len(self.expert_names)
 
 
-@register_multi_expert_selector("kv_task_selector")
+@dataclass
+class KVTaskNameSelectorConfig(SelectorConfig):
+    pass
+
+
+@register_multi_expert_selector("kv_task_selector", KVTaskNameSelectorConfig)
 class KVTaskNameSelector(KVSelector):
     """Selects KVAdapters based on the task name."""
 
@@ -453,7 +549,12 @@ class KVTaskNameSelector(KVSelector):
         )
 
 
-@register_multi_expert_selector("kv_concat_selector")
+@dataclass
+class KVConcatSelectorConfig(SelectorConfig):
+    pass
+
+
+@register_multi_expert_selector("kv_concat_selector", KVConcatSelectorConfig)
 class KVConcatSelector(KVSelector, nn.Module):
     """Concatenates along the sequence dim. all the adapters, and lets the
     model's internal attention mechanism take care of routing in a task agnostic way
@@ -501,6 +602,12 @@ class KVConcatSelector(KVSelector, nn.Module):
         return out
 
 
+@dataclass
+class KVNormSelectorConfig(SelectorConfig):
+    pass
+
+
+@register_multi_expert_selector("kv_norm_selector", KVNormSelectorConfig)
 class KVNormSelector(KVSelector):
     def route(self, experts, query, keys, attn_layer):
         """(2) Compute The Standard Attention Scores in augmented attention"""
@@ -519,11 +626,21 @@ class KVNormSelector(KVSelector):
         return out
 
 
-@register_multi_expert_selector("kv_concat_norm_selector")
+@dataclass
+class KVConcatNormSelectorConfig(SelectorConfig):
+    pass
+
+
+@register_multi_expert_selector("kv_concat_norm_selector", KVConcatNormSelectorConfig)
 class KVConcatNormSelector(KVConcatSelector, KVNormSelector):
     pass
 
 
-@register_multi_expert_selector("kv_task_norm_selector")
+@dataclass
+class KVTaskNameNormSelectorConfig(SelectorConfig):
+    pass
+
+
+@register_multi_expert_selector("kv_task_norm_selector", KVTaskNameNormSelectorConfig)
 class KVTaskNameNormSelector(KVTaskNameSelector, KVNormSelector):
     pass
