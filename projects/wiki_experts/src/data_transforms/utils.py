@@ -52,6 +52,8 @@ def upload_to_hf_(
 ):
     import pandas as pd
     import huggingface_hub
+    from collections import Counter
+    from datasets import concatenate_datasets
 
     hf_token = os.environ.get("HF_TOKEN")
     huggingface_hub.login(token=hf_token)
@@ -61,64 +63,56 @@ def upload_to_hf_(
         hf_user = huggingface_hub.whoami()["name"]
         hf_destination = f"{hf_user}/{dts_name}"
 
-    dataset = load_dataset("json", data_files=dataset_path)["train"]
     rng = np.random.RandomState(seed)
+    dataset = load_dataset("json", data_files=dataset_path)["train"]
+    datasets = []
+    for sub in set(list(dataset["subject"])):
+        dataset_subject = dataset.filter(lambda x: x["subject"] == sub, num_proc=16)
 
-    if create_split:
-        pd = dataset.to_pandas()
-        subjects = pd["subject"].unique()
+        def rename_columns(example):
+            example["source"] = example["instruction"]
+            example["target"] = example["response"]
+            example["task_name"] = example["subject"]
+            example["task_source"] = "oai-mc-mmlu"
+            return example
 
-        ds, tids = [], set()
-        for sub in subjects:
-            dataset_subject = dataset.filter(lambda x: x["subject"] == sub, num_proc=16)
+        # 1. rename columns to match the format of the multitask dataset
+        dataset_subject = dataset_subject.map(rename_columns, num_proc=16).shuffle(seed)
 
-            if cutoff > 0:
-                dataset_subject = dataset_subject.shuffle(seed).select(
-                    range(min(len(dataset_subject), cutoff))
-                )
-
-            # split 0.95 of ids for train, 0.05 for valid
-            ids = list(set(dataset_subject["id"]))
-            rng.shuffle(ids)
-            stids = ids[: int(len(ids) * 0.95)]
-            tids.update(stids)
-
-            print(
-                f"Subject {sub} has {len(ids)} examples, {len(stids)} for train, {len(ids) - len(stids)} for valid."
+        # 2. apply cutoff if needed
+        if cutoff > 0:
+            dataset_subject = dataset_subject.select(
+                range(min(len(dataset_subject), cutoff))
             )
-            ds.append(dataset_subject)
 
-    # creates a split column for each task (subject)
-    def create_split_column(example):
-        return {"split": "train"} if example["id"] in tids else {"split": "valid"}
+        # 3. split 0.95 of ids for train, 0.05 for valid
+        def create_split_column(example):
+            return {"split": "train"} if example["id"] in stids else {"split": "valid"}
 
-    dataset = concatenate_datasets(ds)
-    dataset = dataset.map(create_split_column, num_proc=16)
+        ids = list(set(dataset_subject["id"]))
+        rng.shuffle(ids)
+        stids = set(ids[: int(len(ids) * 0.95)])
 
-    def rename_columns(example):
-        example["source"] = example["instruction"]
-        example["target"] = example["response"]
-        example["task_name"] = example["subject"]
-        example["task_source"] = "oai-mc-mmlu"
-        example["split"] = example["split"]
-        return example
+        dataset_subject = dataset_subject.map(create_split_column, num_proc=16)
 
-    dataset = dataset.map(
-        rename_columns,
-        num_proc=16,
-        remove_columns=["instruction", "response", "subject"],
-    )
+        # 4. augment few shot if needed
+        if aug_few_shot > 0.0:
+            from mttl.datamodule.mt_seq_to_seq_module import (
+                augment_few_shot_task,
+            )
 
-    if aug_few_shot > 0:
-        # augment the dataset few-shot
-        from mttl.datamodule.mt_seq_to_seq_module import (
-            augment_few_shot,
-        )
-        from datasets import concatenate_datasets
+            aug_dataset = augment_few_shot_task(
+                dataset_subject, aug_few_shot, seed=seed
+            )
+            dataset_subject = concatenate_datasets([dataset_subject, aug_dataset])
 
-        aug_dataset = augment_few_shot(dataset, aug_few_shot)
-        dataset = concatenate_datasets([aug_dataset, dataset]).shuffle(seed)
+        # 5. print some stats
+        counter = Counter(dataset_subject["split"])
+        print("Train/Val examples:", counter)
 
+        datasets.append(dataset_subject)
+
+    dataset = concatenate_datasets(dataset_subject).shuffle(seed)
     dataset.push_to_hub(hf_destination, token=hf_token)
     dataset.to_json(
         f"{hf_destination.replace('/', '_')}.json", orient="records", lines=True

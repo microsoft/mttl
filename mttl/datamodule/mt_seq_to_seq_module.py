@@ -1,70 +1,83 @@
 from functools import partial
-from typing import List
 import os
-import torch
+import numpy
 from datasets import load_dataset, concatenate_datasets
-from typing import Dict
+from datasets import Dataset
 from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 from dataclasses import dataclass
-from collections.abc import Iterable
+import tqdm
 
 
-def augment_few_shot(dataset, num_samples, tokenizer=None, max_input_length=None):
+def augment_few_shot_task(
+    dataset, num_samples, tokenizer=None, max_input_length=None, seed=42
+):
+    len_dataset = len(dataset)
+    split = dataset["split"]
+    rng = numpy.random.RandomState(seed)
+    augmented_dataset = []
+
+    train_indices = set(i for i in range(len_dataset) if split[i] == "train")
+
+    def map_to_few_shot(example, index):
+        index_range = list(train_indices - {index})
+        index_chosen = rng.choice(index_range, size=num_samples, replace=False)
+        index_chosen = list(map(int, index_chosen))  # datasets complains otherwise
+
+        sources = [dataset[i]["source"] for i in index_chosen]
+        targets = [dataset[i]["target"] for i in index_chosen]
+
+        context = (
+            "\n\n".join(
+                [" ".join([source, target]) for source, target in zip(sources, targets)]
+            )
+            + "\n\n"
+        )
+        prompt = context + dataset[index]["source"]
+
+        if tokenizer is not None and max_input_length is not None:
+            input_ids = tokenizer(prompt, return_tensors="pt").input_ids
+
+            while (
+                input_ids.shape[-1] > max_input_length
+                and len(context.split("\n\n")) > 2
+            ):
+                context = "\n\n".join(context.split("\n\n")[:-2]) + "\n\n"
+                prompt = context + dataset[index]["source"]
+                input_ids = tokenizer(prompt, return_tensors="pt").input_ids
+
+        return {
+            "source": prompt,
+            "target": dataset[index]["target"],
+            "task_name": dataset[index]["task_name"],
+            "task_source": "few_shot_{}".format(dataset[index]["task_source"]),
+            "split": dataset[index]["split"],
+        }
+
+    augmented_dataset = dataset.map(map_to_few_shot, with_indices=True, num_proc=16)
+    return augmented_dataset
+
+
+def augment_few_shot(
+    dataset, num_samples, tokenizer=None, max_input_length=None, seed=42
+):
     """Augment the dataset with few-shot examples."""
     import numpy as np
     import tqdm
-    from datasets import Dataset
 
     augmented_dataset = []
-    rng = np.random.RandomState(42)
-
     for source in tqdm.tqdm(dataset.unique("task_name")):
-        examples = dataset.filter(lambda x: x["task_name"] == source).to_list()
-        train_indices = set(
-            [i for i in range(len(examples)) if examples[i]["split"] == "train"]
-        )
-
-        for index in tqdm.tqdm(range(len(examples))):
-            index_range = list(train_indices - {index})
-            index_chosen = rng.choice(index_range, size=num_samples, replace=False)
-
-            sources = [examples[i]["source"] for i in index_chosen]
-            targets = [examples[i]["target"] for i in index_chosen]
-
-            context = (
-                "\n\n".join(
-                    [
-                        " ".join([source, target])
-                        for source, target in zip(sources, targets)
-                    ]
+        augmented_dataset.append(
+            Dataset.from_list(
+                augment_few_shot_task(
+                    dataset.filter(lambda x: x["task_name"] == source),
+                    num_samples,
+                    tokenizer,
+                    max_input_length,
+                    seed,
                 )
-                + "\n\n"
             )
-            prompt = context + examples[index]["source"]
-
-            if tokenizer is not None and max_input_length is not None:
-                input_ids = tokenizer(prompt, return_tensors="pt").input_ids
-
-                while (
-                    input_ids.shape[-1] > max_input_length
-                    and len(context.split("\n\n")) > 2
-                ):
-                    context = "\n\n".join(context.split("\n\n")[:-2]) + "\n\n"
-                    prompt = context + examples[index]["source"]
-                    input_ids = tokenizer(prompt, return_tensors="pt").input_ids
-
-            augmented_dataset.append(
-                {
-                    "source": prompt,
-                    "target": examples[index]["target"],
-                    "task_name": examples[index]["task_name"],
-                    "task_source": "few_shot_{}".format(examples[index]["task_source"]),
-                    "split": examples[index]["split"],
-                }
-            )
-
-    augmented_dataset = Dataset.from_list(augmented_dataset)
+        )
     return concatenate_datasets([dataset, augmented_dataset])
 
 
