@@ -49,67 +49,6 @@ def remove_soft_prompts(logits, label_starts, soft_prompt_length):
     )
 
 
-def recursive_getattr(obj, attr_str):
-    """Given a state_dict string, recursively get the object"""
-
-    # Regular expression to match 'attr', 'attr[index]', followed by '.attr[index]' etc.
-    pattern = r"([^\[\].]+)(\[\d+\])?"
-    matches = re.finditer(pattern, attr_str)
-
-    for match in matches:
-        attr, index = match.groups()
-        obj = getattr(obj, attr)
-
-        if index:
-            obj = obj[int(index.strip("[]"))]
-
-        # Check if the current match is at the end of the string
-        if match.end() == len(attr_str):
-            return obj
-
-    return obj
-
-
-def recursive_setattr(parent_obj, attr_str, value):
-    """Given a state_dict string, recursively get and set the object"""
-
-    # Regular expression to match 'attr', 'attr[index]', followed by '.attr[index]' etc.
-    pattern = r"([^\[\].]+)(\[\d+\])?"
-    matches = re.finditer(pattern, attr_str)
-    obj = parent_obj
-
-    n_matches = 0
-    for match in matches:
-        n_matches += 1
-        attr, index = match.groups()
-        parent_obj = obj
-        obj = getattr(parent_obj, attr)
-
-        if index:
-            obj = obj[int(index.strip("[]"))]
-
-        # Check if the current match is at the end of the string
-        if match.end() == len(attr_str):
-            setattr(parent_obj, attr, value)
-            return
-
-    raise AttributeError(f"attribute not found: {attr_str}")
-
-
-def get_input_embeddings_pointer(transformer):
-    embeds = transformer.get_input_embeddings()
-    for parent_module in transformer.modules():
-        for name, child_module in parent_module.named_modules():
-            if child_module is embeds:
-                name = re.sub(
-                    r"\.(\d+)\.", r"[\1].", name
-                )  # layer.0.wte -> layers[0].wte
-                assert recursive_getattr(parent_module, name) is embeds
-                return name, parent_module
-
-    raise ValueError("Could not find input embeddings pointer")
-
-
 class ExtendedEmbedding(nn.Module):
     """Extends nn.Embedding to accomodate soft prompts"""
 
@@ -322,15 +261,11 @@ def modify_with_prompt_tuning(soft_prompt_cls, embed_cls, transformer, config):
         param.requires_grad = False
 
     task_id_container = transformer.task_id_container
-
-    embed_name, parent_mod = get_input_embeddings_pointer(transformer)
-    input_embeds = recursive_getattr(parent_mod, embed_name)
-    assert isinstance(input_embeds, nn.Embedding)
+    input_embeds = transformer.get_input_embeddings()
 
     # Create new embeddings and assign to transformer, replacing existing one
     ext_embeds = embed_cls(config, input_embeds.weight, config.soft_prompt_length)
-
-    recursive_setattr(parent_mod, embed_name, ext_embeds)
+    transformer.set_input_embeddings(ext_embeds)
 
     # Replace in the original model
     config.vocab_embed_dim = input_embeds.embedding_dim
