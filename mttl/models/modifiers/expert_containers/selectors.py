@@ -444,7 +444,7 @@ class TaskNameSelector(Selector):
     @cache_if_views
     def forward(self, input, **kwargs) -> ModulesSelectorOutput:
         # try to infer batch size
-        if not self.routing_infos.task_names:
+        if not self.routing_infos or not self.routing_infos.task_names:
             if "input_ids" in kwargs:
                 batch_size = kwargs["input_ids"].size(0)
             else:
