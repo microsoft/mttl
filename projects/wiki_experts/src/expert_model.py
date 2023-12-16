@@ -240,7 +240,7 @@ class MultiExpertModel(ExpertTrainer):
             )
 
         logger.info(
-            f"Adding expert with name {expert_name}... with action ... {action}!"
+            f"Adding expert with name {expert.name}... with action ... {action}!"
         )
         self.add_expert_instance(expert, action=action, is_default=is_default)
 

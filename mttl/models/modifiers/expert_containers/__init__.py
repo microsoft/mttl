@@ -48,7 +48,6 @@ def add_expert_library_to_transformer(
     expert_library: ExpertLibrary,
     action: str = "route",
     default_expert: str = None,
-    load_only_layers: int = None,
     routing_config: SelectorConfig = None,
     training_config: Config = None,
 ):
@@ -60,7 +59,6 @@ def add_expert_library_to_transformer(
             expert_dump.expert_weights,
             action=action,
             is_default=expert_name == default_expert,
-            load_only_layers=load_only_layers,
             routing_config=routing_config,
             training_config=training_config,
         )

@@ -68,6 +68,8 @@ def upload_to_hf(
         from src.data_transforms.base import TransformConfig
 
         config = TransformConfig.from_path(config_file)
+    else:
+        config = None
 
     return upload_to_hf_(
         dataset_path,

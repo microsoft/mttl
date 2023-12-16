@@ -38,7 +38,7 @@ class ExpertConfig(Config):
         self.augment_few_shot = 0
 
         self.moe_num_experts = 8
-        self.moe_emb_dim = 256
+        self.moe_emb_dim = 128
 
         self.expand_val_set_w_downstream = False
 
