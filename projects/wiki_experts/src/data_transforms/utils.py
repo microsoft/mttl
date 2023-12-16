@@ -95,6 +95,12 @@ def upload_to_hf_(
 
         dataset_subject = dataset_subject.map(create_split_column, num_proc=16)
 
+        # filter by length
+        q = np.quantile([len(s) for s in dataset_subject["source"]], 0.95)
+        dataset_subject = dataset_subject.filter(
+            lambda x: len(x["source"]) < int(q), num_proc=16
+        )
+
         # 4. augment few shot if needed
         if aug_few_shot > 0.0:
             from mttl.datamodule.mt_seq_to_seq_module import (
