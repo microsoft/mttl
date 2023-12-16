@@ -291,7 +291,8 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
             ) or key in plugin_param_keys:
                 del state_dict[key]
                 deleted.append(key)
-        logger.info("Deleted from state dict: {}".format(deleted))
+
+        logger.info("Deleted from state dict: {}".format(len(deleted)))
 
     def on_save_checkpoint(self, ckpt):
         self._delete_non_trainable_params(ckpt["state_dict"])
