@@ -136,6 +136,8 @@ def product_transfer_matrix_loss(
         ################# add default expert end ###############
 
         for expert_name in candidate_expert_names:
+            if expert_name not in expert_lib.keys():
+                continue
             expert_dump = expert_lib.get_expert(expert_name)
 
             logger.info(f"################# Evaluating {expert_name} on {task_eval_on}")
@@ -466,11 +468,22 @@ def get_transfer_matrix_by_filter_tasks(args):
 
     if not os.path.exists(args.output_dir):
         os.mkdir(args.output_dir)
-    fout = open(os.path.join(args.output_dir, "transfer_matrix.jsonl"), "w")
-
+    have_evaluated = []
+    if os.path.exists(os.path.join(args.output_dir, "transfer_matrix.jsonl")):
+        # find the already evaluated tasks
+        df_output = pd.read_json(
+            os.path.join(args.output_dir, "transfer_matrix.jsonl"), lines=True
+        )
+        have_evaluated = df_output["task_eval_on"].tolist()
+        fout = open(os.path.join(args.output_dir, "transfer_matrix.jsonl"), "a+")
+    else:
+        fout = open(os.path.join(args.output_dir, "transfer_matrix.jsonl"), "w")
+    expert_lib = HFExpertLibrary(args.hf_lib_id)
     for i, row in df.iterrows():
-        expert_lib = HFExpertLibrary(args.hf_lib_id)
-        # filter the experts we used
+        # if the task has been evaluated, skip
+        if row["task"] in have_evaluated:
+            print(f"Skip {row['task']}")
+            continue
 
         # get the transfer matrix
         transfer_matrix: pd.DataFrame = product_transfer_matrix_loss(
@@ -486,13 +499,13 @@ def get_transfer_matrix_by_filter_tasks(args):
 
 if __name__ == "__main__":
     args = RankerConfig.parse()
-    get_transfer_matrix_by_filter_tasks(args)
-    # get_all_tasks_using_single_expert(
-    #     args,
-    #     HFExpertLibrary(args.hf_lib_id),
-    #     task_name="abstract_algebra",
-    #     expert_name="adversarial_qa_droberta_tell_what_it_is",
-    # )
+    # get_transfer_matrix_by_filter_tasks(args)
+    get_all_tasks_using_single_expert(
+        args,
+        HFExpertLibrary(args.hf_lib_id),
+        task_name=None,
+        expert_name="race_middle_Write_a_multi_choice_question_for_the_following_article",
+    )
     # produce_transfer_matrix_rouge(
     #     args, HFExpertLibrary(args.hf_lib_id), [args.finetune_task_name]
     # )
