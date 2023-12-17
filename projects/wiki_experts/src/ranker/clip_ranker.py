@@ -10,7 +10,8 @@ import numpy as np
 
 from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRanker
 from mttl.models.utils import EfficientCheckpointModule
-
+from transformers import T5ForConditionalGeneration
+from transformers import T5Tokenizer
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -19,22 +20,44 @@ class TextEncoder(nn.Module):
     def __init__(
         self,
         trainable: bool = False,
+        model_name: str = "all-MiniLM-L6-v2",
     ):
         super().__init__()
-        self.transformer_encoder = SentenceTransformer(
-            "all-MiniLM-L6-v2"
-        )  # You need to define your text encoder
+        if model_name == "all-MiniLM-L6-v2":
+            self.transformer_encoder = SentenceTransformer(
+                model_name
+            )  # You need to define your text encoder
 
-        # frozen the transformer parameters
-        auto_model = self.transformer_encoder._first_module().auto_model
-        if not trainable:
-            for param in auto_model.parameters():
-                param.requires_grad = False
+            # frozen the transformer parameters
+            auto_model = self.transformer_encoder._first_module().auto_model
+            if not trainable:
+                for param in auto_model.parameters():
+                    param.requires_grad = False
+        elif model_name == "t5-small":
+            self.tokenizer = T5Tokenizer.from_pretrained(model_name)
+            self.transformer_encoder = T5ForConditionalGeneration.from_pretrained(
+                model_name, return_dict=True
+            )
+        else:
+            raise NotImplementedError
 
     def forward(self, x):
-        outputs = self.transformer_encoder.encode(
-            x, show_progress_bar=False, device=device, convert_to_tensor=True
-        )
+        if isinstance(self.transformer_encoder, SentenceTransformer):
+            outputs = self.transformer_encoder.encode(
+                x, show_progress_bar=False, device=device, convert_to_tensor=True
+            )
+        elif isinstance(self.transformer_encoder, T5ForConditionalGeneration):
+            input_ids = self.tokenizer(
+                x, return_tensors="pt", padding=True, truncation=True, max_length=512
+            ).input_ids.to(device)
+            last_hidden_states = self.transformer_encoder.encoder(
+                input_ids=input_ids
+            ).last_hidden_state
+            # Pooling strategy: here, we just take the representation of the first token
+            outputs = last_hidden_states[:, 0]
+        else:
+            raise NotImplementedError
+
         return outputs
 
 
@@ -77,11 +100,12 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
         text_embedding_dim: int = 384,
         expert_embedding_dim: int = 512,
         projection_dim: int = 512,
+        encoder_model_name: str = "all-MiniLM-L6-v2",
         **kwargs,
     ):
         super().__init__(**kwargs)
         assert len(task_names) > 0
-        self.text_encoder = TextEncoder()
+        self.text_encoder = TextEncoder(model_name=encoder_model_name)
         expert_names = task_names
         self.expert_num = len(expert_names)
         self.expert_encoder = ExpertEncoder(

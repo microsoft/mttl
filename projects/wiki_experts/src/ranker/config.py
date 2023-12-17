@@ -8,6 +8,7 @@ class RankerConfig(ExpertConfig):
         self.ranker_model = "classifier"
         self.ranker_path = None
         self.subsample = -1
+        self.encoder_model_name = "t5-small"
 
     def post_init(self):
         if self.micro_batch_size is None:

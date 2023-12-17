@@ -89,8 +89,8 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
 
         return expert_prediction, expert_weights.tolist()
 
-    def text_encoder_init(self, requires_grad=False):
-        text_encoder = SentenceTransformer("all-MiniLM-L6-v2")
+    def text_encoder_init(self, requires_grad=False, model_name="all-MiniLM-L6-v2"):
+        text_encoder = SentenceTransformer(model_name)
 
         # frozen the transformer parameters
         auto_model = text_encoder._first_module().auto_model
@@ -157,3 +157,35 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
         acc = torch.sum(preds == label).item() / len(label)
         self.log("test/acc", acc, on_epoch=True, prog_bar=True)
         return loss
+
+
+class T5Classifier(SentenceTransformerClassifier):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def text_encoder_init(self, requires_grad=False, model_name="t5-small"):
+        self.tokenizer = T5Tokenizer.from_pretrained(model_name)
+
+        text_encoder = T5ForConditionalGeneration.from_pretrained(
+            model_name, return_dict=True
+        )
+        return text_encoder
+
+    def forward(self, x):
+        # Encode the text input
+        input_ids = self.tokenizer(
+            x, return_tensors="pt", padding=True, truncation=True, max_length=512
+        ).input_ids.to(device)
+
+        last_hidden_states = self.text_encoder.encoder(
+            input_ids=input_ids
+        ).last_hidden_state
+
+        # Pooling strategy: here, we just take the representation of the first token
+        pooled_output = last_hidden_states[:, 0]
+
+        # Calculate the logits
+        text_output_projecter = self.text_projecter(pooled_output)
+        # Calculate the logits
+        logits = self.out_projecter(text_output_projecter)
+        return logits

@@ -1,6 +1,7 @@
 import pytorch_lightning as pl
 from projects.wiki_experts.src.ranker.classifier_ranker import (
     SentenceTransformerClassifier,
+    T5Classifier,
 )
 from mttl.datamodule.mt_seq_to_seq_module import (
     FlatMultiTaskConfig,
@@ -51,7 +52,11 @@ def train_triplet_clip(args):
     tempdatamodule = FlatMultiTaskModule(tempconfig)
     task_names = tempdatamodule.task_names
     task_names.append("default")
-    model = CLIPTripletRanker(task_names=tempdatamodule.task_names)
+    model = CLIPTripletRanker(
+        task_names=tempdatamodule.task_names,
+        encoder_model_name=args.encoder_model_name,
+        text_embedding_dim=512,
+    )
 
     # add model checkpoint
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
@@ -164,12 +169,25 @@ def train_classifier(args):
         model=args.model,
         train_batch_size=args.train_batch_size,
         finetune_task_name=args.finetune_task_name,
+        predict_batch_size=args.predict_batch_size,
     )
     datamodule = FlatMultiTaskModule(config)
     if args.ranker_path:
-        module = SentenceTransformerClassifier.from_pretrained(args.ranker_path)
+        if args.ranker_model == "classifier":
+            module = SentenceTransformerClassifier.from_pretrained(args.ranker_path)
+        elif args.ranker_model == "t5":
+            module = T5Classifier.from_pretrained(args.ranker_path)
+        else:
+            raise ValueError("Only classifier and t5 models supported for now.")
     else:
-        module = SentenceTransformerClassifier(task_names=datamodule.task_names)
+        if args.ranker_model == "classifier":
+            module = SentenceTransformerClassifier(task_names=datamodule.task_names)
+        elif args.ranker_model == "t5":
+            module = T5Classifier(
+                task_names=datamodule.task_names, transformer_embed_dim=512
+            )
+        else:
+            raise ValueError("Only classifier and t5 models supported for now.")
 
     # add model checkpoint
 
@@ -190,7 +208,8 @@ def train_classifier(args):
         val_check_interval=0.5,
         limit_val_batches=0.5,
     )
-    trainer.fit(module, datamodule)
+    # trainer.fit(module, datamodule)
+    trainer.test(module, datamodule.test_dataloader())
     if wandb_logger:
         wandb_logger.experiment.finish()
 
@@ -199,7 +218,7 @@ if __name__ == "__main__":
     from projects.wiki_experts.src.ranker.config import RankerConfig
 
     args = RankerConfig.parse()
-    if args.ranker_model == "classifier":
+    if args.ranker_model == "classifier" or args.ranker_model == "t5":
         train_classifier(args)
     elif args.ranker_model == "clip":
         train_clip(args)
