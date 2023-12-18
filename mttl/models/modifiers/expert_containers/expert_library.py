@@ -6,6 +6,8 @@ import json
 from typing import Any, Dict, List, Union
 import torch
 import os
+import time
+import requests
 from tempfile import TemporaryDirectory
 import numpy as np
 from collections import defaultdict
@@ -106,6 +108,33 @@ class BackendEngine:
 
     def list_repo_files(self, repo_id):
         raise NotImplementedError
+
+
+def retry(max_retries=10, wait_seconds=60):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            for attempt in range(1, max_retries + 1):
+                try:
+                    result = func(*args, **kwargs)
+                    return result
+                except requests.exceptions.HTTPError as e:
+                    if e.response.status_code == 429:
+                        print(
+                            f"HTTPError 429: Rate limit exceeded. Attempt {attempt}/{max_retries}."
+                        )
+                        if attempt < max_retries:
+                            print(f"Waiting {wait_seconds} seconds before retrying...")
+                            time.sleep(wait_seconds)
+                    else:
+                        # Re-raise the HTTPError if it's not a 429 error
+                        raise e
+                except Exception as e:
+                    raise e
+            raise RuntimeError(
+                f"Function {func.__name__} failed after {max_retries} attempts."
+            )
+
+        return wrapper
 
 
 class HuggingfaceHubEngine(BackendEngine):
@@ -495,6 +524,15 @@ class ExpertLibrary:
             )
             logger.info(f"Scores for {expert_name} uploaded successfully.")
 
+    def get_svd_embedding(self, expert_name: str):
+        try:
+            embeddings = self.get_auxiliary_data(
+                data_type="embeddings", expert_name=expert_name
+            )
+        except ValueError:
+            return None
+        return embeddings["svd"]["embedding"]
+
     def add_embeddings(
         self,
         expert_name: str,
@@ -705,11 +743,27 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
                 new_lib.add_expert(expert)
         return new_lib
 
+    def update_from_remote(self, remote_lib: Union["HFExpertLibrary", str]):
+        """
+        Update the expert library with experts from a remote library.
+
+        Args:
+            remote_lib (Union[HFExpertLibrary, str]): The remote library to update from. It can be either an instance of `HFExpertLibrary` or a string representing the path to the remote library.
+
+        """
+        if isinstance(remote_lib, str):
+            remote_lib = HFExpertLibrary(remote_lib)
+        for name, expert in remote_lib.items():
+            if expert not in self and not expert.expert_info.expert_deleted:
+                self.add_expert(expert)
+            if expert.expert_info.expert_deleted:
+                self.remove_expert(expert.name, soft_delete=True)
+
     @classmethod
     def from_remote(cls, remote_lib: ExpertLibrary, destination):
         new_lib = LocalExpertLibrary(repo_id=destination)
         for name, expert in remote_lib.items():
-            if expert not in new_lib:
+            if expert not in new_lib and not expert.expert_info.expert_deleted:
                 new_lib.add_expert(expert)
         return new_lib
 

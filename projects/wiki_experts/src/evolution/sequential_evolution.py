@@ -3,6 +3,7 @@ import sys
 import copy
 import torch
 import wandb
+import re
 import numpy as np
 import seaborn as sns
 from dataclasses import replace
@@ -56,6 +57,10 @@ from projects.wiki_experts.src.evolution.transfer_matrix import (
     eval_expert_on_task,
 )
 from mttl.datamodule.base import DefaultDataModule
+from mttl.models.modifiers.expert_containers.library_transforms import (
+    SVDEmbeddingTransform,
+    SVDEmbeddingTransformConfig,
+)
 
 
 DEBUG = True
@@ -211,6 +216,11 @@ def optimize_evol_expert_routing(
             best_graph_string, "route", expert_library=expert_lib
         )
         expert = model_optimal.replace_container_with_expert("new_task")
+        expert.expert_weights = {
+            k: v
+            for k, v in expert.expert_weights.items()
+            if re.match(args.trainable_param_names, k)
+        }  # make sure the checkpoint is not >5G
 
         logger.info("Found best graph: {}".format(best_graph_string))
         logger.info("Found best weights: {}".format(best_weights))
@@ -377,18 +387,24 @@ def retrieve_experts_for_task(
     task,
     evaluator=None,
     task_expert=None,
+    use_only_modules_for_tasks=None,
 ) -> ExpertLibrary:
     """
     Retrieves a set of sk experts that are most likley to be useful for the current task
     """
+    expert_lib_copy = copy.deepcopy(expert_lib)
+    if use_only_modules_for_tasks is not None:
+        for k, expert in list(expert_lib_copy.items()):
+            if expert.expert_info.expert_task_name not in use_only_modules_for_tasks:
+                expert_lib_copy.remove_expert(k)
 
     if sk <= 0 or sk >= len(expert_lib):
-        return expert_lib
+        return expert_lib_copy
     # silent the logger
+    if metric not in ["random", "lora_sim", "loss", "rougeL", "lib_embeddings"]:
+        return expert_lib_copy
+
     logger.disabled = True
-    if metric not in ["random", "lora_sim", "loss", "rougeL"]:
-        return expert_lib
-    expert_lib_copy = copy.deepcopy(expert_lib)
 
     if task_expert is None:
         task_expert: Expert = get_task_expert(task, expert_lib)
@@ -411,6 +427,37 @@ def retrieve_experts_for_task(
         task_module_name = task_expert.name
         # compute cosine similarity between each expert and current task's expert, keep top sk
         emb_tasks = module.get_task_embeddings()
+        # compare this task's embed with  other
+        if task_module_name not in emb_tasks:
+            return expert_lib_copy
+        task_emb = emb_tasks[task_module_name]
+        similarities = []
+        t_names = []
+        for t, emb in emb_tasks.items():
+            if t != task_module_name:
+                similarities.append(
+                    cosine_similarity(task_emb.unsqueeze(0), emb.unsqueeze(0)).item()
+                )
+                t_names.append(t)
+        similarities = {k: v for k, v in zip(t_names, similarities)}
+        sel_exp_names = sorted(similarities, key=similarities.get, reverse=True)[:sk]
+
+    elif metric == "lib_embeddings":
+        if task_expert is None:
+            return expert_lib_copy
+        module.load_from_module_dict(expert_lib_copy)
+        from torch.nn.functional import cosine_similarity
+
+        task_module_name = task_expert.name
+        # compute cosine similarity between each expert and current task's expert, keep top sk
+        emb_tasks = {}
+        emb_tasks[task_module_name] = expert_lib_copy.get_svd_embedding(
+            task_module_name
+        )
+        for key, metadatum in expert_lib_copy.data.items():
+            emb_tasks[key] = expert_lib_copy.get_svd_embedding(metadatum.expert_name)
+            emb_tasks[key] = torch.tensor(emb_tasks[metadatum.expert_name])
+
         # compare this task's embed with  other
         if task_module_name not in emb_tasks:
             return expert_lib_copy
@@ -492,7 +539,7 @@ def retrieve_experts_for_task(
 
 
 def eval_callbacks(
-    callbacks: list[EvalCallback], module, expert: Expert, task, sufix=""
+    args, callbacks: list[EvalCallback], module, expert: Expert, task, sufix=""
 ):
     log_row = {}
     for cb in callbacks:
@@ -500,7 +547,7 @@ def eval_callbacks(
         if isinstance(cb, partial):
             local_config = copy.deepcopy(args)
             local_config.finetune_task_name = task
-            cb = cb(config=local_config)
+            cb = cb(config=local_config, subsample=100 if DEBUG else -1)
 
         score = cb.evaluate_model(model=eval_module)
         log_row[f"{cb.name}_{sufix}"] = score
@@ -611,7 +658,7 @@ def active_task_iteration(
             )
 
         log: dict = eval_callbacks(
-            callbacks, module, parent_exp, task, sufix="base_expert"
+            args, callbacks, module, parent_exp, task, sufix="base_expert"
         )
         log_row = {**log_row, **log}
 
@@ -634,6 +681,9 @@ def active_task_iteration(
         task,
         evaluator=evaluator_valid,
         task_expert=parent_exp,
+        use_only_modules_for_tasks=args.finetune_task_name
+        if args.use_only_modules_for_tasks
+        else None,
     )
     # log retrieved experts
     log_row["retrieved_experts"] = str(list(retrieved_expert_lib.keys()))
@@ -707,7 +757,7 @@ def active_task_iteration(
         optimal_expert if improved_on_valid or parent_exp is None else parent_exp
     )
     log: dict = eval_callbacks(
-        callbacks, module, selected_expert, task, sufix="selected_expert"
+        args, callbacks, module, selected_expert, task, sufix="selected_expert"
     )
     log_row = {**log_row, **log}
     ########################################################################
@@ -828,6 +878,12 @@ def main(args: EvolExpertConfig):
         )
 
         for task in tasks_left:
+            if args.retrieve_with == "lib_embeddings":
+                svd_embedder = SVDEmbeddingTransform(
+                    SVDEmbeddingTransformConfig(sparsity_threshold=0.5)
+                )
+                svd_embedder.transform(expert_lib, upload_to_hf=True)
+
             log_row = active_task_iteration(
                 args, task, expert_lib, module=module
             )  # finds a better module for the task, and eds/replaces it into the library

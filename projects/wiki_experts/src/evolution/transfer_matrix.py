@@ -7,6 +7,7 @@ import seaborn as sns
 from typing import Dict
 from huggingface_hub import login
 from matplotlib import pyplot as plt
+from tempfile import TemporaryDirectory
 from pytorch_lightning import seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
@@ -36,7 +37,7 @@ from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.vllm_engines.engines import free_memory
 from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
 
-DEBUG = True
+DEBUG = False
 if "AMLT_OUTPUT_DIR" in os.environ:
     DEBUG = False
 if DEBUG:
@@ -171,9 +172,10 @@ def run_eval(args: EvolExpertConfig):
         # testing a single model
         expert = load_expert(args.hf_repo_id)
         expert.expert_info.expert_name = "joint"
-        expert.expert_info.expert_task_name = "FLAN_19"
+        expert.expert_info.expert_task_name = "joint"
+        temp_dir = TemporaryDirectory(dir=args.output_dir + "/")
         expert_lib = LocalExpertLibrary.from_expet_dict(
-            {args.hf_repo_id: expert}, destination="/tmp"
+            {args.hf_repo_id: expert}, destination=temp_dir.name
         )
     else:
         expert_lib: LocalExpertLibrary = LocalExpertLibrary.from_remote(

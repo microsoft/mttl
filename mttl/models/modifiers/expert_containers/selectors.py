@@ -106,11 +106,21 @@ class MultiExpertSelector(torch.nn.Module, Selector):
         self.init_gap = [0, 0]
         self.main_m = 1
 
+        self._initialized = False
+
     @property
     def name(self):
         return f"{self.__layer_name__}"
 
     def forward(self, *args, **kwargs):
+        if not self._initialized:
+            if sum([p for p in self.module_logits.values()]) == 0:
+                for name, param in self.module_logits.items():
+                    self.module_logits[name].data = (
+                        torch.empty(1).uniform_(-1e-3, 1e-3).to(self.device)
+                    )
+            self._initialized = True
+
         return [self.module_logits]
 
     def get_routing_weights(self):
@@ -131,10 +141,15 @@ class MultiExpertSelector(torch.nn.Module, Selector):
                     torch.ones(1).to(self.device)
                 )
                 self.module_logits[expert_name].data *= main_m
+                self._initialized = True
             else:
                 self.module_logits[expert_name] = torch.nn.Parameter(
                     torch.empty(1).uniform_(*init_gap).to(self.device)
                 )
+
+    def load_state_dict(self, state_dict, strict=True):
+        self._initialized = True
+        return super().load_state_dict(state_dict, strict=strict)
 
 
 @register_multi_expert_selector("task_selector")

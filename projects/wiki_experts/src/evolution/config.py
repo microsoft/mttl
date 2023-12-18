@@ -53,6 +53,10 @@ class EvolExpertConfig(ExpertConfig):
         self.evolution_warmup_steps = 0
         self.evol_n_eval_times = 10
 
+        self.use_only_modules_for_tasks = (
+            False  # if true, only use modules for the given task set for evolution
+        )
+
     @property
     def __key(self):
         return (

@@ -1,6 +1,7 @@
 import torch
 import copy
 import re
+import os
 import numpy as np
 from typing import Dict
 from tempfile import TemporaryDirectory
@@ -116,6 +117,8 @@ class MultiExpertModel(ExpertTrainer):
             td = TemporaryDirectory()
             expert_checkpoint = MultiExpertModel.save_pretrained(self, td.name)
             expert: Expert = load_expert(expert_checkpoint)
+            # remove the temporary directory
+            os.remove(expert_checkpoint)
             return expert
         return
 
