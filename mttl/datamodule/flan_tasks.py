@@ -596,3 +596,18 @@ FLAN_TASKS = [
     "quartz_having_read_above_passage",
     "duorc_ParaphraseRC_generate_question",
 ]
+
+ZHAN_SUBSET = [
+    "niv2_question_generation",
+    "niv2_question_answering",
+    "niv2_wrong_candidate_generation",
+    "ultrachat_31",
+    "ultrachat_15",
+    "ultrachat_19",
+    "MATH/PRM-800K",
+    "ARB",
+    "scienceqa",
+    "huggingface_xsum",
+    "fix_punct",
+    "unified_qa_science_inst",
+]
