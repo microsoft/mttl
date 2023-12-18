@@ -90,6 +90,7 @@ class PlatypusDataset(torch.utils.data.dataset.Dataset):
             "target": target,
             "example_id": key,
             "instruction": entry.get("instruction"),
+            "data_source": entry["data_source"],
         }
 
     def read_all_instructions(self):

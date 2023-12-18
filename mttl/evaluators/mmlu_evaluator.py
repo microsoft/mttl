@@ -108,21 +108,17 @@ class MMLUEvaluator(Evaluator):
         )
         for _, batch in pbar:
             task_names = batch.get("task_names", None)
-            batch.pop("sources_texts", None)
             labels_text = batch.pop("labels_texts", None)
             extra_kwargs = {}
+            extra_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
             max_length = 5
-
-            if self.config.model_family == "gpt":
-                max_length += batch["input_ids"].shape[-1]
-                extra_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
 
             batch = transfer_batch_to_device(batch, self.device)
             with torch.no_grad():
                 if isinstance(model, pl.LightningModule) or hasattr(model, "hparams"):
                     predictions = model.generate(
                         batch,
-                        max_length=max_length,
+                        max_new_tokens=max_length,
                         generation_config=model.generation_config,
                         return_dict_in_generate=True,
                         output_scores=True,
@@ -132,7 +128,7 @@ class MMLUEvaluator(Evaluator):
                     predictions = model.generate(
                         input_ids=batch["input_ids"],
                         attention_mask=batch["attention_mask"],
-                        max_length=max_length,
+                        max_new_tokens=max_length,
                         generation_config=model.generation_config,
                         return_dict_in_generate=True,
                         output_scores=True,

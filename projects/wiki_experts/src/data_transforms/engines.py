@@ -30,7 +30,9 @@ class AutoEngine:
 
 
 class DataGenLLMEngine(LLMEngine):
-    def generate(self, templated_contexts, top_p, temperature, max_tokens, **kwargs):
+    def generate(
+        self, templated_contexts, top_p, temperature, max_tokens, stream=False, **kwargs
+    ):
         results = Response()
 
         sampling_params = SamplingParams(
@@ -62,7 +64,11 @@ class DataGenLLMEngine(LLMEngine):
                 results.outputs.append(INVALID_RESPONSE)
                 results.cumulative_logprobs.append(np.inf)
                 results.finish_reason.append("invalid")
-        return results
+
+            if stream:
+                yield results.outputs[-1], results.finish_reason[-1]
+        if not stream:
+            return results.outputs, results.finish_reason
 
 
 class OpenAI:
@@ -86,7 +92,6 @@ class OpenAI:
         stream=False,
         **kwargs,
     ):
-        results = Response()
         outputs = self.operator.generate(
             templated_contexts, max_tokens=max_tokens, stream=stream
         )
@@ -95,6 +100,5 @@ class OpenAI:
             for output in outputs:
                 yield output, "stop"
         else:
-            results.outputs += output
-            results.finish_reason += ["stop"] * len(output)
-            return results
+            finish_reason = ["stop"] * len(outputs)
+            return outputs, finish_reason

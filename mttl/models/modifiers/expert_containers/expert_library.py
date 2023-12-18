@@ -256,7 +256,9 @@ class ExpertLibrary:
         self.data = {}
 
         try:
-            metadata_dir = self.snapshot_download(self.repo_id, allow_patterns="*.meta")
+            metadata_dir = self.snapshot_download(
+                self.repo_id, allow_patterns="**/*.meta"
+            )
         except Exception as e:
             if isinstance(e, RepositoryNotFoundError):
                 logger.error("Repository not found: %s", self.repo_id)
@@ -265,7 +267,7 @@ class ExpertLibrary:
 
         metadata = [
             MetadataEntry.loads(torch.load(file, map_location="cpu"))
-            for file in glob.glob(f"{metadata_dir}/*.meta")
+            for file in glob.glob(f"{metadata_dir}/**/*.meta")
         ]
 
         for metadatum in metadata:
@@ -727,7 +729,7 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
         if "HF_TOKEN" in os.environ:
             login(token=os.environ["HF_TOKEN"])
 
-        metadata_dir = snapshot_download(repo_id, allow_patterns="*.meta")
+        metadata_dir = snapshot_download(repo_id, allow_patterns="**/*.meta")
         new_lib = LocalExpertLibrary(repo_id=destination, create=False)
 
         for file in glob.glob(f"{metadata_dir}/*.meta"):

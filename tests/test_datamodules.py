@@ -3,10 +3,6 @@ import numpy as np
 from mttl.datamodule.base import AutoDataModule
 from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
 from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
-from projects.wiki_experts.src.ranker.classification_module import (
-    ClassificationDataModule,
-    ClassificationConfig,
-)
 
 
 @pytest.mark.parametrize("task_name", [None, "huggingface_xsum"])
@@ -37,22 +33,6 @@ def test_flan(task_name):
     assert "sources_texts" in batch
     assert "labels_texts" in batch
     assert "task_names" in batch
-
-
-@pytest.mark.parametrize("task_name", [None, "huggingface_xsum"])
-def test_classification(task_name):
-    config = ClassificationConfig(
-        "sordonia/flan-debug-flat",
-        model="t5-small",
-        train_batch_size=4,
-        finetune_task_name=task_name,
-    )
-    datamodule = ClassificationDataModule(config)
-    train_loader = datamodule.train_dataloader()
-    batch = next(iter(train_loader))
-    assert "input" in batch
-    assert "target" in batch
-    assert "label" in batch
 
 
 def test_platypus():
@@ -142,6 +122,7 @@ def test_alpaca_for_gen():
     )
 
 
+@pytest.mark.skip(reason="deleted dataset on remote :(")
 def test_t0_module():
     t0 = AutoDataModule.create(
         "sordonia/t0-10k-flat",

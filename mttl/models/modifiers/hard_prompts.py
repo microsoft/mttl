@@ -47,6 +47,10 @@ class HardPrompt(Adapter, ModifyMixin):
             return_tensors="pt",
             padding=True,
         )
+        # move it to GPU
+        eps["input_ids"] = eps["input_ids"].to(input_ids.device)
+        eps["attention_mask"] = eps["attention_mask"].to(input_ids.device)
+        #
         prompt_shifts = eps["attention_mask"].sum(1)
         modify_labels = labels is not None and prompts[0].model_family == "gpt"
 

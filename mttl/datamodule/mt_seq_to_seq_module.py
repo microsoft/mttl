@@ -2,7 +2,7 @@ from functools import partial
 from typing import List
 import os
 import torch
-from datasets import load_dataset
+from datasets import load_dataset, concatenate_datasets
 from typing import Dict
 from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from collections.abc import Iterable
 
 
-def augment_few_shot(self, dataset, num_samples):
+def augment_few_shot(dataset, num_samples, tokenizer=None, max_input_length=None):
     """Augment the dataset with few-shot examples."""
     import numpy as np
     import tqdm
@@ -42,15 +42,17 @@ def augment_few_shot(self, dataset, num_samples):
                 + "\n\n"
             )
             prompt = context + examples[index]["source"]
-            input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids
 
-            while (
-                input_ids.shape[-1] > self.config.max_input_length
-                and len(context.split("\n\n")) > 2
-            ):
-                context = "\n\n".join(context.split("\n\n")[:-2]) + "\n\n"
-                prompt = context + examples[index]["source"]
-                input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids
+            if tokenizer is not None and max_input_length is not None:
+                input_ids = tokenizer(prompt, return_tensors="pt").input_ids
+
+                while (
+                    input_ids.shape[-1] > max_input_length
+                    and len(context.split("\n\n")) > 2
+                ):
+                    context = "\n\n".join(context.split("\n\n")[:-2]) + "\n\n"
+                    prompt = context + examples[index]["source"]
+                    input_ids = tokenizer(prompt, return_tensors="pt").input_ids
 
             augmented_dataset.append(
                 {
@@ -63,12 +65,18 @@ def augment_few_shot(self, dataset, num_samples):
             )
 
     augmented_dataset = Dataset.from_list(augmented_dataset)
-    return augmented_dataset
+    return concatenate_datasets([dataset, augmented_dataset])
 
 
 @dataclass
 class FlatMultiTaskConfig(DatasetConfig):
     source_template: str = None
+    augment_few_shot: int = 0
+
+
+def apply_source_template(source_template, example):
+    example["source"] = source_template.format(example["source"])
+    return example
 
 
 class FlatMultiTaskModule(DefaultDataModule):
@@ -91,13 +99,20 @@ class FlatMultiTaskModule(DefaultDataModule):
 
         if self.config.source_template is not None:
             # apply source template if specified
-            def apply_source_template(example):
-                example["source"] = self.config.source_template.format(
-                    example["source"]
-                )
-                return example
+            train_dataset = train_dataset.map(
+                partial(apply_source_template, self.config.source_template),
+                num_proc=n_proc,
+            )
 
-            train_dataset = train_dataset.map(apply_source_template, num_proc=n_proc)
+        if self.config.augment_few_shot > 0:
+            train_dataset_aug = augment_few_shot(
+                train_dataset,
+                self.config.augment_few_shot,
+                tokenizer=self.tokenizer,
+                max_input_length=self.config.max_input_length,
+            )
+            train_dataset_aug = train_dataset_aug.shuffle()
+            train_dataset = train_dataset_aug.select(range(len(train_dataset)))
 
         self.train_dataset = train_dataset.filter(
             lambda x: x["split"] == "train",
@@ -117,6 +132,11 @@ class FlatMultiTaskModule(DefaultDataModule):
 
         if len(self.test_dataset) == 0:
             self.test_dataset = self.dev_dataset
+
+        # Wrap the datasets to also return the task_id
+        self.train_dataset = task_id_dataset(self.train_dataset, self._task_to_id)
+        self.dev_dataset = task_id_dataset(self.dev_dataset, self._task_to_id)
+        self.test_dataset = task_id_dataset(self.test_dataset, self._task_to_id)
 
         self.print_infos()
 

@@ -2,6 +2,7 @@ import os
 import sys
 from pytorch_lightning import seed_everything
 from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
+from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from mttl.utils import setup_logging, logger
@@ -76,23 +77,28 @@ def run_eval(args):
 
     logger.info("Args: {}".format(args.to_json()))
 
-    # select dataloader
-    configuration = os.environ.get("FLAN_CONFIG", None)
-    logger.info("flan tasks names: {}".format(configuration))
     # add FlanEvaluator
     data_module = FlanModule(
         FlanConfig(
-            dataset="sordonia/flan-10k-flat",
-            model="EleutherAI/gpt-neo-125m",
-            finetune_task_name=configuration,
+            dataset=args.dataset,
+            model=args.model,
+            finetune_task_name=args.finetune_task_name,
+            predict_batch_size=args.predict_batch_size,
         ),
         for_generation=True,
     )
 
     evaluator = RougeEvaluator(data_module)
     # load module
-    module = MultiExpertModelRanker(**vars(args), tokenizer=data_module.tokenizer)
-    if args.load_module is not None:
+
+    module = MultiExpertModelRanker(
+        **vars(args),
+        tokenizer=data_module.tokenizer,
+    )
+    if args.expert_library_path:
+        library = HFExpertLibrary(args.expert_library_path)
+        module.load_from_library(library)
+    elif args.load_module is not None:
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:
             module.load_expert(**expert_kwargs)
@@ -101,8 +107,11 @@ def run_eval(args):
 
     module.to("cuda")
     # evaluate all the category
-    rouge = evaluator.evaluate(module, split="test")
+    rouge = evaluator.evaluate(module, split="test", verbose=False)
 
+    if args.routing == "retrieval":
+        accuracy = module.get_retrieval_accuracy(data_module.val_dataloader())
+        logger.info("Accuracy: {}".format(accuracy))
     logger.info("Flan rouge: {}".format(rouge))
     del module
 

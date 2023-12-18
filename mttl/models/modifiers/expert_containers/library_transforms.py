@@ -4,6 +4,7 @@ from mttl.models.modifiers.expert_containers.module_graph import Expert
 from mttl.utils import logger
 from mttl.models.modifiers.modify_model import get_modifier_type
 
+import torch
 from tqdm import tqdm
 import numpy as np
 import sklearn.decomposition
@@ -47,26 +48,28 @@ class SVDEmbeddingTransform(LibraryTransform):
 
         names = []
         array = []
-        for name in tqdm(library.keys()):
+        for name in tqdm(list(library.keys())):
             dump = library[name]
             flat = []
             for _, p in dump.expert_weights.items():
-                flat = flat + list(p.flatten().cpu().numpy())
-            array.append(flat)
+                flat.append(p.flatten().cpu())
+            array.append(torch.concatenate(flat, 0).numpy())
             names.append(name)
 
         array = np.array(array)
-        if self.config.sparsity_threshold > 0.0:
-            for thr in [0.0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1]:
-                ar_copy = array.copy()
-                ar_copy[np.abs(ar_copy) <= thr] = 0.0
-                ratio = float((ar_copy == 0.0).sum()) / ar_copy.size
+        for i, _ in enumerate(array):
+            if self.config.sparsity_threshold > 0.0:
+                for thr in [0.0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1]:
+                    ar_copy = array[i].copy()
+                    ar_copy[np.abs(ar_copy) <= thr] = 0.0
+                    ratio = float((ar_copy == 0.0).sum()) / ar_copy.size
 
-                if ratio >= self.config.sparsity_threshold:
-                    logger.info("Found sparsity threshold: {}".format(thr))
-                    break
+                    if ratio >= self.config.sparsity_threshold:
+                        logger.info("Found sparsity threshold: {}".format(thr))
+                        break
+                array[i] = ar_copy
 
-        experts_embeddings = svd.fit_transform(ar_copy)
+        experts_embeddings = svd.fit_transform(array)
         experts_embeddings = (
             experts_embeddings / np.linalg.norm(experts_embeddings, 2, axis=1)[:, None]
         )
@@ -78,6 +81,6 @@ class SVDEmbeddingTransform(LibraryTransform):
                     library.add_embeddings(
                         name,
                         self.config.__dict__,
-                        experts_embeddings[i, :],
+                        experts_embeddings[i],
                     )
         return experts_embeddings

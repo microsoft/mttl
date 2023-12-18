@@ -77,7 +77,6 @@ def add_expert_library_to_transformer(
 
 def add_expert_to_transformer(
     transformer,
-    expert_name,
     expert: Expert,
     action="route",
     is_default=False,
@@ -93,6 +92,9 @@ def add_expert_to_transformer(
 
     expert_config = expert.expert_config
 
+    if not expert.name:
+        raise ValueError("Expert name cannot be empty!")
+
     from mttl.models.modifiers.modify_model import get_modifier_type
     from mttl.models.modifiers.expert_containers.hard_prompts_container import (
         add_hard_prompt_to_transformer,
@@ -107,7 +109,6 @@ def add_expert_to_transformer(
     if model_modifier == "hard_prompt":
         return add_hard_prompt_to_transformer(
             transformer,
-            expert_name,
             expert,
             action=action,
             is_default=is_default,
@@ -174,14 +175,10 @@ def add_expert_to_transformer(
 
                     added_layers.append(expert_container.__layer_name__)
                     expert_container.add_expert(
-                        expert_name,
                         expert,
-                        expert_weights=filter_expert_weights(
-                            expert_container.__layer_name__, expert.expert_weights
-                        ),
                         action=action,
                         is_default=is_default,
                     )
 
-    logger.info("Adding expert to layers %s", added_layers)
+    logger.debug("Adding expert to layers %s", added_layers)
     return transformer

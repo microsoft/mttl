@@ -57,7 +57,6 @@ class ExpertTrainer(EfficientCheckpointModule):
         input_ids, labels = batch["input_ids"], batch["labels"]
 
         self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
-
         outputs = self.model.forward(input_ids, attention_mask=batch["attention_mask"])
 
         # calculate loss, could also be done inside of the model
