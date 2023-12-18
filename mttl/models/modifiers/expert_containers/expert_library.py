@@ -112,8 +112,10 @@ class HuggingfaceHubEngine(BackendEngine):
     def snapshot_download(self, repo_id, allow_patterns=None):
         return snapshot_download(repo_id, allow_patterns=allow_patterns)
 
-    def create_repo(self, repo_id, repo_type, exist_ok):
-        return create_repo(repo_id, repo_type=repo_type, exist_ok=exist_ok)
+    def create_repo(self, repo_id, repo_type, exist_ok, private=True):
+        return create_repo(
+            repo_id, repo_type=repo_type, exist_ok=exist_ok, private=private
+        )
 
     def create_commit(self, repo_id, operations, commit_message):
         return create_commit(
