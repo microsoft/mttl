@@ -74,10 +74,10 @@ class SVDEmbeddingTransform(LibraryTransform):
         if upload_to_hf:
             # add embeddings to the library
             with library.batched_commit():
-                for name in names:
+                for i, name in enumerate(names):
                     library.add_embeddings(
                         name,
                         self.config.__dict__,
-                        experts_embeddings,
+                        experts_embeddings[i, :],
                     )
         return experts_embeddings
