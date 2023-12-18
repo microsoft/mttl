@@ -231,7 +231,7 @@ class ExpertLibrary:
 
         try:
             metadata_dir = self.snapshot_download(
-                self.repo_id, allow_patterns="**/*.meta"
+                self.repo_id, allow_patterns=["**/*.meta", "*.meta"]
             )
         except Exception as e:
             if isinstance(e, RepositoryNotFoundError):
@@ -241,7 +241,7 @@ class ExpertLibrary:
 
         metadata = [
             MetadataEntry.fromdict(torch.load(file, map_location="cpu"))
-            for file in glob.glob(f"{metadata_dir}/**/*.meta")
+            for file in glob.glob(f"{metadata_dir}/**/*.meta", recursive=True)
         ]
 
         for metadatum in metadata:
