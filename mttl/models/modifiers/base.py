@@ -54,18 +54,16 @@ class ModifierConfig(object):
                 kwargs[key] = getattr(training_config, key)
         return cls(**kwargs)
 
-
-class AutoModifierConfig(object):
     @classmethod
-    def fromdict(cls, dumped: Dict) -> ModifierConfig:
+    def fromdict(cls, dumped: Dict) -> "ModifierConfig":
         modifier = dumped.pop("model_modifier")
         klass = MODIFIERS_TO_CONFIGS[modifier]
         return klass(**dumped)
 
     @staticmethod
     def from_training_config(
-        training_config: Union["Config", ModifierConfig]
-    ) -> Union[ModifierConfig, None]:
+        training_config: Union["Config", "ModifierConfig"]
+    ) -> Union["ModifierConfig", None]:
         """Build modifier config from the training config.
 
         Returns None if no modifier is set.
@@ -85,7 +83,11 @@ class AutoModifierConfig(object):
             )
 
         config_klass = MODIFIERS_TO_CONFIGS[training_config.model_modifier]
-        return config_klass.from_training_config(training_config)
+        kwargs = {}
+        for key, _ in config_klass.__dataclass_fields__.items():
+            if hasattr(training_config, key):
+                kwargs[key] = getattr(training_config, key)
+        return config_klass(**kwargs)
 
 
 class ModifyMixin(nn.Module):

@@ -64,25 +64,14 @@ class SelectorConfig:
         return data
 
     @classmethod
-    def from_training_config(cls, training_config: "Config"):
-        """Build modifier config from the training config."""
-        kwargs = {}
-        for key, _ in cls.__dataclass_fields__.items():
-            if hasattr(training_config, key):
-                kwargs[key] = getattr(training_config, key)
-        return cls(**kwargs)
-
-
-class AutoSelectorConfig(object):
-    @classmethod
-    def fromdict(cls, dumped: Dict) -> SelectorConfig:
+    def fromdict(cls, dumped: Dict) -> "SelectorConfig":
         klass = dumped.pop("selector_config")
         return eval(klass)(**dumped)
 
     @staticmethod
     def from_training_config(
-        training_config: Union["Config", SelectorConfig]
-    ) -> Union[SelectorConfig, None]:
+        training_config: Union["Config", "SelectorConfig"]
+    ) -> Union["SelectorConfig", None]:
         """Build modifier config from the training config.
 
         Returns None if no modifier is set.
@@ -100,7 +89,11 @@ class AutoSelectorConfig(object):
             )
 
         config_klass = SELECTORS_NAME_TO_CONFIG[training_config.router_selector]
-        return config_klass.from_training_config(training_config)
+        kwargs = {}
+        for key, _ in config_klass.__dataclass_fields__.items():
+            if hasattr(training_config, key):
+                kwargs[key] = getattr(training_config, key)
+        return config_klass(**kwargs)
 
 
 @dataclass

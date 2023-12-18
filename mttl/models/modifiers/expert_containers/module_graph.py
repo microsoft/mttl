@@ -3,7 +3,7 @@ import torch
 from typing import Dict, Union
 import re
 from string import Template
-from mttl.models.modifiers.base import AutoModifierConfig, ModifierConfig
+from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.modify_model import CONFIGS_TO_MODIFIERS
 
 from mttl.models.utils import download_from_hub
@@ -28,19 +28,22 @@ class ExpertInfo:
 
     @classmethod
     def fromdict(cls, data):
-        # back-compatibility: in the previously stored checkpoints, expert_config was the training_config
         expert_config = None
         training_config = None
 
         if "expert_config" in data:
             try:
-                expert_config = AutoModifierConfig.from_training_config(
-                    data["expert_config"]
-                )
+                expert_config = ModifierConfig.fromdict(data["expert_config"])
             except:
-                # we are probably in the old format
-                training_config = Config.fromdict(data["expert_config"])
-                expert_config = AutoModifierConfig.from_training_config(training_config)
+                # back-compatibility: in the previously stored checkpoints, expert_config was an object
+                if isinstance(data["expert_config"], Config):
+                    expert_config = ModifierConfig.from_training_config(
+                        data["expert_config"]
+                    )
+                else:
+                    # we are probably in the old format
+                    training_config = Config.fromdict(data["expert_config"])
+                    expert_config = ModifierConfig.from_training_config(training_config)
 
         if "training_config" in data:
             # convert it to the generic Config object

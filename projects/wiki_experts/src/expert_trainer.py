@@ -3,9 +3,9 @@ from collections import defaultdict
 from torch import nn
 from mttl.models.llama_patch import replace_attn_with_flash_attn
 from mttl.models.modifiers import modify_transformer
-from mttl.models.modifiers.base import AutoModifierConfig
+from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.routing import RoutingInfo
-from mttl.models.modifiers.expert_containers.selectors import AutoSelectorConfig
+from mttl.models.modifiers.expert_containers.selectors import SelectorConfig
 from transformers import AutoModelForCausalLM
 
 from mttl.models.modifiers.expert_containers.module_graph import ExpertInfo
@@ -48,13 +48,9 @@ class ExpertTrainer(EfficientCheckpointModule):
         self.training_config = ExpertConfig.fromdict(kwargs)
         # init the transformer just with the modifier config, this avoids
         # passing the whole training config to the modify_transformer func
-        self.modifier_config = AutoModifierConfig.from_training_config(
-            self.training_config
-        )
+        self.modifier_config = ModifierConfig.from_training_config(self.training_config)
         # config about the routing
-        self.routing_config = AutoSelectorConfig.from_training_config(
-            self.training_config
-        )
+        self.routing_config = SelectorConfig.from_training_config(self.training_config)
 
         self.model = modify_transformer(model_object, self.modifier_config)
 

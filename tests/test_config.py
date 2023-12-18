@@ -96,7 +96,7 @@ def test_config_was_default_from_file(tmp_path, ConfigTest):
 
 
 def test_auto_modifier_config():
-    from mttl.models.modifiers.base import AutoModifierConfig
+    from mttl.models.modifiers.base import ModifierConfig
     from mttl.models.modifiers.lora import LoRAConfig
 
     config = Config()
@@ -105,7 +105,7 @@ def test_auto_modifier_config():
     config.lora_dropout = 0.52
     config.modify_modules = ".*mlpU.*"
 
-    lora_config = AutoModifierConfig.from_training_config(config)
+    lora_config = ModifierConfig.from_training_config(config)
     assert type(lora_config) == LoRAConfig
     assert lora_config.lora_rank == 12
     assert lora_config.lora_dropout == 0.52
@@ -114,11 +114,11 @@ def test_auto_modifier_config():
 
 def test_dump_load_selector_config():
     from mttl.models.modifiers.expert_containers.selectors import (
-        AutoSelectorConfig,
+        SelectorConfig,
         MOERKHSSelectorConfig,
     )
 
     dump = MOERKHSSelectorConfig(emb_dim=12345).asdict()
-    test = AutoSelectorConfig.fromdict(dump)
+    test = SelectorConfig.fromdict(dump)
     assert test.emb_dim == 12345
     assert type(test) == MOERKHSSelectorConfig

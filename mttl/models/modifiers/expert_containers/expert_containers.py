@@ -4,7 +4,7 @@ from torch import nn
 from typing import List
 from mttl.config import Config
 from mttl.models.modifiers.base import (
-    AutoModifierConfig,
+    ModifierConfig,
     MergeableAdapter,
     ModifierConfig,
     ModifyMixin,
@@ -40,9 +40,9 @@ class ExpertContainer:
         """Checks if the config is supported and converts it to the supported config type if needed."""
         if isinstance(expert_config, Config):
             # patches the config to be a LoRAConfig for the future
-            from mttl.models.modifiers.base import AutoModifierConfig
+            from mttl.models.modifiers.base import ModifierConfig
 
-            expert_config = AutoModifierConfig.from_training_config(expert_config)
+            expert_config = ModifierConfig.from_training_config(expert_config)
 
         if type(expert_config) not in self.__supports_configs__:
             raise ValueError(
@@ -147,10 +147,10 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                 "Cannot set is_default if this expert is merged, change to 'route'."
             )
 
-        expert_config = AutoModifierConfig.from_training_config(expert.expert_config)
-        self._check_config(expert_config)
+        # back-compatibility, in previous versions, the expert config was a training config
+        self._check_config(expert.expert_config)
 
-        expert_module = LoRA(expert_config, self.layer)
+        expert_module = LoRA(expert.expert_config, self.layer)
         if expert_weights is not None:
             expert_module.load_lora_weights(expert_weights)
 
@@ -335,7 +335,7 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
         if action == "merge":
             raise ValueError("Merging is not supported for `KVAdapters`.")
 
-        expert_config = AutoModifierConfig.from_training_config(expert.expert_config)
+        expert_config = ModifierConfig.from_training_config(expert.expert_config)
         self._check_config(expert_config)
 
         expert_module = KVAdapter(expert_config, self.attn_layer)
