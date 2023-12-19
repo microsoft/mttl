@@ -257,7 +257,7 @@ class ExpertLibrary:
 
         try:
             metadata_dir = self.snapshot_download(
-                self.repo_id, allow_patterns="**/*.meta"
+                self.repo_id, allow_patterns=["**/*.meta", "*.meta"]
             )
         except Exception as e:
             if isinstance(e, RepositoryNotFoundError):
@@ -268,6 +268,10 @@ class ExpertLibrary:
         metadata = [
             MetadataEntry.loads(torch.load(file, map_location="cpu"))
             for file in glob.glob(f"{metadata_dir}/**/*.meta")
+        ]
+        metadata += [
+            MetadataEntry.loads(torch.load(file, map_location="cpu"))
+            for file in glob.glob(f"{metadata_dir}/*.meta")
         ]
 
         for metadatum in metadata:
@@ -742,6 +746,8 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
             model_weights = _download_model(expert_info.expert_name)
             expert = Expert(expert_info=expert_info, expert_weights=model_weights)
             if expert not in new_lib:
+                if "/" in expert.name:
+                    expert.expert_info.expert_name = expert.name.replace("/", "_")
                 new_lib.add_expert(expert)
         return new_lib
 
@@ -765,6 +771,8 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
     def from_remote(cls, remote_lib: ExpertLibrary, destination):
         new_lib = LocalExpertLibrary(repo_id=destination)
         for name, expert in remote_lib.items():
+            if "/" in expert.name:
+                expert.expert_info.expert_name = expert.name.replace("/", "_")
             if expert not in new_lib and not expert.expert_info.expert_deleted:
                 new_lib.add_expert(expert)
         return new_lib
