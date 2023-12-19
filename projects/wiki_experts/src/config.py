@@ -37,6 +37,9 @@ class ExpertConfig(Config):
         self.source_template = None
         self.augment_few_shot = 0
 
+        self.moe_num_experts = 8
+        self.moe_emb_dim = 128
+
         self.expand_val_set_w_downstream = False
 
         self.eval_mmlu_callbacks_every = 0

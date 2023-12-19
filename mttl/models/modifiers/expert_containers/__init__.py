@@ -1,20 +1,13 @@
-from functools import partial
 import re
 from mttl.config import Config
-from mttl.models.modifiers.expert_containers.selectors import *
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
+from mttl.models.modifiers.expert_containers.selectors import (
+    SelectorConfig,
+    get_selector,
+)
 from mttl.models.modifiers.expert_containers.expert_containers import *
-from mttl.models.modifiers.kv_adapter import KVAdapter
 from mttl.utils import logger
 from mttl.models.modifiers.expert_containers.module_graph import Expert
-
-
-def get_selector(config: Config, **kwargs):
-    if config.router_selector:
-        if config.router_selector not in MULTI_EXPERT_ROUTERS:
-            raise ValueError(f"Cannot find selector: {config.router_selector}")
-        return MULTI_EXPERT_ROUTERS[config.router_selector](config, **kwargs)
-    else:
-        return None
 
 
 def _extract_identifier(string, match_on="coder"):
@@ -22,15 +15,13 @@ def _extract_identifier(string, match_on="coder"):
     same underlying selector
     e.g. 'block' : 'encoder.block.0.layer.0.SelfAttention' -> 'encoder.block.0'
     """
-    assert match_on in [
-        "coarsegrained",
-        "finegrained",
-    ], "For expert router only coarsegrained and finegrained are supported"
-
     if match_on == "finegrained":
         return string.replace(".", "_")
     if match_on == "coarsegrained":
         return "shared"
+    pos = string.find(f"{match_on}")
+    if pos > 0:
+        return string[: pos + len(match_on)]
     return string
 
 
@@ -54,12 +45,11 @@ def filter_expert_weights(layer_name, expert_weights):
 
 def add_expert_library_to_transformer(
     transformer,
-    expert_library,
-    action="route",
-    default_expert=None,
-    load_only_layers=None,
-    selectors={},
-    config=None,
+    expert_library: ExpertLibrary,
+    action: str = "route",
+    default_expert: str = None,
+    routing_config: SelectorConfig = None,
+    training_config: Config = None,
 ):
     for expert_name, expert_dump in expert_library.items():
         add_expert_to_transformer(
@@ -69,20 +59,18 @@ def add_expert_library_to_transformer(
             expert_dump.expert_weights,
             action=action,
             is_default=expert_name == default_expert,
-            load_only_layers=load_only_layers,
-            selectors=selectors,
-            config=config,
+            routing_config=routing_config,
+            training_config=training_config,
         )
 
 
 def add_expert_to_transformer(
     transformer,
     expert: Expert,
-    action="route",
-    is_default=False,
-    load_only_layers=None,
-    selectors={},
-    config=None,
+    action: str = "route",
+    is_default: bool = False,
+    routing_config: SelectorConfig = None,
+    training_config: Config = None,
 ):
     """
     Params:
@@ -103,6 +91,8 @@ def add_expert_to_transformer(
     # create a shared container for the task id
     if not hasattr(transformer, "task_id_container"):
         transformer.task_id_container = {}
+    if not hasattr(transformer, "selectors"):
+        transformer.selectors = {}
 
     model_modifier = get_modifier_type(expert_config)
 
@@ -112,8 +102,6 @@ def add_expert_to_transformer(
             expert,
             action=action,
             is_default=is_default,
-            selectors=selectors,
-            config=config,
         )
 
     total_layers = 0
@@ -126,23 +114,34 @@ def add_expert_to_transformer(
                     total_layers += 1
                     layer_name = f"{m_name}.{c_name}"
 
-                    selector = None
-                    if config is not None:
-                        identifier = _extract_identifier(
-                            layer_name, config.router_granularity
-                        )
-                        if identifier not in selectors.keys():
-                            selectors[identifier] = get_selector(
-                                config, info_container=transformer.task_id_container
+                    if not isinstance(layer, ExpertContainer):
+                        selector = None
+
+                        if routing_config is not None:
+                            identifier = _extract_identifier(
+                                layer_name, routing_config.router_granularity
                             )
-                            if config.router_selector:
-                                selectors[identifier].__layer_name__ = (
+
+                            if identifier not in transformer.selectors.keys():
+                                # Special case when you have a decoder layer in an enc-dec model
+                                transformer.selectors[identifier] = get_selector(
+                                    routing_config,
+                                    info_container=transformer.task_id_container,
+                                    layer=layer,
+                                    training_config=training_config,
+                                )
+                                transformer.selectors[identifier].__layer_name__ = (
                                     identifier + ".selector"
                                 )
-                        selector = selectors[identifier]
+                                selector: Selector = transformer.selectors[identifier]
+                            else:
+                                # create a view on an existing selector for all the "shared" layers
+                                # these don't hold params, are not registered as modules, and read from the cache
+                                # of their parent "real" selector
+                                selector: SelectorView = transformer.selectors[
+                                    identifier
+                                ].create_view()
 
-                    if not isinstance(layer, ExpertContainer):
-                        # create an expert lora container
                         CONTAINER_CLASS = get_container_class(model_modifier)
                         expert_container = CONTAINER_CLASS(
                             expert_config,
@@ -158,20 +157,6 @@ def add_expert_to_transformer(
                         )
                     else:
                         expert_container = layer
-
-                    if load_only_layers:
-                        layer_num = int(expert_container.__layer_name__.split(".")[2])
-
-                        pos = load_only_layers.find("-")
-                        sel = int(load_only_layers.replace("-", ""))
-
-                        if pos == 0:
-                            # add until layer number excluded
-                            if layer_num >= sel:
-                                continue
-                        else:
-                            if layer_num < sel:
-                                continue
 
                     added_layers.append(expert_container.__layer_name__)
                     expert_container.add_expert(

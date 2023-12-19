@@ -134,7 +134,7 @@ def train_router(
     except:
         pass
 
-    return weights, Expert.loads(expert_dumps)
+    return weights, Expert.fromdict(expert_dumps)
 
 
 if __name__ == "__main__":
