@@ -2,10 +2,6 @@ from abc import ABC, abstractmethod
 from typing import Dict, Union
 from torch import nn
 import re
-from mttl.models.modifiers.modify_model import (
-    CONFIGS_TO_MODIFIERS,
-    MODIFIERS_TO_CONFIGS,
-)
 from mttl.utils import logger
 from dataclasses import dataclass
 
@@ -39,10 +35,11 @@ class ModifierConfig(object):
     def asdict(self) -> Dict:
         """Dump the config to a string."""
         from dataclasses import asdict
+        from mttl.models.modifiers.modify_model import CONFIGS_TO_MODIFIERS
 
         data = asdict(self)
         # store the model modifier for easy loading
-        data["modifier_config_klass"] = self.__class__.__name__
+        data["__model_modifier__"] = CONFIGS_TO_MODIFIERS[type(self)]
         return data
 
     @classmethod
@@ -56,8 +53,14 @@ class ModifierConfig(object):
 
     @classmethod
     def fromdict(cls, dumped: Dict) -> "ModifierConfig":
-        klass = dumped.pop("modifier_config_klass")
-        return eval(klass)(**dumped)
+        from mttl.models.modifiers.modify_model import MODIFIERS_TO_CONFIGS
+
+        if "__model_modifier__" not in dumped:
+            raise ValueError(
+                "Cannot load config from dict, missing '__model_modifier__' key."
+            )
+        mod = dumped.pop("__model_modifier__")
+        return MODIFIERS_TO_CONFIGS[mod](**dumped)
 
     @staticmethod
     def from_training_config(
