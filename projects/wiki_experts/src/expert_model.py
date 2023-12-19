@@ -9,6 +9,10 @@ import tqdm
 from mttl.models.modifiers.expert_containers.expert_containers import (
     LoRAExpertContainer,
 )
+from mttl.models.modifiers.expert_containers.expert_library import (
+    ExpertLibrary,
+    HFExpertLibrary,
+)
 
 from mttl.models.modifiers.lora import LoRAConfig
 from mttl.models.modifiers.routing import RoutingInfo
@@ -17,7 +21,7 @@ from mttl.models.modifiers.expert_containers import ExpertContainer
 from mttl.models.modifiers.expert_containers.selectors import (
     Selector,
     SelectorConfig,
-    RoutingInfoContainerConfig,
+    RoutingInfoContainerConfig
 )
 
 from mttl.models.modifiers.expert_containers import (
@@ -234,10 +238,15 @@ class MultiExpertModel(ExpertTrainer):
         expert_name: str = None,
         action: str = "merge",
         is_default: bool = False,
+        expert_library: ExpertLibrary = None,
     ):
         from mttl.models.modifiers.expert_containers.module_graph import load_expert
 
-        expert = load_expert(expert_path, expert_name=expert_name)
+        expert = load_expert(
+            expert_path,
+            expert_name=expert_name,
+            expert_dict_or_lib=expert_library,
+        )
 
         if self.hparams.model != expert.training_config.model:
             raise ValueError(
