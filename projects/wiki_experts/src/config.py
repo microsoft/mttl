@@ -69,7 +69,9 @@ class ExpertConfig(Config):
         )
         self.train_batch_size = self.micro_batch_size
 
-        if self.finetune_task_name is not None:
+        if self.finetune_task_name is not None and isinstance(
+            self.finetune_task_name, str
+        ):
             if self.finetune_task_name in mttl.datamodule.flan_tasks.__dict__.keys():
                 self.finetune_task_name = getattr(
                     mttl.datamodule.flan_tasks,
