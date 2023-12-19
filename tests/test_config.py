@@ -97,7 +97,6 @@ def test_config_was_default_from_file(tmp_path, ConfigTest):
 
 def test_auto_modifier_config():
     from mttl.models.modifiers.base import ModifierConfig
-    from mttl.models.modifiers.lora import LoRAConfig
 
     config = Config()
     config.model_modifier = "lora"
@@ -106,10 +105,30 @@ def test_auto_modifier_config():
     config.modify_modules = ".*mlpU.*"
 
     lora_config = ModifierConfig.from_training_config(config)
+
+    from mttl.models.modifiers.lora import LoRAConfig
+
     assert type(lora_config) == LoRAConfig
     assert lora_config.lora_rank == 12
     assert lora_config.lora_dropout == 0.52
     assert lora_config.modify_modules == ".*mlpU.*"
+
+
+def test_dump_load_lora_config():
+    from mttl.models.modifiers.base import ModifierConfig
+
+    data = {
+        "__model_modifier__": "lora",
+        "lora_rank": 12,
+        "lora_dropout": 0.52,
+    }
+    lora_config = ModifierConfig.fromdict(data)
+
+    from mttl.models.modifiers.lora import LoRAConfig
+
+    assert type(lora_config) == LoRAConfig
+    assert lora_config.lora_rank == 12
+    assert lora_config.lora_dropout == 0.52
 
 
 def test_dump_load_selector_config():

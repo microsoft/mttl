@@ -10,7 +10,7 @@ from mttl.models.modifiers.routing import RoutingMixin
 
 
 SELECTORS_NAME_TO_KLASS = {}
-SELECTORS_CONFIG_TO_KLASS = {}
+SELECTORS_CONFIG_TO_NAME = {}
 SELECTORS_NAME_TO_CONFIG = {}
 
 
@@ -26,11 +26,11 @@ def register_multi_expert_selector(name, config_cls):
                 f"Cannot register duplicate multi-expert selector ({name})."
             )
 
-        if config_cls in SELECTORS_CONFIG_TO_KLASS:
+        if config_cls in SELECTORS_CONFIG_TO_NAME:
             raise ValueError(f"Cannot register with config class ({config_cls}).")
 
         SELECTORS_NAME_TO_KLASS[name] = fn
-        SELECTORS_CONFIG_TO_KLASS[config_cls] = fn
+        SELECTORS_CONFIG_TO_NAME[config_cls] = name
         SELECTORS_NAME_TO_CONFIG[name] = config_cls
         fn.__layer_name__ = name
         return fn
@@ -40,7 +40,7 @@ def register_multi_expert_selector(name, config_cls):
 
 def get_selector(routing_config: "SelectorConfig", info_container: Dict, **kwargs):
     """Returns a selector object for the given routing_config."""
-    return SELECTORS_CONFIG_TO_KLASS[routing_config.__class__](
+    return SELECTORS_NAME_TO_KLASS[SELECTORS_CONFIG_TO_NAME[routing_config.__class__]](
         info_container, config=routing_config, **kwargs
     )
 
@@ -60,13 +60,17 @@ class SelectorConfig:
 
         data = asdict(self)
         # store the model modifier for easy loading
-        data["selector_config_klass"] = self.__class__.__name__
+        data["__selector_name__"] = SELECTORS_CONFIG_TO_NAME[type(self)]
         return data
 
     @classmethod
     def fromdict(cls, dumped: Dict) -> "SelectorConfig":
-        klass = dumped.pop("selector_config_klass")
-        return eval(klass)(**dumped)
+        if "__selector_name__" not in dumped:
+            raise ValueError(
+                "Cannot load SelectorConfig from dict, missing '__selector_name__' key."
+            )
+        name = dumped.pop("__selector_name__")
+        return SELECTORS_NAME_TO_CONFIG[name](**dumped)
 
     @staticmethod
     def from_training_config(
