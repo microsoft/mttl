@@ -149,11 +149,11 @@ def _prepare_for_expert_training(
     if args.evol_expert_routing in ["no_transfer", "scratch", "from_joint"]:
         if args.evol_expert_routing == "no_transfer":
             expert: Expert = copy.deepcopy(get_task_expert(task, expert_lib))
-            config_copy.model_modifier = expert.expert_config.model_modifier
+            config_copy.model_modifier = expert.training_config.model_modifier
             config_copy.modify_layers = expert.expert_config.modify_layers
             config_copy.modify_modules = expert.expert_config.modify_modules
             config_copy.trainable_param_names = (
-                expert.expert_config.trainable_param_names
+                expert.training_config.trainable_param_names
             )
             module_to_train = ExpertTrainer(
                 **vars(config_copy), tokenizer=dm_train.tokenizer

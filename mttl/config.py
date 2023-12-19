@@ -41,6 +41,7 @@ class Config:
 
     @classmethod
     def fromdict(cls, data):
+        _ = data.pop("_updated_kwargs", None)
         return cls(kwargs=data, raise_error=False, silent=True)
 
     def asdict(self) -> Dict:
