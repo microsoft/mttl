@@ -16,6 +16,7 @@ from mttl.utils import logger
 from mttl.models.modifiers.expert_containers import ExpertContainer
 from mttl.models.modifiers.expert_containers.selectors import (
     Selector,
+    SelectorConfig,
     RoutingInfoContainerConfig,
 )
 
@@ -84,6 +85,8 @@ class MultiExpertModel(ExpertTrainer):
         super().__init__(**kwargs)
 
         self.experts_names = []
+        # config about the routing
+        self.routing_config = SelectorConfig.from_training_config(self.training_config)
 
     @property
     def experts_containers(self) -> List[ExpertContainer]:
@@ -129,6 +132,8 @@ class MultiExpertModel(ExpertTrainer):
         """
         Replaces the expert container with the expert with the given name.
         """
+        if len(self.experts_names) == 0:
+            return
         expert = None
         for _, module in self.model.named_modules():
             for c_name, child in dict(module.named_children()).items():

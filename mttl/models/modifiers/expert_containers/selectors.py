@@ -10,7 +10,7 @@ from mttl.models.modifiers.routing import RoutingMixin
 
 
 SELECTORS_NAME_TO_KLASS = {}
-SELECTORS_CONFIG_TO_NAME = {}
+SELECTORS_CONFIG_TO_KLASS = {}
 SELECTORS_NAME_TO_CONFIG = {}
 
 
@@ -26,11 +26,11 @@ def register_multi_expert_selector(name, config_cls):
                 f"Cannot register duplicate multi-expert selector ({name})."
             )
 
-        if config_cls in SELECTORS_CONFIG_TO_NAME:
+        if config_cls in SELECTORS_CONFIG_TO_KLASS:
             raise ValueError(f"Cannot register with config class ({config_cls}).")
 
         SELECTORS_NAME_TO_KLASS[name] = fn
-        SELECTORS_CONFIG_TO_NAME[config_cls] = name
+        SELECTORS_CONFIG_TO_KLASS[config_cls] = fn
         SELECTORS_NAME_TO_CONFIG[name] = config_cls
         fn.__layer_name__ = name
         return fn
@@ -40,7 +40,7 @@ def register_multi_expert_selector(name, config_cls):
 
 def get_selector(routing_config: "SelectorConfig", info_container: Dict, **kwargs):
     """Returns a selector object for the given routing_config."""
-    return SELECTORS_NAME_TO_KLASS[SELECTORS_CONFIG_TO_NAME[routing_config.__class__]](
+    return SELECTORS_CONFIG_TO_KLASS[routing_config.__class__](
         info_container, config=routing_config, **kwargs
     )
 
@@ -60,17 +60,13 @@ class SelectorConfig:
 
         data = asdict(self)
         # store the model modifier for easy loading
-        data["__selector_name__"] = SELECTORS_CONFIG_TO_NAME[type(self)]
+        data["selector_config_klass"] = self.__class__.__name__
         return data
 
     @classmethod
     def fromdict(cls, dumped: Dict) -> "SelectorConfig":
-        if "__selector_name__" not in dumped:
-            raise ValueError(
-                "Cannot load SelectorConfig from dict, missing '__selector_name__' key."
-            )
-        name = dumped.pop("__selector_name__")
-        return SELECTORS_NAME_TO_CONFIG[name](**dumped)
+        klass = dumped.pop("selector_config_klass")
+        return eval(klass)(**dumped)
 
     @staticmethod
     def from_training_config(
@@ -368,12 +364,14 @@ class PolySelectorDirect(PolySelector):
     def __init__(self, info_container, **kwargs) -> None:
         super().__init__(info_container)
 
-        self.module_logits = nn.ParameterDict()
+        self.module_logits_dict = nn.ParameterDict()
         self._initialized = False
         self.training_config = kwargs["training_config"]
 
+        self.device = kwargs["layer"].weight.device
+
     def _get_weights(self):
-        weights = torch.tensor([self.module_logits[k] for k in self.expert_names])
+        weights = torch.tensor([self.module_logits_dict[k] for k in self.expert_names])
         return weights
 
     def add_expert(self, expert_name: str, **kwargs):
@@ -386,17 +384,17 @@ class PolySelectorDirect(PolySelector):
         main_m = 1
 
         expert_task_name = kwargs["expert_info"].expert_task_name
-        if expert_name not in self.module_logits:
+        if expert_name not in self.module_logits_dict:
             # TODO: this is very error prone, e.g. when you reload this model, this cannot be inited
             # @Oleksiy do you need this?
             if self.training_config.finetune_task_name == expert_task_name:
-                self.module_logits[expert_name] = torch.nn.Parameter(
+                self.module_logits_dict[expert_name] = torch.nn.Parameter(
                     torch.ones(1).to(self.device)
                 )
-                self.module_logits[expert_name].data *= main_m
+                self.module_logits_dict[expert_name].data *= main_m
                 self._initialized = True
             else:
-                self.module_logits[expert_name] = torch.nn.Parameter(
+                self.module_logits_dict[expert_name] = torch.nn.Parameter(
                     torch.empty(1).uniform_(*init_gap).to(self.device)
                 )
 
@@ -405,9 +403,9 @@ class PolySelectorDirect(PolySelector):
         return super().load_state_dict(state_dict, strict=strict)
 
     def init_logits_uniform(self):
-        if sum([p for p in self.module_logits.values()]) == 0:
-            for name, param in self.module_logits.items():
-                self.module_logits[name].data = (
+        if sum([p for p in self.module_logits_dict.values()]) == 0:
+            for name, param in self.module_logits_dict.items():
+                self.module_logits_dict[name].data = (
                     torch.empty(1).uniform_(-1e-3, 1e-3).to(self.device)
                 )
         self._initialized = True

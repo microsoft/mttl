@@ -67,8 +67,7 @@ def eval_expert_on_task(
             model_copy.add_expert_instance(expert, task, action="route")
         else:
             raise ValueError(f"Checkpoint type {type(expert)} not supported")
-        if len(model_copy.experts) == 1:
-            model_copy.replace_container_with_expert(task, get_expert_instance=False)
+        model_copy.replace_container_with_expert(task, get_expert_instance=False)
         module = model_copy
 
     result = {}
@@ -133,6 +132,7 @@ def produce_transfer_matrix(
             tokenizer=evaluator.datamodule.tokenizer,
             device_map="cpu",
         )
+
         if args.only_diagonal:
             library = copy.deepcopy(expert_lib)
             for n, expert in library.items():

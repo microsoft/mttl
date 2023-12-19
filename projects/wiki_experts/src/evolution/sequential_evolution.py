@@ -174,7 +174,6 @@ def _prepare_for_expert_training(
             module_to_train.load_expert(expert)
         else:
             raise ValueError(f"Routing {args.evol_expert_routing} not supported")
-
         module_to_train.to("cuda")
 
     return module_to_train, config_copy, dm_train
@@ -258,7 +257,7 @@ def optimize_evol_expert_routing(
             eval_every = 300
             from mttl.datamodule.base import subsample_dst
 
-            dm_train.train_dataset = subsample_dst(dm_train.train_dataset, 100)
+            dm_train.train_dataset = subsample_dst(dm_train.train_dataset, 1000)
 
         best_weights, expert = train(
             config_copy,
@@ -327,6 +326,7 @@ def maybe_finetune_module(
 def setup(args: EvolExpertConfig):
     seed_everything(args.seed, workers=True)
     setup_logging(args.output_dir)
+
     global wandb_logger
     wandb_logger = init_wandb_logger(args)
     if DEBUG:
