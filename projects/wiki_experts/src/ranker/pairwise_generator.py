@@ -28,14 +28,14 @@ def get_pairwise_dataset(args):
     import json
     import tqdm
 
-    #   for each input x, we want to creat a triple pair (x, m1, m2)
-    #   where m1 and m2 are two experts
+    #   for each input x, we want to creat a triple pair (x, m_positive, m_negative)
+
     # filter the dataset witl only the finetune_task_name
     df = pd.read_csv(args.input_file)
     fout = open(args.output_file, "w")
-    # select the top 1 for each m1
-    for task in df["eval_task"].unique():
-        df_task = df[df["eval_task"] == task]
+
+    for task in df["task_eval_on"].unique():
+        df_task = df[df["task_eval_on"] == task]
         # df_task_top = df_task.groupby(["eval_task", "m1"]).head(1)
         # print(df_task_top)
 
@@ -44,7 +44,7 @@ def get_pairwise_dataset(args):
                 dataset="sordonia/adauni-v1-flat",
                 model="EleutherAI/gpt-neo-125m",
                 finetune_task_name=task,
-                predict_batch_size=10,
+                predict_batch_size=20,
             ),
             for_generation=True,
         )
@@ -67,10 +67,14 @@ def get_pairwise_dataset(args):
                     fout.write(
                         json.dumps(
                             {
-                                "eval_task": element["eval_task"],
+                                "eval_task": element["task_eval_on"],
                                 "sources_texts": input_text,
-                                "positive_expert_names": element["m1"],
-                                "negative_expert_names": element["m2"],
+                                "positive_expert_names": element[
+                                    "positive_expert_name"
+                                ],
+                                "negative_expert_names": element[
+                                    "negative_expert_name"
+                                ],
                             }
                         )
                         + "\n"
