@@ -93,3 +93,32 @@ def test_config_was_default_from_file(tmp_path, ConfigTest):
     config = ConfigTest(filenames=str(config_file))
     assert not config.was_default("dataset")
     assert config.was_default("model")
+
+
+def test_auto_modifier_config():
+    from mttl.models.modifiers.base import ModifierConfig
+    from mttl.models.modifiers.lora import LoRAConfig
+
+    config = Config()
+    config.model_modifier = "lora"
+    config.lora_rank = 12
+    config.lora_dropout = 0.52
+    config.modify_modules = ".*mlpU.*"
+
+    lora_config = ModifierConfig.from_training_config(config)
+    assert type(lora_config) == LoRAConfig
+    assert lora_config.lora_rank == 12
+    assert lora_config.lora_dropout == 0.52
+    assert lora_config.modify_modules == ".*mlpU.*"
+
+
+def test_dump_load_selector_config():
+    from mttl.models.modifiers.expert_containers.selectors import (
+        SelectorConfig,
+        MOERKHSSelectorConfig,
+    )
+
+    dump = MOERKHSSelectorConfig(emb_dim=12345).asdict()
+    test = SelectorConfig.fromdict(dump)
+    assert test.emb_dim == 12345
+    assert type(test) == MOERKHSSelectorConfig

@@ -1,6 +1,11 @@
 from abc import ABC, abstractmethod
+from typing import Dict, Union
 from torch import nn
 import re
+from mttl.models.modifiers.modify_model import (
+    CONFIGS_TO_MODIFIERS,
+    MODIFIERS_TO_CONFIGS,
+)
 from mttl.utils import logger
 from dataclasses import dataclass
 
@@ -30,6 +35,59 @@ class ModifierConfig(object):
     def __eq__(self, other):
         # compare all the attributes
         return self.__dict__ == other.__dict__
+
+    def asdict(self) -> Dict:
+        """Dump the config to a string."""
+        from dataclasses import asdict
+
+        data = asdict(self)
+        # store the model modifier for easy loading
+        data["model_modifier"] = CONFIGS_TO_MODIFIERS[type(self)]
+        return data
+
+    @classmethod
+    def from_training_config(cls, training_config: "Config"):
+        """Build modifier config from the training config."""
+        kwargs = {}
+        for key, _ in cls.__dataclass_fields__.items():
+            if hasattr(training_config, key):
+                kwargs[key] = getattr(training_config, key)
+        return cls(**kwargs)
+
+    @classmethod
+    def fromdict(cls, dumped: Dict) -> "ModifierConfig":
+        modifier = dumped.pop("model_modifier")
+        klass = MODIFIERS_TO_CONFIGS[modifier]
+        return klass(**dumped)
+
+    @staticmethod
+    def from_training_config(
+        training_config: Union["Config", "ModifierConfig"]
+    ) -> Union["ModifierConfig", None]:
+        """Build modifier config from the training config.
+
+        Returns None if no modifier is set.
+        """
+        from mttl.models.modifiers.modify_model import MODIFIERS_TO_CONFIGS
+
+        if isinstance(training_config, ModifierConfig):
+            # nothing to do here
+            return training_config
+
+        if training_config.model_modifier is None:
+            return None
+
+        if training_config.model_modifier not in MODIFIERS_TO_CONFIGS:
+            raise ValueError(
+                f"Model modifier '{training_config.model_modifier}' not found, has it been registered?"
+            )
+
+        config_klass = MODIFIERS_TO_CONFIGS[training_config.model_modifier]
+        kwargs = {}
+        for key, _ in config_klass.__dataclass_fields__.items():
+            if hasattr(training_config, key):
+                kwargs[key] = getattr(training_config, key)
+        return config_klass(**kwargs)
 
 
 class ModifyMixin(nn.Module):

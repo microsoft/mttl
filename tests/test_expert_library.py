@@ -5,6 +5,7 @@ from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibra
 
 def test_expert_lib(mocker):
     library = HFExpertLibrary("sordonia/test-library")
+
     assert len(library) == 2
     assert not library._sliced
 
