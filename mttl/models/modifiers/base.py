@@ -42,7 +42,7 @@ class ModifierConfig(object):
 
         data = asdict(self)
         # store the model modifier for easy loading
-        data["model_modifier"] = CONFIGS_TO_MODIFIERS[type(self)]
+        data["modifier_config_klass"] = self.__class__.__name__
         return data
 
     @classmethod
@@ -56,9 +56,8 @@ class ModifierConfig(object):
 
     @classmethod
     def fromdict(cls, dumped: Dict) -> "ModifierConfig":
-        modifier = dumped.pop("model_modifier")
-        klass = MODIFIERS_TO_CONFIGS[modifier]
-        return klass(**dumped)
+        klass = dumped.pop("modifier_config_klass")
+        return eval(klass)(**dumped)
 
     @staticmethod
     def from_training_config(

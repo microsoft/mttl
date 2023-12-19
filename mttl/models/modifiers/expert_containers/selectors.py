@@ -60,12 +60,12 @@ class SelectorConfig:
 
         data = asdict(self)
         # store the model modifier for easy loading
-        data["selector_config"] = self.__class__.__name__
+        data["selector_config_klass"] = self.__class__.__name__
         return data
 
     @classmethod
     def fromdict(cls, dumped: Dict) -> "SelectorConfig":
-        klass = dumped.pop("selector_config")
+        klass = dumped.pop("selector_config_klass")
         return eval(klass)(**dumped)
 
     @staticmethod
