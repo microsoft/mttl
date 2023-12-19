@@ -57,7 +57,13 @@ class RougeEvaluator(Evaluator):
 
     @switch_to_eval_mode
     def evaluate(
-        self, model, split="val", subsample=-1, num_batches=None, verbose=True
+        self,
+        model,
+        split="val",
+        subsample=-1,
+        num_batches=None,
+        verbose=True,
+        max_length=None,
     ):
         dataloader = self.get_dataloader(split, subsample, shuffle=False)
 
@@ -78,16 +84,14 @@ class RougeEvaluator(Evaluator):
             labels_texts = batch["labels_texts"]
             sources_texts = batch["sources_texts"]
 
-            max_length = self.max_output_length
-            if self.datamodule.config.model_family == "gpt":
-                max_length += batch["input_ids"].shape[-1]
+            max_length = max_length or self.max_output_length
 
             batch = transfer_batch_to_device(batch, self.device)
             with torch.no_grad():
                 if isinstance(model, EfficientCheckpointModule):
                     predictions = model.generate(
                         batch,
-                        max_length=max_length,
+                        max_new_tokens=max_length,
                         generation_config=model.generation_config,
                         return_dict_in_generate=True,
                         output_scores=True,
@@ -97,7 +101,7 @@ class RougeEvaluator(Evaluator):
                     predictions = model.generate(
                         batch["input_ids"],
                         attention_mask=batch["attention_mask"],
-                        max_length=max_length,
+                        max_new_tokens=max_length,
                         generation_config=model.generation_config,
                         return_dict_in_generate=True,
                         output_scores=True,

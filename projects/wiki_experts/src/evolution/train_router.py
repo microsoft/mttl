@@ -126,7 +126,7 @@ def train_router(
     if "expert_dumps" in ckpt:
         expert_dumps = ckpt["expert_dumps"]
         weights = ckpt["merging_weights"]
-        expert = Expert.loads(expert_dumps)
+        expert = Expert.fromdict(expert_dumps)
     else:
         expert = load_expert(checkpoint)
         weights = []

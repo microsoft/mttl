@@ -3,6 +3,7 @@ from collections import defaultdict
 from torch import nn
 from mttl.models.llama_patch import replace_attn_with_flash_attn
 from mttl.models.modifiers import modify_transformer
+from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.routing import RoutingInfo
 from transformers import AutoModelForCausalLM
 
@@ -12,6 +13,7 @@ from mttl.models.utils import (
     prepare_model_for_kbit_training,
 )
 from mttl.models.modifiers.expert_containers.module_graph import Expert
+from projects.wiki_experts.src.config import ExpertConfig
 
 
 torch.set_float32_matmul_precision("high")
@@ -36,21 +38,26 @@ class ExpertTrainer(EfficientCheckpointModule):
             model_object = model_loader_helper(
                 self.hparams.model,
                 load_in_8bit=self.hparams.load_in_8bit,
-                device_map=getattr(self.hparams, "device_map", "auto"),
+                device_map=getattr(self.hparams, "device_map", "cpu"),
             )
 
         if self.hparams.load_in_8bit:
             model_object = prepare_model_for_kbit_training(model_object)
-        self.model = modify_transformer(model_object, self.hparams)
+
+        # rebuild the training config, a bit cumbersome, but that's life
+        self.training_config = ExpertConfig.fromdict(kwargs)
+        # init the transformer just with the modifier config, this avoids
+        # passing the whole training config to the modify_transformer func
+        self.modifier_config = ModifierConfig.from_training_config(self.training_config)
+
+        self.model = modify_transformer(model_object, self.modifier_config)
 
         # replace w flash attn!
         replace_attn_with_flash_attn(self.model)
 
-        self.loss_plugins = nn.ModuleDict({})
         self.test_results = []
         self.best_val_result = None
         self._inference_outputs = []
-
         self._log_pref = kwargs.get("logging_prefix", "")
 
     def forward(self, batch, reduction="mean"):
@@ -176,13 +183,13 @@ class ExpertTrainer(EfficientCheckpointModule):
         ), "Some keys are missing"
 
     def on_save_checkpoint(self, ckpt):
-        from mttl.models.utils import convert_hps_to_dict
-
         super().on_save_checkpoint(ckpt)
+
         # inject expert info in the expert checkpoint
         expert_info = ExpertInfo(
             expert_name=self.hparams.expert_name,
             expert_task_name=self.hparams.finetune_task_name,
-            expert_config=convert_hps_to_dict(self.hparams),
+            expert_config=self.modifier_config,
+            training_config=self.training_config,
         )
-        ckpt["expert_info"] = expert_info.__dict__
+        ckpt["expert_info"] = expert_info.asdict()

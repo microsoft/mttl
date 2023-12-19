@@ -51,6 +51,7 @@ class DefaultCollator:
     model_family: str = "seq2seq"
     for_generation: bool = False
     train_on_inputs: bool = False
+    task_to_id: dict = None
 
     def enforce_eos(self, targets):
         # simulate the default behaviour of LLamatokenizer, when adding eos token and truncating: the last token must always be eos
@@ -254,7 +255,7 @@ class DefaultCollator:
     def __call__(self, batch: Dict):
         sources = [b["source"] for b in batch]
         labels = [b["target"] for b in batch]
-        task_ids = [b.get("task_id", sys.maxsize) for b in batch]
+        task_ids = [b.get("task_id", None) for b in batch]
         task_names = [b.get("task_name", None) for b in batch]
 
         output_batch = (
@@ -263,7 +264,14 @@ class DefaultCollator:
             else self.prepare_inputs_for_seq2seq_family(sources, labels)
         )
 
-        output_batch["task_ids"] = torch.LongTensor(task_ids)
+        has_task_names = all(tn is not None for tn in task_names)
+        has_task_ids = all(tid is not None for tid in task_ids)
+
+        if not has_task_ids and has_task_names and self.task_to_id:
+            output_batch["task_ids"] = torch.LongTensor(
+                [self.task_to_id[tn] for tn in task_names]
+            )
+
         output_batch["task_names"] = task_names
         output_batch["sources_texts"] = sources
         output_batch["labels_texts"] = labels
@@ -349,6 +357,7 @@ class DefaultDataModule(LightningDataModule):
             model_family=self.config.model_family,
             for_generation=self.for_generation,
             train_on_inputs=self.config.train_on_inputs,
+            task_to_id=self.task_to_id,
         )
 
     def print_infos(self):

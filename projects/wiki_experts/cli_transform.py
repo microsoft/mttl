@@ -50,11 +50,17 @@ def transform(
 @cli.command("upload")
 @click.option("--dataset-path", type=str, required=True)
 @click.option("--config-file", type=str, required=False)
-@click.option("--flat", type=bool, default=True)
 @click.option("--create-split", type=bool, default=False)
+@click.option("--aug_few_shot", type=int, required=False, default=-1)
 @click.option("--hf-destination", type=str, required=False, default=None)
+@click.option("--cutoff", type=int, default=0)
 def upload_to_hf(
-    dataset_path, hf_destination=None, config_file=None, flat=True, create_split=False
+    dataset_path,
+    hf_destination=None,
+    config_file=None,
+    create_split=False,
+    aug_few_shot=-1,
+    cutoff=0,
 ):
     from src.data_transforms.utils import upload_to_hf_
 
@@ -62,13 +68,16 @@ def upload_to_hf(
         from src.data_transforms.base import TransformConfig
 
         config = TransformConfig.from_path(config_file)
+    else:
+        config = None
 
     return upload_to_hf_(
         dataset_path,
         hf_destination=hf_destination,
         configuration=config,
-        flat=flat,
         create_split=create_split,
+        aug_few_shot=aug_few_shot,
+        cutoff=cutoff,
     )
 
 
