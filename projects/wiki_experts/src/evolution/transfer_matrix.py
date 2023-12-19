@@ -44,6 +44,12 @@ if DEBUG:
     print("!!!!!!!!!!!!!!!!!!!!!! DEBUG MODE")
 
 
+class TransferMAtrixConfig(EvolExpertConfig):
+    def _set_defaults(self):
+        super()._set_defaults()
+        self.only_diagonal = False
+
+
 def eval_expert_on_task(
     task,
     module: MultiExpertModel,
@@ -96,8 +102,8 @@ def eval_all_experts_on_task(
 
 
 def produce_transfer_matrix(
-    args: EvolExpertConfig,
-    expert_lib,
+    args: TransferMAtrixConfig,
+    expert_lib: ExpertLibrary,
     tasks: list,
     subsample=-1,
     module=None,
@@ -127,8 +133,16 @@ def produce_transfer_matrix(
             tokenizer=evaluator.datamodule.tokenizer,
             device_map="cpu",
         )
+        if args.only_diagonal:
+            library = copy.deepcopy(expert_lib)
+            for n, expert in library.items():
+                if expert.expert_info.expert_task_name != task_eval_on:
+                    library.remove_expert(n)
+        else:
+            library = expert_lib
+
         log_row_task = eval_all_experts_on_task(
-            task_eval_on, module, expert_lib, evaluator=evaluator
+            task_eval_on, module, library, evaluator=evaluator
         )
         log_row.update(log_row_task)
         # eval on base model
@@ -155,14 +169,19 @@ def produce_transfer_matrix(
     return transfer_matrix
 
 
-def run_eval(args: EvolExpertConfig):
+def run_eval(args: EvolExpertConfig, debug=None):
     """
     Create transfer matrix.
     """
     seed_everything(args.seed, workers=True)
     setup_logging(args.output_dir)
+    global DEBUG
+    if debug is not None:
+        DEBUG = debug
+
     if not DEBUG:
-        init_wandb_logger(args)
+        if wandb.run is not None:
+            init_wandb_logger(args)
     if args.hf_token_hub:
         login(token=args.hf_token_hub)
 
@@ -191,5 +210,5 @@ def run_eval(args: EvolExpertConfig):
 
 
 if __name__ == "__main__":
-    args = EvolExpertConfig.parse()
+    args = TransferMAtrixConfig.parse()
     run_eval(args)

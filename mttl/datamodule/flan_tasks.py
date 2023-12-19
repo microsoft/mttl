@@ -611,3 +611,76 @@ ZHAN_SUBSET = [
     "fix_punct",
     "unified_qa_science_inst",
 ]
+
+# similarity pairs
+# selected from 100 tasks, these are 19 pairs, using SCD embeddiings on Phi2
+# Pair: anatomy,professional_medicine, similarity: 0.966
+# Pair: duorc_SelfRC_generate_question_by_answer,dream_generate_last_utterance, similarity: 0.7391
+# Pair: niv2_number_conversion,paws_wiki_1_1_0, similarity: 0.6811
+# Pair: anatomy,ropes_plain_background_situation, similarity: 0.648
+# Pair: trec_1_0_0,niv2_cause_effect_classification, similarity: 0.6239
+# Pair: adversarial_qa_droberta_generate_question,super_glue_cb_1_0_2, similarity: 0.606
+# Pair: niv2_question_generation,super_glue_wic_1_0_2, similarity: 0.5877
+# Pair: cos_e_v1_11_rationale,web_questions_whats_the_answer, similarity: 0.5567
+# Pair: niv2_paraphrasing,niv2_cause_effect_classification, similarity: 0.5157
+# Pair: niv2_cause_effect_classification,ultrachat_21, similarity: 0.5008
+# Pair: anli_r3_0_1_0,high_school_world_history, similarity: 0.4868
+# Pair: app_reviews_convert_to_star_rating,ultrachat_18, similarity: 0.4522
+# Pair: race_middle_Is_this_the_right_answer,duorc_ParaphraseRC_answer_question, similarity: 0.431
+# Pair: ultrachat_31,logical_fallacies, similarity: 0.4041
+# Pair: ultrachat_15,formal_logic, similarity: 0.3467
+# Pair: wiqa_what_might_be_the_first_step_of_the_process,ultrachat_19, similarity: 0.1342
+
+
+# similarity pairs
+# selected from full library sordonia/library-phi_2-v2 using SVD embeddings
+# Pair: wiki_hop_original_choose_best_object_affirmative_1, wiki_hop_original_choose_best_object_affirmative_2, similarity: 0.9884
+# Pair: anatomy,professional_medicine, similarity: 0.966
+# Pair: cot_strategyqa, airoboros, similarity: 0.734
+# Pair: quac_1_0_0, high_school_government_and_politics, similarity: 0.6814
+# Pair: math_dataset_algebra__linear_1d_1_0_0, niv2_grammar_error_detection, similarity: 0.6477
+# Pair: niv2_sentence_composition, wiki_bio_guess_person, similarity: 0.6225
+# Pair: web_questions_whats_the_answer, ropes_background_situation_middle, similarity: 0.6007
+# Pair: sciq_Direct_Question, ropes_new_situation_background_answer, similarity: 0.5815
+# Pair: human_aging, cot_ecqa_ii, similarity: 0.5625
+# Pair: cot_esnli, airoboros, similarity: 0.5436
+# Pair: niv2_discourse_connective_identification, sociology, similarity: 0.5243
+# Pair: niv2_code_to_text, coqa_1_0_0, similarity: 0.5029
+# Pair: super_glue_wic_1_0_2, college_medicine, similarity: 0.4783
+# Pair: ropes_prompt_bottom_no_hint, fix_punct, similarity: 0.4482
+# Pair: niv2_ethics_classification, guanaco, similarity: 0.4005
+# Pair: wiqa_what_might_be_the_first_step_of_the_process, ultrachat_19, similarity: 0.1411
+
+ADAUNI_INTERFERENCE = [
+    "wiki_hop_original_choose_best_object_affirmative_1",
+    "wiki_hop_original_choose_best_object_affirmative_2",
+    "anatomy",
+    "professional_medicine",
+    "cot_strategyqa",
+    "airoboros",
+    "quac_1_0_0",
+    "high_school_government_and_politics",
+    "math_dataset_algebra__linear_1d_1_0_0",
+    "niv2_grammar_error_detection",
+    "niv2_sentence_composition",
+    "wiki_bio_guess_person",
+    "web_questions_whats_the_answer",
+    "ropes_background_situation_middle",
+    "sciq_Direct_Question",
+    "ropes_new_situation_background_answer",
+    "human_aging",
+    "cot_ecqa_ii",
+    "cot_esnli",
+    "niv2_discourse_connective_identification",
+    "sociology",
+    "niv2_code_to_text",
+    "coqa_1_0_0",
+    "super_glue_wic_1_0_2",
+    "college_medicine",
+    "ropes_prompt_bottom_no_hint",
+    "fix_punct",
+    "niv2_ethics_classification",
+    "guanaco",
+    "wiqa_what_might_be_the_first_step_of_the_process",
+    "ultrachat_19",
+]

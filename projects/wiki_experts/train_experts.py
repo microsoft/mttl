@@ -33,7 +33,10 @@ from mttl.utils import get_mlf_logger, setup_logging, logger
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.src.callbacks import RougeCallbackTestPerEpoch
-
+from projects.wiki_experts.src.evolution.transfer_matrix import (
+    TransferMAtrixConfig,
+    run_eval as create_transfer_matrix,
+)
 
 DEBUG = True
 if "AMLT_OUTPUT_DIR" in os.environ:
@@ -222,6 +225,20 @@ def run_multitask(args: ExpertConfig):
     checkpoint = (
         checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
     )
+    ########################
+    # create transfer matrix
+    config = TransferMAtrixConfig()
+    for k, v in vars(args).items():
+        if k in vars(config):
+            setattr(config, k, v)
+    config.hf_repo_id = checkpoint
+    config.finetune_task_name = (
+        args.finetune_task_name.split(",")
+        if not isinstance(args.finetune_task_name, list)
+        else args.finetune_task_name
+    )
+    create_transfer_matrix(config, debug=False)
+    ########################
 
     if args.hf_repo_id and checkpoint:
         from projects.wiki_experts.src.expert_model import push_expert_to_hub
