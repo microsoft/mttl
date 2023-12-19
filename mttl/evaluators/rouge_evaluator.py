@@ -64,8 +64,9 @@ class RougeEvaluator(Evaluator):
         num_batches=None,
         verbose=True,
         max_length=None,
+        shuffle=False,
     ):
-        dataloader = self.get_dataloader(split, subsample, shuffle=False)
+        dataloader = self.get_dataloader(split, subsample, shuffle=shuffle)
 
         if self.use_vllm:
             return self.evaluate_with_vllm(model, dataloader, num_batches, verbose)
