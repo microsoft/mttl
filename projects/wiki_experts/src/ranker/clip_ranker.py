@@ -143,6 +143,7 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
         # l2 normalize the embeddings
         expert_embeddings = F.normalize(expert_embeddings, dim=-1)
         text_embeddings = F.normalize(text_embeddings, dim=-1)
+
         # calculate the loss
         logits = text_embeddings @ expert_embeddings.T / self.temperature
 
@@ -159,7 +160,8 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
         for task in available_tasks:
             if "default" in task:
                 continue
-            self.available_mask[self.tasks_names_to_ids[task]] = 1.0
+            if task in self.tasks_names_to_ids:
+                self.available_mask[self.tasks_names_to_ids[task]] = 1.0
 
     def get_expert_embeddings(
         self,

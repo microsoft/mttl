@@ -116,6 +116,9 @@ class CLIPExpertsDatamodule(DefaultDataModule):
             n_proc=n_proc,
         )
 
+        # get all the tasks_names from the dataset
+        self._task_names = dataset["positive_expert_names"].unique()
+
         if "split" in dataset.column_names["train"]:
             self.train_dataset = train_dataset.filter(
                 lambda x: x["split"] == "train",
@@ -181,6 +184,11 @@ class CLIPTripleDataModule(DefaultDataModule):
             key="eval_task",
             task_names=self.config.finetune_task_name,
             n_proc=n_proc,
+        )
+
+        # get all the tasks_names from the dataset
+        self._task_names = list(set(train_dataset["positive_expert_names"])) + list(
+            set(train_dataset["negative_expert_names"])
         )
 
         if "split" in dataset.column_names["train"]:
