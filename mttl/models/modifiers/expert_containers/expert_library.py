@@ -276,10 +276,6 @@ class ExpertLibrary:
             MetadataEntry.fromdict(torch.load(file, map_location="cpu"))
             for file in glob.glob(f"{metadata_dir}/**/*.meta", recursive=True)
         ]
-        metadata += [
-            MetadataEntry.loads(torch.load(file, map_location="cpu"))
-            for file in glob.glob(f"{metadata_dir}/*.meta")
-        ]
 
         for metadatum in metadata:
             if self.model_name is not None and metadatum.model != self.model_name:
