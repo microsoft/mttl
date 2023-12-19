@@ -122,7 +122,7 @@ def run_eval(args):
 
     module.to("cuda")
     # evaluate all the category
-    rouge = evaluator.evaluate(module, split="test", verbose=False, subsample=100)
+    rouge = evaluator.evaluate(module, split="test", verbose=False, subsample=-1)
     logger.info("Flan rouge: {}".format(rouge))
     del module
 

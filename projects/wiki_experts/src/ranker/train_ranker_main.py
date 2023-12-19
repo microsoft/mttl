@@ -42,29 +42,23 @@ def train_triplet_clip(args):
         predict_batch_size=args.predict_batch_size,
     )
     datamodule = CLIPTripleDataModule(dataconfig)
+    task_names = datamodule.task_names
 
-    # noqa this is not reasonable
-    tempconfig = FlatMultiTaskConfig(
-        dataset=args.dataset,
-        model=args.model,
-        train_batch_size=args.train_batch_size,
-    )
-    tempdatamodule = FlatMultiTaskModule(tempconfig)
-    task_names = tempdatamodule.task_names
-    task_names.append("default")
+    if "default" not in task_names:
+        task_names.append("default")
     model = CLIPTripletRanker(
-        task_names=tempdatamodule.task_names,
+        task_names=task_names,
         encoder_model_name=args.encoder_model_name,
-        text_embedding_dim=512,
+        text_embedding_dim=args.text_embedding_dim,
     )
 
     # add model checkpoint
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
-        monitor="val/loss_epoch",
+        # monitor="val/loss_epoch",
         dirpath=f"clip_triplet_ranker_{args.exp_name}/",
         filename="clip-{epoch:02d}-{val/loss:.2f}",
         save_top_k=1,
-        mode="min",
+        # mode="min",
     )
 
     trainer = pl.Trainer(
@@ -107,19 +101,16 @@ def train_clip(args):
     )
 
     datamodule = CLIPTripleDataModule(dataconfig)
+    task_names = datamodule.task_names
 
-    # noqa this is not reasonable
-    tempconfig = FlatMultiTaskConfig(
-        dataset=args.dataset, model=args.model, train_batch_size=args.train_batch_size
+    if "default" not in task_names:
+        task_names.append("default")
+
+    model = CLIPRanker(
+        task_names=task_names,
+        encoder_model_name=args.encoder_model_name,
+        text_embedding_dim=args.text_embedding_dim,
     )
-    tempdatamodule = FlatMultiTaskModule(tempconfig)
-    task_names = tempdatamodule.task_names
-    task_names.append("default")
-    model = CLIPRanker(task_names=task_names)
-
-    if args.ranker_path:
-        model = CLIPRanker.from_pretrained(args.ranker_path)
-
     # add model checkpoint
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
         monitor="val/loss_epoch",
