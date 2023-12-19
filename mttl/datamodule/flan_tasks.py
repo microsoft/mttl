@@ -654,6 +654,8 @@ ZHAN_SUBSET = [
 ADAUNI_INTERFERENCE = [
     "wiki_hop_original_choose_best_object_affirmative_1",
     "wiki_hop_original_choose_best_object_affirmative_2",
+    "anatomy",
+    "professional_medicine",
     "cot_strategyqa",
     "airoboros",
     "quac_1_0_0",

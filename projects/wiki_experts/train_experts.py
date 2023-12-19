@@ -231,6 +231,7 @@ def run_multitask(args: ExpertConfig):
     for k, v in vars(args).items():
         if k in vars(config):
             setattr(config, k, v)
+    config.eval_metric = "rougeL"
     config.hf_repo_id = checkpoint
     config.finetune_task_name = (
         args.finetune_task_name.split(",")
