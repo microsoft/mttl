@@ -305,3 +305,4 @@ class Config:
         self.soft_prompt_hidden_dim: int = None
         self.soft_prompt_learn_kv: bool = False
         self.prompt_placement: str = "prefix"
+        self.add_routing_token: bool = False

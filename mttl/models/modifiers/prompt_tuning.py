@@ -28,8 +28,14 @@ def roll_along(arr, shifts, dim):
     return torch.gather(arr, dim, indices)
 
 
-def remove_soft_prompts(logits, label_starts, soft_prompt_length):
+def split_soft_prompts(logits, label_starts, soft_prompt_length):
     """Given logits with soft prompts, remove them to recover original shape"""
+
+    # The first token to be removed should not be the first soft prompt,
+    # But rather the token just before, and similarly the last token to be removed
+    # Will be the second last soft token. This way, the last soft prompt's rep. is
+    # used to predict the first label.
+    label_starts = (label_starts - 1).clamp(min=0)
 
     bs, seq_len, vocab_size = logits.shape
     flat_logits = logits.view(bs * seq_len, vocab_size)
@@ -44,25 +50,120 @@ def remove_soft_prompts(logits, label_starts, soft_prompt_length):
     is_soft_prompt[flat_soft_prompt_idx] = True
     not_soft_prompt = ~is_soft_prompt
 
-    return flat_logits[not_soft_prompt].reshape(
+    regular_tokens = flat_logits[not_soft_prompt].reshape(
         bs, seq_len - soft_prompt_length, vocab_size
     )
+
+    soft_prompts = flat_logits[is_soft_prompt].reshape(
+        bs, soft_prompt_length, vocab_size
+    )
+
+    return regular_tokens, soft_prompts
 
 
 class ExtendedEmbedding(nn.Module):
     """Extends nn.Embedding to accomodate soft prompts"""
 
-    def __init__(self, config, input_embeds, n_new_tokens):
+    def __init__(self, config, input_embeds, *args, **kwargs):
         super().__init__()
         self.config = config
-        self.input_embeds = nn.Parameter(input_embeds)
+        n_new_tokens = self.config.soft_prompt_length
+        self.input_embeds = nn.Parameter(input_embeds.weight)
+        self.sparse = input_embeds.sparse
 
         # topk initialization
-        self.new_embeds = nn.Parameter(input_embeds[:n_new_tokens].clone().detach())
+        self.new_embeds = nn.Parameter(
+            input_embeds.weight[:n_new_tokens].clone().detach()
+        )
 
     def forward(self, input_ids):
         # 1) concat the embeddings, and run fwd pass
         all_embeds = torch.cat((self.input_embeds, self.new_embeds), dim=0)
+        out = F.embedding(input_ids, all_embeds, sparse=self.sparse)
+        return out
+
+
+class ExtendedLinear(nn.Module):
+    """Extends Linear LM head to predict soft prompt routing"""
+
+    def __init__(self, config, lm_head, *args, **kwargs):
+        super().__init__()
+        self.config = config
+        n_new_tokens = self.config.n_skills
+        self.lm_head = lm_head
+
+        # topk initialization
+        self.ext_weight = nn.Parameter(lm_head.weight[:n_new_tokens].clone().detach())
+        if lm_head.bias is not None:
+            self.ext_bias = nn.Parameter(lm_head.bias[:n_new_tokens].clone().detach())
+        else:
+            self.ext_bias = None
+
+    def forward(self, x):
+        # regular out
+        weights = torch.cat((self.lm_head.weight, self.ext_weight), dim=0)
+        if self.lm_head.bias is not None:
+            bias = torch.cat((self.lm_head.bias, self.ext_bias), dim=0)
+        else:
+            bias = None
+
+        return F.linear(x, weights, bias)
+
+
+class PolyExtendedEmbedding(nn.Module, RoutingMixin):
+    """Extends nn.Embedding to accomodate soft prompts"""
+
+    def __init__(
+        self, config, input_embeds, task_id_container, selector=None, *args, **kwargs
+    ):
+        nn.Module.__init__(self)
+        RoutingMixin.__init__(self, task_id_container)
+        self.config = config
+        n_new_tokens = self.config.soft_prompt_length
+        self.input_embeds = nn.Parameter(input_embeds.weight)
+        self.task_id_container = task_id_container
+        self.use_routing_token = config.add_routing_token
+
+        if selector is None:
+            # TODO: change this later
+            _n_splits = config.n_splits
+            config.n_splits = n_new_tokens
+            self.selector = PolytroponSelector(config)
+            config.n_splits = _n_splits
+        else:
+            self.selector = selector
+
+        # topk initialization.
+        skill_tokens = input_embeds.weight[: n_new_tokens * config.n_skills]
+
+        # putting soft_prompt_length at dim 0 ensure all skills get top tokens
+        skill_tokens = skill_tokens.view(n_new_tokens, config.n_skills, -1)
+        self.new_embeds = nn.Parameter(skill_tokens.clone().detach())
+
+    def forward(self, input_ids):
+        # Get task weights
+        routing_weights = self.selector(
+            self.task_id_container["routing_infos"]
+        )  # bs, sp_len, n_skills
+        routing_weights = routing_weights.to(dtype=self.new_embeds.dtype)
+
+        if self.use_routing_token:
+            # for the first soft token, use mean routing
+            # TODO: consider dropping the useless first selector and skill token
+            routing_weights[:, 0, :] = 1.0 / self.config.n_skills
+
+        # cache routing weights for routing loss
+        self.routing_targets = routing_weights.detach()
+
+        # Build task soft prompts
+        skilled_prompts = torch.einsum(
+            "blk,lkd->bld", (routing_weights, self.new_embeds)
+        )  # bs, sp_len, dim')
+
+        # 1) concat the embeddings, and run fwd pass
+        all_embeds = torch.cat(
+            (self.input_embeds, skilled_prompts.flatten(0, 1)), dim=0
+        )
         out = F.embedding(input_ids, all_embeds)
         return out
 
@@ -95,9 +196,6 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
             input_ids = kwargs.pop("input_ids")
 
         attention_mask = kwargs.get("attention_mask", None)
-        old_input_ids = input_ids
-        old_attn_mask = attention_mask
-        old_kwargs = {"attention_mask": old_attn_mask, "input_ids": old_input_ids}
 
         # soft prompt will return indices for the correct prompt
         soft_prompt_indices = self.soft_prompt(input_ids)
@@ -147,9 +245,16 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
             out.logits = out.logits[:, self.config.soft_prompt_length :, :]
         elif self.config.prompt_placement == "suffix":
             # remove the soft prompt logits
-            out.logits = remove_soft_prompts(
+            out.logits, out.soft_prompt_logits = split_soft_prompts(
                 out.logits, label_starts, self.config.soft_prompt_length
             )
+
+            if self.config.add_routing_token:
+                # remove the routing token logits
+                out.logits = out.logits[:, :, : -self.config.n_skills]
+                out.soft_prompt_logits = out.soft_prompt_logits[
+                    :, :, -self.config.n_skills :
+                ]
 
         return out
 
@@ -253,9 +358,9 @@ def modify_with_prompt_tuning(soft_prompt_cls, embed_cls, transformer, config):
     """Wrap the forward pass of the model with a hook that takes extracts the embeddings
     from the `input_ids`, gets the embeddings from the soft prompt and stiches them together.
     """
-    assert isinstance(
-        transformer, PreTrainedModel
-    ), "Transformer must be a PreTrainedModel."
+    # assert isinstance(
+    #    transformer, PreTrainedModel
+    # ), "Transformer must be a PreTrainedModel."
 
     for param in transformer.parameters():
         param.requires_grad = False
@@ -264,8 +369,12 @@ def modify_with_prompt_tuning(soft_prompt_cls, embed_cls, transformer, config):
     input_embeds = transformer.get_input_embeddings()
 
     # Create new embeddings and assign to transformer, replacing existing one
-    ext_embeds = embed_cls(config, input_embeds.weight, config.soft_prompt_length)
+    ext_embeds = embed_cls(config, input_embeds, task_id_container=task_id_container)
     transformer.set_input_embeddings(ext_embeds)
+
+    if config.add_routing_token:
+        new_head = ExtendedLinear(config, transformer.get_output_embeddings())
+        transformer.set_output_embeddings(new_head)
 
     # Replace in the original model
     config.vocab_embed_dim = input_embeds.embedding_dim
@@ -292,13 +401,13 @@ class PromptTuning(Adapter, ModifyMixin):
         super().__init__()
 
         self.config = config
+        self.vocab_size = base_input_embeddings.num_embeddings
         self.embed_dim = config.vocab_embed_dim
         self.prompt_length = config.soft_prompt_length
 
         # build indices for the prompt
         self.prompt_indices = (
-            torch.arange(self.prompt_length, dtype=torch.long)
-            + base_input_embeddings.num_embeddings
+            torch.arange(self.prompt_length, dtype=torch.long) + self.vocab_size
         )
 
     def forward(self, input_ids, *args, **kwargs):
@@ -310,99 +419,27 @@ class PromptTuning(Adapter, ModifyMixin):
         return modify_with_prompt_tuning(cls, ExtendedEmbedding, transformer, config)
 
 
-@register_modifier("alpha_prompt_tuning", config_cls=PromptTuningConfig)
-class AlphaPromptTuning(Adapter, ModifyMixin):
-    def __init__(self, base_input_embeddings, config, task_id_ptr, *args, **kwargs):
-        super().__init__()
-
-        self.config = config
-        self.embed_dim = config.vocab_embed_dim
-        self.prompt_length = config.soft_prompt_length
-        self.n_splits = config.n_splits
-        self.dim_per_split = base_input_embeddings.embedding_dim // self.n_splits
-        self.task_id_ptr = task_id_ptr
-        self.num_tokens = base_input_embeddings.num_embeddings
-
-        n_splits = config.n_splits
-        config.n_splits = config.soft_prompt_length * n_splits
-        config.n_skills = base_input_embeddings.num_embeddings
-        self.prompt_mixer = PolytroponSelector(config)
-        config.n_splits = n_splits
-
-        self.base_input_embeddings = base_input_embeddings.weight
-
-    def forward(self, input_ids, *args, **kwargs):
-        # build input for polytropon
-        bs = self.task_id_ptr["routing_infos"].task_ids.size(0)
-        embeds = self.base_input_embeddings.view(
-            self.num_tokens, self.n_splits, self.dim_per_split
-        )
-        self.task_id_ptr["routing_infos"].task_ids.fill_(0)
-        mixing_weights = self.prompt_mixer(self.task_id_ptr["routing_infos"])
-        mixing_weights = mixing_weights.view(
-            bs, self.prompt_length, self.n_splits, self.num_tokens
-        )
-        mixed = torch.einsum("BLSV,VSD->BLSD", (mixing_weights, embeds))
-        return mixed.reshape(bs, self.prompt_length, -1)
-
-    @classmethod
-    def modify_transformer(cls, transformer, config):
-        return modify_with_prompt_tuning(cls, transformer, config)
-
-
 @dataclass
-class PolyPromptTuningConfig(PolyKVAdapterConfig):
-    pass
+class PolyPromptTuningConfig(KVAdapterConfig):
+    add_routing_token = True
 
 
 @register_modifier("poly_prompt_tuning", config_cls=PolyPromptTuningConfig)
-class PolyPromptTuning(Adapter, RoutingMixin, ModifyMixin):
-    def __init__(self, base_input_embeddings, config, task_id_ptr, *args, **kwargs):
-        super(Adapter, self).__init__()
-        super(RoutingMixin, self).__init__(task_id_ptr)
-
-        self.config = config
-        self.embed_dim = config.vocab_embed_dim
-        self.prompt_length = config.soft_prompt_length
-
-        base_input_embeddings = base_input_embeddings.cpu()
-        self.selector = PolytroponSelector(config)
-
-        # initialize from the base model
-        mean = base_input_embeddings.weight.mean(0)
-        std = base_input_embeddings.weight.std(0)
-
-        # TODO: Revisit this initialization
-        embedding = torch.randn(
-            (
-                config.n_skills,
-                self.embed_dim,
-                self.prompt_length,
-            )
-        ) * (std.view(1, -1, 1) / 2) + mean.view(1, -1, 1)
-
-        # split dim according to `n_splits`
-        embedding = embedding.reshape(
-            config.n_skills,
-            config.n_splits,
-            self.embed_dim // config.n_splits,
-            self.prompt_length,
-        ).transpose(
-            0, 1
-        )  # (n_splits, n_skills, dim, prompt_length)
-
-        self.prompt_embedding = nn.Parameter(embedding)
-
+class PolyPromptTuning(PromptTuning):
     def forward(self, input_ids, *args, **kwargs):
-        bs, _ = input_ids.size()
-        weights = self.selector(self.routing_infos)
+        prompt_indices = self.prompt_indices.to(input_ids.device)
 
-        if weights.ndim == 1:
-            raise NotImplementedError()
-            # use indexing!
-            # embed = self.prompt_embedding[:, weights.long(), :]
-        else:
-            embed = torch.einsum("bqs,qsdl->blqd", (weights, self.prompt_embedding))
+        # Rather than repeating the indices across the batch axis, we will continue
+        # From [[100, 101, 102], [100, 101, 102]] to [[100, 101, 102], [103, 104, 105]]
+        bs = input_ids.size(0)
+        bs_offset = (
+            torch.arange(bs, device=input_ids.device).view(-1, 1) * self.prompt_length
+        )
+        prompt_indices = self.prompt_indices.to(input_ids.device)
+        return prompt_indices.unsqueeze(0) + bs_offset
 
-        embed = embed.reshape(bs, self.prompt_length, self.embed_dim)
-        return embed
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        return modify_with_prompt_tuning(
+            cls, PolyExtendedEmbedding, transformer, config
+        )
