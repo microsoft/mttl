@@ -44,7 +44,7 @@ def get_pairwise_dataset(args):
                 dataset="sordonia/adauni-v1-flat",
                 model="EleutherAI/gpt-neo-125m",
                 finetune_task_name=task,
-                predict_batch_size=20,
+                predict_batch_size=10,
             ),
             for_generation=True,
         )
