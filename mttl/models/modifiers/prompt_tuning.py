@@ -421,7 +421,7 @@ class PromptTuning(Adapter, ModifyMixin):
 
 
 @dataclass
-class PolyPromptTuningConfig(KVAdapterConfig, PolytroponConfig):
+class PolyPromptTuningConfig(PromptTuningConfig, PolytroponConfig):
     pass
 
 
