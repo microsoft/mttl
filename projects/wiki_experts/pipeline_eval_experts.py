@@ -89,6 +89,7 @@ def run_eval(args):
 
     if args.hf_lib_id:
         library = HFExpertLibrary(args.hf_lib_id)
+        logger.info("Loaded library: {}".format(library))
     else:
         library = None
 
