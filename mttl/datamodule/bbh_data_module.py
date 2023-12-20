@@ -7,7 +7,7 @@ import os
 
 @dataclass
 class BBHConfig(DatasetConfig):
-    apply_source_template: str = "Instruct: {}\nResponse:"
+    apply_source_template: str = None
 
 
 class BBHDataModule(DefaultDataModule):
@@ -43,7 +43,7 @@ class BBHDataModule(DefaultDataModule):
 
         dataset = concatenate_datasets(datasets)
 
-        if self.config.apply_source_template:
+        if self.config.apply_source_template is not None:
 
             def apply_source_template(source_template, example):
                 example["source"] = source_template.format(example["source"])
