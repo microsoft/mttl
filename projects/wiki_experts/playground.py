@@ -52,7 +52,7 @@ def main():
         raise_error=False, c="./configs/wiki-mmlu/phi-2_flan_kv.json"
     )
     tokenizer = get_tokenizer_with_args(config.model, "gpt", "left", "left", True)
-    model = MultiExpertModel(**vars(config), tokenizer=tokenizer)
+    model = MultiExpertModel(**vars(config), tokenizer=tokenizer).to("cuda")
     device = "cuda"
 
     print("Welcome to the LLM playground! Type 'exit' to leave.")

@@ -359,7 +359,7 @@ class DefaultDataModule(LightningDataModule):
     def print_infos(self):
         from mttl.utils import logger
 
-        if len(self.train_dataset) > 0:
+        if self.train_dataset is not None:
             logger.info("Training steps: %s" % len(self.train_dataloader()))
             logger.info("Training samples: %s" % len(self.train_dataset))
         if self.dev_dataset is not None:
