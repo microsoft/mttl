@@ -43,6 +43,11 @@ class LoRA(MergeableAdapter, ModifyMixin):
         self.forward_fn = None
         self.layer = layer
 
+        if self.dropout > 0.0:
+            self.dropout_layer = nn.Dropout(self.dropout)
+        else:
+            self.dropout_layer = lambda x: x
+
         if hasattr(layer, "weight"):
             self.weight = layer.weight
 
@@ -132,6 +137,7 @@ class LoRA(MergeableAdapter, ModifyMixin):
             return output
         else:
             input_lora = input.to(self.lora_a.dtype)
+            input_lora = self.dropout_layer(input_lora)
             adapter_out = (
                 torch.matmul(torch.matmul(input_lora, self.lora_a), self.lora_b)
                 * self.scaling
@@ -157,6 +163,7 @@ class LoRA(MergeableAdapter, ModifyMixin):
         # (n_examples, seq_len, out_features)
         layer_out = loras[0].layer(input)
         input_lora = input.to(loras[0].lora_a.dtype)
+        input_lora = loras[0].dropout_layer(input_lora)
 
         adapter_out = (
             torch.bmm(torch.bmm(input_lora, lora_a), lora_b) * scaling[:, None, None]
@@ -221,6 +228,8 @@ class SkilledLoRA(LoRA):
     def forward_linear_(self, input, weights):
         layer_out = self.layer(input)
         input_lora = input.to(self.lora_a.dtype)
+        input_lora = self.dropout_layer(input_lora)
+
         bs = input.size(0)
 
         # these are task ids
@@ -273,9 +282,13 @@ class SkilledLoRA(LoRA):
 
         This also handles the case in which the same skilled lora is applied to multiple example
         i.e.:
-
               --> skills      --> weights
         *   : [[a, d, f]]     [[0.1, 0.2, 0.7]]
+
+        It also handles another case, in which we have a single skilled lora applied with different weights
+        i.e.:
+        *   : [[a, d, f]]     [[0.1, 0.2, 0.7],
+                               [0.3, 0.4, 0.3]]
 
         in this case, we broadcast the same combination to all the examples in the batch.
         """
@@ -290,9 +303,20 @@ class SkilledLoRA(LoRA):
         assert np.all(skl.n_skills == n_skills for skl in skilled_loras)
 
         num_skilled_loras = len(skilled_loras)
-        skilled_loras_a = torch.stack([lora.lora_a for lora in skilled_loras], dim=0)
-        skilled_loras_b = torch.stack([lora.lora_b for lora in skilled_loras], dim=0)
-        weights = torch.stack(weights, dim=0).to(device)
+
+        if num_skilled_loras == 1:
+            skilled_loras_a = skilled_loras[0].lora_a.unsqueeze(0)
+            skilled_loras_b = skilled_loras[0].lora_b.unsqueeze(0)
+        else:
+            skilled_loras_a = torch.stack(
+                [lora.lora_a for lora in skilled_loras], dim=0
+            )
+            skilled_loras_b = torch.stack(
+                [lora.lora_b for lora in skilled_loras], dim=0
+            )
+
+        if type(weights) == list:
+            weights = torch.stack(weights, dim=0).to(device)
 
         assert skilled_loras_a.shape[2] == 1, "Only 1 split is supported for now."
         assert skilled_loras_b.shape[3] == 1, "Only 1 split is supported for now."
@@ -301,6 +325,10 @@ class SkilledLoRA(LoRA):
 
         # up-type the input for lora computation
         input_lora = input.to(dtype=skilled_loras[0].lora_a.dtype)
+        weights = weights.to(dtype=skilled_loras[0].lora_a.dtype)
+
+        # apply some dropout
+        input_lora = skilled_loras[0].dropout_layer(input_lora)
 
         # (n_examples,)
         scaling = torch.cat(
@@ -314,11 +342,21 @@ class SkilledLoRA(LoRA):
             weights = weights.squeeze(0)
             scaling = scaling.squeeze(0)
 
-            A = torch.einsum("s,sdr->dr", (weights, skilled_loras_a))
-            B = torch.einsum("s,srd->rd", (weights, skilled_loras_b))
+            if weights.ndim == 1:
+                A = torch.einsum("s,sdr->dr", (weights, skilled_loras_a))
+                B = torch.einsum("s,srd->rd", (weights, skilled_loras_b))
 
-            # scaling is a float (only 1 skilled lora)
-            adapter_out = torch.matmul(torch.matmul(input_lora, A), B) * scaling
+                # scaling is a float (only 1 skilled lora)
+                adapter_out = torch.matmul(torch.matmul(input_lora, A), B) * scaling
+            elif weights.ndim == 2:
+                # we are in the case in which we have a single skilled lora applied with different weights
+                A = torch.einsum("bs,sdr->bdr", (weights, skilled_loras_a))
+                B = torch.einsum("bs,srd->brd", (weights, skilled_loras_b))
+
+                adapter_out = (
+                    torch.bmm(torch.bmm(input_lora.unsqueeze(1), A), B).squeeze()
+                    * scaling
+                )
         elif n_skills == 1:
             # this is basically standard lora forward, we are here by accident
             # !!!warning!!!! this ignores the weights
@@ -425,7 +463,12 @@ class SkilledLoRA_MergeLoraAfterOP(SkilledLoRA):
             return super().forward_linear_(input, weights)
 
         layer_out = self.layer(input)
+
+        # uptype
         input_lora = input.to(self.lora_a.dtype)
+
+        # some dropout
+        input_lora = self.dropout_layer(input_lora)
 
         bs, _, _ = weights.size()
         adapter_out = torch.einsum(

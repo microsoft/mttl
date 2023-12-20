@@ -122,6 +122,7 @@ def test_alpaca_for_gen():
     )
 
 
+@pytest.mark.skip(reason="deleted dataset on remote :(")
 def test_t0_module():
     t0 = AutoDataModule.create(
         "sordonia/t0-10k-flat",

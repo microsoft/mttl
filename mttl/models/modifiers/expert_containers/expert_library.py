@@ -6,9 +6,7 @@ import json
 from typing import Any, Dict, List, Union
 import torch
 import os
-from tempfile import TemporaryDirectory
 import numpy as np
-from collections import defaultdict
 
 from huggingface_hub import (
     hf_hub_download,
@@ -31,7 +29,6 @@ from mttl.models.modifiers.expert_containers.module_graph import (
     Expert,
     load_expert,
     ExpertInfo,
-    ModuleGraph,
 )
 
 
@@ -52,7 +49,11 @@ class Score:
     def hash(self) -> str:
         return str(self.key).encode()
 
-    def dumps(self):
+    @classmethod
+    def fromdict(self, data):
+        return Score(**data)
+
+    def asdict(self):
         return self.__dict__
 
     def __lt__(self, other):
@@ -70,15 +71,15 @@ class MetadataEntry(ExpertInfo):
     expert_deleted: bool = False
 
     @classmethod
-    def loads(cls, ckpt):
-        allowed_keys = MetadataEntry.__dataclass_fields__.keys()
-        contained_keys = list(ckpt.keys())
-        for k in contained_keys:
-            if k not in allowed_keys:
-                ckpt.pop(k)
-        entry = cls(**ckpt)
-        entry.expert_deleted = ckpt.get("expert_deleted", False)
-        return entry
+    def fromdict(cls, data):
+        metadata_entry = super(MetadataEntry, cls).fromdict(data)
+        metadata_entry.expert_deleted = data.get("expert_deleted", False)
+        return metadata_entry
+
+    def asdict(self):
+        data = super().asdict()
+        data.update({"expert_deleted": self.expert_deleted})
+        return data
 
 
 class BackendEngine:
@@ -111,8 +112,10 @@ class HuggingfaceHubEngine(BackendEngine):
     def snapshot_download(self, repo_id, allow_patterns=None):
         return snapshot_download(repo_id, allow_patterns=allow_patterns)
 
-    def create_repo(self, repo_id, repo_type, exist_ok):
-        return create_repo(repo_id, repo_type=repo_type, exist_ok=exist_ok)
+    def create_repo(self, repo_id, repo_type, exist_ok, private=True):
+        return create_repo(
+            repo_id, repo_type=repo_type, exist_ok=exist_ok, private=private
+        )
 
     def create_commit(self, repo_id, operations, commit_message):
         return create_commit(
@@ -187,6 +190,7 @@ class ExpertLibrary:
     def __init__(
         self,
         repo_id,
+        hf_token_hub=None,
         model_name=None,
         selection=None,
         create=False,
@@ -205,12 +209,14 @@ class ExpertLibrary:
 
         self.ignore_sliced = ignore_sliced
 
-        if "HF_TOKEN" in os.environ:
-            self.login(token=os.environ["HF_TOKEN"])
+        if "HF_TOKEN" in os.environ or hf_token_hub:
+            self.login(token=os.environ.get("HF_TOKEN", hf_token_hub))
 
         try:
             if create:
-                self.create_repo(repo_id, repo_type="model", exist_ok=True)
+                self.create_repo(
+                    repo_id, repo_type="model", exist_ok=True, private=True
+                )
         except Exception as e:
             logger.error("Error creating repo %s\n", repo_id)
 
@@ -226,7 +232,9 @@ class ExpertLibrary:
         self.data = {}
 
         try:
-            metadata_dir = self.snapshot_download(self.repo_id, allow_patterns="*.meta")
+            metadata_dir = self.snapshot_download(
+                self.repo_id, allow_patterns=["**/*.meta", "*.meta"]
+            )
         except Exception as e:
             if isinstance(e, RepositoryNotFoundError):
                 logger.error("Repository not found: %s", self.repo_id)
@@ -234,8 +242,8 @@ class ExpertLibrary:
             raise e
 
         metadata = [
-            MetadataEntry.loads(torch.load(file, map_location="cpu"))
-            for file in glob.glob(f"{metadata_dir}/*.meta")
+            MetadataEntry.fromdict(torch.load(file, map_location="cpu"))
+            for file in glob.glob(f"{metadata_dir}/**/*.meta", recursive=True)
         ]
 
         for metadatum in metadata:
@@ -286,7 +294,7 @@ class ExpertLibrary:
 
     def _upload_metadata(self, metadata):
         buffer = io.BytesIO()
-        torch.save(metadata.__dict__, buffer)
+        torch.save(metadata.asdict(), buffer)
         buffer.flush()
 
         addition = CommitOperationAdd(
@@ -320,6 +328,7 @@ class ExpertLibrary:
             scores = self.get_auxiliary_data(
                 data_type="scores", expert_name=expert_name
             )
+            # inject auxiliary data into the expert
             expert_dump.expert_info.embeddings = embeddings
             expert_dump.expert_info.scores = scores
         return expert_dump
@@ -365,7 +374,7 @@ class ExpertLibrary:
             raise ValueError("Expert name cannot contain dots.")
 
         # convert to metadata entry
-        metadata = MetadataEntry.loads(expert_dump.expert_info.__dict__)
+        metadata = MetadataEntry.fromdict(expert_dump.expert_info.asdict())
 
         self._upload_weights(metadata.expert_name, expert_dump)
         self._upload_metadata(metadata)
@@ -404,7 +413,7 @@ class ExpertLibrary:
             raise ValueError(f"Expert {expert_name} not found in repository.")
 
         path = self.hf_hub_download(self.repo_id, filename=f"{expert_name}.meta")
-        metadata = MetadataEntry.loads(torch.load(path, map_location="cpu"))
+        metadata = MetadataEntry.fromdict(torch.load(path, map_location="cpu"))
         metadata.expert_deleted = False
 
         self._upload_metadata(metadata)
@@ -473,7 +482,7 @@ class ExpertLibrary:
             raise ValueError(f"Score {score.name} already exists for task {task}.")
         if score.value is None:
             raise ValueError(f"Score {score.name} has no value and cannot be added.")
-        scores[score.hash] = score.dumps()
+        scores[score.hash] = score.asdict()
 
         buffer = io.BytesIO()
         torch.save(scores, buffer)
@@ -617,7 +626,6 @@ class ExpertLibrary:
 
         metadata = self.data[old_name]
         metadata.expert_name = new_name
-        metadata.expert_config.expert_name = new_name
 
         self.data[new_name] = metadata
         self.data.pop(old_name)
@@ -676,18 +684,19 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
         if "HF_TOKEN" in os.environ:
             login(token=os.environ["HF_TOKEN"])
 
-        metadata_dir = snapshot_download(repo_id, allow_patterns="*.meta")
+        metadata_dir = snapshot_download(repo_id, allow_patterns="**/*.meta")
         new_lib = LocalExpertLibrary(repo_id=destination, create=False)
 
         for file in glob.glob(f"{metadata_dir}/*.meta"):
             metadatum = torch.load(file, map_location="cpu")
-            expert_info = ExpertInfo(
-                expert_config=json.loads(metadatum["expert_config"]),
-                expert_name=metadatum["expert_info"]["expert_name"],
-                expert_task_name=metadatum["expert_info"]["expert_task_name"],
-            )
+
+            expert_info_data = metadatum["expert_info"]
+            expert_info_data["expert_config"] = metadatum["expert_config"]
+
+            expert_info = ExpertInfo.fromdict(expert_info_data)
             model_weights = _download_model(expert_info.expert_name)
             expert = Expert(expert_info=expert_info, expert_weights=model_weights)
+
             if expert not in new_lib:
                 new_lib.add_expert(expert)
         return new_lib

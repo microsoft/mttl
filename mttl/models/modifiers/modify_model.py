@@ -1,7 +1,9 @@
-from mttl.utils import logger
-
+# stores modifiers across the mttl lib
 MODIFIERS = {}
+# stores mapping from configs to modifiers
 CONFIGS_TO_MODIFIERS = {}
+# stores mapping from modifiers to configs
+MODIFIERS_TO_CONFIGS = {}
 
 
 def register_modifier(name, config_cls=None):
@@ -14,6 +16,7 @@ def register_modifier(name, config_cls=None):
 
         if config_cls is not None:
             CONFIGS_TO_MODIFIERS[config_cls] = name
+            MODIFIERS_TO_CONFIGS[name] = config_cls
         return klass
 
     return _thunk
@@ -25,24 +28,23 @@ def get_modifier_type(config, model_modifier=None):
     return model_modifier
 
 
-def modify_transformer(transformer, modifier_config, model_modifier=None):
-    import mttl.models.modifiers.lora  # noqa: F401
-    import mttl.models.modifiers.poly  # noqa: F401
-    import mttl.models.modifiers.routing  # noqa: F401
-    import mttl.models.modifiers.prompt_tuning  # noqa: F401
-    import mttl.models.modifiers.kv_adapter  # noqa: F401
-    import mttl.models.modifiers.hard_prompts  # noqa: F401
+def modify_transformer(
+    transformer, modifier_config, model_modifier=None, **modifier_kwargs
+):
     from mttl.utils import logger
 
     # create a shared container for the task id
     transformer.task_id_container = {}
+    # create a shared container for the possible routers
+    transformer.selectors = {}
 
     # set all params to not require grad
     for param in transformer.parameters():
         param.requires_grad = False
 
-    if hasattr(modifier_config, "model_modifier") and (
-        modifier_config.model_modifier is None
+    if modifier_config is None or (
+        hasattr(modifier_config, "model_modifier")
+        and (modifier_config.model_modifier is None)
     ):
         # set all params to require grad
         for param in transformer.parameters():

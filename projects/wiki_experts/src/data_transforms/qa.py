@@ -1,5 +1,6 @@
 from collections import defaultdict
 from dataclasses import dataclass
+import json
 import numpy as np
 import os
 
@@ -246,6 +247,13 @@ class OAITemplate_Batched_MultiChoice:
         # Find all matches in the input string
         matches = re.findall(pattern, generated_output, re.DOTALL)
 
+        # If nothing is found, try without the options, sometimes it forgets them
+        if not matches:
+            pattern = (
+                r"### Problem:\s*(.*?)\n\n(.*?)\s*### Response:\s*(.*?)\s*(?=##|$)"
+            )
+            matches = re.findall(pattern, generated_output, re.DOTALL)
+
         data = []
         for match in matches:
             if not len(match) == 3:
@@ -260,10 +268,31 @@ class OAITemplate_Batched_MultiChoice:
                 # skipping item
                 continue
 
-            options_split = re.split(r"\s*[A-D]\.\s*", options)
-            if not len(options_split) == 5:
+            choices = re.findall(r"(\w)\. ([^\n]+)", options)
+            if len(choices) != 4:
                 # skipping item
                 continue
+
+            # error in the labels
+            labels = [c[0] for c in choices]
+            if labels != ["A", "B", "C", "D"]:
+                continue
+
+            # check if the response is valid
+            if response[0] not in ["A", "B", "C", "D"]:
+                continue
+
+            # take first letter in response
+            response = response[0]
+
+            # re-assign options to create balanced labels
+            np.random.shuffle(choices)
+            labels, texts = zip(*choices)
+
+            response = "ABCD"[labels.index(response)]
+            options = "\n".join(
+                [f"{label}. {text}" for label, text in zip("ABCD", texts[:4])]
+            )
 
             instruction = (
                 "Question:\n{instruction}\nChoices:\n{options}\nAnswer:".format(
@@ -284,33 +313,244 @@ Please stick to the following format for your output:
 ## Example [number of the example]
 ### Problem:
 [your generated problem]
-
-### Options:
-A. [your first generated options]
-B. [your second generated options]
-C. [your third generated options]
-D. [your fourth generated options]
+A. [your first generated option]
+B. [your second generated option]
+C. [your third generated option]
+D. [your fourth generated option]
 
 ### Response:
-[the correct response, which should be A., B., C. or D.]
+[the correct response, which should be A, B, C or D]
 
 For example:
 
 ## Example 1
 ### Problem:
 {icl_examples[0]['instruction']}
-
-### Options:
 {icl_examples[0]['options']}
 
 ### Response:
 {icl_examples[0]['response']}
 
-You can take inspiration from the following context to generate your questions:
+You should generate your questions based on the content of the following context:
 
 {context}
 
-Now generate {batch_size} diverse problems with their options and responses. Please follow these guidelines carefully when generating problems and responses:
+Now, generate {batch_size} diverse problems each with four options (A, B, C, D) and a response. Please follow the guidelines carefully when generating problems and responses:
+"""
+        return task_description
+
+
+class OAITemplate_Batched_MultiChoice_V2:
+    @classmethod
+    def post_process_generation(cls, generated_output):
+        # Regular expression pattern to split the string into problem, options, and response
+        pattern = r"### Problem:\s*(.*?)\n(.*?)\s*### Response:\s*(.*?)\s*(?=##|$)"
+        # Find all matches in the input string
+        matches = re.findall(pattern, generated_output, re.DOTALL)
+
+        data = []
+        for match in matches:
+            if not len(match) == 3:
+                # skipping item
+                continue
+
+            instruction = match[0].strip()
+            options = match[1].strip()
+            response = match[2].strip()
+
+            if not instruction or not options or not response:
+                # skipping item
+                continue
+
+            choices = re.findall(r"(\w)\. ([^\n]+)", options)
+            if len(choices) != 4:
+                # skipping item
+                continue
+
+            # error in the labels
+            labels = [c[0] for c in choices]
+            if labels != ["A", "B", "C", "D"]:
+                continue
+
+            # check if the response is valid
+            if response[0] not in ["A", "B", "C", "D"]:
+                continue
+
+            # take first letter in response
+            response = response[0]
+
+            # re-assign options to create balanced labels
+            np.random.shuffle(choices)
+            labels, texts = zip(*choices)
+
+            response = "ABCD"[labels.index(response)]
+            options = "\n".join(
+                [f"{label}. {text}" for label, text in zip("ABCD", texts[:4])]
+            )
+
+            instruction = (
+                "Question:\n{instruction}\nChoices:\n{options}\nAnswer:".format(
+                    instruction=instruction, options=options
+                )
+            )
+            data.append({"instruction": instruction, "response": response})
+        return data
+
+    @classmethod
+    def apply(cls, context, output, domain, icl_examples=None):
+        domain = domain.replace("_", " ")
+        batch_size = "five"
+        task_description = f"""Your task is to come up with a set of {batch_size} diverse multiple-choice problems, each with their answer options and ground-truth response about the following domain: {domain}.
+
+Please stick to the following format for your output:
+
+## Example [number of the example]
+### Problem:
+[your generated problem]
+A. [your first generated option]
+B. [your second generated option]
+C. [your third generated option]
+D. [your fourth generated option]
+
+### Response:
+[the correct response, which should be A, B, C or D]
+
+For example:
+
+## Example 1
+### Problem:
+{icl_examples[0]['instruction']}
+{icl_examples[0]['options']}
+
+### Response:
+{icl_examples[0]['response']}
+
+## Example 2
+### Problem:
+{icl_examples[1]['instruction']}
+{icl_examples[1]['options']}
+
+### Response:
+{icl_examples[1]['response']}
+
+## Example 3
+### Problem:
+{icl_examples[2]['instruction']}
+{icl_examples[2]['options']}
+
+### Response:
+{icl_examples[2]['response']}
+
+You should generate your problems based on the content of the following context. The problems should be self-contained and clear, i.e., they should not require the context to be understood.
+
+{context}
+
+Now, generate {batch_size} diverse problems each with four options (A, B, C, D) and a response. Strive to make your problems diverse, by using diverse sentence syntactic constructions and vocabulary. Please follow the guidelines carefully when generating problems and responses:
+"""
+        return task_description
+
+
+class OAITemplate_Batched_MultiChoice_CoT:
+    @classmethod
+    def post_process_generation(cls, generated_output):
+        # Regular expression pattern to split the string into problem, options, and response
+        pattern = r"### Problem:\s*(.*?)\n(.*?)\s*### Response:\s*(.*?)\s*(?=##|$)"
+
+        # Find all matches in the input string
+        matches = re.findall(pattern, generated_output, re.DOTALL)
+
+        data = []
+        for match in matches:
+            if not len(match) == 3:
+                # skipping item
+                continue
+
+            instruction = match[0].strip()
+            options = match[1].strip()
+            response = match[2].strip()
+
+            if not instruction or not options or not response:
+                # skipping item
+                continue
+
+            choices = re.findall(r"(\w)\. ([^\n]+)", options)
+            if len(choices) != 4:
+                # skipping item
+                continue
+
+            # error in the labels
+            labels = [c[0] for c in choices]
+            if labels != ["A", "B", "C", "D"]:
+                continue
+
+            # check if the response is valid
+            if response[0] not in ["A", "B", "C", "D"]:
+                continue
+
+            # take first letter in response
+            response = response[0]
+
+            # re-assign options to create balanced labels
+            np.random.shuffle(choices)
+            labels, texts = zip(*choices)
+
+            response = "ABCD"[labels.index(response)]
+            options = "\n".join(
+                [f"{label}. {text}" for label, text in zip("ABCD", texts[:4])]
+            )
+
+            instruction = (
+                "Question:\n{instruction}\nChoices:\n{options}\nAnswer:".format(
+                    instruction=instruction, options=options
+                )
+            )
+            data.append({"instruction": instruction, "response": response})
+        return data
+
+    @classmethod
+    def apply(cls, context, output, domain, icl_examples=None):
+        domain = domain.replace("_", " ")
+        batch_size = "five"
+        task_description = f"""Your task is to come up with a set of {batch_size} diverse multiple-choice problems, each with their answer options and ground-truth response about the following domain: {domain}.
+
+Carefully analyze the following context to generate your questions:
+
+### Context:
+{context}
+
+First, identify five (5) important concepts, which could be names, entities or facts from the above context. Write each concept in the following format:
+
+### Concepts:
+1. [your first generated concept]
+2. [your second generated concept]
+3. [your third generated concept]
+4. [your fourth generated concept]
+5. [your fifth generated concept]
+
+Then, generate {batch_size} diverse problems relevant to each concept, each with four options (A, B, C, D) and a response. Please stick to the following format for your output:
+
+## Example [number of the example]
+### Problem:
+[your generated problem]
+A. [your first generated option]
+B. [your second generated option]
+C. [your third generated option]
+D. [your fourth generated option]
+
+### Response:
+[the correct response, which should be A, B, C or D]
+
+For example:
+
+## Example 1
+### Problem:
+{icl_examples[0]['instruction']}
+{icl_examples[0]['options']}
+
+### Response:
+{icl_examples[0]['response']}
+
+Please follow the guidelines carefully when generating problems and responses:
 """
         return task_description
 
@@ -351,6 +591,18 @@ QA_MODEL_SETTINGS = {
         model_path="gpt-35-turbo",
         instruction_template=OAITemplate_Batched_MultiChoice(),
         response_template=OAITemplate_Batched_MultiChoice(),
+    ),
+    "openai_batched_multichoice_v2": QAModelSetting(
+        inverse_model_path="gpt-35-turbo",
+        model_path="gpt-35-turbo",
+        instruction_template=OAITemplate_Batched_MultiChoice_V2(),
+        response_template=OAITemplate_Batched_MultiChoice_V2(),
+    ),
+    "openai_batched_multichoice_cot": QAModelSetting(
+        inverse_model_path="gpt-35-turbo",
+        model_path="gpt-35-turbo",
+        instruction_template=OAITemplate_Batched_MultiChoice_CoT(),
+        response_template=OAITemplate_Batched_MultiChoice_CoT(),
     ),
 }
 
@@ -515,6 +767,20 @@ class QATransformModel(TransformModel):
         """
         import copy
 
+        if os.path.exists(dump_filename):
+            print("Loading existing instruction dataset...", dump_filename)
+            last_dataset = read_jsonl_dataset(dump_filename)
+            last_idx = int(last_dataset[-1]["id"])
+        else:
+            last_idx = -1
+
+        if last_idx != -1:
+            print(
+                f"Cutting off existing instruction dataset based on last index... {last_idx}, {len(dataset)}"
+            )
+            dataset = [c for c in dataset if int(c["id"]) > last_idx]
+            print(f"--> {len(dataset)}")
+
         def get_templated_context(entry):
             return self.instruction_template.apply(
                 context=entry["context"],
@@ -530,6 +796,7 @@ class QATransformModel(TransformModel):
             print(context)
             print()
 
+        print(f"Executing {len(templated_contexts)} requests.")
         result = iter(
             llm.generate(
                 templated_contexts,
@@ -540,25 +807,23 @@ class QATransformModel(TransformModel):
             )
         )
 
-        new_dataset = []
+        new_dataset = last_dataset if last_idx > -1 else []
         for entry, output_and_reason in zip(dataset, result):
             instruction, finish_reason = output_and_reason
-            data = self.instruction_template.post_process_generation(instruction)
-            if isinstance(data, list):
-                for d in data:
-                    if reject_output(d["instruction"], finish_reason):
-                        continue
 
+            data = self.instruction_template.post_process_generation(instruction)
+            if not isinstance(data, list):
+                data = [data]
+
+            if not data:
+                print("Skipping generations from context id:", entry["id"])
+                with open(dump_filename + "_discarded", "a") as f:
                     copied_entry = copy.deepcopy(entry)
-                    copied_entry.update(
-                        {
-                            "author_instr": str(llm.model_name),
-                        }
-                    )
-                    copied_entry.update(d)
-                    new_dataset.append(copied_entry)
-            else:
-                if reject_output(data["instruction"], finish_reason):
+                    copied_entry["generation"] = instruction
+                    f.write(json.dumps(copied_entry) + "\n")
+
+            for d in data:
+                if reject_output(d["instruction"], finish_reason):
                     continue
 
                 copied_entry = copy.deepcopy(entry)
@@ -567,10 +832,11 @@ class QATransformModel(TransformModel):
                         "author_instr": str(llm.model_name),
                     }
                 )
-                copied_entry.update(data)
+                copied_entry.update(d)
                 new_dataset.append(copied_entry)
 
-            dump_jsonl_dataset(new_dataset, dump_filename)
+                with open(dump_filename, "a") as f:
+                    f.write(json.dumps(copied_entry) + "\n")
 
         print("Created a new instruction dataset of size:", len(new_dataset))
         return new_dataset
