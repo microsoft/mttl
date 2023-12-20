@@ -201,7 +201,7 @@ def train_classifier(args):
         val_check_interval=0.5,
         limit_val_batches=0.5,
     )
-    # trainer.fit(module, datamodule)
+    trainer.fit(module, datamodule)
     trainer.test(module, datamodule.test_dataloader())
     if wandb_logger:
         wandb_logger.experiment.finish()
