@@ -2,6 +2,7 @@ import os
 import sys
 from huggingface_hub import login
 from pytorch_lightning import seed_everything
+from mttl.datamodule.hswag_data_module import HellaswagDataConfig
 from mttl.datamodule.humaneval_module import HumanEvalConfig
 from mttl.datamodule.arc_data_module import ArcDataConfig
 from mttl.datamodule.mmlu_data_module import MMLUDataConfig
@@ -87,7 +88,8 @@ def setup_evaluators(args, active_tasks=["piqa"]):
             )
         elif task == "hswag":
             evaluators["hswag"] = HellaswagEvaluator(
-                config, generation_kwargs=generation_kwargs
+                HellaswagDataConfig(**common_kwargs),
+                generation_kwargs=generation_kwargs,
             )
         else:
             raise ValueError("No active tasks")
