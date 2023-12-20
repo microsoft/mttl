@@ -1,8 +1,10 @@
-from abc import ABC, abstractmethod, abstractproperty
+from abc import ABC, abstractmethod
 from collections import defaultdict
-import contextlib
 from copy import deepcopy
 import math
+import torch
+
+from transformers import StoppingCriteria
 
 
 def mean(arr):
@@ -61,12 +63,20 @@ def switch_to_eval_mode(fn):
 
 
 class Evaluator(ABC):
-    def __init__(self, datamodule=None, config=None, device="cuda", use_vllm=False):
+    def __init__(
+        self,
+        datamodule=None,
+        config=None,
+        device="cuda",
+        use_vllm=False,
+        generation_kwargs=None,
+    ):
         if config is None and datamodule is None:
             raise ValueError("Either config or datamodule must be provided.")
 
         self.config = deepcopy(config)
         self.datamodule = datamodule
+        self.generation_kwargs = generation_kwargs or {}
         self.use_vllm = use_vllm
         self.device = device
 
@@ -85,6 +95,9 @@ class Evaluator(ABC):
     @abstractmethod
     def evaluate(self, model, split="test", shuffle=False, subsample=-1, **kwargs):
         pass
+
+    def evaluate_with_vllm(self, model, dataloader, num_batches=None, verbose=True):
+        raise NotImplementedError()
 
     @property
     def tasks(self):
