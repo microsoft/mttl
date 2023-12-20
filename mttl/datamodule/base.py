@@ -292,6 +292,8 @@ class MultipleChoiceCollator(DefaultCollator):
         num_options = [len(t) for t in multi_labels]
         multi_sources = [s for s, l in zip(sources, multi_labels) for _ in l]
         multi_labels = list(itertools.chain(*multi_labels))
+        multi_task_names = [tn for tn, l in zip(task_names, multi_labels) for _ in l]
+        multi_task_ids = [tid for tid, l in zip(task_ids, multi_labels) for _ in l]
 
         output_batch = (
             self.prepare_inputs_for_gpt_family(multi_sources, multi_labels)
@@ -304,10 +306,12 @@ class MultipleChoiceCollator(DefaultCollator):
 
         if not has_task_ids and has_task_names and self.task_to_id:
             output_batch["task_ids"] = torch.LongTensor(
-                [self.task_to_id[tn] for tn in task_names]
+                [self.task_to_id[tn] for tn in multi_task_names]
             )
+        elif has_task_ids:
+            output_batch["task_ids"] = torch.LongTensor(multi_task_ids)
 
-        output_batch["task_names"] = task_names
+        output_batch["task_names"] = multi_task_names
         output_batch["sources_texts"] = multi_sources
         output_batch["labels_texts"] = multi_labels
         output_batch["labels_index"] = label_index
