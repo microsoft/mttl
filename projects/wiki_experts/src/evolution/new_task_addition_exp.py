@@ -33,7 +33,6 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     ExpertLibrary,
     Score,
 )
-from projects.wiki_experts.src.evolution.train_router import train_router
 from projects.wiki_experts.src.evolution.evaluators import (
     Evaluator,
     prepare_evaluator,

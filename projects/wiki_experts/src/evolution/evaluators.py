@@ -124,6 +124,7 @@ class ExtendedRougeEvaluator(RougeEvaluator, Evaluator):
         self.name = name
         self.split = split
         self.subsample = subsample
+        self.datamodule = datamodule
 
     def evaluate(self, model):
         device = "cuda" if torch.cuda.is_available() else "cpu"

@@ -20,8 +20,13 @@ from projects.wiki_experts.src.evolution.evaluators import (
 )
 
 from mttl.utils import logger
-from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.models.modifiers.expert_containers.expert_library import (
+    HFExpertLibrary,
+    get_best_expert_for_score,
+    get_best_expert_for_task,
+)
 from projects.wiki_experts.src.evolution.config import find_version
+from mttl.models.modifiers.expert_containers.module_graph import Expert
 
 
 class TableLogger:
@@ -121,3 +126,25 @@ def log_wandb(scores, prefix):
     if wandb.run is not None:
         for t, v in scores.items():
             wandb.log({f"{prefix}_on_{t}_test_mmlu": v["mean"]})
+
+
+def get_task_expert(task, expert_lib, default_score):
+    """
+    Get the best expert for a given task.
+
+    Args:
+        task (str): The task for which to find the expert.
+        expert_lib (ExpertLibrary): The library of available experts.
+        default_score (Score): Score to use for expert retrieval.
+
+    Returns:
+        Expert: The best expert for the given task according to the score.
+    Raises:
+        ValueError: If no default score is provided.
+    """
+    if default_score is None:
+        raise ValueError("No default score provided")
+    parent_exp: Expert = get_best_expert_for_score(expert_lib, default_score.hash)
+    if parent_exp is None and task in expert_lib.tasks:
+        parent_exp = get_best_expert_for_task(expert_lib, task, default_score.hash)
+    return parent_exp
