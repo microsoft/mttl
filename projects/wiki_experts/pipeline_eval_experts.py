@@ -125,7 +125,9 @@ def run_eval(args):
         module.load_from_graph_string(args.module_graph, expert_library=library)
     module.to("cuda")
 
-    evaluators = setup_evaluators(args, active_tasks=args.pipeline_eval_tasks)
+    evaluators = setup_evaluators(
+        args, active_tasks=args.pipeline_eval_tasks.split(",")
+    )
 
     for name, evaluator in evaluators.items():
         scores = evaluator.evaluate(module, shuffle=True)
