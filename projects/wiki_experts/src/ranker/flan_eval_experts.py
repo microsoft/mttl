@@ -48,11 +48,6 @@ def parse_experts_to_load(experts_to_load):
         else:
             action = "route"
 
-        if len(options) >= 3:
-            load_only_layers = options[2]
-        else:
-            load_only_layers = None
-
         is_default = "*" in action
         action = action.replace("*", "")
 
@@ -72,7 +67,6 @@ def parse_experts_to_load(experts_to_load):
                 "action": action,
                 "is_default": is_default,
                 "expert_name": expert_name,
-                "load_only_layers": load_only_layers,
             }
         )
     return kwargs

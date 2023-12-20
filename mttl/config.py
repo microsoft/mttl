@@ -4,10 +4,7 @@ import ast
 import argparse
 from string import Template
 from typing import Dict
-
 from mttl.utils import logger
-from transformers import TrainingArguments
-from dataclasses import dataclass
 
 
 class Config:
@@ -41,6 +38,15 @@ class Config:
 
     def post_init(self):
         pass
+
+    @classmethod
+    def fromdict(cls, data):
+        return cls(kwargs=data, raise_error=False, silent=True)
+
+    def asdict(self) -> Dict:
+        from mttl.models.utils import convert_hps_to_dict
+
+        return convert_hps_to_dict(self.__dict__)
 
     def was_overridden(self, key):
         return key in self._updated_kwargs

@@ -62,6 +62,7 @@ def get_all_tasks_using_single_expert(
     )
 
     module.replace_container_with_expert(expert_name)
+    module.to("cuda")
     scores = evaluator.evaluate(module)
     print(scores)
 

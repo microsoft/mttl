@@ -36,7 +36,6 @@ class TestRoutedMultiExpertModel:
         model_object = make_tiny_llama()
         exp_trainer = ExpertTrainer(
             tokenizer=None,
-            expert_info={},
             **vars(config),
             model_object=model_object,
         )
@@ -59,7 +58,6 @@ class TestRoutedMultiExpertModel:
         module = RoutedMultiExpertModel(
             model_object=make_tiny_llama(),
             tokenizer=None,
-            expert_info={},
             **vars(config),
         )
         assert module.hparams.model_modifier == None

@@ -287,7 +287,8 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
             ) or key in plugin_param_keys:
                 del state_dict[key]
                 deleted.append(key)
-        logger.info("Deleted from state dict: {}".format(deleted))
+
+        logger.info("Deleted from state dict: {}".format(len(deleted)))
 
     def on_save_checkpoint(self, ckpt):
         self._delete_non_trainable_params(ckpt["state_dict"])
@@ -300,9 +301,6 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
         assert (
             len(load_result.unexpected_keys) == 0
         ), f"Load model failed, unexpected keys {load_result.unexpected_keys.__str__()}"
-
-    def transfer_batch_to_device(self, batch, device, dataloader_idx):
-        return transfer_batch_to_device(batch, device)
 
     def configure_optimizers(self):
         args = self.hparams

@@ -112,6 +112,15 @@ def test_skilled_lora_parallel_merge_with_weights():
     assert output[1, 0, 0].item() == 4.0
     assert output.shape == (2, 3, 2)
 
+    # one skilled lora with weights tied across batch
+    input = torch.ones(2, 1)
+    output = SkilledLoRA.parallel_linear_forward(
+        input, [ada1], [torch.tensor([0.5, 0.5]), torch.tensor([0.0, 1.0])]
+    )
+    assert output[0, 0].item() == 1.5
+    assert output[1, 0].item() == 2.0
+    assert output.shape == (2, 2)
+
 
 def test_skilled_lora_view():
     layer = torch.nn.Linear(1, 2, bias=False)
