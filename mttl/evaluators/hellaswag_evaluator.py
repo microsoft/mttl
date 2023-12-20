@@ -3,7 +3,7 @@ from mttl.evaluators.base import switch_to_eval_mode
 from mttl.evaluators.loglike_evaluator import LogLikeEvaluator
 
 
-class ArcEvaluator(LogLikeEvaluator):
+class HellaswagEvaluator(LogLikeEvaluator):
     def __init__(self, config, **kwargs):
         datamodule = HellaswagMultiChoiceModule(config)
 

@@ -6,8 +6,6 @@ from mttl.datamodule.humaneval_module import HumanEvalConfig
 from mttl.datamodule.arc_data_module import ArcDataConfig
 from mttl.datamodule.mmlu_data_module import MMLUDataConfig
 from mttl.datamodule.piqa_data_module import PiqaDataConfig
-from mttl.evaluators.arc_evaluator import ArcEvaluator
-from mttl.evaluators.piqa_evaluator import PiqaEvaluator
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 
 
@@ -15,6 +13,9 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
 from mttl.datamodule.bbh_data_module import BBHConfig
+from mttl.evaluators.arc_evaluator import ArcEvaluator
+from mttl.evaluators.piqa_evaluator import PiqaEvaluator
+from mttl.evaluators.hellaswag_evaluator import HellaswagEvaluator
 from mttl.evaluators import MMLUEvaluator
 from mttl.evaluators.humaneval_evaluator import HumanEvalEvaluator
 from mttl.evaluators.bbh_evaluator import BBHEvaluator
@@ -82,6 +83,10 @@ def setup_evaluators(args, active_tasks=["piqa"]):
                 **common_kwargs,
             )
             evaluators["piqa"] = PiqaEvaluator(
+                config, generation_kwargs=generation_kwargs
+            )
+        elif task == "hswag":
+            evaluators["hswag"] = HellaswagEvaluator(
                 config, generation_kwargs=generation_kwargs
             )
         else:
