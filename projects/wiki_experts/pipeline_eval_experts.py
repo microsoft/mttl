@@ -4,8 +4,10 @@ from huggingface_hub import login
 from pytorch_lightning import seed_everything
 from mttl.datamodule.humaneval_module import HumanEvalConfig
 from mttl.datamodule.arc_data_module import ArcDataConfig, ArcMultiChoiceDataModule
+from mttl.datamodule.piqa_data_module import PiqaDataConfig
 from mttl.evaluators.arc_evaluator import ArcEvaluator
 from mttl.evaluators.em_evaluator import EMEvaluator
+from mttl.evaluators.piqa_evaluator import PiqaEvaluator
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 from mttl.models.modifiers.expert_containers.module_graph import Expert, ExpertInfo
 from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
@@ -27,7 +29,7 @@ from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.mmlu_eval_experts import parse_experts_to_load
 
 
-active_tasks = ["arc"]
+active_tasks = ["piqa"]
 
 
 def setup_evaluators(args):
@@ -65,6 +67,11 @@ def setup_evaluators(args):
             **common_kwargs,
         )
         evaluators.append(ArcEvaluator(config, generation_kwargs=generation_kwargs))
+    elif "piqa" in active_tasks:
+        config = PiqaDataConfig(
+            **common_kwargs,
+        )
+        evaluators.append(PiqaEvaluator(config, generation_kwargs=generation_kwargs))
     else:
         raise ValueError("No active tasks")
     return evaluators

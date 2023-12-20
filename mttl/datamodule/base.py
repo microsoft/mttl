@@ -465,6 +465,23 @@ class DefaultDataModule(LightningDataModule):
         pass
 
 
+class MultiChoiceDataModule(DefaultDataModule):
+    @property
+    def collate_fn(self):
+        return MultipleChoiceCollator(
+            tokenizer=self.tokenizer,
+            padding="longest",
+            max_input_length=self.config.max_input_length,
+            max_output_length=self.config.max_output_length,
+            pad_to_multiple_of=8,
+            return_tensors="pt",
+            model_family=self.config.model_family,
+            for_generation=self.for_generation,
+            train_on_inputs=self.config.train_on_inputs,
+            task_to_id=self.task_to_id,
+        )
+
+
 class AutoDataModule:
     @classmethod
     def create(cls, name, for_generation=False, val_mixin=False, **kwargs):

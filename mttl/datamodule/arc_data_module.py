@@ -1,13 +1,11 @@
 from datasets import load_dataset
 from mttl.datamodule.base import (
-    DefaultDataModule,
+    MultiChoiceDataModule,
     DatasetConfig,
     MultipleChoiceCollator,
 )
 from dataclasses import dataclass
 import os
-
-from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 
 
 @dataclass
@@ -15,22 +13,7 @@ class ArcDataConfig(DatasetConfig):
     arc_type: str = "ARC-Easy"
 
 
-class ArcMultiChoiceDataModule(DefaultDataModule):
-    @property
-    def collate_fn(self):
-        return MultipleChoiceCollator(
-            tokenizer=self.tokenizer,
-            padding="longest",
-            max_input_length=self.config.max_input_length,
-            max_output_length=self.config.max_output_length,
-            pad_to_multiple_of=8,
-            return_tensors="pt",
-            model_family=self.config.model_family,
-            for_generation=self.for_generation,
-            train_on_inputs=self.config.train_on_inputs,
-            task_to_id=self.task_to_id,
-        )
-
+class ArcMultiChoiceDataModule(MultiChoiceDataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
         dataset = load_dataset("ai2_arc", name=self.config.arc_type)["test"]
