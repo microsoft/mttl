@@ -10,7 +10,7 @@ from mttl.models.modifiers.kv_adapter import (
     KVAdapterConfig,
     PolyKVAdapterConfig,
 )
-from mttl.models.modifiers.poly import PolytroponSelector
+from mttl.models.modifiers.poly import PolytroponSelector, PolytroponConfig
 from mttl.models.modifiers.routing import RoutingMixin
 from mttl.models.modifiers.debug_utils import check_if_align, monitor_transformer
 
@@ -392,8 +392,8 @@ def modify_with_prompt_tuning(soft_prompt_cls, embed_cls, transformer, config):
 
 @dataclass
 class PromptTuningConfig(KVAdapterConfig):
-    add_routing_token = False
-    prompt_placement = "prefix"
+    add_routing_token: str = False
+    prompt_placement: str = "prefix"
 
 
 @register_modifier("prompt_tuning", config_cls=PromptTuningConfig)
@@ -421,8 +421,8 @@ class PromptTuning(Adapter, ModifyMixin):
 
 
 @dataclass
-class PolyPromptTuningConfig(KVAdapterConfig):
-    add_routing_token = True
+class PolyPromptTuningConfig(KVAdapterConfig, PolytroponConfig):
+    pass
 
 
 @register_modifier("poly_prompt_tuning", config_cls=PolyPromptTuningConfig)
