@@ -58,6 +58,8 @@ class ExpertConfig(Config):
         self.eval_metric = "loss"
         self.use_vllm = False
 
+        self.pipeline_eval_tasks = "piqa,arc-easy,arc-challenge"
+
     def post_init(self):
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size

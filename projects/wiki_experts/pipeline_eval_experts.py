@@ -3,18 +3,18 @@ import sys
 from huggingface_hub import login
 from pytorch_lightning import seed_everything
 from mttl.datamodule.humaneval_module import HumanEvalConfig
-from mttl.datamodule.arc_data_module import ArcDataConfig, ArcMultiChoiceDataModule
+from mttl.datamodule.arc_data_module import ArcDataConfig
+from mttl.datamodule.mmlu_data_module import MMLUDataConfig
 from mttl.datamodule.piqa_data_module import PiqaDataConfig
 from mttl.evaluators.arc_evaluator import ArcEvaluator
-from mttl.evaluators.em_evaluator import EMEvaluator
 from mttl.evaluators.piqa_evaluator import PiqaEvaluator
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
-from mttl.models.modifiers.expert_containers.module_graph import Expert, ExpertInfo
-from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
+
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.datamodule.bbh_data_module import BBHConfig, BBHDataModule
+
+from mttl.datamodule.bbh_data_module import BBHConfig
 from mttl.evaluators import MMLUEvaluator
 from mttl.evaluators.humaneval_evaluator import HumanEvalEvaluator
 from mttl.evaluators.bbh_evaluator import BBHEvaluator
@@ -29,12 +29,8 @@ from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.mmlu_eval_experts import parse_experts_to_load
 
 
-active_tasks = ["piqa"]
-
-
-def setup_evaluators(args):
-    evaluators = []
-
+def setup_evaluators(args, active_tasks=["piqa"]):
+    evaluators = {}
     common_kwargs = {
         "model": args.model,
         "model_family": args.model_family,
@@ -49,31 +45,47 @@ def setup_evaluators(args):
         "do_sample": True,
     }
 
-    if "humaneval" in active_tasks:
-        common_kwargs["max_output_length"] = 300
-        config = HumanEvalConfig(
-            **common_kwargs,
-        )
-        evaluators.append(
-            HumanEvalEvaluator(config, generation_kwargs=generation_kwargs)
-        )
-    elif "bbh" in active_tasks:
-        config = BBHConfig(
-            **common_kwargs,
-        )
-        evaluators.append(BBHEvaluator(config, generation_kwargs=generation_kwargs))
-    elif "arc" in active_tasks:
-        config = ArcDataConfig(
-            **common_kwargs,
-        )
-        evaluators.append(ArcEvaluator(config, generation_kwargs=generation_kwargs))
-    elif "piqa" in active_tasks:
-        config = PiqaDataConfig(
-            **common_kwargs,
-        )
-        evaluators.append(PiqaEvaluator(config, generation_kwargs=generation_kwargs))
-    else:
-        raise ValueError("No active tasks")
+    for task in set(active_tasks):
+        if task == "humaneval":
+            common_kwargs["max_output_length"] = 300
+            config = HumanEvalConfig(
+                **common_kwargs,
+            )
+            evaluators["humaneval"] = HumanEvalEvaluator(
+                config, generation_kwargs=generation_kwargs
+            )
+        elif task == "bbh":
+            config = BBHConfig(
+                **common_kwargs,
+            )
+            evaluators.append["bbh"] = BBHEvaluator(
+                config, generation_kwargs=generation_kwargs
+            )
+        elif task == "arc-easy":
+            config = ArcDataConfig(
+                **common_kwargs,
+                arc_type="ARC-Easy",
+            )
+            evaluators["arc-easy"] = ArcEvaluator(
+                config, generation_kwargs=generation_kwargs
+            )
+        elif task == "arc-challenge":
+            config = ArcDataConfig(
+                **common_kwargs,
+                arc_type="ARC-Challenge",
+            )
+            evaluators["arc-challenge"] = ArcEvaluator(
+                config, generation_kwargs=generation_kwargs
+            )
+        elif task == "piqa":
+            config = PiqaDataConfig(
+                **common_kwargs,
+            )
+            evaluators["piqa"] = PiqaEvaluator(
+                config, generation_kwargs=generation_kwargs
+            )
+        else:
+            raise ValueError("No active tasks")
     return evaluators
 
 
@@ -106,18 +118,19 @@ def run_eval(args):
             module.load_expert(**expert_kwargs, expert_library=library)
     elif args.module_graph is not None:
         module.load_from_graph_string(args.module_graph, expert_library=library)
-
     module.to("cuda")
 
-    evaluators = setup_evaluators(args)
-    for evaluator in evaluators:
+    evaluators = setup_evaluators(args, active_tasks=args.pipeline_eval_tasks)
+
+    for name, evaluator in evaluators.items():
         scores = evaluator.evaluate(module, shuffle=True)
-        logger.info("Evaluator scores: {}".format(scores))
+        logger.info("Task: {}".format(name))
+        logger.info("Scores: {}".format(scores))
 
-    with open(args.output_dir + "/scores.json", "w") as f:
-        import json
+        with open(args.output_dir + f"/{name}_scores.json", "w") as f:
+            import json
 
-        json.dump(scores, f)
+            json.dump(scores, f)
 
 
 if __name__ == "__main__":

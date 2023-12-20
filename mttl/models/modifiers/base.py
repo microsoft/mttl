@@ -43,15 +43,6 @@ class ModifierConfig(object):
         return data
 
     @classmethod
-    def from_training_config(cls, training_config: "Config"):
-        """Build modifier config from the training config."""
-        kwargs = {}
-        for key, _ in cls.__dataclass_fields__.items():
-            if hasattr(training_config, key):
-                kwargs[key] = getattr(training_config, key)
-        return cls(**kwargs)
-
-    @classmethod
     def fromdict(cls, dumped: Dict) -> "ModifierConfig":
         from mttl.models.modifiers.modify_model import MODIFIERS_TO_CONFIGS
 
