@@ -20,6 +20,7 @@ from projects.wiki_experts.src.evolution.evaluators import (
 )
 
 from mttl.utils import logger
+from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 
 
 class TableLogger:
@@ -66,6 +67,35 @@ def save_new_module(output_dir, module, task_name, postfix=""):
     ckpt_path = module_copy.save_pretrained(dest)
     del module_copy
     return ckpt_path
+
+
+def find_version(s):
+    match = re.search(r"_v(\d+)$", s)
+    return int(match.group(1)) if match else 0
+
+
+def remove_outdated_experts_from_library(library: HFExpertLibrary):
+    for task in library.tasks:
+        experts = library.get_experts_for_task(task)
+        if len(experts) <= 1:
+            continue
+        version = [find_version(metadatum.expert_name) for metadatum in experts]
+        arg_max = np.argmax(version)
+        for i, metadatum in enumerate(experts):
+            if isinstance(metadatum.expert_task_name, list):
+                library.remove_expert(metadatum.expert_name, soft_delete=True)
+            if i != arg_max:
+                library.remove_expert(metadatum.expert_name, soft_delete=True)
+
+
+def get_svd_embedding(lib, expert_name: str):
+    try:
+        embeddings = lib.get_auxiliary_data(
+            data_type="embeddings", expert_name=expert_name
+        )
+    except ValueError:
+        return None
+    return embeddings["svd"]["embedding"]
 
 
 def init_wandb_logger(args):

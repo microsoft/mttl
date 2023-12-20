@@ -21,11 +21,11 @@ from projects.wiki_experts.src.evolution.utils import (
     get_loss,
     init_wandb_logger,
     TableLogger,
+    remove_outdated_experts_from_library,
 )
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from mttl.models.modifiers.expert_containers.expert_library import (
-    remove_outdated_experts_from_library,
     get_best_expert_for_task,
     get_best_expert_for_score,
     LocalExpertLibrary,

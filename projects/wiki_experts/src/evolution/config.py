@@ -8,11 +8,7 @@ from projects.wiki_experts.src.config import ExpertConfig
 from mttl.models.modifiers.expert_containers.module_graph import ExpertInfo
 import mttl.datamodule.flan_tasks
 import re
-
-
-def find_version(s):
-    match = re.search(r"_v(\d+)$", s)
-    return int(match.group(1)) if match else 0
+from projects.wiki_experts.src.evolution.utils import find_version
 
 
 def increase_version(s):

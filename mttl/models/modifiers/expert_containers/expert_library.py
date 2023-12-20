@@ -13,11 +13,6 @@ import numpy as np
 import numpy as np
 
 
-def find_version(s):
-    match = re.search(r"_v(\d+)$", s)
-    return int(match.group(1)) if match else 0
-
-
 from huggingface_hub import (
     hf_hub_download,
     login,
@@ -848,20 +843,6 @@ class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
             # TODO: upload the embeddings
 
         return remote_lib
-
-
-def remove_outdated_experts_from_library(library: HFExpertLibrary):
-    for task in library.tasks:
-        experts = library.get_experts_for_task(task)
-        if len(experts) <= 1:
-            continue
-        version = [find_version(metadatum.expert_name) for metadatum in experts]
-        arg_max = np.argmax(version)
-        for i, metadatum in enumerate(experts):
-            if isinstance(metadatum.expert_task_name, list):
-                library.remove_expert(metadatum.expert_name, soft_delete=True)
-            if i != arg_max:
-                library.remove_expert(metadatum.expert_name, soft_delete=True)
 
 
 def get_best_expert_for_score(library: HFExpertLibrary, hash) -> Expert:

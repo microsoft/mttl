@@ -17,7 +17,6 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     ExpertLibrary,
     HFExpertLibrary,
     LocalExpertLibrary,
-    remove_outdated_experts_from_library,
 )
 
 # from projects.wiki_experts.src.evolution.evolving_expert_library import (
@@ -28,6 +27,7 @@ from projects.wiki_experts.src.evolution.utils import (
     log_wandb,
     init_wandb_logger,
     TableLogger,
+    remove_outdated_experts_from_library,
 )
 
 from projects.wiki_experts.src.evolution.evaluators import Evaluator, prepare_evaluator
