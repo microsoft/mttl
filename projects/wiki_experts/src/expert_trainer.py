@@ -176,12 +176,6 @@ class ExpertTrainer(EfficientCheckpointModule):
         )
         return generations
 
-    def load_expert(self, expert: Expert):
-        keys = self.model.load_state_dict(expert.expert_weights, strict=False)
-        assert (
-            sum(["lora" in k for k in keys.missing_keys]) == 0
-        ), "Some keys are missing"
-
     def on_save_checkpoint(self, ckpt):
         super().on_save_checkpoint(ckpt)
 

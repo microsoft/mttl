@@ -32,9 +32,12 @@ from mttl.utils import get_mlf_logger, setup_logging, logger
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
-from projects.wiki_experts.src.callbacks import RougeCallbackTestPerEpoch
+from projects.wiki_experts.src.callbacks import (
+    RougeCallbackTestPerEpoch,
+    OptimResetCallback,
+)
 from projects.wiki_experts.src.evolution.transfer_matrix import (
-    TransferMAtrixConfig,
+    TransferMatrixConfig,
     run_eval as create_transfer_matrix,
 )
 
@@ -194,6 +197,9 @@ def run_multitask(args: ExpertConfig):
 
     # callbacks.append(RougeCallback(gen_dm))
     callbacks.append(RougeCallbackTestPerEpoch(gen_dm, checkpoint_callback))
+    callbacks.append(
+        OptimResetCallback(reset_lr=args.reset_lr, reset_optim=args.reset_optim)
+    )
 
     trainer = Trainer(
         devices=-1,
@@ -227,7 +233,7 @@ def run_multitask(args: ExpertConfig):
     )
     ########################
     # create transfer matrix
-    config = TransferMAtrixConfig()
+    config = TransferMatrixConfig()
     for k, v in vars(args).items():
         if k in vars(config):
             setattr(config, k, v)

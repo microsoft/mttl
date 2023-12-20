@@ -2,6 +2,7 @@ import os
 import sys
 import copy
 import wandb
+import numpy as np
 import pandas as pd
 import seaborn as sns
 from typing import Dict
@@ -37,14 +38,14 @@ from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.vllm_engines.engines import free_memory
 from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
 
-DEBUG = False
+DEBUG = True
 if "AMLT_OUTPUT_DIR" in os.environ:
     DEBUG = False
 if DEBUG:
     print("!!!!!!!!!!!!!!!!!!!!!! DEBUG MODE")
 
 
-class TransferMAtrixConfig(EvolExpertConfig):
+class TransferMatrixConfig(EvolExpertConfig):
     def _set_defaults(self):
         super()._set_defaults()
         self.only_diagonal = False
@@ -59,6 +60,7 @@ def eval_expert_on_task(
     evaluator_test=None,
 ):
     logger.info(f"Evaluating perf for {task}")
+
     if expert is not None:
         model_copy = copy.deepcopy(module)
         if isinstance(expert, str):
@@ -71,6 +73,9 @@ def eval_expert_on_task(
         module = model_copy
 
     result = {}
+    if DEBUG:
+        result["test"] = 0.5
+        return result
     if evaluator_train is not None:
         scores_base_train = evaluator_train.evaluate(module)
         result["train"] = scores_base_train[task]["mean"]
@@ -101,7 +106,7 @@ def eval_all_experts_on_task(
 
 
 def produce_transfer_matrix(
-    args: TransferMAtrixConfig,
+    args: TransferMatrixConfig,
     expert_lib: ExpertLibrary,
     tasks: list,
     subsample=-1,
@@ -138,6 +143,7 @@ def produce_transfer_matrix(
             for n, expert in library.items():
                 if expert.expert_info.expert_task_name != task_eval_on:
                     library.remove_expert(n)
+                    log_row[n] = np.nan
         else:
             library = expert_lib
 
@@ -179,9 +185,9 @@ def run_eval(args: EvolExpertConfig, debug=None):
     if debug is not None:
         DEBUG = debug
 
-    if not DEBUG:
-        if wandb.run is not None:
-            init_wandb_logger(args)
+    # if not DEBUG:
+    if wandb.run is None:
+        init_wandb_logger(args)
     if args.hf_token_hub:
         login(token=args.hf_token_hub)
 
@@ -210,5 +216,5 @@ def run_eval(args: EvolExpertConfig, debug=None):
 
 
 if __name__ == "__main__":
-    args = TransferMAtrixConfig.parse()
+    args = TransferMatrixConfig.parse()
     run_eval(args)

@@ -59,6 +59,9 @@ class ExpertConfig(Config):
         self.eval_metric = "loss"
         self.use_vllm = False
 
+        self.reset_lr = False
+        self.reset_optim = False
+
     def post_init(self):
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size

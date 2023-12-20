@@ -1,7 +1,7 @@
 # flan tasks without NIv2 template
 FLAN_SUB1 = [
-    "ai2_arc_ARC_Challenge_1_0_0",
-    # "dbpedia_14_given_a_choice_of_categories_"
+    # "ai2_arc_ARC_Challenge_1_0_0",
+    "dbpedia_14_given_a_choice_of_categories_"
 ]
 
 FLAN_SUB3_with_new = [
@@ -684,3 +684,5 @@ ADAUNI_INTERFERENCE = [
     "wiqa_what_might_be_the_first_step_of_the_process",
     "ultrachat_19",
 ]
+# 1 train modules for each of these tasks, 4 pochs per module
+# train pairwise joint modules for 2 epochs each

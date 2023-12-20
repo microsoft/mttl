@@ -21,6 +21,7 @@ from projects.wiki_experts.src.evolution.utils import (
     get_loss,
     init_wandb_logger,
     TableLogger,
+    get_svd_embedding,
 )
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
@@ -451,11 +452,11 @@ def retrieve_experts_for_task(
         task_module_name = task_expert.name
         # compute cosine similarity between each expert and current task's expert, keep top sk
         emb_tasks = {}
-        emb_tasks[task_module_name] = expert_lib_copy.get_svd_embedding(
-            task_module_name
+        emb_tasks[task_module_name] = get_svd_embedding(
+            expert_lib_copy, task_module_name
         )
         for key, metadatum in expert_lib_copy.data.items():
-            emb_tasks[key] = expert_lib_copy.get_svd_embedding(metadatum.expert_name)
+            emb_tasks[key] = get_svd_embedding(expert_lib_copy, metadatum.expert_name)
             emb_tasks[key] = torch.tensor(emb_tasks[metadatum.expert_name])
 
         # compare this task's embed with  other

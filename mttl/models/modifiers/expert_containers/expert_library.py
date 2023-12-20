@@ -2,6 +2,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 import glob
 import io
+import re
 import json
 from typing import Any, Dict, List, Union
 import torch
@@ -9,8 +10,13 @@ import os
 import time
 import requests
 import numpy as np
-from projects.wiki_experts.src.evolution.config import find_version
 import numpy as np
+
+
+def find_version(s):
+    match = re.search(r"_v(\d+)$", s)
+    return int(match.group(1)) if match else 0
+
 
 from huggingface_hub import (
     hf_hub_download,
@@ -534,15 +540,6 @@ class ExpertLibrary:
             )
             logger.info(f"Scores for {expert_name} uploaded successfully.")
 
-    def get_svd_embedding(self, expert_name: str):
-        try:
-            embeddings = self.get_auxiliary_data(
-                data_type="embeddings", expert_name=expert_name
-            )
-        except ValueError:
-            return None
-        return embeddings["svd"]["embedding"]
-
     def add_embeddings(
         self,
         expert_name: str,
@@ -783,6 +780,17 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
 
     @classmethod
     def from_expet_dict(cls, expert_dict: Dict[str, Expert], destination):
+        """
+        Create a new LocalExpertLibrary object from a dictionary of experts. Usefull e.g. when I want to create a library from new experts that are created dynamically.
+
+        Args:
+            expert_dict (Dict[str, Expert]): A dictionary containing expert names as keys and Expert objects as values.
+            destination:
+            destination: path where the local library will be stored
+
+        Returns:
+            LocalExpertLibrary: A new LocalExpertLibrary object containing the experts from the dictionary.
+        """
         new_lib = LocalExpertLibrary(repo_id=destination)
         for name, expert in expert_dict.items():
             if expert not in new_lib:

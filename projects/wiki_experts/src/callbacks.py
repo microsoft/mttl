@@ -11,6 +11,7 @@ from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from mttl.utils import Averager, logger
 from mttl.models.utils import transfer_batch_to_device
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
+from pytorch_lightning.utilities.types import LRSchedulerConfig
 
 DEBUG = False
 
@@ -22,6 +23,46 @@ def decode(preds, tokenizer):
     )
     preds = [pred.strip() for pred in preds]
     return preds
+
+
+class OptimResetCallback(cb.Callback):
+    def __init__(self, reset_optim=False, reset_lr=False) -> None:
+        super().__init__()
+        self.reset_optim = reset_optim
+        self.reset_lr = reset_lr
+
+    def on_train_epoch_start(
+        self, trainer: Trainer, pl_module: LightningModule
+    ) -> None:
+        if self.reset_optim and self.reset_lr:
+            new = pl_module.configure_optimizers()
+            trainer.strategy.optimizers = [new["optimizer"]]
+            trainer.strategy.lr_scheduler_configs = [
+                LRSchedulerConfig(**new["lr_scheduler"])
+            ]
+            trainer.strategy.lr_scheduler_configs[0].__class__
+
+        elif self.reset_lr and not self.reset_optim:
+            optimizer_states = [opt.state_dict() for opt in trainer.optimizers]
+            new = pl_module.configure_optimizers()
+            trainer.strategy.optimizers = [new["optimizer"]]
+            trainer.strategy.lr_scheduler_configs = [
+                LRSchedulerConfig(**new["lr_scheduler"])
+            ]
+            lr = trainer.strategy.lr_scheduler_configs[0].scheduler._last_lr[0]
+            for opt, state in zip(trainer.strategy.optimizers, optimizer_states):
+                opt.load_state_dict(state)
+            for opt in trainer.strategy.optimizers:
+                opt.param_groups[0]["lr"] = lr
+
+        elif self.reset_optim and not self.reset_lr:
+            current_lr = trainer.optimizers[0].param_groups[0]["lr"]
+            new = pl_module.configure_optimizers()
+            trainer.strategy.optimizers = [new["optimizer"]]
+            for opt in trainer.strategy.optimizers:
+                opt.param_groups[0]["lr"] = current_lr
+
+        return super().on_train_epoch_start(trainer, pl_module)
 
 
 class RougeCallbackTestPerEpoch(cb.Callback):
