@@ -271,6 +271,8 @@ class DefaultCollator:
             output_batch["task_ids"] = torch.LongTensor(
                 [self.task_to_id[tn] for tn in task_names]
             )
+        elif has_task_ids:
+            output_batch["task_ids"] = torch.LongTensor(task_ids)
 
         output_batch["task_names"] = task_names
         output_batch["sources_texts"] = sources
