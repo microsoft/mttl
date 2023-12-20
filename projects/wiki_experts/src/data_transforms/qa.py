@@ -1,5 +1,6 @@
 from collections import defaultdict
 from dataclasses import dataclass
+import json
 import numpy as np
 import os
 
@@ -246,6 +247,13 @@ class OAITemplate_Batched_MultiChoice:
         # Find all matches in the input string
         matches = re.findall(pattern, generated_output, re.DOTALL)
 
+        # If nothing is found, try without the options, sometimes it forgets them
+        if not matches:
+            pattern = (
+                r"### Problem:\s*(.*?)\n\n(.*?)\s*### Response:\s*(.*?)\s*(?=##|$)"
+            )
+            matches = re.findall(pattern, generated_output, re.DOTALL)
+
         data = []
         for match in matches:
             if not len(match) == 3:
@@ -260,10 +268,31 @@ class OAITemplate_Batched_MultiChoice:
                 # skipping item
                 continue
 
-            options_split = re.split(r"\s*[A-D]\.\s*", options)
-            if not len(options_split) == 5:
+            choices = re.findall(r"(\w)\. ([^\n]+)", options)
+            if len(choices) != 4:
                 # skipping item
                 continue
+
+            # error in the labels
+            labels = [c[0] for c in choices]
+            if labels != ["A", "B", "C", "D"]:
+                continue
+
+            # check if the response is valid
+            if response[0] not in ["A", "B", "C", "D"]:
+                continue
+
+            # take first letter in response
+            response = response[0]
+
+            # re-assign options to create balanced labels
+            np.random.shuffle(choices)
+            labels, texts = zip(*choices)
+
+            response = "ABCD"[labels.index(response)]
+            options = "\n".join(
+                [f"{label}. {text}" for label, text in zip("ABCD", texts[:4])]
+            )
 
             instruction = (
                 "Question:\n{instruction}\nChoices:\n{options}\nAnswer:".format(
@@ -286,13 +315,13 @@ Please stick to the following format for your output:
 [your generated problem]
 
 ### Options:
-A. [your first generated options]
-B. [your second generated options]
-C. [your third generated options]
-D. [your fourth generated options]
+A. [your first generated option]
+B. [your second generated option]
+C. [your third generated option]
+D. [your fourth generated option]
 
 ### Response:
-[the correct response, which should be A., B., C. or D.]
+[the correct response, which should be A, B, C or D]
 
 For example:
 
@@ -310,7 +339,7 @@ You can take inspiration from the following context to generate your questions:
 
 {context}
 
-Now generate {batch_size} diverse problems with their options and responses. Please follow these guidelines carefully when generating problems and responses:
+Now generate {batch_size} diverse problems each with four options (A, B, C, D) and a response. Please follow the guidelines carefully when generating problems and responses:
 """
         return task_description
 
@@ -515,6 +544,20 @@ class QATransformModel(TransformModel):
         """
         import copy
 
+        if os.path.exists(dump_filename):
+            print("Loading existing instruction dataset...")
+            last_dataset = read_jsonl_dataset(dump_filename)
+            last_idx = int(last_dataset[-1]["id"])
+        else:
+            last_idx = -1
+
+        if last_idx != -1:
+            print(
+                f"Cutting off existing instruction dataset based on last index... {last_idx}, {len(dataset)}"
+            )
+            dataset = [c for c in dataset if int(c["id"]) > last_idx]
+            print(f"--> {len(dataset)}")
+
         def get_templated_context(entry):
             return self.instruction_template.apply(
                 context=entry["context"],
@@ -530,6 +573,7 @@ class QATransformModel(TransformModel):
             print(context)
             print()
 
+        print(f"Executing {len(templated_contexts)} requests.")
         result = iter(
             llm.generate(
                 templated_contexts,
@@ -540,25 +584,23 @@ class QATransformModel(TransformModel):
             )
         )
 
-        new_dataset = []
+        new_dataset = last_dataset if last_idx > -1 else []
         for entry, output_and_reason in zip(dataset, result):
             instruction, finish_reason = output_and_reason
-            data = self.instruction_template.post_process_generation(instruction)
-            if isinstance(data, list):
-                for d in data:
-                    if reject_output(d["instruction"], finish_reason):
-                        continue
 
+            data = self.instruction_template.post_process_generation(instruction)
+            if not isinstance(data, list):
+                data = [data]
+
+            if not data:
+                print("Skipping generations from context id:", entry["id"])
+                with open(dump_filename + "_discarded", "a") as f:
                     copied_entry = copy.deepcopy(entry)
-                    copied_entry.update(
-                        {
-                            "author_instr": str(llm.model_name),
-                        }
-                    )
-                    copied_entry.update(d)
-                    new_dataset.append(copied_entry)
-            else:
-                if reject_output(data["instruction"], finish_reason):
+                    copied_entry["generation"] = instruction
+                    f.write(json.dumps(copied_entry) + "\n")
+
+            for d in data:
+                if reject_output(d["instruction"], finish_reason):
                     continue
 
                 copied_entry = copy.deepcopy(entry)
@@ -567,10 +609,11 @@ class QATransformModel(TransformModel):
                         "author_instr": str(llm.model_name),
                     }
                 )
-                copied_entry.update(data)
+                copied_entry.update(d)
                 new_dataset.append(copied_entry)
 
-            dump_jsonl_dataset(new_dataset, dump_filename)
+                with open(dump_filename, "a") as f:
+                    f.write(json.dumps(copied_entry) + "\n")
 
         print("Created a new instruction dataset of size:", len(new_dataset))
         return new_dataset
