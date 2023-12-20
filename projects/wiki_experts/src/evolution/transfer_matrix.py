@@ -95,9 +95,12 @@ def eval_all_experts_on_task(
     base_model: MultiExpertModel,
     expert_lib: dict,
     evaluator: Evaluator = None,
+    only_diagonal=False,
 ):
     log_row = {}
     for expert_name, expert in expert_lib.items():
+        if only_diagonal and expert.expert_info.expert_task_name != task_eval_on:
+            continue
         score = eval_expert_on_task(
             task_eval_on, base_model, expert, evaluator_test=evaluator
         )
@@ -138,17 +141,12 @@ def produce_transfer_matrix(
             device_map="cpu",
         )
 
-        if args.only_diagonal:
-            library = copy.deepcopy(expert_lib)
-            for n, expert in library.items():
-                if expert.expert_info.expert_task_name != task_eval_on:
-                    library.remove_expert(n)
-                    log_row[n] = np.nan
-        else:
-            library = expert_lib
-
         log_row_task = eval_all_experts_on_task(
-            task_eval_on, module, library, evaluator=evaluator
+            task_eval_on,
+            module,
+            expert_lib,
+            evaluator=evaluator,
+            only_diagonal=args.only_diagonal,
         )
         log_row.update(log_row_task)
         # eval on base model
@@ -159,6 +157,7 @@ def produce_transfer_matrix(
         print(transfer_table.df)
         transfer_table.log(log_row)
         transfer_table.log_table_wandb()
+        transfer_table.df.to_csv(os.path.join(args.output_dir, "transfer_matrix.csv"))
 
     transfer_table.means()
     transfer_table.log_table_wandb()

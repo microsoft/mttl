@@ -21,6 +21,7 @@ from projects.wiki_experts.src.evolution.evaluators import (
 
 from mttl.utils import logger
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from projects.wiki_experts.src.evolution.config import find_version
 
 
 class TableLogger:
@@ -34,6 +35,11 @@ class TableLogger:
     def log(self, row: dict):
         if self.df is None or len(self.df) == 0:
             self.df = pd.DataFrame(columns=row.keys())
+        else:
+            # Add new columns to the DataFrame if they don't exist
+            new_columns = set(row.keys()) - set(self.df.columns)
+            for column in new_columns:
+                self.df[column] = np.nan
         self.df.loc[len(self.df.index)] = row
 
     def get_table(self):
@@ -67,11 +73,6 @@ def save_new_module(output_dir, module, task_name, postfix=""):
     ckpt_path = module_copy.save_pretrained(dest)
     del module_copy
     return ckpt_path
-
-
-def find_version(s):
-    match = re.search(r"_v(\d+)$", s)
-    return int(match.group(1)) if match else 0
 
 
 def remove_outdated_experts_from_library(library: HFExpertLibrary):
