@@ -392,6 +392,7 @@ def modify_with_prompt_tuning(soft_prompt_cls, embed_cls, transformer, config):
 
 @dataclass
 class PromptTuningConfig(KVAdapterConfig):
+    add_routing_token = False
     prompt_placement = "prefix"
 
 
