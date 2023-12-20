@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import itertools
 from pytorch_lightning import LightningDataModule
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PaddingStrategy
@@ -274,6 +275,43 @@ class DefaultCollator:
         output_batch["task_names"] = task_names
         output_batch["sources_texts"] = sources
         output_batch["labels_texts"] = labels
+        return output_batch
+
+
+@dataclass
+class MultipleChoiceCollator(DefaultCollator):
+    """A multiple choice collator useful to compute log-likelihoods of different options."""
+
+    def __call__(self, batch: Dict):
+        sources = [b["source"] for b in batch]
+        multi_labels = [b["target"] for b in batch]
+        label_index = [b["label_index"] for b in batch]
+        task_ids = [b.get("task_id", None) for b in batch]
+        task_names = [b.get("task_name", None) for b in batch]
+
+        num_options = [len(t) for t in multi_labels]
+        multi_sources = [s for s, l in zip(sources, multi_labels) for _ in l]
+        multi_labels = list(itertools.chain(*multi_labels))
+
+        output_batch = (
+            self.prepare_inputs_for_gpt_family(multi_sources, multi_labels)
+            if self.model_family == "gpt"
+            else self.prepare_inputs_for_seq2seq_family(multi_sources, multi_labels)
+        )
+
+        has_task_names = all(tn is not None for tn in task_names)
+        has_task_ids = all(tid is not None for tid in task_ids)
+
+        if not has_task_ids and has_task_names and self.task_to_id:
+            output_batch["task_ids"] = torch.LongTensor(
+                [self.task_to_id[tn] for tn in task_names]
+            )
+
+        output_batch["task_names"] = task_names
+        output_batch["sources_texts"] = multi_sources
+        output_batch["labels_texts"] = multi_labels
+        output_batch["labels_index"] = label_index
+        output_batch["num_options"] = num_options
         return output_batch
 
 

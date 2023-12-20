@@ -3,6 +3,8 @@ import sys
 from huggingface_hub import login
 from pytorch_lightning import seed_everything
 from mttl.datamodule.humaneval_module import HumanEvalConfig
+from mttl.datamodule.arc_data_module import ArcDataConfig, ArcMultiChoiceDataModule
+from mttl.evaluators.arc_evaluator import ArcEvaluator
 from mttl.evaluators.em_evaluator import EMEvaluator
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 from mttl.models.modifiers.expert_containers.module_graph import Expert, ExpertInfo
@@ -25,7 +27,7 @@ from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.mmlu_eval_experts import parse_experts_to_load
 
 
-active_tasks = ["humaneval"]
+active_tasks = ["arc"]
 
 
 def setup_evaluators(args):
@@ -37,6 +39,7 @@ def setup_evaluators(args):
         "max_input_length": args.max_input_length,
         "max_output_length": args.max_output_length,
         "predict_batch_size": args.predict_batch_size,
+        "truncation_side": args.truncation_side,
     }
     generation_kwargs = {
         "temperature": 0.05,
@@ -57,6 +60,11 @@ def setup_evaluators(args):
             **common_kwargs,
         )
         evaluators.append(BBHEvaluator(config, generation_kwargs=generation_kwargs))
+    elif "arc" in active_tasks:
+        config = ArcDataConfig(
+            **common_kwargs,
+        )
+        evaluators.append(ArcEvaluator(config, generation_kwargs=generation_kwargs))
     else:
         raise ValueError("No active tasks")
     return evaluators
