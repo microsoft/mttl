@@ -77,6 +77,7 @@ def run_eval(args):
 
     # get directory of the current file
     setup_logging(args.output_dir)
+    candidate_experts = os.environ.get("CANDIDATE_EXPERTS", None)
 
     logger.info("Args: {}".format(args.to_json()))
 
@@ -106,7 +107,12 @@ def run_eval(args):
         )
     if args.hf_lib_id:
         library = HFExpertLibrary(args.hf_lib_id)
-        module.load_from_library(library)
+        if isinstance(module, MultiExpertModelRanker) and candidate_experts is not None:
+            module.load_from_library(
+                library, candidate_experts=candidate_experts.split(",")
+            )
+        else:
+            module.load_from_library(library)
     elif args.load_module is not None:
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:

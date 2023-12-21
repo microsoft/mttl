@@ -337,6 +337,31 @@ class MultiExpertModelRanker(MultiExpertModel):
             os.path.join(self.hparams.output_dir, "analyse_predict_expert.txt"), "w"
         )
 
+    def load_from_library(
+        self, library, subsample_library_experts=0, candidate_experts=None
+    ):
+        import copy
+
+        keys = list(library.keys())
+        if self.hparams.subsample_library_experts > 0:
+            keys = np.random.permutation(keys)[:subsample_library_experts]
+
+        # fill all the weights with zeros after deep copying the weights
+        # TODO: clean this in some way
+        expert = library[keys[0]]
+        expert = copy.deepcopy(expert)
+        for _, value in expert.expert_weights.items():
+            value.fill_(0)
+        expert.name = "default"
+
+        self.add_expert_instance(expert, is_default=True)
+        for expert_name in tqdm.tqdm(keys, desc="Loading experts..."):
+            if candidate_experts is not None and expert_name not in candidate_experts:
+                print("skip expert: {}".format(expert_name))
+                continue
+            expert_dump = library.get_expert(expert_name, with_auxiliary_data=False)
+            self.add_expert_instance(expert_dump)
+
     def generate(
         self,
         batch,

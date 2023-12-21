@@ -106,6 +106,8 @@ def run_eval(args):
             module.load_expert(**expert_kwargs, expert_library=library)
     elif args.module_graph is not None:
         module.load_from_graph_string(args.module_graph, expert_library=library)
+    elif args.hf_lib_id is not None:
+        module.load_from_library(library)
 
     module.to("cuda")
 
