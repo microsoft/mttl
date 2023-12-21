@@ -168,8 +168,6 @@ class GenerationMixin:
         sources_texts = batch.get("sources_texts", None)
         sequences_texts = decode(predictions.sequences, self.tokenizer)
 
-        breakpoint()
-
         if self.config.model_family != "gpt":
             generated_texts = sequences_texts
         else:
