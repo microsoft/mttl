@@ -48,7 +48,7 @@ class BoolQDataModule(SuperGLUEMultiChoiceDataModule):
         prompt = "{}\nQuestion: {}?\nAnswer:"
         targets = ["no", "yes"]
 
-        example["source"] = (prompt.format(example["passage"], example["question"]),)
+        example["source"] = prompt.format(example["passage"], example["question"])
         example["target"] = targets
         example["label_index"] = example["label"]
         return example
