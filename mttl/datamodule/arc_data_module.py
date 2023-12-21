@@ -28,6 +28,7 @@ class ArcMultiChoiceDataModule(MultiChoiceDataModule):
             answer_key_map = {"1": "A", "2": "B", "3": "C", "4": "D", "5": "E"}
             answer_key = answer_key_map.get(example["answerKey"], example["answerKey"])
 
+            example["task_name"] = self.config.arc_type.lower()
             example["source"] = prompt.format(example["question"])
             example["target"] = targets
             example["label_index"] = ["A", "B", "C", "D", "E"].index(answer_key)

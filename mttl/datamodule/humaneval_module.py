@@ -1,9 +1,9 @@
-from functools import partial
-from datasets import load_dataset
-from mttl.datamodule.base import DefaultDataModule, DatasetConfig
-from dataclasses import dataclass
 import os
 
+from datasets import load_dataset
+from dataclasses import dataclass
+
+from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 
 
@@ -19,8 +19,8 @@ class HumanEvalDataModule(DefaultDataModule):
 
         # convert task_id to task_name and labels
         def map_example(example):
-            example["task_name"] = example["task_id"]
             example["task_source"] = "humaneval"
+            example["task_name"] = "humaneval"
             example["target"] = (
                 example["test"] + "\n" + f"check({example['entry_point']})"
             )
@@ -30,8 +30,7 @@ class HumanEvalDataModule(DefaultDataModule):
         dataset = dataset.map(
             map_example,
             num_proc=n_proc,
-            desc="Mapping task_id to task_name.",
-            remove_columns=["prompt", "test", "entry_point", "task_id"],
+            remove_columns=["prompt", "test", "entry_point"],
         )
 
         (

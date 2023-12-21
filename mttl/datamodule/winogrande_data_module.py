@@ -42,6 +42,7 @@ class WinograndeMultiChoiceDataModule(MultiChoiceSourceDataModule):
             example["source"] = sources
             example["target"] = target
             example["label_index"] = int(example_label)
+            example["task_name"] = "winogrande"
             return example
 
         dataset = dataset.map(

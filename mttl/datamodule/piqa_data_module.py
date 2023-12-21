@@ -25,6 +25,7 @@ class PiqaMultiChoiceDataModule(MultiChoiceDataModule):
             example["source"] = prompt.format(example["goal"])
             example["target"] = targets
             example["label_index"] = example["label"]
+            example["task_name"] = "piqa"
             return example
 
         dataset = dataset.map(
