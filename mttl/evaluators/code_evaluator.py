@@ -63,7 +63,7 @@ class CodeEvaluator(Evaluator):
         extra_kwargs["eos_token_id"] = self.tokenizer.eos_token_id
 
         metric = load("code_eval")
-        for _, batch in pbar:
+        for num_batch, batch in pbar:
             labels_texts = batch["labels_texts"]
 
             batch = transfer_batch_to_device(batch, self.device)
@@ -107,6 +107,9 @@ class CodeEvaluator(Evaluator):
                 logger.info(predictions[0][0])
 
             metric.add_batch(predictions=predictions, references=labels_texts)
+
+            if num_batches is not None and num_batch >= num_batches:
+                break
 
         metrics, _ = metric.compute(k=[1])
         return metrics["pass@1"]
