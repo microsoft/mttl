@@ -130,11 +130,24 @@ class RougeCallback(cb.Callback):
 
         from mttl.evaluators.rouge_evaluator import RougeEvaluator
 
-        self.evaluator = RougeEvaluator(datamodule, device=device)
+        self.evaluator = RougeEvaluator(datamodule=datamodule)
         self.every_n_epochs = every_n_epochs
         self.max_length = max_length
         self.verbose = False
         self.subsample = subsample
+        self.first_eval = False
+
+    def on_after_backward(self, trainer, pl_module):
+        if not self.first_eval:
+            rouge = self.evaluator.evaluate(
+                pl_module,
+                split="val",
+                verbose=self.verbose,
+                subsample=self.subsample,
+            )
+
+            pl_module.log("val/rougeL", rouge, on_step=True, prog_bar=True)
+            self.first_eval = True
 
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
@@ -145,7 +158,6 @@ class RougeCallback(cb.Callback):
                 split="val",
                 verbose=self.verbose,
                 subsample=self.subsample,
-                max_length=self.max_length,
             )
 
             pl_module.log("val/rougeL", rouge, on_epoch=True, prog_bar=True)
@@ -158,7 +170,6 @@ class RougeCallback(cb.Callback):
             split="test",
             verbose=self.verbose,
             subsample=self.subsample,
-            max_length=self.max_length,
         )
 
         pl_module.log("test/rougeL", rouge, on_epoch=True, prog_bar=True)
