@@ -4,6 +4,7 @@ import json
 import pytorch_lightning as pl
 
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.models.monitors import get_monitors
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -86,12 +87,12 @@ def get_datamodule(args, for_generation=False):
             **common_kwargs,
             include_template_type="*",
             include_task_source="CoT",
+            subsample_dev=args.subsample_dev,
         )
         dm = FlanModule(config, for_generation=for_generation)
     elif "flan" in args.dataset:
         config = FlanConfig(
-            **common_kwargs,
-            include_template_type="*",
+            **common_kwargs, include_template_type="*", subsample_dev=args.subsample_dev
         )
         dm = FlanModule(config, for_generation=for_generation)
     elif "flat" in args.dataset:
@@ -153,7 +154,7 @@ def run_multitask(args: ExpertConfig):
     loggers.append(SimpleLogger(args.output_dir))
 
     # get metric monitors for models
-    callbacks = []
+    callbacks = get_monitors(args)
 
     monitor = "val/loss"
     mode = "min"
@@ -186,7 +187,6 @@ def run_multitask(args: ExpertConfig):
         accelerator="gpu",
         logger=loggers,
         log_every_n_steps=1,
-        limit_val_batches=10,
         num_sanity_val_steps=0,
         default_root_dir=args.output_dir,
         max_epochs=args.num_train_epochs,
