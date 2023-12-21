@@ -76,3 +76,22 @@ def test_ni_eval():
     model = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-125m")
     results = ni.evaluate(model, subsample=80)
     assert results["all"]["mean"] == pytest.approx(1.98, 0.1)
+
+
+def test_loglike_eval():
+    from mttl.evaluators.hellaswag_evaluator import HellaswagEvaluator
+    from mttl.datamodule.hellaswag_data_module import HellaswagDataConfig
+
+    evaluator = HellaswagEvaluator(
+        HellaswagDataConfig(
+            model="EleutherAI/gpt-neo-125m",
+            model_family="gpt",
+            max_input_length=1024,
+            train_batch_size=1,
+            predict_batch_size=1,
+        ),
+        device="cpu",
+    )
+    model = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-125m")
+    result = evaluator.evaluate(model, num_batches=10)
+    assert np.allclose(result, 0.272, rtol=0.01)

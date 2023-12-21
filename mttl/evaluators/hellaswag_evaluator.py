@@ -1,4 +1,4 @@
-from mttl.datamodule.hswag_data_module import HellaswagMultiChoiceDataModule
+from mttl.datamodule.hellaswag_data_module import HellaswagMultiChoiceDataModule
 from mttl.evaluators.base import switch_to_eval_mode
 from mttl.evaluators.loglike_evaluator import LogLikeEvaluator
 
@@ -20,6 +20,11 @@ class HellaswagEvaluator(LogLikeEvaluator):
         shuffle=False,
     ):
         outputs = super().evaluate(
-            model, split, subsample, num_batches, verbose, shuffle
+            model,
+            split=split,
+            subsample=subsample,
+            num_batches=num_batches,
+            verbose=verbose,
+            shuffle=shuffle,
         )
         return outputs["accuracy"]

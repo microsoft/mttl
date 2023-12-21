@@ -12,7 +12,7 @@ from mttl.evaluators.superglue_evaluators import BoolQEvaluator
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.datamodule.hswag_data_module import HellaswagDataConfig
+from mttl.datamodule.hellaswag_data_module import HellaswagDataConfig
 from mttl.datamodule.humaneval_module import HumanEvalConfig
 from mttl.datamodule.mbpp_datamodule import MBPPDataConfig
 from mttl.datamodule.arc_data_module import ArcDataConfig
@@ -171,7 +171,7 @@ def run_eval(args):
 
     table = prettytable.PrettyTable()
     table.field_names = list(scores.keys())
-    table.add_row(*list(scores.values()))
+    table.add_row(list(scores.values()))
     print(table)
 
 
