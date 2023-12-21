@@ -284,23 +284,34 @@ class DefaultCollator:
 class MultipleChoiceCollator(DefaultCollator):
     """A multiple choice collator useful to compute log-likelihoods of different options."""
 
+    multisource: bool = False
+
     def __call__(self, batch: Dict):
+        def repeat(x, num_options):
+            return [x[i] for i, j in enumerate(num_options) for _ in range(j)]
+
         sources = [b["source"] for b in batch]
-        multi_labels = [b["target"] for b in batch]
+        labels = [b["target"] for b in batch]
         label_index = [b["label_index"] for b in batch]
         task_ids = [b.get("task_id", None) for b in batch]
         task_names = [b.get("task_name", None) for b in batch]
 
-        num_options = [len(t) for t in multi_labels]
-        multi_sources = [s for s, l in zip(sources, multi_labels) for _ in l]
-        multi_task_names = [tn for tn, l in zip(task_names, multi_labels) for _ in l]
-        multi_task_ids = [tid for tid, l in zip(task_ids, multi_labels) for _ in l]
-        multi_labels = list(itertools.chain(*multi_labels))
+        if self.multisource:
+            num_options = [len(t) for t in sources]
+            labels = repeat(labels, num_options)
+            sources = list(itertools.chain(*sources))
+        else:
+            num_options = [len(t) for t in labels]
+            sources = repeat(sources, num_options)
+            labels = list(itertools.chain(*labels))
+
+        task_names = repeat(task_names, num_options)
+        task_ids = repeat(task_ids, num_options)
 
         output_batch = (
-            self.prepare_inputs_for_gpt_family(multi_sources, multi_labels)
+            self.prepare_inputs_for_gpt_family(sources, labels)
             if self.model_family == "gpt"
-            else self.prepare_inputs_for_seq2seq_family(multi_sources, multi_labels)
+            else self.prepare_inputs_for_seq2seq_family(sources, labels)
         )
 
         has_task_names = all(tn is not None for tn in task_names)
@@ -308,15 +319,15 @@ class MultipleChoiceCollator(DefaultCollator):
 
         if not has_task_ids and has_task_names and self.task_to_id:
             output_batch["task_ids"] = torch.LongTensor(
-                [self.task_to_id[tn] for tn in multi_task_names]
+                [self.task_to_id[tn] for tn in task_names]
             )
         elif has_task_ids:
-            output_batch["task_ids"] = torch.LongTensor(multi_task_ids)
+            output_batch["task_ids"] = torch.LongTensor(task_ids)
 
-        output_batch["sources_texts"] = multi_sources
-        output_batch["labels_texts"] = multi_labels
+        output_batch["sources_texts"] = sources
+        output_batch["labels_texts"] = labels
         output_batch["labels_index"] = label_index
-        output_batch["task_names"] = multi_task_names
+        output_batch["task_names"] = task_names
         output_batch["num_options"] = num_options
         return output_batch
 
@@ -479,6 +490,29 @@ class MultiChoiceDataModule(DefaultDataModule):
             for_generation=self.for_generation,
             train_on_inputs=self.config.train_on_inputs,
             task_to_id=self.task_to_id,
+        )
+
+
+class MultiChoiceSourceDataModule(DefaultDataModule):
+    """
+    Collates multiple sources for the same target, it's when the target is the same,
+    but the source is different.
+    """
+
+    @property
+    def collate_fn(self):
+        return MultipleChoiceCollator(
+            tokenizer=self.tokenizer,
+            padding="longest",
+            max_input_length=self.config.max_input_length,
+            max_output_length=self.config.max_output_length,
+            pad_to_multiple_of=8,
+            return_tensors="pt",
+            model_family=self.config.model_family,
+            for_generation=self.for_generation,
+            train_on_inputs=self.config.train_on_inputs,
+            task_to_id=self.task_to_id,
+            multisource=True,
         )
 
 
