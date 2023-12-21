@@ -103,7 +103,8 @@ class CodeEvaluator(Evaluator):
             predictions = [[p] for p in predictions]
 
             if verbose:
-                logger.info("Prediction:", predictions[0][0])
+                logger.info("Prediction:")
+                logger.info(predictions[0][0])
 
             metric.add_batch(predictions=predictions, references=labels_texts)
 

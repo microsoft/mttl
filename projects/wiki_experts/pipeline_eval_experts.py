@@ -4,7 +4,9 @@ from huggingface_hub import login
 from pytorch_lightning import seed_everything
 
 from mttl.datamodule.openbookqa_data_module import OpenbookQADataConfig
+from mttl.datamodule.superglue_data_module import SuperGLUEDataConfig
 from mttl.evaluators.openbookqa_evaluator import OpenbookQAEvaluator
+from mttl.evaluators.superglue_evaluators import BoolQEvaluator
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -64,6 +66,13 @@ def setup_evaluators(args, active_tasks=["piqa"]):
             evaluators["mbpp"] = MBPPEvaluator(
                 MBPPDataConfig(**common_kwargs),
                 generation_kwargs=generation_kwargs,
+            )
+        elif task == "boolq":
+            config = SuperGLUEDataConfig(
+                **common_kwargs,
+            )
+            evaluators["boolq"] = BoolQEvaluator(
+                config, generation_kwargs=generation_kwargs
             )
         elif task == "bbh":
             config = BBHConfig(
