@@ -1,22 +1,31 @@
 import os
 import sys
+
+import prettytable
 from huggingface_hub import login
 from pytorch_lightning import seed_everything
-from mttl.datamodule.humaneval_module import HumanEvalConfig
-from mttl.datamodule.arc_data_module import ArcDataConfig, ArcMultiChoiceDataModule
-from mttl.datamodule.piqa_data_module import PiqaDataConfig
-from mttl.evaluators.arc_evaluator import ArcEvaluator
-from mttl.evaluators.em_evaluator import EMEvaluator
-from mttl.evaluators.piqa_evaluator import PiqaEvaluator
-from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
-from mttl.models.modifiers.expert_containers.module_graph import Expert, ExpertInfo
-from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
+
+from mttl.datamodule.openbookqa_data_module import OpenbookQADataConfig
+from mttl.datamodule.superglue_data_module import SuperGLUEDataConfig
+from mttl.evaluators.openbookqa_evaluator import OpenbookQAEvaluator
+from mttl.evaluators.superglue_evaluators import BoolQEvaluator
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.datamodule.bbh_data_module import BBHConfig, BBHDataModule
-from mttl.evaluators import MMLUEvaluator
+from mttl.datamodule.hellaswag_data_module import HellaswagDataConfig
+from mttl.datamodule.humaneval_module import HumanEvalConfig
+from mttl.datamodule.mbpp_datamodule import MBPPDataConfig
+from mttl.datamodule.arc_data_module import ArcDataConfig
+from mttl.datamodule.piqa_data_module import PiqaDataConfig
+from mttl.datamodule.winogrande_data_module import WinograndeDataConfig
+from mttl.evaluators.winogrande_evaluator import WinograndeEvaluator
+from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.datamodule.bbh_data_module import BBHConfig
+from mttl.evaluators.arc_evaluator import ArcEvaluator
+from mttl.evaluators.piqa_evaluator import PiqaEvaluator
+from mttl.evaluators.hellaswag_evaluator import HellaswagEvaluator
 from mttl.evaluators.humaneval_evaluator import HumanEvalEvaluator
+from mttl.evaluators.mbpp_evaluator import MBPPEvaluator
 from mttl.evaluators.bbh_evaluator import BBHEvaluator
 from mttl.utils import setup_logging, logger
 
@@ -29,12 +38,8 @@ from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.mmlu_eval_experts import parse_experts_to_load
 
 
-active_tasks = ["piqa"]
-
-
-def setup_evaluators(args):
-    evaluators = []
-
+def setup_evaluators(args, active_tasks=["piqa"]):
+    evaluators = {}
     common_kwargs = {
         "model": args.model,
         "model_family": args.model_family,
@@ -49,31 +54,75 @@ def setup_evaluators(args):
         "do_sample": True,
     }
 
-    if "humaneval" in active_tasks:
-        common_kwargs["max_output_length"] = 300
-        config = HumanEvalConfig(
-            **common_kwargs,
-        )
-        evaluators.append(
-            HumanEvalEvaluator(config, generation_kwargs=generation_kwargs)
-        )
-    elif "bbh" in active_tasks:
-        config = BBHConfig(
-            **common_kwargs,
-        )
-        evaluators.append(BBHEvaluator(config, generation_kwargs=generation_kwargs))
-    elif "arc" in active_tasks:
-        config = ArcDataConfig(
-            **common_kwargs,
-        )
-        evaluators.append(ArcEvaluator(config, generation_kwargs=generation_kwargs))
-    elif "piqa" in active_tasks:
-        config = PiqaDataConfig(
-            **common_kwargs,
-        )
-        evaluators.append(PiqaEvaluator(config, generation_kwargs=generation_kwargs))
-    else:
-        raise ValueError("No active tasks")
+    for task in set(active_tasks):
+        if task == "humaneval":
+            common_kwargs["max_output_length"] = 300
+            config = HumanEvalConfig(
+                **common_kwargs,
+            )
+            evaluators["humaneval"] = HumanEvalEvaluator(
+                config, generation_kwargs=generation_kwargs
+            )
+        elif task == "mbpp":
+            common_kwargs["max_output_length"] = 300
+            evaluators["mbpp"] = MBPPEvaluator(
+                MBPPDataConfig(**common_kwargs),
+                generation_kwargs=generation_kwargs,
+            )
+        elif task == "boolq":
+            config = SuperGLUEDataConfig(
+                **common_kwargs,
+            )
+            evaluators["boolq"] = BoolQEvaluator(
+                config, generation_kwargs=generation_kwargs
+            )
+        elif task == "bbh":
+            config = BBHConfig(
+                **common_kwargs,
+            )
+            evaluators.append["bbh"] = BBHEvaluator(
+                config, generation_kwargs=generation_kwargs
+            )
+        elif task == "arc-easy":
+            config = ArcDataConfig(
+                **common_kwargs,
+                arc_type="ARC-Easy",
+            )
+            evaluators["arc-easy"] = ArcEvaluator(
+                config, generation_kwargs=generation_kwargs
+            )
+        elif task == "arc-challenge":
+            config = ArcDataConfig(
+                **common_kwargs,
+                arc_type="ARC-Challenge",
+            )
+            evaluators["arc-challenge"] = ArcEvaluator(
+                config, generation_kwargs=generation_kwargs
+            )
+        elif task == "piqa":
+            config = PiqaDataConfig(
+                **common_kwargs,
+            )
+            evaluators["piqa"] = PiqaEvaluator(
+                config, generation_kwargs=generation_kwargs
+            )
+        elif task == "hellaswag":
+            evaluators["hellaswag"] = HellaswagEvaluator(
+                HellaswagDataConfig(**common_kwargs),
+                generation_kwargs=generation_kwargs,
+            )
+        elif task == "winogrande":
+            evaluators["winogrande"] = WinograndeEvaluator(
+                WinograndeDataConfig(**common_kwargs),
+                generation_kwargs=generation_kwargs,
+            )
+        elif task == "openbookqa":
+            evaluators["openbookqa"] = OpenbookQAEvaluator(
+                OpenbookQADataConfig(**common_kwargs),
+                generation_kwargs=generation_kwargs,
+            )
+        else:
+            raise ValueError("No active tasks")
     return evaluators
 
 
@@ -111,15 +160,22 @@ def run_eval(args):
 
     module.to("cuda")
 
-    evaluators = setup_evaluators(args)
-    for evaluator in evaluators:
-        scores = evaluator.evaluate(module, shuffle=True)
-        logger.info("Evaluator scores: {}".format(scores))
+    evaluators = setup_evaluators(
+        args, active_tasks=args.pipeline_eval_tasks.split(",")
+    )
 
-    with open(args.output_dir + "/scores.json", "w") as f:
-        import json
+    scores = {}
+    for name, evaluator in evaluators.items():
+        scores[name] = evaluator.evaluate(module, shuffle=True)
+        with open(args.output_dir + f"/scores.json", "w") as f:
+            import json
 
-        json.dump(scores, f)
+            json.dump(scores, f)
+
+    table = prettytable.PrettyTable()
+    table.field_names = list(scores.keys())
+    table.add_row(["{:.3f}".format(v) for v in list(scores.values())])
+    print(table)
 
 
 if __name__ == "__main__":

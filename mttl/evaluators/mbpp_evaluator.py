@@ -1,10 +1,10 @@
-from mttl.datamodule.humaneval_module import HumanEvalDataModule
+from mttl.datamodule.mbpp_datamodule import MBPPDataModule
 from mttl.evaluators.code_evaluator import CodeEvaluator
 
 
-class HumanEvalEvaluator(CodeEvaluator):
+class MBPPEvaluator(CodeEvaluator):
     def __init__(self, config, device="cuda", use_vllm=False, generation_kwargs=None):
-        datamodule = HumanEvalDataModule(config, for_generation=True)
+        datamodule = MBPPDataModule(config, for_generation=True)
 
         super().__init__(
             datamodule=datamodule,
