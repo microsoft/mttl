@@ -30,7 +30,7 @@ class HumanEvalDataModule(DefaultDataModule):
         dataset = dataset.map(
             map_example,
             num_proc=n_proc,
-            remove_columns=["prompt", "test", "entry_point"],
+            remove_columns=["prompt", "test", "entry_point", "task_id"],
         )
 
         (
