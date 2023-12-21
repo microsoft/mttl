@@ -124,7 +124,11 @@ class LossCallback(cb.Callback):
 
 class RougeCallback(cb.Callback):
     def __init__(
-        self, datamodule, device="cuda", every_n_epochs=1, subsample=-1, max_length=None
+        self,
+        datamodule,
+        device="cuda",
+        every_n_epochs=1,
+        subsample=-1,
     ):
         super().__init__()
 
@@ -132,7 +136,6 @@ class RougeCallback(cb.Callback):
 
         self.evaluator = RougeEvaluator(datamodule=datamodule)
         self.every_n_epochs = every_n_epochs
-        self.max_length = max_length
         self.verbose = False
         self.subsample = subsample
         self.first_eval = False
