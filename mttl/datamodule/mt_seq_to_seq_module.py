@@ -4,7 +4,7 @@ import numpy
 from datasets import load_dataset, concatenate_datasets
 from datasets import Dataset
 from mttl.datamodule.base import DefaultDataModule, DatasetConfig
-from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
+from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task, logger
 from dataclasses import dataclass
 import tqdm
 
@@ -153,6 +153,7 @@ class FlatMultiTaskModule(DefaultDataModule):
 class FlanConfig(DatasetConfig):
     include_template_type: str = "zs_noopt"
     include_task_source: str = "P3,Flan2021"
+    subsample_dev: int = None
 
 
 def filter_template_type(include_template_type, example):
@@ -222,6 +223,12 @@ class FlanModule(DefaultDataModule):
                 train_dataset
             )
             self.test_dataset = self.dev_dataset
+
+        if self.config.subsample_dev:
+            logger.info(
+                f"subsampling the dev dataset to {self.config.subsample_dev} samples"
+            )
+            self.subsample_dataset("dev_dataset", self.config.subsample_dev)
 
         # Wrap the datasets to also return the task_id
         self.print_infos()

@@ -228,6 +228,7 @@ class Config:
         self.eval_every = None
         self.debug = False
         self.seed = 42
+        self.subsample_dev = None
 
         self.ni_online_eval = False  # zero-shot online eval for ni
         self.t0_online_eval = False  # zero-shot eval for t0
