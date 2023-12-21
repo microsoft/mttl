@@ -402,6 +402,56 @@ class MultiExpertModelRanker(MultiExpertModel):
         )
         return generations
 
+    def forward(self, batch, reduction="mean"):
+        input_ids, labels = batch["input_ids"], batch["labels"]
+
+        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
+
+        self.expert_ranker.set_available_tasks(self.experts_names)
+        mod_names, mod_weights = self.expert_ranker.predict_batch(
+            batch,
+            n=self.hparams.ranker_top_k,
+        )
+
+        self.model.task_id_container["routing_infos"].routing_modules = mod_names
+        self.model.task_id_container["routing_infos"].routing_weights = mod_weights
+        for e, task_name in enumerate(batch["task_names"]):
+            logger.info(
+                "task_name:{}.... predict experts: {}".format(
+                    task_name, mod_names[e][0]
+                )
+            )
+
+        outputs = self.model.forward(input_ids, attention_mask=batch["attention_mask"])
+
+        # calculate loss, could also be done inside of the model
+        bs = input_ids.size(0)
+        logits = outputs.logits
+        vocab_size = logits.size(-1)
+        labels = labels.squeeze(-1)
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+
+        # Flatten the tokens
+        loss_fct = torch.nn.CrossEntropyLoss(reduction=reduction)
+        shift_logits = shift_logits.view(-1, vocab_size)
+        shift_labels = shift_labels.view(-1)
+
+        # Enable model parallelism
+        shift_labels = shift_labels.to(shift_logits.device)
+        loss = loss_fct(shift_logits, shift_labels)
+
+        # reshape back
+        if reduction == "none":
+            loss = loss.view((bs, -1))
+            # mean only non-zero
+            non_zero_loss = (loss != 0).sum(dim=-1)
+            non_zero_loss[non_zero_loss == 0] = 1
+            loss = loss.sum(dim=-1) / non_zero_loss
+
+        del outputs, shift_logits, shift_labels
+        return loss
+
 
 class MoETrainer(MultiExpertModel):
     def __init__(self, **kwargs):
