@@ -24,7 +24,7 @@ class HumanEvalDataModule(DefaultDataModule):
             example["target"] = (
                 example["test"] + "\n" + f"check({example['entry_point']})"
             )
-            example["source"] = example["prompt"]
+            example["source"] = example["prompt"].lstrip()
             return example
 
         dataset = dataset.map(
