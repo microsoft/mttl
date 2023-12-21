@@ -30,14 +30,19 @@ def swap_model(model, state=None):
 
 
 class MMLUEvaluator(Evaluator, GenerationMixin):
-    def __init__(self, config=None, max_input_length=None, use_vllm=False):
+    def __init__(
+        self, config=None, datamodule=None, max_input_length=None, use_vllm=False
+    ):
         from mttl.datamodule.mmlu_data_module import MMLUDataModule
 
-        config = copy.deepcopy(config)
-        if max_input_length is not None:
-            config.max_input_length = max_input_length
+        if datamodule is None:
+            config = copy.deepcopy(config)
 
-        datamodule = MMLUDataModule(config, for_generation=True)
+            if max_input_length is not None:
+                config.max_input_length = max_input_length
+
+            datamodule = MMLUDataModule(config, for_generation=True)
+
         super().__init__(
             datamodule, use_vllm=use_vllm, generation_kwargs={"max_new_tokens": 1}
         )
