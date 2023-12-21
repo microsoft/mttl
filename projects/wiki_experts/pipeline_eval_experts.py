@@ -106,8 +106,8 @@ def setup_evaluators(args, active_tasks=["piqa"]):
             evaluators["piqa"] = PiqaEvaluator(
                 config, generation_kwargs=generation_kwargs
             )
-        elif task == "hswag":
-            evaluators["hswag"] = HellaswagEvaluator(
+        elif task == "hellaswag":
+            evaluators["hellaswag"] = HellaswagEvaluator(
                 HellaswagDataConfig(**common_kwargs),
                 generation_kwargs=generation_kwargs,
             )
@@ -171,7 +171,7 @@ def run_eval(args):
 
     table = prettytable.PrettyTable()
     table.field_names = list(scores.keys())
-    table.add_row(list(scores.values()))
+    table.add_row(["{:.3f}".format(v) for v in list(scores.values())])
     print(table)
 
 

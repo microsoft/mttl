@@ -99,7 +99,7 @@ class DefaultCollator:
     def prepare_inputs_for_seq2seq_family(self, sources, labels):
         output_batch = {}
 
-        if self.max_input_length > 0:
+        if self.max_input_length:
             tokenized_labels = self.tokenizer(
                 labels,
                 max_length=self.max_output_length,
