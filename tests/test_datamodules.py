@@ -286,3 +286,38 @@ def test_mmlu_spaces_and_merges(task_name=None):
     assert np.allclose(
         batch["input_ids"][0][: len(input_ids)].numpy().tolist(), input_ids
     )
+
+
+def test_multichoice_collator():
+    from mttl.datamodule.base import MultipleChoiceCollator
+    from mttl.datamodule.utils import get_tokenizer_with_args
+    from transformers import AutoTokenizer
+
+    tokenizer = get_tokenizer_with_args(
+        "EleutherAI/gpt-neo-125m", "gpt", "left", "left", False
+    )
+    collator = MultipleChoiceCollator(
+        tokenizer=tokenizer,
+    )
+    batch = [
+        {"source": "a", "target": ["a1", "a2"], "task_name": "t1", "label_index": 1},
+        {"source": "b", "target": ["b1"], "task_name": "t2", "label_index": 0},
+    ]
+    output = collator(batch)
+    assert output["sources_texts"] == ["a", "a", "b"]
+    assert output["labels_texts"] == ["a1", "a2", "b1"]
+    assert output["labels_index"][0] == 1
+    assert output["labels_index"][1] == 0
+    assert output["num_options"] == [2, 1]
+    assert output["task_names"] == ["t1", "t1", "t2"]
+
+    collator = MultipleChoiceCollator(tokenizer=tokenizer, multisource=True)
+    batch = [
+        {"source": ["a1", "a2"], "target": "a", "task_name": "t1", "label_index": 1},
+        {"source": ["b1"], "target": "b", "task_name": "t2", "label_index": 0},
+    ]
+    output = collator(batch)
+    assert output["sources_texts"] == ["a1", "a2", "b1"]
+    assert output["labels_texts"] == ["a", "a", "b"]
+    assert output["num_options"] == [2, 1]
+    assert output["task_names"] == ["t1", "t1", "t2"]
