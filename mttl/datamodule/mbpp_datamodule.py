@@ -15,7 +15,7 @@ class MBPPDataConfig(DatasetConfig):
 class MBPPDataModule(DefaultDataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
-        dataset = load_dataset("mbpp", name="sanitized")["test"]
+        dataset = load_dataset("mbpp", name="sanitized")
 
         # convert task_id to task_name and labels
         def map_example(example):
@@ -24,10 +24,8 @@ class MBPPDataModule(DefaultDataModule):
             source_template = '{}\n\t"""\n\t{}\n\t{}\n\t"""\n\t'
 
             example["task_name"] = example["task_id"]
-            example["source"] = (
-                source_template.format(
-                    code_header, source, "\n\t".join(example["test_list"])
-                ),
+            example["source"] = source_template.format(
+                code_header, source, "\n\t".join(example["test_list"])
             )
             example["target"] = "\n".join(example["test_list"])
             return example
