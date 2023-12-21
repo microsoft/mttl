@@ -1,5 +1,7 @@
 import os
 import sys
+
+import prettytable
 from huggingface_hub import login
 from pytorch_lightning import seed_everything
 
@@ -159,15 +161,18 @@ def run_eval(args):
         args, active_tasks=args.pipeline_eval_tasks.split(",")
     )
 
+    scores = {}
     for name, evaluator in evaluators.items():
-        scores = evaluator.evaluate(module, shuffle=True)
-        logger.info("Task: {}".format(name))
-        logger.info("Scores: {}".format(scores))
-
-        with open(args.output_dir + f"/{name}_scores.json", "w") as f:
+        scores[name] = evaluator.evaluate(module, shuffle=True)
+        with open(args.output_dir + f"/scores.json", "w") as f:
             import json
 
             json.dump(scores, f)
+
+    table = prettytable.PrettyTable()
+    table.field_names = list(scores.keys())
+    table.add_row(*list(scores.values()))
+    print(table)
 
 
 if __name__ == "__main__":

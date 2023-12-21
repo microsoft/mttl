@@ -13,6 +13,7 @@ sentencepiece
 torch_kmeans
 sentence-transformers
 fsspec[adl]
+prettytable
 rich
 accelerate
 bitsandbytes
