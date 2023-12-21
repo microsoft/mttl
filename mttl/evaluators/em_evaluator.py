@@ -18,12 +18,9 @@ def decode(preds, tokenizer):
 
 
 class EMEvaluator(Evaluator):
-    def __init__(
-        self, datamodule, device="cuda", use_vllm=False, generation_kwargs=None
-    ):
+    def __init__(self, datamodule, use_vllm=False, generation_kwargs=None):
         super().__init__(
             datamodule=datamodule,
-            device=device,
             use_vllm=use_vllm,
             generation_kwargs=generation_kwargs,
         )
