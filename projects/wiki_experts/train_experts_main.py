@@ -179,7 +179,8 @@ def run_multitask(args: ExpertConfig):
         elif val_check_interval > args.total_steps and args.total_steps != -1:
             val_check_interval = args.total_steps
 
-    callbacks.append(RougeCallback(gen_dm, every_n_epochs=3))
+    rouge = RougeCallback(gen_dm, every_n_epochs=3 if args.num_train_epochs > 3 else 1)
+    callbacks.append(rouge)
 
     trainer = Trainer(
         devices=-1,

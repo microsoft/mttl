@@ -23,7 +23,8 @@ class MBPPDataModule(DefaultDataModule):
             code_header = example["code"].split(":")[0] + ":"
             source_template = '{}\n\t"""\n\t{}\n\t{}\n\t"""\n\t'
 
-            example["task_name"] = example["task_id"]
+            example["task_source"] = "mbpp"
+            example["task_name"] = "mbpp"
             example["source"] = source_template.format(
                 code_header, source, "\n\t".join(example["test_list"])
             )

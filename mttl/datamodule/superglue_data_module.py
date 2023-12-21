@@ -51,4 +51,5 @@ class BoolQDataModule(SuperGLUEMultiChoiceDataModule):
         example["source"] = prompt.format(example["passage"], example["question"])
         example["target"] = targets
         example["label_index"] = example["label"]
+        example["task_name"] = "boolq"
         return example

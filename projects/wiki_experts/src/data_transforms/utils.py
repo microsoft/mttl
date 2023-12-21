@@ -65,6 +65,7 @@ def upload_to_hf_(
 
     rng = np.random.RandomState(seed)
     dataset = load_dataset("json", data_files=dataset_path)["train"]
+
     datasets = []
     for sub in set(list(dataset["subject"])):
         dataset_subject = dataset.filter(lambda x: x["subject"] == sub, num_proc=16)
@@ -77,7 +78,11 @@ def upload_to_hf_(
             return example
 
         # 1. rename columns to match the format of the multitask dataset
-        dataset_subject = dataset_subject.map(rename_columns, num_proc=16).shuffle(seed)
+        dataset_subject = dataset_subject.map(
+            rename_columns,
+            num_proc=16,
+            remove_columns=["instruction", "response", "subject"],
+        ).shuffle(seed)
 
         # 2. apply cutoff if needed
         if cutoff > 0:

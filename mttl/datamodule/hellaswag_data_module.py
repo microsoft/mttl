@@ -35,6 +35,7 @@ class HellaswagMultiChoiceDataModule(MultiChoiceDataModule):
             )
             targets = [_pre_process_text(ending) for ending in example["endings"]]
 
+            example["task_name"] = "hellaswag"
             example["source"] = prompt.format(activity_label, context)
             example["target"] = targets
             example["label_index"] = int(example["label"])

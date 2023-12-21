@@ -35,15 +35,8 @@ def compute_loglike_loss(logits, labels, reduction="none"):
 
 
 class LogLikeEvaluator(Evaluator):
-    def __init__(
-        self, datamodule, device="cuda", use_vllm=False, generation_kwargs=None
-    ):
-        super().__init__(
-            datamodule=datamodule,
-            device=device,
-            use_vllm=use_vllm,
-            generation_kwargs=generation_kwargs,
-        )
+    def __init__(self, datamodule, **kwargs):
+        super().__init__(datamodule=datamodule, **kwargs)
 
     @switch_to_eval_mode
     def evaluate(
@@ -67,60 +60,65 @@ class LogLikeEvaluator(Evaluator):
 
         all_losses = []
         all_accuracies = []
+        all_predictions = []
+
+        device = next(model.parameters()).device
 
         for num_batch, batch in pbar:
             batch_size = len(batch["labels_index"])
+            num_options = batch["num_options"]
             labels_texts = batch["labels_texts"]
             sources_texts = batch["sources_texts"]
 
-            batch = transfer_batch_to_device(batch, self.device)
+            batch = transfer_batch_to_device(batch, device)
 
             with torch.no_grad():
                 if isinstance(model, EfficientCheckpointModule):
-                    loss_per_example = model.forward(batch, reduction="none")
+                    loss_per_option = model.forward(batch, reduction="none")
                 else:
                     logits = model.forward(
                         input_ids=batch["input_ids"],
                         attention_mask=batch["attention_mask"],
                     ).logits
-                    loss_per_example = compute_loglike_loss(
+                    loss_per_option = compute_loglike_loss(
                         logits, batch["labels"], reduction="none"
                     )
 
-                loss_per_example = loss_per_example.cpu().numpy()
-                all_losses.append(loss_per_example)
+                loss_per_option = loss_per_option.cpu().numpy()
+                loss_per_example = [
+                    loss_per_option[
+                        int(np.sum(num_options[:i])) : int(np.sum(num_options[: i + 1]))
+                    ]
+                    for i in range(batch_size)
+                ]
+                predictions = [
+                    np.argmin(option_loss) for option_loss in loss_per_example
+                ]
+
+                all_predictions.extend(predictions)
+                all_losses.extend(loss_per_option.tolist())
 
                 if "labels_index" in batch:
-                    counter = 0
-                    for i in range(batch_size):
-                        num_options = batch["num_options"][i]
-                        pred = np.argmin(
-                            loss_per_example[counter : counter + num_options]
-                        )
-                        all_accuracies.append(pred == batch["labels_index"][i])
-                        counter += num_options
+                    all_accuracies.extend(
+                        (
+                            np.array(predictions) == np.array(batch["labels_index"])
+                        ).tolist()
+                    )
 
             if verbose:
                 logger.info("Sources:\n%s", sources_texts[0])
-                logger.info("Label:\n%s", labels_texts[0])
+                logger.info("Label:\n%s", labels_texts[batch["labels_index"][0]])
+                logger.info("Prediction:\n%s", labels_texts[batch["labels_index"][0]])
 
             if num_batches is not None and num_batch >= num_batches:
                 break
 
             if all_accuracies:
-                pbar.set_description(
-                    "Accuracy: {:.4f}".format(np.array(all_accuracies).mean())
-                )
-
-        all_losses = np.concatenate(all_losses)
-
-        if all_accuracies:
-            accuracy = np.array(all_accuracies).mean()
-        else:
-            accuracy = None
+                pbar.set_description("Accuracy: {:.4f}".format(np.mean(all_accuracies)))
 
         return {
-            "loss": all_losses.mean(),
-            "loglike": -all_losses.mean(),
-            "accuracy": accuracy,
+            "loss": np.mean(all_losses),
+            "loglike": -np.mean(all_losses),
+            "predictions": all_predictions,
+            "accuracy": np.mean(all_accuracies) if all_accuracies else None,
         }

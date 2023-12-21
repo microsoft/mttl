@@ -1,3 +1,4 @@
+from functools import partial
 from datasets import load_dataset
 from mttl.datamodule.base import (
     MultiChoiceDataModule,
@@ -19,7 +20,7 @@ class ArcMultiChoiceDataModule(MultiChoiceDataModule):
         dataset = load_dataset("ai2_arc", name=self.config.arc_type)["test"]
 
         # convert task_id to task_name and labels
-        def map_example(example):
+        def map_example(arc_type, example):
             prompt = "Question: {}\nAnswer:"
             targets = [choice for choice in example["choices"]["text"]]
 
@@ -28,13 +29,14 @@ class ArcMultiChoiceDataModule(MultiChoiceDataModule):
             answer_key_map = {"1": "A", "2": "B", "3": "C", "4": "D", "5": "E"}
             answer_key = answer_key_map.get(example["answerKey"], example["answerKey"])
 
+            example["task_name"] = arc_type
             example["source"] = prompt.format(example["question"])
             example["target"] = targets
             example["label_index"] = ["A", "B", "C", "D", "E"].index(answer_key)
             return example
 
         dataset = dataset.map(
-            map_example,
+            partial(map_example, self.config.arc_type),
             num_proc=n_proc,
         )
 
