@@ -3,10 +3,14 @@ import sys
 from huggingface_hub import login
 from pytorch_lightning import seed_everything
 
+from mttl.datamodule.openbookqa_data_module import OpenbookQADataConfig
+from mttl.evaluators.openbookqa_evaluator import OpenbookQAEvaluator
+
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.datamodule.hswag_data_module import HellaswagDataConfig
 from mttl.datamodule.humaneval_module import HumanEvalConfig
+from mttl.datamodule.mbpp_datamodule import MBPPDataConfig
 from mttl.datamodule.arc_data_module import ArcDataConfig
 from mttl.datamodule.piqa_data_module import PiqaDataConfig
 from mttl.datamodule.winogrande_data_module import WinograndeDataConfig
@@ -17,6 +21,7 @@ from mttl.evaluators.arc_evaluator import ArcEvaluator
 from mttl.evaluators.piqa_evaluator import PiqaEvaluator
 from mttl.evaluators.hellaswag_evaluator import HellaswagEvaluator
 from mttl.evaluators.humaneval_evaluator import HumanEvalEvaluator
+from mttl.evaluators.mbpp_evaluator import MBPPEvaluator
 from mttl.evaluators.bbh_evaluator import BBHEvaluator
 from mttl.utils import setup_logging, logger
 
@@ -53,6 +58,12 @@ def setup_evaluators(args, active_tasks=["piqa"]):
             )
             evaluators["humaneval"] = HumanEvalEvaluator(
                 config, generation_kwargs=generation_kwargs
+            )
+        elif task == "mbpp":
+            common_kwargs["max_output_length"] = 300
+            evaluators["mbpp"] = MBPPEvaluator(
+                MBPPDataConfig(**common_kwargs),
+                generation_kwargs=generation_kwargs,
             )
         elif task == "bbh":
             config = BBHConfig(
@@ -92,6 +103,11 @@ def setup_evaluators(args, active_tasks=["piqa"]):
         elif task == "winogrande":
             evaluators["winogrande"] = WinograndeEvaluator(
                 WinograndeDataConfig(**common_kwargs),
+                generation_kwargs=generation_kwargs,
+            )
+        elif task == "openbookqa":
+            evaluators["openbookqa"] = OpenbookQAEvaluator(
+                OpenbookQADataConfig(**common_kwargs),
                 generation_kwargs=generation_kwargs,
             )
         else:

@@ -74,8 +74,10 @@ class Evaluator(ABC):
         if config is None and datamodule is None:
             raise ValueError("Either config or datamodule must be provided.")
 
-        self.config = deepcopy(config)
         self.datamodule = datamodule
+        if config is None:
+            config = datamodule.config
+        self.config = deepcopy(config)
         self.generation_kwargs = generation_kwargs or {}
         self.use_vllm = use_vllm
         self.device = device
