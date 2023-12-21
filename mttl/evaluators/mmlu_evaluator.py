@@ -85,7 +85,12 @@ class MMLUEvaluator(Evaluator, GenerationMixin):
 
     @switch_to_eval_mode
     def evaluate(
-        self, model, split="test", subsample=-1, shuffle=False, dataloader=None
+        self,
+        model,
+        split="test",
+        subsample=-1,
+        shuffle=False,
+        **kwargs,
     ):
         if self.use_vllm:
             return self.eval_vllm(
@@ -94,10 +99,6 @@ class MMLUEvaluator(Evaluator, GenerationMixin):
                 subsample=subsample,
                 shuffle=shuffle,
             )
-
-        # DDP
-        if hasattr(model, "module"):
-            model = model.module
 
         all_predictions = []
         all_references = []
