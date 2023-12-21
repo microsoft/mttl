@@ -20,6 +20,6 @@
     "dataset": "sordonia/qamc-flat",
     "warmup_proportion": 0.06,
     "max_input_length": 2048,
-    "max_output_length": 3,
+    "max_output_length": 1,
     "truncation_side": "left"
 }
