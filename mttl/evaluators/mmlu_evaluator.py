@@ -1,14 +1,14 @@
+import copy
 import os
 import click
 import tqdm
 import torch
 import hashlib
 import numpy as np
-import pytorch_lightning as pl
 
 from mttl.dataloader.ni_metrics import compute_metrics
-from mttl.models.utils import transfer_batch_to_device
 from mttl.evaluators.base import (
+    GenerationMixin,
     compute_task_aggregation,
     Evaluator,
     switch_to_eval_mode,
@@ -29,18 +29,23 @@ def swap_model(model, state=None):
     return state
 
 
-class MMLUEvaluator(Evaluator):
+class MMLUEvaluator(Evaluator, GenerationMixin):
     def __init__(
-        self, config=None, max_input_length=None, device="cuda", use_vllm=False
+        self, config=None, datamodule=None, max_input_length=None, use_vllm=False
     ):
-        super().__init__(config=config, device=device, use_vllm=use_vllm)
-
         from mttl.datamodule.mmlu_data_module import MMLUDataModule
 
-        if max_input_length is not None:
-            self.config.max_input_length = max_input_length
+        if datamodule is None:
+            config = copy.deepcopy(config)
 
-        self.datamodule = MMLUDataModule(self.config, for_generation=True)
+            if max_input_length is not None:
+                config.max_input_length = max_input_length
+
+            datamodule = MMLUDataModule(config, for_generation=True)
+
+        super().__init__(
+            datamodule, use_vllm=use_vllm, generation_kwargs={"max_new_tokens": 1}
+        )
 
     def eval_vllm(self, model, generation_config, subsample, shuffle):
         model_hash = hashlib.sha256()
@@ -80,7 +85,12 @@ class MMLUEvaluator(Evaluator):
 
     @switch_to_eval_mode
     def evaluate(
-        self, model, split="test", subsample=-1, shuffle=False, dataloader=None
+        self,
+        model,
+        split="test",
+        subsample=-1,
+        shuffle=False,
+        **kwargs,
     ):
         if self.use_vllm:
             return self.eval_vllm(
@@ -89,10 +99,6 @@ class MMLUEvaluator(Evaluator):
                 subsample=subsample,
                 shuffle=shuffle,
             )
-
-        # DDP
-        if hasattr(model, "module"):
-            model = model.module
 
         all_predictions = []
         all_references = []
@@ -108,33 +114,10 @@ class MMLUEvaluator(Evaluator):
         for _, batch in pbar:
             task_names = batch.get("task_names", None)
             labels_text = batch.pop("labels_texts", None)
-            extra_kwargs = {}
-            extra_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
-            max_length = 5
 
-            batch = transfer_batch_to_device(batch, self.device)
-            with torch.no_grad():
-                if isinstance(model, pl.LightningModule) or hasattr(model, "hparams"):
-                    predictions = model.generate(
-                        batch,
-                        max_new_tokens=max_length,
-                        generation_config=model.generation_config,
-                        return_dict_in_generate=True,
-                        output_scores=True,
-                        **extra_kwargs,
-                    )
-                else:
-                    predictions = model.generate(
-                        input_ids=batch["input_ids"],
-                        attention_mask=batch["attention_mask"],
-                        max_new_tokens=max_length,
-                        generation_config=model.generation_config,
-                        return_dict_in_generate=True,
-                        output_scores=True,
-                        **extra_kwargs,
-                    )
-
+            predictions = self.generate_for_batch(model, batch)
             logits = predictions.scores[0]
+
             probs = (
                 torch.stack(
                     [
@@ -204,7 +187,7 @@ def evaluate_mmlu(hf_model, task_name=None):
     config = MMLUDataConfig(
         dataset="mmlu",
         model=hf_model,
-        predict_batch_size=16,
+        predict_batch_size=4,
         max_input_length=model.config.max_position_embeddings,
         model_family="gpt",
         finetune_task_name=task_name,

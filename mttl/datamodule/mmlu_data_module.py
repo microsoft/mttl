@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 import os
-import itertools
 import pkg_resources
 from torch.utils.data import DataLoader
 
@@ -16,8 +15,11 @@ from datasets import load_dataset
 from dataclasses import dataclass
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 
-from mttl.utils import logger
-from mttl.datamodule.base import DatasetConfig, DefaultCollator, DefaultDataModule
+from mttl.datamodule.base import (
+    DatasetConfig,
+    DefaultCollator,
+    DefaultDataModule,
+)
 
 
 #################################################

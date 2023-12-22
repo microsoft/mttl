@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import pytorch_lightning as pl
+from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
 
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 from mttl.models.monitors import get_monitors
@@ -23,7 +24,7 @@ from mttl.datamodule.mt_seq_to_seq_module import (
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.callbacks import RougeCallback
+from mttl.callbacks import NanoMMLUCallback, RougeCallback, MMLUCallback
 from mttl.datamodule.oasst1_module import OA1Config, OA1Module
 from mttl.datamodule.facts_lm_module import FactsLMConfig, FactsLMDataModule
 from mttl.datamodule.platypus_module import (
@@ -51,8 +52,10 @@ class SimpleLogger(pl.loggers.logger.DummyLogger):
             json.dump(self.metrics, f)
 
 
-def get_datamodule(args, for_generation=False):
+def get_datamodule(args, for_generation=False, dataset_override=None):
     # refactor all the common arguments below into a dict common kwargs
+    dataset = args.dataset if not dataset_override else dataset_override
+
     common_kwargs = {
         "model": args.model,
         "train_batch_size": args.train_batch_size,
@@ -63,45 +66,22 @@ def get_datamodule(args, for_generation=False):
         "model_family": args.model_family,
         "finetune_task_name": args.finetune_task_name,
         "truncation_side": args.truncation_side,
-        "dataset": args.dataset.replace("qa:", "").replace("raw_docs:", ""),
+        "dataset": dataset,
         "train_on_inputs": False,
     }
-    if args.dataset.startswith("qa:"):
-        config = PlatypusConfig(**common_kwargs)
-        dm = PlatypusQAModule(config, for_generation=for_generation)
-    elif args.dataset.startswith("raw_docs:"):
-        config = FactsLMConfig(
-            **common_kwargs,
-            text_field="facts" if "facts" in args.dataset else "text",
-        )
-        dm = FactsLMDataModule(config, for_generation=for_generation)
-    elif "oa1" in args.dataset:
-        config = OA1Config(
-            **common_kwargs,
-            train_on_reverse=args.dataset == "inverse-oa1",
-        )
-        dm = OA1Module(config, for_generation=for_generation)
-    elif "cot:flan" in args.dataset:
-        common_kwargs["dataset"] = common_kwargs["dataset"].replace("cot:", "")
-        config = FlanConfig(
-            **common_kwargs,
-            include_template_type="*",
-            include_task_source="CoT",
-            subsample_dev=args.subsample_dev,
-        )
-        dm = FlanModule(config, for_generation=for_generation)
-    elif "flan" in args.dataset:
-        config = FlanConfig(
-            **common_kwargs, include_template_type="*", subsample_dev=args.subsample_dev
-        )
-        dm = FlanModule(config, for_generation=for_generation)
-    elif "flat" in args.dataset:
+
+    if "flat" in dataset:
         config = FlatMultiTaskConfig(
             **common_kwargs,
             source_template=args.source_template,
             augment_few_shot=args.augment_few_shot,
         )
         dm = FlatMultiTaskModule(config, for_generation=for_generation)
+    elif "mmlu" in dataset:
+        config = MMLUDataConfig(
+            **common_kwargs,
+        )
+        dm = MMLUDataModule(config, for_generation=for_generation)
     else:
         raise ValueError(f"Unknown dataset {args.dataset}")
     return dm
@@ -122,6 +102,7 @@ def run_multitask(args: ExpertConfig):
     model_class = ExpertTrainer
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
+
     gen_dm = get_datamodule(args, for_generation=True)
 
     # legit logging
@@ -180,7 +161,15 @@ def run_multitask(args: ExpertConfig):
         elif val_check_interval > args.total_steps and args.total_steps != -1:
             val_check_interval = args.total_steps
 
-    callbacks.append(RougeCallback(gen_dm, every_n_epochs=3))
+    rouge = RougeCallback(gen_dm, every_n_epochs=3 if args.num_train_epochs > 3 else 1)
+    callbacks.append(rouge)
+
+    if args.eval_mmlu_flag:
+        mmlu = NanoMMLUCallback(
+            get_datamodule(args, dataset_override="mmlu", for_generation=True),
+            every_n_epochs=3 if args.num_train_epochs > 3 else 1,
+        )
+        callbacks.append(mmlu)
 
     trainer = Trainer(
         devices=-1,

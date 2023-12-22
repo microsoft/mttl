@@ -126,12 +126,9 @@ def run_eval(args):
     if args.load_module is not None:
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:
-            module.load_expert(**expert_kwargs)
+            module.load_expert(**expert_kwargs, expert_library=library)
     elif args.module_graph is not None:
         module.load_from_graph_string(args.module_graph, expert_library=library)
-    elif library is not None:
-        if not args.baseline:
-            module.load_from_library(library, args.subsample_library_experts)
 
     if args.mmlu_use_hard_prompt:
         config = HardPromptConfig(
