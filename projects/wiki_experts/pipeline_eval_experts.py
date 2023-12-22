@@ -149,6 +149,8 @@ def run_eval(args):
     else:
         library = None
 
+    filtering_experts = os.environ.get("FILTERING_EXPERTS", "")
+
     if args.load_module is not None:
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:
@@ -156,7 +158,9 @@ def run_eval(args):
     elif args.module_graph is not None:
         module.load_from_graph_string(args.module_graph, expert_library=library)
     elif args.hf_lib_id is not None:
-        module.load_from_library(library)
+        module.load_from_library(
+            library, filtering_experts=filtering_experts.split(",")
+        )
 
     module.to("cuda")
 
