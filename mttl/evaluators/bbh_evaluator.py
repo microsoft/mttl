@@ -4,7 +4,7 @@ from mttl.evaluators.em_evaluator import EMEvaluator
 
 class DirectBBHEvaluator(EMEvaluator):
     def __init__(self, config, use_vllm=False, generation_kwargs=None):
-        datamodule = BBHDataModule(config)
+        datamodule = BBHDataModule(config, for_generation=True)
 
         generation_kwargs["max_new_tokens"] = 1
         super().__init__(
