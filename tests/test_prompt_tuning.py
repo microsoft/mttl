@@ -5,7 +5,11 @@ import torch.nn.functional as F
 from pytorch_lightning import seed_everything
 from mttl.models.modifiers.routing import RoutingInfo
 from mttl.models.modifiers import modify_transformer
-from mttl.models.modifiers.prompt_tuning import PromptTuning, PromptTuningConfig
+from mttl.models.modifiers.prompt_tuning import (
+    PromptTuning,
+    PromptTuningConfig,
+    ExtendedEmbedding,
+)
 
 
 def test_prompt_tuning():
@@ -66,12 +70,12 @@ def test_prompt_tuning():
 
     # trim the logits to remove the soft prompt
     loss = masked_cross_entropy(output.logits, labels, batch["attention_mask"])
-    assert round(loss.item(), 4) == 6.0812
+    assert round(loss.item(), 4) == 6.1077
 
     # Manually set the soft prompt embeddings to high values to induce a change
     for module in new_model.modules():
-        if isinstance(module, PromptTuning):
-            module.prompt_embedding.weight.data.fill_(0)
+        if isinstance(module, ExtendedEmbedding):
+            module.new_embeds.data.fill_(0)
 
     # Test Base Llama model
     output = new_model(**batch)
