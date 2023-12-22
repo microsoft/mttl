@@ -535,20 +535,21 @@ class ExpertLibrary:
             )
             logger.info(f"Scores for {expert_name} uploaded successfully.")
 
-    def add_embeddings(
+    def add_auxiliary_data(
         self,
+        data_type: str,
         expert_name: str,
-        embedding_config: Dict,
+        config: Dict,
         expert_embedding: np.ndarray,
     ):
         if expert_name not in self.data:
             raise ValueError(f"Expert {expert_name} not found in repository.")
 
-        if "name" not in embedding_config:
+        if "name" not in config:
             raise ValueError("Embedding config must contain a name.")
 
         operations = []
-        embedding_file = f"{expert_name}.embeddings"
+        embedding_file = f"{expert_name}.{data_type}"
 
         embeddings = self.list_repo_files(self.repo_id)
         if embedding_file in embeddings:
@@ -557,9 +558,9 @@ class ExpertLibrary:
         else:
             embeddings = {}
 
-        embeddings[embedding_config["name"]] = {
-            "embedding": expert_embedding,
-            "config": embedding_config,
+        embeddings[config["name"]] = {
+            data_type: expert_embedding,
+            "config": config,
         }
 
         buffer = io.BytesIO()
@@ -580,6 +581,19 @@ class ExpertLibrary:
                 commit_message=f"Update library with embedding for {expert_name}.",
             )
             logger.info(f"Embedding for {expert_name} uploaded successfully.")
+
+    def add_embeddings(
+        self,
+        expert_name: str,
+        embedding_config: Dict,
+        expert_embedding: np.ndarray,
+    ):
+        return self.add_auxiliary_data(
+            data_type="embeddings",
+            expert_name=expert_name,
+            config=embedding_config,
+            expert_embedding=expert_embedding,
+        )
 
     def _update_readme(self):
         buffer = io.BytesIO()
@@ -715,38 +729,6 @@ class ExpertLibrary:
 
 
 class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
-    @classmethod
-    def from_old_version(cls, repo_id, destination):
-        import huggingface_hub
-
-        def _download_model(expert_name):
-            model_file = f"{expert_name}.ckpt"
-            model = hf_hub_download(repo_id, filename=model_file)
-            model = torch.load(model, map_location="cpu")
-            return model
-
-        if "HF_TOKEN" in os.environ:
-            login(token=os.environ["HF_TOKEN"])
-
-        metadata_dir = snapshot_download(repo_id, allow_patterns="**/*.meta")
-        new_lib = LocalExpertLibrary(repo_id=destination, create=False)
-
-        for file in glob.glob(f"{metadata_dir}/*.meta"):
-            metadatum = torch.load(file, map_location="cpu")
-
-            expert_info_data = metadatum["expert_info"]
-            expert_info_data["expert_config"] = metadatum["expert_config"]
-
-            expert_info = ExpertInfo.fromdict(expert_info_data)
-            model_weights = _download_model(expert_info.expert_name)
-            expert = Expert(expert_info=expert_info, expert_weights=model_weights)
-
-            if expert not in new_lib:
-                if "/" in expert.name:
-                    expert.expert_info.expert_name = expert.name.replace("/", "_")
-                new_lib.add_expert(expert)
-        return new_lib
-
     def update_from_remote(self, remote_lib: Union["HFExpertLibrary", str]):
         """
         Update the expert library with experts from a remote library.
@@ -764,7 +746,7 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
                 self.remove_expert(expert.name, soft_delete=True)
 
     @classmethod
-    def from_remote(cls, remote_lib: ExpertLibrary, destination):
+    def create_from_remote(cls, remote_lib: ExpertLibrary, destination):
         new_lib = LocalExpertLibrary(repo_id=destination)
         for name, expert in remote_lib.items():
             if "/" in expert.name:
