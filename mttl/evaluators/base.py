@@ -129,6 +129,10 @@ class GenerationOutput:
 
 
 class GenerationMixin:
+    def postprocess_generation_output(self, generation_output):
+        """Postprocesses the generation output."""
+        return generation_output
+
     """Applied to an evaluator handles generation logic for a given batch."""
 
     def generate_for_batch(self, model, batch):
@@ -185,10 +189,14 @@ class GenerationMixin:
                         generated = generated_texts_fallback[i]
                     generated_texts.append(generated)
 
-        return GenerationOutput(
-            scores=predictions.scores,
-            sequences=predictions.sequences,
-            sequences_texts=sequences_texts,
-            sources_texts=sources_texts,
-            generated_texts=generated_texts,
+        generated_texts = [text.strip() for text in generated_texts]
+
+        return self.postprocess_generation_output(
+            GenerationOutput(
+                scores=predictions.scores,
+                sequences=predictions.sequences,
+                sequences_texts=sequences_texts,
+                sources_texts=sources_texts,
+                generated_texts=generated_texts,
+            )
         )
