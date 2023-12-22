@@ -44,7 +44,7 @@ class LiveCheckpointCallback(pl.Callback):
     def on_train_end(self, trainer, pl_module):
         """Saves the last checkpoint."""
         if self.save_last:
-            self.last_model_path = f"{self.dirpath}/last.ckpt"
+            self.last_model_path = os.path.join(f"{self.dirpath}", "last.ckpt")
             trainer.save_checkpoint(
                 self.last_model_path, weights_only=self.save_weights_only
             )
@@ -55,11 +55,15 @@ class LiveCheckpointCallback(pl.Callback):
 
         monitor = self.monitor.replace("/", "-")
         if last_value is not None:
-            past_filename = f"{self.dirpath}/best_{monitor}_{last_value:.004f}.ckpt"
+            past_filename = os.path.join(
+                f"{self.dirpath}", f"best_{monitor}_{last_value:.004f}.ckpt"
+            )
             if os.path.exists(past_filename):
                 os.remove(past_filename)
 
-        this_filename = f"{self.dirpath}/best_{monitor}_{this_value:.004f}.ckpt"
+        this_filename = os.path.join(
+            f"{self.dirpath}", f"best_{monitor}_{this_value:.004f}.ckpt"
+        )
 
         logger.info("Saving new best model to %s", this_filename)
         trainer.save_checkpoint(this_filename, weights_only=self.save_weights_only)
