@@ -6,6 +6,7 @@ import math
 from typing import List
 import torch
 
+from transformers import StoppingCriteriaList, StoppingCriteria
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
 
 
@@ -128,16 +129,48 @@ class GenerationOutput:
     generated_texts: List[str] = None  # only the generated portion
 
 
+class StoppingCriteriaSub(StoppingCriteria):
+    def __init__(self, stops=[]):
+        super().__init__()
+        self.stops = stops
+
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor):
+        for i, stop in enumerate(self.stops):
+            stop = self.stops[i] = stop.to(input_ids.device)
+
+            if torch.all((stop[None, :] == input_ids[:, -stop.shape[0] :])).item():
+                return True
+        return False
+
+
 class GenerationMixin:
+    """Applied to an evaluator handles generation logic for a given batch."""
+
     def postprocess_generation_output(self, generation_output):
         """Postprocesses the generation output."""
         return generation_output
 
-    """Applied to an evaluator handles generation logic for a given batch."""
+    def _create_stopping_criteria(self):
+        """Create stopping criteria if needed."""
+        stop_tokens = self.generation_kwargs.pop("stop_tokens", None)
+        if stop_tokens:
+            stop_words_ids = [
+                # tokenize stop word and return tensors
+                self.tokenizer(
+                    stop_word, add_special_tokens=False, return_tensors="pt"
+                ).input_ids
+                for stop_word in stop_tokens
+            ]
+            stopping_criteria = StoppingCriteriaList(
+                [StoppingCriteriaSub(stops=stop_words_ids)]
+            )
+            self.generation_kwargs["stopping_criteria"] = stopping_criteria
 
     def generate_for_batch(self, model, batch):
         if hasattr(model, "module"):
             model = model.module
+
+        self._create_stopping_criteria()
 
         extra_kwargs = {}
         extra_kwargs["pad_token_id"] = self.tokenizer.pad_token_id

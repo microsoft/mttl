@@ -15,6 +15,8 @@ class DirectBBHEvaluator(EMEvaluator):
         datamodule = BBHDataModule(config, for_generation=True)
 
         generation_kwargs["max_new_tokens"] = 20
+        generation_kwargs["stop_tokens"] = ["\n\n"]
+
         super().__init__(
             datamodule=datamodule,
             use_vllm=use_vllm,
