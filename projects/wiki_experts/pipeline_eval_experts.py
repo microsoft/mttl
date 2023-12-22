@@ -79,6 +79,7 @@ def setup_evaluators(args, active_tasks=["piqa"]):
         elif task == "bbh":
             config = BBHConfig(
                 **common_kwargs,
+                augment_few_shot=5,
             )
             evaluators["bbh"] = DirectBBHEvaluator(
                 config, generation_kwargs=generation_kwargs
