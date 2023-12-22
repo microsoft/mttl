@@ -1,7 +1,6 @@
 import os
 import tqdm
 import copy
-import torch
 import pytorch_lightning as pl
 from pytorch_lightning import LightningModule, Trainer, callbacks as cb
 from torch.optim import Optimizer
