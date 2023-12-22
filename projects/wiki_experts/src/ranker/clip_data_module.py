@@ -187,8 +187,11 @@ class CLIPTripleDataModule(DefaultDataModule):
         )
 
         # get all the tasks_names from the dataset
-        self._task_names = list(set(train_dataset["positive_expert_names"])) + list(
-            set(train_dataset["negative_expert_names"])
+        self._task_names = list(
+            set(
+                train_dataset["positive_expert_names"]
+                + train_dataset["negative_expert_names"]
+            )
         )
 
         if "split" in dataset.column_names["train"]:
