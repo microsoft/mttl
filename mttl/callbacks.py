@@ -124,17 +124,32 @@ class LossCallback(cb.Callback):
 
 class RougeCallback(cb.Callback):
     def __init__(
-        self, datamodule, device="cuda", every_n_epochs=1, subsample=-1, max_length=None
+        self,
+        datamodule,
+        every_n_epochs=1,
+        subsample=-1,
     ):
         super().__init__()
 
         from mttl.evaluators.rouge_evaluator import RougeEvaluator
 
-        self.evaluator = RougeEvaluator(datamodule, device=device)
+        self.evaluator = RougeEvaluator(datamodule=datamodule)
         self.every_n_epochs = every_n_epochs
-        self.max_length = max_length
         self.verbose = False
         self.subsample = subsample
+        self.first_eval = False
+
+    def on_after_backward(self, trainer, pl_module):
+        if not self.first_eval:
+            rouge = self.evaluator.evaluate(
+                pl_module,
+                split="val",
+                verbose=self.verbose,
+                subsample=self.subsample,
+            )
+
+            pl_module.log("val/rougeL", rouge, on_step=True, prog_bar=True)
+            self.first_eval = True
 
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
@@ -145,7 +160,6 @@ class RougeCallback(cb.Callback):
                 split="val",
                 verbose=self.verbose,
                 subsample=self.subsample,
-                max_length=self.max_length,
             )
 
             pl_module.log("val/rougeL", rouge, on_epoch=True, prog_bar=True)
@@ -158,11 +172,63 @@ class RougeCallback(cb.Callback):
             split="test",
             verbose=self.verbose,
             subsample=self.subsample,
-            max_length=self.max_length,
         )
 
         pl_module.log("test/rougeL", rouge, on_epoch=True, prog_bar=True)
 
+        return super().on_test_epoch_end(trainer, pl_module)
+
+
+class NanoMMLUCallback(cb.Callback):
+    def __init__(
+        self,
+        datamodule,
+        every_n_epochs=1,
+        subsample=-1,
+    ):
+        super().__init__()
+
+        from mttl.evaluators.mmlu_evaluator import MMLUEvaluator
+
+        self.evaluator = MMLUEvaluator(datamodule=datamodule)
+        self.every_n_epochs = every_n_epochs
+        self.verbose = False
+        self.subsample = subsample
+        self.first_eval = False
+
+    def on_after_backward(self, trainer, pl_module):
+        if not self.first_eval:
+            em = self.evaluator.evaluate(
+                pl_module,
+                split="test",
+                verbose=self.verbose,
+                subsample=self.subsample,
+            )["all"]["mean"]
+
+            pl_module.log("test/mmlu", em, on_step=True, prog_bar=True)
+            self.first_eval = True
+
+    def on_validation_epoch_end(
+        self, trainer: Trainer, pl_module: LightningModule
+    ) -> None:
+        if self.every_n_epochs > 0 and trainer.current_epoch % self.every_n_epochs == 0:
+            em = self.evaluator.evaluate(
+                pl_module,
+                split="test",
+                verbose=self.verbose,
+                subsample=self.subsample,
+            )["all"]["mean"]
+            pl_module.log("test/mmlu", em, on_epoch=True, prog_bar=True)
+        return super().on_validation_epoch_end(trainer, pl_module)
+
+    def on_test_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        em = self.evaluator.evaluate(
+            pl_module,
+            split="test",
+            verbose=self.verbose,
+            subsample=self.subsample,
+        )["all"]["mean"]
+        pl_module.log("test/mmlu", em, on_epoch=True, prog_bar=True)
         return super().on_test_epoch_end(trainer, pl_module)
 
 
