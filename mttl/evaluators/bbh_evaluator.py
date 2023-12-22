@@ -6,7 +6,7 @@ class DirectBBHEvaluator(EMEvaluator):
     def __init__(self, config, use_vllm=False, generation_kwargs=None):
         datamodule = BBHDataModule(config, for_generation=True)
 
-        generation_kwargs["max_new_tokens"] = 1
+        generation_kwargs["max_new_tokens"] = 20
         super().__init__(
             datamodule=datamodule,
             use_vllm=use_vllm,
