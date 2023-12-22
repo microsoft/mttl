@@ -198,6 +198,7 @@ class Config:
         # Filtering configs, useful for flan flat, etc.
         self.include_template_type = "zs_noopt"
         self.include_task_source = "P3,Flan2021"
+        self.remove_phi_eval_tasks = False
 
         # Training config
         self.compute_strategy = None

@@ -232,6 +232,10 @@ class FlanModule(DefaultDataModule):
             self.subsample_dataset("dev_dataset", self.config.subsample_dev)
 
         if self.config.remove_phi_eval_tasks:
+            assert not any(
+                name in self.config.include_task_source.lower()
+                for name in ["niv2", "*"]
+            ), "niv2 not currently supported for phi-2 eval exclusion"
 
             def is_phi2_eval_task(datapoint):
                 eval_tasks = [
