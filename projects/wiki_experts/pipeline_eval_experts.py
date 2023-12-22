@@ -80,7 +80,7 @@ def setup_evaluators(args, active_tasks=["piqa"]):
             config = BBHConfig(
                 **common_kwargs,
             )
-            evaluators.append["bbh"] = DirectBBHEvaluator(
+            evaluators["bbh"] = DirectBBHEvaluator(
                 config, generation_kwargs=generation_kwargs
             )
         elif task == "arc-easy":
