@@ -26,7 +26,7 @@ from mttl.evaluators.piqa_evaluator import PiqaEvaluator
 from mttl.evaluators.hellaswag_evaluator import HellaswagEvaluator
 from mttl.evaluators.humaneval_evaluator import HumanEvalEvaluator
 from mttl.evaluators.mbpp_evaluator import MBPPEvaluator
-from mttl.evaluators.bbh_evaluator import BBHEvaluator
+from mttl.evaluators.bbh_evaluator import DirectBBHEvaluator
 from mttl.utils import setup_logging, logger
 
 # register models
@@ -80,7 +80,7 @@ def setup_evaluators(args, active_tasks=["piqa"]):
             config = BBHConfig(
                 **common_kwargs,
             )
-            evaluators.append["bbh"] = BBHEvaluator(
+            evaluators.append["bbh"] = DirectBBHEvaluator(
                 config, generation_kwargs=generation_kwargs
             )
         elif task == "arc-easy":

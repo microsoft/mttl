@@ -7,7 +7,7 @@ import os
 
 @dataclass
 class BBHConfig(DatasetConfig):
-    apply_source_template: str = None
+    apply_source_template: str = "Solve the following problem: {}\nAnswer:"
 
 
 class BBHDataModule(DefaultDataModule):
