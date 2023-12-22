@@ -282,54 +282,16 @@ def get_checkpoint_path(path, step=None, use_last=False):
             raise ValueError(
                 "last.ckpt not found or found multiple (?) in the list of checkpoints!"
             )
-        return match[0]
+        path = match[0]
     else:
-        match = [m for m in match if "last.ckpt" not in m]
-
-    if len(match) > 1:
-        logger.warning(
-            f"{len(match)} checkpoints found. "
-            + "taking the one with the lowest val loss"
-        )
-        losses = []
-        for x in match:
-            if "loss" in x:
-                loss = float(x.split("loss=")[-1].split(".ckpt")[0])
-            elif "zero_shot_perf" in x:
-                loss = -float(x.split("zero_shot_perf=")[-1].split(".ckpt")[0])
-            else:
-                continue
-            losses.append(loss)
-        idx = np.argmin(losses) if losses else 0
-        path = match[idx]
-    elif len(match) == 0:
-        match = glob.glob(f"{path}/*step*.pt", recursive=True)
-        if len(match) > 1:
-            logger.warning(
-                f"{len(match)} checkpoints found. "
-                + "taking the one with the lowest val loss"
-            )
-            found = False
-            for m in match:
-                # take the one with the specified step
-                if str(step) in m:
-                    path = m
-                    found = True
-                    break
-            if not found and step is None:
-                # global_stepX.pt, take the one with the highest step
-                idx = np.argmax(
-                    [float(x.split("step")[-1].split(".pt")[0]) for x in match]
-                )
-                path = match[idx]
-        elif len(match) == 0:
-            raise FileNotFoundError(f"{path} had no `.ckpt` nor `.pt` files")
-        else:
-            path = match[0]
-    else:
+        match = [m for m in match if "best" in m]
+        if len(match) == 0:
+            raise ValueError("No best checkpoints found!")
+        elif len(match) > 1:
+            logger.warn("Multiple best checkpoints found! Taking the last one.")
         path = match[0]
 
-    print("Found checkpoint", path)
+    logger.info(f"Found checkpoint at {path}.")
     return path
 
 

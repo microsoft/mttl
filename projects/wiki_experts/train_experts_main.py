@@ -5,18 +5,17 @@ import pytorch_lightning as pl
 from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
 
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.callbacks import LiveCheckpointCallback
+from mttl.models.utils import SimpleLogger
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import torch
 from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
-from pytorch_lightning.callbacks import ModelCheckpoint
 import json
 
 from mttl.datamodule.mt_seq_to_seq_module import (
-    FlanConfig,
-    FlanModule,
     FlatMultiTaskConfig,
     FlatMultiTaskModule,
 )
@@ -24,31 +23,10 @@ from mttl.datamodule.mt_seq_to_seq_module import (
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.callbacks import NanoMMLUCallback, RougeCallback, MMLUCallback
-from mttl.datamodule.oasst1_module import OA1Config, OA1Module
-from mttl.datamodule.facts_lm_module import FactsLMConfig, FactsLMDataModule
-from mttl.datamodule.platypus_module import (
-    PlatypusModule,
-    PlatypusConfig,
-    PlatypusQAModule,
-)
 from mttl.utils import get_mlf_logger, setup_logging, logger
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
-
-
-class SimpleLogger(pl.loggers.logger.DummyLogger):
-    def __init__(self, output_dir):
-        self.metrics = {}
-        self.output_file = os.path.join(output_dir, "metrics.json")
-
-    def log_metrics(self, metrics, step=None):
-        for k, v in metrics.items():
-            if k not in self.metrics:
-                self.metrics[k] = []
-            self.metrics[k].append({"step": step, "value": v})
-        with open(self.output_file, "w") as f:
-            json.dump(self.metrics, f)
 
 
 def get_datamodule(args, for_generation=False, dataset_override=None):
@@ -136,18 +114,22 @@ def run_multitask(args: ExpertConfig):
     # get metric monitors for models
     callbacks = []
 
-    monitor = "val/loss"
-    mode = "min"
-
-    model_name = args.model.replace("/", "_")
-    checkpoint_callback = ModelCheckpoint(
+    monitor = "val/rougeL"
+    mode = "max"
+    checkpoint_callback = LiveCheckpointCallback(
         dirpath=args.output_dir,
         monitor=monitor,
-        filename=f"{model_name}" + "-{" + monitor + ":.004f}",
-        save_top_k=1,
         save_last=True,
         mode=mode,
     )
+    rouge = RougeCallback(gen_dm, every_n_epochs=3 if args.num_train_epochs > 3 else 1)
+    mmlu = NanoMMLUCallback(
+        get_datamodule(args, dataset_override="mmlu", for_generation=True),
+        every_n_epochs=3 if args.num_train_epochs > 3 else 1,
+    )
+
+    callbacks.append(rouge)
+    callbacks.append(mmlu)
     callbacks.append(checkpoint_callback)
 
     val_check_interval = args.eval_every
@@ -159,15 +141,6 @@ def run_multitask(args: ExpertConfig):
             val_check_interval = len(dm.train_dataloader())
         elif val_check_interval > args.total_steps and args.total_steps != -1:
             val_check_interval = args.total_steps
-
-    rouge = RougeCallback(gen_dm, every_n_epochs=3 if args.num_train_epochs > 3 else 1)
-    mmlu = NanoMMLUCallback(
-        get_datamodule(args, dataset_override="mmlu", for_generation=True),
-        every_n_epochs=3 if args.num_train_epochs > 3 else 1,
-    )
-
-    callbacks.append(rouge)
-    callbacks.append(mmlu)
 
     trainer = Trainer(
         devices=-1,
@@ -189,6 +162,7 @@ def run_multitask(args: ExpertConfig):
     )
 
     # initial validation!
+    trainer.validate(module, dm)
     trainer.fit(module, dm)
     trainer.test(module, dm)
 
