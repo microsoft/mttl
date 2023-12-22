@@ -60,6 +60,8 @@ class LiveCheckpointCallback(pl.Callback):
                 os.remove(past_filename)
 
         this_filename = f"{self.dirpath}/best_{monitor}_{this_value:.004f}.ckpt"
+
+        logger.info("Saving new best model to %s", this_filename)
         trainer.save_checkpoint(this_filename, weights_only=self.save_weights_only)
         self.best_model_path = this_filename
 
