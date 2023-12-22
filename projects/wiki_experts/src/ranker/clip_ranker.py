@@ -62,10 +62,24 @@ class TextEncoder(nn.Module):
 
 
 class ExpertEncoder(nn.Module):
-    def __init__(self, expert_dim: int = 512, expert_num: int = 246):
+    def __init__(
+        self,
+        expert_dim: int = 512,
+        expert_num: int = 246,
+        pretrained_embedding=None,
+        pretrained_ids_to_tasks_names=None,
+        tasks_names_to_ids=None,
+    ):
         super().__init__()
 
         self.expert_embedding = nn.Embedding(expert_num, expert_dim)
+        if pretrained_embedding is not None:
+            for e, em in enumerate(pretrained_embedding):
+                expert_name = pretrained_ids_to_tasks_names[e]
+                index = tasks_names_to_ids[expert_name]
+                self.expert_embedding.weight.data[index] = em
+
+        # set the embedding trained
         self.expert_embedding.weight.requires_grad = True
         self.model = nn.Linear(expert_dim, expert_dim)
 
@@ -101,21 +115,28 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
         expert_embedding_dim: int = 512,
         projection_dim: int = 512,
         encoder_model_name: str = "all-MiniLM-L6-v2",
+        pretrained_embedding=None,
+        pretrained_ids_to_tasks_names=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
         assert len(task_names) > 0
-        self.text_encoder = TextEncoder(model_name=encoder_model_name)
+
         expert_names = task_names
         self.expert_num = len(expert_names)
-        self.expert_encoder = ExpertEncoder(
-            expert_dim=expert_embedding_dim,
-            expert_num=self.expert_num,
-        )
-        self.projection_dim = projection_dim
 
         self.ids_to_tasks_names = {i: task for i, task in enumerate(expert_names)}
         self.tasks_names_to_ids = {task: i for i, task in enumerate(expert_names)}
+        # initialize the§ text encoder and expert encoder
+        self.text_encoder = TextEncoder(model_name=encoder_model_name)
+        self.expert_encoder = ExpertEncoder(
+            expert_dim=expert_embedding_dim,
+            expert_num=self.expert_num,
+            pretrained_embedding=pretrained_embedding,
+            pretrained_ids_to_tasks_names=pretrained_ids_to_tasks_names,
+            tasks_names_to_ids=self.tasks_names_to_ids,
+        )
+        self.projection_dim = projection_dim
         self.text_projection = ProjectionHead(
             embedding_dim=text_embedding_dim, projection_dim=projection_dim
         )
