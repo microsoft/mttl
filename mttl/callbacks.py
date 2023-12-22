@@ -63,36 +63,32 @@ class LiveCheckpointCallback(pl.Callback):
         trainer.save_checkpoint(this_filename, weights_only=self.save_weights_only)
         self.best_model_path = this_filename
 
-    def on_log(self, trainer, pl_module):
+    def on_log(self, trainer, pl_module, metric_name, metric_value, **kwargs):
         """Dummy callback called by LiveLogMixin. Every time a metric is logged,
         we call this function to check if we should save a checkpoint.
         """
         if not self.monitor:
             return
 
-        if not hasattr(pl_module, "live_metrics"):
-            raise ValueError(
-                "Live metrics not set up yet, is your module a LightningModule with LiveLogMixin?"
-            )
+        if metric_name != self.monitor:
+            return
 
-        if self.monitor not in pl_module.live_metrics:
-            logger.debug(f"Metric {self.monitor} not found in live metrics.")
-        else:
-            last_value = pl_module.live_metrics[self.monitor][-1]["value"]
-            last_step = pl_module.live_metrics[self.monitor][-1]["step"]
+        last_value = metric_value
+        last_step = trainer.global_step
 
-            # compare last_value and _last_value wrt self.mode
-            if last_step > self._last_step:
-                do_save = False
-                self._last_step = last_step
-                if self.mode == "min":
-                    do_save = self._last_value is None or last_value < self._last_value
-                else:
-                    do_save = self._last_value is None or last_value > self._last_value
+        # compare last_value and _last_value wrt self.mode
+        if last_step > self._last_step:
+            do_save = False
+            self._last_step = last_step
 
-                if do_save:
-                    self._save_best(trainer, self._last_value, last_value)
-                    self._last_value = last_value
+            if self.mode == "min":
+                do_save = self._last_value is None or last_value < self._last_value
+            else:
+                do_save = self._last_value is None or last_value > self._last_value
+
+            if do_save:
+                self._save_best(trainer, self._last_value, last_value)
+                self._last_value = last_value
 
 
 class LossCallback(cb.Callback):

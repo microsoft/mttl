@@ -1,6 +1,5 @@
 import os
 import sys
-import json
 import pytorch_lightning as pl
 from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
 
@@ -13,16 +12,17 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 import torch
 from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
-import json
 
 from mttl.datamodule.mt_seq_to_seq_module import (
+    FlanConfig,
+    FlanModule,
     FlatMultiTaskConfig,
     FlatMultiTaskModule,
 )
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.callbacks import NanoMMLUCallback, RougeCallback, MMLUCallback
+from mttl.callbacks import NanoMMLUCallback, RougeCallback
 from mttl.utils import get_mlf_logger, setup_logging, logger
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
@@ -47,7 +47,13 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         "train_on_inputs": False,
     }
 
-    if "flat" in dataset:
+    if "flan" in dataset:
+        config = FlanConfig(
+            **common_kwargs,
+            include_template_type="*",
+        )
+        dm = FlanModule(config, for_generation=for_generation)
+    elif "flat" in dataset:
         config = FlatMultiTaskConfig(
             **common_kwargs,
             source_template=args.source_template,

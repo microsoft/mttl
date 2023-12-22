@@ -108,61 +108,36 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
 
 class SimpleLogger(pl.loggers.logger.DummyLogger):
     def __init__(self, output_dir):
-        self.metrics = {}
         self.output_file = os.path.join(output_dir, "metrics.json")
+        if os.path.exists(self.output_file):
+            os.remove(self.output_file)
 
     def log_metrics(self, metrics, step=None):
+        lines = []
         for k, v in metrics.items():
-            if k not in self.metrics:
-                self.metrics[k] = []
             if isinstance(v, torch.Tensor):
                 v = v.item()
-            self.metrics[k].append({"step": step, "value": v})
+            lines.append({"name": k, "value": v, "step": step})
 
-        with open(self.output_file, "w") as f:
-            json.dump(self.metrics, f)
+        with open(self.output_file, "a+") as f:
+            for l in lines:
+                f.write(json.dumps(l) + "\n")
 
 
-class LiveLogMixin:
-    def log_dict(self, mapping, **kwargs):
-        for k, v in mapping.items():
-            self.log(k, v, **kwargs)
+class OnLogCallback:
+    """Adds `on_log` capability to callbacks."""
 
     def log(self, name, value, **kwargs):
-        """Override the weird pytorch lightning logging system.
-
-        Just store everything in trainer._mttl_metrics.
-        """
-        trainer: pl.Trainer = self.trainer
-
-        step = trainer.global_step
-        if name not in self.live_metrics:
-            self.live_metrics[name] = []
-
-        if isinstance(value, torch.Tensor):
-            value = value.item()
-        self.live_metrics[name].append({"step": step, "value": value})
-
-        if kwargs.get("prog_bar", True):
-            trainer.progress_bar_metrics.update({name: value})
-
-        # dispatch to each logger !
-        for logger in trainer.loggers:
-            logger.log_metrics({name: value}, step=step)
+        output = LightningModule.log(self, name, value, **kwargs)
 
         # call on log on each callback
-        for callback in trainer.callbacks:
+        for callback in self.trainer.callbacks:
             if hasattr(callback, "on_log"):
-                callback.on_log(trainer, self)
-
-    @property
-    def live_metrics(self):
-        if not hasattr(self.trainer, "_live_metrics"):
-            self.trainer._live_metrics = {}
-        return self.trainer._live_metrics
+                callback.on_log(self.trainer, self, name, value)
+        return output
 
 
-class EfficientCheckpointModule(LiveLogMixin, PushToHubMixin, LightningModule):
+class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
     """Efficiently save and load checkpoints.
 
     Only saves and loads parameters that are either in the trainable parameters
