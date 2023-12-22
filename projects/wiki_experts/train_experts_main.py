@@ -161,13 +161,14 @@ def run_multitask(args: ExpertConfig):
             val_check_interval = args.total_steps
 
     rouge = RougeCallback(gen_dm, every_n_epochs=3 if args.num_train_epochs > 3 else 1)
-    mmlu = NanoMMLUCallback(
-        get_datamodule(args, dataset_override="mmlu", for_generation=True),
-        every_n_epochs=3 if args.num_train_epochs > 3 else 1,
-    )
-
     callbacks.append(rouge)
-    callbacks.append(mmlu)
+
+    if args.eval_mmlu_flag:
+        mmlu = NanoMMLUCallback(
+            get_datamodule(args, dataset_override="mmlu", for_generation=True),
+            every_n_epochs=3 if args.num_train_epochs > 3 else 1,
+        )
+        callbacks.append(mmlu)
 
     trainer = Trainer(
         devices=-1,
