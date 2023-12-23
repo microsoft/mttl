@@ -130,17 +130,31 @@ class GenerationOutput:
 
 
 class StoppingCriteriaSub(StoppingCriteria):
-    def __init__(self, stops=[]):
+    def __init__(self, stop_tokens=[], tokenizer=None):
         super().__init__()
-        self.stops = stops
+        self.stop = stop_tokens
+        self.max_length = max([len(s) for s in stop_tokens])
+        self.tokenizer = tokenizer
+        self.finished = None
 
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor):
-        for i, stop in enumerate(self.stops):
-            stop = self.stops[i] = stop.to(input_ids.device)
+        """Stops on matching token strings and not ids."""
+        if self.finished is None:
+            self.finished = torch.zeros(input_ids.shape[0], dtype=torch.bool)
 
-            if torch.all((stop[None, :] == input_ids[:, -stop.shape[0] :])).item():
-                return True
-        return False
+        batch_size = input_ids.shape[0]
+        decoded = self.tokenizer.batch_decode(
+            input_ids[:, -self.max_length :], skip_special_tokens=True
+        )
+
+        for j in range(batch_size):
+            if self.finished[j]:
+                continue
+            for stop in self.stop:
+                self.finished[j] = stop in decoded[j]
+                if self.finished[j]:
+                    break
+        return torch.all(self.finished)
 
 
 class GenerationMixin:
@@ -150,33 +164,22 @@ class GenerationMixin:
         """Postprocesses the generation output."""
         return generation_output
 
-    def _create_stopping_criteria(self):
-        """Create stopping criteria if needed."""
-        stop_tokens = self.generation_kwargs.pop("stop_tokens", None)
-        if stop_tokens:
-            stop_words_ids = [
-                # tokenize stop word and return tensors
-                self.tokenizer(
-                    stop_word, add_special_tokens=False, return_tensors="pt"
-                ).input_ids
-                for stop_word in stop_tokens
-            ]
-            stopping_criteria = StoppingCriteriaList(
-                [StoppingCriteriaSub(stops=stop_words_ids)]
-            )
-            self.generation_kwargs["stopping_criteria"] = stopping_criteria
-
     def generate_for_batch(self, model, batch):
         if hasattr(model, "module"):
             model = model.module
-
-        self._create_stopping_criteria()
 
         extra_kwargs = {}
         extra_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
         extra_kwargs["eos_token_id"] = self.tokenizer.eos_token_id
         extra_kwargs["max_new_tokens"] = self.config.max_output_length
         extra_kwargs.update(self.generation_kwargs)
+
+        stop_tokens = extra_kwargs.pop("stop_tokens", None)
+        if stop_tokens:
+            stopping_criteria = StoppingCriteriaList(
+                [StoppingCriteriaSub(stop_tokens, tokenizer=self.tokenizer)]
+            )
+            extra_kwargs["stopping_criteria"] = stopping_criteria
 
         device = next(model.parameters()).device
         batch = transfer_batch_to_device(batch, device)
@@ -223,6 +226,22 @@ class GenerationMixin:
                     generated_texts.append(generated)
 
         generated_texts = [text.strip() for text in generated_texts]
+
+        # if stop tokens have been specified, then we need to remove them from the generated text
+        # we search the surface for of the first matching stop token from the end of the generated
+        # and the sequence text. We then remove everything after that and keep only the first part
+        # (before the stopping sequence has been produced)
+        if stop_tokens:
+            for i, generated_text in enumerate(generated_texts):
+                for stop in stop_tokens:
+                    if stop in generated_text:
+                        generated_texts[i] = generated_text.rsplit(stop)[0]
+                        break
+            for i, sequence_text in enumerate(sequences_texts):
+                for stop in stop_tokens:
+                    if stop in sequence_text:
+                        sequences_texts[i] = sequence_text.rsplit(stop)[0]
+                        break
 
         return self.postprocess_generation_output(
             GenerationOutput(

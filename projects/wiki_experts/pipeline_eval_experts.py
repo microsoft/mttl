@@ -41,7 +41,7 @@ from projects.wiki_experts.mmlu_eval_experts import parse_experts_to_load
 
 def setup_evaluators(args, active_tasks=["piqa"]):
     evaluators = {}
-    common_kwargs = {
+    common_kwargs_ = {
         "model": args.model,
         "model_family": args.model_family,
         "max_input_length": args.max_input_length,
@@ -49,18 +49,24 @@ def setup_evaluators(args, active_tasks=["piqa"]):
         "predict_batch_size": args.predict_batch_size,
         "truncation_side": args.truncation_side,
     }
-    generation_kwargs = {
-        "temperature": 0.05,
-        "top_p": 0.95,
-        "do_sample": True,
+    generation_kwargs_ = {
+        "temperature": 0.0,
     }
 
     for task in set(active_tasks):
-        common_kwargs = copy.deepcopy(common_kwargs)
-        generation_kwargs = copy.deepcopy(generation_kwargs)
+        common_kwargs = copy.deepcopy(common_kwargs_)
+        generation_kwargs = copy.deepcopy(generation_kwargs_)
 
         if task == "humaneval":
-            common_kwargs["max_output_length"] = 300
+            generation_kwargs.update(
+                {
+                    "temperature": 0.05,
+                    "top_p": 0.95,
+                    "do_sample": True,
+                    "max_new_tokens": 300,
+                    "stop_tokens": ["\n\n"],
+                }
+            )
             config = HumanEvalConfig(
                 **common_kwargs,
             )
@@ -68,7 +74,15 @@ def setup_evaluators(args, active_tasks=["piqa"]):
                 config, generation_kwargs=generation_kwargs
             )
         elif task == "mbpp":
-            common_kwargs["max_output_length"] = 300
+            generation_kwargs.update(
+                {
+                    "temperature": 0.05,
+                    "top_p": 0.95,
+                    "do_sample": True,
+                    "max_new_tokens": 300,
+                    "stop_tokens": ["\n\n"],
+                }
+            )
             evaluators["mbpp"] = MBPPEvaluator(
                 MBPPDataConfig(**common_kwargs),
                 generation_kwargs=generation_kwargs,
@@ -81,9 +95,10 @@ def setup_evaluators(args, active_tasks=["piqa"]):
                 config, generation_kwargs=generation_kwargs
             )
         elif task == "bbh":
+            generation_kwargs["max_new_tokens"] = 128
             config = BBHConfig(
                 **common_kwargs,
-                augment_few_shot=3,
+                augment_few_shot=5,
             )
             evaluators["bbh"] = DirectBBHEvaluator(
                 config, generation_kwargs=generation_kwargs
@@ -174,7 +189,7 @@ def run_eval(args):
         else:
             num_batches = None
         scores[name] = evaluators[name].evaluate(
-            module, shuffle=True, verbose=False, num_batches=num_batches
+            module, shuffle=True, verbose=True, num_batches=num_batches
         )
         with open(args.output_dir + f"/scores.json", "w") as f:
             import json
