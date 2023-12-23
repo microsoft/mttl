@@ -81,9 +81,7 @@ class ExpertConfig(Config):
             )  # use "+" for assign multiple task set vars to be found in task_sequences
             for task_name in tasks:
                 task_names.extend(
-                    getattr(mttl.datamodule.task_sequences, task_name, task_name)
+                    getattr(mttl.datamodule.task_sequences, task_name, [task_name])
                 )
-            # if you want to assign a list
-            # self.finetune_task_names = task_names
             # I would suggest re-adding ",", then splitting is handled in datamodule
-            self.finetune_task_names = ",".join(task_names)
+            self.finetune_task_name = ",".join(task_names)
