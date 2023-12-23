@@ -6,6 +6,7 @@ from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 from mttl.callbacks import LiveCheckpointCallback
 from mttl.models.utils import SimpleLogger
+from mttl.models.monitors import get_monitors
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -93,8 +94,11 @@ def run_multitask(args: ExpertConfig):
     module = model_class(**vars(args), tokenizer=dm.tokenizer)
 
     # get metric monitors for models
-    monitor = "val/rougeL"
-    mode = "max"
+    callbacks = get_monitors(args)
+
+    monitor = "val/loss"
+    mode = "min"
+
     checkpoint_callback = LiveCheckpointCallback(
         dirpath=args.output_dir,
         monitor=monitor,

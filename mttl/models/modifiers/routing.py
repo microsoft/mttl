@@ -241,6 +241,7 @@ def modify_with_routing(cls, transformer, config, optional_wrapper=None):
     for m_name, module in dict(transformer.named_modules()).items():
         if re.fullmatch(config.modify_modules, m_name):
             for c_name, layer in dict(module.named_children()).items():
+                # breakpoint()
                 if re.fullmatch(config.modify_layers, c_name):
                     layer_name = f"{m_name}.{c_name}"
 
@@ -261,7 +262,8 @@ def modify_with_routing(cls, transformer, config, optional_wrapper=None):
                             assert isinstance(transformer, T5ForConditionalGeneration)
                             in_d = transformer.config.d_model
                         else:
-                            in_d = layer.in_features
+                            # The following line will fail if `layer` is not a `nn.Linear` layer
+                            in_d = getattr(layer, "in_features", None)
 
                         selectors[identifier] = get_selector(
                             config,

@@ -4,7 +4,7 @@ import numpy
 from datasets import load_dataset, concatenate_datasets
 from datasets import Dataset
 from mttl.datamodule.base import DefaultDataModule, DatasetConfig
-from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
+from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task, logger
 from dataclasses import dataclass
 import tqdm
 
@@ -167,6 +167,8 @@ class FlatMultiTaskModule(DefaultDataModule):
 class FlanConfig(DatasetConfig):
     include_template_type: str = "zs_noopt"
     include_task_source: str = "P3,Flan2021"
+    subsample_dev: int = None
+    remove_phi_eval_tasks: bool = False
 
 
 def filter_template_type(include_template_type, example):
@@ -236,6 +238,38 @@ class FlanModule(DefaultDataModule):
                 train_dataset
             )
             self.test_dataset = self.dev_dataset
+
+        if self.config.subsample_dev:
+            logger.info(
+                f"subsampling the dev dataset to {self.config.subsample_dev} samples"
+            )
+            self.subsample_dataset("dev_dataset", self.config.subsample_dev)
+
+        if self.config.remove_phi_eval_tasks:
+            assert not any(
+                name in self.config.include_task_source.lower()
+                for name in ["niv2", "*"]
+            ), "niv2 not currently supported for phi-2 eval exclusion"
+
+            def is_phi2_eval_task(datapoint):
+                eval_tasks = [
+                    "hellaswag_1_1_0",
+                    "ai2_arc_ARC_Challenge_1_0_0",
+                    "ai2_arc_ARC_Easy_1_0_0",
+                    "piqa_1_0_0",
+                    "winogrande_1_1_0",
+                    "bool_q_1_0_0",
+                    "openbookqa_0_1_0",
+                ]
+                return not any(
+                    eval_task == datapoint["task_name"] for eval_task in eval_tasks
+                )
+
+            self.train_dataset = self.train_dataset.filter(
+                is_phi2_eval_task,
+                num_proc=n_proc,
+                desc="Filtering phi-2 eval tasks from training mixture.",
+            )
 
         # Wrap the datasets to also return the task_id
         self.print_infos()
