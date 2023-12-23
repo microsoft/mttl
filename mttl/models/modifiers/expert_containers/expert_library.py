@@ -539,7 +539,7 @@ class ExpertLibrary:
         data_type: str,
         expert_name: str,
         config: Dict,
-        expert_aux_data: np.ndarray,
+        data: np.ndarray,
     ):
         if expert_name not in self.data:
             raise ValueError(f"Expert {expert_name} not found in repository.")
@@ -558,7 +558,7 @@ class ExpertLibrary:
             aux_data = {}
 
         aux_data[config["name"]] = {
-            data_type: expert_aux_data,
+            data_type: data,
             "config": config,
         }
 
@@ -591,7 +591,7 @@ class ExpertLibrary:
             data_type="embeddings",
             expert_name=expert_name,
             config=embedding_config,
-            expert_aux_data=expert_embedding,
+            data=expert_embedding,
         )
 
     def _update_readme(self):

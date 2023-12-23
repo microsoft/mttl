@@ -79,3 +79,28 @@ def test_read_embeddings():
     )
     assert "abstract_algebra" in embeddings
     assert embeddings["abstract_algebra"]["svd"]["embedding"].shape[1] == 2
+
+
+def test_add_auxiliary_data(mocker, tmp_path):
+    from mttl.models.modifiers.expert_containers.expert_library import (
+        HFExpertLibrary,
+        LocalExpertLibrary,
+    )
+
+    # read the stored embeddings
+    library = LocalExpertLibrary.create_from_remote(
+        HFExpertLibrary("sordonia/test-library"), tmp_path
+    )
+
+    library.add_auxiliary_data(
+        data_type="test",
+        expert_name="abstract_algebra",
+        config={"name": "test_expert"},
+        data={"test": 1},
+    )
+    assert (
+        library.get_auxiliary_data("test", expert_name="abstract_algebra")[
+            "test_expert"
+        ]["test"]["test"]
+        == 1
+    )
