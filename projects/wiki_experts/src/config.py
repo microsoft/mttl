@@ -60,6 +60,7 @@ class ExpertConfig(Config):
 
         self.reset_lr = False
         self.reset_optim = False
+        self.pipeline_eval_tasks = "piqa,arc-easy,arc-challenge"
 
     def post_init(self):
         if self.micro_batch_size is None:
