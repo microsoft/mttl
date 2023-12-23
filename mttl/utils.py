@@ -15,7 +15,6 @@ import hashlib
 from pytorch_lightning.utilities.rank_zero import rank_zero_info
 from torch.autograd.function import Function
 
-
 logger = logging.getLogger("mttl")
 
 
@@ -238,7 +237,50 @@ class CustomModelCheckpoint(pl.callbacks.ModelCheckpoint):
         self.last_model_score = current
 
 
-def get_mlf_logger():
+def get_pl_loggers(args):
+    loggers = []
+
+    add_simple_logger(loggers, args)
+    add_tb_logger(loggers, args)
+    add_wandb_logger(loggers, args)
+    add_mlf_logger(loggers)
+
+    return loggers
+
+
+def add_simple_logger(loggers, args):
+    from mttl.models.utils import SimpleLogger
+
+    loggers.append(SimpleLogger(args.output_dir))
+
+
+def add_tb_logger(loggers, args):
+    if args.tensorboard:
+        tb_logger = pl.loggers.TensorBoardLogger(save_dir=args.output_dir)
+        loggers.append(tb_logger)
+
+
+def add_wandb_logger(loggers, args) -> pl.loggers.WandbLogger:
+    if not os.environ.get("WANDB_API_KEY"):
+        return
+
+    import wandb
+
+    if not args.exp_name:
+        args.exp_name = os.environ.get("AMLT_JOB_NAME")
+    if not args.wandb_project:
+        args.wandb_project = os.environ.get("WANDB_PROJECT")
+
+    wandb_logger = pl.loggers.WandbLogger(
+        project=args.wandb_project,
+        name=args.exp_name,
+        settings=wandb.Settings(start_method="fork"),
+    )
+    wandb_logger.experiment.save("*.py")
+    loggers.append(wandb_logger)
+
+
+def add_mlf_logger(loggers):
     import pytorch_lightning as pl
     from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
@@ -265,7 +307,9 @@ def get_mlf_logger():
     except:
         logger.warn("Couldn't instantiate MLFlowLogger!")
         mlf_logger = None
-    return mlf_logger
+
+    if mlf_logger is not None:
+        loggers.append(mlf_logger)
 
 
 def get_checkpoint_path(path, step=None, use_last=False):

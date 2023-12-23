@@ -13,8 +13,9 @@ from mttl.models.monitors import get_monitors
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.utils import (
     CustomModelCheckpoint,
+    add_wandb_logger,
     get_checkpoint_path,
-    get_mlf_logger,
+    add_mlf_logger,
     setup_logging,
 )
 from mttl.config import Config
@@ -160,19 +161,8 @@ def finetune(args, use_mlf=True, do_zs=True):
 
         # legit logging
         loggers = []
-        if os.environ.get("WANDB_API_KEY"):
-            wandb_logger = pl.loggers.WandbLogger(
-                project=args.wandb_project,
-                name=args.exp_name,
-            )
-            wandb_logger.experiment.save("*.py")
-            loggers.append(wandb_logger)
-        else:
-            wandb_logger = None
-
-        mlf_logger = get_mlf_logger()
-        if mlf_logger and use_mlf:
-            loggers.append(mlf_logger)
+        add_wandb_logger(loggers, args)
+        add_mlf_logger(loggers)
 
         loggers.append(
             pl.loggers.CSVLogger(save_dir=args.output_dir, name="csv_metrics")

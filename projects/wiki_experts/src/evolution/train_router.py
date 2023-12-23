@@ -14,7 +14,7 @@ from projects.wiki_experts.src.expert_model import (
     RoutedMultiExpertModel,
 )
 from mttl.models.modifiers.expert_containers.module_graph import Expert
-from mttl.utils import get_mlf_logger, setup_logging, logger
+from mttl.utils import add_mlf_logger, add_tb_logger, setup_logging, logger
 from projects.wiki_experts.src.config import ExpertConfig
 from config import EvolExpertConfig
 from typing import List
@@ -51,13 +51,8 @@ def train_router(
     module.to("cuda")
     ##############################
 
-    mlf_logger = get_mlf_logger()
-    if mlf_logger:
-        loggers.append(mlf_logger)
-
-    if args.tensorboard:
-        tb_logger = pl.loggers.TensorBoardLogger(save_dir=args.output_dir)
-        loggers.append(tb_logger)
+    add_mlf_logger(loggers)
+    add_tb_logger(loggers, args)
 
     if silent:
         logger.disabled = True

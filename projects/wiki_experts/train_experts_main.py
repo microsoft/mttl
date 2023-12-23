@@ -23,7 +23,11 @@ from mttl.datamodule.mt_seq_to_seq_module import (
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.callbacks import NanoMMLUCallback, RougeCallback
-from mttl.utils import get_mlf_logger, setup_logging, logger
+from mttl.utils import (
+    get_pl_loggers,
+    setup_logging,
+    logger,
+)
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
@@ -75,7 +79,6 @@ def run_multitask(args: ExpertConfig):
 
     # get directory of the current file
     setup_logging(args.output_dir)
-
     logger.info("Args: {}".format(args.to_json()))
 
     if args.hf_token_hub:
@@ -86,40 +89,10 @@ def run_multitask(args: ExpertConfig):
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
 
-    gen_dm = get_datamodule(args, for_generation=True)
-
-    # legit logging
-    loggers = []
-    exp_name = os.environ.get("AMLT_JOB_NAME", args.exp_name)
-    if os.environ.get("WANDB_API_KEY") or args.wandb_project:
-        import wandb
-
-        project = "wiki_experts" if args.wandb_project is None else args.wandb_project
-        args.exp_name = "dev_run" if args.exp_name is None else args.exp_name
-        project = os.environ.get("WANDB_PROJECT", project)
-        wandb_logger = pl.loggers.WandbLogger(
-            project=project,
-            name=exp_name,  # , config=args_
-            settings=wandb.Settings(start_method="fork"),
-        )
-        wandb_logger.experiment.save("*.py")
-        loggers.append(wandb_logger)
-
+    loggers = get_pl_loggers(args)
     module = model_class(**vars(args), tokenizer=dm.tokenizer)
 
-    mlf_logger = get_mlf_logger()
-    if mlf_logger:
-        loggers.append(mlf_logger)
-
-    if args.tensorboard:
-        tb_logger = pl.loggers.TensorBoardLogger(save_dir=args.output_dir)
-        loggers.append(tb_logger)
-
-    loggers.append(SimpleLogger(args.output_dir))
-
     # get metric monitors for models
-    callbacks = []
-
     monitor = "val/rougeL"
     mode = "max"
     checkpoint_callback = LiveCheckpointCallback(
@@ -128,7 +101,21 @@ def run_multitask(args: ExpertConfig):
         save_last=True,
         mode=mode,
     )
+    rouge = RougeCallback(
+        get_datamodule(args, for_generation=True),
+        every_n_epochs=3 if args.num_train_epochs > 3 else 1,
+    )
+
+    callbacks = []
     callbacks.append(checkpoint_callback)
+    callbacks.append(rouge)
+
+    if args.eval_mmlu_flag:
+        mmlu = NanoMMLUCallback(
+            get_datamodule(args, dataset_override="mmlu", for_generation=True),
+            every_n_epochs=3 if args.num_train_epochs > 3 else 1,
+        )
+        callbacks.append(mmlu)
 
     val_check_interval = args.eval_every
     if val_check_interval == -1 or val_check_interval is None:
@@ -139,16 +126,6 @@ def run_multitask(args: ExpertConfig):
             val_check_interval = len(dm.train_dataloader())
         elif val_check_interval > args.total_steps and args.total_steps != -1:
             val_check_interval = args.total_steps
-
-    rouge = RougeCallback(gen_dm, every_n_epochs=3 if args.num_train_epochs > 3 else 1)
-    callbacks.append(rouge)
-
-    if args.eval_mmlu_flag:
-        mmlu = NanoMMLUCallback(
-            get_datamodule(args, dataset_override="mmlu", for_generation=True),
-            every_n_epochs=3 if args.num_train_epochs > 3 else 1,
-        )
-        callbacks.append(mmlu)
 
     trainer = Trainer(
         devices=-1,
