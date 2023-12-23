@@ -10,7 +10,6 @@ import os
 import time
 import requests
 import numpy as np
-import numpy as np
 
 
 from huggingface_hub import (
@@ -729,6 +728,16 @@ class ExpertLibrary:
 
 
 class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
+    def add_expert(
+        self, expert_dump: Expert, expert_name: str = None, force: bool = False
+    ):
+        expert_name = expert_name or expert_dump.expert_info.expert_name
+        if "/" in expert_name:
+            # create subfolders if necessary
+            pref, suff = expert_name.split("/")
+            os.makedirs(os.path.join(self.repo_id, pref, suff), exist_ok=True)
+        return super().add_expert(expert_dump, expert_name=expert_name, force=force)
+
     def update_from_remote(self, remote_lib: Union["HFExpertLibrary", str]):
         """
         Update the expert library with experts from a remote library.
@@ -749,20 +758,17 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
     def create_from_remote(cls, remote_lib: ExpertLibrary, destination):
         new_lib = LocalExpertLibrary(repo_id=destination)
         for name, expert in remote_lib.items():
-            if "/" in expert.name:
-                expert.expert_info.expert_name = expert.name.replace("/", "_")
             if expert not in new_lib and not expert.expert_info.expert_deleted:
                 new_lib.add_expert(expert)
         return new_lib
 
     @classmethod
-    def from_expet_dict(cls, expert_dict: Dict[str, Expert], destination):
+    def from_expert_dict(cls, expert_dict: Dict[str, Expert], destination):
         """
-        Create a new LocalExpertLibrary object from a dictionary of experts. Usefull e.g. when I want to create a library from new experts that are created dynamically.
+        Create a new LocalExpertLibrary object from a dictionary of experts. Useful e.g. when I want to create a library from new experts that are created dynamically.
 
         Args:
             expert_dict (Dict[str, Expert]): A dictionary containing expert names as keys and Expert objects as values.
-            destination:
             destination: path where the local library will be stored
 
         Returns:

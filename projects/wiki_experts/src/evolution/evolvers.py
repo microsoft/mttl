@@ -268,6 +268,11 @@ def evolve_selector_only(
     )
 
 
+def load_lora_expert_in_experttrainer(module: ExpertTrainer, expert: Expert):
+    keys = module.model.load_state_dict(expert.expert_weights, strict=False)
+    assert sum(["lora" in k for k in keys.missing_keys]) == 0, "Some keys are missing"
+
+
 @register_evol_funcs("no_transfer")
 def independent_expert_fine_tuning(
     args: EvolExpertConfig,
@@ -290,7 +295,7 @@ def independent_expert_fine_tuning(
 
     args.trainable_param_names = task_expert.training_config.trainable_param_names
     module_to_train = ExpertTrainer(**vars(args))
-    module_to_train.load_expert(task_expert)
+    load_lora_expert_in_experttrainer(module_to_train, task_expert)
 
     return evolve_with_sgd(
         args,
@@ -357,7 +362,7 @@ def evolve_from_joint(
     module_to_train: ExpertTrainer = ExpertTrainer(**vars(args))
     assert "joint" in expert_lib, "No joint expert in library"
     joint_expert = expert_lib["joint"]
-    module_to_train.load_expert(joint_expert)
+    load_lora_expert_in_experttrainer(module_to_train, joint_expert)
 
     return evolve_with_sgd(
         args,

@@ -1,7 +1,7 @@
 import os
 
 from mttl.config import Config
-import mttl.datamodule.flan_tasks
+import mttl.datamodule.task_sequences
 
 
 class ExpertConfig(Config):
@@ -14,7 +14,6 @@ class ExpertConfig(Config):
         self.hf_token_hub = None
         self.hf_lib_id = None
         self.hf_repo_id = None
-        self.run_name = "default"
 
         # just a lame flag to 0 out all adapter weights
         self.baseline = False
@@ -75,9 +74,25 @@ class ExpertConfig(Config):
         if self.finetune_task_name is not None and isinstance(
             self.finetune_task_name, str
         ):
-            if self.finetune_task_name in mttl.datamodule.flan_tasks.__dict__.keys():
+            if "+" in self.finetune_task_name:
+                finetune_task_names = []
+                for task_name in self.finetune_task_name.split("+"):
+                    if task_name in mttl.datamodule.task_sequences.__dict__.keys():
+                        finetune_task_names.extend(
+                            getattr(
+                                mttl.datamodule.task_sequences,
+                                task_name,
+                                task_name,
+                            )
+                        )
+                self.finetune_task_name = finetune_task_names
+
+            elif (
+                self.finetune_task_name
+                in mttl.datamodule.task_sequences.__dict__.keys()
+            ):
                 self.finetune_task_name = getattr(
-                    mttl.datamodule.flan_tasks,
+                    mttl.datamodule.task_sequences,
                     self.finetune_task_name,
                     self.finetune_task_name,
                 )

@@ -94,12 +94,6 @@ class ExpertTrainer(EfficientCheckpointModule):
         del outputs, shift_logits, shift_labels
         return loss
 
-    def load_expert(self, expert: Expert):
-        keys = self.model.load_state_dict(expert.expert_weights, strict=False)
-        assert (
-            sum(["lora" in k for k in keys.missing_keys]) == 0
-        ), "Some keys are missing"
-
     def training_step(self, batch, _):
         loss = self.forward(batch)
         total_loss = loss

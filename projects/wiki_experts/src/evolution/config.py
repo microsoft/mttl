@@ -5,8 +5,6 @@ from collections import defaultdict
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 from projects.wiki_experts.src.config import ExpertConfig
-from mttl.models.modifiers.expert_containers.module_graph import ExpertInfo
-import mttl.datamodule.flan_tasks
 import re
 
 

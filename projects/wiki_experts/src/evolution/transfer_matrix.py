@@ -198,11 +198,11 @@ def run_eval(args: EvolExpertConfig, debug=None):
         expert.expert_info.expert_name = "joint"
         expert.expert_info.expert_task_name = "joint"
         temp_dir = TemporaryDirectory(dir=args.output_dir + "/")
-        expert_lib = LocalExpertLibrary.from_expet_dict(
+        expert_lib = LocalExpertLibrary.from_expert_dict(
             {args.hf_repo_id: expert}, destination=temp_dir.name
         )
     else:
-        expert_lib: LocalExpertLibrary = LocalExpertLibrary.from_remote(
+        expert_lib: LocalExpertLibrary = LocalExpertLibrary.create_from_remote(
             HFExpertLibrary(repo_id=args.hf_repo_id), destination="/tmp"
         )
         remove_outdated_experts_from_library(expert_lib)

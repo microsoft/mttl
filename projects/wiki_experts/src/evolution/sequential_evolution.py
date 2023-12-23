@@ -137,7 +137,7 @@ def setup(args: EvolExpertConfig):
         login(token=args.hf_token_hub)
 
     os.makedirs(local_lib_location, exist_ok=True)
-    expert_lib = LocalExpertLibrary.from_remote(
+    expert_lib = LocalExpertLibrary.create_from_remote(
         HFExpertLibrary(args.hf_repo_id), local_lib_location
     )
     expert_lib.ignore_sliced = True
@@ -166,10 +166,10 @@ def setup(args: EvolExpertConfig):
         login(token=token)
         user_name = HfApi().whoami(token=token)["name"]
 
-        run_name: str = os.getenv("AMLT_JOB_NAME", "_test_evol")
+        exp_name: str = os.getenv("AMLT_JOB_NAME", "_test_evol")
         # if args.to_repo_id is None:
-        #     args.to_repo_id = args.hf_repo_id + run_name
-        to_repo_id = user_name + "/" + run_name
+        #     args.to_repo_id = args.hf_repo_id + exp_name
+        to_repo_id = user_name + "/" + exp_name
         create_repo(to_repo_id, token=token, exist_ok=True)
 
     print("###### Tasks", tasks)
@@ -485,6 +485,7 @@ def active_task_iteration(
     # log retrieved experts
     log_row["retrieved_experts"] = str(list(retrieved_expert_lib.keys()))
 
+    # prepare hps for evolution step
     config_copy = copy.deepcopy(args)
     config_copy.finetune_task_name = task
     config_copy.output_dir = os.path.join(

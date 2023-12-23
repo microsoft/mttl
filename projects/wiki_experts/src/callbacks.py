@@ -27,6 +27,15 @@ def decode(preds, tokenizer):
 
 class OptimResetCallback(cb.Callback):
     def __init__(self, reset_optim=False, reset_lr=False) -> None:
+        """
+        Callback class to reset optimizer and learning rate during training.
+
+        I run some experiments using it, but didnt see any improvement. I not not 100% sure this does waht it is supposed to. pllightning is a bit tricky when it comes to reseting the optimizer.
+
+        Args:
+            reset_optim (bool, optional): Whether to reset the optimizer. Defaults to False.
+            reset_lr (bool, optional): Whether to reset the learning rate. Defaults to False.
+        """
         super().__init__()
         self.reset_optim = reset_optim
         self.reset_lr = reset_lr
@@ -34,6 +43,13 @@ class OptimResetCallback(cb.Callback):
     def on_train_epoch_start(
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:
+        """
+        Method called at the start of each training epoch.
+
+        Args:
+            trainer (Trainer): The PyTorch Lightning Trainer object.
+            pl_module (LightningModule): The PyTorch Lightning module being trained.
+        """
         if self.reset_optim and self.reset_lr:
             new = pl_module.configure_optimizers()
             trainer.strategy.optimizers = [new["optimizer"]]

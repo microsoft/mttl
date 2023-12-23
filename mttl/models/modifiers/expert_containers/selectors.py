@@ -369,8 +369,8 @@ class PolySelectorDirect(PolySelector):
         super().__init__(info_container)
 
         self.module_logits_dict = nn.ParameterDict()
-        self._initialized = False
         self.training_config = kwargs["training_config"]
+        self.init_gap = [-1e-3, 1e-3]
 
         self.device = kwargs["layer"].weight.device
 
@@ -381,25 +381,31 @@ class PolySelectorDirect(PolySelector):
     def add_expert(self, expert_name: str, **kwargs):
         """
         Assume:
-        expert_task_name -- task name expert is pecialized in
+        expert_task_name -- task name expert is pecialized at
         self.config.finetune_task_name -- name of the task the model is currently trained on
+
+        If we eocounter a module for the current task, we init it with one hot, otherwise with uniform.
+
+
         """
-        init_gap = [0, 0]
         main_m = 1
 
         expert_task_name = kwargs["expert_info"].expert_task_name
         if expert_name not in self.module_logits_dict:
-            # TODO: this is very error prone, e.g. when you reload this model, this cannot be inited
-            # @Oleksiy do you need this?
             if self.training_config.finetune_task_name == expert_task_name:
+                self.init_gap = [
+                    0,
+                    0,
+                ]  # encountered module for current task, init one hot
                 self.module_logits_dict[expert_name] = torch.nn.Parameter(
                     torch.ones(1).to(self.device)
                 )
+                self.init_logits_uniform()
                 self.module_logits_dict[expert_name].data *= main_m
-                self._initialized = True
+
             else:
                 self.module_logits_dict[expert_name] = torch.nn.Parameter(
-                    torch.empty(1).uniform_(*init_gap).to(self.device)
+                    torch.empty(1).uniform_(*self.init_gap).to(self.device)
                 )
 
     def load_state_dict(self, state_dict, strict=True):
@@ -415,15 +421,6 @@ class PolySelectorDirect(PolySelector):
         self._initialized = True
 
     def forward(self, *args, **kwargs):
-        if not self._initialized:
-            # if can happen that logits are not innitialized until first forward.
-            # happens when e.g. there is not module for the tasks that the model is currently trained on -> all module logits will be 0s.
-            # we must init them to uniform in this case.
-            assert (
-                sum([torch.sum(log).item() for log in self.module_logits_dict.values()])
-                == 0
-            )
-            self.init_logits_uniform()
         return super().forward(*args, **kwargs)
 
 

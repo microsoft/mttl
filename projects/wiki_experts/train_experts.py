@@ -62,7 +62,7 @@ class SimpleLogger(pl.loggers.logger.DummyLogger):
             json.dump(self.metrics, f)
 
 
-def get_datamodule(args, for_generation=False):
+def get_datamodule(args, for_generation=False, subsample=-1):
     # refactor all the common arguments below into a dict common kwargs
     common_kwargs = {
         "model": args.model,
@@ -76,7 +76,7 @@ def get_datamodule(args, for_generation=False):
         "truncation_side": args.truncation_side,
         "dataset": args.dataset.replace("qa:", "").replace("raw_docs:", ""),
         "train_on_inputs": False,
-        "subsample": 100 if DEBUG else -1,
+        "subsample": subsample,
     }
     if args.dataset.startswith("qa:"):
         config = PlatypusConfig(**common_kwargs)
@@ -87,12 +87,6 @@ def get_datamodule(args, for_generation=False):
             text_field="facts" if "facts" in args.dataset else "text",
         )
         dm = FactsLMDataModule(config, for_generation=for_generation)
-    elif "platypus" in args.dataset:
-        config = PlatypusConfig(
-            **common_kwargs,
-            train_on_reverse=args.dataset == "inverse-platypus",
-        )
-        dm = PlatypusModule(config, for_generation=for_generation)
     elif "oa1" in args.dataset:
         config = OA1Config(
             **common_kwargs,
@@ -113,7 +107,14 @@ def get_datamodule(args, for_generation=False):
             include_template_type="*",
         )
         dm = FlanModule(config, for_generation=for_generation)
-    elif "adauni" in args.dataset:
+    elif "flat" in args.dataset:
+        config = FlatMultiTaskConfig(
+            **common_kwargs,
+            source_template=args.source_template,
+            augment_few_shot=args.augment_few_shot,
+        )
+        dm = FlatMultiTaskModule(config, for_generation=for_generation)
+    elif "flat" in args.dataset:
         config = FlatMultiTaskConfig(
             **common_kwargs,
         )

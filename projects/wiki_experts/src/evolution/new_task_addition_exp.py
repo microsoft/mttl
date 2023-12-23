@@ -82,7 +82,7 @@ def setup(args: EvolExpertConfig):
         expert = load_expert(args.hf_repo_id)
         expert.expert_info.expert_name = "joint"
         expert.expert_info.expert_task_name = "FLAN_19"
-        expert_lib = LocalExpertLibrary.from_expet_dict(
+        expert_lib = LocalExpertLibrary.from_expert_dict(
             {args.hf_repo_id: expert}, destination="/tmp"
         )
         expert_lib.ignore_sliced = True
@@ -99,7 +99,7 @@ def setup(args: EvolExpertConfig):
         if args.hf_token_hub:
             login(token=args.hf_token_hub)
 
-        expert_lib = LocalExpertLibrary.from_remote(
+        expert_lib = LocalExpertLibrary.create_from_remote(
             HFExpertLibrary(args.hf_repo_id), local_lib_location
         )
         expert_lib.ignore_sliced = True

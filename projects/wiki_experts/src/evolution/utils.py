@@ -108,15 +108,15 @@ def init_wandb_logger(args):
     if args.wandb_project is None:
         args.wandb_project = os.environ.get("WANDB_PROJECT", "MMLU_ninja_merge")
     if args.wandb_project:
-        run_name = os.getenv("AMLT_JOB_NAME", f"{args.run_name}")
+        exp_name = os.getenv("AMLT_JOB_NAME", f"{args.exp_name}")
         # wandb.init(
         #     project=args.wandb_project,
-        #     name=run_name,
+        #     name=exp_name,
         #     config=args,
         # )
         logger = pl.loggers.WandbLogger(
             project=args.wandb_project,
-            name=run_name,
+            name=exp_name,
             config=args,
         )
     return logger

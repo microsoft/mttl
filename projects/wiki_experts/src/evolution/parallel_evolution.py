@@ -85,7 +85,7 @@ def setup(args: EvolExpertConfig):
 
     remote_lib = HFExpertLibrary(args.hf_repo_id)
     os.makedirs(local_lib_location, exist_ok=True)
-    expert_lib = LocalExpertLibrary.from_remote(
+    expert_lib = LocalExpertLibrary.create_from_remote(
         remote_lib, destination=local_lib_location
     )
 
