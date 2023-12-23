@@ -49,7 +49,7 @@ class EMEvaluator(Evaluator, GenerationMixin):
         extra_kwargs["eos_token_id"] = self.tokenizer.eos_token_id
         all_em = []
 
-        for _, batch in pbar:
+        for num_batch, batch in pbar:
             labels_texts = batch["labels_texts"]
             sources_texts = batch["sources_texts"]
 
@@ -66,7 +66,7 @@ class EMEvaluator(Evaluator, GenerationMixin):
 
             pbar.set_description(f"exact_match: {np.mean(all_em):.4f}")
 
-            if num_batches is not None and len(all_em) >= num_batches:
+            if num_batches is not None and num_batch >= num_batches:
                 break
 
         return np.mean(all_em)
