@@ -539,7 +539,7 @@ class ExpertLibrary:
         data_type: str,
         expert_name: str,
         config: Dict,
-        expert_eux_data: np.ndarray,
+        expert_aux_data: np.ndarray,
     ):
         if expert_name not in self.data:
             raise ValueError(f"Expert {expert_name} not found in repository.")
@@ -558,7 +558,7 @@ class ExpertLibrary:
             aux_data = {}
 
         aux_data[config["name"]] = {
-            data_type: expert_eux_data,
+            data_type: expert_aux_data,
             "config": config,
         }
 
@@ -591,7 +591,7 @@ class ExpertLibrary:
             data_type="embeddings",
             expert_name=expert_name,
             config=embedding_config,
-            expert_embedding=expert_embedding,
+            expert_aux_data=expert_embedding,
         )
 
     def _update_readme(self):
@@ -702,8 +702,6 @@ class ExpertLibrary:
         """
         tasks = set()
         for metadatum in self.data.values():
-            if isinstance(metadatum.expert_task_name, list):
-                continue
             tasks.add(metadatum.expert_task_name)
         return list(tasks)
 
@@ -733,9 +731,9 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
     ):
         expert_name = expert_name or expert_dump.expert_info.expert_name
         if "/" in expert_name:
-            # create subfolders if necessary
-            pref, suff = expert_name.split("/")
-            os.makedirs(os.path.join(self.repo_id, pref, suff), exist_ok=True)
+            # create sub-folders if necessary
+            path = expert_name.split("/")
+            os.makedirs(os.path.join(self.repo_id, *path[:-1]), exist_ok=True)
         return super().add_expert(expert_dump, expert_name=expert_name, force=force)
 
     def update_from_remote(self, remote_lib: Union["HFExpertLibrary", str]):

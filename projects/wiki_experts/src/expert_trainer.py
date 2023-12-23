@@ -14,10 +14,10 @@ from mttl.models.utils import (
 )
 from mttl.models.modifiers.expert_containers.module_graph import Expert
 from projects.wiki_experts.src.config import ExpertConfig
+from mttl.models.modifiers.expert_containers.selectors import SelectorConfig
 
 
 torch.set_float32_matmul_precision("high")
-from mttl.models.modifiers.expert_containers.selectors import SelectorConfig
 
 
 class ExpertTrainer(EfficientCheckpointModule):
