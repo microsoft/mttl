@@ -51,7 +51,7 @@ class SimpleLogger(pl.loggers.logger.DummyLogger):
             json.dump(self.metrics, f)
 
 
-def get_datamodule(args, for_generation=False, subsample=-1):
+def get_datamodule(args, for_generation=False, dataset_override=None):
     # refactor all the common arguments below into a dict common kwargs
     dataset = args.dataset if not dataset_override else dataset_override
 
@@ -67,7 +67,6 @@ def get_datamodule(args, for_generation=False, subsample=-1):
         "truncation_side": args.truncation_side,
         "dataset": dataset,
         "train_on_inputs": False,
-        "subsample": subsample,
     }
 
     if "flat" in dataset:
@@ -77,11 +76,11 @@ def get_datamodule(args, for_generation=False, subsample=-1):
             augment_few_shot=args.augment_few_shot,
         )
         dm = FlatMultiTaskModule(config, for_generation=for_generation)
-    elif "flat" in args.dataset:
-        config = FlatMultiTaskConfig(
+    elif "mmlu" in dataset:
+        config = MMLUDataConfig(
             **common_kwargs,
         )
-        dm = FlatMultiTaskModule(config, for_generation=for_generation)
+        dm = MMLUDataModule(config, for_generation=for_generation)
     else:
         raise ValueError(f"Unknown dataset {args.dataset}")
     return dm
