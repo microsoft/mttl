@@ -10,6 +10,8 @@ class RankerConfig(ExpertConfig):
         self.subsample = -1
         self.encoder_model_name = "t5-small"
         self.text_embedding_dim = 512
+        self.expert_embedding_dim = 512
+        self.projection_dim = 512
 
     def post_init(self):
         if self.micro_batch_size is None:
