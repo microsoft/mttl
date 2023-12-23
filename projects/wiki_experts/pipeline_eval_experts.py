@@ -2,6 +2,7 @@ import os
 import sys
 
 import prettytable
+import copy
 from huggingface_hub import login
 from pytorch_lightning import seed_everything
 
@@ -55,6 +56,9 @@ def setup_evaluators(args, active_tasks=["piqa"]):
     }
 
     for task in set(active_tasks):
+        common_kwargs = copy.deepcopy(common_kwargs)
+        generation_kwargs = copy.deepcopy(generation_kwargs)
+
         if task == "humaneval":
             common_kwargs["max_output_length"] = 300
             config = HumanEvalConfig(
@@ -79,7 +83,7 @@ def setup_evaluators(args, active_tasks=["piqa"]):
         elif task == "bbh":
             config = BBHConfig(
                 **common_kwargs,
-                augment_few_shot=5,
+                augment_few_shot=3,
             )
             evaluators["bbh"] = DirectBBHEvaluator(
                 config, generation_kwargs=generation_kwargs
@@ -163,8 +167,15 @@ def run_eval(args):
     )
 
     scores = {}
-    for name, evaluator in evaluators.items():
-        scores[name] = evaluator.evaluate(module, shuffle=True)
+    for name in sorted(evaluators.keys()):
+        logger.info("Evaluating %s", name)
+        if name == "bbh":
+            num_batches = 200
+        else:
+            num_batches = None
+        scores[name] = evaluators[name].evaluate(
+            module, shuffle=True, verbose=False, num_batches=num_batches
+        )
         with open(args.output_dir + f"/scores.json", "w") as f:
             import json
 

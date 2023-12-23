@@ -59,7 +59,10 @@ class BBHDataModule(DefaultDataModule):
                 few_shots = task_dataset.select(range(self.config.augment_few_shot))
 
                 task_dataset = augment_few_shot_task(
-                    task_dataset, few_shots=few_shots, tokenizer=self.tokenizer
+                    task_dataset,
+                    few_shots=few_shots,
+                    tokenizer=self.tokenizer,
+                    max_input_length=self.config.max_input_length,
                 )
 
             datasets.append(task_dataset)
