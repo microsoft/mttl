@@ -148,11 +148,15 @@ class StoppingCriteriaSub(StoppingCriteria):
         decoded = self.tokenizer.batch_decode(input_ids[:, -self.max_length :])
 
         for j in range(batch_size):
+            # fill the rest of input ids with pad tokens, the generation finished!
             if self.finished[j]:
+                input_ids[j, self.finished[j][1] :] = self.tokenizer.pad_token_id
                 continue
+            # check which stop token is in the decoded text
             for stop in self.stop:
-                if stop in decoded[j]:
-                    self.finished[j] = stop
+                pos = decoded[j].find(stop)
+                if pos != -1:
+                    self.finished[j] = (stop, input_ids.shape[1])
                 if self.finished[j]:
                     break
         return all(self.finished)
@@ -238,13 +242,13 @@ class GenerationMixin:
             for i in range(len(generated_texts)):
                 if (
                     finished_with[i] is not None
-                    and finished_with[i] is not self.tokenizer.eos_token
+                    and finished_with[i][0] is not self.tokenizer.eos_token
                 ):
                     generated_texts[i] = generated_texts[i].rpartition(
-                        finished_with[i]
+                        finished_with[i][0]
                     )[0]
                     sequences_texts[i] = sequences_texts[i].rpartition(
-                        finished_with[i]
+                        finished_with[i][0]
                     )[0]
 
         return self.postprocess_generation_output(
