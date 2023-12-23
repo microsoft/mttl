@@ -42,7 +42,7 @@ class AdapterRankerHelper:
                 device
             )
             return model
-        elif ranker_model == "t5":
+        elif ranker_model == "classifier_t5":
             model = T5Classifier.from_pretrained(ranker_path).to(device)
             return model
         elif ranker_model == "kate":
