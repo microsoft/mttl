@@ -14,7 +14,7 @@ from mttl.utils import logger
 class EMEvaluator(Evaluator, GenerationMixin):
     def postprocess_generation_output(self, generation_output):
         """Usually EM evaluator is insensitive to this kind of spaces."""
-        generation_output.generated_text = [
+        generation_output.generated_texts = [
             t.strip() for t in generation_output.generated_texts
         ]
         return generation_output
@@ -66,6 +66,7 @@ class EMEvaluator(Evaluator, GenerationMixin):
 
             eval_metrics = compute_metrics(predictions, references, reduction="none")
             all_em.extend(eval_metrics["exact_match"])
+
             if verbose:
                 logger.info("Sources:\n%s", sources_texts[0])
                 logger.info("Label:\n%s", labels_texts[0])
