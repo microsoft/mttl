@@ -70,29 +70,19 @@ class ExpertConfig(Config):
             self.train_batch_size // self.micro_batch_size
         )
         self.train_batch_size = self.micro_batch_size
-
         if self.finetune_task_name is not None and isinstance(
             self.finetune_task_name, str
         ):
-            if "+" in self.finetune_task_name:
-                finetune_task_names = []
-                for task_name in self.finetune_task_name.split("+"):
-                    if task_name in mttl.datamodule.task_sequences.__dict__.keys():
-                        finetune_task_names.extend(
-                            getattr(
-                                mttl.datamodule.task_sequences,
-                                task_name,
-                                task_name,
-                            )
-                        )
-                self.finetune_task_name = finetune_task_names
-
-            elif (
-                self.finetune_task_name
-                in mttl.datamodule.task_sequences.__dict__.keys()
-            ):
-                self.finetune_task_name = getattr(
-                    mttl.datamodule.task_sequences,
-                    self.finetune_task_name,
-                    self.finetune_task_name,
+            # resolve task keys
+            task_names = []
+            tasks = self.finetune_task_name.split(
+                "+"
+            )  # use "+" for assign multiple task set vars to be found in task_sequences
+            for task_name in tasks:
+                task_names.extend(
+                    getattr(mttl.datamodule.task_sequences, task_name, task_name)
                 )
+            # if you want to assign a list
+            # self.finetune_task_names = task_names
+            # I would suggest re-adding ",", then splitting is handled in datamodule
+            self.finetune_task_names = ",".join(task_names)

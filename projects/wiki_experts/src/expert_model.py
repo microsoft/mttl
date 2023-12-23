@@ -18,12 +18,7 @@ from mttl.models.modifiers.lora import LoRAConfig
 from mttl.models.modifiers.routing import RoutingInfo
 from mttl.utils import logger
 from mttl.models.modifiers.expert_containers import ExpertContainer
-from mttl.models.modifiers.expert_containers.selectors import (
-    Selector,
-    SelectorConfig,
-    RoutingInfoContainerConfig
-)
-
+from mttl.models.modifiers.expert_containers.selectors import Selector
 from mttl.models.modifiers.expert_containers import (
     add_expert_to_transformer,
 )
@@ -89,8 +84,6 @@ class MultiExpertModel(ExpertTrainer):
         super().__init__(**kwargs)
 
         self.experts_names = []
-        # config about the routing
-        self.routing_config = SelectorConfig.from_training_config(self.training_config)
 
     @property
     def experts_containers(self) -> List[ExpertContainer]:

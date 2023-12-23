@@ -17,6 +17,7 @@ from projects.wiki_experts.src.config import ExpertConfig
 
 
 torch.set_float32_matmul_precision("high")
+from mttl.models.modifiers.expert_containers.selectors import SelectorConfig
 
 
 class ExpertTrainer(EfficientCheckpointModule):
@@ -49,6 +50,8 @@ class ExpertTrainer(EfficientCheckpointModule):
         # init the transformer just with the modifier config, this avoids
         # passing the whole training config to the modify_transformer func
         self.modifier_config = ModifierConfig.from_training_config(self.training_config)
+        # config about the routing
+        self.routing_config = SelectorConfig.from_training_config(self.training_config)
 
         self.model = modify_transformer(model_object, self.modifier_config)
 

@@ -539,35 +539,35 @@ class ExpertLibrary:
         data_type: str,
         expert_name: str,
         config: Dict,
-        expert_embedding: np.ndarray,
+        expert_eux_data: np.ndarray,
     ):
         if expert_name not in self.data:
             raise ValueError(f"Expert {expert_name} not found in repository.")
 
         if "name" not in config:
-            raise ValueError("Embedding config must contain a name.")
+            raise ValueError(f"{data_type} config must contain a name.")
 
         operations = []
-        embedding_file = f"{expert_name}.{data_type}"
+        aux_file = f"{expert_name}.{data_type}"
 
-        embeddings = self.list_repo_files(self.repo_id)
-        if embedding_file in embeddings:
-            path = self.hf_hub_download(self.repo_id, filename=embedding_file)
-            embeddings = torch.load(path, map_location="cpu")
+        aux_data = self.list_repo_files(self.repo_id)
+        if aux_file in aux_data:
+            path = self.hf_hub_download(self.repo_id, filename=aux_file)
+            aux_data = torch.load(path, map_location="cpu")
         else:
-            embeddings = {}
+            aux_data = {}
 
-        embeddings[config["name"]] = {
-            data_type: expert_embedding,
+        aux_data[config["name"]] = {
+            data_type: expert_eux_data,
             "config": config,
         }
 
         buffer = io.BytesIO()
-        torch.save(embeddings, buffer)
+        torch.save(aux_data, buffer)
         buffer.flush()
 
         addition_a = CommitOperationAdd(
-            path_in_repo=f"{embedding_file}", path_or_fileobj=buffer
+            path_in_repo=f"{aux_file}", path_or_fileobj=buffer
         )
         operations.append(addition_a)
 
