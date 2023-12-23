@@ -15,7 +15,7 @@ class EMEvaluator(Evaluator, GenerationMixin):
     def postprocess_generation_output(self, generation_output):
         """Usually EM evaluator is insensitive to this kind of spaces."""
         generation_output.generated_text = [
-            t.strip() for t in generation_output.generated_text
+            t.strip() for t in generation_output.generated_texts
         ]
         return generation_output
 
