@@ -12,6 +12,13 @@ from mttl.utils import logger
 
 
 class EMEvaluator(Evaluator, GenerationMixin):
+    def postprocess_generation_output(self, generation_output):
+        """Usually EM evaluator is insensitive to this kind of spaces."""
+        generation_output.generated_text = [
+            t.strip() for t in generation_output.generated_text
+        ]
+        return generation_output
+
     def __init__(self, datamodule, use_vllm=False, generation_kwargs=None):
         super().__init__(
             datamodule=datamodule,

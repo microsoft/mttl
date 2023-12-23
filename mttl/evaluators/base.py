@@ -10,10 +10,12 @@ from transformers import StoppingCriteriaList, StoppingCriteria
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
 
 
-def decode(preds, tokenizer):
+def decode(preds, tokenizer, clean_up_tokenization_spaces=True):
     preds[preds == -100] = tokenizer.pad_token_id
     preds = tokenizer.batch_decode(
-        preds, skip_special_tokens=True, clean_up_tokenization_spaces=True
+        preds,
+        skip_special_tokens=True,
+        clean_up_tokenization_spaces=clean_up_tokenization_spaces,
     )
     preds = [pred.strip() for pred in preds]
     return preds
@@ -224,8 +226,6 @@ class GenerationMixin:
                         # we fallback to the standard way of getting the output
                         generated = generated_texts_fallback[i]
                     generated_texts.append(generated)
-
-        generated_texts = [text.strip() for text in generated_texts]
 
         # if stop tokens have been specified, then we need to remove them from the generated text
         # we search the surface for of the first matching stop token from the end of the generated
