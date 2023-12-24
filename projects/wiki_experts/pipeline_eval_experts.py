@@ -169,7 +169,8 @@ def run_eval(args):
         logger.info("Loaded library: {}".format(library))
 
         if args.ranker_model is not None:
-            module.add_experts_from_library(library, filtering_experts.split(","))
+            module.load_from_library(library, filtering_experts.split(","))
+            # module.add_experts_from_library(library, filtering_experts.split(","))
     else:
         library = None
 
