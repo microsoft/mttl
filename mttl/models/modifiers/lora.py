@@ -275,22 +275,21 @@ class SkilledLoRA(LoRA):
         Executes multiple skilled loras in parallel.
 
         I.e. this is useful for the situations in which each example in the batch
-        need to be processed by a different combination of skills.
+        need to be processed by a different combination of skills,
               --> skills     --> weights
         ex1 : [[a, d, f]     [[0.1, 0.2, 0.7]
         ex2 :  [c, g, h]]     [0.3, 0.4, 0.3]]
 
-        This also handles the case in which the same skilled lora is applied to multiple example
-        i.e.:
+        This also handles the case in which the same skilled lora is applied to multiple examples,
+        in this case, we broadcast the same combination to all the examples in the batch,
               --> skills      --> weights
         *   : [[a, d, f]]     [[0.1, 0.2, 0.7]]
 
-        It also handles another case, in which we have a single skilled lora applied with different weights
-        i.e.:
+        It also handles another case, in which we have a single shared skilled lora applied with different weights
+        depending on the example,
+              --> skills      --> weights
         *   : [[a, d, f]]     [[0.1, 0.2, 0.7],
                                [0.3, 0.4, 0.3]]
-
-        in this case, we broadcast the same combination to all the examples in the batch.
         """
         if merge_after:
             raise NotImplementedError("`merge_after` is not implemented for now.")
@@ -387,6 +386,11 @@ class LoRAView(LoRA):
     on a bunch of other LoRAs parameters stacked together.
     """
 
+    def __init__(self, config, layer, lora_a, lora_b):
+        super().__init__(config, layer)
+        self.lora_a = lora_a
+        self.lora_b = lora_b
+
     def create_for_layer(self, layer):
         pass
 
@@ -415,10 +419,13 @@ class SkilledLoRAView(SkilledLoRA):
 
         loras = []
         for i in range(self.n_skills):
-            lora = LoRAView(self.config, self.layer)
             # squeeze n_splits if any
-            lora.lora_a = self.lora_a[i].squeeze()
-            lora.lora_b = self.lora_b[i].squeeze()
+            lora = LoRAView(
+                self.config,
+                self.layer,
+                self.lora_a[i].squeeze(),
+                self.lora_b[i].squeeze(),
+            )
             loras.append(lora)
         return loras
 
