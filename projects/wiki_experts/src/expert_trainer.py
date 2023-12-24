@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 from collections import defaultdict
 from torch import nn
 from mttl.models.llama_patch import replace_attn_with_flash_attn
@@ -40,7 +41,6 @@ class ExpertTrainer(EfficientCheckpointModule):
                 load_in_8bit=self.hparams.load_in_8bit,
                 device_map=getattr(self.hparams, "device_map", "cpu"),
             )
-
         if self.hparams.load_in_8bit:
             model_object = prepare_model_for_kbit_training(model_object)
 
@@ -133,6 +133,7 @@ class ExpertTrainer(EfficientCheckpointModule):
 
     def validation_step(self, batch, batch_idx):
         loss = self.forward(batch, reduction="none")
+
         mean_loss = loss.sum() / loss.shape[0]
         self._inference_outputs += [(loss.detach().cpu(),)]
         return mean_loss

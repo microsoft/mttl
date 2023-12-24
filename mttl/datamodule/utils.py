@@ -8,8 +8,11 @@ def maybe_filter_hf_dataset_by_task(
     dataset, task_field, task_names: str = None, n_proc=16
 ):
     """Filter a HuggingFace dataset by task names."""
+
     # get the tasks
-    all_tasks = set(dataset["train"][task_field])
+    all_tasks = set()
+    if "train" in dataset:
+        all_tasks = all_tasks.union(set(dataset["train"][task_field]))
     if "validation" in dataset:
         all_tasks = all_tasks.union(set(dataset["validation"][task_field]))
     if "test" in dataset:
@@ -31,11 +34,12 @@ def maybe_filter_hf_dataset_by_task(
     train_dataset, dev_dataset, test_dataset = None, None, None
 
     if task_names is not None:
-        train_dataset = dataset["train"].filter(
-            lambda x: x[task_field] in task_names,
-            num_proc=n_proc,
-            desc="Filtering task names",
-        )
+        if "train" in dataset:
+            train_dataset = dataset["train"].filter(
+                lambda x: x[task_field] in task_names,
+                num_proc=n_proc,
+                desc="Filtering task names",
+            )
         if "validation" in dataset:
             dev_dataset = dataset["validation"].filter(
                 lambda x: x[task_field] in task_names,
@@ -49,7 +53,8 @@ def maybe_filter_hf_dataset_by_task(
                 desc="Filtering task names",
             )
     else:
-        train_dataset = dataset["train"]
+        if "train" in dataset:
+            train_dataset = dataset["train"]
         if "validation" in dataset:
             dev_dataset = dataset["validation"]
         if "test" in dataset:

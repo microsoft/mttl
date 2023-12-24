@@ -1,7 +1,9 @@
 import os
+import torch
 
 from mttl.config import Config
 import mttl.datamodule.flan_tasks
+from mttl.utils import logger
 
 
 class ExpertConfig(Config):
@@ -58,6 +60,8 @@ class ExpertConfig(Config):
         self.eval_metric = "loss"
         self.use_vllm = False
 
+        self.pipeline_eval_tasks = "piqa,arc-easy,arc-challenge"
+
     def post_init(self):
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size
@@ -67,6 +71,13 @@ class ExpertConfig(Config):
             self.train_batch_size // self.micro_batch_size
         )
         self.train_batch_size = self.micro_batch_size
+
+        n_devices = torch.cuda.device_count()
+        if n_devices > 1:
+            logger.warn(
+                "You have multiple GPUs, but your device count is not being taken "
+                + "into account when computing `gradient_accumulation_steps`."
+            )
 
         if self.finetune_task_name is not None:
             if self.finetune_task_name in mttl.datamodule.flan_tasks.__dict__.keys():
