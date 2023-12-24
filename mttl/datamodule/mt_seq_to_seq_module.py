@@ -85,6 +85,7 @@ def augment_few_shot(
 class FlatMultiTaskConfig(DatasetConfig):
     source_template: str = None
     augment_few_shot: int = 0
+    subsample_dev: int = None
 
 
 def apply_source_template(source_template, example):
@@ -145,6 +146,12 @@ class FlatMultiTaskModule(DefaultDataModule):
 
         if len(self.test_dataset) == 0:
             self.test_dataset = self.dev_dataset
+
+        if self.config.subsample_dev:
+            logger.info(
+                f"subsampling the dev dataset to {self.config.subsample_dev} samples"
+            )
+            self.subsample_dataset("dev_dataset", self.config.subsample_dev)
 
         self.print_infos()
 
