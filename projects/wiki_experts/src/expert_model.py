@@ -159,7 +159,7 @@ class MultiExpertModel(ExpertTrainer):
             expert_dump = library[module_name]
             self.add_expert_instance(expert_dump)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
             # Create a list to hold the futures
             futures = []
             for element in library.keys():
@@ -169,7 +169,7 @@ class MultiExpertModel(ExpertTrainer):
             with tqdm.tqdm(
                 total=len(library), desc="Processing", unit="module"
             ) as progress_bar:
-                for future in concurrent.futures.as_completed(futures):
+                for _ in concurrent.futures.as_completed(futures):
                     progress_bar.update(1)
 
     def load_from_module_dict(self, module_dict, action="route"):

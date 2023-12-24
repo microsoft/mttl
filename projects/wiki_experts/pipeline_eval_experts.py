@@ -166,6 +166,9 @@ def run_eval(args):
     if args.hf_lib_id:
         library = HFExpertLibrary(args.hf_lib_id)
         logger.info("Loaded library: {}".format(library))
+
+        if args.ranker_model is not None:
+            module.add_experts_from_library(library)
     else:
         library = None
 
