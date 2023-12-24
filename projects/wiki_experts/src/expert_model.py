@@ -399,7 +399,6 @@ class MultiExpertModelRanker(MultiExpertModel):
             self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
                 batch
             )
-
         self.expert_ranker.set_available_tasks(self.experts_names)
         mod_names, mod_weights = self.expert_ranker.predict_batch(
             batch,
@@ -415,11 +414,20 @@ class MultiExpertModelRanker(MultiExpertModel):
         self.model.task_id_container["routing_infos"].routing_weights = mod_weights
 
         for e, task_name in enumerate(batch["task_names"]):
-            logger.info(
-                "task_name:{}.... predict experts: {}".format(
-                    task_name, mod_names[e][0]
+            if mod_names[e][0] in self.experts_names:
+                logger.info(
+                    "task_name:{}.... predict experts: {}".format(
+                        task_name,
+                        mod_names[e][0],
+                    )
                 )
-            )
+            else:
+                logger.info(
+                    "task_name:{}.... used experts: {}".format(
+                        task_name,
+                        "default",
+                    )
+                )
             self.fout.write(task_name + "\t" + mod_names[e][0] + "\n")
         self.fout.flush()
         logger.info(f"Most similar: {str(mod_names)}")
@@ -444,11 +452,20 @@ class MultiExpertModelRanker(MultiExpertModel):
         self.model.task_id_container["routing_infos"].routing_modules = mod_names
         self.model.task_id_container["routing_infos"].routing_weights = mod_weights
         for e, task_name in enumerate(batch["task_names"]):
-            logger.info(
-                "task_name:{}.... predict experts: {}".format(
-                    task_name, mod_names[e][0]
+            if mod_names[e][0] in self.experts_names:
+                logger.info(
+                    "task_name:{}.... predict experts: {}".format(
+                        task_name,
+                        mod_names[e][0],
+                    )
                 )
-            )
+            else:
+                logger.info(
+                    "task_name:{}.... used experts: {}".format(
+                        task_name,
+                        "default",
+                    )
+                )
 
         outputs = self.model.forward(input_ids, attention_mask=batch["attention_mask"])
 
