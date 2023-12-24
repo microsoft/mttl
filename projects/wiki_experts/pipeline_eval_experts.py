@@ -163,16 +163,15 @@ def run_eval(args):
     else:
         module = MultiExpertModel(**vars(args))
 
+    filtering_experts = os.environ.get("FILTERING_EXPERTS", None)
     if args.hf_lib_id:
         library = HFExpertLibrary(args.hf_lib_id)
         logger.info("Loaded library: {}".format(library))
 
         if args.ranker_model is not None:
-            module.add_experts_from_library(library)
+            module.add_experts_from_library(library, filtering_experts.split(","))
     else:
         library = None
-
-    filtering_experts = os.environ.get("FILTERING_EXPERTS", "")
 
     if args.load_module is not None:
         kwargs = parse_experts_to_load(args.load_module)
@@ -180,10 +179,6 @@ def run_eval(args):
             module.load_expert(**expert_kwargs, expert_library=library)
     elif args.module_graph is not None:
         module.load_from_graph_string(args.module_graph, expert_library=library)
-    elif args.hf_lib_id is not None:
-        module.load_from_library(
-            library, filtering_experts=filtering_experts.split(",")
-        )
 
     module.to("cuda")
 
