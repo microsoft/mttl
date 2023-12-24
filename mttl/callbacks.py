@@ -1,20 +1,100 @@
-import datetime
-import time
 import sys, os
 import copy
 import torch
 import tqdm
-from typing import Any
 
 import pytorch_lightning as pl
 from pytorch_lightning import LightningModule, Trainer, callbacks as cb
 from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
 from torch.optim import Optimizer
-from mttl.utils import Averager, logger
+
+from mttl.utils import logger
 from mttl.models.utils import transfer_batch_to_device
 
 
 DEBUG = False
+
+
+class LiveCheckpointCallback(pl.Callback):
+    """A better model checkpoint callback, that works in synchrony with LiveLogMixin."""
+
+    def __init__(
+        self,
+        dirpath,
+        monitor=None,
+        mode="min",
+        save_last=True,
+        save_weights_only=True,
+    ):
+        if not monitor and not save_last:
+            raise ValueError(
+                "Must specify a monitor metric to track if save_last is False."
+            )
+
+        self.dirpath = dirpath
+        self.monitor = monitor
+        self.mode = mode
+        self.best_model_path = None
+        self.last_model_path = None
+        self.save_last = save_last
+        self._last_step = -1
+        self._last_value = None
+        self.save_weights_only = save_weights_only
+
+    def on_train_end(self, trainer, pl_module):
+        """Saves the last checkpoint."""
+        if self.save_last:
+            self.last_model_path = os.path.join(f"{self.dirpath}", "last.ckpt")
+            trainer.save_checkpoint(
+                self.last_model_path, weights_only=self.save_weights_only
+            )
+
+    def _save_best(self, trainer, last_value, this_value):
+        if this_value is None:
+            raise ValueError("No value to save.. Something has gone wrong!")
+
+        monitor = self.monitor.replace("/", "-")
+        if last_value is not None:
+            past_filename = os.path.join(
+                f"{self.dirpath}", f"best_{monitor}_{last_value:.004f}.ckpt"
+            )
+            if os.path.exists(past_filename):
+                os.remove(past_filename)
+
+        this_filename = os.path.join(
+            f"{self.dirpath}", f"best_{monitor}_{this_value:.004f}.ckpt"
+        )
+
+        logger.info("Saving new best model to %s", this_filename)
+        trainer.save_checkpoint(this_filename, weights_only=self.save_weights_only)
+        self.best_model_path = this_filename
+
+    def on_log(self, trainer, pl_module, metric_name, metric_value, **kwargs):
+        """Dummy callback called by LiveLogMixin. Every time a metric is logged,
+        we call this function to check if we should save a checkpoint.
+        """
+        if not self.monitor:
+            return
+
+        if metric_name != self.monitor:
+            return
+
+        last_value = metric_value
+        last_step = trainer.global_step
+
+        # compare last_value and _last_value wrt self.mode
+        if last_step > self._last_step:
+            do_save = False
+            self._last_step = last_step
+
+            if self.mode == "min":
+                do_save = self._last_value is None or last_value < self._last_value
+            else:
+                do_save = self._last_value is None or last_value > self._last_value
+
+            if do_save:
+                self._save_best(trainer, self._last_value, last_value)
+                self._last_value = last_value
 
 
 class LossCallback(cb.Callback):
@@ -137,21 +217,8 @@ class RougeCallback(cb.Callback):
         self.every_n_epochs = every_n_epochs
         self.verbose = False
         self.subsample = subsample
-        self.first_eval = False
 
-    def on_after_backward(self, trainer, pl_module):
-        if not self.first_eval:
-            rouge = self.evaluator.evaluate(
-                pl_module,
-                split="val",
-                verbose=self.verbose,
-                subsample=self.subsample,
-            )
-
-            pl_module.log("val/rougeL", rouge, on_step=True, prog_bar=True)
-            self.first_eval = True
-
-    def on_validation_epoch_end(
+    def on_validation_epoch_start(
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:
         if self.every_n_epochs > 0 and trainer.current_epoch % self.every_n_epochs == 0:
@@ -161,10 +228,7 @@ class RougeCallback(cb.Callback):
                 verbose=self.verbose,
                 subsample=self.subsample,
             )
-
-            pl_module.log("val/rougeL", rouge, on_epoch=True, prog_bar=True)
-
-        return super().on_validation_epoch_end(trainer, pl_module)
+            pl_module.log("val/rougeL", rouge, prog_bar=True)
 
     def on_test_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         rouge = self.evaluator.evaluate(
@@ -173,10 +237,7 @@ class RougeCallback(cb.Callback):
             verbose=self.verbose,
             subsample=self.subsample,
         )
-
-        pl_module.log("test/rougeL", rouge, on_epoch=True, prog_bar=True)
-
-        return super().on_test_epoch_end(trainer, pl_module)
+        pl_module.log("test/rougeL", rouge, prog_bar=True)
 
 
 class NanoMMLUCallback(cb.Callback):
@@ -196,19 +257,7 @@ class NanoMMLUCallback(cb.Callback):
         self.subsample = subsample
         self.first_eval = False
 
-    def on_after_backward(self, trainer, pl_module):
-        if not self.first_eval:
-            em = self.evaluator.evaluate(
-                pl_module,
-                split="test",
-                verbose=self.verbose,
-                subsample=self.subsample,
-            )["all"]["mean"]
-
-            pl_module.log("test/mmlu", em, on_step=True, prog_bar=True)
-            self.first_eval = True
-
-    def on_validation_epoch_end(
+    def on_validation_epoch_start(
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:
         if self.every_n_epochs > 0 and trainer.current_epoch % self.every_n_epochs == 0:
@@ -217,9 +266,8 @@ class NanoMMLUCallback(cb.Callback):
                 split="test",
                 verbose=self.verbose,
                 subsample=self.subsample,
-            )["all"]["mean"]
-            pl_module.log("test/mmlu", em, on_epoch=True, prog_bar=True)
-        return super().on_validation_epoch_end(trainer, pl_module)
+            )
+            pl_module.log("test/mmlu", em["all"]["mean"], prog_bar=True)
 
     def on_test_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         em = self.evaluator.evaluate(
@@ -227,9 +275,8 @@ class NanoMMLUCallback(cb.Callback):
             split="test",
             verbose=self.verbose,
             subsample=self.subsample,
-        )["all"]["mean"]
-        pl_module.log("test/mmlu", em, on_epoch=True, prog_bar=True)
-        return super().on_test_epoch_end(trainer, pl_module)
+        )
+        pl_module.log("test/mmlu", em["all"]["mean"], prog_bar=True)
 
 
 class MMLUCallback(cb.Callback):

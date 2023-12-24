@@ -143,9 +143,9 @@ class KATERanker(AdapterRanker):
 
     def predict_batch(self, batch, n=1):
         query = self.embedder.encode(
-            batch["sources_texts"], show_progress_bar=False, device="cuda:0"
+            batch["sources_texts"], show_progress_bar=False, device="cuda"
         )
-        _, indices = self.index.search(query, 100)
+        _, indices = self.index.search(query, 10)
         top_tasks, top_weights = [], []
 
         for _, idxs in enumerate(indices):
@@ -156,10 +156,14 @@ class KATERanker(AdapterRanker):
                 if task_name in self.available_tasks
             ]
             top_selected = Counter(task_names).most_common(n)
+            if len(top_selected) < n:
+                top_selected += [
+                    (top_selected[-1][0], 0) for _ in range(n - len(top_selected))
+                ]
             top_tasks.append([x[0] for x in top_selected])
             top_weights.append([x[1] for x in top_selected])
 
-        top_weights = np.exp(np.array(top_weights))
+        top_weights = np.array(top_weights)
         top_weights = top_weights / top_weights.sum(axis=1, keepdims=True)
         return top_tasks, top_weights.tolist()
 

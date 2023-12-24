@@ -15,7 +15,7 @@ from mttl.callbacks import MMLUCallback
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.platypus_module import PlatypusModule
 from mttl.datamodule.ni_data_module import NiDataModule
-from mttl.utils import get_mlf_logger, setup_logging, logger
+from mttl.utils import add_mlf_logger, add_tb_logger, setup_logging, logger
 from mttl.models.monitors import SelectorMetricsLog, SelectorRoutingsLog, get_monitors
 from mttl.dist_utils import is_main_process
 from mttl.models.modifiers.routing import RoutingSelector
@@ -216,14 +216,8 @@ def run_multitask(args):
     else:
         wandb_logger = None
 
-    mlf_logger = get_mlf_logger()
-    if mlf_logger:
-        loggers.append(mlf_logger)
-
-    if args.tensorboard:
-        tb_logger = pl.loggers.TensorBoardLogger(save_dir=args.output_dir)
-        loggers.append(tb_logger)
-
+    add_mlf_logger(loggers)
+    add_tb_logger(loggers, args)
     loggers.append(pl.loggers.CSVLogger(save_dir=args.output_dir, name="csv_metrics"))
 
     kwargs = {"val_check_interval": args.eval_every} if args.eval_every else {}

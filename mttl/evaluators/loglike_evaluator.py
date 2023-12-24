@@ -108,7 +108,7 @@ class LogLikeEvaluator(Evaluator):
             if verbose:
                 logger.info("Sources:\n%s", sources_texts[0])
                 logger.info("Label:\n%s", labels_texts[batch["labels_index"][0]])
-                logger.info("Prediction:\n%s", labels_texts[batch["labels_index"][0]])
+                logger.info("Prediction:\n%s", labels_texts[predictions[0]])
 
             if num_batches is not None and num_batch >= num_batches:
                 break

@@ -2,6 +2,7 @@ import os
 import sys
 
 import prettytable
+import copy
 from huggingface_hub import login
 from pytorch_lightning import seed_everything
 
@@ -26,7 +27,7 @@ from mttl.evaluators.piqa_evaluator import PiqaEvaluator
 from mttl.evaluators.hellaswag_evaluator import HellaswagEvaluator
 from mttl.evaluators.humaneval_evaluator import HumanEvalEvaluator
 from mttl.evaluators.mbpp_evaluator import MBPPEvaluator
-from mttl.evaluators.bbh_evaluator import BBHEvaluator
+from mttl.evaluators.bbh_evaluator import DirectBBHEvaluator
 from mttl.utils import setup_logging, logger
 
 # register models
@@ -40,7 +41,7 @@ from projects.wiki_experts.mmlu_eval_experts import parse_experts_to_load
 
 def setup_evaluators(args, active_tasks=["piqa"]):
     evaluators = {}
-    common_kwargs = {
+    common_kwargs_ = {
         "model": args.model,
         "model_family": args.model_family,
         "max_input_length": args.max_input_length,
@@ -48,15 +49,24 @@ def setup_evaluators(args, active_tasks=["piqa"]):
         "predict_batch_size": args.predict_batch_size,
         "truncation_side": args.truncation_side,
     }
-    generation_kwargs = {
-        "temperature": 0.05,
-        "top_p": 0.95,
-        "do_sample": True,
+    generation_kwargs_ = {
+        "temperature": 0.0,
     }
 
     for task in set(active_tasks):
+        common_kwargs = copy.deepcopy(common_kwargs_)
+        generation_kwargs = copy.deepcopy(generation_kwargs_)
+
         if task == "humaneval":
-            common_kwargs["max_output_length"] = 300
+            generation_kwargs.update(
+                {
+                    "temperature": 0.05,
+                    "top_p": 0.95,
+                    "do_sample": True,
+                    "max_new_tokens": 300,
+                    "stop_tokens": ["\n\n"],
+                }
+            )
             config = HumanEvalConfig(
                 **common_kwargs,
             )
@@ -64,7 +74,15 @@ def setup_evaluators(args, active_tasks=["piqa"]):
                 config, generation_kwargs=generation_kwargs
             )
         elif task == "mbpp":
-            common_kwargs["max_output_length"] = 300
+            generation_kwargs.update(
+                {
+                    "temperature": 0.05,
+                    "top_p": 0.95,
+                    "do_sample": True,
+                    "max_new_tokens": 300,
+                    "stop_tokens": ["\n\n"],
+                }
+            )
             evaluators["mbpp"] = MBPPEvaluator(
                 MBPPDataConfig(**common_kwargs),
                 generation_kwargs=generation_kwargs,
@@ -77,10 +95,12 @@ def setup_evaluators(args, active_tasks=["piqa"]):
                 config, generation_kwargs=generation_kwargs
             )
         elif task == "bbh":
+            generation_kwargs["max_new_tokens"] = 128
             config = BBHConfig(
                 **common_kwargs,
+                augment_few_shot=5,
             )
-            evaluators.append["bbh"] = BBHEvaluator(
+            evaluators["bbh"] = DirectBBHEvaluator(
                 config, generation_kwargs=generation_kwargs
             )
         elif task == "arc-easy":
@@ -146,6 +166,9 @@ def run_eval(args):
     if args.hf_lib_id:
         library = HFExpertLibrary(args.hf_lib_id)
         logger.info("Loaded library: {}".format(library))
+
+        if args.ranker_model is not None:
+            module.add_experts_from_library(library)
     else:
         library = None
 
@@ -169,8 +192,15 @@ def run_eval(args):
     )
 
     scores = {}
-    for name, evaluator in evaluators.items():
-        scores[name] = evaluator.evaluate(module, shuffle=True)
+    for name in sorted(evaluators.keys()):
+        logger.info("Evaluating %s", name)
+        if name == "bbh":
+            num_batches = 200
+        else:
+            num_batches = None
+        scores[name] = evaluators[name].evaluate(
+            module, shuffle=True, verbose=True, num_batches=num_batches
+        )
         with open(args.output_dir + f"/scores.json", "w") as f:
             import json
 

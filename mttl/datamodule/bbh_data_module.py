@@ -4,10 +4,13 @@ from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from dataclasses import dataclass
 import os
 
+from mttl.datamodule.mt_seq_to_seq_module import augment_few_shot_task
+
 
 @dataclass
 class BBHConfig(DatasetConfig):
-    apply_source_template: str = None
+    augment_few_shot: int = -1
+    apply_source_template: str = "Solve the following problem: {}\nAnswer:"
 
 
 class BBHDataModule(DefaultDataModule):
@@ -35,25 +38,36 @@ class BBHDataModule(DefaultDataModule):
                     "source": x["input"],
                     "task_name": task_name,
                     "task_source": "bbh",
+                    "split": "test",
                 },
                 remove_columns=["input"],
                 num_proc=n_proc,
             )
+
+            if self.config.apply_source_template is not None:
+
+                def apply_source_template(source_template, example):
+                    example["source"] = source_template.format(example["source"])
+                    return example
+
+                task_dataset = task_dataset.map(
+                    partial(apply_source_template, self.config.apply_source_template),
+                    num_proc=n_proc,
+                )
+
+            if self.config.augment_few_shot > 0:
+                few_shots = task_dataset.select(range(self.config.augment_few_shot))
+
+                task_dataset = augment_few_shot_task(
+                    task_dataset,
+                    few_shots=few_shots,
+                    tokenizer=self.tokenizer,
+                    max_input_length=self.config.max_input_length,
+                )
+
             datasets.append(task_dataset)
 
         dataset = concatenate_datasets(datasets)
-
-        if self.config.apply_source_template is not None:
-
-            def apply_source_template(source_template, example):
-                example["source"] = source_template.format(example["source"])
-                return example
-
-            dataset = dataset.map(
-                partial(apply_source_template, self.config.apply_source_template),
-                num_proc=n_proc,
-            )
-
         self.train_dataset = self.dev_dataset = dataset
         self.test_dataset = self.dev_dataset
         self.print_infos()

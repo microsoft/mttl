@@ -14,7 +14,13 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.evaluators import MMLUEvaluator
 from mttl.callbacks import MMLUCallback, LossCallback
-from mttl.utils import get_mlf_logger, setup_logging, logger
+from mttl.utils import (
+    add_mlf_logger,
+    add_simple_logger,
+    add_tb_logger,
+    setup_logging,
+    logger,
+)
 
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
 from mttl.datamodule.oasst1_module import OA1Config, OA1Module
@@ -176,15 +182,9 @@ def run_multitask(args: ExpertConfig):
         scores_init = eval_mmlu(module, args, chkpt_criteria="init")
     ##############################
 
-    mlf_logger = get_mlf_logger()
-    if mlf_logger:
-        loggers.append(mlf_logger)
-
-    if args.tensorboard:
-        tb_logger = pl.loggers.TensorBoardLogger(save_dir=args.output_dir)
-        loggers.append(tb_logger)
-
-    loggers.append(SimpleLogger(args.output_dir))
+    add_mlf_logger(loggers)
+    add_tb_logger(loggers, args)
+    add_simple_logger(loggers, args)
     monitor = "val/loss"
 
     if args.use_custom_valid_callback:

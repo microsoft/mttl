@@ -7,6 +7,25 @@ from mttl.utils import logger
 
 
 # reference: https://github.com/declare-lab/instruct-eval/blob/main/human_eval/main.py#L35
+def count_indent(text: str) -> int:
+    count = 0
+    for char in text:
+        if char == " ":
+            count += 1
+        else:
+            break
+    return count
+
+
+def fix_indents(text: str, multiple: int = 2):
+    outputs = []
+    for line in text.split("\n"):
+        while count_indent(line) % multiple != 0:
+            line = " " + line
+        outputs.append(line)
+    return "\n".join(outputs)
+
+
 def filter_code(completion: str) -> str:
     # The program tends to overwrite, we only take the first function
     completion = completion.lstrip("\n")
@@ -44,18 +63,20 @@ class CodeEvaluator(Evaluator, GenerationMixin):
 
         metric = load("code_eval")
         for num_batch, batch in pbar:
+            sources_texts = batch["sources_texts"]
             labels_texts = batch["labels_texts"]
 
             predictions = self.generate_for_batch(model, batch)
-
-            # take only the prediction part, and sanitize it with filter code,
-            # we cannot do cut at the token id level due to token healing problems
-            for i, prediction in enumerate(predictions.generated_texts):
-                predictions.sequences_texts[i] = batch["sources_texts"][
-                    i
-                ] + filter_code(prediction)
-
-            predictions = [[p] for p in predictions.sequences_texts]
+            predictions = [
+                [s + p]
+                for s, p in zip(
+                    sources_texts,
+                    map(
+                        lambda x: filter_code(fix_indents(x)),
+                        predictions.generated_texts,
+                    ),
+                )
+            ]
 
             if verbose:
                 logger.info("Prediction:")

@@ -1,3 +1,5 @@
+from functools import partial
+import threading
 import torch
 import re
 import numpy as np
@@ -87,6 +89,7 @@ class MultiExpertModel(ExpertTrainer):
         super().__init__(**kwargs)
 
         self.experts_names = []
+        self.lock = threading.Lock()
 
     @property
     def experts_containers(self) -> List[ExpertContainer]:
@@ -149,6 +152,27 @@ class MultiExpertModel(ExpertTrainer):
             return expert
         return
 
+    def add_experts_from_library(self, library):
+        import tqdm
+        import concurrent.futures
+
+        def add_module(self, module_name):
+            expert_dump = library[module_name]
+            self.add_expert_instance(expert_dump)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+            # Create a list to hold the futures
+            futures = []
+            for element in library.keys():
+                futures.append(executor.submit(partial(add_module, self), element))
+
+            # Progress bar setup
+            with tqdm.tqdm(
+                total=len(library), desc="Processing", unit="module"
+            ) as progress_bar:
+                for _ in concurrent.futures.as_completed(futures):
+                    progress_bar.update(1)
+
     def load_from_module_dict(self, module_dict, action="route"):
         for module_name, destination in module_dict.items():
             if isinstance(destination, str):
@@ -187,16 +211,17 @@ class MultiExpertModel(ExpertTrainer):
         if expert_name is not None:
             expert_instance.name = expert_name
 
-        self.model = add_expert_to_transformer(
-            self.model,
-            expert_instance,
-            action=action,
-            is_default=expert_instance.name == "default" or is_default,
-            routing_config=self.routing_config,
-            training_config=self.training_config,
-        )
-        if action != "merge":
-            self.experts_names.append(expert_instance.name)
+        with self.lock:
+            self.model = add_expert_to_transformer(
+                self.model,
+                expert_instance,
+                action=action,
+                is_default=expert_instance.name == "default" or is_default,
+                routing_config=self.routing_config,
+                training_config=self.training_config,
+            )
+            if action != "merge":
+                self.experts_names.append(expert_instance.name)
 
     def load_from_graph_string(self, s, action="route", expert_library=None):
         from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph

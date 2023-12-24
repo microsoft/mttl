@@ -1,18 +1,18 @@
 import os
 import sys
-import json
 import pytorch_lightning as pl
 from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
 
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.callbacks import LiveCheckpointCallback
+from mttl.models.utils import SimpleLogger
+from mttl.models.monitors import get_monitors
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import torch
 from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
-from pytorch_lightning.callbacks import ModelCheckpoint
-import json
 
 from mttl.datamodule.mt_seq_to_seq_module import (
     FlanConfig,
@@ -23,32 +23,15 @@ from mttl.datamodule.mt_seq_to_seq_module import (
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.callbacks import NanoMMLUCallback, RougeCallback, MMLUCallback
-from mttl.datamodule.oasst1_module import OA1Config, OA1Module
-from mttl.datamodule.facts_lm_module import FactsLMConfig, FactsLMDataModule
-from mttl.datamodule.platypus_module import (
-    PlatypusModule,
-    PlatypusConfig,
-    PlatypusQAModule,
+from mttl.callbacks import NanoMMLUCallback, RougeCallback
+from mttl.utils import (
+    get_pl_loggers,
+    setup_logging,
+    logger,
 )
-from mttl.utils import get_mlf_logger, setup_logging, logger
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
-
-
-class SimpleLogger(pl.loggers.logger.DummyLogger):
-    def __init__(self, output_dir):
-        self.metrics = {}
-        self.output_file = os.path.join(output_dir, "metrics.json")
-
-    def log_metrics(self, metrics, step=None):
-        for k, v in metrics.items():
-            if k not in self.metrics:
-                self.metrics[k] = []
-            self.metrics[k].append({"step": step, "value": v})
-        with open(self.output_file, "w") as f:
-            json.dump(self.metrics, f)
 
 
 def get_datamodule(args, for_generation=False, dataset_override=None):
@@ -69,7 +52,13 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         "train_on_inputs": False,
     }
 
-    if "flat" in dataset:
+    if "flan" in dataset:
+        config = FlanConfig(
+            **common_kwargs,
+            include_template_type="*",
+        )
+        dm = FlanModule(config, for_generation=for_generation)
+    elif "flat" in dataset:
         config = FlatMultiTaskConfig(
             **common_kwargs,
             source_template=args.source_template,
@@ -91,7 +80,6 @@ def run_multitask(args: ExpertConfig):
 
     # get directory of the current file
     setup_logging(args.output_dir)
-
     logger.info("Args: {}".format(args.to_json()))
 
     if args.hf_token_hub:
@@ -102,53 +90,36 @@ def run_multitask(args: ExpertConfig):
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
 
-    gen_dm = get_datamodule(args, for_generation=True)
-
-    # legit logging
-    loggers = []
-    exp_name = os.environ.get("AMLT_JOB_NAME", args.exp_name)
-    if os.environ.get("WANDB_API_KEY") or args.wandb_project:
-        import wandb
-
-        project = "wiki_experts" if args.wandb_project is None else args.wandb_project
-        args.exp_name = "dev_run" if args.exp_name is None else args.exp_name
-        project = os.environ.get("WANDB_PROJECT", project)
-        wandb_logger = pl.loggers.WandbLogger(
-            project=project,
-            name=exp_name,  # , config=args_
-            settings=wandb.Settings(start_method="fork"),
-        )
-        wandb_logger.experiment.save("*.py")
-        loggers.append(wandb_logger)
-
+    loggers = get_pl_loggers(args)
     module = model_class(**vars(args), tokenizer=dm.tokenizer)
 
-    mlf_logger = get_mlf_logger()
-    if mlf_logger:
-        loggers.append(mlf_logger)
-
-    if args.tensorboard:
-        tb_logger = pl.loggers.TensorBoardLogger(save_dir=args.output_dir)
-        loggers.append(tb_logger)
-
-    loggers.append(SimpleLogger(args.output_dir))
-
     # get metric monitors for models
-    callbacks = []
+    callbacks = get_monitors(args)
 
     monitor = "val/loss"
     mode = "min"
 
-    model_name = args.model.replace("/", "_")
-    checkpoint_callback = ModelCheckpoint(
+    checkpoint_callback = LiveCheckpointCallback(
         dirpath=args.output_dir,
         monitor=monitor,
-        filename=f"{model_name}" + "-{" + monitor + ":.004f}",
-        save_top_k=1,
         save_last=True,
         mode=mode,
     )
+    rouge = RougeCallback(
+        get_datamodule(args, for_generation=True),
+        every_n_epochs=3 if args.num_train_epochs > 3 else 1,
+    )
+
+    callbacks = []
     callbacks.append(checkpoint_callback)
+    callbacks.append(rouge)
+
+    if args.eval_mmlu_flag:
+        mmlu = NanoMMLUCallback(
+            get_datamodule(args, dataset_override="mmlu", for_generation=True),
+            every_n_epochs=3 if args.num_train_epochs > 3 else 1,
+        )
+        callbacks.append(mmlu)
 
     val_check_interval = args.eval_every
     if val_check_interval == -1 or val_check_interval is None:
@@ -159,16 +130,6 @@ def run_multitask(args: ExpertConfig):
             val_check_interval = len(dm.train_dataloader())
         elif val_check_interval > args.total_steps and args.total_steps != -1:
             val_check_interval = args.total_steps
-
-    rouge = RougeCallback(gen_dm, every_n_epochs=3 if args.num_train_epochs > 3 else 1)
-    callbacks.append(rouge)
-
-    if args.eval_mmlu_flag:
-        mmlu = NanoMMLUCallback(
-            get_datamodule(args, dataset_override="mmlu", for_generation=True),
-            every_n_epochs=3 if args.num_train_epochs > 3 else 1,
-        )
-        callbacks.append(mmlu)
 
     trainer = Trainer(
         devices=-1,
@@ -190,6 +151,7 @@ def run_multitask(args: ExpertConfig):
     )
 
     # initial validation!
+    trainer.validate(module, dm)
     trainer.fit(module, dm)
     trainer.test(module, dm)
 

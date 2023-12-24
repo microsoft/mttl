@@ -4,17 +4,20 @@ from copy import deepcopy
 from dataclasses import dataclass
 import math
 from typing import List
+import numpy as np
 import torch
 
+from transformers import StoppingCriteriaList, StoppingCriteria
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
 
 
-def decode(preds, tokenizer):
+def decode(preds, tokenizer, clean_up_tokenization_spaces=True):
     preds[preds == -100] = tokenizer.pad_token_id
     preds = tokenizer.batch_decode(
-        preds, skip_special_tokens=True, clean_up_tokenization_spaces=True
+        preds,
+        skip_special_tokens=True,
+        clean_up_tokenization_spaces=clean_up_tokenization_spaces,
     )
-    preds = [pred.strip() for pred in preds]
     return preds
 
 
@@ -128,8 +131,43 @@ class GenerationOutput:
     generated_texts: List[str] = None  # only the generated portion
 
 
+class StoppingCriteriaSub(StoppingCriteria):
+    def __init__(self, stop_tokens=[], tokenizer=None):
+        super().__init__()
+        self.stop = stop_tokens
+        self.max_length = max([len(s) for s in stop_tokens])
+        self.tokenizer = tokenizer
+        self.finished = None
+
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor):
+        """Stops on matching token strings and not ids."""
+        if self.finished is None:
+            self.finished = [None for _ in range(input_ids.shape[0])]
+
+        batch_size = input_ids.shape[0]
+        decoded = self.tokenizer.batch_decode(input_ids[:, -self.max_length :])
+
+        for j in range(batch_size):
+            # fill the rest of input ids with pad tokens, the generation finished!
+            if self.finished[j]:
+                input_ids[j, self.finished[j][1] :] = self.tokenizer.pad_token_id
+                continue
+            # check which stop token is in the decoded text
+            for stop in self.stop:
+                pos = decoded[j].find(stop)
+                if pos != -1:
+                    self.finished[j] = (stop, input_ids.shape[1])
+                if self.finished[j]:
+                    break
+        return all(self.finished)
+
+
 class GenerationMixin:
     """Applied to an evaluator handles generation logic for a given batch."""
+
+    def postprocess_generation_output(self, generation_output):
+        """Postprocesses the generation output."""
+        return generation_output
 
     def generate_for_batch(self, model, batch):
         if hasattr(model, "module"):
@@ -140,6 +178,14 @@ class GenerationMixin:
         extra_kwargs["eos_token_id"] = self.tokenizer.eos_token_id
         extra_kwargs["max_new_tokens"] = self.config.max_output_length
         extra_kwargs.update(self.generation_kwargs)
+
+        stop_tokens = extra_kwargs.pop("stop_tokens", None)
+        if stop_tokens:
+            stop_tokens = stop_tokens + [self.tokenizer.eos_token]
+            stopping_criteria = StoppingCriteriaList(
+                [StoppingCriteriaSub(stop_tokens, tokenizer=self.tokenizer)]
+            )
+            extra_kwargs["stopping_criteria"] = stopping_criteria
 
         device = next(model.parameters()).device
         batch = transfer_batch_to_device(batch, device)
@@ -185,10 +231,32 @@ class GenerationMixin:
                         generated = generated_texts_fallback[i]
                     generated_texts.append(generated)
 
-        return GenerationOutput(
-            scores=predictions.scores,
-            sequences=predictions.sequences,
-            sequences_texts=sequences_texts,
-            sources_texts=sources_texts,
-            generated_texts=generated_texts,
+        # if stop tokens have been specified, then we need to remove them from the generated text
+        # we search the surface for of the first matching stop token from the end of the generated
+        # and the sequence text. We then remove everything after that and keep only the first part
+        # (before the stopping sequence has been produced)
+        if stop_tokens:
+            finished_with = extra_kwargs["stopping_criteria"][0].finished
+
+            # we strip the finished with token
+            for i in range(len(generated_texts)):
+                if (
+                    finished_with[i] is not None
+                    and finished_with[i][0] is not self.tokenizer.eos_token
+                ):
+                    generated_texts[i] = generated_texts[i].rpartition(
+                        finished_with[i][0]
+                    )[0]
+                    sequences_texts[i] = sequences_texts[i].rpartition(
+                        finished_with[i][0]
+                    )[0]
+
+        return self.postprocess_generation_output(
+            GenerationOutput(
+                scores=predictions.scores,
+                sequences=predictions.sequences,
+                sequences_texts=sequences_texts,
+                sources_texts=sources_texts,
+                generated_texts=generated_texts,
+            )
         )

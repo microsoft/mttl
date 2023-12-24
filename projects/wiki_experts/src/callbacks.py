@@ -1,27 +1,17 @@
 import os
 import tqdm
 import copy
-import torch
 import pytorch_lightning as pl
 from pytorch_lightning import LightningModule, Trainer, callbacks as cb
 from torch.optim import Optimizer
 from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 
-from mttl.utils import Averager, logger
-from mttl.models.utils import transfer_batch_to_device
+from mttl.utils import logger
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
 
+
 DEBUG = False
-
-
-def decode(preds, tokenizer):
-    preds[preds == -100] = tokenizer.pad_token_id
-    preds = tokenizer.batch_decode(
-        preds, skip_special_tokens=True, clean_up_tokenization_spaces=True
-    )
-    preds = [pred.strip() for pred in preds]
-    return preds
 
 
 class RougeLCallback(cb.Callback):
