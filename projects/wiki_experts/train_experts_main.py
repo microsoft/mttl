@@ -5,6 +5,7 @@ import pytorch_lightning as pl
 from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
 
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.models.monitors import get_monitors
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -134,7 +135,7 @@ def run_multitask(args: ExpertConfig):
     loggers.append(SimpleLogger(args.output_dir))
 
     # get metric monitors for models
-    callbacks = []
+    callbacks = get_monitors(args)
 
     monitor = "val/loss"
     mode = "min"

@@ -36,6 +36,7 @@ class SkillWrapper(RouterWrapper):
 
 @dataclass
 class PolytroponConfig(ModifierConfig):
+    n_tasks: int = None
     n_skills: int = 1
     n_splits: int = 1
     router_selector: str = "poly"
@@ -45,6 +46,8 @@ class PolytroponConfig(ModifierConfig):
     module_logits_straight_through: bool = False
     poly_average_correction: bool = False
     poly_use_shared_skill: bool = False
+    router_granularity: str = "finegrained"
+    model_family: str = "gpt"
 
 
 @register_selector("poly")
