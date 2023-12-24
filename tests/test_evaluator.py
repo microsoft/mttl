@@ -40,6 +40,39 @@ def test_rouge_eval(mocker):
     assert generate_func.call_args[1]["max_new_tokens"] == 1
 
 
+def test_early_stopping(mocker):
+    flan = AutoDataModule.create(
+        "sordonia/flan-debug-flat",
+        model="EleutherAI/gpt-neo-125m",
+        model_family="gpt",
+        max_input_length=1024,
+        max_output_length=128,
+        train_batch_size=4,
+        for_generation=True,
+        predict_batch_size=1,
+        truncation_side="left",
+    )
+
+    evaluator = RougeEvaluator(flan, generation_kwargs={"stop_tokens": ["\n\n"]})
+    model = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-125m")
+
+    generate_func = mocker.spy(model, "generate")
+    generate_for_batch_func = mocker.spy(evaluator, "generate_for_batch")
+    rouge = evaluator.evaluate(model, num_batches=1)
+    assert generate_func.call_args[1]["stopping_criteria"][0].stop == [
+        "\n\n",
+        "<|endoftext|>",
+    ]
+
+    assert "Trisha's step-dad" in generate_for_batch_func.spy_return.generated_texts[0]
+    assert pytest.approx(rouge, 0.01) == 1.769
+
+    evaluator = RougeEvaluator(flan, generation_kwargs={"stop_tokens": ["step-dad"]})
+    generate_for_batch_func = mocker.spy(evaluator, "generate_for_batch")
+    rouge = evaluator.evaluate(model, num_batches=1)
+    assert generate_for_batch_func.spy_return.generated_texts[0] == " Trisha's "
+
+
 def test_mmlu_eval():
     mmlu = MMLUEvaluator(
         MMLUDataConfig(
