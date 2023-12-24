@@ -241,7 +241,6 @@ def modify_with_routing(cls, transformer, config, optional_wrapper=None):
     for m_name, module in dict(transformer.named_modules()).items():
         if re.fullmatch(config.modify_modules, m_name):
             for c_name, layer in dict(module.named_children()).items():
-                # breakpoint()
                 if re.fullmatch(config.modify_layers, c_name):
                     layer_name = f"{m_name}.{c_name}"
 

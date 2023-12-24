@@ -93,35 +93,12 @@ class ExpertTrainer(EfficientCheckpointModule):
             non_zero_loss[non_zero_loss == 0] = 1
             loss = loss.sum(dim=-1) / non_zero_loss
 
-        if getattr(self.model.config, "add_routing_token", False):
-            # do not use the target for the first soft token, as its always set to 1/n.
-            soft_logits = outputs.soft_prompt_logits[:, 1:].flatten(0, 1)
-            soft_labels = (
-                self.model.get_input_embeddings()
-                .routing_targets[:, 1:]
-                .detach()
-                .flatten(0, 1)
-            )
-            soft_loss = loss_fct(soft_logits, soft_labels)
-            self.routing_loss = soft_loss
-
         del outputs, shift_logits, shift_labels
         return loss
 
     def training_step(self, batch, _):
         loss = self.forward(batch)
         total_loss = loss
-
-        if getattr(self.model.config, "add_routing_token", False):
-            # linear the loss target
-            coef = self.global_step / self.model.config.total_steps
-            total_loss += coef * self.routing_loss
-            self.log(
-                f"{self._log_pref}train/routing_loss",
-                self.routing_loss,
-                on_step=True,
-                prog_bar=True,
-            )
 
         self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
         self.log(
@@ -156,16 +133,6 @@ class ExpertTrainer(EfficientCheckpointModule):
 
     def validation_step(self, batch, batch_idx):
         loss = self.forward(batch, reduction="none")
-
-        if getattr(self.model.config, "add_routing_token", False):
-            # slowly anneal the loss target
-            routing_loss = self.routing_loss.sum() / self.routing_loss.numel()
-            self.log(
-                f"{self._log_pref}train/routing_loss",
-                routing_loss,
-                on_step=True,
-                prog_bar=True,
-            )
 
         mean_loss = loss.sum() / loss.shape[0]
         self._inference_outputs += [(loss.detach().cpu(),)]
