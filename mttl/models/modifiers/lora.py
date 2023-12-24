@@ -404,6 +404,11 @@ class SkilledLoRAView(SkilledLoRA):
     on a bunch of other LoRAs parameters stacked together.
     """
 
+    def __init__(self, config, layer, lora_a, lora_b):
+        super().__init__(config, layer)
+        self.lora_a = lora_a
+        self.lora_b = lora_b
+
     def create_for_layer(self, layer):
         pass
 
@@ -445,14 +450,12 @@ class SkilledLoRAView(SkilledLoRA):
             n_skills=len(loras),
             n_splits=1,
         )
-        layer = loras[0].layer
-        skilled_lora = cls(config, layer)
-        skilled_lora.lora_a = torch.stack(
-            [lora.lora_a for lora in loras], dim=0
-        ).unsqueeze(1)
-        skilled_lora.lora_b = torch.stack(
-            [lora.lora_b for lora in loras], dim=0
-        ).unsqueeze(2)
+        skilled_lora = cls(
+            config,
+            loras[0].layer,
+            lora_a=torch.stack([lora.lora_a for lora in loras], dim=0).unsqueeze(1),
+            lora_b=torch.stack([lora.lora_b for lora in loras], dim=0).unsqueeze(2),
+        )
         return skilled_lora
 
 
