@@ -320,20 +320,6 @@ class MultiExpertModel(ExpertTrainer):
     def forward(self, batch, reduction="mean"):
         return super().forward(batch, reduction)
 
-    @property
-    def generation_config(self):
-        return self.model.generation_config
-
-    def generate(
-        self,
-        batch,
-        **kwargs,
-    ):
-        generations = self.model.generate(
-            inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
-        )
-        return generations
-
 
 class MultiExpertModelRanker(MultiExpertModel):
     def __init__(self, **kwargs):
@@ -377,18 +363,22 @@ class MoETrainer(MultiExpertModel):
         super().__init__(**kwargs)
 
         # 8 experts
-        for i in range(self.hparams.moe_num_experts):
-            self.add_empty_expert(
-                f"e{i}",
-                LoRAConfig(
-                    modify_layers=self.hparams.modify_layers,
-                    modify_modules=self.hparams.modify_modules,
-                    lora_alpha=self.hparams.lora_alpha,
-                    lora_dropout=self.hparams.lora_dropout,
-                    lora_rank=self.hparams.lora_rank,
-                    lora_init_b_random=True,
-                ),
-            )
+        if not self.hparams.hf_lib_id:
+            for i in range(self.hparams.moe_num_experts):
+                self.add_empty_expert(
+                    f"e{i}",
+                    LoRAConfig(
+                        modify_layers=self.hparams.modify_layers,
+                        modify_modules=self.hparams.modify_modules,
+                        lora_alpha=self.hparams.lora_alpha,
+                        lora_dropout=self.hparams.lora_dropout,
+                        lora_rank=self.hparams.lora_rank,
+                        lora_init_b_random=True,
+                    ),
+                )
+        else:
+            library = HFExpertLibrary(self.hparams.hf_lib_id)
+            self.add_experts_from_library(library)
 
     def training_step(self, batch, _):
         loss = self.forward(batch)
