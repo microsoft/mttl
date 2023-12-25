@@ -19,6 +19,7 @@ from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRanker
 
 try:
     import faiss
+    from faiss import IDSelectorBatch
 except:
     logger.warn("Faiss not installed. KATE router will not work.")
 
@@ -139,7 +140,18 @@ class KATERanker(AdapterRanker):
         self.task_names = list(self.dataset["task_name"])
 
     def set_available_tasks(self, available_tasks):
-        self.available_tasks = available_tasks
+        """Remove vectors from index corresponding to the unavailable tasks."""
+        ids = np.array(
+            [
+                i
+                for i, task_name in enumerate(self.task_names)
+                if task_name not in available_tasks
+            ]
+        )
+        if len(ids) > 0:
+            self.index.remove_ids(ids)
+            self.task_names = [x for x in self.task_names if x in available_tasks]
+            self.available_tasks = available_tasks
 
     def predict_batch(self, batch, n=1):
         query = self.embedder.encode(
