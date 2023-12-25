@@ -3,6 +3,7 @@ from collections import defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
 import math
+import os
 from typing import List
 import numpy as np
 import torch
@@ -262,6 +263,49 @@ class GenerationMixin:
         )
 
 
+class EvaluatorRunner:
+    def __init__(self, verbose=False):
+        self.evaluators = {}
+        self.verbose = verbose
+
+    def add_evaluator(self, name, evaluator):
+        self.evaluators[name] = evaluator
+
+    def run(self, module, output_path):
+        import json
+        import prettytable
+        from mttl.utils import logger
+
+        os.makedirs(output_path, exist_ok=True)
+
+        scores = {}
+        for name in sorted(self.evaluators.keys()):
+            logger.info("Evaluating %s", name)
+
+            if name in ["bbh", "mmlu"]:
+                num_batches = 200
+            else:
+                num_batches = None
+
+            scores[name] = self.evaluators[name].evaluate(
+                module, shuffle=True, verbose=self.verbose, num_batches=num_batches
+            )
+            if name == "mmlu":
+                scores[name] = scores[name]["all"]["mean"]
+
+            with open(output_path + "/scores.json", "w") as f:
+                json.dump(scores, f)
+
+        with open(output_path + "/scores.json", "w") as f:
+            scores["mean"] = np.array(list(scores.values())).mean()
+            json.dump(scores, f)
+
+        table = prettytable.PrettyTable()
+        table.field_names = list(scores.keys())
+        table.add_row(["{:.3f}".format(v) for v in list(scores.values())])
+        print(table)
+
+
 def setup_evaluators(
     model_type,
     model_family,
@@ -270,8 +314,10 @@ def setup_evaluators(
     predict_batch_size,
     truncation_side,
     tasks=None,
-):
+) -> EvaluatorRunner:
     import copy
+    from mttl.datamodule.mmlu_data_module import MMLUDataConfig
+    from mttl.evaluators.mmlu_evaluator import MMLUEvaluator
     from mttl.evaluators.piqa_evaluator import PiqaEvaluator
     from mttl.evaluators.hellaswag_evaluator import HellaswagEvaluator
     from mttl.evaluators.humaneval_evaluator import HumanEvalEvaluator
@@ -315,6 +361,7 @@ def setup_evaluators(
         "hellaswag",
         "winogrande",
         "openbookqa",
+        "mmlu",
     ]:
         common_kwargs = copy.deepcopy(common_kwargs_)
         generation_kwargs = copy.deepcopy(generation_kwargs_)
@@ -403,7 +450,16 @@ def setup_evaluators(
                 OpenbookQADataConfig(**common_kwargs),
                 generation_kwargs=generation_kwargs,
             )
+        elif task == "mmlu":
+            evaluators["mmlu"] = MMLUEvaluator(
+                MMLUDataConfig(**common_kwargs),
+                generation_kwargs=generation_kwargs,
+            )
         else:
             raise ValueError("No active tasks")
 
-    return evaluators
+    runner = EvaluatorRunner(verbose=False)
+    for name, evaluator in evaluators.items():
+        runner.add_evaluator(name, evaluator)
+
+    return runner
