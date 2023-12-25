@@ -31,7 +31,12 @@ def swap_model(model, state=None):
 
 class MMLUEvaluator(Evaluator, GenerationMixin):
     def __init__(
-        self, config=None, datamodule=None, max_input_length=None, use_vllm=False
+        self,
+        config=None,
+        datamodule=None,
+        max_input_length=None,
+        use_vllm=False,
+        generation_kwargs=None,
     ):
         from mttl.datamodule.mmlu_data_module import MMLUDataModule
 
@@ -43,8 +48,9 @@ class MMLUEvaluator(Evaluator, GenerationMixin):
 
             datamodule = MMLUDataModule(config, for_generation=True)
 
+        generation_kwargs["max_new_tokens"] = 1
         super().__init__(
-            datamodule, use_vllm=use_vllm, generation_kwargs={"max_new_tokens": 1}
+            datamodule, use_vllm=use_vllm, generation_kwargs=generation_kwargs
         )
 
     def eval_vllm(self, model, generation_config, subsample, shuffle):
