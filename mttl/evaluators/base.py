@@ -211,7 +211,7 @@ class GenerationMixin:
 
         # take only the prediction part
         # we cannot do cut at the token id level due to token healing problems
-        sources_texts = batch.get("sources_texts", None)
+        sources_texts = batch.get("sources_texts")
         sequences_texts = decode(predictions.sequences, self.tokenizer)
 
         if self.config.model_family != "gpt":
@@ -269,7 +269,7 @@ def setup_evaluators(
     max_output_length,
     predict_batch_size,
     truncation_side,
-    tasks,
+    tasks=None,
 ):
     import copy
     from mttl.evaluators.piqa_evaluator import PiqaEvaluator
@@ -304,7 +304,18 @@ def setup_evaluators(
         "temperature": 0.0,
     }
 
-    for task in tasks:
+    for task in tasks or [
+        "humaneval",
+        "mbpp",
+        "boolq",
+        "bbh",
+        "arc-easy",
+        "arc-challenge",
+        "piqa",
+        "hellaswag",
+        "winogrande",
+        "openbookqa",
+    ]:
         common_kwargs = copy.deepcopy(common_kwargs_)
         generation_kwargs = copy.deepcopy(generation_kwargs_)
 
@@ -394,4 +405,5 @@ def setup_evaluators(
             )
         else:
             raise ValueError("No active tasks")
+
     return evaluators

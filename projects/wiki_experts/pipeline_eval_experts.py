@@ -59,7 +59,7 @@ def run_eval(args):
         max_output_length=args.max_output_length,
         predict_batch_size=args.predict_batch_size,
         truncation_side=args.truncation_side,
-        tasks=args.pipeline_eval_tasks.split(","),
+        tasks=args.pipeline_eval_tasks.split(",") if args.pipeline_eval_tasks else None,
     )
 
     scores = {}
