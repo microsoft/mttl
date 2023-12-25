@@ -236,7 +236,7 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
         text_embeddings = F.normalize(text_embeddings, dim=-1)
         # calculate the similarity and normalize
         dot_similarity = F.softmax(text_embeddings @ expert_embeddings.T, dim=-1)
-        expert_indices = torch.topk(dot_similarity.squeeze(0), k=n)
+        expert_indices = torch.topk(dot_similarity, k=n, dim=1)
 
         expert_prediction = [
             [self.ids_to_tasks_names[index.item()] for index in indices]
