@@ -112,6 +112,7 @@ def product_transfer_matrix_loss(
             tokenizer=data_module.tokenizer,
             # device_map="cpu",
         )
+        module.to("cuda")
         expert_name = "default"
         module.add_expert_instance(module_copy, expert_name="default", is_default=True)
 
@@ -155,6 +156,7 @@ def product_transfer_matrix_loss(
                     tokenizer=data_module.tokenizer,
                     # device_map="cpu",
                 )
+            module.to("cuda")
             add_expert_to_transformer(
                 module.model,
                 expert_dump,
@@ -462,51 +464,36 @@ def produce_transfer_matrix_mmlu(
     return transfer_matrix
 
 
-def get_transfer_matrix_by_filter_tasks(args):
+def get_transfer_matrix_by_filter_tasks(args, tasks=None):
     import pandas as pd
 
-    df = pd.read_json("top_5_random_5.jsonl", lines=True)
-
-    if not os.path.exists(args.output_dir):
-        os.mkdir(args.output_dir)
-    have_evaluated = []
-    if os.path.exists(os.path.join(args.output_dir, "transfer_matrix.jsonl")):
-        # find the already evaluated tasks
-        df_output = pd.read_json(
-            os.path.join(args.output_dir, "transfer_matrix.jsonl"), lines=True
-        )
-        have_evaluated = df_output["task_eval_on"].tolist()
-        fout = open(os.path.join(args.output_dir, "transfer_matrix.jsonl"), "a+")
-    else:
-        fout = open(os.path.join(args.output_dir, "transfer_matrix.jsonl"), "w")
     expert_lib = HFExpertLibrary(args.hf_lib_id)
-    for i, row in df.iterrows():
-        # if the task has been evaluated, skip
-        if row["task"] in have_evaluated:
-            print(f"Skip {row['task']}")
-            continue
-
+    tasks = os.environ.get("TASKS", None)
+    assert tasks is not None, "Please set TASKS environment variable"
+    if not os.path.exists(os.path.join(args.output_dir)):
+        os.mkdir(args.output_dir)
+    for task in tasks.split(","):
         # get the transfer matrix
+        fout = open(os.path.join(args.output_dir, f"{task}_transfer_matrix.jsonl"), "w")
         transfer_matrix: pd.DataFrame = product_transfer_matrix_loss(
             args,
             expert_lib,
-            tasks=[row["task"]],
-            candidate_expert_names=row["candidate_experts"],
+            tasks=[task],
+            candidate_expert_names=expert_lib.keys(),
             fout=fout,
         )
-
         print("Transfer matrix", transfer_matrix)
 
 
 if __name__ == "__main__":
     args = RankerConfig.parse()
-    # get_transfer_matrix_by_filter_tasks(args)
-    get_all_tasks_using_single_expert(
-        args,
-        HFExpertLibrary(args.hf_lib_id),
-        task_name=None,
-        expert_name="race_middle_Write_a_multi_choice_question_for_the_following_article",
-    )
+    get_transfer_matrix_by_filter_tasks(args)
+    # get_all_tasks_using_single_expert(
+    #     args,
+    #     HFExpertLibrary(args.hf_lib_id),
+    #     task_name=None,
+    #     expert_name="race_middle_Write_a_multi_choice_question_for_the_following_article",
+    # )
     # produce_transfer_matrix_rouge(
     #     args, HFExpertLibrary(args.hf_lib_id), [args.finetune_task_name]
     # )

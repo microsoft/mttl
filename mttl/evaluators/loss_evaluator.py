@@ -6,6 +6,8 @@ import torch
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 import numpy as np
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 class LossEvaluator(RougeEvaluator):
     def get_loss(
@@ -23,7 +25,7 @@ class LossEvaluator(RougeEvaluator):
         )
 
         for _, batch in pbar:
-            batch = transfer_batch_to_device(batch, self.device)
+            batch = transfer_batch_to_device(batch, device)
             with torch.no_grad():
                 if isinstance(model, ExpertTrainer):
                     loss = model.get_loss_for_all(batch, 0)
