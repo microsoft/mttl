@@ -137,6 +137,7 @@ def setup(args: EvolExpertConfig):
         login(token=args.hf_token_hub)
 
     os.makedirs(local_lib_location, exist_ok=True)
+    print("Local lib location", local_lib_location)
     expert_lib = LocalExpertLibrary.create_from_remote(
         HFExpertLibrary(args.hf_repo_id), local_lib_location
     )
@@ -151,7 +152,7 @@ def setup(args: EvolExpertConfig):
         expert_lib=expert_lib,
         results_table=TableLogger(),
     )
-    # dont want to overwrite the exp lib from which we start here for now
+
     if args.experiment_state_path is not None:
         exper_state.load_from_path(args.experiment_state_path)
 
@@ -495,8 +496,8 @@ def active_task_iteration(
         args.evolution_warmup_steps
     )  # doubled parameter due historiucal reasons
 
-    optimal_expert, log = EVOL_FUNCTIONS[args.evol_expert_routing](
-        args=args,
+    optimal_expert, log = EVOL_FUNCTIONS[config_copy.evol_expert_routing](
+        args=config_copy,
         task=task,
         module=module,
         expert_lib=retrieved_expert_lib,

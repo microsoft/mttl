@@ -128,12 +128,15 @@ class ModulesSelectorOutput(SelectorOutput):
     modules: List[str]
 
 
-def cache_if_views(func):
-    def wrapper(self, input, **kwargs):
+def forward_with_cache(func):
+    def wrapper(self: Selector, input, **kwargs):
+        if self.forward_cache is not None and not self.clear_cache:
+            self.count_call()
+            return self.forward_cache
         output = func(self, input, **kwargs)
+        self.forward_cache = output
 
-        if self.forward_cache is None:
-            self.forward_cache = output
+        self.count_call()
 
         return output
 
@@ -144,11 +147,23 @@ class Selector(RoutingMixin, nn.Module):
     def __init__(self, info_container, config=None, **kwargs):
         nn.Module.__init__(self)
         RoutingMixin.__init__(self, info_container)
-
         self.config = config
         self.expert_names = []
         self.selector_views = []
         self.forward_cache = None
+        self.total_calls_per_forward = 0
+
+        self._calls_counter = 0
+
+    @property
+    def clear_cache(self):
+        reset_cache = self._calls_counter >= self.total_calls_per_forward
+        if reset_cache:
+            self._calls_counter = 0
+        return reset_cache
+
+    def count_call(self):
+        self._calls_counter += 1
 
     @abstractmethod
     def forward(self, input, **kwargs) -> SelectorOutput:
@@ -170,9 +185,6 @@ class Selector(RoutingMixin, nn.Module):
         selector_view = SelectorView(self, len(self.selector_views))
         self.selector_views.append(selector_view)
         return selector_view
-
-    def clear_cache(self):
-        self.forward_cache = None
 
     @property
     def name(self):
@@ -238,7 +250,7 @@ class PolySelector(Selector):
         module_weights = module_logits / (module_logits.sum(dim=-1, keepdim=True) + EPS)
         return module_weights
 
-    @cache_if_views
+    @forward_with_cache
     def forward(self, input, **kwargs) -> ModulesAndWeightsSelectorOutput:
         weights = self._get_weights()
         modules = self.expert_names
@@ -310,7 +322,7 @@ class MOERKHSSelector(Selector):
         input_view = input.view(-1, input.shape[-1])
         return self.rkhs_hid(input_view).reshape(input.shape[0], input.shape[1], -1)
 
-    @cache_if_views
+    @forward_with_cache
     def forward(
         self, input, **kwargs
     ) -> BatchAndSequenceModulesAndWeightsSelectorOutput:
@@ -369,14 +381,20 @@ class PolySelectorDirect(PolySelector):
         super().__init__(info_container)
 
         self.module_logits_dict = nn.ParameterDict()
+
         self.training_config = kwargs["training_config"]
         self.init_gap = [-1e-3, 1e-3]
 
         self.device = kwargs["layer"].weight.device
 
     def _get_weights(self):
-        weights = torch.tensor([self.module_logits_dict[k] for k in self.expert_names])
+        weights = torch.cat(
+            [self.module_logits_dict[k] for k in self.module_logits_dict.keys()]
+        )
         return weights
+
+    def get_routing_weights(self):
+        return {k: v.detach().item() for k, v in self.module_logits_dict.items()}
 
     def add_expert(self, expert_name: str, **kwargs):
         """
@@ -420,8 +438,11 @@ class PolySelectorDirect(PolySelector):
                 )
         self._initialized = True
 
+    @forward_with_cache
     def forward(self, *args, **kwargs):
-        return super().forward(*args, **kwargs)
+        weights = self._get_weights()
+        modules = list(self.module_logits_dict.keys())
+        return ModulesAndWeightsSelectorOutput(modules, weights)
 
 
 @dataclass
@@ -438,7 +459,7 @@ class RoutingInfosContainerSelector(Selector):
 
         self.default_expert_name = None
 
-    @cache_if_views
+    @forward_with_cache
     def forward(self, input, **kwargs) -> BatchModulesAndWeightsSelectorOutput:
         if not hasattr(self.routing_infos, "routing_modules"):
             raise ValueError("routing_modules not in routing_infos")
@@ -463,7 +484,7 @@ class TaskNameSelector(Selector):
 
         self.default_expert_name = None
 
-    @cache_if_views
+    @forward_with_cache
     def forward(self, input, **kwargs) -> ModulesSelectorOutput:
         # try to infer batch size
         if not self.routing_infos or not self.routing_infos.task_names:

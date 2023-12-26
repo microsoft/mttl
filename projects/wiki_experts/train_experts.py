@@ -198,6 +198,7 @@ def run_multitask(args: ExpertConfig):
 
     # callbacks.append(RougeCallback(gen_dm))
     callbacks.append(RougeCallbackTestPerEpoch(gen_dm, checkpoint_callback))
+
     callbacks.append(
         OptimResetCallback(reset_lr=args.reset_lr, reset_optim=args.reset_optim)
     )

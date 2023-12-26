@@ -16,7 +16,7 @@ from huggingface_hub import create_repo, login, HfApi
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
-from projects.wiki_experts.train_experts_main import get_datamodule
+from projects.wiki_experts.train_experts import get_datamodule
 from projects.wiki_experts.src.evolution.utils import get_loss, get_task_expert
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
@@ -69,6 +69,7 @@ def evolve_with_sgd(
 ) -> (Expert, dict):
     log_row = {}
     dm_eval = evaluator_valid.datamodule
+    args.finetune_task_name = task
     dm_train = get_datamodule(
         args, for_generation=False, subsample=args.subsample_train_set
     )
@@ -113,6 +114,7 @@ def evolve_with_sgd(
     logger.info("Found best weights: {}".format(best_weights))
     log_row["weights"] = str(best_weights)
     expert.expert_info.expert_task_name = task
+    del module_to_train
     return expert, log_row
 
 
@@ -223,7 +225,7 @@ def evolve_selector_and_experts(
     )
 
 
-@register_evol_funcs("sgd")
+@register_evol_funcs("selector")
 def evolve_selector_only(
     args: EvolExpertConfig,
     task,

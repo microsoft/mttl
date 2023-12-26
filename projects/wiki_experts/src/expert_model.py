@@ -13,6 +13,7 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     ExpertLibrary,
     HFExpertLibrary,
 )
+import copy
 
 from mttl.models.modifiers.lora import LoRAConfig
 from mttl.models.modifiers.routing import RoutingInfo
@@ -185,7 +186,12 @@ class MultiExpertModel(ExpertTrainer):
         action="route",
         is_default=False,
     ):
+        old_name = None
         if expert_name is not None:
+            # we want to load expert instance with a given name (might be different than the one in the expert instance)
+            # we dont want to change expert instance though!
+            # will create a copy for now (maybe safer), alternatively can change the name and set it back at the end of the fuction
+            expert_instance = copy.deepcopy(expert_instance)
             expert_instance.name = expert_name
 
         self.model = add_expert_to_transformer(

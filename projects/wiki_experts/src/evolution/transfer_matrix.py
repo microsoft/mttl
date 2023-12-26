@@ -58,6 +58,7 @@ def eval_expert_on_task(
     evaluator_train=None,
     evaluator_valid=None,
     evaluator_test=None,
+    debug=False,
 ):
     logger.info(f"Evaluating perf for {task}")
 
@@ -73,7 +74,7 @@ def eval_expert_on_task(
         module = model_copy
 
     result = {}
-    if DEBUG:
+    if debug:
         result["test"] = 0.5
         return result
     if evaluator_train is not None:
@@ -102,7 +103,7 @@ def eval_all_experts_on_task(
         if only_diagonal and expert.expert_info.expert_task_name != task_eval_on:
             continue
         score = eval_expert_on_task(
-            task_eval_on, base_model, expert, evaluator_test=evaluator
+            task_eval_on, base_model, expert, evaluator_test=evaluator, debug=DEBUG
         )
         log_row[expert_name] = score["test"]
     return log_row
@@ -151,7 +152,7 @@ def produce_transfer_matrix(
         log_row.update(log_row_task)
         # eval on base model
         log_row["base"] = eval_expert_on_task(
-            task_eval_on, module, None, evaluator_test=evaluator
+            task_eval_on, module, None, evaluator_test=evaluator, debug=DEBUG
         )["test"]
 
         print(transfer_table.df)

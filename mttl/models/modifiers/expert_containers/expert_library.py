@@ -640,7 +640,9 @@ class ExpertLibrary:
         # set in transaction flag
         self._in_transaction = True
         yield
-        logger.info(f"Committing len(self._pending_operations) operations...")
+        if len(self._pending_operations) == 0:
+            return
+        logger.info(f"Committing {len(self._pending_operations)} operations...")
         if self._pending_pre_uploads:
             preupload_lfs_files(self.repo_id, additions=self._pending_pre_uploads)
         self.create_commit(
@@ -803,17 +805,19 @@ class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
         remote_lib = HFExpertLibrary(repo_id=repo_id, create=True)
 
         only_tasks = only_tasks or local_lib.tasks
-        for name, expert in local_lib.items():
-            if expert.name not in remote_lib:
-                remote_lib.add_expert(expert, name, force=force)
+        with remote_lib.batched_commit():
+            for name, expert in local_lib.items():
+                if expert.name not in remote_lib:
+                    remote_lib.add_expert(expert, name, force=force)
 
         # delete experts that are in remote_lib but were deleted from the local_lib
-        for name, expert in remote_lib.items():
-            if (
-                name not in local_lib.keys()
-                and expert.expert_info.expert_task_name in only_tasks
-            ):
-                remote_lib.remove_expert(name, soft_delete=True)
+        with remote_lib.batched_commit():
+            for name, expert in remote_lib.items():
+                if (
+                    name not in local_lib.keys()
+                    and expert.expert_info.expert_task_name in only_tasks
+                ):
+                    remote_lib.remove_expert(name, soft_delete=True)
 
         # also update the scores
         if upload_aux_data:

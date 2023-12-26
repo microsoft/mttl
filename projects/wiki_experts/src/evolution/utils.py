@@ -101,7 +101,7 @@ def get_svd_embedding(lib, expert_name: str):
         )
     except ValueError:
         return None
-    return embeddings["svd"]["embedding"]
+    return embeddings["svd"]["embeddings"]
 
 
 def init_wandb_logger(args):

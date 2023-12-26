@@ -188,8 +188,8 @@ class RougeLCallback(cb.Callback):
         if trainer.global_step % self.eval_every_opt_step == 0:
             metrics = self.test(pl_module)
             self.best_loss = copy.deepcopy(metrics)
-            self.maybe_checkpoint_now(trainer)
             self.log_metrics(metrics, pl_module)
+            self.maybe_checkpoint_now(trainer)
             # checksum of parameters
             # p_sum = np.sum([p.detach().cpu().sum() for p in pl_module.parameters()])
         return super().on_before_optimizer_step(trainer, pl_module, optimizer)
