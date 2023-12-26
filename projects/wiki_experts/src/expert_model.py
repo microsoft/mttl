@@ -366,7 +366,11 @@ class MultiExpertModelRanker(MultiExpertModel):
         )
 
     def load_from_library(
-        self, library, subsample_library_experts=0, filtering_experts=None
+        self,
+        library,
+        subsample_library_experts=0,
+        filtering_experts=None,
+        available_experts=None,
     ):
         import copy
 
@@ -384,6 +388,9 @@ class MultiExpertModelRanker(MultiExpertModel):
 
         self.add_expert_instance(expert, is_default=True)
         for expert_name in tqdm.tqdm(keys, desc="Loading experts..."):
+            if available_experts is not None and expert_name not in available_experts:
+                print("{} not in available experts, skip expert".format(expert_name))
+                continue
             if filtering_experts is not None and expert_name in filtering_experts:
                 print("skip expert: {}".format(expert_name))
                 continue

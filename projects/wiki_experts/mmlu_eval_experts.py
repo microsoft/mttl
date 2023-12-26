@@ -85,6 +85,8 @@ def run_eval(args):
     configuration = os.environ.get("MMLU_CONFIG", None)
     logger.info("MMLU Configuration: {}".format(configuration))
 
+    available_experts = os.environ.get("MMLU_AVAILABLE_EXPERTS", None).split(",")
+
     if configuration == "random_5":
         args.finetune_task_name = "college_biology,high_school_government_and_politics,prehistory,security_studies"
         subsample = None
@@ -131,7 +133,10 @@ def run_eval(args):
         module.load_from_graph_string(args.module_graph, expert_library=library)
     elif library is not None:
         if not args.baseline:
-            module.load_from_library(library, args.subsample_library_experts)
+            if isinstance(module, MultiExpertModelRanker):
+                module.load_from_library(library, available_experts=available_experts)
+            else:
+                module.load_from_library(library, args.subsample_library_experts)
 
     if args.mmlu_use_hard_prompt:
         config = HardPromptConfig(
