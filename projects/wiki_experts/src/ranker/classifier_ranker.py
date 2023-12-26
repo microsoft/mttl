@@ -166,10 +166,12 @@ class T5Classifier(SentenceTransformerClassifier):
     def text_encoder_init(self, requires_grad=False, model_name="t5-small"):
         self.tokenizer = T5Tokenizer.from_pretrained(model_name)
 
-        text_encoder = T5ForConditionalGeneration.from_pretrained(
-            model_name, return_dict=True
-        )
-        return text_encoder
+        model = T5ForConditionalGeneration.from_pretrained(model_name, return_dict=True)
+
+        # Freeze all the parameters
+        for param in model.parameters():
+            param.requires_grad = requires_grad
+        return model
 
     def forward(self, x):
         # Encode the text input
