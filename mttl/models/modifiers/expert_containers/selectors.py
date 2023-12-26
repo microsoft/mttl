@@ -176,56 +176,12 @@ class Selector(RoutingMixin, nn.Module):
     def get_merged_weights(self, container, **selector_kwargs) -> Dict:
         return {}
 
-    def create_view(self) -> "SelectorView":
-        """
-        Create a view on an existing selector for all the "shared" layers
-        these don't hold params, are not registered as modules, and read from the cache
-        of their parent "real" selector.
-        """
-        selector_view = SelectorView(self, len(self.selector_views))
-        self.selector_views.append(selector_view)
-        return selector_view
-
     @property
     def name(self):
         return f"{self.__layer_name__}"
 
     @abstractmethod
     def add_expert(self, expert_name: str, **kwargs):
-        pass
-
-
-class SelectorView:
-    """A view on a selector, handles selector caching during forward pass, in the case
-    this selector is shared across layers. First layer gets the real deal, the others get a view on it.
-    """
-
-    def __init__(self, selector, id):
-        self._id = id
-        self.selector = selector
-        # only the last view clears the cache
-        for view in self.selector.views:
-            view.clear_cache = False
-        self.clear_cache = True
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
-
-    def forward(self, _, **__):
-        output = self.selector.forward_cache
-
-        if output is None:
-            raise ValueError("No forward cache set, this view seems dangling!")
-
-        if self.clear_cache:
-            self.selector.forward_cache = None
-        return output
-
-    def get_merged_weights(self, container, **selector_kwargs) -> Dict:
-        return self.selector.get_merged_weights(container, **selector_kwargs)
-
-    def add_expert(self, *args, **kwargs):
-        """Do not add experts! This is just a view of the real thing."""
         pass
 
 
