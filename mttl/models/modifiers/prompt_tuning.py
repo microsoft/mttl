@@ -122,7 +122,6 @@ class PolyExtendedEmbedding(nn.Module, RoutingMixin):
         n_new_tokens = self.config.soft_prompt_length
         self.input_embeds = nn.Parameter(input_embeds.weight)
         self.task_id_container = task_id_container
-        self.use_routing_token = config.add_routing_token
 
         if selector is None:
             # TODO: change this later
@@ -146,11 +145,6 @@ class PolyExtendedEmbedding(nn.Module, RoutingMixin):
             self.task_id_container["routing_infos"]
         )  # bs, sp_len, n_skills
         routing_weights = routing_weights.to(dtype=self.new_embeds.dtype)
-
-        if self.use_routing_token:
-            # for the first soft token, use mean routing
-            # TODO: consider dropping the useless first selector and skill token
-            routing_weights[:, 0, :] = 1.0 / self.config.n_skills
 
         # cache routing weights for routing loss
         self.routing_targets = routing_weights.detach()
@@ -248,13 +242,6 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
             out.logits, out.soft_prompt_logits = split_soft_prompts(
                 out.logits, label_starts, self.config.soft_prompt_length
             )
-
-            if self.config.add_routing_token:
-                # remove the routing token logits
-                out.logits = out.logits[:, :, : -self.config.n_skills]
-                out.soft_prompt_logits = out.soft_prompt_logits[
-                    :, :, -self.config.n_skills :
-                ]
 
         return out
 
@@ -372,10 +359,6 @@ def modify_with_prompt_tuning(soft_prompt_cls, embed_cls, transformer, config):
     ext_embeds = embed_cls(config, input_embeds, task_id_container=task_id_container)
     transformer.set_input_embeddings(ext_embeds)
 
-    if config.add_routing_token:
-        new_head = ExtendedLinear(config, transformer.get_output_embeddings())
-        transformer.set_output_embeddings(new_head)
-
     # Replace in the original model
     config.vocab_embed_dim = input_embeds.embedding_dim
 
@@ -392,7 +375,6 @@ def modify_with_prompt_tuning(soft_prompt_cls, embed_cls, transformer, config):
 
 @dataclass
 class PromptTuningConfig(KVAdapterConfig):
-    add_routing_token: str = False
     prompt_placement: str = "prefix"
 
 
