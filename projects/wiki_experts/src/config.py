@@ -83,6 +83,4 @@ class ExpertConfig(Config):
                 task_names.extend(
                     getattr(mttl.datamodule.task_sequences, task_name, [task_name])
                 )
-            self.finetune_task_name = task_names
-            # I would suggest re-adding ",", then splitting is handled in datamodule
-            # self.finetune_task_name = ",".join(task_names)
+            self.finetune_task_name = ",".join(task_names)

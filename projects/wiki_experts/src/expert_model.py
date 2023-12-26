@@ -186,7 +186,6 @@ class MultiExpertModel(ExpertTrainer):
         action="route",
         is_default=False,
     ):
-        old_name = None
         if expert_name is not None:
             # we want to load expert instance with a given name (might be different than the one in the expert instance)
             # we dont want to change expert instance though!

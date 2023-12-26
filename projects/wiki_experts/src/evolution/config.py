@@ -30,7 +30,6 @@ class EvolExpertConfig(ExpertConfig):
         self.action = "route"
         self.init_router_best = False
         self.subsample_ng_train_set = -1
-        self.use_vllm = False
         self.regularizer_factor = 0.0
         self.n_ng_iterations = 2
         self.n_active_iterations = 1
@@ -55,6 +54,11 @@ class EvolExpertConfig(ExpertConfig):
         self.use_only_modules_for_tasks = (
             False  # if true, only use modules for the given task set for evolution
         )
+
+    def post_init(self):
+        super().post_init()
+        if isinstance(self.finetune_task_name, str):
+            self.finetune_task_name = self.finetune_task_name.split(",")
 
     @property
     def __key(self):
