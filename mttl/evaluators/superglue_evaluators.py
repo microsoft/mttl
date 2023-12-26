@@ -1,5 +1,4 @@
 from mttl.datamodule.superglue_data_module import BoolQDataModule
-from mttl.evaluators.base import switch_to_eval_mode
 from mttl.evaluators.loglike_evaluator import LogLikeEvaluator
 
 
@@ -8,18 +7,3 @@ class BoolQEvaluator(LogLikeEvaluator):
         datamodule = BoolQDataModule(config)
 
         super().__init__(datamodule=datamodule, **kwargs)
-
-    @switch_to_eval_mode
-    def evaluate(
-        self,
-        model,
-        split="test",
-        subsample=-1,
-        num_batches=None,
-        verbose=True,
-        shuffle=False,
-    ):
-        outputs = super().evaluate(
-            model, split, subsample, num_batches, verbose, shuffle
-        )
-        return outputs["accuracy"]

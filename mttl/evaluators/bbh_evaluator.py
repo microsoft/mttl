@@ -14,3 +14,8 @@ class DirectBBHEvaluator(EMEvaluator):
             use_vllm=use_vllm,
             generation_kwargs=generation_kwargs,
         )
+
+
+class DirectBBHEvaluatorFast(DirectBBHEvaluator):
+    def evaluate(*args, **kwargs):
+        super().evaluate(*args, **kwargs, num_batches=200)

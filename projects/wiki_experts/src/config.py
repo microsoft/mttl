@@ -39,6 +39,9 @@ class ExpertConfig(Config):
         self.source_template = None
         self.augment_few_shot = 0
 
+        self.subsample_train = None
+        self.subsample_dev = None
+
         self.moe_num_experts = 8
         self.moe_emb_dim = 128
 
@@ -59,8 +62,7 @@ class ExpertConfig(Config):
         self.eval_mmlu_flag = False
         self.eval_metric = "loss"
         self.use_vllm = False
-
-        self.pipeline_eval_tasks = "piqa,arc-easy,arc-challenge"
+        self.pipeline_eval_tasks = None
 
     def post_init(self):
         if self.micro_batch_size is None:

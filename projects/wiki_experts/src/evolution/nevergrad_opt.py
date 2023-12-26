@@ -81,7 +81,7 @@ def mmlu_get_loss(
             # using accuracy
             mmlu_evaluator = MMLUEvaluator(model.hparams, split="test", use_vllm=False)
             scores = mmlu_evaluator.evaluate(model, dataloader=dataloader)
-            return scores["all"]["mean"] * -1.0
+            return scores * -1.0
 
 
 def default_l1_regularization(weights):

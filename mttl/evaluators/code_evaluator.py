@@ -50,6 +50,7 @@ class CodeEvaluator(Evaluator, GenerationMixin):
         num_batches=None,
         verbose=True,
         shuffle=False,
+        output_path=None,
         **kwargs,
     ):
         dataloader = self.get_dataloader(split, subsample, shuffle=shuffle)

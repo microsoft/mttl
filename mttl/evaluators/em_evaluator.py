@@ -40,6 +40,7 @@ class EMEvaluator(Evaluator, GenerationMixin):
         num_batches=None,
         verbose=True,
         shuffle=False,
+        output_path=None,
     ):
         dataloader = self.get_dataloader(split, subsample, shuffle=shuffle)
 
@@ -57,6 +58,9 @@ class EMEvaluator(Evaluator, GenerationMixin):
         all_em = []
 
         for num_batch, batch in pbar:
+            if num_batches is not None and num_batch >= num_batches:
+                break
+
             labels_texts = batch["labels_texts"]
             sources_texts = batch["sources_texts"]
 
@@ -73,8 +77,5 @@ class EMEvaluator(Evaluator, GenerationMixin):
                 logger.info("Prediction:\n%s", predictions[0])
 
             pbar.set_description(f"exact_match: {np.mean(all_em):.4f}")
-
-            if num_batches is not None and num_batch >= num_batches:
-                break
 
         return np.mean(all_em)

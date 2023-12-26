@@ -146,16 +146,7 @@ def run_eval(args):
     scores = mmlu.evaluate(
         module, split=args.mmlu_test_split, subsample=subsample, shuffle=True
     )
-
-    with open(args.output_dir + "/mmlu.json", "w") as f:
-        import json
-
-        json.dump(scores, f)
-
-    logger.info("MMLU Accuracy: {}".format(scores["all"]["mean"]))
-    for t, v in scores.items():
-        logger.info("MMLU Accuracy {}: {}".format(t, v["mean"]))
-    del module, mmlu
+    logger.info("MMLU Accuracy: {}".format(scores))
 
 
 if __name__ == "__main__":

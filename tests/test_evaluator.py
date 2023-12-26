@@ -87,9 +87,8 @@ def test_mmlu_eval():
     )
 
     model = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-125m")
-    results = mmlu.evaluate(model, subsample=80)
-    assert results["all"]["mean"] == 50
-    assert results["all"]["stderr"] == 50
+    mean_scores = mmlu.evaluate(model, subsample=80)
+    assert mean_scores == 50
 
 
 @pytest.mark.skipif(
@@ -115,7 +114,7 @@ def test_ni_eval():
 
     model = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-125m")
     results = ni.evaluate(model, subsample=80)
-    assert results["all"]["mean"] == pytest.approx(1.98, 0.1)
+    assert results == pytest.approx(1.98, 0.1)
 
 
 def test_loglike_eval():

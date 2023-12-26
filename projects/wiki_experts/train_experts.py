@@ -53,11 +53,13 @@ def eval_mmlu(module, args, base_perf=None, chkpt_criteria=None):
         args,
         split=args.mmlu_test_split,
     )
+
     scores = mmlu.evaluate(module)
     print(f"Evaluating final checkpoint with selection criteria {chkpt_criteria}")
-    logger.info("Final MMLU Accuracy: {}".format(scores["all"]["mean"]))
-    for t, v in scores.items():
+    logger.info("Final MMLU Accuracy: {}".format(scores))
+    for t, v in mmlu.last_metrics.items():
         logger.info("MMLU Accuracy {}: {}".format(t, v["mean"]))
+
     # super hard to log with pllogger here
     improvement = None
     if base_perf is not None:

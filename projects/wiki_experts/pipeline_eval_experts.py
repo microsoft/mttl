@@ -1,3 +1,4 @@
+import glob
 import os
 import sys
 
@@ -7,8 +8,11 @@ from pytorch_lightning import seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.evaluators.base import setup_evaluators
-from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
+from mttl.models.modifiers.expert_containers.expert_library import (
+    HFExpertLibrary,
+    LocalExpertLibrary,
+)
 from mttl.utils import setup_logging, logger
 from projects.wiki_experts.src.expert_model import (
     MultiExpertModel,
@@ -36,11 +40,16 @@ def run_eval(args):
         module = MultiExpertModel(**vars(args))
 
     if args.hf_lib_id:
-        library = HFExpertLibrary(args.hf_lib_id)
-        logger.info("Loaded library: {}".format(library))
+        if os.path.exists(args.hf_lib_id):
+            # it's a local library
+            library = LocalExpertLibrary("/tmp/experts", create=True)
 
-        if args.ranker_model is not None:
-            module.add_experts_from_library(library)
+            for file in glob.glob(os.path.join(args.hf_lib_id, "*")):
+                library.add_expert_from_ckpt(file, force=True)
+        else:
+            library = HFExpertLibrary(args.hf_lib_id)
+
+        logger.info("Loaded library: {}".format(args.hf_lib_id))
     else:
         library = None
 
@@ -50,9 +59,11 @@ def run_eval(args):
             module.load_expert(**expert_kwargs, expert_library=library)
     elif args.module_graph is not None:
         module.load_from_graph_string(args.module_graph, expert_library=library)
+    elif args.hf_lib_id is not None:
+        module.add_experts_from_library(library)
     module.to("cuda")
 
-    evaluators = setup_evaluators(
+    runner: EvaluatorRunner = setup_evaluators(
         model_type=args.model,
         model_family=args.model_family,
         max_input_length=args.max_input_length,
@@ -60,27 +71,9 @@ def run_eval(args):
         predict_batch_size=args.predict_batch_size,
         truncation_side=args.truncation_side,
         tasks=args.pipeline_eval_tasks.split(",") if args.pipeline_eval_tasks else None,
+        output_path=args.output_dir,
     )
-
-    scores = {}
-    for name in sorted(evaluators.keys()):
-        logger.info("Evaluating %s", name)
-        if name == "bbh":
-            num_batches = 200
-        else:
-            num_batches = None
-        scores[name] = evaluators[name].evaluate(
-            module, shuffle=True, verbose=True, num_batches=num_batches
-        )
-        with open(args.output_dir + f"/scores.json", "w") as f:
-            import json
-
-            json.dump(scores, f)
-
-    table = prettytable.PrettyTable()
-    table.field_names = list(scores.keys())
-    table.add_row(["{:.3f}".format(v) for v in list(scores.values())])
-    print(table)
+    runner.run(module)
 
 
 if __name__ == "__main__":

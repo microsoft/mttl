@@ -91,9 +91,11 @@ class Evaluator(ABC):
         self.datamodule = datamodule
         if config is None:
             config = datamodule.config
+
         self.config = deepcopy(config)
         self.generation_kwargs = generation_kwargs or {}
         self.use_vllm = use_vllm
+        self._last_metrics = None
 
     def get_dataloader(self, split, subsample, shuffle):
         if self.datamodule is None:
@@ -107,8 +109,31 @@ class Evaluator(ABC):
             dataloader = self.datamodule.val_dataloader(subsample, shuffle)
         return dataloader
 
+    @property
+    def last_metrics(self):
+        return self._last_metrics
+
+    def save_metrics(self, metrics, output_path):
+        self._last_metrics = metrics
+
+        if output_path is None:
+            return
+
+        import json
+
+        with open(output_path + "/metrics.json", "w") as f:
+            f.write(json.dumps(metrics, f, indent=2))
+
     @abstractmethod
-    def evaluate(self, model, split="test", shuffle=False, subsample=-1, **kwargs):
+    def evaluate(
+        self,
+        model,
+        split="test",
+        shuffle=False,
+        subsample=-1,
+        output_path=None,
+        **kwargs,
+    ):
         pass
 
     def evaluate_with_vllm(self, model, dataloader, num_batches=None, verbose=True):
@@ -264,39 +289,39 @@ class GenerationMixin:
 
 
 class EvaluatorRunner:
-    def __init__(self, verbose=False):
+    def __init__(self, output_path, verbose=False):
         self.evaluators = {}
         self.verbose = verbose
+        self.output_path = output_path
 
     def add_evaluator(self, name, evaluator):
         self.evaluators[name] = evaluator
 
-    def run(self, module, output_path):
+    def run(self, module):
         import json
         import prettytable
         from mttl.utils import logger
 
-        os.makedirs(output_path, exist_ok=True)
+        os.makedirs(self.output_path, exist_ok=True)
 
         scores = {}
         for name in sorted(self.evaluators.keys()):
             logger.info("Evaluating %s", name)
 
-            if name in ["bbh", "mmlu"]:
-                num_batches = 200
-            else:
-                num_batches = None
+            task_output_path = os.path.join(self.output_path, name)
+            os.makedirs(self.output_path, exist_ok=True)
 
             scores[name] = self.evaluators[name].evaluate(
-                module, shuffle=True, verbose=self.verbose, num_batches=num_batches
+                module,
+                shuffle=True,
+                verbose=self.verbose,
+                output_path=task_output_path,
             )
-            if name == "mmlu":
-                scores[name] = scores[name]["all"]["mean"]
 
-            with open(output_path + "/scores.json", "w") as f:
+            with open(self.output_path + "/scores.json", "w") as f:
                 json.dump(scores, f)
 
-        with open(output_path + "/scores.json", "w") as f:
+        with open(self.output_path + "/scores.json", "w") as f:
             scores["mean"] = np.array(list(scores.values())).mean()
             json.dump(scores, f)
 
@@ -313,16 +338,17 @@ def setup_evaluators(
     max_output_length,
     predict_batch_size,
     truncation_side,
+    output_path=None,
     tasks=None,
 ) -> EvaluatorRunner:
     import copy
     from mttl.datamodule.mmlu_data_module import MMLUDataConfig
-    from mttl.evaluators.mmlu_evaluator import MMLUEvaluator
+    from mttl.evaluators.mmlu_evaluator import MMLUEvaluator, MMLUEvaluatorFast
     from mttl.evaluators.piqa_evaluator import PiqaEvaluator
     from mttl.evaluators.hellaswag_evaluator import HellaswagEvaluator
     from mttl.evaluators.humaneval_evaluator import HumanEvalEvaluator
     from mttl.evaluators.mbpp_evaluator import MBPPEvaluator
-    from mttl.evaluators.bbh_evaluator import DirectBBHEvaluator
+    from mttl.evaluators.bbh_evaluator import DirectBBHEvaluator, DirectBBHEvaluatorFast
     from mttl.evaluators.superglue_evaluators import BoolQEvaluator
     from mttl.evaluators.arc_evaluator import ArcEvaluator
     from mttl.evaluators.openbookqa_evaluator import OpenbookQAEvaluator
@@ -354,14 +380,14 @@ def setup_evaluators(
         "humaneval",
         "mbpp",
         "boolq",
-        "bbh",
+        "bbh-fast",
         "arc-easy",
         "arc-challenge",
         "piqa",
         "hellaswag",
         "winogrande",
         "openbookqa",
-        "mmlu",
+        "mmlu-fast",
     ]:
         common_kwargs = copy.deepcopy(common_kwargs_)
         generation_kwargs = copy.deepcopy(generation_kwargs_)
@@ -412,6 +438,15 @@ def setup_evaluators(
             evaluators["bbh"] = DirectBBHEvaluator(
                 config, generation_kwargs=generation_kwargs
             )
+        elif task == "bbh-fast":
+            generation_kwargs["max_new_tokens"] = 128
+            config = BBHConfig(
+                **common_kwargs,
+                augment_few_shot=5,
+            )
+            evaluators["bbh"] = DirectBBHEvaluatorFast(
+                config, generation_kwargs=generation_kwargs
+            )
         elif task == "arc-easy":
             config = ArcDataConfig(
                 **common_kwargs,
@@ -455,10 +490,15 @@ def setup_evaluators(
                 MMLUDataConfig(**common_kwargs),
                 generation_kwargs=generation_kwargs,
             )
+        elif task == "mmlu-fast":
+            evaluators["mmlu-fast"] = MMLUEvaluatorFast(
+                MMLUDataConfig(**common_kwargs),
+                generation_kwargs=generation_kwargs,
+            )
         else:
             raise ValueError("No active tasks")
 
-    runner = EvaluatorRunner(verbose=False)
+    runner = EvaluatorRunner(output_path, verbose=False)
     for name, evaluator in evaluators.items():
         runner.add_evaluator(name, evaluator)
 
