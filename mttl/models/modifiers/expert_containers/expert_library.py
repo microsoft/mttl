@@ -540,6 +540,7 @@ class ExpertLibrary:
         expert_name: str,
         config: Dict,
         data: np.ndarray,
+        force: bool = False,
     ):
         if expert_name not in self.data:
             raise ValueError(f"Expert {expert_name} not found in repository.")
@@ -556,7 +557,10 @@ class ExpertLibrary:
             aux_data = torch.load(path, map_location="cpu")
         else:
             aux_data = {}
-
+        if config["name"] in aux_data and not force:
+            raise ValueError(
+                f"Data of type {data_type} for expert {expert_name} already exists in repository."
+            )
         aux_data[config["name"]] = {
             data_type: data,
             "config": config,
