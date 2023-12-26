@@ -31,7 +31,9 @@ class DatasetConfig:
     model_family: str = "gpt"
     train_on_inputs: bool = False
     finetune_task_name: str = None
+    subsample_train: int = None
     subsample_dev: int = None
+    subsample_test: int = None
 
 
 @dataclass
@@ -458,8 +460,7 @@ class DefaultDataModule(LightningDataModule):
         )
         return train_dataset, dev_dataset
 
-    def subsample_dataset(self, ds_name, n_samples):
-        dataset = getattr(self, ds_name)
+    def subsample_dataset(self, dataset, n_samples):
         total_size = len(dataset)
         # make this deterministic to always sample the same subset
         rng = torch.Generator().manual_seed(1234)
@@ -468,7 +469,8 @@ class DefaultDataModule(LightningDataModule):
             subsampled_dataset = dataset.select(idxs)
         else:
             subsampled_dataset = torch.utils.data.Subset(dataset, idxs)
-        setattr(self, ds_name, subsampled_dataset)
+
+        return subsampled_dataset
 
     def __init__(
         self, config: Union[DatasetConfig, Any], for_generation=False, val_mixin=None
@@ -491,11 +493,13 @@ class DefaultDataModule(LightningDataModule):
         pass
 
     def post_setup_dataset(self):
-        if self.config.subsample_dev:
-            logger.info(
-                f"subsampling the dev dataset to {self.config.subsample_dev} samples"
-            )
-            self.subsample_dataset("dev_dataset", self.config.subsample_dev)
+        for split in ["train", "dev", "test"]:
+            subsample = getattr(self.config, f"subsample_{split}", None)
+            if subsample:
+                logger.info(f"subsampling the {split} dataset to {subsample} samples")
+                dataset = getattr(self, f"{split}_dataset")
+                sub_dataset = self.subsample_dataset(dataset, subsample)
+                setattr(self, f"{split}_dataset", sub_dataset)
 
         self.print_infos()
 
