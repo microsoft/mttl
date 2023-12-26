@@ -50,6 +50,7 @@ class CodeEvaluator(Evaluator, GenerationMixin):
         num_batches=None,
         verbose=True,
         shuffle=False,
+        **kwargs,
     ):
         dataloader = self.get_dataloader(split, subsample, shuffle=shuffle)
 
@@ -66,7 +67,7 @@ class CodeEvaluator(Evaluator, GenerationMixin):
             sources_texts = batch["sources_texts"]
             labels_texts = batch["labels_texts"]
 
-            predictions = self.generate_for_batch(model)
+            predictions = self.generate_for_batch(model, batch)
             predictions = [
                 [s + p]
                 for s, p in zip(
