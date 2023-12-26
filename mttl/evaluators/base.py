@@ -121,6 +121,9 @@ class Evaluator(ABC):
 
         import json
 
+        if not os.path.exists(output_path):
+            os.makedirs(output_path, exist_ok=True)
+
         with open(output_path + "/metrics.json", "w") as f:
             f.write(json.dumps(metrics, f, indent=2))
 
