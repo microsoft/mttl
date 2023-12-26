@@ -48,7 +48,9 @@ class MMLUEvaluator(Evaluator, GenerationMixin):
 
             datamodule = MMLUDataModule(config, for_generation=True)
 
+        generation_kwargs = generation_kwargs or {}
         generation_kwargs["max_new_tokens"] = 1
+
         super().__init__(
             datamodule, use_vllm=use_vllm, generation_kwargs=generation_kwargs
         )
