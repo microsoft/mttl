@@ -187,10 +187,10 @@ class MultiExpertModel(ExpertTrainer):
         is_default=False,
     ):
         if expert_name is not None:
-            # we want to load expert instance with a given name (might be different than the one in the expert instance)
+            # we want to load expert instance with a given name (might be different from the one in the expert instance)
             # we dont want to change expert instance though!
-            # will create a copy for now (maybe safer), alternatively can change the name and set it back at the end of the fuction
-            expert_instance = copy.deepcopy(expert_instance)
+            # will create a copy for now (maybe safer), alternatively can change the name and set it back at the end of the function
+            expert_instance = expert_instance.clone()
             expert_instance.name = expert_name
 
         self.model = add_expert_to_transformer(
