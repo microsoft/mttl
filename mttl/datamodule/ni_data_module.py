@@ -391,5 +391,4 @@ class NiDataModule(DefaultDataModule):
                 )
             )
 
-        self.print_infos()
         self._check_test_references()

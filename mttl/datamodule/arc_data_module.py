@@ -45,4 +45,3 @@ class ArcMultiChoiceDataModule(MultiChoiceDataModule):
 
         self.train_dataset = self.dev_dataset = None
         self.test_dataset = dataset
-        self.print_infos()

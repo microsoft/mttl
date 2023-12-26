@@ -31,6 +31,7 @@ class DatasetConfig:
     model_family: str = "gpt"
     train_on_inputs: bool = False
     finetune_task_name: str = None
+    subsample_dev: int = None
 
 
 @dataclass
@@ -481,12 +482,22 @@ class DefaultDataModule(LightningDataModule):
         self.for_generation = for_generation
         self.tokenizer = get_tokenizer(config, for_generation=for_generation)
         self.setup_dataset()
+        self.post_setup_dataset()
 
     def setup(self, stage=None):
         pass
 
     def setup_dataset(self):
         pass
+
+    def post_setup_dataset(self):
+        if self.config.subsample_dev:
+            logger.info(
+                f"subsampling the dev dataset to {self.config.subsample_dev} samples"
+            )
+            self.subsample_dataset("dev_dataset", self.config.subsample_dev)
+
+        self.print_infos()
 
 
 class MultiChoiceDataModule(DefaultDataModule):

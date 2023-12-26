@@ -68,6 +68,7 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         "truncation_side": args.truncation_side,
         "dataset": dataset,
         "train_on_inputs": False,
+        "subsample_dev": args.subsample_dev,
     }
 
     if "flat" in dataset:
@@ -75,7 +76,6 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
             **common_kwargs,
             source_template=args.source_template,
             augment_few_shot=args.augment_few_shot,
-            subsample_dev=args.subsample_dev,
         )
         dm = FlatMultiTaskModule(config, for_generation=for_generation)
     elif "mmlu" in dataset:

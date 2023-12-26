@@ -56,4 +56,3 @@ class BBHDataModule(DefaultDataModule):
 
         self.train_dataset = self.dev_dataset = dataset
         self.test_dataset = self.dev_dataset
-        self.print_infos()

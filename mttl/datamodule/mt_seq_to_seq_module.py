@@ -85,7 +85,6 @@ def augment_few_shot(
 class FlatMultiTaskConfig(DatasetConfig):
     source_template: str = None
     augment_few_shot: int = 0
-    subsample_dev: int = None
 
 
 def apply_source_template(source_template, example):
@@ -146,14 +145,6 @@ class FlatMultiTaskModule(DefaultDataModule):
 
         if len(self.test_dataset) == 0:
             self.test_dataset = self.dev_dataset
-
-        if self.config.subsample_dev:
-            logger.info(
-                f"subsampling the dev dataset to {self.config.subsample_dev} samples"
-            )
-            self.subsample_dataset("dev_dataset", self.config.subsample_dev)
-
-        self.print_infos()
 
 
 @dataclass
@@ -232,12 +223,6 @@ class FlanModule(DefaultDataModule):
             )
             self.test_dataset = self.dev_dataset
 
-        if self.config.subsample_dev:
-            logger.info(
-                f"subsampling the dev dataset to {self.config.subsample_dev} samples"
-            )
-            self.subsample_dataset("dev_dataset", self.config.subsample_dev)
-
         if self.config.remove_phi_eval_tasks:
             assert not any(
                 name in self.config.include_task_source.lower()
@@ -263,9 +248,6 @@ class FlanModule(DefaultDataModule):
                 num_proc=n_proc,
                 desc="Filtering phi-2 eval tasks from training mixture.",
             )
-
-        # Wrap the datasets to also return the task_id
-        self.print_infos()
 
 
 @dataclass
@@ -311,4 +293,3 @@ class T0FlatModule(DefaultDataModule):
             train_dataset
         )
         self.test_dataset = self.dev_dataset
-        self.print_infos()
