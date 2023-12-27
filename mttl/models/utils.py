@@ -409,7 +409,7 @@ def model_loader_helper(model_name, device_map="auto", load_in_8bit=False):
         )
     elif "phi-2" in model_name:
         model_object = AutoModelForCausalLM.from_pretrained(
-            os.environ["PHI_PATH"],
+            os.environ.get("PHI_PATH", 'microsoft/phi-2'),
             load_in_8bit=load_in_8bit,
             torch_dtype=torch.bfloat16,
             device_map=device_map,

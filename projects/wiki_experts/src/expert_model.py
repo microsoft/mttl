@@ -1,5 +1,6 @@
 import torch
 import re
+import os
 import numpy as np
 from typing import Dict, List
 from tempfile import TemporaryDirectory
@@ -12,15 +13,13 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     ExpertLibrary,
     HFExpertLibrary,
 )
+import copy
 
 from mttl.models.modifiers.lora import LoRAConfig
 from mttl.models.modifiers.routing import RoutingInfo
 from mttl.utils import logger
 from mttl.models.modifiers.expert_containers import ExpertContainer
-from mttl.models.modifiers.expert_containers.selectors import (
-    Selector,
-)
-
+from mttl.models.modifiers.expert_containers.selectors import Selector
 from mttl.models.modifiers.expert_containers import (
     add_expert_to_transformer,
 )
@@ -131,6 +130,8 @@ class MultiExpertModel(ExpertTrainer):
         """
         Replaces the expert container with the expert with the given name.
         """
+        if len(self.experts_names) == 0:
+            return
         expert = None
         for _, module in self.model.named_modules():
             for c_name, child in dict(module.named_children()).items():
@@ -145,6 +146,8 @@ class MultiExpertModel(ExpertTrainer):
             td = TemporaryDirectory()
             expert_checkpoint = MultiExpertModel.save_pretrained(self, td.name)
             expert: Expert = load_expert(expert_checkpoint)
+            # remove the temporary directory
+            os.remove(expert_checkpoint)
             return expert
         return
 
@@ -184,6 +187,10 @@ class MultiExpertModel(ExpertTrainer):
         is_default=False,
     ):
         if expert_name is not None:
+            # we want to load expert instance with a given name (might be different from the one in the expert instance)
+            # we dont want to change expert instance though!
+            # will create a copy for now (maybe safer), alternatively can change the name and set it back at the end of the function
+            expert_instance = expert_instance.clone()
             expert_instance.name = expert_name
 
         self.model = add_expert_to_transformer(
