@@ -68,9 +68,16 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         "truncation_side": args.truncation_side,
         "dataset": dataset,
         "train_on_inputs": False,
+        "subsample_train": args.subsample_train,
+        "subsample_dev": args.subsample_dev,
+        "subsample_test": args.subsample_test,
     }
-
-    if "flat" in dataset:
+    if "flan" in dataset:
+        config = FlanConfig(
+            **common_kwargs, remove_phi_eval_tasks=args.remove_phi_eval_tasks
+        )
+        dm = FlanModule(config, for_generation=for_generation)
+    elif "flat" in dataset:
         config = FlatMultiTaskConfig(
             **common_kwargs,
             source_template=args.source_template,
@@ -102,6 +109,7 @@ def run_multitask(args: ExpertConfig):
     model_class = ExpertTrainer
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
+    print("n tasks : ", args.n_tasks)
 
     gen_dm = get_datamodule(args, for_generation=True)
 

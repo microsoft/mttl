@@ -36,7 +36,6 @@ class SuperGLUEMultiChoiceDataModule(MultiChoiceDataModule):
         self.train_dataset = None
         self.dev_dataset = dataset
         self.test_dataset = dataset
-        self.print_infos()
 
 
 class BoolQDataModule(SuperGLUEMultiChoiceDataModule):

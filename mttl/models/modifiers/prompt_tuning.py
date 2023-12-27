@@ -68,7 +68,9 @@ class ExtendedEmbedding(nn.Module):
         super().__init__()
         self.config = config
         n_new_tokens = self.config.soft_prompt_length
-        self.input_embeds = nn.Parameter(input_embeds.weight)
+        self.input_embeds = nn.Parameter(
+            input_embeds.weight, requires_grad=input_embeds.weight.requires_grad
+        )
         self.sparse = input_embeds.sparse
 
         # topk initialization

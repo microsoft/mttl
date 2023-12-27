@@ -22,7 +22,6 @@ class PlatypusModule(DefaultDataModule):
 
         self.train_dataset, self.dev_dataset = self.create_train_valid_split(dataset)
         self.test_dataset = self.dev_dataset
-        self.print_infos()
 
 
 class PlatypusQAModule(PlatypusModule):
@@ -40,7 +39,6 @@ class PlatypusQAModule(PlatypusModule):
             train_dataset
         )
         self.test_dataset = self.dev_dataset
-        self.print_infos()
 
     def create_train_valid_split(self, dataset, validation_portion=None):
         """

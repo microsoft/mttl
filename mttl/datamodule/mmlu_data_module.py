@@ -262,5 +262,3 @@ class MMLUDataModule(DefaultDataModule):
         ) = maybe_filter_hf_dataset_by_task(
             dataset, "Task", self.config.finetune_task_name
         )
-
-        self.print_infos()
