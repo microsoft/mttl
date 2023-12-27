@@ -125,7 +125,7 @@ class Evaluator(ABC):
             os.makedirs(output_path, exist_ok=True)
 
         with open(output_path + "/metrics.json", "w") as f:
-            f.write(json.dumps(metrics, f, indent=2))
+            json.dump(metrics, f, indent=2)
 
     @abstractmethod
     def evaluate(
@@ -321,12 +321,12 @@ class EvaluatorRunner:
                 output_path=task_output_path,
             )
 
-            with open(self.output_path + "/scores.json", "w") as f:
-                json.dump(scores, f)
+            with open(self.output_path + "/metrics.json", "w") as f:
+                json.dump(scores, f, indent=2)
 
-        with open(self.output_path + "/scores.json", "w") as f:
+        with open(self.output_path + "/metrics.json", "w") as f:
             scores["mean"] = np.array(list(scores.values())).mean()
-            json.dump(scores, f)
+            json.dump(scores, f, indent=2)
 
         table = prettytable.PrettyTable()
         table.field_names = list(scores.keys())
