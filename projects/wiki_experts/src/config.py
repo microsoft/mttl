@@ -1,7 +1,9 @@
 import os
+import torch
 
 from mttl.config import Config
-import mttl.datamodule.task_sequences
+import mttl.datamodule.flan_tasks
+from mttl.utils import logger
 
 
 class ExpertConfig(Config):
@@ -71,6 +73,14 @@ class ExpertConfig(Config):
             self.train_batch_size // self.micro_batch_size
         )
         self.train_batch_size = self.micro_batch_size
+        
+        n_devices = torch.cuda.device_count()
+        if n_devices > 1:
+            logger.warn(
+                "You have multiple GPUs, but your device count is not being taken "
+                + "into account when computing `gradient_accumulation_steps`."
+            )
+        
         if self.finetune_task_name is not None and isinstance(
             self.finetune_task_name, str
         ):

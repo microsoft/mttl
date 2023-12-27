@@ -13,6 +13,7 @@ import numpy as np
 from mttl.utils import logger
 from mttl.datamodule.utils import get_tokenizer
 from datasets import Dataset as HFDataset
+from datasets.arrow_dataset import Dataset as ArrowDataset
 
 
 @dataclass
@@ -459,6 +460,18 @@ class DefaultDataModule(LightningDataModule):
             generator=self.rng,
         )
         return train_dataset, dev_dataset
+
+    def subsample_dataset(self, ds_name, n_samples):
+        dataset = getattr(self, ds_name)
+        total_size = len(dataset)
+        # make this deterministic to always sample the same subset
+        rng = torch.Generator().manual_seed(1234)
+        idxs = torch.randperm(total_size, generator=rng)[:n_samples]
+        if isinstance(dataset, ArrowDataset):
+            subsampled_dataset = dataset.select(idxs)
+        else:
+            subsampled_dataset = torch.utils.data.Subset(dataset, idxs)
+        setattr(self, ds_name, subsampled_dataset)
 
     def __init__(
         self, config: Union[DatasetConfig, Any], for_generation=False, val_mixin=None
