@@ -338,7 +338,7 @@ class EvaluatorRunner:
         table = prettytable.PrettyTable()
         table.field_names = list(scores.keys())
         table.add_row(["{:.3f}".format(v) for v in list(scores.values())])
-        print(table)
+        logger.info("Results:\n" + str(table))
 
 
 def setup_evaluators(

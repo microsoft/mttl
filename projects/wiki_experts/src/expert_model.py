@@ -109,14 +109,16 @@ class MultiExpertModel(ExpertTrainer):
         return weights
 
     def load_from_graph(self, graph: ModuleGraph, action="route", **kwargs):
-        for _, module in graph.create_modules(
+        for name, module in graph.create_modules(
             base_hparams=self.hparams, **kwargs
         ).items():
             print("Loading module: {}".format(module.name))
+            # loading from graph gets the name of the root node
             self.add_expert_instance(
                 module,
                 action=action,
-                is_default=module.name == "default",
+                expert_name=name,
+                is_default=name == "default",
             )
 
     def delete_expert_container(self):
@@ -268,7 +270,7 @@ class MultiExpertModel(ExpertTrainer):
         expert = load_expert(
             expert_path,
             expert_name=expert_name,
-            expert_dict_or_lib=expert_library,
+            expert_library=expert_library,
         )
 
         if self.hparams.model != expert.training_config.model:
