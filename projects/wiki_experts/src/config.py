@@ -2,7 +2,7 @@ import os
 import torch
 
 from mttl.config import Config
-import mttl.datamodule.flan_tasks
+import mttl.datamodule.task_sequences
 from mttl.utils import logger
 
 
