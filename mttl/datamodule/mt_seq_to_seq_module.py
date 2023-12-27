@@ -165,7 +165,6 @@ class FlatMultiTaskModule(DefaultDataModule):
 class FlanConfig(DatasetConfig):
     include_template_type: str = "zs_noopt"
     include_task_source: str = "P3,Flan2021"
-    subsample_dev: int = None
     remove_phi_eval_tasks: bool = False
 
 
