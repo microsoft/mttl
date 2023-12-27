@@ -162,11 +162,7 @@ class KATERanker(AdapterRanker):
 
         for _, idxs in enumerate(indices):
             task_names = [self.task_names[int(idx)] for idx in idxs]
-            task_names = [
-                task_name
-                for task_name in task_names
-                if task_name in self.available_tasks
-            ]
+            task_names = [task_name for task_name in task_names]
             top_selected = Counter(task_names).most_common(n)
             if len(top_selected) < n:
                 top_selected += [
