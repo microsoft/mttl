@@ -228,7 +228,7 @@ class RougeCallback(cb.Callback):
                 verbose=self.verbose,
                 subsample=self.subsample,
             )
-            pl_module.log("val/rougeL", rouge, prog_bar=True)
+            pl_module.log("val/rougeL", rouge, on_epoch=True, prog_bar=True)
 
     def on_test_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         rouge = self.evaluator.evaluate(
@@ -237,7 +237,7 @@ class RougeCallback(cb.Callback):
             verbose=self.verbose,
             subsample=self.subsample,
         )
-        pl_module.log("test/rougeL", rouge, prog_bar=True)
+        pl_module.log("test/rougeL", rouge, on_epoch=True, prog_bar=True)
 
 
 class NanoMMLUCallback(cb.Callback):
