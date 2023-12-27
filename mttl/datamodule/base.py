@@ -30,6 +30,7 @@ class DatasetConfig:
     truncation_side: str = "right"
     model_family: str = "gpt"
     train_on_inputs: bool = False
+    add_eos_to_targets: bool = True
     finetune_task_name: str = None
     subsample_train: int = None
     subsample_dev: int = None
@@ -57,6 +58,7 @@ class DefaultCollator:
     for_generation: bool = False
     train_on_inputs: bool = False
     task_to_id: dict = None
+    add_eos_to_targets: bool = True
 
     def enforce_eos(self, targets):
         # simulate the default behaviour of LLamatokenizer, when adding eos token and truncating: the last token must always be eos
@@ -98,7 +100,10 @@ class DefaultCollator:
                 labels_[i] = " " + labels_[i]
 
         # adds the eos token
-        labels_ = [l + " " + self.tokenizer.eos_token for l in labels_]
+        labels_ = [
+            l + ((" " + self.tokenizer.eos_token) if self.add_eos_to_targets else "")
+            for l in labels_
+        ]
         return sources_, labels_
 
     def prepare_inputs_for_seq2seq_family(self, sources, labels):
@@ -416,6 +421,7 @@ class DefaultDataModule(LightningDataModule):
             model_family=self.config.model_family,
             for_generation=self.for_generation,
             train_on_inputs=self.config.train_on_inputs,
+            add_eos_to_targets=self.config.add_eos_to_targets,
             task_to_id=self.task_to_id,
         )
 
