@@ -30,12 +30,12 @@ class ExperimentState:
     @property
     def path(self):
         if wandb.run is not None:
-            run_name = wandb.run.name
+            exp_name = wandb.run.name
         else:
-            run_name = os.getenv("AMLT_JOB_NAME", "_some_experiment")
-        run_name = run_name.replace("/", "_")
+            exp_name = os.getenv("AMLT_JOB_NAME", "_some_experiment")
+        exp_name = exp_name.replace("/", "_")
         path = self.state.config.output_dir
-        path = os.path.join(path, f"exp_state_{run_name}")
+        path = os.path.join(path, f"exp_state_{exp_name}")
 
         os.makedirs(path, exist_ok=True)
         return path

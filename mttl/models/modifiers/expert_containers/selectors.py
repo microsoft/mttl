@@ -128,12 +128,15 @@ class ModulesSelectorOutput(SelectorOutput):
     modules: List[str]
 
 
-def cache_if_views(func):
-    def wrapper(self, input, **kwargs):
+def forward_with_cache(func):
+    def wrapper(self: Selector, input, **kwargs):
+        if self.forward_cache is not None and not self.clear_cache:
+            self.count_call()
+            return self.forward_cache
         output = func(self, input, **kwargs)
+        self.forward_cache = output
 
-        if self.forward_cache is None:
-            self.forward_cache = output
+        self.count_call()
 
         return output
 
@@ -144,11 +147,23 @@ class Selector(RoutingMixin, nn.Module):
     def __init__(self, info_container, config=None, **kwargs):
         nn.Module.__init__(self)
         RoutingMixin.__init__(self, info_container)
-
         self.config = config
         self.expert_names = []
         self.selector_views = []
         self.forward_cache = None
+        self.total_calls_per_forward = 0
+
+        self._calls_counter = 0
+
+    @property
+    def clear_cache(self):
+        reset_cache = self._calls_counter >= self.total_calls_per_forward
+        if reset_cache:
+            self._calls_counter = 0
+        return reset_cache
+
+    def count_call(self):
+        self._calls_counter += 1
 
     @abstractmethod
     def forward(self, input, **kwargs) -> SelectorOutput:
@@ -161,59 +176,12 @@ class Selector(RoutingMixin, nn.Module):
     def get_merged_weights(self, container, **selector_kwargs) -> Dict:
         return {}
 
-    def create_view(self) -> "SelectorView":
-        """
-        Create a view on an existing selector for all the "shared" layers
-        these don't hold params, are not registered as modules, and read from the cache
-        of their parent "real" selector.
-        """
-        selector_view = SelectorView(self, len(self.selector_views))
-        self.selector_views.append(selector_view)
-        return selector_view
-
-    def clear_cache(self):
-        self.forward_cache = None
-
     @property
     def name(self):
         return f"{self.__layer_name__}"
 
     @abstractmethod
     def add_expert(self, expert_name: str, **kwargs):
-        pass
-
-
-class SelectorView:
-    """A view on a selector, handles selector caching during forward pass, in the case
-    this selector is shared across layers. First layer gets the real deal, the others get a view on it.
-    """
-
-    def __init__(self, selector, id):
-        self._id = id
-        self.selector = selector
-        # only the last view clears the cache
-        for view in self.selector.views:
-            view.clear_cache = False
-        self.clear_cache = True
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
-
-    def forward(self, _, **__):
-        output = self.selector.forward_cache
-
-        if output is None:
-            raise ValueError("No forward cache set, this view seems dangling!")
-
-        if self.clear_cache:
-            self.selector.forward_cache = None
-        return output
-
-    def get_merged_weights(self, container, **selector_kwargs) -> Dict:
-        return self.selector.get_merged_weights(container, **selector_kwargs)
-
-    def add_expert(self, *args, **kwargs):
-        """Do not add experts! This is just a view of the real thing."""
         pass
 
 
@@ -238,7 +206,7 @@ class PolySelector(Selector):
         module_weights = module_logits / (module_logits.sum(dim=-1, keepdim=True) + EPS)
         return module_weights
 
-    @cache_if_views
+    @forward_with_cache
     def forward(self, input, **kwargs) -> ModulesAndWeightsSelectorOutput:
         weights = self._get_weights()
         modules = self.expert_names
@@ -310,7 +278,7 @@ class MOERKHSSelector(Selector):
         input_view = input.view(-1, input.shape[-1])
         return self.rkhs_hid(input_view).reshape(input.shape[0], input.shape[1], -1)
 
-    @cache_if_views
+    @forward_with_cache
     def forward(
         self, input, **kwargs
     ) -> BatchAndSequenceModulesAndWeightsSelectorOutput:
@@ -368,35 +336,69 @@ class PolySelectorDirect(PolySelector):
     def __init__(self, info_container, **kwargs) -> None:
         super().__init__(info_container)
 
-        self.module_logits = nn.ParameterDict()
+        self.module_logits_dict = nn.ParameterDict()
+
         self.training_config = kwargs["training_config"]
+        self.init_gap = [-1e-3, 1e-3]
+
+        self.device = kwargs["layer"].weight.device
 
     def _get_weights(self):
-        weights = torch.tensor([self.module_logits[k] for k in self.expert_names])
+        weights = torch.cat(
+            [self.module_logits_dict[k] for k in self.module_logits_dict.keys()]
+        )
         return weights
+
+    def get_routing_weights(self):
+        return {k: v.detach().item() for k, v in self.module_logits_dict.items()}
 
     def add_expert(self, expert_name: str, **kwargs):
         """
         Assume:
-        expert_task_name -- task name expert is pecialized in
+        expert_task_name -- task name expert is pecialized at
         self.config.finetune_task_name -- name of the task the model is currently trained on
+
+        If we eocounter a module for the current task, we init it with one hot, otherwise with uniform.
+
+
         """
-        init_gap = [0, 0]
         main_m = 1
 
         expert_task_name = kwargs["expert_info"].expert_task_name
-        if expert_name not in self.module_logits:
-            # TODO: this is very error prone, e.g. when you reload this model, this cannot be inited
-            # @Oleksiy do you need this?
+        if expert_name not in self.module_logits_dict:
             if self.training_config.finetune_task_name == expert_task_name:
-                self.module_logits[expert_name] = torch.nn.Parameter(
+                self.init_gap = [
+                    0,
+                    0,
+                ]  # encountered module for current task, init one hot
+                self.module_logits_dict[expert_name] = torch.nn.Parameter(
                     torch.ones(1).to(self.device)
                 )
-                self.module_logits[expert_name].data *= main_m
+                self.init_logits_uniform()
+                self.module_logits_dict[expert_name].data *= main_m
+
             else:
-                self.module_logits[expert_name] = torch.nn.Parameter(
-                    torch.empty(1).uniform_(*init_gap).to(self.device)
+                self.module_logits_dict[expert_name] = torch.nn.Parameter(
+                    torch.empty(1).uniform_(*self.init_gap).to(self.device)
                 )
+
+    def load_state_dict(self, state_dict, strict=True):
+        self._initialized = True
+        return super().load_state_dict(state_dict, strict=strict)
+
+    def init_logits_uniform(self):
+        if sum([p for p in self.module_logits_dict.values()]) == 0:
+            for name, param in self.module_logits_dict.items():
+                self.module_logits_dict[name].data = (
+                    torch.empty(1).uniform_(-1e-3, 1e-3).to(self.device)
+                )
+        self._initialized = True
+
+    @forward_with_cache
+    def forward(self, *args, **kwargs):
+        weights = self._get_weights()
+        modules = list(self.module_logits_dict.keys())
+        return ModulesAndWeightsSelectorOutput(modules, weights)
 
 
 @dataclass
@@ -413,7 +415,7 @@ class RoutingInfosContainerSelector(Selector):
 
         self.default_expert_name = None
 
-    @cache_if_views
+    @forward_with_cache
     def forward(self, input, **kwargs) -> BatchModulesAndWeightsSelectorOutput:
         if not hasattr(self.routing_infos, "routing_modules"):
             raise ValueError("routing_modules not in routing_infos")
@@ -438,7 +440,7 @@ class TaskNameSelector(Selector):
 
         self.default_expert_name = None
 
-    @cache_if_views
+    @forward_with_cache
     def forward(self, input, **kwargs) -> ModulesSelectorOutput:
         # try to infer batch size
         if not self.routing_infos or not self.routing_infos.task_names:
