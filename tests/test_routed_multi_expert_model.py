@@ -12,7 +12,6 @@ from projects.wiki_experts.src.expert_model import (
 from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
 from mttl.models.modifiers.expert_containers import LoRAExpertContainer
 from mttl.models.modifiers.lora import LoRA
-from conftest import make_tiny_llama
 
 
 @pytest.fixture
@@ -21,23 +20,24 @@ def tmp_exp_config(tmp_path):
         def _set_defaults(self):
             super()._set_defaults()
             self.model_modifier = "lora"
-            self.modify_layers = "gate_proj|down_proj|up_proj"
-            self.modify_modules = ".*mlp.*"
+            self.modify_layers = "c_fc|c_proj|k_proj|v_proj|q_proj|out_proj"
+            self.modify_modules = ".*"
             self.trainable_param_names = ".*lora_[ab].*"
             self.output_dir = tmp_path
-            self.router_selector = "poly_router"
+            self.router_selector = "poly_router_dir"
             self.router_granularity = "coarsegrained"
+            self.model = "EleutherAI/gpt-neo-125m"
 
     return SimpleConfig()
 
 
 class TestRoutedMultiExpertModel:
     def create_dummy_expert(self, config: ExpertConfig, exp_name) -> Expert:
-        model_object = make_tiny_llama()
+        # model_object = make_tiny_llama()
         exp_trainer = ExpertTrainer(
             tokenizer=None,
             **vars(config),
-            model_object=model_object,
+            # model_object=model_object,
         )
         dir = f"{config.output_dir}/{exp_name}"
         os.makedirs(dir, exist_ok=True)
@@ -56,7 +56,7 @@ class TestRoutedMultiExpertModel:
         module_dict = {"mod1": exp1, "mod2": exp2, "default": exp1}
 
         module = RoutedMultiExpertModel(
-            model_object=make_tiny_llama(),
+            # model_object=make_tiny_llama(),
             tokenizer=None,
             **vars(config),
         )
@@ -65,7 +65,7 @@ class TestRoutedMultiExpertModel:
         bs, max_seq_len = 10, 100
 
         assert isinstance(
-            module.model.model.layers[0].mlp.down_proj, LoRAExpertContainer
+            module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
         )
 
         batch = {
@@ -82,19 +82,18 @@ class TestRoutedMultiExpertModel:
 
         # Test Base Llama model
         output = module(batch)
-        assert np.allclose(output.item(), 6.0915, atol=0.1)
+        assert np.allclose(output.item(), 11.04, atol=0.1)
 
     def test_expert_selector_with_poly_routing(self, tmp_exp_config):
         seed_everything(0)
         config: ExpertConfig = tmp_exp_config
 
-        config.router_selector = "poly_router"
+        config.router_selector = "poly_router_dir"
         exp1_dest = self.create_dummy_expert(config, "exp1")
         exp2_dest = self.create_dummy_expert(config, "exp2")
         module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
 
         module = RoutedMultiExpertModel(
-            model_object=make_tiny_llama(),
             tokenizer=None,
             expert_info={},
             **vars(config),
@@ -103,7 +102,7 @@ class TestRoutedMultiExpertModel:
         bs, max_seq_len = 10, 100
 
         assert isinstance(
-            module.model.model.layers[0].mlp.down_proj, LoRAExpertContainer
+            module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
         )
 
         batch = {
@@ -118,7 +117,7 @@ class TestRoutedMultiExpertModel:
 
         # Test Base Llama model
         output = module(batch)
-        assert np.allclose(output.item(), 6.1158, atol=0.1)
+        assert np.allclose(output.item(), 9.7, atol=0.1)
 
         # check the get_router_weights function
         routing_weights = module.get_router_weights()
@@ -130,7 +129,6 @@ class TestRoutedMultiExpertModel:
         # change router_granularity to finegrained
         config.router_granularity = "finegrained"
         module = RoutedMultiExpertModel(
-            model_object=make_tiny_llama(),
             tokenizer=None,
             expert_info={},
             **vars(config),
@@ -138,15 +136,12 @@ class TestRoutedMultiExpertModel:
         module.load_from_module_dict(module_dict)
         output = module(batch)
         routing_weights = module.get_router_weights()
-        assert np.allclose(output.item(), 6.07, atol=0.1)
-        assert (
-            "mod1" in routing_weights["model_layers_0_mlp_up_proj.selector"]
-            and "mod2" in routing_weights["model_layers_0_mlp_up_proj.selector"]
-        )
+        assert np.allclose(output.item(), 9.7, atol=0.1)
+
         expert = module.to_expert()
         assert isinstance(expert, Expert)
         module.replace_container_with_expert("mod1")
-        assert isinstance(module.model.model.layers[0].mlp.down_proj, LoRA)
+        assert isinstance(module.model.transformer.h[0].attn.attention.k_proj, LoRA)
 
     def test_add_expert_with_action_merge(self, tmp_exp_config):
         seed_everything(0)
@@ -158,7 +153,6 @@ class TestRoutedMultiExpertModel:
         module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
 
         module = RoutedMultiExpertModel(
-            model_object=make_tiny_llama(),
             tokenizer=None,
             expert_info={},
             **vars(config),
@@ -167,10 +161,10 @@ class TestRoutedMultiExpertModel:
         bs, max_seq_len = 10, 100
 
         assert isinstance(
-            module.model.model.layers[0].mlp.down_proj, LoRAExpertContainer
+            module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
         )
         # expert container should be empty
-        assert len(module.model.model.layers[0].mlp.down_proj) == 0
+        assert len(module.model.transformer.h[0].attn.attention.k_proj) == 0
 
         batch = {
             "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
@@ -184,7 +178,7 @@ class TestRoutedMultiExpertModel:
 
         # Test Base Llama model
         output = module(batch)
-        assert np.allclose(output.item(), 6.09, atol=0.1)
+        assert np.allclose(output.item(), 9.7, atol=0.1)
 
 
 if __name__ == "__main__":

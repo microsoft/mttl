@@ -31,6 +31,7 @@ class DatasetConfig:
     model_family: str = "gpt"
     train_on_inputs: bool = False
     finetune_task_name: str = None
+    subsample: int = -1
 
 
 @dataclass
@@ -353,6 +354,7 @@ def subsample_dst(dataset, subsample: int):
 
 class DefaultDataModule(LightningDataModule):
     def train_dataloader(self, subsample=None):
+        subsample = subsample or self.config.subsample
         train_dataset = self.train_dataset
         if subsample and subsample > 0:
             train_dataset = subsample_dst(train_dataset, subsample)
@@ -368,6 +370,7 @@ class DefaultDataModule(LightningDataModule):
         )
 
     def val_dataloader(self, subsample=None, shuffle=False):
+        subsample = subsample or self.config.subsample
         dev_dataset = self.dev_dataset
         if subsample and subsample > 0:
             dev_dataset = subsample_dst(dev_dataset, subsample)
@@ -383,6 +386,7 @@ class DefaultDataModule(LightningDataModule):
         )
 
     def test_dataloader(self, subsample=None, shuffle=False):
+        subsample = subsample or self.config.subsample
         test_dataset = self.test_dataset
         if subsample and subsample > 0:
             test_dataset = subsample_dst(test_dataset, subsample)

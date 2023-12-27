@@ -2,7 +2,7 @@ import os
 import torch
 
 from mttl.config import Config
-import mttl.datamodule.flan_tasks
+import mttl.datamodule.task_sequences
 from mttl.utils import logger
 
 
@@ -64,6 +64,10 @@ class ExpertConfig(Config):
         self.use_vllm = False
         self.pipeline_eval_tasks = None
 
+        self.reset_lr = False
+        self.reset_optim = False
+        self.pipeline_eval_tasks = "piqa,arc-easy,arc-challenge"
+
     def post_init(self):
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size
@@ -81,10 +85,16 @@ class ExpertConfig(Config):
                 + "into account when computing `gradient_accumulation_steps`."
             )
 
-        if self.finetune_task_name is not None:
-            if self.finetune_task_name in mttl.datamodule.flan_tasks.__dict__.keys():
-                self.finetune_task_name = getattr(
-                    mttl.datamodule.flan_tasks,
-                    self.finetune_task_name,
-                    self.finetune_task_name,
+        if self.finetune_task_name is not None and isinstance(
+            self.finetune_task_name, str
+        ):
+            # resolve task keys
+            task_names = []
+            tasks = self.finetune_task_name.split(
+                "+"
+            )  # use "+" for assign multiple task set vars to be found in task_sequences
+            for task_name in tasks:
+                task_names.extend(
+                    getattr(mttl.datamodule.task_sequences, task_name, [task_name])
                 )
+            self.finetune_task_name = ",".join(task_names)

@@ -6,7 +6,6 @@ from mttl.models.llama_patch import replace_attn_with_flash_attn
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.routing import RoutingInfo
-from mttl.models.modifiers.expert_containers.selectors import SelectorConfig
 from transformers import AutoModelForCausalLM
 
 from mttl.models.modifiers.expert_containers.module_graph import ExpertInfo
@@ -14,7 +13,9 @@ from mttl.models.utils import (
     EfficientCheckpointModule,
     prepare_model_for_kbit_training,
 )
+from mttl.models.modifiers.expert_containers.module_graph import Expert
 from projects.wiki_experts.src.config import ExpertConfig
+from mttl.models.modifiers.expert_containers.selectors import SelectorConfig
 
 
 torch.set_float32_matmul_precision("high")
