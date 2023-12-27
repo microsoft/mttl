@@ -68,13 +68,13 @@ def test_skilled_lora_parallel_merge_with_weights():
 
     config = SkilledLoRAConfig(n_skills=2, n_splits=1, lora_alpha=1, lora_rank=1)
 
-    ada1 = SkilledLoRAView(config, layer)
-    ada1.lora_a = torch.randn(2, 1, 1, config.lora_rank)
-    ada1.lora_b = torch.ones(2, config.lora_rank, 1, 2)
+    lora_a = torch.randn(2, 1, 1, config.lora_rank)
+    lora_b = torch.ones(2, config.lora_rank, 1, 2)
+    ada1 = SkilledLoRAView(config, layer, lora_a, lora_b)
 
-    ada2 = SkilledLoRAView(config, layer)
-    ada2.lora_a = torch.randn(2, 1, 1, config.lora_rank)
-    ada2.lora_b = torch.ones(2, config.lora_rank, 1, 2)
+    lora_a = torch.randn(2, 1, 1, config.lora_rank)
+    lora_b = torch.ones(2, config.lora_rank, 1, 2)
+    ada2 = SkilledLoRAView(config, layer, lora_a, lora_b)
 
     # fill some dummy values
     ada1.lora_a[0, :].fill_(1.0)
