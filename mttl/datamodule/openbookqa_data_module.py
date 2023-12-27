@@ -24,6 +24,8 @@ class OpenbookQAMultiChoiceDataModule(MultiChoiceDataModule):
             example["label_index"] = ["A", "B", "C", "D"].index(
                 example["answerKey"].strip()
             )
+            example["task_name"] = "openbookqa"
+            example["task_source"] = "openbookqa"
             return example
 
         dataset = dataset.map(
