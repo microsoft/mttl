@@ -49,4 +49,3 @@ class MBPPDataModule(DefaultDataModule):
 
         self.train_dataset = None
         self.dev_dataset = self.test_dataset = test_dataset
-        self.print_infos()

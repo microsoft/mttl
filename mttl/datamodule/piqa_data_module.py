@@ -38,4 +38,3 @@ class PiqaMultiChoiceDataModule(MultiChoiceDataModule):
 
         self.train_dataset = None
         self.dev_dataset = self.test_dataset = dataset
-        self.print_infos()

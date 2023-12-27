@@ -16,7 +16,6 @@ class AlpacaDataModule(DefaultDataModule):
 
         self.train_dataset, self.dev_dataset = self.create_train_valid_split(dataset)
         self.test_dataset = self.dev_dataset
-        self.print_infos()
 
 
 class AlpacaPretrainDataModule(AlpacaDataModule):
