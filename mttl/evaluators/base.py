@@ -161,6 +161,13 @@ class GenerationOutput:
 
 
 class StoppingCriteriaSub(StoppingCriteria):
+    """A stopping criteria that stops on matching token strings (and not ids).
+
+    We decide to stop on strings rather than stopping on particular ids is a bit difficult to do,
+    i.e. \n\n might be tokenized differently if it is preceeded by a particular token or followed
+    by a particular token, i.e. the model can generate \n\na, which is tokenized as a whole.
+    """
+
     def __init__(self, stop_tokens=[], tokenizer=None):
         super().__init__()
         self.stop = stop_tokens
