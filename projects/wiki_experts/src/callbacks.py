@@ -45,6 +45,16 @@ class DownstreamEvalCallback(cb.Callback):
                 prog_bar=True,
             )
 
+    def on_test_epoch_end(self, trainer: Trainer, pl_module: ExpertTrainer) -> None:
+        metrics = self.runner.run(pl_module)
+        for task, metric in metrics.items():
+            pl_module.log(
+                f"{self.METRIC_KEY}_last/{task}",
+                metric,
+                on_epoch=True,
+                prog_bar=True,
+            )
+
 
 class OptimResetCallback(cb.Callback):
     def __init__(self, reset_optim=False, reset_lr=False) -> None:
