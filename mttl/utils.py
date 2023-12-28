@@ -332,8 +332,8 @@ def get_checkpoint_path(path, step=None, use_last=False):
         if len(match) == 0:
             raise ValueError("No best checkpoints found!")
         elif len(match) > 1:
-            logger.warn("Multiple best checkpoints found! Taking the last one.")
-        path = match[0]
+            logger.warn("Multiple best checkpoints found! Taking the most recent one!")
+            path = max(match, key=os.path.getctime)
 
     logger.info(f"Found checkpoint at {path}.")
     return path
