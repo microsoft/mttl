@@ -67,7 +67,8 @@ class ExpertConfig(Config):
         self.use_vllm = False
         self.reset_lr = False
         self.reset_optim = False
-        self.pipeline_eval_tasks = "piqa,boolq,arc-easy,arc-challenge"
+
+        self.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,winogrande"
 
     def post_init(self):
         if self.micro_batch_size is None:
