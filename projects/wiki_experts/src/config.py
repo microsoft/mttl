@@ -62,11 +62,9 @@ class ExpertConfig(Config):
         self.eval_mmlu_flag = False
         self.eval_metric = "loss"
         self.use_vllm = False
-        self.pipeline_eval_tasks = None
-
         self.reset_lr = False
         self.reset_optim = False
-        self.pipeline_eval_tasks = "piqa,arc-easy,arc-challenge"
+        self.pipeline_eval_tasks = "piqa,boolq,arc-easy,arc-challenge"
 
     def post_init(self):
         if self.micro_batch_size is None:
