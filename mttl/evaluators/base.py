@@ -375,9 +375,10 @@ class EvaluatorRunner:
                 with open(self.output_path + "/metrics.json", "w") as f:
                     json.dump(scores, f, indent=2)
 
+        scores["mean"] = np.array(list(scores.values())).mean()
+
         if self.output_path:
             with open(self.output_path + "/metrics.json", "w") as f:
-                scores["mean"] = np.array(list(scores.values())).mean()
                 json.dump(scores, f, indent=2)
 
         table = prettytable.PrettyTable()

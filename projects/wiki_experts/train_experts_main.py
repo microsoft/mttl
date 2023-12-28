@@ -7,7 +7,6 @@ from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibra
 from mttl.callbacks import LiveCheckpointCallback
 
 from mttl.models.monitors import get_monitors
-from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))

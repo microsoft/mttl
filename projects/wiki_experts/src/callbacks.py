@@ -17,6 +17,8 @@ DEBUG = False
 
 
 class DownstreamEvalCallback(cb.Callback):
+    METRIC_KEY = "downstream"
+
     def __init__(self, args) -> None:
         super().__init__()
 
@@ -28,6 +30,7 @@ class DownstreamEvalCallback(cb.Callback):
             predict_batch_size=args.predict_batch_size,
             truncation_side=args.truncation_side,
             tasks=args.pipeline_eval_tasks,
+            output_path=os.path.join(args.output_dir, self.METRIC_KEY),
         )
 
     def on_validation_epoch_end(
@@ -36,7 +39,7 @@ class DownstreamEvalCallback(cb.Callback):
         metrics = self.runner.run(pl_module)
         for task, metric in metrics.items():
             pl_module.log(
-                f"downstream/{task}",
+                f"{self.METRIC_KEY}/{task}",
                 metric,
                 on_epoch=True,
                 prog_bar=True,
