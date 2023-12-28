@@ -101,25 +101,24 @@ def run_multitask(args: ExpertConfig):
 
     # get metric monitors for models
     callbacks = get_monitors(args)
-
-    monitor = "val/loss"
-    mode = "min"
-
     checkpoint_callback = LiveCheckpointCallback(
         dirpath=args.output_dir,
-        monitor=monitor,
+        monitor="val/loss",
         save_last=True,
-        mode=mode,
+        mode="min",
     )
-
-    rouge = RougeCallback(
-        get_datamodule(args, for_generation=True),
-        every_n_epochs=3 if args.num_train_epochs > 3 else 1,
-    )
-
-    callbacks = []
     callbacks.append(checkpoint_callback)
-    callbacks.append(rouge)
+
+    if args.eval_rouge_flag:
+        rouge = RougeCallback(
+            get_datamodule(args, for_generation=True),
+            every_n_epochs=3 if args.num_train_epochs > 3 else 1,
+        )
+        callbacks.append(rouge)
+    else:
+        logger.warn(
+            "Deactivating rouge callback as it is not enabled in the config. Please set `eval_rouge_flag=True`."
+        )
 
     if args.eval_mmlu_flag:
         mmlu = NanoMMLUCallback(
@@ -128,8 +127,17 @@ def run_multitask(args: ExpertConfig):
         )
         callbacks.append(mmlu)
     else:
+        logger.warn(
+            "Deactivating mmlu callback as it is not enabled in the config. Please set `eval_mmlu_flag=True`."
+        )
+
+    if args.pipeline_eval_tasks:
         eval = DownstreamEvalCallback(args)
         callbacks.append(eval)
+    else:
+        logger.warn(
+            "Deactivating downstream eval callback as it is not enabled in the config. Please set `pipeline_eval_tasks`."
+        )
 
     val_check_interval = args.eval_every
     if val_check_interval == -1 or val_check_interval is None:

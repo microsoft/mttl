@@ -220,7 +220,6 @@ class RougeCallback(cb.Callback):
         datamodule,
         every_n_epochs=1,
         subsample=-1,
-        skip_first_epoch=False,
         generation_kwargs=None,
     ):
         super().__init__()
@@ -234,17 +233,13 @@ class RougeCallback(cb.Callback):
         )
 
         self.every_n_epochs = every_n_epochs
-        self.skip_first_epoch = skip_first_epoch
         self.verbose = False
         self.subsample = subsample
 
-    def on_validation_epoch_start(
+    def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:
         if self.every_n_epochs > 0 and trainer.current_epoch % self.every_n_epochs == 0:
-            if self.skip_first_epoch and trainer.current_epoch == 0:
-                return
-
             rouge = self.evaluator.evaluate(
                 pl_module,
                 split="val",
