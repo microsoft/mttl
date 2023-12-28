@@ -285,7 +285,7 @@ class NanoMMLUCallback(cb.Callback):
                 verbose=self.verbose,
                 subsample=self.subsample,
             )
-            pl_module.log("test/mmlu", em, on_epoch=True, prog_bar=True)
+            pl_module.log("val/mmlu", em, on_epoch=True, prog_bar=True)
 
     def on_test_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         em = self.evaluator.evaluate(
@@ -294,7 +294,7 @@ class NanoMMLUCallback(cb.Callback):
             verbose=self.verbose,
             subsample=self.subsample,
         )
-        pl_module.log("test/best_mmlu", em, on_epoch=True, prog_bar=True)
+        pl_module.log("test/mmlu", em, on_epoch=True, prog_bar=True)
 
 
 class MMLUCallback(cb.Callback):
