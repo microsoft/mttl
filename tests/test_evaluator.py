@@ -153,3 +153,20 @@ def test_code_evaluator():
     model = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-125m")
     result = evaluator.evaluate(model, num_batches=2)
     assert np.allclose(result, 0.0, rtol=0.01)
+
+
+def test_setup_evaluators():
+    from mttl.evaluators.base import setup_evaluators
+    from mttl.evaluators.loglike_evaluator import LogLikeEvaluator
+
+    runner = setup_evaluators(
+        "gpt-2",
+        "gpt",
+        max_input_length=1024,
+        max_output_length=128,
+        predict_batch_size=1,
+        truncation_side="left",
+        tasks="piqa,boolq",
+    )
+    assert len(runner.evaluators) == 2
+    assert isinstance(runner.evaluators["piqa"], LogLikeEvaluator)
