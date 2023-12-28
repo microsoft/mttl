@@ -7,6 +7,13 @@ import pytest
 
 
 @pytest.fixture(scope="session")
+def gpt_neo():
+    from transformers import AutoModelForCausalLM
+
+    return AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-125m")
+
+
+@pytest.fixture(scope="session")
 def flan_batch_for_generation():
     from mttl.datamodule.base import AutoDataModule
 

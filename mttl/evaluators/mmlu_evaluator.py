@@ -195,7 +195,7 @@ class MMLUEvaluator(GenerativeEvaluator):
 
 class MMLUEvaluatorFast(MMLUEvaluator):
     def evaluate(self, *args, **kwargs):
-        super().evaluate(*args, **kwargs, num_batches=400, shuffle=True)
+        return super().evaluate(*args, **kwargs, num_batches=400, shuffle=True)
 
 
 @click.command()

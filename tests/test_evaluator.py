@@ -174,3 +174,30 @@ def test_setup_evaluators():
     )
     assert len(runner.evaluators) == 2
     assert isinstance(runner.evaluators["piqa"], LogLikeEvaluator)
+
+
+def test_runner(mocker, gpt_neo):
+    from mttl.evaluators.base import setup_evaluators
+    from mttl.evaluators.mmlu_evaluator import MMLUEvaluatorFast
+    from mttl.evaluators.loglike_evaluator import LogLikeEvaluator
+
+    runner = setup_evaluators(
+        "EleutherAI/gpt-neo-125m",
+        "gpt",
+        max_input_length=1024,
+        max_output_length=128,
+        predict_batch_size=1,
+        truncation_side="left",
+        tasks="mmlu-fast,mmlu",
+    )
+
+    obj_mmlu = mocker.patch(
+        "mttl.evaluators.mmlu_evaluator.MMLUEvaluator.evaluate", return_value=2
+    )
+    scores = runner.run(gpt_neo)
+    assert scores["mmlu-fast"] == 2
+    assert scores["mmlu"] == 2
+    assert scores["mean"] == 2
+    assert obj_mmlu.call_count == 2
+    assert "shuffle" not in obj_mmlu._mock_call_args_list[0][1]
+    assert obj_mmlu._mock_call_args_list[1][1]["shuffle"]
