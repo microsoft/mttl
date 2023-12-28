@@ -8,9 +8,8 @@ import numpy as np
 
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators.base import (
-    GenerationMixin,
+    GenerativeEvaluator,
     compute_task_aggregation,
-    Evaluator,
     switch_to_eval_mode,
 )
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
@@ -29,7 +28,7 @@ def swap_model(model, state=None):
     return state
 
 
-class MMLUEvaluator(Evaluator, GenerationMixin):
+class MMLUEvaluator(GenerativeEvaluator):
     def __init__(
         self,
         config=None,

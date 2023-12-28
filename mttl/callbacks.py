@@ -208,12 +208,18 @@ class RougeCallback(cb.Callback):
         datamodule,
         every_n_epochs=1,
         subsample=-1,
+        generation_kwargs=None,
     ):
         super().__init__()
 
         from mttl.evaluators.rouge_evaluator import RougeEvaluator
 
-        self.evaluator = RougeEvaluator(datamodule=datamodule)
+        generation_kwargs = generation_kwargs or {"auto_max_new_tokens": True}
+        self.evaluator = RougeEvaluator(
+            datamodule=datamodule,
+            generation_kwargs=generation_kwargs,
+        )
+
         self.every_n_epochs = every_n_epochs
         self.verbose = False
         self.subsample = subsample
@@ -267,7 +273,7 @@ class NanoMMLUCallback(cb.Callback):
                 verbose=self.verbose,
                 subsample=self.subsample,
             )
-            pl_module.log("test/mmlu", em, prog_bar=True)
+            pl_module.log("test/mmlu", em, on_epoch=True, prog_bar=True)
 
     def on_test_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         em = self.evaluator.evaluate(
@@ -276,7 +282,7 @@ class NanoMMLUCallback(cb.Callback):
             verbose=self.verbose,
             subsample=self.subsample,
         )
-        pl_module.log("test/mmlu", em, prog_bar=True)
+        pl_module.log("test/best_mmlu", em, on_epoch=True, prog_bar=True)
 
 
 class MMLUCallback(cb.Callback):

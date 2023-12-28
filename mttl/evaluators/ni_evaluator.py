@@ -9,11 +9,9 @@ from pathlib import Path
 from mttl.dataloader.ni_metrics import compute_metrics, compute_grouped_metrics
 from mttl.models.utils import transfer_batch_to_device
 from mttl.evaluators.base import (
-    Evaluator,
     mean_stderr,
     switch_to_eval_mode,
-    decode,
-    GenerationMixin,
+    GenerativeEvaluator,
 )
 
 
@@ -60,7 +58,7 @@ def compute_aggregation_and_maybe_save(
     return all_results
 
 
-class NIEvaluator(Evaluator, GenerationMixin):
+class NIEvaluator(GenerativeEvaluator):
     def __init__(
         self,
         config,

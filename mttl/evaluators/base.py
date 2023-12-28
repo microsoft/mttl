@@ -9,6 +9,8 @@ import numpy as np
 import torch
 
 from transformers import StoppingCriteriaList, StoppingCriteria
+
+from mttl.utils import logger
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
 
 
@@ -83,7 +85,6 @@ class Evaluator(ABC):
         datamodule=None,
         config=None,
         use_vllm=False,
-        generation_kwargs=None,
     ):
         if config is None and datamodule is None:
             raise ValueError("Either config or datamodule must be provided.")
@@ -93,7 +94,6 @@ class Evaluator(ABC):
             config = datamodule.config
 
         self.config = deepcopy(config)
-        self.generation_kwargs = generation_kwargs or {}
         self.use_vllm = use_vllm
         self._last_metrics = None
 
@@ -198,8 +198,46 @@ class StoppingCriteriaSub(StoppingCriteria):
         return all(self.finished)
 
 
-class GenerationMixin:
+class GenerativeEvaluator(Evaluator):
     """Applied to an evaluator handles generation logic for a given batch."""
+
+    def __init__(
+        self,
+        datamodule=None,
+        config=None,
+        use_vllm=False,
+        generation_kwargs=None,
+    ):
+        super().__init__(datamodule, config, use_vllm)
+
+        self.generation_kwargs = generation_kwargs or {}
+
+        if self.generation_kwargs.pop("auto_max_new_tokens", None):
+            self.generation_kwargs["max_new_tokens"] = self._detect_max_new_tokens()
+
+    def _detect_max_new_tokens(self) -> int:
+        """Tries to detect the max_new_tokens automatically based on the length of the test / valid set answers."""
+        logger.warn(
+            "Trying to auto detect max_new_tokens. This functionality should only be used for training and not for reporting results (as it assumes access to test labels)."
+        )
+
+        length = -1
+        try:
+            for batch in iter(self.datamodule.val_dataloader()):
+                if "labels" in batch:
+                    length = max(length, batch["labels"].shape[1])
+            for batch in iter(self.datamodule.test_dataloader()):
+                if "labels" in batch:
+                    length = max(length, batch["labels"].shape[1])
+        except Exception as e:
+            logger.warn("Exception: {}", e)
+
+        if length == -1:
+            logger.warn("Could not auto detect max_new_tokens.")
+            return self.config.max_output_length
+        else:
+            logger.info("Auto detected max_new_tokens: %d", length)
+            return length
 
     def postprocess_generation_output(self, generation_output):
         """Postprocesses the generation output."""

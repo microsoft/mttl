@@ -3,14 +3,14 @@ import hashlib
 import numpy as np
 
 import os
-from mttl.evaluators.base import Evaluator, GenerationMixin, switch_to_eval_mode, decode
+from mttl.evaluators.base import GenerativeEvaluator, switch_to_eval_mode, decode
 from mttl.evaluators.ni_evaluator import compute_metrics
 from mttl.evaluators.mmlu_evaluator import swap_model
 from mttl.utils import logger
 from mttl.vllm_engines.engines import LLMEngineRouge, free_memory
 
 
-class RougeEvaluator(Evaluator, GenerationMixin):
+class RougeEvaluator(GenerativeEvaluator):
     def __init__(self, datamodule, use_vllm=False, generation_kwargs=None):
         super().__init__(
             datamodule=datamodule,
