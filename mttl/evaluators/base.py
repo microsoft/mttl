@@ -384,6 +384,7 @@ class EvaluatorRunner:
         table.field_names = list(scores.keys())
         table.add_row(["{:.3f}".format(v) for v in list(scores.values())])
         logger.info("Results:\n" + str(table))
+        return scores
 
 
 def setup_evaluators(
