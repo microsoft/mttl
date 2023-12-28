@@ -131,6 +131,9 @@ def run_multitask(args: ExpertConfig):
         )
 
     if args.pipeline_eval_tasks:
+        if args.pipeline_eval_tasks == "all":
+            args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,winogrande"
+
         eval = DownstreamEvalCallback(args)
         callbacks.append(eval)
     else:
