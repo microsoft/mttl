@@ -3,8 +3,6 @@ import os
 from evaluate import load
 
 from mttl.evaluators.base import (
-    Evaluator,
-    GenerationMixin,
     GenerativeEvaluator,
     switch_to_eval_mode,
 )
