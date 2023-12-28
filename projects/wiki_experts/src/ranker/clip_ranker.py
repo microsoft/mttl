@@ -110,7 +110,7 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
     def __init__(
         self,
         task_names,
-        temperature: float = 0.07,
+        temperature: float = 1,
         text_embedding_dim: int = 384,
         expert_embedding_dim: int = 512,
         projection_dim: int = 512,
@@ -208,6 +208,10 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
         text_embeddings = F.normalize(text_embeddings, dim=-1)
         # calculate the similarity and normalize
         dot_similarity = text_embeddings @ expert_embeddings.T / self.temperature
+
+        # masked the unavailable tasks
+        if self.available_mask is not None:
+            dot_similarity = dot_similarity + (1.0 - self.available_mask) * -100
         expert_indices = torch.topk(dot_similarity.squeeze(0), k=n)
 
         expert_prediction = [
@@ -234,9 +238,13 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
 
         expert_embeddings = F.normalize(expert_embeddings, dim=-1)
         text_embeddings = F.normalize(text_embeddings, dim=-1)
-        # calculate the similarity and normalize
-        dot_similarity = F.softmax(text_embeddings @ expert_embeddings.T, dim=-1)
-        expert_indices = torch.topk(dot_similarity, k=n, dim=1)
+        # calculate the similarity
+        logits = (text_embeddings @ expert_embeddings.T).detach().cpu()
+        # masked the unavailable tasks
+        if self.available_mask is not None:
+            logits = logits + (1.0 - self.available_mask) * -100
+
+        expert_indices = torch.topk(logits, k=n, dim=1)
 
         expert_prediction = [
             [self.ids_to_tasks_names[index.item()] for index in indices]
