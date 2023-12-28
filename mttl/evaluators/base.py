@@ -366,7 +366,6 @@ class EvaluatorRunner:
 
             scores[name] = self.evaluators[name].evaluate(
                 module,
-                shuffle=True,
                 verbose=self.verbose,
                 output_path=task_output_path,
             )
@@ -440,13 +439,13 @@ def setup_evaluators(
         "humaneval",
         "mbpp",
         "boolq",
-        "bbh-fast",
         "arc-easy",
         "arc-challenge",
         "piqa",
         "hellaswag",
         "winogrande",
         "openbookqa",
+        "bbh-fast",
         "mmlu-fast",
     ]:
         common_kwargs = copy.deepcopy(common_kwargs_)
