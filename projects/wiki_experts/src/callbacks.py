@@ -17,7 +17,7 @@ DEBUG = False
 
 
 class DownstreamEvalCallback(cb.Callback):
-    def __init__(self, args, tasks=None) -> None:
+    def __init__(self, args) -> None:
         super().__init__()
 
         self.runner: EvaluatorRunner = setup_evaluators(
@@ -27,7 +27,7 @@ class DownstreamEvalCallback(cb.Callback):
             max_output_length=args.max_output_length,
             predict_batch_size=args.predict_batch_size,
             truncation_side=args.truncation_side,
-            tasks=tasks if tasks is not None else ["boolq"],
+            tasks=args.pipeline_eval_tasks,
         )
 
     def on_validation_epoch_end(
