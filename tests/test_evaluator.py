@@ -24,6 +24,8 @@ def test_rouge_eval(mocker):
         for_generation=True,
         predict_batch_size=1,
         truncation_side="left",
+        include_template_type="zs_noopt",
+        include_task_source="P3,Flan2021",
     )
 
     evaluator = RougeEvaluator(flan)
@@ -51,6 +53,8 @@ def test_early_stopping(mocker):
         for_generation=True,
         predict_batch_size=1,
         truncation_side="left",
+        include_template_type="zs_noopt",
+        include_task_source="P3,Flan2021",
     )
 
     evaluator = RougeEvaluator(flan, generation_kwargs={"stop_tokens": ["\n\n"]})
@@ -160,13 +164,13 @@ def test_setup_evaluators():
     from mttl.evaluators.loglike_evaluator import LogLikeEvaluator
 
     runner = setup_evaluators(
-        "gpt-2",
+        "EleutherAI/gpt-neo-125m",
         "gpt",
         max_input_length=1024,
         max_output_length=128,
         predict_batch_size=1,
         truncation_side="left",
-        tasks="piqa,boolq",
+        tasks="piqa,arc-easy",
     )
     assert len(runner.evaluators) == 2
     assert isinstance(runner.evaluators["piqa"], LogLikeEvaluator)
