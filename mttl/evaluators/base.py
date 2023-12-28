@@ -3,18 +3,24 @@ from collections import defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
 import math
+import os
 from typing import List
+import numpy as np
 import torch
 
+from transformers import StoppingCriteriaList, StoppingCriteria
+
+from mttl.utils import logger
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
 
 
-def decode(preds, tokenizer):
+def decode(preds, tokenizer, clean_up_tokenization_spaces=True):
     preds[preds == -100] = tokenizer.pad_token_id
     preds = tokenizer.batch_decode(
-        preds, skip_special_tokens=True, clean_up_tokenization_spaces=True
+        preds,
+        skip_special_tokens=True,
+        clean_up_tokenization_spaces=clean_up_tokenization_spaces,
     )
-    preds = [pred.strip() for pred in preds]
     return preds
 
 
@@ -79,7 +85,7 @@ class Evaluator(ABC):
         datamodule=None,
         config=None,
         use_vllm=False,
-        generation_kwargs=None,
+        **_,
     ):
         if config is None and datamodule is None:
             raise ValueError("Either config or datamodule must be provided.")
@@ -87,9 +93,10 @@ class Evaluator(ABC):
         self.datamodule = datamodule
         if config is None:
             config = datamodule.config
+
         self.config = deepcopy(config)
-        self.generation_kwargs = generation_kwargs or {}
         self.use_vllm = use_vllm
+        self._last_metrics = None
 
     def get_dataloader(self, split, subsample, shuffle):
         if self.datamodule is None:
@@ -103,8 +110,34 @@ class Evaluator(ABC):
             dataloader = self.datamodule.val_dataloader(subsample, shuffle)
         return dataloader
 
+    @property
+    def last_metrics(self):
+        return self._last_metrics
+
+    def save_metrics(self, metrics, output_path):
+        self._last_metrics = metrics
+
+        if output_path is None:
+            return
+
+        import json
+
+        if not os.path.exists(output_path):
+            os.makedirs(output_path, exist_ok=True)
+
+        with open(output_path + "/metrics.json", "w") as f:
+            json.dump(metrics, f, indent=2)
+
     @abstractmethod
-    def evaluate(self, model, split="test", shuffle=False, subsample=-1, **kwargs):
+    def evaluate(
+        self,
+        model,
+        split="test",
+        shuffle=False,
+        subsample=-1,
+        output_path=None,
+        **kwargs,
+    ):
         pass
 
     def evaluate_with_vllm(self, model, dataloader, num_batches=None, verbose=True):
@@ -128,8 +161,88 @@ class GenerationOutput:
     generated_texts: List[str] = None  # only the generated portion
 
 
-class GenerationMixin:
+class StoppingCriteriaSub(StoppingCriteria):
+    """A stopping criteria that stops on matching token strings (and not ids).
+
+    We decide to stop on strings rather than stopping on particular ids is a bit difficult to do,
+    i.e. \n\n might be tokenized differently if it is preceeded by a particular token or followed
+    by a particular token, i.e. the model can generate \n\na, which is tokenized as a whole.
+    """
+
+    def __init__(self, stop_tokens=[], tokenizer=None):
+        super().__init__()
+        self.stop = stop_tokens
+        self.max_length = max([len(s) for s in stop_tokens])
+        self.tokenizer = tokenizer
+        self.finished = None
+
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor):
+        """Stops on matching token strings and not ids."""
+        if self.finished is None:
+            self.finished = [None for _ in range(input_ids.shape[0])]
+
+        batch_size = input_ids.shape[0]
+        decoded = self.tokenizer.batch_decode(input_ids[:, -self.max_length :])
+
+        for j in range(batch_size):
+            # fill the rest of input ids with pad tokens, the generation finished!
+            if self.finished[j]:
+                input_ids[j, self.finished[j][1] :] = self.tokenizer.pad_token_id
+                continue
+            # check which stop token is in the decoded text
+            for stop in self.stop:
+                pos = decoded[j].find(stop)
+                if pos != -1:
+                    self.finished[j] = (stop, input_ids.shape[1])
+                if self.finished[j]:
+                    break
+        return all(self.finished)
+
+
+class GenerativeEvaluator(Evaluator):
     """Applied to an evaluator handles generation logic for a given batch."""
+
+    def __init__(
+        self,
+        datamodule=None,
+        config=None,
+        use_vllm=False,
+        generation_kwargs=None,
+    ):
+        super().__init__(datamodule, config, use_vllm)
+
+        self.generation_kwargs = generation_kwargs or {}
+
+        if self.generation_kwargs.pop("auto_max_new_tokens", None):
+            self.generation_kwargs["max_new_tokens"] = self._detect_max_new_tokens()
+
+    def _detect_max_new_tokens(self) -> int:
+        """Tries to detect the max_new_tokens automatically based on the length of the test / valid set answers."""
+        logger.warn(
+            "Trying to auto detect max_new_tokens. This functionality should only be used for training and not for reporting results (as it assumes access to test labels)."
+        )
+
+        length = -1
+        try:
+            for batch in iter(self.datamodule.val_dataloader()):
+                if "labels" in batch:
+                    length = max(length, batch["labels"].shape[1])
+            for batch in iter(self.datamodule.test_dataloader()):
+                if "labels" in batch:
+                    length = max(length, batch["labels"].shape[1])
+        except Exception as e:
+            logger.warn("Exception: {}", e)
+
+        if length == -1:
+            logger.warn("Could not auto detect max_new_tokens.")
+            return self.config.max_output_length
+        else:
+            logger.info("Auto detected max_new_tokens: %d", length)
+            return length
+
+    def postprocess_generation_output(self, generation_output):
+        """Postprocesses the generation output."""
+        return generation_output
 
     def generate_for_batch(self, model, batch):
         if hasattr(model, "module"):
@@ -140,6 +253,14 @@ class GenerationMixin:
         extra_kwargs["eos_token_id"] = self.tokenizer.eos_token_id
         extra_kwargs["max_new_tokens"] = self.config.max_output_length
         extra_kwargs.update(self.generation_kwargs)
+
+        stop_tokens = extra_kwargs.pop("stop_tokens", None)
+        if stop_tokens:
+            stop_tokens = stop_tokens + [self.tokenizer.eos_token]
+            stopping_criteria = StoppingCriteriaList(
+                [StoppingCriteriaSub(stop_tokens, tokenizer=self.tokenizer)]
+            )
+            extra_kwargs["stopping_criteria"] = stopping_criteria
 
         device = next(model.parameters()).device
         batch = transfer_batch_to_device(batch, device)
@@ -165,7 +286,7 @@ class GenerationMixin:
 
         # take only the prediction part
         # we cannot do cut at the token id level due to token healing problems
-        sources_texts = batch.get("sources_texts", None)
+        sources_texts = batch.get("sources_texts")
         sequences_texts = decode(predictions.sequences, self.tokenizer)
 
         if self.config.model_family != "gpt":
@@ -185,10 +306,260 @@ class GenerationMixin:
                         generated = generated_texts_fallback[i]
                     generated_texts.append(generated)
 
-        return GenerationOutput(
-            scores=predictions.scores,
-            sequences=predictions.sequences,
-            sequences_texts=sequences_texts,
-            sources_texts=sources_texts,
-            generated_texts=generated_texts,
+        # if stop tokens have been specified, then we need to remove them from the generated text
+        # we search the surface for of the first matching stop token from the end of the generated
+        # and the sequence text. We then remove everything after that and keep only the first part
+        # (before the stopping sequence has been produced)
+        if stop_tokens:
+            finished_with = extra_kwargs["stopping_criteria"][0].finished
+
+            # we strip the finished with token
+            for i in range(len(generated_texts)):
+                if (
+                    finished_with[i] is not None
+                    and finished_with[i][0] is not self.tokenizer.eos_token
+                ):
+                    generated_texts[i] = generated_texts[i].rpartition(
+                        finished_with[i][0]
+                    )[0]
+                    sequences_texts[i] = sequences_texts[i].rpartition(
+                        finished_with[i][0]
+                    )[0]
+
+        return self.postprocess_generation_output(
+            GenerationOutput(
+                scores=predictions.scores,
+                sequences=predictions.sequences,
+                sequences_texts=sequences_texts,
+                sources_texts=sources_texts,
+                generated_texts=generated_texts,
+            )
         )
+
+
+class EvaluatorRunner:
+    def __init__(self, output_path=None, verbose=False):
+        self.evaluators = {}
+        self.verbose = verbose
+        self.output_path = output_path
+
+    def add_evaluator(self, name, evaluator):
+        self.evaluators[name] = evaluator
+
+    def run(self, module):
+        import json
+        import prettytable
+        from mttl.utils import logger
+
+        if self.output_path:
+            os.makedirs(self.output_path, exist_ok=True)
+
+        scores = {}
+        for name in sorted(self.evaluators.keys()):
+            logger.info("Evaluating %s", name)
+
+            if self.output_path:
+                task_output_path = os.path.join(self.output_path, name)
+                os.makedirs(self.output_path, exist_ok=True)
+            else:
+                task_output_path = None
+
+            scores[name] = self.evaluators[name].evaluate(
+                module,
+                shuffle=True,
+                verbose=self.verbose,
+                output_path=task_output_path,
+            )
+
+            if self.output_path:
+                with open(self.output_path + "/metrics.json", "w") as f:
+                    json.dump(scores, f, indent=2)
+
+        scores["mean"] = np.array(list(scores.values())).mean()
+
+        if self.output_path:
+            with open(self.output_path + "/metrics.json", "w") as f:
+                json.dump(scores, f, indent=2)
+
+        table = prettytable.PrettyTable()
+        table.field_names = list(scores.keys())
+        table.add_row(["{:.3f}".format(v) for v in list(scores.values())])
+        logger.info("Results:\n" + str(table))
+        return scores
+
+
+def setup_evaluators(
+    model_type,
+    model_family,
+    max_input_length,
+    max_output_length,
+    predict_batch_size,
+    truncation_side,
+    output_path=None,
+    tasks=None,
+) -> EvaluatorRunner:
+    import copy
+    from mttl.datamodule.mmlu_data_module import MMLUDataConfig
+    from mttl.evaluators.mmlu_evaluator import MMLUEvaluator, MMLUEvaluatorFast
+    from mttl.evaluators.piqa_evaluator import PiqaEvaluator
+    from mttl.evaluators.hellaswag_evaluator import HellaswagEvaluator
+    from mttl.evaluators.humaneval_evaluator import HumanEvalEvaluator
+    from mttl.evaluators.mbpp_evaluator import MBPPEvaluator
+    from mttl.evaluators.bbh_evaluator import DirectBBHEvaluator, DirectBBHEvaluatorFast
+    from mttl.evaluators.superglue_evaluators import BoolQEvaluator
+    from mttl.evaluators.arc_evaluator import ArcEvaluator
+    from mttl.evaluators.openbookqa_evaluator import OpenbookQAEvaluator
+    from mttl.evaluators.winogrande_evaluator import WinograndeEvaluator
+    from mttl.datamodule.winogrande_data_module import WinograndeDataConfig
+    from mttl.datamodule.openbookqa_data_module import OpenbookQADataConfig
+    from mttl.datamodule.arc_data_module import ArcDataConfig
+    from mttl.datamodule.piqa_data_module import PiqaDataConfig
+    from mttl.datamodule.hellaswag_data_module import HellaswagDataConfig
+    from mttl.datamodule.superglue_data_module import SuperGLUEDataConfig
+    from mttl.datamodule.bbh_data_module import BBHConfig
+    from mttl.datamodule.mbpp_datamodule import MBPPDataConfig
+    from mttl.datamodule.humaneval_module import HumanEvalConfig
+
+    evaluators = {}
+    common_kwargs_ = {
+        "model": model_type,
+        "model_family": model_family,
+        "max_input_length": max_input_length,
+        "max_output_length": max_output_length,
+        "predict_batch_size": predict_batch_size,
+        "truncation_side": truncation_side,
+    }
+    generation_kwargs_ = {
+        "temperature": 0.0,
+    }
+
+    if type(tasks) == str:
+        tasks = tasks.split(",")
+
+    for task in tasks or [
+        "humaneval",
+        "mbpp",
+        "boolq",
+        "bbh-fast",
+        "arc-easy",
+        "arc-challenge",
+        "piqa",
+        "hellaswag",
+        "winogrande",
+        "openbookqa",
+        "mmlu-fast",
+    ]:
+        common_kwargs = copy.deepcopy(common_kwargs_)
+        generation_kwargs = copy.deepcopy(generation_kwargs_)
+
+        if task == "humaneval":
+            generation_kwargs.update(
+                {
+                    "temperature": 0.05,
+                    "top_p": 0.95,
+                    "do_sample": True,
+                    "max_new_tokens": 300,
+                    "stop_tokens": ["\n\n"],
+                }
+            )
+            config = HumanEvalConfig(
+                **common_kwargs,
+            )
+            evaluators["humaneval"] = HumanEvalEvaluator(
+                config, generation_kwargs=generation_kwargs
+            )
+        elif task == "mbpp":
+            generation_kwargs.update(
+                {
+                    "temperature": 0.05,
+                    "top_p": 0.95,
+                    "do_sample": True,
+                    "max_new_tokens": 300,
+                    "stop_tokens": ["\n\n"],
+                }
+            )
+            evaluators["mbpp"] = MBPPEvaluator(
+                MBPPDataConfig(**common_kwargs),
+                generation_kwargs=generation_kwargs,
+            )
+        elif task == "boolq":
+            config = SuperGLUEDataConfig(
+                **common_kwargs,
+            )
+            evaluators["boolq"] = BoolQEvaluator(
+                config, generation_kwargs=generation_kwargs
+            )
+        elif task == "bbh":
+            generation_kwargs["max_new_tokens"] = 128
+            config = BBHConfig(
+                **common_kwargs,
+                augment_few_shot=5,
+            )
+            evaluators["bbh"] = DirectBBHEvaluator(
+                config, generation_kwargs=generation_kwargs
+            )
+        elif task == "bbh-fast":
+            generation_kwargs["max_new_tokens"] = 128
+            config = BBHConfig(
+                **common_kwargs,
+                augment_few_shot=5,
+            )
+            evaluators["bbh"] = DirectBBHEvaluatorFast(
+                config, generation_kwargs=generation_kwargs
+            )
+        elif task == "arc-easy":
+            config = ArcDataConfig(
+                **common_kwargs,
+                arc_type="ARC-Easy",
+            )
+            evaluators["arc-easy"] = ArcEvaluator(
+                config, generation_kwargs=generation_kwargs
+            )
+        elif task == "arc-challenge":
+            config = ArcDataConfig(
+                **common_kwargs,
+                arc_type="ARC-Challenge",
+            )
+            evaluators["arc-challenge"] = ArcEvaluator(
+                config, generation_kwargs=generation_kwargs
+            )
+        elif task == "piqa":
+            config = PiqaDataConfig(
+                **common_kwargs,
+            )
+            evaluators["piqa"] = PiqaEvaluator(
+                config, generation_kwargs=generation_kwargs
+            )
+        elif task == "hellaswag":
+            evaluators["hellaswag"] = HellaswagEvaluator(
+                HellaswagDataConfig(**common_kwargs),
+                generation_kwargs=generation_kwargs,
+            )
+        elif task == "winogrande":
+            evaluators["winogrande"] = WinograndeEvaluator(
+                WinograndeDataConfig(**common_kwargs),
+                generation_kwargs=generation_kwargs,
+            )
+        elif task == "openbookqa":
+            evaluators["openbookqa"] = OpenbookQAEvaluator(
+                OpenbookQADataConfig(**common_kwargs),
+                generation_kwargs=generation_kwargs,
+            )
+        elif task == "mmlu":
+            evaluators["mmlu"] = MMLUEvaluator(
+                MMLUDataConfig(**common_kwargs),
+                generation_kwargs=generation_kwargs,
+            )
+        elif task == "mmlu-fast":
+            evaluators["mmlu-fast"] = MMLUEvaluatorFast(
+                MMLUDataConfig(**common_kwargs),
+                generation_kwargs=generation_kwargs,
+            )
+        else:
+            raise ValueError("No active tasks")
+
+    runner = EvaluatorRunner(output_path, verbose=False)
+    for name, evaluator in evaluators.items():
+        runner.add_evaluator(name, evaluator)
+
+    return runner

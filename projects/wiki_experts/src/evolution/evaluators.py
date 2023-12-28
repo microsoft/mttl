@@ -135,7 +135,7 @@ class ExtendedRougeEvaluator(RougeEvaluator, Evaluator):
     def get_loss(self, model, **kwargs):
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model.to(device)
-        rougeL = self.evaluate(model, **kwargs)["all"]["mean"]
+        rougeL = self.evaluate(model, **kwargs)
         return rougeL * -1.0
 
     @property
@@ -209,10 +209,7 @@ class ExtendedMMLUEvaluator(MMLUEvaluator, Evaluator):
         self.name = name
 
     def get_loss(self, model, **kwargs):
-        return (
-            self.evaluate(model, subsample=self.subsample, **kwargs)["all"]["mean"]
-            * -1.0
-        )
+        return self.evaluate(model, subsample=self.subsample, **kwargs) * -1.0
 
     @property
     def tokenizer(self):

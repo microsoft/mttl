@@ -8,9 +8,8 @@ import numpy as np
 
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators.base import (
-    GenerationMixin,
+    GenerativeEvaluator,
     compute_task_aggregation,
-    Evaluator,
     switch_to_eval_mode,
 )
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
@@ -29,9 +28,14 @@ def swap_model(model, state=None):
     return state
 
 
-class MMLUEvaluator(Evaluator, GenerationMixin):
+class MMLUEvaluator(GenerativeEvaluator):
     def __init__(
-        self, config=None, datamodule=None, max_input_length=None, use_vllm=False
+        self,
+        config=None,
+        datamodule=None,
+        max_input_length=None,
+        use_vllm=False,
+        generation_kwargs=None,
     ):
         from mttl.datamodule.mmlu_data_module import MMLUDataModule
 
@@ -43,8 +47,11 @@ class MMLUEvaluator(Evaluator, GenerationMixin):
 
             datamodule = MMLUDataModule(config, for_generation=True)
 
+        generation_kwargs = generation_kwargs or {}
+        generation_kwargs["max_new_tokens"] = 1
+
         super().__init__(
-            datamodule, use_vllm=use_vllm, generation_kwargs={"max_new_tokens": 1}
+            datamodule, use_vllm=use_vllm, generation_kwargs=generation_kwargs
         )
 
     def eval_vllm(self, model, generation_config, subsample, shuffle):
@@ -89,91 +96,107 @@ class MMLUEvaluator(Evaluator, GenerationMixin):
         model,
         split="test",
         subsample=-1,
+        num_batches=None,
+        verbose=True,
         shuffle=False,
+        output_path=None,
         **kwargs,
     ):
         if self.use_vllm:
-            return self.eval_vllm(
+            metrics = self.eval_vllm(
                 model,
                 generation_config=model.generation_config,
                 subsample=subsample,
                 shuffle=shuffle,
             )
+        else:
+            all_predictions = []
+            all_references = []
+            all_task_names = []
+            all_EM = []
 
-        all_predictions = []
-        all_references = []
-        all_task_names = []
-        all_EM = []
+            dataloader = self.get_dataloader(split, subsample, shuffle)
 
-        dataloader = self.get_dataloader(split, subsample, shuffle)
-
-        pbar = tqdm.tqdm(
-            enumerate(dataloader),
-            total=len(dataloader),
-        )
-        for _, batch in pbar:
-            task_names = batch.get("task_names", None)
-            labels_text = batch.pop("labels_texts", None)
-
-            predictions = self.generate_for_batch(model, batch)
-            logits = predictions.scores[0]
-
-            probs = (
-                torch.stack(
-                    [
-                        logits[
-                            :,
-                            self.tokenizer(" A", add_special_tokens=False).input_ids[
-                                -1
-                            ],
-                        ],
-                        logits[
-                            :,
-                            self.tokenizer(" B", add_special_tokens=False).input_ids[
-                                -1
-                            ],
-                        ],
-                        logits[
-                            :,
-                            self.tokenizer(" C", add_special_tokens=False).input_ids[
-                                -1
-                            ],
-                        ],
-                        logits[
-                            :,
-                            self.tokenizer(" D", add_special_tokens=False).input_ids[
-                                -1
-                            ],
-                        ],
-                    ],
-                    dim=-1,
-                )
-                .max(dim=-1)[1]
-                .detach()
-                .cpu()
-                .numpy()
+            pbar = tqdm.tqdm(
+                enumerate(dataloader),
+                total=len(dataloader),
             )
+            for num_batch, batch in pbar:
+                if num_batches and num_batch >= num_batches:
+                    break
 
-            predictions = [{0: "A", 1: "B", 2: "C", 3: "D"}[p] for p in probs]
-            references = labels_text
+                task_names = batch.get("task_names", None)
+                labels_text = batch.pop("labels_texts", None)
 
-            all_predictions += predictions
-            all_references += references
-            all_task_names += task_names
+                predictions = self.generate_for_batch(model, batch)
+                logits = predictions.scores[0]
+
+                probs = (
+                    torch.stack(
+                        [
+                            logits[
+                                :,
+                                self.tokenizer(
+                                    " A", add_special_tokens=False
+                                ).input_ids[-1],
+                            ],
+                            logits[
+                                :,
+                                self.tokenizer(
+                                    " B", add_special_tokens=False
+                                ).input_ids[-1],
+                            ],
+                            logits[
+                                :,
+                                self.tokenizer(
+                                    " C", add_special_tokens=False
+                                ).input_ids[-1],
+                            ],
+                            logits[
+                                :,
+                                self.tokenizer(
+                                    " D", add_special_tokens=False
+                                ).input_ids[-1],
+                            ],
+                        ],
+                        dim=-1,
+                    )
+                    .max(dim=-1)[1]
+                    .detach()
+                    .cpu()
+                    .numpy()
+                )
+
+                predictions = [{0: "A", 1: "B", 2: "C", 3: "D"}[p] for p in probs]
+                references = labels_text
+
+                all_predictions += predictions
+                all_references += references
+                all_task_names += task_names
+
+                eval_metrics = compute_metrics(
+                    predictions, [[r] for r in references], reduction="none"
+                )
+
+                all_EM.extend(eval_metrics["exact_match"])
+                pbar.set_description(
+                    f"Task: {task_names[0] if task_names else None}, EM: {np.mean(all_EM):.4f}"
+                )
 
             eval_metrics = compute_metrics(
-                predictions, [[r] for r in references], reduction="none"
+                all_predictions, [[r] for r in all_references], reduction="none"
+            )
+            metrics = compute_task_aggregation(
+                all_task_names, eval_metrics["exact_match"]
             )
 
-            all_EM.extend(eval_metrics["exact_match"])
-            pbar.set_description(
-                f"Task: {task_names[0] if task_names else None}, EM: {np.mean(all_EM):.4f}"
-            )
+        self.save_metrics(metrics, output_path)
+        return metrics["all"]["mean"]
 
-        eval_metrics = compute_metrics(
-            all_predictions, [[r] for r in all_references], reduction="none"
-        )
-        return compute_task_aggregation(all_task_names, eval_metrics["exact_match"])
+
+class MMLUEvaluatorFast(MMLUEvaluator):
+    def evaluate(self, *args, **kwargs):
+        super().evaluate(*args, **kwargs, num_batches=400)
 
 
 @click.command()

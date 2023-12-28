@@ -4,6 +4,7 @@ import glob
 import io
 import re
 import json
+import sys
 from typing import Any, Dict, List, Union
 import torch
 import os
@@ -90,7 +91,7 @@ class BackendEngine:
     def snapshot_download(self, repo_id, allow_patterns=None):
         raise NotImplementedError
 
-    def create_repo(self, repo_id, repo_type, exist_ok):
+    def create_repo(self, repo_id, repo_type, exist_ok, private=True):
         raise NotImplementedError
 
     def create_commit(self, repo_id, operations, commit_message):
@@ -173,7 +174,7 @@ class LocalFSEngine(BackendEngine):
     def snapshot_download(self, repo_id, allow_patterns=None):
         return repo_id
 
-    def create_repo(self, repo_id, repo_type, exist_ok):
+    def create_repo(self, repo_id, repo_type, exist_ok, private=True):
         os.makedirs(repo_id, exist_ok=exist_ok)
 
     def create_commit(self, repo_id, operations, commit_message):
@@ -249,7 +250,9 @@ class ExpertLibrary:
                     repo_id, repo_type="model", exist_ok=True, private=True
                 )
         except Exception as e:
-            logger.error("Error creating repo %s\n", repo_id)
+            logger.error("Error creating repo %s.", repo_id)
+            logger.error(e)
+            sys.exit(1)
 
         self._build_lib()
         logger.info("Loaded %s experts from huggingface hub", len(self.data))

@@ -1,3 +1,5 @@
+from functools import partial
+import threading
 import torch
 import re
 import os
@@ -85,6 +87,7 @@ class MultiExpertModel(ExpertTrainer):
         super().__init__(**kwargs)
 
         self.experts_names = []
+        self.lock = threading.Lock()
 
     @property
     def experts_containers(self) -> List[ExpertContainer]:
@@ -106,14 +109,16 @@ class MultiExpertModel(ExpertTrainer):
         return weights
 
     def load_from_graph(self, graph: ModuleGraph, action="route", **kwargs):
-        for _, module in graph.create_modules(
+        for name, module in graph.create_modules(
             base_hparams=self.hparams, **kwargs
         ).items():
             print("Loading module: {}".format(module.name))
+            # loading from graph gets the name of the root node
             self.add_expert_instance(
                 module,
                 action=action,
-                is_default=module.name == "default",
+                expert_name=name,
+                is_default=name == "default",
             )
 
     def delete_expert_container(self):
@@ -150,6 +155,27 @@ class MultiExpertModel(ExpertTrainer):
             os.remove(expert_checkpoint)
             return expert
         return
+
+    def add_experts_from_library(self, library):
+        import tqdm
+        import concurrent.futures
+
+        def add_module(self, module_name):
+            expert_dump = library[module_name]
+            self.add_expert_instance(expert_dump)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+            # Create a list to hold the futures
+            futures = []
+            for element in library.keys():
+                futures.append(executor.submit(partial(add_module, self), element))
+
+            # Progress bar setup
+            with tqdm.tqdm(
+                total=len(library), desc="Processing", unit="module"
+            ) as progress_bar:
+                for _ in concurrent.futures.as_completed(futures):
+                    progress_bar.update(1)
 
     def load_from_module_dict(self, module_dict, action="route"):
         for module_name, destination in module_dict.items():
@@ -193,16 +219,17 @@ class MultiExpertModel(ExpertTrainer):
             expert_instance = expert_instance.clone()
             expert_instance.name = expert_name
 
-        self.model = add_expert_to_transformer(
-            self.model,
-            expert_instance,
-            action=action,
-            is_default=expert_instance.name == "default" or is_default,
-            routing_config=self.routing_config,
-            training_config=self.training_config,
-        )
-        if action != "merge":
-            self.experts_names.append(expert_instance.name)
+        with self.lock:
+            self.model = add_expert_to_transformer(
+                self.model,
+                expert_instance,
+                action=action,
+                is_default=expert_instance.name == "default" or is_default,
+                routing_config=self.routing_config,
+                training_config=self.training_config,
+            )
+            if action != "merge":
+                self.experts_names.append(expert_instance.name)
 
     def load_from_graph_string(self, s, action="route", expert_library=None):
         from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
@@ -243,7 +270,7 @@ class MultiExpertModel(ExpertTrainer):
         expert = load_expert(
             expert_path,
             expert_name=expert_name,
-            expert_dict_or_lib=expert_library,
+            expert_library=expert_library,
         )
 
         if self.hparams.model != expert.training_config.model:
@@ -302,24 +329,6 @@ class MultiExpertModel(ExpertTrainer):
     def forward(self, batch, reduction="mean"):
         return super().forward(batch, reduction)
 
-    @property
-    def generation_config(self):
-        return self.model.generation_config
-
-    def generate(
-        self,
-        batch,
-        **kwargs,
-    ):
-        if hasattr(self.model, "task_id_container"):
-            self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
-                batch
-            )
-        generations = self.model.generate(
-            inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
-        )
-        return generations
-
 
 class MultiExpertModelRanker(MultiExpertModel):
     def __init__(self, **kwargs):
@@ -332,15 +341,8 @@ class MultiExpertModelRanker(MultiExpertModel):
             ranker_path=kwargs["ranker_path"],
         )
 
-    def generate(
-        self,
-        batch,
-        **kwargs,
-    ):
-        if hasattr(self.model, "task_id_container"):
-            self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
-                batch
-            )
+    def set_routing_infos(self, batch, generate=False):
+        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
 
         self.expert_ranker.set_available_tasks(self.experts_names)
         mod_names, mod_weights = self.expert_ranker.predict_batch(
@@ -360,11 +362,6 @@ class MultiExpertModelRanker(MultiExpertModel):
         logger.info(f"Most similar: {str(mod_names)}")
         logger.info(f"Most similar weights: {str(mod_weights)}")
 
-        generations = self.model.generate(
-            inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
-        )
-        return generations
-
 
 class MoETrainer(MultiExpertModel):
     def __init__(self, **kwargs):
@@ -375,18 +372,22 @@ class MoETrainer(MultiExpertModel):
         super().__init__(**kwargs)
 
         # 8 experts
-        for i in range(self.hparams.moe_num_experts):
-            self.add_empty_expert(
-                f"e{i}",
-                LoRAConfig(
-                    modify_layers=self.hparams.modify_layers,
-                    modify_modules=self.hparams.modify_modules,
-                    lora_alpha=self.hparams.lora_alpha,
-                    lora_dropout=self.hparams.lora_dropout,
-                    lora_rank=self.hparams.lora_rank,
-                    lora_init_b_random=True,
-                ),
-            )
+        if not self.hparams.hf_lib_id:
+            for i in range(self.hparams.moe_num_experts):
+                self.add_empty_expert(
+                    f"e{i}",
+                    LoRAConfig(
+                        modify_layers=self.hparams.modify_layers,
+                        modify_modules=self.hparams.modify_modules,
+                        lora_alpha=self.hparams.lora_alpha,
+                        lora_dropout=self.hparams.lora_dropout,
+                        lora_rank=self.hparams.lora_rank,
+                        lora_init_b_random=True,
+                    ),
+                )
+        else:
+            library = HFExpertLibrary(self.hparams.hf_lib_id)
+            self.add_experts_from_library(library)
 
     def training_step(self, batch, _):
         loss = self.forward(batch)

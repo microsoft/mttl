@@ -63,10 +63,13 @@ class ExpertTrainer(EfficientCheckpointModule):
         self._inference_outputs = []
         self._log_pref = kwargs.get("logging_prefix", "")
 
+    def set_routing_infos(self, batch, generate=False):
+        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
+
     def forward(self, batch, reduction="mean"):
         input_ids, labels = batch["input_ids"], batch["labels"]
 
-        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
+        self.set_routing_infos(batch)
         outputs = self.model.forward(input_ids, attention_mask=batch["attention_mask"])
 
         # calculate loss, could also be done inside of the model
@@ -170,10 +173,7 @@ class ExpertTrainer(EfficientCheckpointModule):
         batch,
         **kwargs,
     ):
-        if hasattr(self.model, "task_id_container"):
-            self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
-                batch
-            )
+        self.set_routing_infos(batch, generate=True)
 
         generations = self.model.generate(
             inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs

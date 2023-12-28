@@ -1,28 +1,59 @@
 import os
 import tqdm
 import copy
-import torch
 import pytorch_lightning as pl
 from pytorch_lightning import LightningModule, Trainer, callbacks as cb
 from torch.optim import Optimizer
+from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 
-from mttl.utils import Averager, logger
-from mttl.models.utils import transfer_batch_to_device
+from mttl.utils import logger
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
 from pytorch_lightning.utilities.types import LRSchedulerConfig
+
 
 DEBUG = False
 
 
-def decode(preds, tokenizer):
-    preds[preds == -100] = tokenizer.pad_token_id
-    preds = tokenizer.batch_decode(
-        preds, skip_special_tokens=True, clean_up_tokenization_spaces=True
-    )
-    preds = [pred.strip() for pred in preds]
-    return preds
+class DownstreamEvalCallback(cb.Callback):
+    METRIC_KEY = "downstream"
+
+    def __init__(self, args) -> None:
+        super().__init__()
+
+        self.runner: EvaluatorRunner = setup_evaluators(
+            model_type=args.model,
+            model_family=args.model_family,
+            max_input_length=args.max_input_length,
+            max_output_length=args.max_output_length,
+            predict_batch_size=args.predict_batch_size,
+            truncation_side=args.truncation_side,
+            tasks=args.pipeline_eval_tasks,
+            output_path=os.path.join(args.output_dir, self.METRIC_KEY),
+        )
+
+    def on_validation_epoch_end(
+        self, trainer: Trainer, pl_module: ExpertTrainer
+    ) -> None:
+        metrics = self.runner.run(pl_module)
+        for task, metric in metrics.items():
+            pl_module.log(
+                f"{self.METRIC_KEY}/{task}",
+                metric,
+                on_epoch=True,
+                prog_bar=True,
+            )
+
+    def on_test_epoch_end(self, trainer: Trainer, pl_module: ExpertTrainer) -> None:
+        metrics = self.runner.run(pl_module)
+        for task, metric in metrics.items():
+            pl_module.log(
+                f"{self.METRIC_KEY}_last/{task}",
+                metric,
+                on_epoch=True,
+                prog_bar=True,
+            )
 
 
 class OptimResetCallback(cb.Callback):

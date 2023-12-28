@@ -47,6 +47,7 @@ class LogLikeEvaluator(Evaluator):
         num_batches=None,
         verbose=True,
         shuffle=False,
+        output_path=None,
     ):
         dataloader = self.get_dataloader(split, subsample, shuffle=shuffle)
 
@@ -65,6 +66,9 @@ class LogLikeEvaluator(Evaluator):
         device = next(model.parameters()).device
 
         for num_batch, batch in pbar:
+            if num_batches is not None and num_batch >= num_batches:
+                break
+
             batch_size = len(batch["labels_index"])
             num_options = batch["num_options"]
             labels_texts = batch["labels_texts"]
@@ -108,10 +112,7 @@ class LogLikeEvaluator(Evaluator):
             if verbose:
                 logger.info("Sources:\n%s", sources_texts[0])
                 logger.info("Label:\n%s", labels_texts[batch["labels_index"][0]])
-                logger.info("Prediction:\n%s", labels_texts[batch["labels_index"][0]])
-
-            if num_batches is not None and num_batch >= num_batches:
-                break
+                logger.info("Prediction:\n%s", labels_texts[predictions[0]])
 
             if all_accuracies:
                 pbar.set_description("Accuracy: {:.4f}".format(np.mean(all_accuracies)))
@@ -121,4 +122,4 @@ class LogLikeEvaluator(Evaluator):
             "loglike": -np.mean(all_losses),
             "predictions": all_predictions,
             "accuracy": np.mean(all_accuracies) if all_accuracies else None,
-        }
+        }["accuracy"]

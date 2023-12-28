@@ -39,6 +39,9 @@ class ExpertConfig(Config):
         self.source_template = None
         self.augment_few_shot = 0
 
+        self.subsample_train = None
+        self.subsample_dev = None
+
         self.moe_num_experts = 8
         self.moe_emb_dim = 128
 
@@ -49,20 +52,22 @@ class ExpertConfig(Config):
         self.eval_rougeL_callback_every = 0
         self.test_sets_callbacks = []
 
-        self.use_custom_valid_callback = False  # if True use custom callback to early top on eval loss  instead of lightning callback
+        self.use_custom_valid_callback = False  # if True use custom callback to early stop on eval loss instead of lightning callback
 
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
 
-        self.mmlu_use_hard_prompt = None
+        self.mmlu_use_hard_prompt = None  # use a hard prompt for mmlu
+
         self.eval_mmlu_few_shot = True  # use few-shot for mmlu, default
-        self.eval_mmlu_flag = False
+        self.eval_mmlu_flag = False  # eval mmlu performance during training
+        self.eval_rouge_flag = False  # eval rouge during training
+        self.pipeline_eval_tasks = None
+
         self.eval_metric = "loss"
         self.use_vllm = False
-
         self.reset_lr = False
         self.reset_optim = False
-        self.pipeline_eval_tasks = "piqa,arc-easy,arc-challenge"
 
     def post_init(self):
         if self.micro_batch_size is None:
@@ -73,14 +78,14 @@ class ExpertConfig(Config):
             self.train_batch_size // self.micro_batch_size
         )
         self.train_batch_size = self.micro_batch_size
-        
+
         n_devices = torch.cuda.device_count()
         if n_devices > 1:
             logger.warn(
                 "You have multiple GPUs, but your device count is not being taken "
                 + "into account when computing `gradient_accumulation_steps`."
             )
-        
+
         if self.finetune_task_name is not None and isinstance(
             self.finetune_task_name, str
         ):

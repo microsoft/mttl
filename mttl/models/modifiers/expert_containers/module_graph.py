@@ -425,7 +425,7 @@ class ModuleGraph:
         root_modules = {}
         for root in self.roots:
             root_modules[root.name] = root.instantiate(
-                *args, **kwargs, expert_dict=self.expert_library
+                *args, **kwargs, expert_library=self.expert_library
             )[0]
         return root_modules
 
@@ -438,7 +438,7 @@ class ModuleGraph:
 
 def load_expert(
     expert_path: str,
-    expert_dict_or_lib: Union[Dict, "ExpertLibrary"] = None,
+    expert_library: Union[Dict, "ExpertLibrary"] = None,
     expert_name: str = None,
     **kwargs,
 ):
@@ -446,10 +446,9 @@ def load_expert(
     # load the expert weights
     import os
 
-    if expert_dict_or_lib is not None and expert_path in expert_dict_or_lib:
-        return expert_dict_or_lib[expert_path]
+    if expert_library is not None and expert_path in expert_library:
+        return expert_library[expert_path]
 
-    logger.info(f"Attempting to load expert from {expert_path}")
     if os.path.isfile(expert_path) or os.path.isdir(expert_path):
         expert_checkpoint = get_checkpoint_path(expert_path)
     else:
