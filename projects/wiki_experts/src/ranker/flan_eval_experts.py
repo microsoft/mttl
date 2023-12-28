@@ -107,12 +107,10 @@ def run_eval(args):
         )
     if args.hf_lib_id:
         library = HFExpertLibrary(args.hf_lib_id)
-        if isinstance(module, MultiExpertModelRanker) and filtering_experts is not None:
-            module.load_from_library(
-                library, filtering_experts=filtering_experts.split(",")
-            )
-        else:
-            module.load_from_library(library)
+
+        module.load_from_library(
+            library, filtering_experts=filtering_experts.split(",")
+        )
     elif args.load_module is not None:
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:

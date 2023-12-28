@@ -232,7 +232,13 @@ class MultiExpertModel(ExpertTrainer):
         graph = ModuleGraph.from_string(s, expert_library=expert_library)
         self.load_from_graph(graph, action=action)
 
-    def load_from_library(self, library, subsample_library_experts=0):
+    def load_from_library(
+        self,
+        library,
+        subsample_library_experts=0,
+        filtering_experts=None,
+        available_experts=None,
+    ):
         import copy
 
         keys = list(library.keys())
@@ -249,6 +255,12 @@ class MultiExpertModel(ExpertTrainer):
 
         self.add_expert_instance(expert, is_default=True)
         for expert_name in tqdm.tqdm(keys, desc="Loading experts..."):
+            if available_experts is not None and expert_name not in available_experts:
+                print("{} not in available experts, skip expert".format(expert_name))
+                continue
+            if filtering_experts is not None and expert_name in filtering_experts:
+                print("skip expert: {}".format(expert_name))
+                continue
             expert_dump = library.get_expert(expert_name, with_auxiliary_data=False)
             self.add_expert_instance(expert_dump)
 
@@ -337,7 +349,7 @@ class MultiExpertModel(ExpertTrainer):
             import numpy as np
 
             batch["task_names"] = np.random.choice(
-                self.experts, batch["input_ids"].shape[0], replace=True
+                self.experts_names, batch["input_ids"].shape[0], replace=True
             ).tolist()
         if hasattr(self.model, "task_id_container"):
             self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
@@ -364,38 +376,6 @@ class MultiExpertModelRanker(MultiExpertModel):
         self.fout = open(
             os.path.join(self.hparams.output_dir, "analyse_predict_expert.txt"), "w"
         )
-
-    def load_from_library(
-        self,
-        library,
-        subsample_library_experts=0,
-        filtering_experts=None,
-        available_experts=None,
-    ):
-        import copy
-
-        keys = list(library.keys())
-        if self.hparams.subsample_library_experts > 0:
-            keys = np.random.permutation(keys)[:subsample_library_experts]
-
-        # fill all the weights with zeros after deep copying the weights
-        # TODO: clean this in some way
-        expert = library[keys[0]]
-        expert = copy.deepcopy(expert)
-        for _, value in expert.expert_weights.items():
-            value.fill_(0)
-        expert.name = "default"
-
-        self.add_expert_instance(expert, is_default=True)
-        for expert_name in tqdm.tqdm(keys, desc="Loading experts..."):
-            if available_experts is not None and expert_name not in available_experts:
-                print("{} not in available experts, skip expert".format(expert_name))
-                continue
-            if filtering_experts is not None and expert_name in filtering_experts:
-                print("skip expert: {}".format(expert_name))
-                continue
-            expert_dump = library.get_expert(expert_name, with_auxiliary_data=False)
-            self.add_expert_instance(expert_dump)
 
     def generate(
         self,
