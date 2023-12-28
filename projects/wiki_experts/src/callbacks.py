@@ -34,7 +34,13 @@ class DownstreamEvalCallback(cb.Callback):
         self, trainer: Trainer, pl_module: ExpertTrainer
     ) -> None:
         metrics = self.runner.run(pl_module)
-        pl_module.log_dict(metrics, on_epoch=True, prog_bar=True)
+        for task, metric in metrics.items():
+            pl_module.log(
+                f"downstream/{task}",
+                metric,
+                on_epoch=True,
+                prog_bar=True,
+            )
 
 
 class OptimResetCallback(cb.Callback):
