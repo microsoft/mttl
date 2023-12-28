@@ -5,8 +5,10 @@ from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
 
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 from mttl.callbacks import LiveCheckpointCallback
-from mttl.models.utils import SimpleLogger
+
 from mttl.models.monitors import get_monitors
+from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
+from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -50,13 +52,16 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         "truncation_side": args.truncation_side,
         "dataset": dataset,
         "train_on_inputs": False,
+        "add_eos_to_targets": "qamc"
+        not in args.dataset,  # do not add eos for mmlu stuff (for now)
         "subsample_train": args.subsample_train,
         "subsample_dev": args.subsample_dev,
         "subsample_test": args.subsample_test,
     }
     if "flan" in dataset:
         config = FlanConfig(
-            **common_kwargs, remove_phi_eval_tasks=args.remove_phi_eval_tasks
+            **common_kwargs,
+            remove_phi_eval_tasks=args.remove_phi_eval_tasks,
         )
         dm = FlanModule(config, for_generation=for_generation)
     elif "flat" in dataset:
@@ -90,7 +95,6 @@ def run_multitask(args: ExpertConfig):
     model_class = ExpertTrainer
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
-    print("n tasks : ", args.n_tasks)
 
     loggers = get_pl_loggers(args)
     module = model_class(**vars(args), tokenizer=dm.tokenizer)
@@ -107,6 +111,7 @@ def run_multitask(args: ExpertConfig):
         save_last=True,
         mode=mode,
     )
+
     rouge = RougeCallback(
         get_datamodule(args, for_generation=True),
         every_n_epochs=3 if args.num_train_epochs > 3 else 1,
@@ -122,6 +127,9 @@ def run_multitask(args: ExpertConfig):
             every_n_epochs=3 if args.num_train_epochs > 3 else 1,
         )
         callbacks.append(mmlu)
+    else:
+        eval = DownstreamEvalCallback(args)
+        callbacks.append(eval)
 
     val_check_interval = args.eval_every
     if val_check_interval == -1 or val_check_interval is None:
@@ -137,7 +145,6 @@ def run_multitask(args: ExpertConfig):
         devices=-1,
         accelerator="gpu",
         logger=loggers,
-        log_every_n_steps=1,
         num_sanity_val_steps=0,
         default_root_dir=args.output_dir,
         max_epochs=args.num_train_epochs,
@@ -145,6 +152,7 @@ def run_multitask(args: ExpertConfig):
         gradient_clip_val=args.max_grad_norm,
         strategy=args.compute_strategy if args.compute_strategy else "auto",
         callbacks=callbacks,
+        enable_checkpointing=False,
         accumulate_grad_batches=args.gradient_accumulation_steps,
         precision=int(args.precision)
         if args.precision in ["16", "32"]
@@ -152,18 +160,18 @@ def run_multitask(args: ExpertConfig):
         val_check_interval=val_check_interval,
     )
 
-    # initial validation!
+    # initial validation only for a bunch of datasets... ?
     trainer.validate(module, dm)
     trainer.fit(module, dm)
-    trainer.test(module, dm)
 
-    del module
     torch.cuda.empty_cache()
 
     # reload best model before pushing!
     checkpoint = (
         checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
     )
+    module.load_state_dict(torch.load(checkpoint)["state_dict"])
+    trainer.test(module, dm)
 
     if args.hf_lib_id and checkpoint:
         library = HFExpertLibrary(args.hf_lib_id, create=True)

@@ -4,6 +4,7 @@ import copy
 import pytorch_lightning as pl
 from pytorch_lightning import LightningModule, Trainer, callbacks as cb
 from torch.optim import Optimizer
+from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 
@@ -13,6 +14,27 @@ from pytorch_lightning.utilities.types import LRSchedulerConfig
 
 
 DEBUG = False
+
+
+class DownstreamEvalCallback(cb.Callback):
+    def __init__(self, args, tasks=None) -> None:
+        super().__init__()
+
+        self.runner: EvaluatorRunner = setup_evaluators(
+            model_type=args.model,
+            model_family=args.model_family,
+            max_input_length=args.max_input_length,
+            max_output_length=args.max_output_length,
+            predict_batch_size=args.predict_batch_size,
+            truncation_side=args.truncation_side,
+            tasks=tasks if tasks is not None else ["boolq"],
+        )
+
+    def on_validation_epoch_end(
+        self, trainer: Trainer, pl_module: ExpertTrainer
+    ) -> None:
+        metrics = self.runner.run(pl_module)
+        pl_module.log_dict(metrics, on_epoch=True, prog_bar=True)
 
 
 class OptimResetCallback(cb.Callback):

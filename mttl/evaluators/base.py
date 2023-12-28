@@ -85,6 +85,7 @@ class Evaluator(ABC):
         datamodule=None,
         config=None,
         use_vllm=False,
+        **_,
     ):
         if config is None and datamodule is None:
             raise ValueError("Either config or datamodule must be provided.")
@@ -337,7 +338,7 @@ class GenerativeEvaluator(Evaluator):
 
 
 class EvaluatorRunner:
-    def __init__(self, output_path, verbose=False):
+    def __init__(self, output_path=None, verbose=False):
         self.evaluators = {}
         self.verbose = verbose
         self.output_path = output_path
@@ -350,14 +351,18 @@ class EvaluatorRunner:
         import prettytable
         from mttl.utils import logger
 
-        os.makedirs(self.output_path, exist_ok=True)
+        if self.output_path:
+            os.makedirs(self.output_path, exist_ok=True)
 
         scores = {}
         for name in sorted(self.evaluators.keys()):
             logger.info("Evaluating %s", name)
 
-            task_output_path = os.path.join(self.output_path, name)
-            os.makedirs(self.output_path, exist_ok=True)
+            if self.output_path:
+                task_output_path = os.path.join(self.output_path, name)
+                os.makedirs(self.output_path, exist_ok=True)
+            else:
+                task_output_path = None
 
             scores[name] = self.evaluators[name].evaluate(
                 module,
@@ -366,12 +371,14 @@ class EvaluatorRunner:
                 output_path=task_output_path,
             )
 
-            with open(self.output_path + "/metrics.json", "w") as f:
-                json.dump(scores, f, indent=2)
+            if self.output_path:
+                with open(self.output_path + "/metrics.json", "w") as f:
+                    json.dump(scores, f, indent=2)
 
-        with open(self.output_path + "/metrics.json", "w") as f:
-            scores["mean"] = np.array(list(scores.values())).mean()
-            json.dump(scores, f, indent=2)
+        if self.output_path:
+            with open(self.output_path + "/metrics.json", "w") as f:
+                scores["mean"] = np.array(list(scores.values())).mean()
+                json.dump(scores, f, indent=2)
 
         table = prettytable.PrettyTable()
         table.field_names = list(scores.keys())
@@ -423,6 +430,9 @@ def setup_evaluators(
     generation_kwargs_ = {
         "temperature": 0.0,
     }
+
+    if type(tasks) == str:
+        tasks = tasks.split(",")
 
     for task in tasks or [
         "humaneval",
