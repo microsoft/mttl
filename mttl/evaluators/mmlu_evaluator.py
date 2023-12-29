@@ -97,7 +97,6 @@ class MMLUEvaluator(GenerativeEvaluator):
         split="test",
         subsample=-1,
         num_batches=None,
-        verbose=True,
         shuffle=False,
         output_path=None,
         **kwargs,
@@ -196,7 +195,7 @@ class MMLUEvaluator(GenerativeEvaluator):
 
 class MMLUEvaluatorFast(MMLUEvaluator):
     def evaluate(self, *args, **kwargs):
-        super().evaluate(*args, **kwargs, num_batches=400)
+        return super().evaluate(*args, **kwargs, num_batches=400, shuffle=True)
 
 
 @click.command()

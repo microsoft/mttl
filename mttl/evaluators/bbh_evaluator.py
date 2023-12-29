@@ -17,5 +17,5 @@ class DirectBBHEvaluator(EMEvaluator):
 
 
 class DirectBBHEvaluatorFast(DirectBBHEvaluator):
-    def evaluate(*args, **kwargs):
-        super().evaluate(*args, **kwargs, num_batches=200)
+    def evaluate(self, *args, **kwargs):
+        return super().evaluate(*args, **kwargs, num_batches=200, shuffle=True)
