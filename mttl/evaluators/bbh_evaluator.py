@@ -17,7 +17,7 @@ class DirectBBHEvaluator(EMEvaluator):
 
     def evaluate(self, *args, **kwargs):
         """EM returns a score between 0 and 1, so we divide by 100 to get a score between 0 and 1."""
-        return super().evaluate(*args, **kwargs, num_batches=200, shuffle=True) / 100.0
+        return super().evaluate(*args, **kwargs) / 100.0
 
 
 class DirectBBHEvaluatorFast(DirectBBHEvaluator):
