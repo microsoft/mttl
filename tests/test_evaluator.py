@@ -206,4 +206,4 @@ def test_runner(mocker, gpt_neo):
     assert obj_mmlu.call_count == 2
     assert "shuffle" not in obj_mmlu._mock_call_args_list[0][1]
     assert obj_mmlu._mock_call_args_list[1][1]["shuffle"]
-    assert obj_bbh._mock_call_args_list[1][1]["shuffle"]
+    assert obj_bbh._mock_call_args_list[0][1]["shuffle"]
