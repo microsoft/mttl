@@ -33,7 +33,7 @@ class DownstreamEvalCallback(cb.Callback):
             output_path=os.path.join(args.output_dir, self.METRIC_KEY),
         )
 
-    def on_validation_epoch_end(
+    def on_validation_epoch_start(
         self, trainer: Trainer, pl_module: ExpertTrainer
     ) -> None:
         metrics = self.runner.run(pl_module)
