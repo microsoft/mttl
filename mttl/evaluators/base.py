@@ -503,7 +503,7 @@ def setup_evaluators(
                 **common_kwargs,
                 augment_few_shot=5,
             )
-            evaluators["bbh"] = DirectBBHEvaluatorFast(
+            evaluators["bbh-fast"] = DirectBBHEvaluatorFast(
                 config, generation_kwargs=generation_kwargs
             )
         elif task == "arc-easy":
