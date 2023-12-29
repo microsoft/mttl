@@ -1,149 +1,25 @@
+import glob
 import os
 import sys
 
 import prettytable
-import copy
 from huggingface_hub import login
 from pytorch_lightning import seed_everything
 
-from mttl.datamodule.openbookqa_data_module import OpenbookQADataConfig
-from mttl.datamodule.superglue_data_module import SuperGLUEDataConfig
-from mttl.evaluators.openbookqa_evaluator import OpenbookQAEvaluator
-from mttl.evaluators.superglue_evaluators import BoolQEvaluator
-
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.datamodule.hellaswag_data_module import HellaswagDataConfig
-from mttl.datamodule.humaneval_module import HumanEvalConfig
-from mttl.datamodule.mbpp_datamodule import MBPPDataConfig
-from mttl.datamodule.arc_data_module import ArcDataConfig
-from mttl.datamodule.piqa_data_module import PiqaDataConfig
-from mttl.datamodule.winogrande_data_module import WinograndeDataConfig
-from mttl.evaluators.winogrande_evaluator import WinograndeEvaluator
-from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
-from mttl.datamodule.bbh_data_module import BBHConfig
-from mttl.evaluators.arc_evaluator import ArcEvaluator
-from mttl.evaluators.piqa_evaluator import PiqaEvaluator
-from mttl.evaluators.hellaswag_evaluator import HellaswagEvaluator
-from mttl.evaluators.humaneval_evaluator import HumanEvalEvaluator
-from mttl.evaluators.mbpp_evaluator import MBPPEvaluator
-from mttl.evaluators.bbh_evaluator import DirectBBHEvaluator
+from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
+from mttl.models.modifiers.expert_containers.expert_library import (
+    HFExpertLibrary,
+    LocalExpertLibrary,
+)
 from mttl.utils import setup_logging, logger
-
-# register models
 from projects.wiki_experts.src.expert_model import (
     MultiExpertModel,
     MultiExpertModelRanker,
 )
 from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.mmlu_eval_experts import parse_experts_to_load
-
-
-def setup_evaluators(args, active_tasks=["piqa"]):
-    evaluators = {}
-    common_kwargs_ = {
-        "model": args.model,
-        "model_family": args.model_family,
-        "max_input_length": args.max_input_length,
-        "max_output_length": args.max_output_length,
-        "predict_batch_size": args.predict_batch_size,
-        "truncation_side": args.truncation_side,
-    }
-    generation_kwargs_ = {
-        "temperature": 0.0,
-    }
-
-    for task in set(active_tasks):
-        common_kwargs = copy.deepcopy(common_kwargs_)
-        generation_kwargs = copy.deepcopy(generation_kwargs_)
-
-        if task == "humaneval":
-            generation_kwargs.update(
-                {
-                    "temperature": 0.05,
-                    "top_p": 0.95,
-                    "do_sample": True,
-                    "max_new_tokens": 300,
-                    "stop_tokens": ["\n\n"],
-                }
-            )
-            config = HumanEvalConfig(
-                **common_kwargs,
-            )
-            evaluators["humaneval"] = HumanEvalEvaluator(
-                config, generation_kwargs=generation_kwargs
-            )
-        elif task == "mbpp":
-            generation_kwargs.update(
-                {
-                    "temperature": 0.05,
-                    "top_p": 0.95,
-                    "do_sample": True,
-                    "max_new_tokens": 300,
-                    "stop_tokens": ["\n\n"],
-                }
-            )
-            evaluators["mbpp"] = MBPPEvaluator(
-                MBPPDataConfig(**common_kwargs),
-                generation_kwargs=generation_kwargs,
-            )
-        elif task == "boolq":
-            config = SuperGLUEDataConfig(
-                **common_kwargs,
-            )
-            evaluators["boolq"] = BoolQEvaluator(
-                config, generation_kwargs=generation_kwargs
-            )
-        elif task == "bbh":
-            generation_kwargs["max_new_tokens"] = 128
-            config = BBHConfig(
-                **common_kwargs,
-                augment_few_shot=5,
-            )
-            evaluators["bbh"] = DirectBBHEvaluator(
-                config, generation_kwargs=generation_kwargs
-            )
-        elif task == "arc-easy":
-            config = ArcDataConfig(
-                **common_kwargs,
-                arc_type="ARC-Easy",
-            )
-            evaluators["arc-easy"] = ArcEvaluator(
-                config, generation_kwargs=generation_kwargs
-            )
-        elif task == "arc-challenge":
-            config = ArcDataConfig(
-                **common_kwargs,
-                arc_type="ARC-Challenge",
-            )
-            evaluators["arc-challenge"] = ArcEvaluator(
-                config, generation_kwargs=generation_kwargs
-            )
-        elif task == "piqa":
-            config = PiqaDataConfig(
-                **common_kwargs,
-            )
-            evaluators["piqa"] = PiqaEvaluator(
-                config, generation_kwargs=generation_kwargs
-            )
-        elif task == "hellaswag":
-            evaluators["hellaswag"] = HellaswagEvaluator(
-                HellaswagDataConfig(**common_kwargs),
-                generation_kwargs=generation_kwargs,
-            )
-        elif task == "winogrande":
-            evaluators["winogrande"] = WinograndeEvaluator(
-                WinograndeDataConfig(**common_kwargs),
-                generation_kwargs=generation_kwargs,
-            )
-        elif task == "openbookqa":
-            evaluators["openbookqa"] = OpenbookQAEvaluator(
-                OpenbookQADataConfig(**common_kwargs),
-                generation_kwargs=generation_kwargs,
-            )
-        else:
-            raise ValueError("No active tasks")
-    return evaluators
 
 
 def run_eval(args):
@@ -165,12 +41,16 @@ def run_eval(args):
 
     filtering_experts = os.environ.get("FILTERING_EXPERTS", None)
     if args.hf_lib_id:
-        library = HFExpertLibrary(args.hf_lib_id)
-        logger.info("Loaded library: {}".format(library))
+        if os.path.exists(args.hf_lib_id):
+            # it's a local library
+            library = LocalExpertLibrary("/tmp/experts", create=True)
 
-        if args.ranker_model is not None:
-            module.load_from_library(library, filtering_experts.split(","))
-            # module.add_experts_from_library(library, filtering_experts.split(","))
+            for file in glob.glob(os.path.join(args.hf_lib_id, "*")):
+                library.add_expert_from_ckpt(file, force=True)
+        else:
+            library = HFExpertLibrary(args.hf_lib_id)
+
+        logger.info("Loaded library: {}".format(args.hf_lib_id))
     else:
         library = None
 
@@ -180,32 +60,21 @@ def run_eval(args):
             module.load_expert(**expert_kwargs, expert_library=library)
     elif args.module_graph is not None:
         module.load_from_graph_string(args.module_graph, expert_library=library)
-
+    elif args.hf_lib_id is not None:
+        module.add_experts_from_library(library)
     module.to("cuda")
 
-    evaluators = setup_evaluators(
-        args, active_tasks=args.pipeline_eval_tasks.split(",")
+    runner: EvaluatorRunner = setup_evaluators(
+        model_type=args.model,
+        model_family=args.model_family,
+        max_input_length=args.max_input_length,
+        max_output_length=args.max_output_length,
+        predict_batch_size=args.predict_batch_size,
+        truncation_side=args.truncation_side,
+        tasks=args.pipeline_eval_tasks.split(",") if args.pipeline_eval_tasks else None,
+        output_path=args.output_dir,
     )
-
-    scores = {}
-    for name in sorted(evaluators.keys()):
-        logger.info("Evaluating %s", name)
-        if name == "bbh":
-            num_batches = 200
-        else:
-            num_batches = None
-        scores[name] = evaluators[name].evaluate(
-            module, shuffle=True, verbose=True, num_batches=num_batches
-        )
-        with open(args.output_dir + f"/scores.json", "w") as f:
-            import json
-
-            json.dump(scores, f)
-
-    table = prettytable.PrettyTable()
-    table.field_names = list(scores.keys())
-    table.add_row(["{:.3f}".format(v) for v in list(scores.values())])
-    print(table)
+    runner.run(module)
 
 
 if __name__ == "__main__":

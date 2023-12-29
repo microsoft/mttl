@@ -1,6 +1,7 @@
 import os
 import sys
 import re
+import requests
 from typing import Dict
 from tempfile import TemporaryDirectory
 from pytorch_lightning import seed_everything
@@ -28,6 +29,11 @@ from mttl.utils import setup_logging, logger
 from projects.wiki_experts.src.evolution.experiment_state import ExperimentState
 from projects.wiki_experts.src.evolution.sequential_evolution import *
 from huggingface_hub import create_repo, login, HfApi
+from mttl.models.modifiers.expert_containers.library_transforms import (
+    SVDEmbeddingTransform,
+    SVDEmbeddingTransformConfig,
+)
+from projects.wiki_experts.src.evolution.evaluators import MMLUEvalCallback
 
 # this script evolves a single task for 1 active iteration and commits it to the library
 
@@ -63,8 +69,9 @@ def setup(args: EvolExpertConfig):
     login(token=token)
     user_name = HfApi().whoami(token=token)["name"]
     ai = find_ai(args.hf_repo_id)
-    args.to_repo_id = increase_ai(args.hf_repo_id)
-    args.to_repo_id = f"{user_name}/{args.to_repo_id.split('/')[-1]}"
+    if args.to_repo_id is None:
+        args.to_repo_id = increase_ai(args.hf_repo_id)
+        args.to_repo_id = f"{user_name}/{args.to_repo_id.split('/')[-1]}"
     args.to_repo_id += "_debug" if DEBUG else ""
     create_repo(args.to_repo_id, token=token, exist_ok=True)
 
@@ -76,12 +83,13 @@ def setup(args: EvolExpertConfig):
         temp_dir = TemporaryDirectory(dir=args.output_dir + "/")
         local_lib_location = temp_dir.name
 
+    remote_lib = HFExpertLibrary(args.hf_repo_id)
     os.makedirs(local_lib_location, exist_ok=True)
-    expert_lib = LocalExpertLibrary.from_remote(
-        HFExpertLibrary(args.hf_repo_id), local_lib_location
+    expert_lib = LocalExpertLibrary.create_from_remote(
+        remote_lib, destination=local_lib_location
     )
-    expert_lib.ignore_sliced = True
 
+    expert_lib.ignore_sliced = True
     exper_state = ExperimentState(
         config=args,
         active_iteration=0,
@@ -93,6 +101,8 @@ def setup(args: EvolExpertConfig):
         exper_state.load_from_path(args.experiment_state_path)
 
     tasks = args.finetune_task_name
+    if not isinstance(tasks, list):
+        tasks = tasks.split(",")
     expert_lib = exper_state.state.expert_lib
     # remove tasks for which we dont have experts
     # tasks = [t for t in tasks if t in expert_lib.tasks]
@@ -111,19 +121,57 @@ def main(args: EvolExpertConfig):
     expert_lib: ExpertLibrary = expert_lib
     module = None
 
+    callbacks = [partial(MMLUEvalCallback, split="test")]
+
     for task in tasks:
+        # pull updates from remote
+        expert_lib.update_from_remote(args.to_repo_id)
+        # recalculate embeddings just in case (its fast)
+        svd_embedder = SVDEmbeddingTransform(
+            SVDEmbeddingTransformConfig(sparsity_threshold=0.5)
+        )
+        svd_embedder.transform(expert_lib, upload_to_hf=True)
+
         print("Evolving on task", task)
         log_row: Dict = active_task_iteration(
-            args, task, expert_lib, module=module, ai=ai
+            args, task, expert_lib, module=module, ai=ai, callbacks=callbacks
         )
         tablelogger.log(log_row)
         tablelogger.log_table_wandb()
 
-    # save the expert lib, send updates to remote
-    remote_lib = HFExpertLibrary.from_local(
-        expert_lib, args.to_repo_id, force=True, upload_aux_data=True, only_tasks=tasks
-    )
-    logger.info(f"Done, saving to repo {args.to_repo_id}")
+        lib_cynced = False
+        try:
+            # save the expert lib, send updates to remote
+            remote_lib = HFExpertLibrary.from_local(
+                expert_lib,
+                args.to_repo_id,
+                force=True,
+                upload_aux_data=True,
+                only_tasks=tasks,
+            )
+            logger.info(f"Done, saving to repo {args.to_repo_id}")
+            lib_cynced = True
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 429:
+                logger.info(
+                    "Too many requests, contin uing without syncyng the library to repote."
+                )
+
+    if not lib_cynced:
+        # try hard to cync the library
+        from mttl.models.modifiers.expert_containers.expert_library import retry
+
+        @retry(max_retries=20, wait_seconds=60 * 10)
+        def retry_sync():
+            remote_lib = HFExpertLibrary.from_local(
+                expert_lib,
+                args.to_repo_id,
+                force=True,
+                upload_aux_data=True,
+                only_tasks=tasks,
+            )
+
+        retry_sync()
 
 
 if __name__ == "__main__":

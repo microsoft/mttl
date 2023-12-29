@@ -2,11 +2,13 @@ import os
 import sys
 import copy
 import wandb
+import numpy as np
 import pandas as pd
 import seaborn as sns
 from typing import Dict
 from huggingface_hub import login
 from matplotlib import pyplot as plt
+from tempfile import TemporaryDirectory
 from pytorch_lightning import seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
@@ -25,6 +27,7 @@ from projects.wiki_experts.src.evolution.utils import (
     log_wandb,
     init_wandb_logger,
     TableLogger,
+    remove_outdated_experts_from_library,
 )
 
 from projects.wiki_experts.src.evolution.evaluators import Evaluator, prepare_evaluator
@@ -33,13 +36,19 @@ from mttl.utils import setup_logging, logger
 # register models
 from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.vllm_engines.engines import free_memory
-from mttl.models.modifiers.expert_containers.module_graph import Expert
+from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
 
 DEBUG = True
 if "AMLT_OUTPUT_DIR" in os.environ:
     DEBUG = False
 if DEBUG:
     print("!!!!!!!!!!!!!!!!!!!!!! DEBUG MODE")
+
+
+class TransferMatrixConfig(EvolExpertConfig):
+    def _set_defaults(self):
+        super()._set_defaults()
+        self.only_diagonal = False
 
 
 def eval_expert_on_task(
@@ -49,8 +58,10 @@ def eval_expert_on_task(
     evaluator_train=None,
     evaluator_valid=None,
     evaluator_test=None,
+    debug=False,
 ):
     logger.info(f"Evaluating perf for {task}")
+
     if expert is not None:
         model_copy = copy.deepcopy(module)
         if isinstance(expert, str):
@@ -59,11 +70,13 @@ def eval_expert_on_task(
             model_copy.add_expert_instance(expert, task, action="route")
         else:
             raise ValueError(f"Checkpoint type {type(expert)} not supported")
-        if len(model_copy.experts) == 1:
-            model_copy.replace_container_with_expert(task, get_expert_instance=False)
+        model_copy.replace_container_with_expert(task, get_expert_instance=False)
         module = model_copy
 
     result = {}
+    if debug:
+        result["test"] = 0.5
+        return result
     if evaluator_train is not None:
         scores_base_train = evaluator_train.evaluate(module)
         result["train"] = scores_base_train[task]["mean"]
@@ -83,19 +96,22 @@ def eval_all_experts_on_task(
     base_model: MultiExpertModel,
     expert_lib: dict,
     evaluator: Evaluator = None,
+    only_diagonal=False,
 ):
     log_row = {}
     for expert_name, expert in expert_lib.items():
+        if only_diagonal and expert.expert_info.expert_task_name != task_eval_on:
+            continue
         score = eval_expert_on_task(
-            task_eval_on, base_model, expert, evaluator_test=evaluator
+            task_eval_on, base_model, expert, evaluator_test=evaluator, debug=DEBUG
         )
         log_row[expert_name] = score["test"]
     return log_row
 
 
 def produce_transfer_matrix(
-    args: EvolExpertConfig,
-    expert_lib,
+    args: TransferMatrixConfig,
+    expert_lib: ExpertLibrary,
     tasks: list,
     subsample=-1,
     module=None,
@@ -125,18 +141,27 @@ def produce_transfer_matrix(
             tokenizer=evaluator.datamodule.tokenizer,
             device_map="cpu",
         )
+
         log_row_task = eval_all_experts_on_task(
-            task_eval_on, module, expert_lib, evaluator=evaluator
+            task_eval_on,
+            module,
+            expert_lib,
+            evaluator=evaluator,
+            only_diagonal=args.only_diagonal,
         )
         log_row.update(log_row_task)
         # eval on base model
         log_row["base"] = eval_expert_on_task(
-            task_eval_on, module, None, evaluator_test=evaluator
+            task_eval_on, module, None, evaluator_test=evaluator, debug=DEBUG
         )["test"]
 
         print(transfer_table.df)
         transfer_table.log(log_row)
         transfer_table.log_table_wandb()
+        transfer_table.df.to_csv(os.path.join(args.output_dir, "transfer_matrix.csv"))
+
+    transfer_table.means()
+    transfer_table.log_table_wandb()
 
     transfer_matrix = transfer_table.df
     if wandb.run is not None:
@@ -150,21 +175,38 @@ def produce_transfer_matrix(
     return transfer_matrix
 
 
-def run_eval(args: EvolExpertConfig):
+def run_eval(args: EvolExpertConfig, debug=None):
     """
     Create transfer matrix.
     """
     seed_everything(args.seed, workers=True)
     setup_logging(args.output_dir)
-    if not DEBUG:
+    global DEBUG
+    if debug is not None:
+        DEBUG = debug
+
+    # if not DEBUG:
+    if wandb.run is None:
         init_wandb_logger(args)
     if args.hf_token_hub:
         login(token=args.hf_token_hub)
 
     print("###### Tasks", args.finetune_task_name)
     # can work with other library types as well, but need to implement clone and filter_with_tasks
-
-    expert_lib: ExpertLibrary = HFExpertLibrary(repo_id=args.hf_repo_id)
+    if os.path.isfile(args.hf_repo_id):
+        # testing a single model
+        expert = load_expert(args.hf_repo_id)
+        expert.expert_info.expert_name = "joint"
+        expert.expert_info.expert_task_name = "joint"
+        temp_dir = TemporaryDirectory(dir=args.output_dir + "/")
+        expert_lib = LocalExpertLibrary.from_expert_dict(
+            {args.hf_repo_id: expert}, destination=temp_dir.name
+        )
+    else:
+        expert_lib: LocalExpertLibrary = LocalExpertLibrary.create_from_remote(
+            HFExpertLibrary(repo_id=args.hf_repo_id), destination="/tmp"
+        )
+        remove_outdated_experts_from_library(expert_lib)
 
     transfer_matrix: pd.DataFrame = produce_transfer_matrix(
         args, expert_lib, tasks=args.finetune_task_name
@@ -174,5 +216,5 @@ def run_eval(args: EvolExpertConfig):
 
 
 if __name__ == "__main__":
-    args = EvolExpertConfig.parse()
+    args = TransferMatrixConfig.parse()
     run_eval(args)

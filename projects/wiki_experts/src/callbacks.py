@@ -4,14 +4,166 @@ import copy
 import pytorch_lightning as pl
 from pytorch_lightning import LightningModule, Trainer, callbacks as cb
 from torch.optim import Optimizer
+from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 
 from mttl.utils import logger
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
+from pytorch_lightning.utilities.types import LRSchedulerConfig
 
 
 DEBUG = False
+
+
+class DownstreamEvalCallback(cb.Callback):
+    METRIC_KEY = "downstream"
+
+    def __init__(self, args) -> None:
+        super().__init__()
+
+        self.runner: EvaluatorRunner = setup_evaluators(
+            model_type=args.model,
+            model_family=args.model_family,
+            max_input_length=args.max_input_length,
+            max_output_length=args.max_output_length,
+            predict_batch_size=args.predict_batch_size,
+            truncation_side=args.truncation_side,
+            tasks=args.pipeline_eval_tasks,
+            output_path=os.path.join(args.output_dir, self.METRIC_KEY),
+        )
+
+    def on_validation_epoch_end(
+        self, trainer: Trainer, pl_module: ExpertTrainer
+    ) -> None:
+        metrics = self.runner.run(pl_module)
+        for task, metric in metrics.items():
+            pl_module.log(
+                f"{self.METRIC_KEY}/{task}",
+                metric,
+                on_epoch=True,
+                prog_bar=True,
+            )
+
+    def on_test_epoch_end(self, trainer: Trainer, pl_module: ExpertTrainer) -> None:
+        metrics = self.runner.run(pl_module)
+        for task, metric in metrics.items():
+            pl_module.log(
+                f"{self.METRIC_KEY}_last/{task}",
+                metric,
+                on_epoch=True,
+                prog_bar=True,
+            )
+
+
+class OptimResetCallback(cb.Callback):
+    def __init__(self, reset_optim=False, reset_lr=False) -> None:
+        """
+        Callback class to reset optimizer and learning rate during training.
+
+        I run some experiments using it, but didnt see any improvement. I not not 100% sure this does waht it is supposed to. pllightning is a bit tricky when it comes to reseting the optimizer.
+
+        Args:
+            reset_optim (bool, optional): Whether to reset the optimizer. Defaults to False.
+            reset_lr (bool, optional): Whether to reset the learning rate. Defaults to False.
+        """
+        super().__init__()
+        self.reset_optim = reset_optim
+        self.reset_lr = reset_lr
+
+    def on_train_epoch_start(
+        self, trainer: Trainer, pl_module: LightningModule
+    ) -> None:
+        """
+        Method called at the start of each training epoch.
+
+        Args:
+            trainer (Trainer): The PyTorch Lightning Trainer object.
+            pl_module (LightningModule): The PyTorch Lightning module being trained.
+        """
+        if self.reset_optim and self.reset_lr:
+            new = pl_module.configure_optimizers()
+            trainer.strategy.optimizers = [new["optimizer"]]
+            trainer.strategy.lr_scheduler_configs = [
+                LRSchedulerConfig(**new["lr_scheduler"])
+            ]
+            trainer.strategy.lr_scheduler_configs[0].__class__
+
+        elif self.reset_lr and not self.reset_optim:
+            optimizer_states = [opt.state_dict() for opt in trainer.optimizers]
+            new = pl_module.configure_optimizers()
+            trainer.strategy.optimizers = [new["optimizer"]]
+            trainer.strategy.lr_scheduler_configs = [
+                LRSchedulerConfig(**new["lr_scheduler"])
+            ]
+            lr = trainer.strategy.lr_scheduler_configs[0].scheduler._last_lr[0]
+            for opt, state in zip(trainer.strategy.optimizers, optimizer_states):
+                opt.load_state_dict(state)
+            for opt in trainer.strategy.optimizers:
+                opt.param_groups[0]["lr"] = lr
+
+        elif self.reset_optim and not self.reset_lr:
+            current_lr = trainer.optimizers[0].param_groups[0]["lr"]
+            new = pl_module.configure_optimizers()
+            trainer.strategy.optimizers = [new["optimizer"]]
+            for opt in trainer.strategy.optimizers:
+                opt.param_groups[0]["lr"] = current_lr
+
+        return super().on_train_epoch_start(trainer, pl_module)
+
+
+class RougeCallbackTestPerEpoch(cb.Callback):
+    def __init__(
+        self,
+        datamodule,
+        checkpointing_callback: cb.Callback,
+        name="test_rougeL_per_epoch",
+    ):
+        self.name = name
+        self.datamodule = datamodule
+        self.evaluator = RougeEvaluator(datamodule)
+        self.checkpointing_callback = checkpointing_callback
+        self.epoch = 0
+
+    def on_train_epoch_end(self, trainer: Trainer, pl_module: ExpertTrainer) -> None:
+        # test best model sofar
+        pl_module_device = pl_module.device
+        pl_module.to("cpu")
+        copy_pl_module = copy.deepcopy(pl_module)
+        copy_pl_module.to(pl_module_device)
+
+        best_model_path = (
+            self.checkpointing_callback.best_model_path
+            or self.checkpointing_callback.last_model_path
+        )
+
+        copy_pl_module.from_pretrained(best_model_path)
+        metrics_test = self.test(copy_pl_module, split="test")
+
+        pl_module.log(f"test/{self.name}", metrics_test, on_epoch=True, prog_bar=True)
+
+        del copy_pl_module
+        pl_module.to(pl_module_device)
+        self.epoch += 1
+        return super().on_train_epoch_end(trainer, pl_module)
+
+        if self.do_checkpoint and self._checkpoint_now:
+            try:
+                filename = (
+                    self.output_dir
+                    + f"/{self.name}_val_epoch{self.epoch}/"
+                    + f"{self.best_loss:.004f}.ckpt"
+                )
+                ckpt_path = os.path.join(filename)
+                trainer.save_checkpoint(ckpt_path)
+                self._prev_checkpoint = ckpt_path
+            except Exception as e:
+                logger.error("Error in checkpointing with RougeLCallback: " + str(e))
+        self._checkpoint_now = False
+
+    def test(self, pl_module: LightningModule, split="val"):
+        rougeL = self.evaluator.evaluate(pl_module, verbose=False, split=split)
+        return rougeL
 
 
 class RougeLCallback(cb.Callback):
@@ -67,8 +219,8 @@ class RougeLCallback(cb.Callback):
         if trainer.global_step % self.eval_every_opt_step == 0:
             metrics = self.test(pl_module)
             self.best_loss = copy.deepcopy(metrics)
-            self.maybe_checkpoint_now(trainer)
             self.log_metrics(metrics, pl_module)
+            self.maybe_checkpoint_now(trainer)
             # checksum of parameters
             # p_sum = np.sum([p.detach().cpu().sum() for p in pl_module.parameters()])
         return super().on_before_optimizer_step(trainer, pl_module, optimizer)

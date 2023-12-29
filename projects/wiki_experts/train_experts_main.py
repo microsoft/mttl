@@ -5,8 +5,9 @@ from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
 
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 from mttl.callbacks import LiveCheckpointCallback
-from mttl.models.utils import SimpleLogger
+
 from mttl.models.monitors import get_monitors
+from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -50,12 +51,16 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         "truncation_side": args.truncation_side,
         "dataset": dataset,
         "train_on_inputs": False,
+        "add_eos_to_targets": "qamc"
+        not in args.dataset,  # do not add eos for mmlu stuff (for now)
+        "subsample_train": args.subsample_train,
+        "subsample_dev": args.subsample_dev,
+        "subsample_test": args.subsample_test,
     }
-
     if "flan" in dataset:
         config = FlanConfig(
             **common_kwargs,
-            include_template_type="*",
+            remove_phi_eval_tasks=args.remove_phi_eval_tasks,
         )
         dm = FlanModule(config, for_generation=for_generation)
     elif "flat" in dataset:
@@ -95,24 +100,24 @@ def run_multitask(args: ExpertConfig):
 
     # get metric monitors for models
     callbacks = get_monitors(args)
-
-    monitor = "val/loss"
-    mode = "min"
-
     checkpoint_callback = LiveCheckpointCallback(
         dirpath=args.output_dir,
-        monitor=monitor,
+        monitor="val/loss",
         save_last=True,
-        mode=mode,
+        mode="min",
     )
-    rouge = RougeCallback(
-        get_datamodule(args, for_generation=True),
-        every_n_epochs=3 if args.num_train_epochs > 3 else 1,
-    )
-
-    callbacks = []
     callbacks.append(checkpoint_callback)
-    callbacks.append(rouge)
+
+    if args.eval_rouge_flag:
+        rouge = RougeCallback(
+            get_datamodule(args, for_generation=True),
+            every_n_epochs=3 if args.num_train_epochs > 3 else 1,
+        )
+        callbacks.append(rouge)
+    else:
+        logger.warn(
+            "Deactivating rouge callback as it is not enabled in the config. Please set `eval_rouge_flag=True`."
+        )
 
     if args.eval_mmlu_flag:
         mmlu = NanoMMLUCallback(
@@ -120,6 +125,21 @@ def run_multitask(args: ExpertConfig):
             every_n_epochs=3 if args.num_train_epochs > 3 else 1,
         )
         callbacks.append(mmlu)
+    else:
+        logger.warn(
+            "Deactivating mmlu callback as it is not enabled in the config. Please set `eval_mmlu_flag=True`."
+        )
+
+    if args.pipeline_eval_tasks:
+        if args.pipeline_eval_tasks == "all":
+            args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
+
+        eval = DownstreamEvalCallback(args)
+        callbacks.append(eval)
+    else:
+        logger.warn(
+            "Deactivating downstream eval callback as it is not enabled in the config. Please set `pipeline_eval_tasks`."
+        )
 
     val_check_interval = args.eval_every
     if val_check_interval == -1 or val_check_interval is None:
@@ -135,7 +155,6 @@ def run_multitask(args: ExpertConfig):
         devices=-1,
         accelerator="gpu",
         logger=loggers,
-        log_every_n_steps=1,
         num_sanity_val_steps=0,
         default_root_dir=args.output_dir,
         max_epochs=args.num_train_epochs,
@@ -143,6 +162,7 @@ def run_multitask(args: ExpertConfig):
         gradient_clip_val=args.max_grad_norm,
         strategy=args.compute_strategy if args.compute_strategy else "auto",
         callbacks=callbacks,
+        enable_checkpointing=False,
         accumulate_grad_batches=args.gradient_accumulation_steps,
         precision=int(args.precision)
         if args.precision in ["16", "32"]
@@ -150,18 +170,18 @@ def run_multitask(args: ExpertConfig):
         val_check_interval=val_check_interval,
     )
 
-    # initial validation!
+    # initial validation only for a bunch of datasets... ?
     trainer.validate(module, dm)
     trainer.fit(module, dm)
-    trainer.test(module, dm)
 
-    del module
     torch.cuda.empty_cache()
 
     # reload best model before pushing!
     checkpoint = (
         checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
     )
+    module.load_state_dict(torch.load(checkpoint)["state_dict"])
+    trainer.test(module, dm)
 
     if args.hf_lib_id and checkpoint:
         library = HFExpertLibrary(args.hf_lib_id, create=True)

@@ -62,7 +62,6 @@ class KVAdapter(Adapter, ModifyMixin):
         self.soft_prompt_length = config.soft_prompt_length
         self.soft_prompt_learn_kv = config.soft_prompt_learn_kv
         funcType = types.MethodType
-        # breakpoint()
 
         # do not patch this layer multiple times, especially useful for container layers
         if "gpt-neo" in config.model:

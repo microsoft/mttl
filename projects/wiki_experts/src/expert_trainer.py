@@ -6,7 +6,6 @@ from mttl.models.llama_patch import replace_attn_with_flash_attn
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.routing import RoutingInfo
-from mttl.models.modifiers.expert_containers.selectors import SelectorConfig
 from transformers import AutoModelForCausalLM
 
 from mttl.models.modifiers.expert_containers.module_graph import ExpertInfo
@@ -14,7 +13,9 @@ from mttl.models.utils import (
     EfficientCheckpointModule,
     prepare_model_for_kbit_training,
 )
+from mttl.models.modifiers.expert_containers.module_graph import Expert
 from projects.wiki_experts.src.config import ExpertConfig
+from mttl.models.modifiers.expert_containers.selectors import SelectorConfig
 
 
 torch.set_float32_matmul_precision("high")
@@ -62,10 +63,13 @@ class ExpertTrainer(EfficientCheckpointModule):
         self._inference_outputs = []
         self._log_pref = kwargs.get("logging_prefix", "")
 
+    def set_routing_infos(self, batch, generate=False):
+        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
+
     def forward(self, batch, reduction="mean"):
         input_ids, labels = batch["input_ids"], batch["labels"]
 
-        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
+        self.set_routing_infos(batch)
         outputs = self.model.forward(input_ids, attention_mask=batch["attention_mask"])
 
         # calculate loss, could also be done inside of the model
@@ -93,35 +97,12 @@ class ExpertTrainer(EfficientCheckpointModule):
             non_zero_loss[non_zero_loss == 0] = 1
             loss = loss.sum(dim=-1) / non_zero_loss
 
-        if getattr(self.model.config, "add_routing_token", False):
-            # do not use the target for the first soft token, as its always set to 1/n.
-            soft_logits = outputs.soft_prompt_logits[:, 1:].flatten(0, 1)
-            soft_labels = (
-                self.model.get_input_embeddings()
-                .routing_targets[:, 1:]
-                .detach()
-                .flatten(0, 1)
-            )
-            soft_loss = loss_fct(soft_logits, soft_labels)
-            self.routing_loss = soft_loss
-
         del outputs, shift_logits, shift_labels
         return loss
 
     def training_step(self, batch, _):
         loss = self.forward(batch)
         total_loss = loss
-
-        if getattr(self.model.config, "add_routing_token", False):
-            # linear the loss target
-            coef = self.global_step / self.model.config.total_steps
-            total_loss += coef * self.routing_loss
-            self.log(
-                f"{self._log_pref}train/routing_loss",
-                self.routing_loss,
-                on_step=True,
-                prog_bar=True,
-            )
 
         self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
         self.log(
@@ -156,16 +137,6 @@ class ExpertTrainer(EfficientCheckpointModule):
 
     def validation_step(self, batch, batch_idx):
         loss = self.forward(batch, reduction="none")
-
-        if getattr(self.model.config, "add_routing_token", False):
-            # slowly anneal the loss target
-            routing_loss = self.routing_loss.sum() / self.routing_loss.numel()
-            self.log(
-                f"{self._log_pref}train/routing_loss",
-                routing_loss,
-                on_step=True,
-                prog_bar=True,
-            )
 
         mean_loss = loss.sum() / loss.shape[0]
         self._inference_outputs += [(loss.detach().cpu(),)]
@@ -202,10 +173,7 @@ class ExpertTrainer(EfficientCheckpointModule):
         batch,
         **kwargs,
     ):
-        if hasattr(self.model, "task_id_container"):
-            self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(
-                batch
-            )
+        self.set_routing_infos(batch, generate=True)
 
         generations = self.model.generate(
             inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs

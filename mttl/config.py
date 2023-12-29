@@ -41,6 +41,7 @@ class Config:
 
     @classmethod
     def fromdict(cls, data):
+        _ = data.pop("_updated_kwargs", None)
         return cls(kwargs=data, raise_error=False, silent=True)
 
     def asdict(self) -> Dict:
@@ -229,7 +230,10 @@ class Config:
         self.eval_every = None
         self.debug = False
         self.seed = 42
+
+        self.subsample_train = None
         self.subsample_dev = None
+        self.subsample_test = None
 
         self.ni_online_eval = False  # zero-shot online eval for ni
         self.t0_online_eval = False  # zero-shot eval for t0

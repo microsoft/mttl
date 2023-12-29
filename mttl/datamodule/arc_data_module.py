@@ -43,6 +43,6 @@ class ArcMultiChoiceDataModule(MultiChoiceDataModule):
         self._task_to_id = {}
         self._task_names = []
 
-        self.train_dataset = self.dev_dataset = None
+        self.train_dataset = None
+        self.dev_dataset = dataset
         self.test_dataset = dataset
-        self.print_infos()

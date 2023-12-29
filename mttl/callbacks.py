@@ -49,20 +49,32 @@ class LiveCheckpointCallback(pl.Callback):
                 self.last_model_path, weights_only=self.save_weights_only
             )
 
-    def _save_best(self, trainer, last_value, this_value):
+    @classmethod
+    def parse_ckpt_name(cls, filename):
+        try:
+            fields = filename.split("_")
+            mode = fields[2]
+            monitor = fields[4]
+            value = float(fields[6])
+            step = int(fields[8].split(".")[0])
+            return (mode, monitor, value, step)
+        except:
+            raise ValueError(f"Could not parse filename {filename}.")
+
+    def _save_best(self, trainer, this_value):
         if this_value is None:
             raise ValueError("No value to save.. Something has gone wrong!")
 
         monitor = self.monitor.replace("/", "-")
-        if last_value is not None:
-            past_filename = os.path.join(
-                f"{self.dirpath}", f"best_{monitor}_{last_value:.004f}.ckpt"
-            )
-            if os.path.exists(past_filename):
-                os.remove(past_filename)
+        monitor = monitor.replace("_", "-")
+
+        if self.best_model_path is not None:
+            if os.path.exists(self.best_model_path):
+                os.remove(self.best_model_path)
 
         this_filename = os.path.join(
-            f"{self.dirpath}", f"best_{monitor}_{this_value:.004f}.ckpt"
+            f"{self.dirpath}",
+            f"best_mode_{self.mode}_metric_{monitor}_value_{this_value:.004f}_step_{self._last_step}.ckpt",
         )
 
         logger.info("Saving new best model to %s", this_filename)
@@ -93,7 +105,7 @@ class LiveCheckpointCallback(pl.Callback):
                 do_save = self._last_value is None or last_value > self._last_value
 
             if do_save:
-                self._save_best(trainer, self._last_value, last_value)
+                self._save_best(trainer, last_value)
                 self._last_value = last_value
 
 
@@ -208,17 +220,23 @@ class RougeCallback(cb.Callback):
         datamodule,
         every_n_epochs=1,
         subsample=-1,
+        generation_kwargs=None,
     ):
         super().__init__()
 
         from mttl.evaluators.rouge_evaluator import RougeEvaluator
 
-        self.evaluator = RougeEvaluator(datamodule=datamodule)
+        generation_kwargs = generation_kwargs or {"auto_max_new_tokens": True}
+        self.evaluator = RougeEvaluator(
+            datamodule=datamodule,
+            generation_kwargs=generation_kwargs,
+        )
+
         self.every_n_epochs = every_n_epochs
         self.verbose = False
         self.subsample = subsample
 
-    def on_validation_epoch_start(
+    def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
     ) -> None:
         if self.every_n_epochs > 0 and trainer.current_epoch % self.every_n_epochs == 0:
@@ -228,7 +246,7 @@ class RougeCallback(cb.Callback):
                 verbose=self.verbose,
                 subsample=self.subsample,
             )
-            pl_module.log("val/rougeL", rouge, prog_bar=True)
+            pl_module.log("val/rougeL", rouge, on_epoch=True, prog_bar=True)
 
     def on_test_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         rouge = self.evaluator.evaluate(
@@ -237,7 +255,7 @@ class RougeCallback(cb.Callback):
             verbose=self.verbose,
             subsample=self.subsample,
         )
-        pl_module.log("test/rougeL", rouge, prog_bar=True)
+        pl_module.log("test/rougeL", rouge, on_epoch=True, prog_bar=True)
 
 
 class NanoMMLUCallback(cb.Callback):
@@ -267,7 +285,7 @@ class NanoMMLUCallback(cb.Callback):
                 verbose=self.verbose,
                 subsample=self.subsample,
             )
-            pl_module.log("test/mmlu", em["all"]["mean"], prog_bar=True)
+            pl_module.log("val/mmlu", em, on_epoch=True, prog_bar=True)
 
     def on_test_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         em = self.evaluator.evaluate(
@@ -276,7 +294,7 @@ class NanoMMLUCallback(cb.Callback):
             verbose=self.verbose,
             subsample=self.subsample,
         )
-        pl_module.log("test/mmlu", em["all"]["mean"], prog_bar=True)
+        pl_module.log("test/mmlu", em, on_epoch=True, prog_bar=True)
 
 
 class MMLUCallback(cb.Callback):

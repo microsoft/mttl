@@ -12,7 +12,6 @@ from mttl.models.modifiers.base import (
 from mttl.models.modifiers.lora import LoRA, LoRAConfig
 from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
 from mttl.models.modifiers.expert_containers.selectors import *
-from mttl.models.modifiers.modify_model import get_modifier_type
 from mttl.models.modifiers.expert_containers.module_graph import Expert
 
 
@@ -188,6 +187,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
 
         for _, expert_module in self.experts.items():
             expert_module.merge_with_layer()
+
         self.merged_expert_names.extend(self.experts)
         self.experts.clear()
 

@@ -30,7 +30,12 @@ class DatasetConfig:
     truncation_side: str = "right"
     model_family: str = "gpt"
     train_on_inputs: bool = False
+    add_eos_to_targets: bool = True
     finetune_task_name: str = None
+    subsample_train: int = None
+    subsample_dev: int = None
+    subsample_test: int = None
+    subsample: int = -1
 
 
 @dataclass
@@ -53,6 +58,7 @@ class DefaultCollator:
     for_generation: bool = False
     train_on_inputs: bool = False
     task_to_id: dict = None
+    add_eos_to_targets: bool = True
 
     def enforce_eos(self, targets):
         # simulate the default behaviour of LLamatokenizer, when adding eos token and truncating: the last token must always be eos
@@ -94,7 +100,10 @@ class DefaultCollator:
                 labels_[i] = " " + labels_[i]
 
         # adds the eos token
-        labels_ = [l + " " + self.tokenizer.eos_token for l in labels_]
+        labels_ = [
+            l + ((" " + self.tokenizer.eos_token) if self.add_eos_to_targets else "")
+            for l in labels_
+        ]
         return sources_, labels_
 
     def prepare_inputs_for_seq2seq_family(self, sources, labels):
@@ -353,6 +362,7 @@ def subsample_dst(dataset, subsample: int):
 
 class DefaultDataModule(LightningDataModule):
     def train_dataloader(self, subsample=None):
+        subsample = subsample or self.config.subsample
         train_dataset = self.train_dataset
         if subsample and subsample > 0:
             train_dataset = subsample_dst(train_dataset, subsample)
@@ -368,6 +378,7 @@ class DefaultDataModule(LightningDataModule):
         )
 
     def val_dataloader(self, subsample=None, shuffle=False):
+        subsample = subsample or self.config.subsample
         dev_dataset = self.dev_dataset
         if subsample and subsample > 0:
             dev_dataset = subsample_dst(dev_dataset, subsample)
@@ -383,6 +394,7 @@ class DefaultDataModule(LightningDataModule):
         )
 
     def test_dataloader(self, subsample=None, shuffle=False):
+        subsample = subsample or self.config.subsample
         test_dataset = self.test_dataset
         if subsample and subsample > 0:
             test_dataset = subsample_dst(test_dataset, subsample)
@@ -409,6 +421,7 @@ class DefaultDataModule(LightningDataModule):
             model_family=self.config.model_family,
             for_generation=self.for_generation,
             train_on_inputs=self.config.train_on_inputs,
+            add_eos_to_targets=self.config.add_eos_to_targets,
             task_to_id=self.task_to_id,
         )
 
@@ -459,8 +472,7 @@ class DefaultDataModule(LightningDataModule):
         )
         return train_dataset, dev_dataset
 
-    def subsample_dataset(self, ds_name, n_samples):
-        dataset = getattr(self, ds_name)
+    def subsample_dataset(self, dataset, n_samples):
         total_size = len(dataset)
         # make this deterministic to always sample the same subset
         rng = torch.Generator().manual_seed(1234)
@@ -469,7 +481,8 @@ class DefaultDataModule(LightningDataModule):
             subsampled_dataset = dataset.select(idxs)
         else:
             subsampled_dataset = torch.utils.data.Subset(dataset, idxs)
-        setattr(self, ds_name, subsampled_dataset)
+
+        return subsampled_dataset
 
     def __init__(
         self, config: Union[DatasetConfig, Any], for_generation=False, val_mixin=None
@@ -483,12 +496,24 @@ class DefaultDataModule(LightningDataModule):
         self.for_generation = for_generation
         self.tokenizer = get_tokenizer(config, for_generation=for_generation)
         self.setup_dataset()
+        self.post_setup_dataset()
 
     def setup(self, stage=None):
         pass
 
     def setup_dataset(self):
         pass
+
+    def post_setup_dataset(self):
+        for split in ["train", "dev", "test"]:
+            subsample = getattr(self.config, f"subsample_{split}", None)
+            if subsample:
+                logger.info(f"subsampling the {split} dataset to {subsample} samples")
+                dataset = getattr(self, f"{split}_dataset")
+                sub_dataset = self.subsample_dataset(dataset, subsample)
+                setattr(self, f"{split}_dataset", sub_dataset)
+
+        self.print_infos()
 
 
 class MultiChoiceDataModule(DefaultDataModule):

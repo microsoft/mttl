@@ -2,7 +2,10 @@ import tqdm
 import os
 from evaluate import load
 
-from mttl.evaluators.base import Evaluator, GenerationMixin, switch_to_eval_mode
+from mttl.evaluators.base import (
+    GenerativeEvaluator,
+    switch_to_eval_mode,
+)
 from mttl.utils import logger
 
 
@@ -32,7 +35,7 @@ def filter_code(completion: str) -> str:
     return completion.split("\n\n")[0]
 
 
-class CodeEvaluator(Evaluator, GenerationMixin):
+class CodeEvaluator(GenerativeEvaluator):
     def __init__(self, datamodule, use_vllm=False, generation_kwargs=None):
         super().__init__(
             datamodule=datamodule,
@@ -50,6 +53,8 @@ class CodeEvaluator(Evaluator, GenerationMixin):
         num_batches=None,
         verbose=True,
         shuffle=False,
+        output_path=None,
+        **kwargs,
     ):
         dataloader = self.get_dataloader(split, subsample, shuffle=shuffle)
 

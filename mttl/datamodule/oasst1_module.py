@@ -16,4 +16,3 @@ class OA1Module(DefaultDataModule):
             dataset = Oasst1Dataset(self.config.data_dir)
 
         self.train_dataset, self.dev_dataset = self.create_train_valid_split(dataset)
-        self.print_infos()

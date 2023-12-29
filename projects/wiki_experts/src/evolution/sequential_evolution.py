@@ -3,6 +3,7 @@ import sys
 import copy
 import torch
 import wandb
+import re
 import numpy as np
 import seaborn as sns
 from dataclasses import replace
@@ -15,12 +16,17 @@ from huggingface_hub import create_repo, login, HfApi
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
+from projects.wiki_experts.train_experts_main import get_datamodule
 from projects.wiki_experts.src.evolution.utils import (
     get_loss,
     init_wandb_logger,
     TableLogger,
+    get_task_expert,
+    get_svd_embedding,
+    remove_outdated_experts_from_library,
 )
 
+from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from mttl.models.modifiers.expert_containers.expert_library import (
     get_best_expert_for_task,
     get_best_expert_for_score,
@@ -29,8 +35,12 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     ExpertLibrary,
     Score,
 )
-from projects.wiki_experts.src.evolution.train_router import train_router
-from projects.wiki_experts.src.evolution.evaluators import Evaluator, prepare_evaluator
+from projects.wiki_experts.src.evolution.train_router import train_module
+from projects.wiki_experts.src.evolution.evaluators import (
+    Evaluator,
+    prepare_evaluator,
+    EvalCallback,
+)
 
 
 from mttl.models.modifiers.expert_containers.module_graph import Expert
@@ -41,13 +51,21 @@ from projects.wiki_experts.src.evolution.config import (
 )
 from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
 from mttl.utils import setup_logging, logger
-from projects.wiki_experts.src.expert_model import MultiExpertModel
+from projects.wiki_experts.src.expert_model import (
+    MultiExpertModel,
+)
 from projects.wiki_experts.src.evolution.experiment_state import ExperimentState
 from mttl.vllm_engines.engines import free_memory
 from projects.wiki_experts.src.evolution.transfer_matrix import (
     eval_all_experts_on_task,
     eval_expert_on_task,
 )
+from mttl.models.modifiers.expert_containers.library_transforms import (
+    SVDEmbeddingTransform,
+    SVDEmbeddingTransformConfig,
+)
+from projects.wiki_experts.src.evolution.evolvers import EVOL_FUNCTIONS
+
 
 DEBUG = True
 if "AMLT_OUTPUT_DIR" in os.environ:
@@ -65,11 +83,19 @@ default_score: Score = None
 to_repo_id = None
 
 
-def get_task_expert(task, expert_lib):
-    parent_exp: Expert = get_best_expert_for_score(expert_lib, default_score.hash)
-    if parent_exp is None and task in expert_lib.tasks:
-        parent_exp = get_best_expert_for_task(expert_lib, task, default_score.hash)
-    return parent_exp
+def load_expert_into_model(module, expert, task):
+    if expert is not None:
+        model_copy = copy.deepcopy(module)
+        if isinstance(expert, str):
+            model_copy.load_from_module_dict({task: expert}, action="route")
+        elif isinstance(expert, Expert):
+            model_copy.add_expert_instance(expert, task, action="route")
+        else:
+            raise ValueError(f"Checkpoint type {type(expert)} not supported")
+        if len(model_copy.experts) == 1:
+            model_copy.replace_container_with_expert(task, get_expert_instance=False)
+        module = model_copy
+    return module
 
 
 def log_best_weights(module_dict, best_weights, task, prefix=""):
@@ -94,160 +120,10 @@ def log_best_weights(module_dict, best_weights, task, prefix=""):
         plt.clf()
 
 
-def optimize_evol_expert_routing(
-    args: EvolExpertConfig,
-    task,
-    module: MultiExpertModel,
-    expert_lib: ExpertLibrary,
-    evaluator_train: Evaluator,
-    evaluator_valid: Evaluator,
-) -> Expert:
-    if args.evol_expert_routing == "nevergrad":
-        logger.info(
-            f"############ Optimizing with nevergrad for {task} for {args.n_ng_iterations} iterations"
-        )
-        get_loss_function = partial(get_loss, evaluator=evaluator_train)
-        base_module = get_task_expert(task, expert_lib)
-        base_module_name = base_module.name if base_module is not None else None
-
-        optimizer = NGRoutingOptimizer(
-            model=module,
-            expert_lib=expert_lib,
-            get_loss=get_loss_function,
-            budget=args.n_ng_iterations,
-            base_module_name=base_module_name,
-            action="route",
-            regularizer_factor=args.regularizer_factor,
-        )
-        best_weights, best_graph_string = optimizer.optimize()
-        best_weights = best_weights.tolist()
-        # log_best_weights(expert_lib, best_weights, task, prefix=log_prefix)
-
-        model_optimal = copy.deepcopy(module)
-        model_optimal.load_from_graph_string(
-            best_graph_string, "route", expert_library=expert_lib
-        )
-        expert = model_optimal.replace_container_with_expert("new_task")
-
-        logger.info("Found best graph: {}".format(best_graph_string))
-        logger.info("Found best weights: {}".format(best_weights))
-        log_row["weights"] = str(
-            {t: v for t, v in zip(expert_lib.keys(), best_weights)}
-        )
-        expert.expert_info.parent_node = best_graph_string
-
-    elif args.evol_expert_routing in ["sgd", "sgd_full_ft"]:
-        config_copy = copy.deepcopy(args)
-        config_copy.finetune_task_name = task
-        config_copy.output_dir = os.path.join(
-            args.output_dir, f"sgd_router_{task}_ai{a_i}"
-        )
-        if args.evol_expert_routing == "sgd_full_ft":
-            # we also train the loras
-            config_copy.trainable_param_names += "|.*module_logits.*|.*selector.*"
-        elif args.evol_expert_routing == "sgd":
-            config_copy.trainable_param_names = "|.*module_logits.*|.*selector.*"
-
-        config_copy.warmup_steps = 0
-
-        # dm_train must have for generation = False here
-        dm_train = evaluator_train.datamodule
-        dm_train = (
-            prepare_evaluator(
-                config_copy,
-                config_copy.dataset,
-                tasks=task,
-                split="train",
-                for_generation=False,
-            ).datamodule
-            if dm_train.for_generation
-            else dm_train
-        )
-
-        assert dm_train.for_generation == False
-        dm_eval = evaluator_valid.datamodule
-
-        # eval 10 times but with at least 10 updates interval
-        total_updtes = (
-            len(dm_train.train_dataloader())
-            * args.num_train_epochs
-            // args.gradient_accumulation_steps
-        )
-        eval_every = max(10, total_updtes // 10)
-        loggers = [] if wandb_logger is None else [wandb_logger]
-        if DEBUG:
-            eval_every = 300
-            from mttl.datamodule.base import subsample_dst
-
-            dm_train.train_dataset = subsample_dst(dm_train.train_dataset, 100)
-
-        best_weights, expert = train_router(
-            config_copy,
-            dm_train,
-            dm_eval,
-            expert_lib=expert_lib,
-            val_check_interval=eval_every,
-            loggers=loggers,
-            logging_prefix=log_prefix,
-            silent=not DEBUG,
-        )
-
-        # cleanup: remove config_copy.output_dir stuff, as we have out expert already
-        if os.path.exists(config_copy.output_dir):
-            try:
-                os.system(f"rm -rf {config_copy.output_dir}")
-            except Exception as e:
-                logger.error(e)
-
-        logger.info("Found best weights: {}".format(best_weights))
-        log_row["weights"] = str(best_weights)
-        expert.expert_info.expert_task_name = task
-
-    else:
-        raise ValueError(
-            f"Optimizer {args.evol_expert_routing} not supported. Choose from 'nevergrad' or 'sgd' or 'sgd_full_ft"
-        )
-
-    return expert
-
-
-def maybe_finetune_module(
-    args: EvolExpertConfig,
-    task,
-    new_module,
-):
-    module_path_fine_tuned = None
-    if args.finetune_new_expert:
-        raise NotImplementedError("Finetuning new expert not implemented yet")
-        from projects.wiki_experts.src.evolution._finetune_expert import finetune_expert
-        from mttl.datamodule.base import AutoDataModule
-
-        dm = AutoDataModule.create(
-            args.dataset,
-            model=args.model,
-            model_family=args.model_family,
-            for_generation=False,
-            validation_portion=args.validation_portion,
-            finetune_task_name=task,
-            train_batch_size=8,
-            predict_batch_size=16,
-        )
-        args_copy = copy.deepcopy(args)
-        args_copy.num_train_epochs = 1
-        args_copy.model_modifier = "lora"
-        val_check_interval = args.gradient_accumulation_steps * 4
-        module_path_fine_tuned = finetune_expert(
-            args_copy,
-            dm=dm,
-            module_dest=new_momodule_path,
-            val_check_interval=val_check_interval,
-        )
-    return module_path_fine_tuned
-
-
 def setup(args: EvolExpertConfig):
     seed_everything(args.seed, workers=True)
     setup_logging(args.output_dir)
+
     global wandb_logger
     wandb_logger = init_wandb_logger(args)
     if DEBUG:
@@ -261,10 +137,14 @@ def setup(args: EvolExpertConfig):
         login(token=args.hf_token_hub)
 
     os.makedirs(local_lib_location, exist_ok=True)
-    expert_lib = LocalExpertLibrary.from_remote(
+    print("Local lib location", local_lib_location)
+    expert_lib = LocalExpertLibrary.create_from_remote(
         HFExpertLibrary(args.hf_repo_id), local_lib_location
     )
     expert_lib.ignore_sliced = True
+
+    # make sure we only consider modules of the latest version
+    remove_outdated_experts_from_library(expert_lib)
 
     exper_state = ExperimentState(
         config=args,
@@ -272,7 +152,7 @@ def setup(args: EvolExpertConfig):
         expert_lib=expert_lib,
         results_table=TableLogger(),
     )
-    # dont want to overwrite the exp lib from which we start here for now
+
     if args.experiment_state_path is not None:
         exper_state.load_from_path(args.experiment_state_path)
 
@@ -287,10 +167,10 @@ def setup(args: EvolExpertConfig):
         login(token=token)
         user_name = HfApi().whoami(token=token)["name"]
 
-        run_name: str = os.getenv("AMLT_JOB_NAME", "_test_evol")
+        exp_name: str = os.getenv("AMLT_JOB_NAME", "_test_evol")
         # if args.to_repo_id is None:
-        #     args.to_repo_id = args.hf_repo_id + run_name
-        to_repo_id = user_name + "/" + run_name
+        #     args.to_repo_id = args.hf_repo_id + exp_name
+        to_repo_id = user_name + "/" + exp_name
         create_repo(to_repo_id, token=token, exist_ok=True)
 
     print("###### Tasks", tasks)
@@ -305,21 +185,27 @@ def retrieve_experts_for_task(
     task,
     evaluator=None,
     task_expert=None,
+    use_only_modules_for_tasks=None,
 ) -> ExpertLibrary:
     """
     Retrieves a set of sk experts that are most likley to be useful for the current task
     """
+    expert_lib_copy = copy.deepcopy(expert_lib)
+    if use_only_modules_for_tasks is not None:
+        for k, expert in list(expert_lib_copy.items()):
+            if expert.expert_info.expert_task_name not in use_only_modules_for_tasks:
+                expert_lib_copy.remove_expert(k)
 
     if sk <= 0 or sk >= len(expert_lib):
-        return expert_lib
+        return expert_lib_copy
     # silent the logger
+    if metric not in ["random", "lora_sim", "loss", "rougeL", "lib_embeddings"]:
+        return expert_lib_copy
+
     logger.disabled = True
-    if metric not in ["random", "lora_sim", "loss", "rougeL"]:
-        return expert_lib
-    expert_lib_copy = copy.deepcopy(expert_lib)
 
     if task_expert is None:
-        task_expert: Expert = get_task_expert(task, expert_lib)
+        task_expert: Expert = get_task_expert(task, expert_lib, default_score)
 
     module = copy.deepcopy(module)
     if metric == "random":
@@ -330,6 +216,7 @@ def retrieve_experts_for_task(
         sel_exp_names = np.random.choice(keys, sk, replace=False)
 
     if metric == "lora_sim":
+        # TODO: check that we have embeddings in the expert library
         if task_expert is None:
             return expert_lib_copy
         module.load_from_module_dict(expert_lib_copy)
@@ -338,6 +225,37 @@ def retrieve_experts_for_task(
         task_module_name = task_expert.name
         # compute cosine similarity between each expert and current task's expert, keep top sk
         emb_tasks = module.get_task_embeddings()
+        # compare this task's embed with  other
+        if task_module_name not in emb_tasks:
+            return expert_lib_copy
+        task_emb = emb_tasks[task_module_name]
+        similarities = []
+        t_names = []
+        for t, emb in emb_tasks.items():
+            if t != task_module_name:
+                similarities.append(
+                    cosine_similarity(task_emb.unsqueeze(0), emb.unsqueeze(0)).item()
+                )
+                t_names.append(t)
+        similarities = {k: v for k, v in zip(t_names, similarities)}
+        sel_exp_names = sorted(similarities, key=similarities.get, reverse=True)[:sk]
+
+    elif metric == "lib_embeddings":
+        if task_expert is None:
+            return expert_lib_copy
+        module.load_from_module_dict(expert_lib_copy)
+        from torch.nn.functional import cosine_similarity
+
+        task_module_name = task_expert.name
+        # compute cosine similarity between each expert and current task's expert, keep top sk
+        emb_tasks = {}
+        emb_tasks[task_module_name] = get_svd_embedding(
+            expert_lib_copy, task_module_name
+        )
+        for key, metadatum in expert_lib_copy.data.items():
+            emb_tasks[key] = get_svd_embedding(expert_lib_copy, metadatum.expert_name)
+            emb_tasks[key] = torch.tensor(emb_tasks[metadatum.expert_name])
+
         # compare this task's embed with  other
         if task_module_name not in emb_tasks:
             return expert_lib_copy
@@ -418,14 +336,38 @@ def retrieve_experts_for_task(
     return expert_lib_copy
 
 
+def eval_callbacks(
+    args, callbacks: list[EvalCallback], module, expert: Expert, task, sufix=""
+):
+    log_row = {}
+    for cb in callbacks:
+        eval_module = load_expert_into_model(module, expert, task)
+        if isinstance(cb, partial):
+            local_config = copy.deepcopy(args)
+            local_config.finetune_task_name = task
+            cb = cb(config=local_config, subsample=100 if DEBUG else -1)
+
+        score = cb.evaluate_model(model=eval_module)
+        log_row[f"{cb.name}_{sufix}"] = score
+        del eval_module
+        free_memory()
+    return log_row
+
+
 def active_task_iteration(
     args: EvolExpertConfig,
     task: str,
     expert_lib: HFExpertLibrary,
     module: MultiExpertModel,
     ai=None,
+    callbacks: list[EvalCallback] = [],
+    update_library: bool = True,
+    wandb_logger_local=None,
 ):
-    global a_i, log_prefix, log_row, default_score
+    global a_i, log_prefix, log_row, default_score, wandb_logger
+    wandb_logger = (
+        wandb_logger_local if wandb_logger_local is not None else wandb_logger
+    )
     a_i = ai if ai is not None else a_i
     log_row = {"act_i": a_i}
     log_row["task"] = task
@@ -445,7 +387,7 @@ def active_task_iteration(
         )
 
     # assert task in expert_lib.tasks
-    parent_exp: Expert = get_task_expert(task, expert_lib)
+    parent_exp: Expert = get_task_expert(task, expert_lib, default_score)
     if parent_exp is not None:
         base_perf = {
             "train": expert_lib.get_score(
@@ -513,6 +455,11 @@ def active_task_iteration(
                 ),
             )
 
+        log: dict = eval_callbacks(
+            args, callbacks, module, parent_exp, task, sufix="base_expert"
+        )
+        log_row = {**log_row, **log}
+
     log_row[f"{args.eval_metric}_base_test"] = (
         base_perf["test"] if parent_exp is not None else -10e10
     )
@@ -532,18 +479,37 @@ def active_task_iteration(
         task,
         evaluator=evaluator_valid,
         task_expert=parent_exp,
+        use_only_modules_for_tasks=args.finetune_task_name
+        if args.use_only_modules_for_tasks
+        else None,
     )
     # log retrieved experts
     log_row["retrieved_experts"] = str(list(retrieved_expert_lib.keys()))
 
-    optimal_expert: Expert = optimize_evol_expert_routing(
-        args,
-        task,
-        module,
-        retrieved_expert_lib,
-        evaluator_train,
-        evaluator_valid,
+    # prepare hps for evolution step
+    config_copy = copy.deepcopy(args)
+    config_copy.finetune_task_name = task
+    config_copy.output_dir = os.path.join(
+        args.output_dir, f"{args.evol_expert_routing}_router_{task}_ai{a_i}"
     )
+    config_copy.warmup_steps = (
+        args.evolution_warmup_steps
+    )  # doubled parameter due historiucal reasons
+
+    optimal_expert, log = EVOL_FUNCTIONS[config_copy.evol_expert_routing](
+        args=config_copy,
+        task=task,
+        module=module,
+        expert_lib=retrieved_expert_lib,
+        evaluator_train=evaluator_train,
+        evaluator_valid=evaluator_valid,
+        log_prefix=log_prefix,
+        wandb_logger=wandb_logger,
+        debug=DEBUG,
+        default_score=default_score,
+    )
+    optimal_expert: Expert = optimal_expert
+    log_row = {**log_row, **log}
 
     optimized_perf: dict = eval_expert_on_task(
         task,
@@ -600,36 +566,17 @@ def active_task_iteration(
     )
 
     ########################################################################
-    module_path_fine_tuned = maybe_finetune_module(args, task, optimal_expert)
-    if module_path_fine_tuned is not None:
-        raise NotImplementedError("Fine tuning new expert not implemented yet")
-        fine_tuned_perf = eval_expert_on_task(
-            task,
-            module,
-            module_path_fine_tuned,
-            None,
-            evaluator_valid,
-            evaluator_test,
-        )
-        log_row[f"{args.eval_metric}_test_fine_tuned"] = fine_tuned_perf["test"]
-        log_row[f"{args.eval_metric}_valid_finetuned"] = fine_tuned_perf["valid"]
-
-        improved_on_valid_ft = (
-            log_row[f"{args.eval_metric}_valid_finetuned"]
-            > log_row[f"{args.eval_metric}_valid_max"]
-        )
-        log_row[f"{args.eval_metric}_test_selected_fine_tuned"] = (
-            log_row[f"{args.eval_metric}_test_fine_tuned"]
-            if improved_on_valid_ft
-            else log_row[f"{args.eval_metric}_test_selected"]
-        )
-        if improved_on_valid_ft:
-            new_module_path = module_path_fine_tuned
-            improved_on_valid = improved_on_valid_ft
-
+    # log callbacks
+    selected_expert = (
+        optimal_expert if improved_on_valid or parent_exp is None else parent_exp
+    )
+    log: dict = eval_callbacks(
+        args, callbacks, module, selected_expert, task, sufix="selected_expert"
+    )
+    log_row = {**log_row, **log}
     ########################################################################
     # replace the module in the expertlib with the new one or add new module
-    if improved_on_valid or DEBUG:
+    if (improved_on_valid or DEBUG) and update_library:
         parent_exp_name = "None" if parent_exp is None else parent_exp.name
         # make sure the library is on hf
         if args.new_module_action == "replace":
@@ -717,6 +664,12 @@ def main(args: EvolExpertConfig):
         )
 
         for task in tasks_left:
+            if args.retrieve_with == "lib_embeddings":
+                svd_embedder = SVDEmbeddingTransform(
+                    SVDEmbeddingTransformConfig(sparsity_threshold=0.5)
+                )
+                svd_embedder.transform(expert_lib, upload_to_hf=True)
+
             log_row = active_task_iteration(
                 args, task, expert_lib, module=module
             )  # finds a better module for the task, and eds/replaces it into the library
