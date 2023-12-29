@@ -35,8 +35,9 @@ def get_optimizer(model, args, no_decay=None):
                 param_groups["router"]["params"].append(param)
             else:
                 param_groups["others"]["params"].append(param)
-            param.requires_grad = True
+
             trainable_param_names.add(param_name)
+            param.requires_grad = True
         else:
             param.requires_grad = False
 
