@@ -6,6 +6,7 @@ import numpy as np
 
 from torch.distributions.relaxed_bernoulli import RelaxedBernoulli
 from mttl.global_vars import EPS
+from mttl.utils import logger
 
 from mttl.models.modifiers.base import ModifierConfig, ModifyMixin
 from mttl.models.modifiers.lora import SkilledLoRA, SkilledLoRAConfig
@@ -128,6 +129,48 @@ class PolytroponSelector(RoutingSelector):
         return module_weights
 
 
+@register_selector("per_token_poly")
+class PerTokenPolytroponSelector(RoutingSelector):
+    def __init__(self, config, **kwargs):
+        super().__init__(config)
+
+        self.n_splits = config.n_splits
+        self.n_skills = config.n_skills
+        self.dropout = config.module_logits_dropout
+
+        self.module_logits = nn.Parameter(
+            torch.empty(
+                (config.vocab_size, config.n_splits * config.n_skills)
+            ).uniform_(-1e-3, 1e-3)
+        )
+
+    def resize_module_logits(self, n_tasks):
+        logger.warning(
+            "Resizing module logits is a no-op for PerTokenPolytroponSelector"
+        )
+
+    def forward(self, routing_infos, **kwargs):
+        # Note : encoder - decoder models not currently supported.
+        input_ids = routing_infos.input_ids
+
+        if input_ids.max().item() >= self.module_logits.shape[0]:
+            raise ValueError(
+                "Poly selector encountered a larger number of tasks than provided at init. {} vs {}".format(
+                    input_ids.max().item(),
+                    self.module_logits.shape[0],
+                )
+            )
+
+        module_logits = self.module_logits[input_ids]
+        module_logits = module_logits.view(
+            *input_ids.shape, self.n_splits, self.n_skills
+        )
+        module_logits = torch.sigmoid(module_logits)
+        module_weights = module_logits / (module_logits.sum(dim=-1, keepdim=True) + EPS)
+
+        return module_weights
+
+
 @dataclass
 class PolyLoRAConfig(SkilledLoRAConfig, PolytroponConfig):
     pass
@@ -142,10 +185,11 @@ class PolyLoRA(SkilledLoRA, RoutingMixin):
 
     def forward(self, input):
         task_id = self.routing_infos.task_ids
-        repeat = input.size(0) // task_id.size(0)
+        repeat = input.size(0) / task_id.size(0)
 
         # this repeat follows the patten in `model.predict()` line 152
-        if repeat:
+        if repeat != 1.0:
+            breakpoint()
             self.routing_infos.repeat_interleave(repeat)
 
         mixing_weights = self.selector(self.routing_infos).to(dtype=input.dtype)
@@ -158,6 +202,44 @@ class PolyLoRA(SkilledLoRA, RoutingMixin):
     def modify_transformer(cls, transformer, config, optional_wrapper=None):
         if config.router_selector is None:
             config.router_selector = "poly"
+
+        return modify_with_routing(cls, transformer, config, SkillWrapper)
+
+
+@dataclass
+class PerTokenPolyLoRAConfig(PolyLoRAConfig):
+    pass
+
+
+@register_modifier("per_token_poly", config_cls=PerTokenPolyLoRAConfig)
+class PerTokenPolyLoRA(PolyLoRA):
+    def forward(self, input):
+        input_ids = self.routing_infos.input_ids
+        repeat = input.size(0) / input_ids.size(0)
+
+        # this repeat follows the patten in `model.predict()` line 152
+        if repeat != 1.0:
+            self.routing_infos.input_ids = (
+                self.routing_infos.input_ids.repeat_interleave(repeat, dim=0)
+            )
+
+        # Phi-2 generation specific
+        if input.size(1) != input_ids.size(1):
+            assert input.size(1) == 1
+            self.routing_infos.input_ids = self.routing_infos.input_ids[:, [-1]]
+
+        mixing_weights = self.selector(self.routing_infos).to(dtype=input.dtype)
+        # add n_splits dimension
+        if mixing_weights.ndim == 3:
+            mixing_weights = mixing_weights.unsqueeze(1)
+
+        return SkilledLoRA.forward(self, input, mixing_weights)
+
+    @classmethod
+    def modify_transformer(cls, transformer, config, optional_wrapper=None):
+        config.router_selector = "per_token_poly"
+        if not hasattr(config, "vocab_size"):
+            config.vocab_size = transformer.get_input_embeddings().num_embeddings
 
         return modify_with_routing(cls, transformer, config, SkillWrapper)
 

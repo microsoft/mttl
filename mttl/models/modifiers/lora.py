@@ -232,31 +232,43 @@ class SkilledLoRA(LoRA):
 
         bs = input.size(0)
 
-        # these are task ids
-        if weights.ndim == 1:
-            # use indexing!
-            wrm_steps = 0
-            if self.training_steps < wrm_steps:
-                A = self.lora_a[torch.zeros_like(weights).long()]
-                B = self.lora_b[torch.zeros_like(weights).long()]
-            else:
-                if self.training_steps == wrm_steps:
-                    self.lora_a.data.copy_(
-                        self.lora_a.data[:1].repeat(self.n_skills, 1, 1, 1)
-                    )
-                    self.lora_b.data.copy_(
-                        self.lora_b.data[:1].repeat(self.n_skills, 1, 1, 1)
-                    )
-                A = self.lora_a[weights.long(), :, :, :]
-                B = self.lora_b[weights.long(), :, :, :]
-        else:
-            weights = weights.to(self.lora_a.dtype)
-            A = torch.einsum("bqs,sqdr->bqdr", (weights, self.lora_a))
-            B = torch.einsum("bqs,srqd->brqd", (weights, self.lora_b))
+        if weights.ndim < 4:
+            # these are task ids
+            if weights.ndim == 1:
+                # use indexing!
+                wrm_steps = 0
+                if self.training_steps < wrm_steps:
+                    A = self.lora_a[torch.zeros_like(weights).long()]
+                    B = self.lora_b[torch.zeros_like(weights).long()]
+                else:
+                    if self.training_steps == wrm_steps:
+                        self.lora_a.data.copy_(
+                            self.lora_a.data[:1].repeat(self.n_skills, 1, 1, 1)
+                        )
+                        self.lora_b.data.copy_(
+                            self.lora_b.data[:1].repeat(self.n_skills, 1, 1, 1)
+                        )
+                    A = self.lora_a[weights.long(), :, :, :]
+                    B = self.lora_b[weights.long(), :, :, :]
+            elif weights.ndim == 3:
+                weights = weights.to(self.lora_a.dtype)
+                A = torch.einsum("bqs,sqdr->bqdr", (weights, self.lora_a))
+                B = torch.einsum("bqs,srqd->brqd", (weights, self.lora_b))
 
-        A = A.reshape(bs, self.in_features, self.rank)
-        B = B.reshape(bs, self.rank, self.out_features)
-        adapter_out = input_lora.bmm(A).bmm(B) * self.scaling
+            A = A.reshape(bs, self.in_features, self.rank)
+            B = B.reshape(bs, self.rank, self.out_features)
+            adapter_out = input_lora.bmm(A).bmm(B) * self.scaling
+
+        elif weights.ndim == 4:
+            # per token routing
+            weights = weights.to(self.lora_a.dtype)
+            A = torch.einsum("blqs,sqdr->blqdr", (weights, self.lora_a))
+            B = torch.einsum("blqs,srqd->blqrd", (weights, self.lora_b))
+            A = A.reshape(bs, -1, self.in_features, self.rank)
+            B = B.transpose(2, 3).reshape(bs, -1, self.rank, self.out_features)
+            adapter_out = torch.einsum("bld,bldr->blr", (input_lora, A))
+            adapter_out = torch.einsum("blr,blrd->bld", (adapter_out, B)) * self.scaling
+
         return layer_out + adapter_out.to(input.dtype)
 
     @classmethod
