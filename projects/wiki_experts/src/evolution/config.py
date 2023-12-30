@@ -5,8 +5,6 @@ from collections import defaultdict
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 from projects.wiki_experts.src.config import ExpertConfig
-from mttl.models.modifiers.expert_containers.module_graph import ExpertInfo
-import mttl.datamodule.flan_tasks
 import re
 
 
@@ -32,7 +30,6 @@ class EvolExpertConfig(ExpertConfig):
         self.action = "route"
         self.init_router_best = False
         self.subsample_ng_train_set = -1
-        self.use_vllm = False
         self.regularizer_factor = 0.0
         self.n_ng_iterations = 2
         self.n_active_iterations = 1
@@ -49,6 +46,19 @@ class EvolExpertConfig(ExpertConfig):
         self.retrieve_with = "lora_sim"  # random, lora_sim, loss, rougeL
         self.upload_lib_to_hub = False
         self.to_repo_id: str = None
+
+        self.evolution_warmup_steps = 0
+        self.evol_n_eval_times = 10
+        self.subsample_train_set = -1
+
+        self.use_only_modules_for_tasks = (
+            False  # if true, only use modules for the given task set for evolution
+        )
+
+    def post_init(self):
+        super().post_init()
+        if isinstance(self.finetune_task_name, str):
+            self.finetune_task_name = self.finetune_task_name.split(",")
 
     @property
     def __key(self):

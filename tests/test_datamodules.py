@@ -15,6 +15,8 @@ def test_flan(task_name):
             train_batch_size=4,
             predict_batch_size=4,
             finetune_task_name=task_name,
+            include_template_type="zs_noopt",
+            include_task_source="P3,Flan2021",
         )
     )
     if task_name is None:
@@ -153,6 +155,8 @@ def test_truncation_side():
         train_batch_size=4,
         predict_batch_size=100,
         truncation_side="left",
+        include_template_type="zs_noopt",
+        include_task_source="P3,Flan2021",
     )
     dl = flan.val_dataloader()
     batch = next(iter(dl))
@@ -176,6 +180,8 @@ def test_truncation_side():
         train_batch_size=4,
         predict_batch_size=100,
         truncation_side="left",
+        include_template_type="zs_noopt",
+        include_task_source="P3,Flan2021",
     )
     dl = flan.val_dataloader()
     batch = next(iter(dl))
@@ -196,6 +202,8 @@ def test_auto_module():
         model_family="seq2seq",
         train_batch_size=4,
         predict_batch_size=4,
+        include_template_type="zs_noopt",
+        include_task_source="P3,Flan2021",
     )
     assert len(flan.train_dataset) == 559
     assert len(flan.task_names) == 235
@@ -291,7 +299,6 @@ def test_mmlu_spaces_and_merges(task_name=None):
 def test_multichoice_collator():
     from mttl.datamodule.base import MultipleChoiceCollator
     from mttl.datamodule.utils import get_tokenizer_with_args
-    from transformers import AutoTokenizer
 
     tokenizer = get_tokenizer_with_args(
         "EleutherAI/gpt-neo-125m", "gpt", "left", "left", False

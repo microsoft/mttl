@@ -46,16 +46,7 @@ def run_eval(args):
     mmlu = MMLUEvaluator(config)
     module = MoETrainer.load_from_checkpoint(args.checkpoint).to("cuda")
     scores = mmlu.evaluate(module, split=args.mmlu_test_split, shuffle=True)
-
-    with open(args.output_dir + "/mmlu.json", "w") as f:
-        import json
-
-        json.dump(scores, f)
-
-    logger.info("MMLU Accuracy: {}".format(scores["all"]["mean"]))
-    for t, v in scores.items():
-        logger.info("MMLU Accuracy {}: {}".format(t, v["mean"]))
-    del module, mmlu
+    logger.info("MMLU scores: {}".format(scores))
 
 
 if __name__ == "__main__":

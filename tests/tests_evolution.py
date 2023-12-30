@@ -9,10 +9,6 @@ from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
 from conftest import make_tiny_llama
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
-from projects.wiki_experts.src.evolution.sequential_evolution import (
-    retrieve_experts_for_task,
-)
-from projects.wiki_experts.src.evolution.evaluators import prepare_evaluator
 
 
 def create_dummy_expert(config: ExpertConfig, exp_name) -> Expert:

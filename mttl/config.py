@@ -41,6 +41,7 @@ class Config:
 
     @classmethod
     def fromdict(cls, data):
+        _ = data.pop("_updated_kwargs", None)
         return cls(kwargs=data, raise_error=False, silent=True)
 
     def asdict(self) -> Dict:
@@ -198,6 +199,7 @@ class Config:
         # Filtering configs, useful for flan flat, etc.
         self.include_template_type = "zs_noopt"
         self.include_task_source = "P3,Flan2021"
+        self.remove_phi_eval_tasks = False
 
         # Training config
         self.compute_strategy = None
@@ -228,6 +230,10 @@ class Config:
         self.eval_every = None
         self.debug = False
         self.seed = 42
+
+        self.subsample_train = None
+        self.subsample_dev = None
+        self.subsample_test = None
 
         self.ni_online_eval = False  # zero-shot online eval for ni
         self.t0_online_eval = False  # zero-shot eval for t0
@@ -310,3 +316,5 @@ class Config:
         self.soft_prompt_mlp_dim: int = None
         self.soft_prompt_hidden_dim: int = None
         self.soft_prompt_learn_kv: bool = False
+        self.prompt_placement: str = "prefix"
+        self.add_routing_token: bool = False

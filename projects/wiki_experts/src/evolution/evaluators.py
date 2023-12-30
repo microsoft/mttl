@@ -2,6 +2,7 @@ import sys
 import os
 import copy
 import torch
+import wandb
 from functools import partial
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -15,6 +16,47 @@ from mttl.evaluators import RougeEvaluator
 from mttl.datamodule.base import AutoDataModule
 from projects.wiki_experts.src.evolution.config import EvolExpertConfig
 from projects.wiki_experts.train_experts_main import get_datamodule
+
+
+class EvalCallback(ABC):
+    @abstractmethod
+    def evaluate_model(self, model, prefix=""):
+        pass
+
+
+class MMLUEvalCallback(MMLUEvaluator, EvalCallback):
+    def __init__(
+        self,
+        config,
+        name="mmlu_test_callback",
+        split="test",
+        subsample=-1,
+        use_vllm=False,
+    ):
+        self.split = split
+        from mttl.datamodule.mmlu_data_module import MMLUDataConfig
+
+        assert split in ["test"]
+        self.use_vllm = use_vllm
+        mmlu_config = MMLUDataConfig(
+            **{
+                k: v
+                for k, v in config.__dict__.items()
+                if k in MMLUDataConfig.__dataclass_fields__.keys()
+            }
+        )
+        super().__init__(mmlu_config, use_vllm=use_vllm)
+        self.subsample = subsample
+        self.name = name
+
+    def evaluate_model(self, model, prefix=""):
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model.to(device)
+        score = self.evaluate(model, self.split, self.subsample)["all"]["mean"]
+        # log
+        if wandb.run is not None:
+            wandb.log({f"{prefix}{self.name}_{self.split}": score})
+        return score
 
 
 def prepare_evaluator(
@@ -82,6 +124,7 @@ class ExtendedRougeEvaluator(RougeEvaluator, Evaluator):
         self.name = name
         self.split = split
         self.subsample = subsample
+        self.datamodule = datamodule
 
     def evaluate(self, model):
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -92,7 +135,7 @@ class ExtendedRougeEvaluator(RougeEvaluator, Evaluator):
     def get_loss(self, model, **kwargs):
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model.to(device)
-        rougeL = self.evaluate(model, **kwargs)["all"]["mean"]
+        rougeL = self.evaluate(model, **kwargs)
         return rougeL * -1.0
 
     @property
@@ -166,10 +209,7 @@ class ExtendedMMLUEvaluator(MMLUEvaluator, Evaluator):
         self.name = name
 
     def get_loss(self, model, **kwargs):
-        return (
-            self.evaluate(model, subsample=self.subsample, **kwargs)["all"]["mean"]
-            * -1.0
-        )
+        return self.evaluate(model, subsample=self.subsample, **kwargs) * -1.0
 
     @property
     def tokenizer(self):

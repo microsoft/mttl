@@ -261,7 +261,8 @@ def modify_with_routing(cls, transformer, config, optional_wrapper=None):
                             assert isinstance(transformer, T5ForConditionalGeneration)
                             in_d = transformer.config.d_model
                         else:
-                            in_d = layer.in_features
+                            # The following line will fail if `layer` is not a `nn.Linear` layer
+                            in_d = getattr(layer, "in_features", None)
 
                         selectors[identifier] = get_selector(
                             config,

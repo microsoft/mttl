@@ -11,7 +11,7 @@ from mttl.datamodule.mt_seq_to_seq_module import T0FlatModule, T0FlatConfig
 from mttl.models.encoder_decoder import EncoderDecoder
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.models.monitors import get_monitors
-from mttl.utils import get_mlf_logger, setup_logging
+from mttl.utils import add_mlf_logger, add_wandb_logger, setup_logging
 from mttl.config import Config
 
 
@@ -62,20 +62,8 @@ def run_multitask(args):
 
     # legit logging
     loggers = []
-    if os.environ.get("WANDB_API_KEY"):
-        wandb_logger = pl.loggers.WandbLogger(
-            project=args.wandb_project,
-            name=args.exp_name,
-        )
-        wandb_logger.experiment.save("*.py")
-        loggers.append(wandb_logger)
-    else:
-        wandb_logger = None
-
-    mlf_logger = get_mlf_logger()
-    if mlf_logger:
-        loggers.append(mlf_logger)
-
+    add_wandb_logger(args, loggers)
+    add_mlf_logger(loggers)
     loggers.append(pl.loggers.CSVLogger(save_dir=args.output_dir, name="csv_metrics"))
 
     kwargs = (

@@ -2,11 +2,16 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 import glob
 import io
+import re
 import json
+import sys
 from typing import Any, Dict, List, Union
 import torch
 import os
+import time
+import requests
 import numpy as np
+
 
 from huggingface_hub import (
     hf_hub_download,
@@ -86,7 +91,7 @@ class BackendEngine:
     def snapshot_download(self, repo_id, allow_patterns=None):
         raise NotImplementedError
 
-    def create_repo(self, repo_id, repo_type, exist_ok):
+    def create_repo(self, repo_id, repo_type, exist_ok, private=True):
         raise NotImplementedError
 
     def create_commit(self, repo_id, operations, commit_message):
@@ -106,6 +111,33 @@ class BackendEngine:
 
     def list_repo_files(self, repo_id):
         raise NotImplementedError
+
+
+def retry(max_retries=10, wait_seconds=60):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            for attempt in range(1, max_retries + 1):
+                try:
+                    result = func(*args, **kwargs)
+                    return result
+                except requests.exceptions.HTTPError as e:
+                    if e.response.status_code == 429:
+                        print(
+                            f"HTTPError 429: Rate limit exceeded. Attempt {attempt}/{max_retries}."
+                        )
+                        if attempt < max_retries:
+                            print(f"Waiting {wait_seconds} seconds before retrying...")
+                            time.sleep(wait_seconds)
+                    else:
+                        # Re-raise the HTTPError if it's not a 429 error
+                        raise e
+                except Exception as e:
+                    raise e
+            raise RuntimeError(
+                f"Function {func.__name__} failed after {max_retries} attempts."
+            )
+
+        return wrapper
 
 
 class HuggingfaceHubEngine(BackendEngine):
@@ -142,7 +174,7 @@ class LocalFSEngine(BackendEngine):
     def snapshot_download(self, repo_id, allow_patterns=None):
         return repo_id
 
-    def create_repo(self, repo_id, repo_type, exist_ok):
+    def create_repo(self, repo_id, repo_type, exist_ok, private=True):
         os.makedirs(repo_id, exist_ok=exist_ok)
 
     def create_commit(self, repo_id, operations, commit_message):
@@ -218,7 +250,9 @@ class ExpertLibrary:
                     repo_id, repo_type="model", exist_ok=True, private=True
                 )
         except Exception as e:
-            logger.error("Error creating repo %s\n", repo_id)
+            logger.error("Error creating repo %s.", repo_id)
+            logger.error(e)
+            sys.exit(1)
 
         self._build_lib()
         logger.info("Loaded %s experts from huggingface hub", len(self.data))
@@ -503,39 +537,44 @@ class ExpertLibrary:
             )
             logger.info(f"Scores for {expert_name} uploaded successfully.")
 
-    def add_embeddings(
+    def add_auxiliary_data(
         self,
+        data_type: str,
         expert_name: str,
-        embedding_config: Dict,
-        expert_embedding: np.ndarray,
+        config: Dict,
+        data: np.ndarray,
+        force: bool = False,
     ):
         if expert_name not in self.data:
             raise ValueError(f"Expert {expert_name} not found in repository.")
 
-        if "name" not in embedding_config:
-            raise ValueError("Embedding config must contain a name.")
+        if "name" not in config:
+            raise ValueError(f"{data_type} config must contain a name.")
 
         operations = []
-        embedding_file = f"{expert_name}.embeddings"
+        aux_file = f"{expert_name}.{data_type}"
 
-        embeddings = self.list_repo_files(self.repo_id)
-        if embedding_file in embeddings:
-            path = self.hf_hub_download(self.repo_id, filename=embedding_file)
-            embeddings = torch.load(path, map_location="cpu")
+        aux_data = self.list_repo_files(self.repo_id)
+        if aux_file in aux_data:
+            path = self.hf_hub_download(self.repo_id, filename=aux_file)
+            aux_data = torch.load(path, map_location="cpu")
         else:
-            embeddings = {}
-
-        embeddings[embedding_config["name"]] = {
-            "embedding": expert_embedding,
-            "config": embedding_config,
+            aux_data = {}
+        if config["name"] in aux_data and not force:
+            raise ValueError(
+                f"Data of type {data_type} for expert {expert_name} already exists in repository."
+            )
+        aux_data[config["name"]] = {
+            data_type: data,
+            "config": config,
         }
 
         buffer = io.BytesIO()
-        torch.save(embeddings, buffer)
+        torch.save(aux_data, buffer)
         buffer.flush()
 
         addition_a = CommitOperationAdd(
-            path_in_repo=f"{embedding_file}", path_or_fileobj=buffer
+            path_in_repo=f"{aux_file}", path_or_fileobj=buffer
         )
         operations.append(addition_a)
 
@@ -548,6 +587,19 @@ class ExpertLibrary:
                 commit_message=f"Update library with embedding for {expert_name}.",
             )
             logger.info(f"Embedding for {expert_name} uploaded successfully.")
+
+    def add_embeddings(
+        self,
+        expert_name: str,
+        embedding_config: Dict,
+        expert_embedding: np.ndarray,
+    ):
+        return self.add_auxiliary_data(
+            data_type="embeddings",
+            expert_name=expert_name,
+            config=embedding_config,
+            data=expert_embedding,
+        )
 
     def _update_readme(self):
         buffer = io.BytesIO()
@@ -595,7 +647,9 @@ class ExpertLibrary:
         # set in transaction flag
         self._in_transaction = True
         yield
-        logger.info(f"Committing len(self._pending_operations) operations...")
+        if len(self._pending_operations) == 0:
+            return
+        logger.info(f"Committing {len(self._pending_operations)} operations...")
         if self._pending_pre_uploads:
             preupload_lfs_files(self.repo_id, additions=self._pending_pre_uploads)
         self.create_commit(
@@ -655,7 +709,10 @@ class ExpertLibrary:
         """
         Doesn't assume that the experts' names correspond to the tasks they were trained on
         """
-        return [metadatum.expert_task_name for metadatum in self.data.values()]
+        tasks = set()
+        for metadatum in self.data.values():
+            tasks.add(metadatum.expert_task_name)
+        return list(tasks)
 
     def __contains__(self, expert: Union[Expert, str]):
         key = expert if isinstance(expert, str) else expert.expert_info.expert_name
@@ -669,42 +726,63 @@ class ExpertLibrary:
             self.remove_expert(old_expert.name, soft_delete=soft_delete)
         return self.add_expert(new_expert)
 
+    def get_experts_for_task(self, task):
+        return [
+            metadatum
+            for metadatum in self.data.values()
+            if metadatum.expert_task_name == task
+        ]
+
 
 class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
+    def add_expert(
+        self, expert_dump: Expert, expert_name: str = None, force: bool = False
+    ):
+        expert_name = expert_name or expert_dump.expert_info.expert_name
+        if "/" in expert_name:
+            # create sub-folders if necessary
+            path = expert_name.split("/")
+            os.makedirs(os.path.join(self.repo_id, *path[:-1]), exist_ok=True)
+        return super().add_expert(expert_dump, expert_name=expert_name, force=force)
+
+    def update_from_remote(self, remote_lib: Union["HFExpertLibrary", str]):
+        """
+        Update the expert library with experts from a remote library.
+
+        Args:
+            remote_lib (Union[HFExpertLibrary, str]): The remote library to update from. It can be either an instance of `HFExpertLibrary` or a string representing the path to the remote library.
+
+        """
+        if isinstance(remote_lib, str):
+            remote_lib = HFExpertLibrary(remote_lib)
+        for name, expert in remote_lib.items():
+            if expert not in self and not expert.expert_info.expert_deleted:
+                self.add_expert(expert)
+            if expert.expert_info.expert_deleted:
+                self.remove_expert(expert.name, soft_delete=True)
+
     @classmethod
-    def from_old_version(cls, repo_id, destination):
-        import huggingface_hub
-
-        def _download_model(expert_name):
-            model_file = f"{expert_name}.ckpt"
-            model = hf_hub_download(repo_id, filename=model_file)
-            model = torch.load(model, map_location="cpu")
-            return model
-
-        if "HF_TOKEN" in os.environ:
-            login(token=os.environ["HF_TOKEN"])
-
-        metadata_dir = snapshot_download(repo_id, allow_patterns="**/*.meta")
-        new_lib = LocalExpertLibrary(repo_id=destination, create=False)
-
-        for file in glob.glob(f"{metadata_dir}/*.meta"):
-            metadatum = torch.load(file, map_location="cpu")
-
-            expert_info_data = metadatum["expert_info"]
-            expert_info_data["expert_config"] = metadatum["expert_config"]
-
-            expert_info = ExpertInfo.fromdict(expert_info_data)
-            model_weights = _download_model(expert_info.expert_name)
-            expert = Expert(expert_info=expert_info, expert_weights=model_weights)
-
-            if expert not in new_lib:
+    def create_from_remote(cls, remote_lib: ExpertLibrary, destination):
+        new_lib = LocalExpertLibrary(repo_id=destination)
+        for name, expert in remote_lib.items():
+            if expert not in new_lib and not expert.expert_info.expert_deleted:
                 new_lib.add_expert(expert)
         return new_lib
 
     @classmethod
-    def from_remote(cls, remote_lib: ExpertLibrary, destination):
+    def from_expert_dict(cls, expert_dict: Dict[str, Expert], destination):
+        """
+        Create a new LocalExpertLibrary object from a dictionary of experts. Useful e.g. when I want to create a library from new experts that are created dynamically.
+
+        Args:
+            expert_dict (Dict[str, Expert]): A dictionary containing expert names as keys and Expert objects as values.
+            destination: path where the local library will be stored
+
+        Returns:
+            LocalExpertLibrary: A new LocalExpertLibrary object containing the experts from the dictionary.
+        """
         new_lib = LocalExpertLibrary(repo_id=destination)
-        for name, expert in remote_lib.items():
+        for name, expert in expert_dict.items():
             if expert not in new_lib:
                 new_lib.add_expert(expert)
         return new_lib
@@ -734,17 +812,19 @@ class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
         remote_lib = HFExpertLibrary(repo_id=repo_id, create=True)
 
         only_tasks = only_tasks or local_lib.tasks
-        for name, expert in local_lib.items():
-            if expert.name not in remote_lib:
-                remote_lib.add_expert(expert, name, force=force)
+        with remote_lib.batched_commit():
+            for name, expert in local_lib.items():
+                if expert.name not in remote_lib:
+                    remote_lib.add_expert(expert, name, force=force)
 
         # delete experts that are in remote_lib but were deleted from the local_lib
-        for name, expert in remote_lib.items():
-            if (
-                name not in local_lib.keys()
-                and expert.expert_info.expert_task_name in only_tasks
-            ):
-                remote_lib.remove_expert(name, soft_delete=True)
+        with remote_lib.batched_commit():
+            for name, expert in remote_lib.items():
+                if (
+                    name not in local_lib.keys()
+                    and expert.expert_info.expert_task_name in only_tasks
+                ):
+                    remote_lib.remove_expert(name, soft_delete=True)
 
         # also update the scores
         if upload_aux_data:

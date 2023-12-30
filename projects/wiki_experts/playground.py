@@ -1,6 +1,8 @@
+from dataclasses import dataclass
 import readline
 import os
 import glob
+from typing import List
 
 
 def path_completer(text, state):
@@ -40,6 +42,34 @@ def generate(input, model, device):
     return model.tokenizer.decode(output_ids, skip_special_tokens=True)
 
 
+@dataclass
+class Conversation:
+    """A conversation between two agents."""
+
+    prompts: List[str]
+    responses: List[str]
+
+    separator = "\n"
+    prompt_template: str = "Instruct: {}\nAnswer:"
+    response_template: str = " {}"
+
+    def to_str(self):
+        convo = ""
+        for i in range(len(self.prompts)):
+            if convo:
+                convo += self.separator
+            prompt = self.prompts[i]
+            convo += self.prompt_template.format(prompt.strip())
+            if len(self.responses) > i:
+                response = self.responses[i]
+                convo += self.response_template.format(response.strip())
+        return convo
+
+    def clear(self):
+        self.prompts = []
+        self.responses = []
+
+
 def main():
     from projects.wiki_experts.src.config import ExpertConfig
     from projects.wiki_experts.src.expert_model import MultiExpertModel
@@ -49,13 +79,15 @@ def main():
 
     setup_autocomplete()
     config = ExpertConfig.parse(
-        raise_error=False, c="./configs/wiki-mmlu/phi-2_flan_kv.json"
+        raise_error=False, c="./configs/wiki-mmlu/phi-2_flan.json"
     )
     tokenizer = get_tokenizer_with_args(config.model, "gpt", "left", "left", True)
     model = MultiExpertModel(**vars(config), tokenizer=tokenizer).to("cuda")
     device = "cuda"
 
     print("Welcome to the LLM playground! Type 'exit' to leave.")
+
+    conversation = Conversation([], [])
 
     while True:
         print()
@@ -75,8 +107,15 @@ def main():
         if user_input.lower() in ["exit", "quit"]:
             break
 
-        response = generate(user_input, model, device)
-        print(response)
+        if user_input.lower() == "clear":
+            conversation.clear()
+            continue
+
+        conversation.prompts.append(user_input)
+        response = generate(conversation.to_str(), model, device)
+        conversation.responses.append(response)
+
+        print("Conversation so far:", conversation.to_str())
 
 
 if __name__ == "__main__":

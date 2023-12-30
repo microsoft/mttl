@@ -25,8 +25,10 @@ def get_monitors(config):
     if (
         config.model_modifier
         and "poly" in config.model_modifier
-        and config.router_selector
-        and "poly" in config.router_selector
+        and (
+            (config.router_selector and "poly" in config.router_selector)
+            or config.router_selector is None
+        )
     ):
         monitors += [PolytroponLog()]
     if "llama_adapter" in config.model_modifier:
@@ -64,11 +66,19 @@ class PolytroponLog(Callback):
             }
 
         # iterate over encoder and decoder layers
-        stats = {"encoder": [], "decoder": []}
+        model_family = getattr(pl_module.model.config, "model_family", "gpt")
+        if model_family == "encdec":
+            stats = {"encoder": [], "decoder": []}
+        elif model_family == "gpt":
+            stats = {"": []}
 
         seen = 0
         for coder in stats.keys():
-            mod = getattr(pl_module.model, coder)
+            if len(coder) > 0:
+                mod = getattr(pl_module.model, coder)
+            else:
+                mod = pl_module.model
+
             for module in mod.modules():
                 if hasattr(module, "module_logits"):
                     stats[coder] += [layer_stats(module.module_logits)]

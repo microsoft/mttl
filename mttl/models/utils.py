@@ -2,9 +2,10 @@ from enum import Enum
 import hashlib
 import os
 from typing import Any, Callable, Optional, Union
-from pytorch_lightning import LightningModule
+import pytorch_lightning as pl
+from pytorch_lightning import LightningModule, Trainer
 import torch
-
+import json
 from transformers.utils import cached_file
 from transformers.file_utils import PushToHubMixin
 from mttl.utils import logger, get_checkpoint_path
@@ -105,7 +106,38 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
     return model
 
 
-class EfficientCheckpointModule(LightningModule, PushToHubMixin):
+class SimpleLogger(pl.loggers.logger.DummyLogger):
+    def __init__(self, output_dir):
+        self.output_file = os.path.join(output_dir, "metrics.json")
+        if os.path.exists(self.output_file):
+            os.remove(self.output_file)
+
+    def log_metrics(self, metrics, step=None):
+        lines = []
+        for k, v in metrics.items():
+            if isinstance(v, torch.Tensor):
+                v = v.item()
+            lines.append({"name": k, "value": v, "step": step})
+
+        with open(self.output_file, "a+") as f:
+            for l in lines:
+                f.write(json.dumps(l) + "\n")
+
+
+class OnLogCallback:
+    """Adds `on_log` capability to callbacks."""
+
+    def log(self, name, value, **kwargs):
+        output = LightningModule.log(self, name, value, **kwargs)
+
+        # call on log on each callback
+        for callback in self.trainer.callbacks:
+            if hasattr(callback, "on_log"):
+                callback.on_log(self.trainer, self, name, value)
+        return output
+
+
+class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
     """Efficiently save and load checkpoints.
 
     Only saves and loads parameters that are either in the trainable parameters
@@ -409,7 +441,7 @@ def model_loader_helper(model_name, device_map="auto", load_in_8bit=False):
         )
     elif "phi-2" in model_name:
         model_object = AutoModelForCausalLM.from_pretrained(
-            os.environ["PHI_PATH"],
+            os.environ.get("PHI_PATH", 'microsoft/phi-2'),
             load_in_8bit=load_in_8bit,
             torch_dtype=torch.bfloat16,
             device_map=device_map,

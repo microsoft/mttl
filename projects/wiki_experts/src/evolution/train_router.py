@@ -10,14 +10,12 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
-from projects.wiki_experts.src.expert_model import (
-    RoutedMultiExpertModel,
-)
-from mttl.models.modifiers.expert_containers.module_graph import Expert
+from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
 from mttl.utils import get_mlf_logger, setup_logging, logger
 from projects.wiki_experts.src.config import ExpertConfig
 from config import EvolExpertConfig
 from typing import List
+from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 
 
 def save_new_module(module_copy, args):
@@ -29,27 +27,17 @@ def save_new_module(module_copy, args):
     return checkpoint
 
 
-def train_router(
+def train_module(
     args: EvolExpertConfig,
     dm,
     dm_eval,
-    expert_lib: dict,
+    module: ExpertTrainer,
     loggers: List = [],
     val_check_interval=None,
     logging_prefix="",
     silent=False,
 ):
     seed_everything(args.seed, workers=True)
-
-    module = RoutedMultiExpertModel(
-        **vars(args),
-        tokenizer=dm.tokenizer,
-        device_map="auto",
-        logging_prefix=logging_prefix,
-    )
-    module.load_from_module_dict(expert_lib)
-    module.to("cuda")
-    ##############################
 
     mlf_logger = get_mlf_logger()
     if mlf_logger:
@@ -120,12 +108,17 @@ def train_router(
         checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
     )
     logger.info(f"Loading best model from {checkpoint}")
-    del module
     torch.cuda.empty_cache()
     ckpt = torch.load(checkpoint)
-    expert_dumps = ckpt["expert_dumps"]
-    weights = ckpt["merging_weights"]
+    if "expert_dumps" in ckpt:
+        expert_dumps = ckpt["expert_dumps"]
+        weights = ckpt["merging_weights"]
+        expert = Expert.fromdict(expert_dumps)
+    else:
+        expert = load_expert(checkpoint)
+        weights = []
 
+    del module
     if hasattr(checkpoint_callback, "remove_checkpoints"):
         # cleanup
         checkpoint_callback.remove_checkpoints()
@@ -134,13 +127,12 @@ def train_router(
     except:
         pass
 
-    return weights, Expert.fromdict(expert_dumps)
+    return weights, expert
 
 
 if __name__ == "__main__":
     from tempfile import TemporaryDirectory
     from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
-    from projects.wiki_experts.src.expert_trainer import ExpertTrainer
     from mttl.datamodule.base import AutoDataModule
 
     def create_dummy_expert(config: ExpertConfig, exp_name) -> Expert:
@@ -203,5 +195,5 @@ if __name__ == "__main__":
         "default": exp_3,
     }
 
-    weights, checkpoint = train_router(args, dm=dm, module_dict=module_dict)
+    weights, checkpoint = train_module(args, dm=dm, module_dict=module_dict)
     print(weights, checkpoint)
