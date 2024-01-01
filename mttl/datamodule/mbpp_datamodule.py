@@ -1,10 +1,10 @@
-from functools import partial
 from datasets import load_dataset
 from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from dataclasses import dataclass
 import os
 
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
+from mttl.datamodule.mt_seq_to_seq_module import apply_source_template
 
 
 @dataclass
@@ -28,6 +28,7 @@ class MBPPDataModule(DefaultDataModule):
             example["source"] = source_template.format(
                 code_header, source, "\n\t".join(example["test_list"])
             )
+            example["code_prefix"] = example["source"]
             example["target"] = "\n".join(example["test_list"])
             return example
 
@@ -36,6 +37,8 @@ class MBPPDataModule(DefaultDataModule):
             num_proc=n_proc,
             remove_columns=["prompt", "task_id"],
         )
+
+        dataset = apply_source_template(dataset, self.config.apply_source_template)
 
         (
             self._task_names,

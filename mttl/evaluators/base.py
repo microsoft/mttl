@@ -394,6 +394,7 @@ def setup_evaluators(
     max_output_length,
     predict_batch_size,
     truncation_side,
+    source_template_for_code=None,
     output_path=None,
     tasks=None,
 ) -> EvaluatorRunner:
@@ -463,6 +464,7 @@ def setup_evaluators(
             )
             config = HumanEvalConfig(
                 **common_kwargs,
+                apply_source_template=source_template_for_code,
             )
             evaluators["humaneval"] = HumanEvalEvaluator(
                 config, generation_kwargs=generation_kwargs
@@ -478,7 +480,9 @@ def setup_evaluators(
                 }
             )
             evaluators["mbpp"] = MBPPEvaluator(
-                MBPPDataConfig(**common_kwargs),
+                MBPPDataConfig(
+                    **common_kwargs, apply_source_template=source_template_for_code
+                ),
                 generation_kwargs=generation_kwargs,
             )
         elif task == "boolq":

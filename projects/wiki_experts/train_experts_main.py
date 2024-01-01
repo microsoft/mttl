@@ -66,7 +66,9 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
     elif "flat" in dataset:
         config = FlatMultiTaskConfig(
             **common_kwargs,
-            source_template=args.source_template,
+            source_template="Instruct: {}\nAnswer:"
+            if args.use_instruct_template
+            else None,
             augment_few_shot=args.augment_few_shot,
         )
         dm = FlatMultiTaskModule(config, for_generation=for_generation)
@@ -163,6 +165,7 @@ def run_multitask(args: ExpertConfig):
         strategy=args.compute_strategy if args.compute_strategy else "auto",
         callbacks=callbacks,
         enable_checkpointing=False,
+        log_every_n_steps=args.gradient_accumulation_steps,
         accumulate_grad_batches=args.gradient_accumulation_steps,
         precision=int(args.precision)
         if args.precision in ["16", "32"]

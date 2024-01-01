@@ -1,4 +1,5 @@
 from collections import defaultdict
+from functools import partial
 import itertools
 import json
 import click
@@ -1847,6 +1848,49 @@ def download_flan(cutoff=10_000, filter_zs=False):
         print("# Valid", len(task_dataset.filter(lambda x: x["split"] == "validation")))
 
 
+def create_alpaca_code(hf_repo_id):
+    import guesslang
+
+    dataset = load_dataset("TokenBender/code_instructions_122k_alpaca_style")["train"]
+    guess = guesslang.Guess()
+
+    def map_func(guess, example):
+        example["task_source"] = "code_instructions_122k_alpaca_style"
+        language = guess.language_name(example["output"])
+        example["task_name"] = language or "unknown"
+        example["source"] = example["instruction"]
+        example["target"] = example["output"]
+        return example
+
+    dataset = dataset.shuffle(42).map(partial(map_func, guess), num_proc=1)
+    len_dataset_ = len(dataset)
+    num_train = int(len_dataset_ * 0.95)
+
+    def assign_split(_, idx):
+        if idx < num_train:
+            return {"split": "train"}
+        else:
+            return {"split": "validation"}
+
+    dataset = dataset.map(assign_split, with_indices=True, num_proc=16)
+    allowed_languages = set(
+        ["Python", "SQL", "JavaScript", "Java", "TypeScript", "HTML"]
+    )
+    dataset = dataset.filter(
+        lambda x: len(x["source"]) <= 219
+        and len(x["source"]) >= 49
+        and len(x["target"]) <= 1550
+        and len(x["target"]) >= 45
+        and x["task_name"] in allowed_languages,
+        num_proc=16,
+    )
+
+    columns = ["source", "target", "task_name", "task_source", "split"]
+    to_remove = set(dataset.column_names) - set(columns)
+    dataset = dataset.remove_columns(list(to_remove))
+    dataset.push_to_hub(hf_repo_id)
+
+
 def create_platypus_templated(hf_repo_id):
     from mttl.dataloader.platypus_dataset_reader import PlatypusDataset
 
@@ -2241,6 +2285,8 @@ def main(task):
         create_tags("sordonia/adauni-v4-10k-flat")
     elif task == "transform-platy":
         create_mmlu_platy()
+    elif task == "alpaca_code":
+        create_alpaca_code("sordonia/alpaca-code-flat")
     else:
         raise ValueError("Unknown task")
 

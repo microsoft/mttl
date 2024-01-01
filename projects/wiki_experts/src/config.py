@@ -36,6 +36,7 @@ class ExpertConfig(Config):
         self.micro_batch_size = None
         self.validation_portion = 0.03
 
+        self.use_instruct_template = False
         self.source_template = None
         self.augment_few_shot = 0
 

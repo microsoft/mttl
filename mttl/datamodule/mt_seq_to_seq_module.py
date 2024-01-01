@@ -101,9 +101,18 @@ class FlatMultiTaskConfig(DatasetConfig):
     augment_few_shot: int = 0
 
 
-def apply_source_template(source_template, example):
+def apply_source_template_(source_template, example):
     example["source"] = source_template.format(example["source"])
     return example
+
+
+def apply_source_template(dataset, source_template):
+    if source_template is not None:
+        dataset = dataset.map(
+            partial(apply_source_template_, source_template),
+            num_proc=os.environ.get("MTTL_NUM_PROC_DATASETS", 16),
+        )
+    return dataset
 
 
 class FlatMultiTaskModule(DefaultDataModule):
@@ -124,12 +133,9 @@ class FlatMultiTaskModule(DefaultDataModule):
             self.dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
         )
 
-        if self.config.source_template is not None:
-            # apply source template if specified
-            train_dataset = train_dataset.map(
-                partial(apply_source_template, self.config.source_template),
-                num_proc=n_proc,
-            )
+        train_dataset = apply_source_template(
+            train_dataset, self.config.source_template
+        )
 
         if self.config.augment_few_shot > 0:
             train_dataset_aug = augment_few_shot(

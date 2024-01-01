@@ -5,11 +5,12 @@ from dataclasses import dataclass
 
 from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
+from mttl.datamodule.mt_seq_to_seq_module import apply_source_template
 
 
 @dataclass
 class HumanEvalConfig(DatasetConfig):
-    pass
+    apply_source_template: str = None
 
 
 class HumanEvalDataModule(DefaultDataModule):
@@ -24,6 +25,7 @@ class HumanEvalDataModule(DefaultDataModule):
             example["target"] = (
                 example["test"] + "\n" + f"check({example['entry_point']})"
             )
+            example["code_prefix"] = example["prompt"].lstrip()
             example["source"] = example["prompt"].lstrip()
             return example
 
@@ -32,6 +34,8 @@ class HumanEvalDataModule(DefaultDataModule):
             num_proc=n_proc,
             remove_columns=["prompt", "test", "entry_point", "task_id"],
         )
+
+        dataset = apply_source_template(dataset, self.config.apply_source_template)
 
         (
             self._task_names,

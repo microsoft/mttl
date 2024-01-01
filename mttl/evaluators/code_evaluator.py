@@ -36,12 +36,15 @@ def filter_code(completion: str) -> str:
 
 
 class CodeEvaluator(GenerativeEvaluator):
-    def __init__(self, datamodule, use_vllm=False, generation_kwargs=None):
+    def __init__(
+        self, datamodule, use_vllm=False, generation_kwargs=None, prepend_source=True
+    ):
         super().__init__(
             datamodule=datamodule,
             use_vllm=use_vllm,
             generation_kwargs=generation_kwargs,
         )
+        self.prepend_source = prepend_source
         os.environ["HF_ALLOW_CODE_EVAL"] = "1"
 
     @switch_to_eval_mode
@@ -68,12 +71,13 @@ class CodeEvaluator(GenerativeEvaluator):
 
         metric = load("code_eval")
         for num_batch, batch in pbar:
-            sources_texts = batch["sources_texts"]
+            # we assume code prefixes are available and these are "completion" tasks
+            sources_texts = batch["code_prefix"]
             labels_texts = batch["labels_texts"]
 
             predictions = self.generate_for_batch(model, batch)
             predictions = [
-                [s + p]
+                [s if self.prepend_source else "" + p]
                 for s, p in zip(
                     sources_texts,
                     map(

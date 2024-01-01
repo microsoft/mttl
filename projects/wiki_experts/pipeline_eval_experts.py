@@ -73,6 +73,7 @@ def run_eval(args):
         tasks=args.pipeline_eval_tasks.split(",") if args.pipeline_eval_tasks else None,
         output_path=args.output_dir,
     )
+    runner.verbose = True
     runner.run(module)
 
 
