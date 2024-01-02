@@ -162,5 +162,5 @@ def add_expert_to_transformer(
                         is_default=is_default,
                     )
 
-    logger.debug("Adding expert to layers %s", added_layers)
+    logger.info("Adding expert to layers %s", added_layers)
     return transformer

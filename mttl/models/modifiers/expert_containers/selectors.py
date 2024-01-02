@@ -106,26 +106,34 @@ class SelectorOutput:
 
 
 @dataclass
+class ModulesSelectorOutput(SelectorOutput):
+    """A selector output that contains a list of modules without weights."""
+
+    modules: List[str]
+
+
+@dataclass
 class ModulesAndWeightsSelectorOutput(SelectorOutput):
+    """A selector output that contains a list of modules and weights shared across the batch."""
+
     modules: List[str]
     weights: Union[List[float], torch.Tensor]
 
 
 @dataclass
 class BatchModulesAndWeightsSelectorOutput(SelectorOutput):
+    """A selector output that contains a list of modules and weights for each example."""
+
     modules: List[List[str]]
     weights: Union[List[List[float]], torch.Tensor]
 
 
 @dataclass
 class BatchAndSequenceModulesAndWeightsSelectorOutput(SelectorOutput):
+    """A selector output that contains a list of modules and weights for each example and token."""
+
     indices: torch.Tensor
     weights: Union[List[List[float]], torch.Tensor]
-
-
-@dataclass
-class ModulesSelectorOutput(SelectorOutput):
-    modules: List[str]
 
 
 def forward_with_cache(func):
@@ -293,8 +301,6 @@ class MOERKHSSelector(Selector):
         routing_weights, selected_experts = torch.topk(
             routing_weights, self.topk, dim=-1
         )
-        routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
-
         # we cast back to the input dtype
         routing_weights = routing_weights.to(input.dtype)
 

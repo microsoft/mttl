@@ -77,7 +77,7 @@ class CodeEvaluator(GenerativeEvaluator):
 
             predictions = self.generate_for_batch(model, batch)
             predictions = [
-                [s if self.prepend_source else "" + p]
+                [(s if self.prepend_source else "") + p]
                 for s, p in zip(
                     sources_texts,
                     map(
@@ -97,4 +97,6 @@ class CodeEvaluator(GenerativeEvaluator):
                 break
 
         metrics, _ = metric.compute(k=[1])
+
+        self.save_metrics(metrics, output_path)
         return metrics["pass@1"]
