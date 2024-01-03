@@ -28,6 +28,7 @@ def augment_few_shot_task(
     tokenizer=None,
     max_input_length=None,
     seed=42,
+    modify_task_source=True,
 ):
     if num_samples is None and few_shots is None:
         raise ValueError("Either num_samples or few_shots must be specified.")
@@ -74,7 +75,9 @@ def augment_few_shot_task(
             "source": prompt,
             "target": dataset[index]["target"],
             "task_name": dataset[index]["task_name"],
-            "task_source": "few_shot_{}".format(dataset[index]["task_source"]),
+            "task_source": "few_shot_{}".format(dataset[index]["task_source"])
+            if modify_task_source
+            else dataset[index]["task_source"],
             "split": dataset[index]["split"]
             if "split" in dataset.column_names
             else None,
