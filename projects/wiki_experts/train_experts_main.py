@@ -60,6 +60,9 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
     if "flan" in dataset:
         config = FlanConfig(
             **common_kwargs,
+            source_template="Instruct: {}\nAnswer:"
+            if args.use_instruct_template
+            else None,
             remove_phi_eval_tasks=args.remove_phi_eval_tasks,
         )
         dm = FlanModule(config, for_generation=for_generation)
@@ -175,25 +178,27 @@ def run_multitask(args: ExpertConfig):
 
     # initial validation only for a bunch of datasets... ?
     trainer.validate(module, dm)
-    trainer.fit(module, dm)
 
-    torch.cuda.empty_cache()
+    if args.do_train:
+        trainer.fit(module, dm)
 
-    # reload best model before pushing!
-    checkpoint = (
-        checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
-    )
-    module.load_state_dict(torch.load(checkpoint)["state_dict"])
-    trainer.test(module, dm)
+        torch.cuda.empty_cache()
 
-    if args.hf_lib_id and checkpoint:
-        library = HFExpertLibrary(args.hf_lib_id, create=True)
-        library.add_expert_from_ckpt(checkpoint)
+        # reload best model before pushing!
+        checkpoint = (
+            checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
+        )
+        module.load_state_dict(torch.load(checkpoint)["state_dict"])
+        trainer.test(module, dm)
 
-    if args.hf_repo_id and checkpoint:
-        from projects.wiki_experts.src.expert_model import push_expert_to_hub
+        if args.hf_lib_id and checkpoint:
+            library = HFExpertLibrary(args.hf_lib_id, create=True)
+            library.add_expert_from_ckpt(checkpoint)
 
-        push_expert_to_hub(checkpoint, args.hf_repo_id, auto_search=False)
+        if args.hf_repo_id and checkpoint:
+            from projects.wiki_experts.src.expert_model import push_expert_to_hub
+
+            push_expert_to_hub(checkpoint, args.hf_repo_id, auto_search=False)
 
 
 if __name__ == "__main__":

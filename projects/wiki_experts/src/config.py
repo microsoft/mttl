@@ -16,6 +16,7 @@ class ExpertConfig(Config):
         self.hf_token_hub = None
         self.hf_lib_id = None
         self.hf_repo_id = None
+        self.do_train = True
 
         # just a lame flag to 0 out all adapter weights
         self.baseline = False
@@ -45,6 +46,7 @@ class ExpertConfig(Config):
 
         self.moe_num_experts = 8
         self.moe_emb_dim = 128
+        self.moe_ent_reg = 2.5
 
         self.expand_val_set_w_downstream = False
 

@@ -365,6 +365,7 @@ class MultiExpertModelRanker(MultiExpertModel):
 
 class MoETrainer(MultiExpertModel):
     def __init__(self, **kwargs):
+        kwargs["trainable_param_names"] = kwargs["trainable_param_names"] + "|.*rkhs.*"
         kwargs["router_selector"] = "moe_rkhs_router"
         kwargs["router_granularity"] = "mlp"
         kwargs["emb_dim"] = kwargs["moe_emb_dim"]
@@ -410,7 +411,7 @@ class MoETrainer(MultiExpertModel):
             self.model.task_id_container["routing_gates"].clear()
 
             mi_loss = (-entropy + xentropy) / num
-            total_loss += 2.5 * mi_loss
+            total_loss += self.hparams.moe_ent_reg * mi_loss
             self.log(
                 f"{self._log_pref}train/route_ent",
                 xentropy / num,
