@@ -165,6 +165,7 @@ class PolytroponSelector(RoutingSelector):
 
 @dataclass
 class PerTokenPolytroponConfig(PolytroponConfig):
+    model_family: str = None
     vocab_size: int = None
     skip_unseen_tokens: bool = True  # during evaluation, if token has not been seen (and no mapping has been learned yet) skip it
 
@@ -175,6 +176,8 @@ class PerTokenPolytroponSelector(RoutingSelector):
 
     def __init__(self, config, **kwargs):
         super().__init__(config)
+
+        assert config.model_family == "gpt", "only decoder models supported for now."
 
         self.n_splits = config.n_splits
         self.n_skills = config.n_skills

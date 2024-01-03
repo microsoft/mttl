@@ -55,6 +55,7 @@ def test_ptp_poly():
         modify_layers="q_proj|v_proj|k_proj|o_proj",
         vocab_size=400,
         skip_unseen_tokens=True,
+        model_family="gpt",
     )
 
     modify_transformer(model, adapter_config)
