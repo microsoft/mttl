@@ -432,7 +432,7 @@ class MoETrainer(MultiExpertModel):
 
         for i, pg in enumerate(self.optimizers().optimizer.param_groups):
             self.log(f"train/lr_{i}", pg["lr"])
-        return loss
+        return total_loss
 
 
 class RoutedMultiExpertModel(MultiExpertModel):
