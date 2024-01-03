@@ -404,8 +404,8 @@ class MoETrainer(MultiExpertModel):
                 values = values.to(torch.float32)
                 values = values.view(-1, values.shape[-1])
                 probs = torch.softmax(values, -1)
-                entropy += -(probs.mean(0) * torch.log(probs.mean(0))).sum(-1)
-                xentropy += -(probs * torch.log(probs)).sum(-1).mean(0)
+                entropy += -(probs.mean(0) * torch.log(probs.mean(0) + 1e-6)).sum(-1)
+                xentropy += -(probs * torch.log(probs + 1e-6)).sum(-1).mean(0)
                 num += 1.0
 
             self.model.task_id_container["routing_gates"].clear()
