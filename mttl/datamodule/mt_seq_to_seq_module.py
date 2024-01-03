@@ -76,7 +76,6 @@ def augment_few_shot(
     dataset, num_samples, tokenizer=None, max_input_length=None, seed=42
 ):
     """Augment the dataset with few-shot examples."""
-    import numpy as np
     import tqdm
 
     augmented_dataset = []
