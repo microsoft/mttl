@@ -13,6 +13,7 @@ from pytorch_lightning import Callback
 
 from mttl.utils import agg_dicts, Averager
 from mttl.models.modifiers.routing import RoutingSelector
+from mttl.models.modifiers.poly import PolytroponSelector
 
 try:
     import wandb
@@ -92,6 +93,27 @@ class PolytroponLog(Callback):
                     pl_module.log(
                         f"Z/{coder}.{k}", v, on_epoch=True, on_step=True, sync_dist=True
                     )
+
+        # Finally, log seen task information
+        if PolytroponSelector.seen_samples_per_task is not None:
+            is_seen = PolytroponSelector.seen_samples_per_task > 0
+            n_seen, n_unseen = is_seen.sum(), (~is_seen).sum()
+            seen_tasks = PolytroponSelector.seen_samples_per_task[is_seen]
+            seen_min, seen_max = seen_tasks.min(), seen_tasks.max()
+            to_log = {
+                "n_seen": n_seen,
+                "n_unseen": n_unseen,
+                "seen_min": seen_min,
+                "seen_max": seen_max,
+            }
+            for k, v in to_log.items():
+                pl_module.log(
+                    f"Z/{k}",
+                    v.float().item(),
+                    on_epoch=True,
+                    on_step=True,
+                    sync_dist=True,
+                )
 
 
 class SelectorRoutingsLog(Callback):
