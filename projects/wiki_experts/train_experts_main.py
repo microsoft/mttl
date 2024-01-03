@@ -1,19 +1,19 @@
 import os
 import sys
-import json
 import pytorch_lightning as pl
 from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
 
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.callbacks import LiveCheckpointCallback
+
 from mttl.models.monitors import get_monitors
+from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import torch
 from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
-from pytorch_lightning.callbacks import ModelCheckpoint
-import json
 
 from mttl.datamodule.mt_seq_to_seq_module import (
     FlanConfig,
@@ -24,32 +24,15 @@ from mttl.datamodule.mt_seq_to_seq_module import (
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.callbacks import NanoMMLUCallback, RougeCallback, MMLUCallback
-from mttl.datamodule.oasst1_module import OA1Config, OA1Module
-from mttl.datamodule.facts_lm_module import FactsLMConfig, FactsLMDataModule
-from mttl.datamodule.platypus_module import (
-    PlatypusModule,
-    PlatypusConfig,
-    PlatypusQAModule,
+from mttl.callbacks import NanoMMLUCallback, RougeCallback
+from mttl.utils import (
+    get_pl_loggers,
+    setup_logging,
+    logger,
 )
-from mttl.utils import get_mlf_logger, setup_logging, logger
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
-
-
-class SimpleLogger(pl.loggers.logger.DummyLogger):
-    def __init__(self, output_dir):
-        self.metrics = {}
-        self.output_file = os.path.join(output_dir, "metrics.json")
-
-    def log_metrics(self, metrics, step=None):
-        for k, v in metrics.items():
-            if k not in self.metrics:
-                self.metrics[k] = []
-            self.metrics[k].append({"step": step, "value": v})
-        with open(self.output_file, "w") as f:
-            json.dump(self.metrics, f)
 
 
 def get_datamodule(args, for_generation=False, dataset_override=None):
@@ -68,13 +51,16 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         "truncation_side": args.truncation_side,
         "dataset": dataset,
         "train_on_inputs": False,
+        "add_eos_to_targets": "qamc"
+        not in args.dataset,  # do not add eos for mmlu stuff (for now)
         "subsample_train": args.subsample_train,
         "subsample_dev": args.subsample_dev,
         "subsample_test": args.subsample_test,
     }
     if "flan" in dataset:
         config = FlanConfig(
-            **common_kwargs, remove_phi_eval_tasks=args.remove_phi_eval_tasks
+            **common_kwargs,
+            remove_phi_eval_tasks=args.remove_phi_eval_tasks,
         )
         dm = FlanModule(config, for_generation=for_generation)
     elif "flat" in dataset:
@@ -99,7 +85,6 @@ def run_multitask(args: ExpertConfig):
 
     # get directory of the current file
     setup_logging(args.output_dir)
-
     logger.info("Args: {}".format(args.to_json()))
 
     if args.hf_token_hub:
@@ -109,55 +94,52 @@ def run_multitask(args: ExpertConfig):
     model_class = ExpertTrainer
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
-    print("n tasks : ", args.n_tasks)
 
-    gen_dm = get_datamodule(args, for_generation=True)
-
-    # legit logging
-    loggers = []
-    exp_name = os.environ.get("AMLT_JOB_NAME", args.exp_name)
-    if os.environ.get("WANDB_API_KEY") or args.wandb_project:
-        import wandb
-
-        project = "wiki_experts" if args.wandb_project is None else args.wandb_project
-        args.exp_name = "dev_run" if args.exp_name is None else args.exp_name
-        project = os.environ.get("WANDB_PROJECT", project)
-        wandb_logger = pl.loggers.WandbLogger(
-            project=project,
-            name=exp_name,  # , config=args_
-            settings=wandb.Settings(start_method="fork"),
-        )
-        wandb_logger.experiment.save("*.py")
-        loggers.append(wandb_logger)
-
+    loggers = get_pl_loggers(args)
     module = model_class(**vars(args), tokenizer=dm.tokenizer)
-
-    mlf_logger = get_mlf_logger()
-    if mlf_logger:
-        loggers.append(mlf_logger)
-
-    if args.tensorboard:
-        tb_logger = pl.loggers.TensorBoardLogger(save_dir=args.output_dir)
-        loggers.append(tb_logger)
-
-    loggers.append(SimpleLogger(args.output_dir))
 
     # get metric monitors for models
     callbacks = get_monitors(args)
-
-    monitor = "val/loss"
-    mode = "min"
-
-    model_name = args.model.replace("/", "_")
-    checkpoint_callback = ModelCheckpoint(
+    checkpoint_callback = LiveCheckpointCallback(
         dirpath=args.output_dir,
-        monitor=monitor,
-        filename=f"{model_name}" + "-{" + monitor + ":.004f}",
-        save_top_k=1,
+        monitor="val/loss",
         save_last=True,
-        mode=mode,
+        mode="min",
     )
     callbacks.append(checkpoint_callback)
+
+    if args.eval_rouge_flag:
+        rouge = RougeCallback(
+            get_datamodule(args, for_generation=True),
+            every_n_epochs=3 if args.num_train_epochs > 3 else 1,
+        )
+        callbacks.append(rouge)
+    else:
+        logger.warn(
+            "Deactivating rouge callback as it is not enabled in the config. Please set `eval_rouge_flag=True`."
+        )
+
+    if args.eval_mmlu_flag:
+        mmlu = NanoMMLUCallback(
+            get_datamodule(args, dataset_override="mmlu", for_generation=True),
+            every_n_epochs=3 if args.num_train_epochs > 3 else 1,
+        )
+        callbacks.append(mmlu)
+    else:
+        logger.warn(
+            "Deactivating mmlu callback as it is not enabled in the config. Please set `eval_mmlu_flag=True`."
+        )
+
+    if args.pipeline_eval_tasks:
+        if args.pipeline_eval_tasks == "all":
+            args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
+
+        eval = DownstreamEvalCallback(args)
+        callbacks.append(eval)
+    else:
+        logger.warn(
+            "Deactivating downstream eval callback as it is not enabled in the config. Please set `pipeline_eval_tasks`."
+        )
 
     val_check_interval = args.eval_every
     if val_check_interval == -1 or val_check_interval is None:
@@ -169,21 +151,10 @@ def run_multitask(args: ExpertConfig):
         elif val_check_interval > args.total_steps and args.total_steps != -1:
             val_check_interval = args.total_steps
 
-    rouge = RougeCallback(gen_dm, every_n_epochs=3 if args.num_train_epochs > 3 else 1)
-    callbacks.append(rouge)
-
-    if args.eval_mmlu_flag:
-        mmlu = NanoMMLUCallback(
-            get_datamodule(args, dataset_override="mmlu", for_generation=True),
-            every_n_epochs=3 if args.num_train_epochs > 3 else 1,
-        )
-        callbacks.append(mmlu)
-
     trainer = Trainer(
         devices=-1,
         accelerator="gpu",
         logger=loggers,
-        log_every_n_steps=1,
         num_sanity_val_steps=0,
         default_root_dir=args.output_dir,
         max_epochs=args.num_train_epochs,
@@ -191,6 +162,7 @@ def run_multitask(args: ExpertConfig):
         gradient_clip_val=args.max_grad_norm,
         strategy=args.compute_strategy if args.compute_strategy else "auto",
         callbacks=callbacks,
+        enable_checkpointing=False,
         accumulate_grad_batches=args.gradient_accumulation_steps,
         precision=int(args.precision)
         if args.precision in ["16", "32"]
@@ -198,17 +170,18 @@ def run_multitask(args: ExpertConfig):
         val_check_interval=val_check_interval,
     )
 
-    # initial validation!
+    # initial validation only for a bunch of datasets... ?
+    trainer.validate(module, dm)
     trainer.fit(module, dm)
-    trainer.test(module, dm)
 
-    del module
     torch.cuda.empty_cache()
 
     # reload best model before pushing!
     checkpoint = (
         checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
     )
+    module.load_state_dict(torch.load(checkpoint)["state_dict"])
+    trainer.test(module, dm)
 
     if args.hf_lib_id and checkpoint:
         library = HFExpertLibrary(args.hf_lib_id, create=True)

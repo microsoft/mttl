@@ -8,7 +8,7 @@ from mttl.online_eval import NIOnlineZeroShot, T0OnlineZeroShot
 from mttl.callbacks import ProgressCallback
 from mttl.datamodule.t0_data_module import T0PretrainDataModule
 from mttl.models.monitors import get_monitors
-from mttl.utils import get_mlf_logger, logger, setup_logging
+from mttl.utils import add_mlf_logger, add_wandb_logger, logger, setup_logging
 
 # register models
 import models.vsmear  # noqa: F401
@@ -56,20 +56,9 @@ def run_multitask(args):
 
     # legit logging
     loggers = []
-    if os.environ.get("WANDB_API_KEY"):
-        wandb_logger = pl.loggers.WandbLogger(
-            project=args.wandb_project,
-            name=args.exp_name,
-        )
-        wandb_logger.experiment.save("*.py")
-        loggers.append(wandb_logger)
-    else:
-        wandb_logger = None
 
-    mlf_logger = get_mlf_logger()
-    if mlf_logger:
-        loggers.append(mlf_logger)
-
+    add_wandb_logger(loggers, args)
+    add_mlf_logger(loggers)
     loggers.append(pl.loggers.CSVLogger(save_dir=args.output_dir, name="csv_metrics"))
 
     kwargs = (

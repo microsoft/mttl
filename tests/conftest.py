@@ -7,6 +7,13 @@ import pytest
 
 
 @pytest.fixture(scope="session")
+def gpt_neo():
+    from transformers import AutoModelForCausalLM
+
+    return AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-125m")
+
+
+@pytest.fixture(scope="session")
 def flan_batch_for_generation():
     from mttl.datamodule.base import AutoDataModule
 
@@ -19,6 +26,8 @@ def flan_batch_for_generation():
         predict_batch_size=2,
         truncation_side="left",
         for_generation=True,
+        include_template_type="zs_noopt",
+        include_task_source="P3,Flan2021",
     )
     dl = flan.val_dataloader()
     batch = next(iter(dl))

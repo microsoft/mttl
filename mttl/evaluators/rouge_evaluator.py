@@ -3,14 +3,14 @@ import hashlib
 import numpy as np
 
 import os
-from mttl.evaluators.base import Evaluator, GenerationMixin, switch_to_eval_mode, decode
+from mttl.evaluators.base import GenerativeEvaluator, switch_to_eval_mode, decode
 from mttl.evaluators.ni_evaluator import compute_metrics
 from mttl.evaluators.mmlu_evaluator import swap_model
 from mttl.utils import logger
 from mttl.vllm_engines.engines import LLMEngineRouge, free_memory
 
 
-class RougeEvaluator(Evaluator, GenerationMixin):
+class RougeEvaluator(GenerativeEvaluator):
     def __init__(self, datamodule, use_vllm=False, generation_kwargs=None):
         super().__init__(
             datamodule=datamodule,
@@ -67,7 +67,10 @@ class RougeEvaluator(Evaluator, GenerationMixin):
         )
 
         all_rougeL = []
-        for _, batch in pbar:
+        for num_batch, batch in pbar:
+            if num_batches is not None and num_batch >= num_batches:
+                break
+
             labels_texts = batch["labels_texts"]
             sources_texts = batch["sources_texts"]
 
@@ -83,8 +86,5 @@ class RougeEvaluator(Evaluator, GenerationMixin):
                 logger.info("Prediction:\n%s", predictions[0])
 
             pbar.set_description(f"rougeL: {np.mean(all_rougeL):.4f}")
-
-            if num_batches is not None and len(all_rougeL) >= num_batches:
-                break
 
         return np.mean(all_rougeL)

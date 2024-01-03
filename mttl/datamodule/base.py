@@ -12,8 +12,7 @@ import sys
 import numpy as np
 from mttl.utils import logger
 from mttl.datamodule.utils import get_tokenizer
-from datasets import Dataset as HFDataset
-from datasets.arrow_dataset import Dataset as ArrowDataset
+from datasets import Dataset as ArrowDataset
 
 
 @dataclass
@@ -30,6 +29,7 @@ class DatasetConfig:
     truncation_side: str = "right"
     model_family: str = "gpt"
     train_on_inputs: bool = False
+    add_eos_to_targets: bool = True
     finetune_task_name: str = None
     subsample_train: int = None
     subsample_dev: int = None
@@ -57,6 +57,7 @@ class DefaultCollator:
     for_generation: bool = False
     train_on_inputs: bool = False
     task_to_id: dict = None
+    add_eos_to_targets: bool = True
 
     def enforce_eos(self, targets):
         # simulate the default behaviour of LLamatokenizer, when adding eos token and truncating: the last token must always be eos
@@ -98,7 +99,10 @@ class DefaultCollator:
                 labels_[i] = " " + labels_[i]
 
         # adds the eos token
-        labels_ = [l + " " + self.tokenizer.eos_token for l in labels_]
+        labels_ = [
+            l + ((" " + self.tokenizer.eos_token) if self.add_eos_to_targets else "")
+            for l in labels_
+        ]
         return sources_, labels_
 
     def prepare_inputs_for_seq2seq_family(self, sources, labels):
@@ -337,20 +341,21 @@ class MultipleChoiceCollator(DefaultCollator):
         return output_batch
 
 
-def subsample_dst(dataset, subsample: int):
+def subsample_dst(dataset, subsample: int, rng: torch.Generator = None):
+    rng = rng or torch.Generator().manual_seed(1234)
     subsample = max(len(dataset) // subsample, 1)
     if isinstance(dataset, torch.utils.data.Subset):
         idxs = dataset.indices
         idxs = idxs[:subsample]
         dataset.indices = idxs
     elif isinstance(dataset, Dataset):
-        idxs = torch.randperm(len(dataset))
-        idxs = idxs[:subsample]
+        idxs = torch.randperm(len(dataset), generator=rng)[:subsample]
         dataset = torch.utils.data.Subset(dataset, idxs)
     # hugginface datasets
-    elif isinstance(dataset, HFDataset):
+    elif isinstance(dataset, ArrowDataset):
         # randomly select subsample indices
-        dataset = dataset.select(np.random.choice(len(dataset), subsample))
+        idxs = torch.randperm(len(dataset), generator=rng)[:subsample]
+        dataset = dataset.select(idxs)
 
     return dataset
 
@@ -382,7 +387,7 @@ class DefaultDataModule(LightningDataModule):
             batch_size=self.config.predict_batch_size,
             shuffle=shuffle,
             num_workers=8,
-            pin_memory=True,
+            pin_memory=False,
             persistent_workers=False,
             collate_fn=self.collate_fn,
             drop_last=False,
@@ -398,7 +403,7 @@ class DefaultDataModule(LightningDataModule):
             batch_size=self.config.predict_batch_size,
             shuffle=shuffle,
             num_workers=8,
-            pin_memory=True,
+            pin_memory=False,
             persistent_workers=False,
             collate_fn=self.collate_fn,
             drop_last=False,
@@ -416,12 +421,15 @@ class DefaultDataModule(LightningDataModule):
             model_family=self.config.model_family,
             for_generation=self.for_generation,
             train_on_inputs=self.config.train_on_inputs,
+            add_eos_to_targets=self.config.add_eos_to_targets,
             task_to_id=self.task_to_id,
         )
 
     def print_infos(self):
         from mttl.utils import logger
 
+        logger.info("Dataset name: %s", self.config.dataset)
+        logger.info("Reader class: %s", self.__class__.__name__)
         if self.train_dataset is not None and len(self.train_dataset) > 0:
             logger.info("Training steps: %s" % len(self.train_dataloader()))
             logger.info("Training samples: %s" % len(self.train_dataset))

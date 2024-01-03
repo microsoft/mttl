@@ -9,11 +9,9 @@ from pathlib import Path
 from mttl.dataloader.ni_metrics import compute_metrics, compute_grouped_metrics
 from mttl.models.utils import transfer_batch_to_device
 from mttl.evaluators.base import (
-    Evaluator,
     mean_stderr,
     switch_to_eval_mode,
-    decode,
-    GenerationMixin,
+    GenerativeEvaluator,
 )
 
 
@@ -60,46 +58,48 @@ def compute_aggregation_and_maybe_save(
     return all_results
 
 
-class NIEvaluator(Evaluator, GenerationMixin):
+class NIEvaluator(GenerativeEvaluator):
     def __init__(
         self,
         config,
         num_pos_examples=0,
         max_input_length=None,
-        pred_output_file_path=None,
     ):
-        super().__init__(config=config)
-
         from mttl.datamodule.ni_data_module import NiDataModule
 
-        self.pred_output_file_path = (
-            pred_output_file_path  # if not None, will trute generations into it
+        super().__init__(config=config)
+
+        # unrestricted input length for SNI pass -1
+        if max_input_length is not None:
+            self.config.max_input_length = max_input_length
+
+        self.config.max_output_length = 128
+        self.config.num_pos_examples = num_pos_examples
+        self.config.use_task_descriptions = True
+
+        self.datamodule = NiDataModule(
+            self.config,
+            for_generation=True,
         )
 
-        if self.datamodule is None:
-            # unrestricted input length for SNI pass -1
-            if max_input_length is not None:
-                self.config.max_input_length = max_input_length
-
-            self.config.max_output_length = 128
-            self.config.num_pos_examples = num_pos_examples
-            self.config.use_task_descriptions = True
-
-            self.datamodule = NiDataModule(
-                self.config,
-                for_generation=True,
-            )
-
     @switch_to_eval_mode
-    def evaluate(self, model, split="test", subsample=-1, shuffle=False):
+    def evaluate(
+        self,
+        model,
+        split="test",
+        subsample=-1,
+        num_batches=None,
+        shuffle=False,
+        output_path=None,
+    ):
         dataloader = self.get_dataloader(split, subsample, shuffle)
 
         all_predictions = []
         all_task_names = []
         all_rougeL = []
 
-        if not self.pred_output_file_path is None:
-            path = re.sub(r"/[^/]*$", "", self.pred_output_file_path)
+        if output_path:
+            path = re.sub(r"/[^/]*$", "", output_path)
             Path(path).mkdir(parents=True, exist_ok=True)
 
         pbar = tqdm.tqdm(
@@ -108,7 +108,7 @@ class NIEvaluator(Evaluator, GenerationMixin):
         )
         eval_instances = {}
 
-        for _, batch in pbar:
+        for num_batch, batch in pbar:
             task_names = batch.pop("task_names", None)
             batch.pop("input_texts", None)
             # we use labels texts here for evaluation, because some tokenizers do not skip
@@ -144,8 +144,8 @@ class NIEvaluator(Evaluator, GenerationMixin):
             )
 
             # save generations to a file
-            if self.pred_output_file_path is not None:
-                with open(self.pred_output_file_path, "a") as f:
+            if output_path is not None:
+                with open(output_path + "/generations.jsonl", "a") as f:
                     for p, id_, tn, r, rouge in zip(
                         outputs.generated_texts,
                         batch["instance_ids"],
@@ -161,6 +161,9 @@ class NIEvaluator(Evaluator, GenerationMixin):
                             "rougeL": rouge,
                         }
                         f.write(json.dumps(l) + "\n")
+
+            if num_batches and num_batch >= num_batches:
+                break
 
         instance_ids = [id for id, _ in eval_instances.items()]
         all_references = [eval_instances[id]["references"] for id in instance_ids]
@@ -181,4 +184,6 @@ class NIEvaluator(Evaluator, GenerationMixin):
             all_results["all"]["stderr"] = mean_stderr(
                 [v for k, v in all_results["per_task"].items() if "rougeL" in k]
             )
-        return all_results
+
+        self.save_metrics(all_results, output_path)
+        return all_results["all"]["mean"]

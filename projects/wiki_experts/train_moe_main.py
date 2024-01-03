@@ -13,58 +13,19 @@ from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 import json
 
-from mttl.datamodule.mt_seq_to_seq_module import (
-    FlatMultiTaskConfig,
-    FlatMultiTaskModule,
+from mttl.callbacks import LiveCheckpointCallback, RougeCallback
+from mttl.utils import (
+    add_mlf_logger,
+    add_simple_logger,
+    add_tb_logger,
+    add_wandb_logger,
+    setup_logging,
+    logger,
 )
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
-
-from mttl.callbacks import RougeCallback
-from mttl.utils import get_mlf_logger, setup_logging, logger
+from projects.wiki_experts.train_experts_main import get_datamodule
 from projects.wiki_experts.src.expert_model import MoETrainer
 from projects.wiki_experts.src.config import ExpertConfig
-
-
-class SimpleLogger(pl.loggers.logger.DummyLogger):
-    def __init__(self, output_dir):
-        self.metrics = {}
-        self.output_file = os.path.join(output_dir, "metrics.json")
-
-    def log_metrics(self, metrics, step=None):
-        for k, v in metrics.items():
-            if k not in self.metrics:
-                self.metrics[k] = []
-            self.metrics[k].append({"step": step, "value": v})
-        with open(self.output_file, "w") as f:
-            json.dump(self.metrics, f)
-
-
-def get_datamodule(args, for_generation=False):
-    # refactor all the common arguments below into a dict common kwargs
-    common_kwargs = {
-        "model": args.model,
-        "train_batch_size": args.train_batch_size,
-        "predict_batch_size": args.predict_batch_size,
-        "max_input_length": args.max_input_length,
-        "max_output_length": args.max_output_length,
-        "validation_portion": args.validation_portion,
-        "model_family": args.model_family,
-        "finetune_task_name": args.finetune_task_name,
-        "truncation_side": args.truncation_side,
-        "dataset": args.dataset.replace("qa:", "").replace("raw_docs:", ""),
-        "train_on_inputs": False,
-    }
-    if "flat" in args.dataset:
-        config = FlatMultiTaskConfig(
-            **common_kwargs,
-            source_template=args.source_template,
-            augment_few_shot=args.augment_few_shot,
-        )
-        dm = FlatMultiTaskModule(config, for_generation=for_generation)
-    else:
-        raise ValueError(f"Unknown dataset {args.dataset}")
-    return dm
 
 
 def run_multitask(args: ExpertConfig):
@@ -85,34 +46,14 @@ def run_multitask(args: ExpertConfig):
 
     # legit logging
     loggers = []
-    exp_name = os.environ.get("AMLT_JOB_NAME", args.exp_name)
-    if os.environ.get("WANDB_API_KEY") or args.wandb_project:
-        import wandb
-
-        project = "wiki_experts" if args.wandb_project is None else args.wandb_project
-        args.exp_name = "dev_run" if args.exp_name is None else args.exp_name
-        project = os.environ.get("WANDB_PROJECT", project)
-        wandb_logger = pl.loggers.WandbLogger(
-            project=project,
-            name=exp_name,  # , config=args_
-            settings=wandb.Settings(start_method="fork"),
-        )
-        wandb_logger.experiment.save("*.py")
-        loggers.append(wandb_logger)
+    add_mlf_logger(loggers)
+    add_wandb_logger(loggers, args)
+    add_tb_logger(loggers, args)
+    add_simple_logger(loggers, args)
 
     args.trainable_param_names = args.trainable_param_names + "|.*rkhs.*"
 
     module = MoETrainer(**vars(args), tokenizer=dm.tokenizer)
-
-    mlf_logger = get_mlf_logger()
-    if mlf_logger:
-        loggers.append(mlf_logger)
-
-    if args.tensorboard:
-        tb_logger = pl.loggers.TensorBoardLogger(save_dir=args.output_dir)
-        loggers.append(tb_logger)
-
-    loggers.append(SimpleLogger(args.output_dir))
 
     # get metric monitors for models
     callbacks = []
@@ -120,12 +61,9 @@ def run_multitask(args: ExpertConfig):
     monitor = "val/loss"
     mode = "min"
 
-    model_name = args.model.replace("/", "_")
-    checkpoint_callback = ModelCheckpoint(
+    checkpoint_callback = LiveCheckpointCallback(
         dirpath=args.output_dir,
         monitor=monitor,
-        filename=f"{model_name}" + "-{" + monitor + ":.004f}",
-        save_top_k=1,
         save_last=True,
         mode=mode,
     )
@@ -147,9 +85,7 @@ def run_multitask(args: ExpertConfig):
     num_batches = min(len(gen_dm.val_dataloader()), 500)
     subsample = len(gen_dm.val_dataloader()) / num_batches
 
-    callbacks.append(
-        RougeCallback(gen_dm, every_n_epochs=3, subsample=int(subsample), max_length=3)
-    )
+    callbacks.append(RougeCallback(gen_dm, every_n_epochs=3, subsample=int(subsample)))
 
     trainer = Trainer(
         devices=-1,

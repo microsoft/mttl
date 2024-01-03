@@ -53,9 +53,12 @@ class PolytroponConfig(ModifierConfig):
 
 @register_selector("poly")
 class PolytroponSelector(RoutingSelector):
+    seen_samples_per_task = None
+
     def __init__(self, config, **kwargs):
         super().__init__(config)
 
+        self.n_tasks = config.n_tasks
         self.n_splits = config.n_splits
         self.n_skills = config.n_skills
         self.dropout = config.module_logits_dropout
@@ -74,21 +77,52 @@ class PolytroponSelector(RoutingSelector):
             )
         )
 
+        if PolytroponSelector.seen_samples_per_task is None:
+            PolytroponSelector.seen_samples_per_task = torch.zeros(
+                config.n_tasks, dtype=torch.long, device="cpu"
+            )
+
+        self.use_avg_last = False
+
     def resize_module_logits(self, n_tasks):
         self.module_logits.data = torch.empty(
             (n_tasks, self.n_splits * self.n_skills)
         ).uniform_(-1e-3, 1e-3)
 
     def forward(self, routing_infos, **kwargs):
-        if torch.max(routing_infos.task_ids).item() >= self.module_logits.shape[0]:
+        task_ids = routing_infos.task_ids
+
+        if task_ids is None:
+            if not self.use_avg_last:
+                logger.warning("task_ids is None, using AverageSelector instead")
+
+            self.use_avg_last = True
+            bs = routing_infos.input_ids.size(0)
+            module_weights = torch.ones(
+                (bs, self.n_splits, self.n_skills),
+                device=routing_infos.input_ids.device,
+            )
+            module_weights = (
+                module_weights / module_weights.sum(dim=-1, keepdim=True) + EPS
+            )
+            return module_weights
+
+        self.use_avg_last = False
+        if self.training and not hasattr(routing_infos, "logged_task_ids"):
+            PolytroponSelector.seen_samples_per_task += torch.bincount(
+                task_ids, minlength=self.n_tasks
+            ).cpu()
+            routing_infos.logged_task_ids = True
+
+        if torch.max(task_ids).item() >= self.module_logits.shape[0]:
             raise ValueError(
                 "Poly selector encountered a larger number of tasks than provided at init. {} vs {}".format(
-                    torch.max(routing_infos.task_ids).item(),
+                    torch.max(task_ids).item(),
                     self.module_logits.shape[0],
                 )
             )
 
-        module_logits = self.module_logits[routing_infos.task_ids]
+        module_logits = self.module_logits[task_ids]
         module_logits = module_logits.view(-1, self.n_splits, self.n_skills)
 
         if self.use_l2_norm:
@@ -185,12 +219,13 @@ class PolyLoRA(SkilledLoRA, RoutingMixin):
 
     def forward(self, input):
         task_id = self.routing_infos.task_ids
-        repeat = input.size(0) / task_id.size(0)
 
-        # this repeat follows the patten in `model.predict()` line 152
-        if repeat != 1.0:
-            breakpoint()
-            self.routing_infos.repeat_interleave(repeat)
+        if task_id is not None:
+            repeat = input.size(0) // task_id.size(0)
+
+            # this repeat follows the patten in `model.predict()` line 152
+            if repeat:
+                self.routing_infos.repeat_interleave(repeat)
 
         mixing_weights = self.selector(self.routing_infos).to(dtype=input.dtype)
         # add n_splits dimension

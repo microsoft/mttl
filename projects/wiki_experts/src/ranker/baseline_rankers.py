@@ -19,6 +19,7 @@ from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRanker
 
 try:
     import faiss
+    from faiss import IDSelectorBatch
 except:
     logger.warn("Faiss not installed. KATE router will not work.")
 
@@ -139,27 +140,38 @@ class KATERanker(AdapterRanker):
         self.task_names = list(self.dataset["task_name"])
 
     def set_available_tasks(self, available_tasks):
-        self.available_tasks = available_tasks
+        """Remove vectors from index corresponding to the unavailable tasks."""
+        ids = np.array(
+            [
+                i
+                for i, task_name in enumerate(self.task_names)
+                if task_name not in available_tasks
+            ]
+        )
+        if len(ids) > 0:
+            self.index.remove_ids(ids)
+            self.task_names = [x for x in self.task_names if x in available_tasks]
+            self.available_tasks = available_tasks
 
     def predict_batch(self, batch, n=1):
         query = self.embedder.encode(
-            batch["sources_texts"], show_progress_bar=False, device="cuda:0"
+            batch["sources_texts"], show_progress_bar=False, device="cuda"
         )
-        _, indices = self.index.search(query, 100)
+        _, indices = self.index.search(query, 10)
         top_tasks, top_weights = [], []
 
         for _, idxs in enumerate(indices):
             task_names = [self.task_names[int(idx)] for idx in idxs]
-            task_names = [
-                task_name
-                for task_name in task_names
-                if task_name in self.available_tasks
-            ]
+            task_names = [task_name for task_name in task_names]
             top_selected = Counter(task_names).most_common(n)
+            if len(top_selected) < n:
+                top_selected += [
+                    (top_selected[-1][0], 0) for _ in range(n - len(top_selected))
+                ]
             top_tasks.append([x[0] for x in top_selected])
             top_weights.append([x[1] for x in top_selected])
 
-        top_weights = np.exp(np.array(top_weights))
+        top_weights = np.array(top_weights)
         top_weights = top_weights / top_weights.sum(axis=1, keepdims=True)
         return top_tasks, top_weights.tolist()
 

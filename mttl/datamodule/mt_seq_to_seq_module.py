@@ -10,22 +10,34 @@ import tqdm
 
 
 def augment_few_shot_task(
-    dataset, num_samples, tokenizer=None, max_input_length=None, seed=42
+    dataset,
+    num_samples=None,
+    few_shots=None,
+    tokenizer=None,
+    max_input_length=None,
+    seed=42,
 ):
+    if num_samples is None and few_shots is None:
+        raise ValueError("Either num_samples or few_shots must be specified.")
+
     len_dataset = len(dataset)
-    split = dataset["split"]
     rng = numpy.random.RandomState(seed)
-    augmented_dataset = []
 
-    train_indices = set(i for i in range(len_dataset) if split[i] == "train")
+    if few_shots is None:
+        split = dataset["split"]
+        train_indices = set(i for i in range(len_dataset) if split[i] == "train")
 
-    def map_to_few_shot(example, index):
-        index_range = list(train_indices - {index})
-        index_chosen = rng.choice(index_range, size=num_samples, replace=False)
-        index_chosen = list(map(int, index_chosen))  # datasets complains otherwise
+    def map_to_few_shot(_, index):
+        if few_shots is None:
+            index_range = list(train_indices - {index})
+            index_chosen = rng.choice(index_range, size=num_samples, replace=False)
+            index_chosen = list(map(int, index_chosen))  # datasets complains otherwise
 
-        sources = [dataset[i]["source"] for i in index_chosen]
-        targets = [dataset[i]["target"] for i in index_chosen]
+            sources = [dataset[i]["source"] for i in index_chosen]
+            targets = [dataset[i]["target"] for i in index_chosen]
+        else:
+            sources = few_shots["source"]
+            targets = few_shots["target"]
 
         context = (
             "\n\n".join(
@@ -51,7 +63,9 @@ def augment_few_shot_task(
             "target": dataset[index]["target"],
             "task_name": dataset[index]["task_name"],
             "task_source": "few_shot_{}".format(dataset[index]["task_source"]),
-            "split": dataset[index]["split"],
+            "split": dataset[index]["split"]
+            if "split" in dataset.column_names
+            else None,
         }
 
     augmented_dataset = dataset.map(map_to_few_shot, with_indices=True, num_proc=16)
@@ -149,9 +163,8 @@ class FlatMultiTaskModule(DefaultDataModule):
 
 @dataclass
 class FlanConfig(DatasetConfig):
-    include_template_type: str = "zs_noopt"
-    include_task_source: str = "P3,Flan2021"
-    subsample_dev: int = None
+    include_template_type: str = "*"
+    include_task_source: str = "P3,Flan2021,CoT"
     remove_phi_eval_tasks: bool = False
 
 

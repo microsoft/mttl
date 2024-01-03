@@ -9,7 +9,7 @@ from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 
 @dataclass
 class HumanEvalConfig(DatasetConfig):
-    apply_source_template: str = None
+    pass
 
 
 class HumanEvalDataModule(DefaultDataModule):
