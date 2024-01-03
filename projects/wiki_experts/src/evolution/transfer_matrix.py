@@ -61,6 +61,7 @@ def eval_expert_on_task(
     evaluator_test=None,
     debug=False,
 ):
+    module = None
     logger.info(f"Evaluating perf for {task}")
 
     if expert is not None:
@@ -77,6 +78,13 @@ def eval_expert_on_task(
             raise ValueError(f"Checkpoint type {type(expert)} not supported")
         model_copy.replace_container_with_expert(task, get_expert_instance=False)
         module = model_copy
+
+    if module is None:
+        module = (
+            module_constructor
+            if isinstance(module_constructor, MultiExpertModel)
+            else module_constructor()
+        )
 
     result = {}
     if debug:
