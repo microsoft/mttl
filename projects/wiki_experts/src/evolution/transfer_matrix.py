@@ -5,7 +5,8 @@ import wandb
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from typing import Dict
+from torch import nn
+from typing import Dict, Union
 from huggingface_hub import login
 from matplotlib import pyplot as plt
 from tempfile import TemporaryDirectory
@@ -38,7 +39,7 @@ from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.vllm_engines.engines import free_memory
 from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
 
-DEBUG = True
+DEBUG = False
 if "AMLT_OUTPUT_DIR" in os.environ:
     DEBUG = False
 if DEBUG:
@@ -53,7 +54,7 @@ class TransferMatrixConfig(EvolExpertConfig):
 
 def eval_expert_on_task(
     task,
-    module: MultiExpertModel,
+    module_constructor: Union[callable, MultiExpertModel],
     expert,
     evaluator_train=None,
     evaluator_valid=None,
@@ -63,7 +64,11 @@ def eval_expert_on_task(
     logger.info(f"Evaluating perf for {task}")
 
     if expert is not None:
-        model_copy = copy.deepcopy(module)
+        model_copy = (
+            module_constructor
+            if isinstance(module_constructor, MultiExpertModel)
+            else module_constructor()
+        )
         if isinstance(expert, str):
             model_copy.load_from_module_dict({task: expert}, action="route")
         elif isinstance(expert, Expert):
@@ -93,7 +98,7 @@ def eval_expert_on_task(
 
 def eval_all_experts_on_task(
     task_eval_on,
-    base_model: MultiExpertModel,
+    module_constructor: MultiExpertModel,
     expert_lib: dict,
     evaluator: Evaluator = None,
     only_diagonal=False,
@@ -103,7 +108,11 @@ def eval_all_experts_on_task(
         if only_diagonal and expert.expert_info.expert_task_name != task_eval_on:
             continue
         score = eval_expert_on_task(
-            task_eval_on, base_model, expert, evaluator_test=evaluator, debug=DEBUG
+            task_eval_on,
+            module_constructor,
+            expert,
+            evaluator_test=evaluator,
+            debug=DEBUG,
         )
         log_row[expert_name] = score["test"]
     return log_row
@@ -134,7 +143,8 @@ def produce_transfer_matrix(
             args,
             args.dataset,
             tasks=task_eval_on,
-            split="test",
+            split="val",
+            subsample=args.subsample_eval_set,
         )
         module = MultiExpertModel(
             **vars(args),
@@ -144,7 +154,11 @@ def produce_transfer_matrix(
 
         log_row_task = eval_all_experts_on_task(
             task_eval_on,
-            module,
+            lambda: MultiExpertModel(
+                **vars(args),
+                tokenizer=evaluator.datamodule.tokenizer,
+                device_map="cpu",
+            ),
             expert_lib,
             evaluator=evaluator,
             only_diagonal=args.only_diagonal,
@@ -152,7 +166,7 @@ def produce_transfer_matrix(
         log_row.update(log_row_task)
         # eval on base model
         log_row["base"] = eval_expert_on_task(
-            task_eval_on, module, None, evaluator_test=evaluator, debug=DEBUG
+            task_eval_on, module, expert=None, evaluator_test=evaluator, debug=DEBUG
         )["test"]
 
         print(transfer_table.df)
@@ -204,7 +218,7 @@ def run_eval(args: EvolExpertConfig, debug=None):
         )
     else:
         expert_lib: LocalExpertLibrary = LocalExpertLibrary.create_from_remote(
-            HFExpertLibrary(repo_id=args.hf_repo_id), destination="/tmp"
+            HFExpertLibrary(repo_id=args.hf_repo_id), destination=args.output_dir
         )
         remove_outdated_experts_from_library(expert_lib)
 

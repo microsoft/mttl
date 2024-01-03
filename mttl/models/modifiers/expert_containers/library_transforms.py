@@ -51,13 +51,8 @@ class SVDEmbeddingTransform(LibraryTransform):
         for name in tqdm(list(library.keys())):
             dump = library[name]
             flat = []
-            if "expert_weights" in dump.expert_weights:
-                for _, p in dump.expert_weights["expert_weights"].items():
-                    flat.append(p.flatten().cpu())
-            else:
-                for _, p in dump.expert_weights.items():
-                    flat.append(p.flatten().cpu())
-
+            for _, p in dump.expert_weights.items():
+                flat.append(p.flatten().cpu())
             array.append(torch.concatenate(flat, 0).numpy())
             names.append(name)
 

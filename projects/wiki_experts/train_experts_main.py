@@ -1,6 +1,9 @@
 import os
 import sys
 import pytorch_lightning as pl
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
+
 from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
 
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
@@ -9,7 +12,6 @@ from mttl.callbacks import LiveCheckpointCallback
 from mttl.models.monitors import get_monitors
 from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import torch
 from huggingface_hub import login

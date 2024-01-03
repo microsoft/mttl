@@ -50,6 +50,7 @@ class EvolExpertConfig(ExpertConfig):
         self.evolution_warmup_steps = 0
         self.evol_n_eval_times = 10
         self.subsample_train_set = -1
+        self.subsample_eval_set = -1
 
         self.use_only_modules_for_tasks = (
             False  # if true, only use modules for the given task set for evolution
