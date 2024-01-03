@@ -12,7 +12,7 @@
     "micro_batch_size": 1,
     "train_batch_size": 16,
     "predict_batch_size": 4,
-    "eval_every": 100000,
+    "eval_every": 10000,
     "subsample_dev": 5000,
     "precision": "bf16",
     "dataset": "sordonia/flan-10k-flat",
@@ -25,5 +25,5 @@
     "max_output_length": 64,
     "truncation_side": "left",
     "remove_phi_eval_tasks": true,
-    "pipeline_eval_tasks": "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,winogrande"
+    "pipeline_eval_tasks": "all"
 }

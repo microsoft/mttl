@@ -1790,35 +1790,41 @@ def download_t0(cutoff=-1, per_task=True):
             task_dataset.to_json(os.path.join(dataset_folder, task_name + ".json"))
 
 
-def download_flan(cutoff=10_000, filter_zs=False):
-    dataset_folder = "flan_task"
+def download_flan(
+    hf_repo_id=None, cutoff=10_000, filter_zs=False, template_examples=False
+):
     dataset = load_dataset("chiayewken/flan-v2", split="train")
 
     # filter some examples from the dataset
     if filter_zs:
-        dataset = dataset.filter(
-            lambda example: example["template_type"] == "zs_noopt", num_proc=32
+        part = dataset.filter(
+            lambda example: example["task_source"] != "NIv2", num_proc=24
         )
+        part1 = part.filter(
+            lambda example: example["template_type"] == "zs_noopt", num_proc=24
+        )
+        part2 = part.filter(
+            lambda example: example["template_type"] == "zs_opt"
+            and example["task_source"] == "CoT",
+            num_proc=24,
+        )
+        dataset = concatenate_datasets([part1, part2])
+        print("# number of tasks:", len(set(dataset["task_name"])))
 
     # group the dataset using the task_name
     task_names = dataset.unique("task_name")
     print("Num Tasks: ", len(task_names))
 
-    task_dict = {task_name: [] for task_name in task_names}
-    for idx, example in tqdm.tqdm(enumerate(dataset)):
-        task_dict[example["task_name"]].append(example)
-
-    for task_name, task_dataset in task_dict.items():
-        if len(task_dataset) == 0:
-            continue
-        task_dict[task_name] = Dataset.from_list(task_dataset)
-
+    all_datasets = []
     for task_name in task_names:
         print("Processing task: ", task_name)
 
-        task_dataset = task_dict[task_name]
+        task_dataset = dataset.filter(
+            lambda x: x["task_name"] == task_name, num_proc=24
+        )
+
         # if the dataset is too large, we randomly sample 5000 examples for the training
-        task_dataset = task_dataset.shuffle()
+        task_dataset = task_dataset.shuffle(42)
 
         if len(task_dataset) > cutoff:
             task_dataset = task_dataset.select(range(cutoff))
@@ -1838,14 +1844,45 @@ def download_flan(cutoff=10_000, filter_zs=False):
 
         task_dataset = task_dataset.map(assign_split, with_indices=True)
 
-        # save it into the task file
-        task_name = task_name.replace("/", "_")
-        task_dataset.to_json(os.path.join(dataset_folder, task_name + ".json"))
+        if template_examples:
+            from mttl.datamodule.mt_seq_to_seq_module import apply_source_template
+            from mttl.datamodule.mt_seq_to_seq_module import augment_few_shot_task
+
+            task_dataset = apply_source_template(task_dataset, "Instruct: {}\nAnswer:")
+            task_dataset = augment_few_shot_task(
+                task_dataset, 3, modify_task_source=False
+            )
+
+        # randomly cut the dataset again
+        task_dataset = task_dataset.shuffle(42)
+
+        if len(task_dataset) > cutoff:
+            task_dataset = task_dataset.select(range(cutoff))
+
+        all_datasets.append(task_dataset)
 
         print("Dumping task", task_name)
         print("# Train", len(task_dataset.filter(lambda x: x["split"] == "train")))
         print("# Test", len(task_dataset.filter(lambda x: x["split"] == "test")))
         print("# Valid", len(task_dataset.filter(lambda x: x["split"] == "validation")))
+
+    all_datasets = concatenate_datasets(all_datasets)
+
+    def clean_task(x):
+        if "task_name" not in x:
+            return x
+
+        x["task_name"] = (
+            x["task_name"]
+            .replace(":", "_")
+            .replace("/", "_")
+            .replace("-", "_")
+            .replace(".", "_")
+        )
+        return x
+
+    all_datasets = all_datasets.map(lambda x: clean_task(x))
+    all_datasets.push_to_hub(hf_repo_id)
 
 
 def create_alpaca_code(hf_repo_id):
@@ -1910,6 +1947,72 @@ def create_platypus_templated(hf_repo_id):
         )
 
     Dataset.from_list(examples).push_to_hub(hf_repo_id)
+
+
+def create_platypus_templated_instruct_answer(hf_repo_id):
+    from mttl.datamodule.mt_seq_to_seq_module import apply_source_template
+
+    dataset = load_dataset("sordonia/platypus-flat")
+    apply_source_template(dataset["train"], "Instruct: {}\nAnswer:").push_to_hub(
+        hf_repo_id
+    )
+
+
+def create_mbpp(hf_repo_id):
+    from mttl.datamodule.mt_seq_to_seq_module import apply_source_template
+
+    dataset = load_dataset("mbpp")
+
+    def add_source(x):
+        x["source"] = (
+            x["text"] + "\n" + "\n".join(f">>> {test}" for test in x["test_list"])
+        )
+        x["target"] = x["code"]
+        return x
+
+    def add_train(x):
+        x["split"] = "train"
+        return x
+
+    def add_test(x):
+        x["split"] = "validation"
+        return x
+
+    dataset = dataset.map(
+        add_source,
+        num_proc=16,
+        remove_columns=[
+            "test_list",
+            "text",
+            "code",
+            "challenge_test_list",
+            "test_setup_code",
+        ],
+    )
+    train_dataset = dataset["train"].map(add_train)
+    test_dataset = dataset["validation"].map(add_test)
+
+    apply_source_template(
+        concatenate_datasets([train_dataset, test_dataset]), "Instruct: {}\nAnswer:"
+    ).push_to_hub(hf_repo_id)
+
+
+def create_ultrachat_templated_instruct_answer(hf_repo_id):
+    from mttl.datamodule.mt_seq_to_seq_module import apply_source_template
+
+    dataset = load_dataset("sordonia/ultrachat-32c-10k-flat")
+    apply_source_template(dataset["train"], "Instruct: {}\nAnswer:").push_to_hub(
+        hf_repo_id
+    )
+
+
+def create_adauni_reduced_templated(hf_repo_id):
+    dataseta = load_dataset("sordonia/flan-templated-reduced-ia-flat")["train"]
+    datasetb = load_dataset("sordonia/platypus-templated-ia-flat")["train"]
+    datasetc = load_dataset("sordonia/ultrachat-templated-ia-flat")["train"]
+    datasetd = load_dataset("sordonia/mbpp-templated-ia-flat")["train"]
+    datasets = concatenate_datasets([dataseta, datasetb, datasetc, datasetd])
+    datasets.push_to_hub(hf_repo_id)
 
 
 def create_adauni(hf_repo_id):
@@ -2270,23 +2373,40 @@ def main(task):
     if task == "flan":
         download_flan(cutoff=10_000)
         create_data("flan_task", "sordonia/flan-10k-flat", flat=True)
+    elif task == "flan_reduced_templated":
+        download_flan(
+            "sordonia/flan-10k-flat-reduced-templated",
+            cutoff=10_000,
+            filter_zs=True,
+            template_examples=True,
+        )
     elif task == "t0":
         download_t0(cutoff=10_000)
         create_data("t0_task", "sordonia/t0-10k-flat", flat=True)
     elif task == "sni":
         create_sni("sordonia/sni-10k-flat")
+    elif task == "mbpp":
+        create_mbpp("sordonia/mbpp-templated-ia-flat")
     elif task == "adauni":
         create_adauni("sordonia/adauni-v3-10k-flat")
     elif task == "argilla":
         create_argilla("sordonia/argilla_notus-flat")
     elif task == "platypus-templated":
         create_platypus_templated("sordonia/platypus-templated-flat")
+    elif task == "platypus-templated-instruct-answer":
+        create_platypus_templated_instruct_answer("sordonia/platypus-templated-ia-flat")
+    elif task == "ultrachat-templated-instruct-answer":
+        create_ultrachat_templated_instruct_answer(
+            "sordonia/ultrachat-templated-ia-flat"
+        )
     elif task == "tags":
         create_tags("sordonia/adauni-v4-10k-flat")
     elif task == "transform-platy":
         create_mmlu_platy()
     elif task == "alpaca_code":
         create_alpaca_code("sordonia/alpaca-code-flat")
+    elif task == "adauni-reduced-templated":
+        create_adauni_reduced_templated("sordonia/adauni-templated-reduced-ia-flat")
     else:
         raise ValueError("Unknown task")
 
