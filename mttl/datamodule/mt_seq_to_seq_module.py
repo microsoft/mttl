@@ -92,7 +92,7 @@ def augment_few_shot(
                 )
             )
         )
-    return concatenate_datasets([dataset, augmented_dataset])
+    return concatenate_datasets([dataset] + augmented_dataset)
 
 
 @dataclass
@@ -171,6 +171,7 @@ class FlatMultiTaskModule(DefaultDataModule):
 class FlanConfig(DatasetConfig):
     include_template_type: str = "*"
     include_task_source: str = "P3,Flan2021,CoT"
+    source_template: str = None
     remove_phi_eval_tasks: bool = False
 
 
@@ -218,6 +219,10 @@ class FlanModule(DefaultDataModule):
             _,
         ) = maybe_filter_hf_dataset_by_task(
             dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
+        )
+
+        train_dataset = apply_source_template(
+            train_dataset, self.config.source_template
         )
 
         if "split" in dataset.column_names["train"]:
