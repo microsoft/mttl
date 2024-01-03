@@ -163,20 +163,35 @@ class PolytroponSelector(RoutingSelector):
         return module_weights
 
 
+@dataclass
+class PerTokenPolytroponConfig(PolytroponConfig):
+    vocab_size: int = None
+    skip_unseen_tokens: bool = True  # during evaluation, if token has not been seen (and no mapping has been learned yet) skip it
+
+
 @register_selector("per_token_poly")
 class PerTokenPolytroponSelector(RoutingSelector):
+    seen_samples_per_token = None
+
     def __init__(self, config, **kwargs):
         super().__init__(config)
 
         self.n_splits = config.n_splits
         self.n_skills = config.n_skills
+        self.vocab_size = config.vocab_size
         self.dropout = config.module_logits_dropout
+        self.skip_unseen_tokens = config.skip_unseen_tokens
 
         self.module_logits = nn.Parameter(
             torch.empty(
                 (config.vocab_size, config.n_splits * config.n_skills)
             ).uniform_(-1e-3, 1e-3)
         )
+
+        if PerTokenPolytroponSelector.seen_samples_per_token is None:
+            PerTokenPolytroponSelector.seen_samples_per_token = torch.zeros(
+                config.vocab_size, dtype=torch.long, device="cpu"
+            )
 
     def resize_module_logits(self, n_tasks):
         logger.warning(
@@ -187,6 +202,11 @@ class PerTokenPolytroponSelector(RoutingSelector):
         # Note : encoder - decoder models not currently supported.
         input_ids = routing_infos.input_ids
 
+        if self.training and not hasattr(routing_infos, "logged_task_ids"):
+            PerTokenPolytroponSelector.seen_samples_per_token += torch.bincount(
+                input_ids.view(-1), minlength=self.vocab_size
+            ).cpu()
+            routing_infos.logged_task_ids = True
         if input_ids.max().item() >= self.module_logits.shape[0]:
             raise ValueError(
                 "Poly selector encountered a larger number of tasks than provided at init. {} vs {}".format(
@@ -201,6 +221,12 @@ class PerTokenPolytroponSelector(RoutingSelector):
         )
         module_logits = torch.sigmoid(module_logits)
         module_weights = module_logits / (module_logits.sum(dim=-1, keepdim=True) + EPS)
+
+        if not self.training and self.config.skip_unseen_tokens:
+            is_seen = (
+                PerTokenPolytroponSelector.seen_samples_per_token[input_ids.cpu()] > 0
+            )
+            module_weights[~is_seen] = 0.0
 
         return module_weights
 
@@ -242,7 +268,7 @@ class PolyLoRA(SkilledLoRA, RoutingMixin):
 
 
 @dataclass
-class PerTokenPolyLoRAConfig(PolyLoRAConfig):
+class PerTokenPolyLoRAConfig(SkilledLoRAConfig, PerTokenPolytroponConfig):
     pass
 
 
