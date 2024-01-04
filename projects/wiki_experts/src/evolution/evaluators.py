@@ -15,7 +15,7 @@ from mttl.datamodule.base import DefaultDataModule
 from mttl.evaluators import RougeEvaluator
 from mttl.datamodule.base import AutoDataModule
 from projects.wiki_experts.src.evolution.config import EvolExpertConfig
-from projects.wiki_experts.train_experts_main import get_datamodule
+from projects.wiki_experts.utils import get_datamodule
 
 
 class EvalCallback(ABC):
