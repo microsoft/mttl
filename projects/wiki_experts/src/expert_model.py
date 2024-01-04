@@ -89,6 +89,14 @@ class MultiExpertModel(ExpertTrainer):
         self.experts_names = []
         self.lock = threading.Lock()
 
+    def deepcopy(self):
+        lock = self.lock
+        self.lock = None
+        _copy = copy.deepcopy(self)
+        _copy.lock = lock
+        self.lock = lock
+        return _copy
+
     @property
     def experts_containers(self) -> List[ExpertContainer]:
         containers = []
