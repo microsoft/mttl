@@ -66,7 +66,7 @@ def eval_expert_on_task(
 
     if expert is not None:
         model_copy = (
-            copy.deepcopy(module_constructor)
+            module_constructor.deepcopy()
             if isinstance(module_constructor, MultiExpertModel)
             else module_constructor()
         )
@@ -163,11 +163,6 @@ def produce_transfer_matrix(
         log_row_task = eval_all_experts_on_task(
             task_eval_on,
             module,
-            # lambda: MultiExpertModel(
-            #     **vars(args),
-            #     tokenizer=evaluator.datamodule.tokenizer,
-            #     device_map="cpu",
-            # ),
             expert_lib,
             evaluator=evaluator,
             only_diagonal=args.only_diagonal,
