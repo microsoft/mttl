@@ -30,11 +30,13 @@ class DataCollatorForCLIPExpertsTriple(DefaultCollator):
         sources = [b["sources_texts"] for b in batch]
         positive_experts = [b["positive_expert_names"] for b in batch]
         negative_experts = [b["negative_expert_names"] for b in batch]
+        eval_task = [b["eval_task"] for b in batch]
 
         return {
             "sources_texts": sources,
             "positive_expert_names": positive_experts,
             "negative_expert_names": negative_experts,
+            "eval_task": eval_task, 
         }
 
 
