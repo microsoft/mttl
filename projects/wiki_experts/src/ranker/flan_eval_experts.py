@@ -111,7 +111,7 @@ def run_loss_eval(args):
     if args.hf_lib_id:
         library = HFExpertLibrary(args.hf_lib_id)
 
-        module.load_from_library(library, filtering_experts=filtering_experts)
+        module.add_experts_from_library(library, filtering_experts=filtering_experts)
     elif args.load_module is not None:
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:
@@ -181,5 +181,5 @@ def run_eval(args):
 
 if __name__ == "__main__":
     args = ExpertConfig.parse()
-    run_eval(args)
-    # run_loss_eval(args)
+    # run_eval(args)
+    run_loss_eval(args)
