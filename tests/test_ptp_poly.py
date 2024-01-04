@@ -53,7 +53,7 @@ def test_ptp_poly():
     adapter_config = PerTokenPolyLoRAConfig(
         modify_modules=".*self_attn",
         modify_layers="q_proj|v_proj|k_proj|o_proj",
-        vocab_size=400,
+        # vocab_size=400,
         skip_unseen_tokens=True,
         model_family="gpt",
     )

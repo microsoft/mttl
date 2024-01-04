@@ -165,8 +165,6 @@ class PolytroponSelector(RoutingSelector):
 
 @dataclass
 class PerTokenPolytroponConfig(PolytroponConfig):
-    model_family: str = None
-    vocab_size: int = None
     skip_unseen_tokens: bool = True  # during evaluation, if token has not been seen (and no mapping has been learned yet) skip it
 
 
