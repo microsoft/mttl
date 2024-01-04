@@ -34,7 +34,7 @@ def get_pairwise_dataset(args):
     df = pd.read_csv(args.input_file)
     fout = open(args.output_file, "w")
 
-    for task in df["task_eval_on"].unique():
+    for task in tqdm.tqdm(df["task_eval_on"].unique()):
         df_task = df[df["task_eval_on"] == task]
         # df_task_top = df_task.groupby(["eval_task", "m1"]).head(1)
         # print(df_task_top)
@@ -61,7 +61,7 @@ def get_pairwise_dataset(args):
         test_dataset = data_module.test_dataloader()
         print("task::{}....len:{}".format(task, len(test_dataset)))
 
-        for batch in tqdm.tqdm(test_dataset):
+        for batch in test_dataset:
             for input_text in batch["sources_texts"]:
                 for e, element in df_task.iterrows():
                     fout.write(
@@ -81,7 +81,7 @@ def get_pairwise_dataset(args):
                     )
             fout.flush()
             ## if only need subset of the dataset
-            break
+            # break
 
 
 if __name__ == "__main__":
