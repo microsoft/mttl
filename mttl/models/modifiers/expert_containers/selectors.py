@@ -160,7 +160,6 @@ class Selector(RoutingMixin, nn.Module):
         self.selector_views = []
         self.forward_cache = None
         self.total_calls_per_forward = 0
-
         self._calls_counter = 0
 
     @property
@@ -257,6 +256,7 @@ class PolySelector(Selector):
 class MOERKHSSelectorConfig(SelectorConfig):
     rkhs_dim: int = 512
     emb_dim: int = 128
+    top_k: int = -1
 
 
 @register_multi_expert_selector("moe_rkhs_router", MOERKHSSelectorConfig)
@@ -269,7 +269,7 @@ class MOERKHSSelector(Selector):
                 "MOERKHSSelector requires a layer to be passed in kwargs to infer the input dimension."
             )
 
-        self.topk = 2
+        self.top_k = config.top_k
         self.input_dim = kwargs["layer"].weight.data.shape[-1]
         self.rkhs_dim = config.rkhs_dim
         self.emb_dim = config.emb_dim
@@ -298,11 +298,16 @@ class MOERKHSSelector(Selector):
 
         router_logits = torch.matmul(rkhs_enc, rkhs_emb.T)
         routing_weights = F.softmax(router_logits, dim=-1, dtype=torch.float)
-        routing_weights, selected_experts = torch.topk(
-            routing_weights, self.topk, dim=-1
-        )
-        # we cast back to the input dtype
-        routing_weights = routing_weights.to(input.dtype)
+
+        if self.top_k > 0:
+            routing_weights, selected_experts = torch.topk(
+                routing_weights, self.top_k, dim=-1
+            )
+            # we cast back to the input dtype
+            routing_weights = routing_weights.to(input.dtype)
+        else:
+            # soft routing
+            selected_experts = None
 
         g = self.info_container.get("routing_gates", [])
         g.append(router_logits)

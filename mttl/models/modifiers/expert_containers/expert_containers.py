@@ -9,6 +9,8 @@ from mttl.models.modifiers.base import (
     ModifierConfig,
     ModifyMixin,
 )
+
+from mttl.utils import logger
 from mttl.models.modifiers.lora import LoRA, LoRAConfig
 from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
 from mttl.models.modifiers.expert_containers.selectors import *
@@ -216,40 +218,66 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                 input, [self.get(module) for module in selection.modules]
             )
         elif isinstance(selection, BatchAndSequenceModulesAndWeightsSelectorOutput):
-            indices = selection.indices.reshape(-1, selection.indices.shape[-1])
-            weights = selection.weights.reshape(-1, selection.weights.shape[-1])
+            if selection.indices is not None:
+                indices = selection.indices.reshape(-1, selection.indices.shape[-1])
+                weights = selection.weights.reshape(-1, selection.weights.shape[-1])
 
-            # set of active indices
-            unique_indices, inverse_indices = torch.unique(indices, return_inverse=True)
-
-            # form a skilled lora for each unique index, we could potentially skip this stack step
-            # to save some memory space, but let's leave it for now
-            skilled_loras = [
-                SkilledLoRAView.from_loras(
-                    [self.get(int(expert_index)) for expert_index in unique_indices]
+                # set of active indices
+                unique_indices, inverse_indices = torch.unique(
+                    indices, return_inverse=True
                 )
-            ]
 
-            # express weights in the new basis of unique indices
-            # i.e.
-            # indices          = [[10, 20], [15, 5]]
-            # weights          = [[0.2, 0.8], [0.9, 0.1]]
-            # unique indices   = [5, 10, 15, 20]
-            # inverse_indices  = [[1, 3], [2, 0]]
-            # inverse_weights  = [[0, 0.2, 0, 0.8], [0.1, 0, 0.9, 0.]]
-            inverse_weights = torch.zeros(
-                weights.shape[0], len(unique_indices), device=weights.device
-            )
-            inverse_weights = torch.scatter_add(
-                inverse_weights, 1, inverse_indices, weights
-            )
+                # form a skilled lora for each unique index, we could potentially skip this stack step
+                # to save some memory space, but let's leave it for now
+                skilled_loras = [
+                    SkilledLoRAView.from_loras(
+                        [self.get(int(expert_index)) for expert_index in unique_indices]
+                    )
+                ]
 
-            module_output = SkilledLoRA.parallel_linear_weighted_forward(
-                input.view(-1, input.size(-1)),
-                skilled_loras,
-                inverse_weights,
-                merge_after=False,
-            )
+                # express weights in the new basis of unique indices
+                # i.e.
+                # indices          = [[10, 20], [15, 5]]
+                # weights          = [[0.2, 0.8], [0.9, 0.1]]
+                # unique indices   = [5, 10, 15, 20]
+                # inverse_indices  = [[1, 3], [2, 0]]
+                # inverse_weights  = [[0, 0.2, 0, 0.8], [0.1, 0, 0.9, 0.]]
+                inverse_weights = torch.zeros(
+                    weights.shape[0], len(unique_indices), device=weights.device
+                )
+                inverse_weights = torch.scatter_add(
+                    inverse_weights, 1, inverse_indices, weights
+                )
+
+                module_output = SkilledLoRA.parallel_linear_weighted_forward(
+                    input.view(-1, input.size(-1)),
+                    skilled_loras,
+                    inverse_weights,
+                    merge_after=False,
+                )
+            else:
+                # we have no indices, so we just use a linear combination of all the experts
+                # for each position and batch example
+                if hasattr(self, "_skilled_loras"):
+                    skilled_loras = self._skilled_loras
+                else:
+                    logger.warn("Storing skilled loras for reuse.")
+
+                    # store skilled lora view for reuse locally
+                    skilled_loras = [
+                        SkilledLoRAView.from_loras(
+                            [
+                                self.get(int(expert_index))
+                                for expert_index in range(len(self))
+                            ]
+                        )
+                    ]
+                    self._skilled_loras = skilled_loras
+
+                weights = selection.weights.reshape(-1, selection.weights.shape[-1])
+                module_output = SkilledLoRA.parallel_linear_weighted_forward(
+                    input.view(-1, input.size(-1)), skilled_loras, [weights]
+                )
             return module_output.view(input.shape[0], input.shape[1], -1)
 
     def forward(self, input, **kwargs):

@@ -7,10 +7,13 @@ from pytorch_lightning import seed_everything
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.src.expert_model import (
+    MoETrainer,
     RoutedMultiExpertModel,
 )
+
 from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
 from mttl.models.modifiers.expert_containers import LoRAExpertContainer
+from mttl.models.modifiers.expert_containers.selectors import MOERKHSSelector
 from mttl.models.modifiers.lora import LoRA
 
 
@@ -31,154 +34,190 @@ def tmp_exp_config(tmp_path):
     return SimpleConfig()
 
 
-class TestRoutedMultiExpertModel:
-    def create_dummy_expert(self, config: ExpertConfig, exp_name) -> Expert:
-        # model_object = make_tiny_llama()
-        exp_trainer = ExpertTrainer(
-            tokenizer=None,
-            **vars(config),
-            # model_object=model_object,
-        )
-        dir = f"{config.output_dir}/{exp_name}"
-        os.makedirs(dir, exist_ok=True)
-        checkpoint = exp_trainer.save_pretrained(dir)
-        expert = load_expert(checkpoint, exp_name)
-        expert.expert_info.expert_name = exp_name
-        return expert
+def create_dummy_expert(config: ExpertConfig, exp_name) -> Expert:
+    exp_trainer = ExpertTrainer(
+        tokenizer=None,
+        **vars(config),
+    )
+    dir = f"{config.output_dir}/{exp_name}"
+    os.makedirs(dir, exist_ok=True)
+    checkpoint = exp_trainer.save_pretrained(dir)
+    expert = load_expert(checkpoint, exp_name)
+    expert.expert_info.expert_name = exp_name
+    return expert
 
-    def test_expert_selector_with_task_name_routing(self, tmp_exp_config):
-        seed_everything(0)
-        config: Config = tmp_exp_config
 
-        config.router_selector = "task_selector"
-        exp1 = self.create_dummy_expert(config, "exp1")
-        exp2 = self.create_dummy_expert(config, "exp2")
-        module_dict = {"mod1": exp1, "mod2": exp2, "default": exp1}
+def test_expert_selector_with_task_name_routing(tmp_exp_config):
+    seed_everything(0)
+    config: Config = tmp_exp_config
 
-        module = RoutedMultiExpertModel(
-            # model_object=make_tiny_llama(),
-            tokenizer=None,
-            **vars(config),
-        )
-        assert module.hparams.model_modifier == None
-        module.load_from_module_dict(module_dict, action="route")
-        bs, max_seq_len = 10, 100
+    config.router_selector = "task_selector"
+    exp1 = create_dummy_expert(config, "exp1")
+    exp2 = create_dummy_expert(config, "exp2")
+    module_dict = {"mod1": exp1, "mod2": exp2, "default": exp1}
 
-        assert isinstance(
-            module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
-        )
+    module = RoutedMultiExpertModel(
+        tokenizer=None,
+        **vars(config),
+    )
+    assert module.hparams.model_modifier == None
+    module.load_from_module_dict(module_dict, action="route")
+    bs, max_seq_len = 10, 100
 
-        batch = {
-            "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
-            "labels": torch.randint(10, 400, (bs, max_seq_len)),
-        }
-        seq_len = torch.randint(0, max_seq_len, (bs,))
-        attn_mask = torch.zeros(bs, max_seq_len, dtype=torch.int32)
-        attn_mask[torch.arange(bs), seq_len] = 1
-        attn_mask = 1 - attn_mask.cumsum(dim=-1)
-        batch["attention_mask"] = attn_mask
-        batch["task_names"] = ["mod1", "mod2"] * 4
-        batch["task_names"] += ["some_unknown_task_name"] * 2
+    assert isinstance(
+        module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
+    )
 
-        # Test Base Llama model
-        output = module(batch)
-        assert np.allclose(output.item(), 11.04, atol=0.1)
+    batch = {
+        "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
+        "labels": torch.randint(10, 400, (bs, max_seq_len)),
+    }
+    seq_len = torch.randint(0, max_seq_len, (bs,))
+    attn_mask = torch.zeros(bs, max_seq_len, dtype=torch.int32)
+    attn_mask[torch.arange(bs), seq_len] = 1
+    attn_mask = 1 - attn_mask.cumsum(dim=-1)
+    batch["attention_mask"] = attn_mask
+    batch["task_names"] = ["mod1", "mod2"] * 4
+    batch["task_names"] += ["some_unknown_task_name"] * 2
 
-    def test_expert_selector_with_poly_routing(self, tmp_exp_config):
-        seed_everything(0)
-        config: ExpertConfig = tmp_exp_config
+    # Test Base Llama model
+    output = module(batch)
+    assert np.allclose(output.item(), 11.04, atol=0.1)
 
-        config.router_selector = "poly_router_dir"
-        exp1_dest = self.create_dummy_expert(config, "exp1")
-        exp2_dest = self.create_dummy_expert(config, "exp2")
-        module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
 
-        module = RoutedMultiExpertModel(
-            tokenizer=None,
-            expert_info={},
-            **vars(config),
-        )
-        module.load_from_module_dict(module_dict, action="route")
-        bs, max_seq_len = 10, 100
+def test_expert_selector_with_poly_routing(tmp_exp_config):
+    seed_everything(0)
+    config: ExpertConfig = tmp_exp_config
 
-        assert isinstance(
-            module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
-        )
+    config.router_selector = "poly_router_dir"
+    exp1_dest = create_dummy_expert(config, "exp1")
+    exp2_dest = create_dummy_expert(config, "exp2")
+    module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
 
-        batch = {
-            "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
-            "labels": torch.randint(10, 400, (bs, max_seq_len)),
-        }
-        seq_len = torch.randint(0, max_seq_len, (bs,))
-        attn_mask = torch.zeros(bs, max_seq_len, dtype=torch.int32)
-        attn_mask[torch.arange(bs), seq_len] = 1
-        attn_mask = 1 - attn_mask.cumsum(dim=-1)
-        batch["attention_mask"] = attn_mask
+    module = RoutedMultiExpertModel(
+        tokenizer=None,
+        expert_info={},
+        **vars(config),
+    )
+    module.load_from_module_dict(module_dict, action="route")
+    bs, max_seq_len = 10, 100
 
-        # Test Base Llama model
-        output = module(batch)
-        assert np.allclose(output.item(), 9.7, atol=0.1)
+    assert isinstance(
+        module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
+    )
 
-        # check the get_router_weights function
-        routing_weights = module.get_router_weights()
-        assert (
-            "mod1" in routing_weights["shared.selector"]
-            and "mod2" in routing_weights["shared.selector"]
-        )
+    batch = {
+        "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
+        "labels": torch.randint(10, 400, (bs, max_seq_len)),
+    }
+    seq_len = torch.randint(0, max_seq_len, (bs,))
+    attn_mask = torch.zeros(bs, max_seq_len, dtype=torch.int32)
+    attn_mask[torch.arange(bs), seq_len] = 1
+    attn_mask = 1 - attn_mask.cumsum(dim=-1)
+    batch["attention_mask"] = attn_mask
 
-        # change router_granularity to finegrained
-        config.router_granularity = "finegrained"
-        module = RoutedMultiExpertModel(
-            tokenizer=None,
-            expert_info={},
-            **vars(config),
-        )
-        module.load_from_module_dict(module_dict)
-        output = module(batch)
-        routing_weights = module.get_router_weights()
-        assert np.allclose(output.item(), 9.7, atol=0.1)
+    # Test Base Llama model
+    output = module(batch)
+    assert np.allclose(output.item(), 9.7, atol=0.1)
 
-        expert = module.to_expert()
-        assert isinstance(expert, Expert)
-        module.replace_container_with_expert("mod1")
-        assert isinstance(module.model.transformer.h[0].attn.attention.k_proj, LoRA)
+    # check the get_router_weights function
+    routing_weights = module.get_router_weights()
+    assert (
+        "mod1" in routing_weights["shared.selector"]
+        and "mod2" in routing_weights["shared.selector"]
+    )
 
-    def test_add_expert_with_action_merge(self, tmp_exp_config):
-        seed_everything(0)
-        config: ExpertConfig = tmp_exp_config
+    # change router_granularity to finegrained
+    config.router_granularity = "finegrained"
+    module = RoutedMultiExpertModel(
+        tokenizer=None,
+        expert_info={},
+        **vars(config),
+    )
+    module.load_from_module_dict(module_dict)
+    output = module(batch)
+    routing_weights = module.get_router_weights()
+    assert np.allclose(output.item(), 9.7, atol=0.1)
 
-        config.router_selector = "poly_router"
-        exp1_dest = self.create_dummy_expert(config, "exp1")
-        exp2_dest = self.create_dummy_expert(config, "exp2")
-        module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
+    expert = module.to_expert()
+    assert isinstance(expert, Expert)
+    module.replace_container_with_expert("mod1")
+    assert isinstance(module.model.transformer.h[0].attn.attention.k_proj, LoRA)
 
-        module = RoutedMultiExpertModel(
-            tokenizer=None,
-            expert_info={},
-            **vars(config),
-        )
-        module.load_from_module_dict(module_dict, action="merge")
-        bs, max_seq_len = 10, 100
 
-        assert isinstance(
-            module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
-        )
-        # expert container should be empty
-        assert len(module.model.transformer.h[0].attn.attention.k_proj) == 0
+def test_expert_selector_with_moe_routing(tmp_exp_config, mocker):
+    seed_everything(0)
+    config: ExpertConfig = tmp_exp_config
 
-        batch = {
-            "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
-            "labels": torch.randint(10, 400, (bs, max_seq_len)),
-        }
-        seq_len = torch.randint(0, max_seq_len, (bs,))
-        attn_mask = torch.zeros(bs, max_seq_len, dtype=torch.int32)
-        attn_mask[torch.arange(bs), seq_len] = 1
-        attn_mask = 1 - attn_mask.cumsum(dim=-1)
-        batch["attention_mask"] = attn_mask
+    config.router_selector = "moe_rkhs_router"
 
-        # Test Base Llama model
-        output = module(batch)
-        assert np.allclose(output.item(), 9.7, atol=0.1)
+    module = MoETrainer(
+        tokenizer=None,
+        expert_info={},
+        **vars(config),
+    )
+    bs, max_seq_len = 10, 100
+
+    container = module.model.transformer.h[0].attn.attention.k_proj
+    assert isinstance(container, LoRAExpertContainer)
+    assert isinstance(container.selector, MOERKHSSelector)
+    assert container.selector.top_k == -1
+
+    spy = mocker.spy(container.selector, "forward")
+
+    batch = {
+        "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
+        "labels": torch.randint(10, 400, (bs, max_seq_len)),
+    }
+    seq_len = torch.randint(0, max_seq_len, (bs,))
+    attn_mask = torch.zeros(bs, max_seq_len, dtype=torch.int32)
+    attn_mask[torch.arange(bs), seq_len] = 1
+    attn_mask = 1 - attn_mask.cumsum(dim=-1)
+    batch["attention_mask"] = attn_mask
+
+    # Test Base Llama model
+    output = module(batch)
+    assert np.allclose(output.item(), 10.18, atol=0.1)
+    assert spy.call_count == 1
+    assert container.selector.total_calls_per_forward == 1
+
+
+def test_add_expert_with_action_merge(tmp_exp_config):
+    seed_everything(0)
+    config: ExpertConfig = tmp_exp_config
+
+    config.router_selector = "poly_router"
+    exp1_dest = create_dummy_expert(config, "exp1")
+    exp2_dest = create_dummy_expert(config, "exp2")
+    module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
+
+    module = RoutedMultiExpertModel(
+        tokenizer=None,
+        expert_info={},
+        **vars(config),
+    )
+    module.load_from_module_dict(module_dict, action="merge")
+    bs, max_seq_len = 10, 100
+
+    assert isinstance(
+        module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
+    )
+    # expert container should be empty
+    assert len(module.model.transformer.h[0].attn.attention.k_proj) == 0
+
+    batch = {
+        "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
+        "labels": torch.randint(10, 400, (bs, max_seq_len)),
+    }
+    seq_len = torch.randint(0, max_seq_len, (bs,))
+    attn_mask = torch.zeros(bs, max_seq_len, dtype=torch.int32)
+    attn_mask[torch.arange(bs), seq_len] = 1
+    attn_mask = 1 - attn_mask.cumsum(dim=-1)
+    batch["attention_mask"] = attn_mask
+
+    # Test Base Llama model
+    output = module(batch)
+    assert np.allclose(output.item(), 9.7, atol=0.1)
 
 
 if __name__ == "__main__":
