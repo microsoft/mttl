@@ -110,7 +110,7 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
     def __init__(
         self,
         task_names,
-        temperature: float = 1,
+        temperature: float = 0.07,
         text_embedding_dim: int = 384,
         expert_embedding_dim: int = 512,
         projection_dim: int = 512,
