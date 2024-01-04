@@ -41,7 +41,7 @@ def get_monitors(config):
 class PolytroponLog(Callback):
     """Log polytropon metrics of interest, sparsity / efficiency / discreteness."""
 
-    LOG_EVERY = 5  # 00
+    LOG_EVERY = 500
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:
         if trainer.global_step == 0 or trainer.global_step % self.LOG_EVERY > 0:
