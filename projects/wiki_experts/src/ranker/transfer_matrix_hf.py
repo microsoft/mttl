@@ -196,143 +196,6 @@ def product_transfer_matrix_loss(
     return transfer_matrix
 
 
-def produce_transfer_matrix_rouge(
-    args: ExpertConfig, expert_lib: HFExpertLibrary, tasks: list
-):
-    """
-    Eval each module in expert_lib on each subject in subjects.
-    """
-    # sort tasks to first include tasks for which modules are available
-    tasks = [t for t in expert_lib.keys() if t in tasks] + [
-        t for t in tasks if t not in expert_lib.keys()
-    ]
-
-    if not os.path.exists(os.path.join(args.output_dir, "transfer_matrix.jsonl")):
-        os.mkdir(args.output_dir)
-    fout = open(os.path.join(args.output_dir, "transfer_matrix.jsonl"), "w")
-
-    transfer_table = TableLogger()
-
-    for task_eval_on in tasks:
-        config = FlatMultiTaskConfig(
-            dataset=args.dataset,
-            model="EleutherAI/gpt-neo-125m",
-            finetune_task_name=task_eval_on,
-            predict_batch_size=8,
-        )
-
-        data_module = FlatMultiTaskModule(config, for_generation=True)
-
-        evaluator = RougeEvaluator(data_module)
-
-        ################# add default expert ###############
-        module_name = list(expert_lib.keys())[0]
-        module_dump = expert_lib[module_name]
-
-        expert_name = "default"
-
-        # fill all the weights with zeros
-        # deep copy the weights
-        weights = copy.deepcopy(module_dump.expert_weights)
-        for key, value in weights.items():
-            value.fill_(0)
-
-        module = MultiExpertModel(
-            **vars(args),
-            tokenizer=data_module.tokenizer,
-            # device_map="cpu",
-        )
-        add_expert_to_transformer(
-            module.model,
-            expert_name,
-            module_dump.expert_config,
-            weights,
-            action="route",
-            is_default=True,
-        )
-
-        module.replace_container_with_expert(expert_name)
-
-        scores = evaluator.evaluate(module, num_batches=5)
-        logger.info(f"Scores on of {expert_name} for {task_eval_on}: {scores}")
-        print(f"Scores on of {expert_name} for {task_eval_on}: {scores}")
-        fout.write(
-            json.dumps(
-                {
-                    "expert_name": expert_name,
-                    "task_eval_on": task_eval_on,
-                    "score": scores,
-                }
-            )
-            + "\n"
-        )
-
-        del module
-        free_memory()
-        ################# add default expert ###############
-        for expert_name, expert_dump in expert_lib.items():
-            module_dest = expert_lib[expert_name]
-
-            logger.info(f"################# Evaluating {expert_name} on {task_eval_on}")
-
-            if isinstance(evaluator, MMLUEvaluator):
-                module = MultiExpertModel(
-                    **vars(args),
-                    tokenizer=evaluator.datamodule.tokenizer,
-                    # device_map="cpu",
-                )
-            else:
-                module = MultiExpertModel(
-                    **vars(args),
-                    tokenizer=data_module.tokenizer,
-                    # device_map="cpu",
-                )
-
-            if module_dest:
-                add_expert_to_transformer(
-                    module.model,
-                    expert_name,
-                    expert_dump.expert_config,
-                    expert_dump.expert_weights,
-                    action="route",
-                    is_default=False,
-                )
-
-                module.replace_container_with_expert(expert_name)
-
-            scores = evaluator.evaluate(module, num_batches=5)
-            logger.info(f"Scores on of {expert_name} for {task_eval_on}: {scores}")
-            print(f"Scores on of {expert_name} for {task_eval_on}: {scores}")
-            fout.write(
-                json.dumps(
-                    {
-                        "expert_name": expert_name,
-                        "task_eval_on": task_eval_on,
-                        "score": scores,
-                    }
-                )
-                + "\n"
-            )
-            fout.flush()
-
-            del module
-            free_memory()
-
-        print(transfer_table.df)
-        transfer_table.log_table_wandb()
-    transfer_matrix = transfer_table.df
-    if wandb.run is not None:
-        _size = 1 * len(transfer_matrix.columns)
-        plt.figure(figsize=(_size, _size))
-        # set "module" as index
-        transfer_matrix = transfer_matrix.set_index("eval_task")
-        ax = sns.heatmap(transfer_matrix, annot=True, linewidth=0.5)
-        ax.figure.tight_layout()
-        wandb.log({"transfer_matrix_heatmap": wandb.Image(ax.get_figure())})
-    plt.clf()
-    return transfer_matrix
-
-
 def produce_transfer_matrix_mmlu(
     args: RankerConfig, expert_lib: HFExpertLibrary, tasks: list
 ):
@@ -460,7 +323,7 @@ def produce_transfer_matrix_mmlu(
     return transfer_matrix
 
 
-def get_transfer_matrix_by_filter_tasks(args, tasks=None):
+def get_transfer_matrix_for_flat(args, tasks=None):
     import pandas as pd
 
     expert_lib = HFExpertLibrary(args.hf_lib_id)
@@ -481,17 +344,40 @@ def get_transfer_matrix_by_filter_tasks(args, tasks=None):
         print("Transfer matrix", transfer_matrix)
 
 
+def get_transfer_matrix_for_flan(args):
+    import pandas as pd
+
+    expert_lib = HFExpertLibrary(args.hf_lib_id)
+    tasks = os.environ.get("TASKS", None)
+    assert tasks is not None, "Please set TASKS environment variable"
+    flantasks = os.environ.get("FLANTASKS", None)
+    assert flantasks is not None, "Please set FLANTASKS environment variable"
+    flantasks = flantasks.split(",")
+    if not os.path.exists(os.path.join(args.output_dir)):
+        os.mkdir(args.output_dir)
+    for task in tasks.split(","):
+        # get the transfer matrix
+        fout = open(os.path.join(args.output_dir, f"{task}_transfer_matrix.jsonl"), "w")
+        transfer_matrix: pd.DataFrame = product_transfer_matrix_loss(
+            args,
+            expert_lib,
+            tasks=[task],
+            candidate_expert_names=flantasks,
+            fout=fout,
+        )
+        print("Transfer matrix", transfer_matrix)
+
+
 if __name__ == "__main__":
     args = RankerConfig.parse()
-    get_transfer_matrix_by_filter_tasks(args)
+    # get_transfer_matrix_for_flat(args)
+
+    get_transfer_matrix_for_flan(args)
     # get_all_tasks_using_single_expert(
     #     args,
     #     HFExpertLibrary(args.hf_lib_id),
     #     task_name=None,
     #     expert_name="race_middle_Write_a_multi_choice_question_for_the_following_article",
-    # )
-    # produce_transfer_matrix_rouge(
-    #     args, HFExpertLibrary(args.hf_lib_id), [args.finetune_task_name]
     # )
 
     # product_transfer_matrix_loss(
