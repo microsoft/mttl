@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from torch import nn
-from typing import Dict, Union
+from typing import Dict, Union, Callable
 from huggingface_hub import login
 from matplotlib import pyplot as plt
 from tempfile import TemporaryDirectory
@@ -54,7 +54,7 @@ class TransferMatrixConfig(EvolExpertConfig):
 
 def eval_expert_on_task(
     task,
-    module_constructor: Union[callable, MultiExpertModel],
+    module_constructor: Union[Callable, MultiExpertModel],
     expert,
     evaluator_train=None,
     evaluator_valid=None,
@@ -66,7 +66,7 @@ def eval_expert_on_task(
 
     if expert is not None:
         model_copy = (
-            module_constructor
+            copy.deepcopy(module_constructor)
             if isinstance(module_constructor, MultiExpertModel)
             else module_constructor()
         )
@@ -106,7 +106,7 @@ def eval_expert_on_task(
 
 def eval_all_experts_on_task(
     task_eval_on,
-    module_constructor: MultiExpertModel,
+    module_constructor: Union[Callable, MultiExpertModel],
     expert_lib: dict,
     evaluator: Evaluator = None,
     only_diagonal=False,
@@ -162,11 +162,12 @@ def produce_transfer_matrix(
 
         log_row_task = eval_all_experts_on_task(
             task_eval_on,
-            lambda: MultiExpertModel(
-                **vars(args),
-                tokenizer=evaluator.datamodule.tokenizer,
-                device_map="cpu",
-            ),
+            module,
+            # lambda: MultiExpertModel(
+            #     **vars(args),
+            #     tokenizer=evaluator.datamodule.tokenizer,
+            #     device_map="cpu",
+            # ),
             expert_lib,
             evaluator=evaluator,
             only_diagonal=args.only_diagonal,
