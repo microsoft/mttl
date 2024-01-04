@@ -69,6 +69,7 @@ def run_multitask(args: ExpertConfig):
 
     loggers = get_pl_loggers(args)
 
+    best_checkpoints = glob.glob(os.path.join(args.output_dir, "best_mode*", "*.ckpt"))
     if len(best_checkpoints) > 0:
         best_checkpoint = best_checkpoints[0]
         create_transfer_matrix(best_checkpoint)
@@ -76,8 +77,6 @@ def run_multitask(args: ExpertConfig):
         sys.exit(0)
 
     module = model_class(**vars(args), tokenizer=dm.tokenizer)
-
-    best_checkpoints = glob.glob(os.path.join(args.output_dir, "best_mode*", "*.ckpt"))
 
     # get metric monitors for models
     callbacks = get_monitors(args)
