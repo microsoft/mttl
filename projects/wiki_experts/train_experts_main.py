@@ -1,6 +1,7 @@
 import os
 import sys
 import pytorch_lightning as pl
+import glob
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -35,6 +36,28 @@ from mttl.utils import (
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
+from projects.wiki_experts.src.evolution.transfer_matrix import (
+    TransferMatrixConfig,
+    produce_transfer_matrix,
+)
+
+
+def create_transfer_matrix(args, checkpoint):
+    ########################
+    # create transfer matrix
+    config = TransferMatrixConfig()
+    for k, v in vars(args).items():
+        if k in vars(config):
+            setattr(config, k, v)
+    config.eval_metric = "rougeL"
+    config.hf_repo_id = checkpoint
+    config.finetune_task_name = (
+        args.finetune_task_name.split(",")
+        if not isinstance(args.finetune_task_name, list)
+        else args.finetune_task_name
+    )
+    produce_transfer_matrix(config, debug=False)
+    ########################
 
 
 def get_datamodule(args, for_generation=False, dataset_override=None):
@@ -98,7 +121,16 @@ def run_multitask(args: ExpertConfig):
     args.n_tasks = len(dm._task_names)
 
     loggers = get_pl_loggers(args)
+
+    if len(best_checkpoints) > 0:
+        best_checkpoint = best_checkpoints[0]
+        create_transfer_matrix(best_checkpoint)
+        # end program
+        sys.exit(0)
+
     module = model_class(**vars(args), tokenizer=dm.tokenizer)
+
+    best_checkpoints = glob.glob(os.path.join(args.output_dir, "best_mode*", "*.ckpt"))
 
     # get metric monitors for models
     callbacks = get_monitors(args)
@@ -193,6 +225,8 @@ def run_multitask(args: ExpertConfig):
         from projects.wiki_experts.src.expert_model import push_expert_to_hub
 
         push_expert_to_hub(checkpoint, args.hf_repo_id, auto_search=False)
+
+    create_transfer_matrix(checkpoint)
 
 
 if __name__ == "__main__":
