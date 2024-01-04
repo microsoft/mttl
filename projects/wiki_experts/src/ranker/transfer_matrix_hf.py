@@ -157,12 +157,8 @@ def product_transfer_matrix_loss(
                     # device_map="cpu",
                 )
             module.to("cuda")
-            add_expert_to_transformer(
-                module.model,
-                expert_dump,
-                action="route",
-                is_default=False,
-            )
+
+            module.add_expert_instance(expert_dump, action="route", is_default=False)
 
             module.replace_container_with_expert(expert_name)
 
