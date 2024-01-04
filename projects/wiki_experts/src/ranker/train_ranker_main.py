@@ -4,8 +4,8 @@ from projects.wiki_experts.src.ranker.classifier_ranker import (
     T5Classifier,
 )
 from mttl.datamodule.mt_seq_to_seq_module import (
-    FlatMultiTaskConfig,
-    FlatMultiTaskModule,
+    FlanConfig,
+    FlanModule,
 )
 from projects.wiki_experts.src.ranker.clip_ranker import CLIPRanker, CLIPTripletRanker
 from projects.wiki_experts.src.ranker.clip_data_module import (
@@ -47,17 +47,18 @@ def train_triplet_clip(args):
     if "default" not in task_names:
         task_names.append("default")
 
-    cls = SentenceTransformerClassifier.from_pretrained(
-        "zhan1993/classifier_ranker_held_out"
-    )
+    # cls = SentenceTransformerClassifier.from_pretrained(
+    #     "zhan1993/classifier_ranker_held_out"
+    # )
+    print("num experts", len(task_names))
     model = CLIPTripletRanker(
         task_names=task_names,
         encoder_model_name=args.encoder_model_name,
         text_embedding_dim=args.text_embedding_dim,
         expert_embedding_dim=args.expert_embedding_dim,
         projection_dim=args.projection_dim,
-        pretrained_embedding=cls.out_projecter.weight,
-        pretrained_ids_to_tasks_names=cls.ids_to_tasks_names,
+        # pretrained_embedding=cls.out_projecter.weight,
+        # pretrained_ids_to_tasks_names=cls.ids_to_tasks_names,
     )
     if args.ranker_path:
         model = model.load_from_checkpoint(args.ranker_path)
@@ -165,14 +166,17 @@ def train_classifier(args):
     if "flat" not in args.dataset:
         raise ValueError("Only flat datamodule supported for now.")
 
-    config = FlatMultiTaskConfig(
+    config = FlanConfig(
         dataset=args.dataset,
         model=args.model,
         train_batch_size=args.train_batch_size,
         finetune_task_name=args.finetune_task_name,
         predict_batch_size=args.predict_batch_size,
+        include_task_source="P3,Flan2021",
+        include_template_type="*",
     )
-    datamodule = FlatMultiTaskModule(config)
+    datamodule = FlanModule(config)
+    print("num of labels", len(datamodule.task_names))
     if args.ranker_path:
         if args.ranker_model == "classifier":
             module = SentenceTransformerClassifier.from_pretrained(args.ranker_path)
