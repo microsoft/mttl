@@ -38,7 +38,7 @@ from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.src.evolution.transfer_matrix import (
     TransferMatrixConfig,
-    produce_transfer_matrix,
+    run_eval as produce_transfer_matrix,
 )
 
 
