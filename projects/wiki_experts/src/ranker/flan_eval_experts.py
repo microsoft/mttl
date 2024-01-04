@@ -181,5 +181,5 @@ def run_eval(args):
 
 if __name__ == "__main__":
     args = ExpertConfig.parse()
-    # run_eval(args)
-    run_loss_eval(args)
+    run_eval(args)
+    # run_loss_eval(args)
