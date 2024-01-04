@@ -24,14 +24,13 @@ class LossEvaluator(RougeEvaluator):
             total=len(dataloader),
         )
 
-        for _, batch in pbar:
+        for e, batch in pbar:
             batch = transfer_batch_to_device(batch, device)
             with torch.no_grad():
                 if isinstance(model, ExpertTrainer):
                     loss = model.get_loss_for_all(batch, 0)
                     all_loss.extend(loss.cpu().numpy().astype(np.float64))
             pbar.set_description(f"Loss Score: {np.mean(all_loss):.4f}")
-
-            if num_batches is not None and len(all_loss) >= num_batches:
+            if num_batches is not None and e >= num_batches:
                 break
         return np.mean(all_loss)
