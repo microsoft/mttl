@@ -151,7 +151,7 @@ def produce_transfer_matrix(
             args,
             args.dataset,
             tasks=task_eval_on,
-            split="val",
+            split=args.transfer_matrix_split,
             subsample=args.subsample_eval_set,
         )
         module = MultiExpertModel(

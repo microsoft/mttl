@@ -56,6 +56,8 @@ class EvolExpertConfig(ExpertConfig):
             False  # if true, only use modules for the given task set for evolution
         )
 
+        self.transfer_matrix_split = "test"
+
     def post_init(self):
         super().post_init()
         if isinstance(self.finetune_task_name, str):

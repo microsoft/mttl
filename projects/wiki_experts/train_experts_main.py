@@ -62,19 +62,20 @@ def run_multitask(args: ExpertConfig):
     if args.hf_token_hub:
         login(token=args.hf_token_hub)
 
+    loggers = get_pl_loggers(args)
+    # all files starting with best_mode in the output directory
+    best_checkpoints = glob.glob(os.path.join(args.output_dir, "best_mode*"))
+    if len(best_checkpoints) > 0:
+        best_checkpoint = best_checkpoints[0]
+        logger.info(f"Found best checkpoint {best_checkpoint}")
+        create_transfer_matrix(args, best_checkpoint)
+        # end program
+        sys.exit(0)
+
     # select dataloader
     model_class = ExpertTrainer
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
-
-    loggers = get_pl_loggers(args)
-
-    best_checkpoints = glob.glob(os.path.join(args.output_dir, "best_mode*", "*.ckpt"))
-    if len(best_checkpoints) > 0:
-        best_checkpoint = best_checkpoints[0]
-        create_transfer_matrix(best_checkpoint)
-        # end program
-        sys.exit(0)
 
     module = model_class(**vars(args), tokenizer=dm.tokenizer)
 
@@ -172,7 +173,7 @@ def run_multitask(args: ExpertConfig):
 
         push_expert_to_hub(checkpoint, args.hf_repo_id, auto_search=False)
 
-    create_transfer_matrix(checkpoint)
+    create_transfer_matrix(args, checkpoint)
 
 
 if __name__ == "__main__":
