@@ -69,21 +69,26 @@ class CodeEvaluator(GenerativeEvaluator):
             total=len(dataloader),
         )
 
+        all_predictions = []
+
         metric = load("code_eval")
         for num_batch, batch in pbar:
             # we assume code prefixes are available and these are "completion" tasks
             sources_texts = batch["code_prefix"]
-            labels_texts = batch["labels_texts"]
+            tests = batch["code_tests"]
 
             predictions = self.generate_for_batch(model, batch)
+            generated = list(
+                map(
+                    lambda x: filter_code(fix_indents(x)),
+                    predictions.generated_texts,
+                )
+            )
             predictions = [
                 [(s if self.prepend_source else "") + p]
                 for s, p in zip(
                     sources_texts,
-                    map(
-                        lambda x: filter_code(fix_indents(x)),
-                        predictions.generated_texts,
-                    ),
+                    generated,
                 )
             ]
 
@@ -91,12 +96,20 @@ class CodeEvaluator(GenerativeEvaluator):
                 logger.info("Prediction:")
                 logger.info(predictions[0][0])
 
-            metric.add_batch(predictions=predictions, references=labels_texts)
+            all_predictions.extend([p[0] for p in predictions])
+            metric.add_batch(predictions=predictions, references=tests)
 
             if num_batches is not None and num_batch >= num_batches:
                 break
 
         metrics, _ = metric.compute(k=[1])
+
+        if output_path:
+            os.makedirs(output_path, exist_ok=True)
+
+            with open(output_path + "/predictions.json", "w") as f:
+                for prediction in all_predictions:
+                    f.write(prediction + "\n\n")
 
         self.save_metrics(metrics, output_path)
         return metrics["pass@1"]

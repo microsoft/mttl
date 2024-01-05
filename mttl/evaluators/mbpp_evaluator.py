@@ -10,4 +10,5 @@ class MBPPEvaluator(CodeEvaluator):
             datamodule=datamodule,
             use_vllm=use_vllm,
             generation_kwargs=generation_kwargs,
+            prepend_source=not datamodule.config.use_instruct_template,
         )
