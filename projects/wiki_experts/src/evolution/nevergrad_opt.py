@@ -22,7 +22,6 @@ from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
 from mttl.evaluators import MMLUEvaluator
 from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
-from projects.wiki_experts.src.evolution.config import EvolExpertConfig as ExpertConfig
 
 
 def mmlu_get_loss(
@@ -95,7 +94,7 @@ def default_l1_regularization(weights):
 class NGRoutingOptimizer:
     def __init__(
         self,
-        model: MultiExpertModel,
+        model_constructor: Callable,
         expert_lib: ExpertLibrary,
         get_loss: Callable,  # function that takes model as input and returns loss
         budget=5,
@@ -105,9 +104,9 @@ class NGRoutingOptimizer:
         action="route",
     ) -> None:
         self.action = action
+        self.model_constructor = model_constructor
         self.regularizer_factor = regularizer_factor
         self.task_name = task_name
-        self.model: MultiExpertModel = model
         self.module_graph: ModuleGraph = self.construct_graph(expert_lib)
         self.varaibles = self.module_graph.get_variables()
         self.K = len(self.varaibles)
@@ -141,7 +140,6 @@ class NGRoutingOptimizer:
     ):
         def get_score(
             weights,
-            basemodel: MultiExpertModel,
             get_loss,
             get_regular,
             get_vars,
@@ -149,7 +147,7 @@ class NGRoutingOptimizer:
         ):
             graph_vars = get_vars(weights)
             logger.info(f"Testing weights {graph_vars.values()} into the model")
-            model = copy.deepcopy(basemodel)
+            model = self.model_constructor()
             model.load_from_graph(self.module_graph, action=action, **graph_vars)
             # import numpy as np
             # np.sum([p.detach().cpu().sum().item() for p in model.parameters()])
@@ -169,7 +167,6 @@ class NGRoutingOptimizer:
         _get_score = partial(
             get_score,
             get_loss=self.get_loss,
-            basemodel=self.model,
             get_regular=default_l1_regularization,
             get_vars=self.get_graph_vars,
             action=self.action,
