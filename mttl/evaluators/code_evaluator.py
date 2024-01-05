@@ -51,7 +51,7 @@ class CodeEvaluator(GenerativeEvaluator):
     def evaluate(
         self,
         model,
-        split="val",
+        split="test",
         subsample=-1,
         num_batches=None,
         verbose=True,

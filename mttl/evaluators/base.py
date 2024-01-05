@@ -463,7 +463,6 @@ def setup_evaluators(
                     "top_p": 0.95,
                     "do_sample": True,
                     "max_new_tokens": 300,
-                    "stop_tokens": ["\n\n"],
                 }
             )
             config = HumanEvalConfig(
@@ -480,7 +479,6 @@ def setup_evaluators(
                     "top_p": 0.95,
                     "do_sample": True,
                     "max_new_tokens": 300,
-                    "stop_tokens": ["\n\n"],
                 }
             )
             evaluators["mbpp"] = MBPPEvaluator(
