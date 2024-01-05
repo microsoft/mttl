@@ -34,7 +34,7 @@ from mttl.models.modifiers.expert_containers.module_graph import (
     ModuleGraph,
     load_expert,
 )
-import os
+import random
 
 
 def push_expert_to_hub(
@@ -356,6 +356,7 @@ class MultiExpertModelRanker(MultiExpertModel):
             ranker_model=kwargs["ranker_model"],
             ranker_path=kwargs["ranker_path"],
         )
+        self.routing = kwargs["routing"]
         self.hparams.router_selector = "info_selector"
         self.fout = open(
             os.path.join(self.hparams.output_dir, "analyse_predict_expert.txt"), "w"
@@ -369,6 +370,13 @@ class MultiExpertModelRanker(MultiExpertModel):
             batch,
             n=self.hparams.ranker_top_k,
         )
+
+        if self.routing == "random":
+            mod_names = [
+                [random.choice(self.experts_names)]
+                for _ in range(len(batch["task_names"]))
+            ]
+            mod_weights = [[1.0] for _ in range(len(batch["task_names"]))]
 
         # fill in the weights for the routing selector, for now just take the first one
         # mod_names = [['mod1', 'mod2'], ['mod3', 'mod4']]
