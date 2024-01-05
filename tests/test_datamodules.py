@@ -3,6 +3,7 @@ import numpy as np
 from mttl.datamodule.base import AutoDataModule
 from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
 from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
+from mttl.datamodule.mbpp_datamodule import MBPPDataConfig, MBPPDataModule
 
 
 @pytest.mark.parametrize("task_name", [None, "huggingface_xsum"])
@@ -328,3 +329,18 @@ def test_multichoice_collator():
     assert output["labels_texts"] == ["a", "a", "b"]
     assert output["num_options"] == [2, 1]
     assert output["task_names"] == ["t1", "t1", "t2"]
+
+
+def test_mbpp():
+    config = MBPPDataConfig(
+        model="EleutherAI/gpt-neo-125m",
+        model_family="gpt",
+        max_input_length=4096,
+        train_batch_size=4,
+        predict_batch_size=4,
+    )
+
+    module = MBPPDataModule(config)
+
+    for ex in module.train_dataset["train"]:
+        exec(ex["source"] + ex["target"])

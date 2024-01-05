@@ -9,6 +9,7 @@ from mttl.datamodule.mt_seq_to_seq_module import apply_source_template
 
 @dataclass
 class MBPPDataConfig(DatasetConfig):
+    name: str = "sanitized"
     use_instruct_template: bool = False
 
 
@@ -50,6 +51,7 @@ def completion_template(example):
     # format the code and test cases
     code_header = example["code"].partition(":")[0] + ":"
     code_body = example["code"].partition(":")[2].lstrip("\n")
+    code_body = code_body.replace("    ", "\t")
     indent = detect_indentation(code_body)
 
     # the format of the source is:
@@ -79,16 +81,14 @@ def completion_template(example):
 class MBPPDataModule(DefaultDataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
-        dataset = load_dataset(
-            "mbpp", name="sanitized" if self.for_generation else "full"
-        )
+        dataset = load_dataset("mbpp", name=self.config.name)
 
         dataset = dataset.map(
             instruct_template
             if self.config.use_instruct_template
             else completion_template,
             num_proc=n_proc,
-            remove_columns=["prompt", "task_id"],
+            remove_columns=["task_id"],
         )
 
         (
@@ -102,4 +102,5 @@ class MBPPDataModule(DefaultDataModule):
         )
 
         self.train_dataset = train_dataset
-        self.dev_dataset = self.test_dataset = test_dataset
+        self.dev_dataset = valid_dataset
+        self.test_dataset = test_dataset
