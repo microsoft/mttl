@@ -164,6 +164,75 @@ class PolytroponSelector(RoutingSelector):
 
 
 @dataclass
+class PerTokenPolytroponConfig(PolytroponConfig):
+    skip_unseen_tokens: bool = True  # during evaluation, if token has not been seen (and no mapping has been learned yet) skip it
+
+
+@register_selector("per_token_poly")
+class PerTokenPolytroponSelector(RoutingSelector):
+    seen_samples_per_token = None
+
+    def __init__(self, config, **kwargs):
+        super().__init__(config)
+
+        assert config.model_family == "gpt", "only decoder models supported for now."
+
+        self.n_splits = config.n_splits
+        self.n_skills = config.n_skills
+        self.vocab_size = config.vocab_size
+        self.dropout = config.module_logits_dropout
+        self.skip_unseen_tokens = config.skip_unseen_tokens
+
+        self.module_logits = nn.Parameter(
+            torch.empty(
+                (config.vocab_size, config.n_splits * config.n_skills)
+            ).uniform_(-1e-3, 1e-3)
+        )
+
+        if PerTokenPolytroponSelector.seen_samples_per_token is None:
+            PerTokenPolytroponSelector.seen_samples_per_token = torch.zeros(
+                config.vocab_size, dtype=torch.long, device="cpu"
+            )
+
+    def resize_module_logits(self, n_tasks):
+        logger.warning(
+            "Resizing module logits is a no-op for PerTokenPolytroponSelector"
+        )
+
+    def forward(self, routing_infos, **kwargs):
+        # Note : encoder - decoder models not currently supported.
+        input_ids = routing_infos.input_ids
+
+        if self.training and not hasattr(routing_infos, "logged_task_ids"):
+            PerTokenPolytroponSelector.seen_samples_per_token += torch.bincount(
+                input_ids.view(-1), minlength=self.vocab_size
+            ).cpu()
+            routing_infos.logged_task_ids = True
+        if input_ids.max().item() >= self.module_logits.shape[0]:
+            raise ValueError(
+                "Poly selector encountered a larger number of tasks than provided at init. {} vs {}".format(
+                    input_ids.max().item(),
+                    self.module_logits.shape[0],
+                )
+            )
+
+        module_logits = self.module_logits[input_ids]
+        module_logits = module_logits.view(
+            *input_ids.shape, self.n_splits, self.n_skills
+        )
+        module_logits = torch.sigmoid(module_logits)
+        module_weights = module_logits / (module_logits.sum(dim=-1, keepdim=True) + EPS)
+
+        if not self.training and self.config.skip_unseen_tokens:
+            is_seen = (
+                PerTokenPolytroponSelector.seen_samples_per_token[input_ids.cpu()] > 0
+            )
+            module_weights[~is_seen] = 0.0
+
+        return module_weights
+
+
+@dataclass
 class PolyLoRAConfig(SkilledLoRAConfig, PolytroponConfig):
     pass
 
@@ -195,6 +264,44 @@ class PolyLoRA(SkilledLoRA, RoutingMixin):
     def modify_transformer(cls, transformer, config, optional_wrapper=None):
         if config.router_selector is None:
             config.router_selector = "poly"
+
+        return modify_with_routing(cls, transformer, config, SkillWrapper)
+
+
+@dataclass
+class PerTokenPolyLoRAConfig(SkilledLoRAConfig, PerTokenPolytroponConfig):
+    pass
+
+
+@register_modifier("per_token_poly", config_cls=PerTokenPolyLoRAConfig)
+class PerTokenPolyLoRA(PolyLoRA):
+    def forward(self, input):
+        input_ids = self.routing_infos.input_ids
+        repeat = input.size(0) / input_ids.size(0)
+
+        # this repeat follows the patten in `model.predict()` line 152
+        if repeat != 1.0:
+            self.routing_infos.input_ids = (
+                self.routing_infos.input_ids.repeat_interleave(repeat, dim=0)
+            )
+
+        # Phi-2 generation specific
+        if input.size(1) != input_ids.size(1):
+            assert input.size(1) == 1
+            self.routing_infos.input_ids = self.routing_infos.input_ids[:, [-1]]
+
+        mixing_weights = self.selector(self.routing_infos).to(dtype=input.dtype)
+        # add n_splits dimension
+        if mixing_weights.ndim == 3:
+            mixing_weights = mixing_weights.unsqueeze(1)
+
+        return SkilledLoRA.forward(self, input, mixing_weights)
+
+    @classmethod
+    def modify_transformer(cls, transformer, config, optional_wrapper=None):
+        config.router_selector = "per_token_poly"
+        if not hasattr(config, "vocab_size"):
+            config.vocab_size = transformer.get_input_embeddings().num_embeddings
 
         return modify_with_routing(cls, transformer, config, SkillWrapper)
 

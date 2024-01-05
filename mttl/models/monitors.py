@@ -13,7 +13,7 @@ from pytorch_lightning import Callback
 
 from mttl.utils import agg_dicts, Averager
 from mttl.models.modifiers.routing import RoutingSelector
-from mttl.models.modifiers.poly import PolytroponSelector
+from mttl.models.modifiers.poly import PolytroponSelector, PerTokenPolytroponSelector
 
 try:
     import wandb
@@ -95,10 +95,16 @@ class PolytroponLog(Callback):
                     )
 
         # Finally, log seen task information
+        counts = None
         if PolytroponSelector.seen_samples_per_task is not None:
-            is_seen = PolytroponSelector.seen_samples_per_task > 0
+            counts = PolytroponSelector.seen_samples_per_task
+        elif PerTokenPolytroponSelector.seen_samples_per_token is not None:
+            counts = PerTokenPolytroponSelector.seen_samples_per_token
+
+        if counts is not None:
+            is_seen = counts > 0
             n_seen, n_unseen = is_seen.sum(), (~is_seen).sum()
-            seen_tasks = PolytroponSelector.seen_samples_per_task[is_seen]
+            seen_tasks = counts[is_seen]
             seen_min, seen_max = seen_tasks.min(), seen_tasks.max()
             to_log = {
                 "n_seen": n_seen,
