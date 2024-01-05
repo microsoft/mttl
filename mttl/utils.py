@@ -328,7 +328,8 @@ def get_checkpoint_path(path, step=None, use_last=False):
             )
         path = match[0]
     else:
-        match = [m for m in matches if "best" in m]
+        # match the filename
+        match = [m for m in matches if "best" in m.split("/")[-1]]
         if len(match) == 0:
             logger.warn("No best checkpoints found! Defaulting to 'last'.")
 
@@ -336,6 +337,7 @@ def get_checkpoint_path(path, step=None, use_last=False):
             path = match[0]
         elif len(match) > 1:
             logger.warn("Multiple best checkpoints found! Taking the most recent one!")
+            logger.warn(match)
             path = max(match, key=os.path.getctime)
         else:
             path = match[0]
