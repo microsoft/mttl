@@ -187,6 +187,7 @@ class StoppingCriteriaSub(StoppingCriteria):
         decoded = self.tokenizer.batch_decode(
             input_ids[:, -min(self.max_length, self.num_tokens) :]
         )
+        self.num_tokens += 1
 
         for j in range(batch_size):
             # fill the rest of input ids with pad tokens, the generation finished!
