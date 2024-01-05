@@ -12,7 +12,7 @@ import sys
 import numpy as np
 from mttl.utils import logger
 from mttl.datamodule.utils import get_tokenizer
-from datasets import Dataset as ArrowDataset
+from datasets import Dataset as ArrowDataset, concatenate_datasets
 
 
 @dataclass
@@ -34,6 +34,7 @@ class DatasetConfig:
     subsample_train: int = None
     subsample_dev: int = None
     subsample_test: int = None
+    subsample_per_task: bool = False
     subsample: int = -1
 
 
@@ -472,12 +473,12 @@ class DefaultDataModule(LightningDataModule):
         )
         return train_dataset, dev_dataset
 
-    def subsample_dataset(self, ds_name, n_samples, per_task=False):
+    def subsample_dataset(self, dataset, n_samples, per_task=False):
         """
         Subsamples a dataset by randomly selecting a specified number of samples.
 
         Args:
-            ds_name (str): The name of the dataset attribute to subsample.
+            train_dataset: The dataset to subsample.
             n_samples (int or float): The number of samples to subsample. If `n_samples` is less than 1, it is treated as a fraction of the total dataset size.
             per_task (bool, optional): Whether to subsample per task. Defaults to False.
 
@@ -495,7 +496,6 @@ class DefaultDataModule(LightningDataModule):
             idxs = torch.randperm(total_size, generator=rng)[:n_samples]
             return idxs
 
-        dataset = getattr(self, ds_name)
         total_size = len(dataset)
         # make this deterministic to always sample the same subset
         rng = torch.Generator().manual_seed(1234)
@@ -525,7 +525,7 @@ class DefaultDataModule(LightningDataModule):
                 per_task is False
             ), "per_task subsampling is only supported for ArrowDataset"
             subsampled_dataset = torch.utils.data.Subset(dataset, idxs)
-        setattr(self, ds_name, subsampled_dataset)
+        return subsampled_dataset
 
     def __init__(
         self, config: Union[DatasetConfig, Any], for_generation=False, val_mixin=None
@@ -553,7 +553,9 @@ class DefaultDataModule(LightningDataModule):
             if subsample:
                 logger.info(f"subsampling the {split} dataset to {subsample} samples")
                 dataset = getattr(self, f"{split}_dataset")
-                sub_dataset = self.subsample_dataset(dataset, subsample)
+                sub_dataset = self.subsample_dataset(
+                    dataset, subsample, per_task=self.config.subsample_per_task
+                )
                 setattr(self, f"{split}_dataset", sub_dataset)
 
         self.print_infos()
