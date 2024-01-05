@@ -472,17 +472,60 @@ class DefaultDataModule(LightningDataModule):
         )
         return train_dataset, dev_dataset
 
-    def subsample_dataset(self, dataset, n_samples):
+    def subsample_dataset(self, ds_name, n_samples, per_task=False):
+        """
+        Subsamples a dataset by randomly selecting a specified number of samples.
+
+        Args:
+            ds_name (str): The name of the dataset attribute to subsample.
+            n_samples (int or float): The number of samples to subsample. If `n_samples` is less than 1, it is treated as a fraction of the total dataset size.
+            per_task (bool, optional): Whether to subsample per task. Defaults to False.
+
+        Returns:
+            None
+
+        Raises:
+            AssertionError: If `per_task` is True and the dataset is not an ArrowDataset.
+
+        """
+
+        def get_dst_idxs_sampled(n_samples, total_size, rng):
+            if n_samples < 1:
+                n_samples = int(n_samples * total_size)
+            idxs = torch.randperm(total_size, generator=rng)[:n_samples]
+            return idxs
+
+        dataset = getattr(self, ds_name)
         total_size = len(dataset)
         # make this deterministic to always sample the same subset
         rng = torch.Generator().manual_seed(1234)
-        idxs = torch.randperm(total_size, generator=rng)[:n_samples]
+        idxs = get_dst_idxs_sampled(n_samples, total_size, rng)
         if isinstance(dataset, ArrowDataset):
-            subsampled_dataset = dataset.select(idxs)
+            if per_task:
+                task_names = dataset.unique("task_name")
+                subsampled_dataset = []
+                for task_name in task_names:
+                    task_idxs = torch.tensor(
+                        [
+                            index
+                            for index, value in enumerate(dataset["task_name"])
+                            if value == task_name
+                        ]
+                    )
+                    idxs = get_dst_idxs_sampled(n_samples, len(task_idxs), rng)
+                    task_idxs = task_idxs[idxs]
+                    task_dataset = dataset.select(task_idxs)
+                    subsampled_dataset.append(task_dataset)
+                    assert all([t == task_name for t in task_dataset["task_name"]])
+                subsampled_dataset = concatenate_datasets(subsampled_dataset)
+            else:
+                subsampled_dataset = dataset.select(idxs)
         else:
+            assert (
+                per_task is False
+            ), "per_task subsampling is only supported for ArrowDataset"
             subsampled_dataset = torch.utils.data.Subset(dataset, idxs)
-
-        return subsampled_dataset
+        setattr(self, ds_name, subsampled_dataset)
 
     def __init__(
         self, config: Union[DatasetConfig, Any], for_generation=False, val_mixin=None
