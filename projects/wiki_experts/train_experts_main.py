@@ -1,6 +1,7 @@
 import os
 import sys
 import pytorch_lightning as pl
+from mttl.datamodule.mbpp_datamodule import MBPPDataConfig, MBPPDataModule
 from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
 
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
@@ -80,6 +81,13 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
             **common_kwargs,
         )
         dm = MMLUDataModule(config, for_generation=for_generation)
+    elif "mbpp" in dataset:
+        config = MBPPDataConfig(
+            **common_kwargs,
+            # use full training set for training
+            name="full" if not for_generation else "sanitized",
+        )
+        dm = MBPPDataModule(config, for_generation=for_generation)
     else:
         raise ValueError(f"Unknown dataset {args.dataset}")
     return dm
