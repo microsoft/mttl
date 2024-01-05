@@ -3,8 +3,8 @@ import os
 import pytest
 from pytorch_lightning import seed_everything
 from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
-from mttl.models.expert_trainer import ExpertTrainer
-from mttl.models.expert_trainer import ExpertConfig
+from projects.wiki_experts.src.expert_trainer import ExpertTrainer
+from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
 from conftest import make_tiny_llama
