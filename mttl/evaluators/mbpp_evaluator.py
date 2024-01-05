@@ -3,7 +3,7 @@ from mttl.evaluators.code_evaluator import CodeEvaluator
 
 
 class MBPPEvaluator(CodeEvaluator):
-    STOP_TOKENS = ["\n\n", "\ndef", "\nif", "\n#"]
+    STOP_TOKENS = ["\n\n", "\ndef"]
 
     def __init__(self, config, use_vllm=False, generation_kwargs=None):
         datamodule = MBPPDataModule(config, for_generation=True)
