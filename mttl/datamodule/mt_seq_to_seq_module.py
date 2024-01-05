@@ -99,9 +99,6 @@ def augment_few_shot(
 class FlatMultiTaskConfig(DatasetConfig):
     source_template: str = None
     augment_few_shot: int = 0
-    subsample_dev: int = None
-    subsample_train: int = None
-    subsample_test: int = None
 
 
 def apply_source_template(source_template, example):
@@ -159,28 +156,6 @@ class FlatMultiTaskModule(DefaultDataModule):
             num_proc=n_proc,
             desc="Creating test set",
         )
-
-        if self.config.subsample_dev:
-            logger.info(
-                f"subsampling the dev dataset to {self.config.subsample_dev} samples per task"
-            )
-            self.subsample_dataset(
-                "dev_dataset", self.config.subsample_dev, per_task=True
-            )
-        if self.config.subsample_train:
-            logger.info(
-                f"subsampling the train dataset to {self.config.subsample_train} samples per task"
-            )
-            self.subsample_dataset(
-                "train_dataset", self.config.subsample_train, per_task=True
-            )
-        if self.config.subsample_test:
-            logger.info(
-                f"subsampling the test dataset to {self.config.subsample_test} samples per task"
-            )
-            self.subsample_dataset(
-                "test_dataset", self.config.subsample_test, per_task=True
-            )
 
         if len(self.test_dataset) == 0:
             self.test_dataset = self.dev_dataset
