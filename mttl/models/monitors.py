@@ -31,7 +31,8 @@ def get_monitors(config):
         )
     ):
         monitors += [PolytroponLog()]
-    if "llama_adapter" in config.model_modifier:
+
+    if config.model_modifier and "llama_adapter" in config.model_modifier:
         monitors += [AlphaLog()]
 
     return monitors
