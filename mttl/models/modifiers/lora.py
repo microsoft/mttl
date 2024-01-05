@@ -232,6 +232,7 @@ class SkilledLoRA(LoRA):
 
         bs = input.size(0)
 
+        # Standard polytropon routing : (batch_size, dim_in, dim_out)
         if weights.ndim < 4:
             # these are task ids
             if weights.ndim == 1:
@@ -259,9 +260,10 @@ class SkilledLoRA(LoRA):
             B = B.reshape(bs, self.rank, self.out_features)
             adapter_out = input_lora.bmm(A).bmm(B) * self.scaling
 
+        # Per Token Routing : (batch_size, seq_len, dim_in, dim_out)
         elif weights.ndim == 4:
-            # per token routing
             weights = weights.to(self.lora_a.dtype)
+            # b: batch, l: seq_len, d: d_in/d_out, r: rank
             A = torch.einsum("blqs,sqdr->blqdr", (weights, self.lora_a))
             B = torch.einsum("blqs,srqd->blqrd", (weights, self.lora_b))
             A = A.reshape(bs, -1, self.in_features, self.rank)
