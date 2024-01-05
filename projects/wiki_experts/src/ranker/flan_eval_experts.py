@@ -6,6 +6,7 @@ from mttl.datamodule.mt_seq_to_seq_module import (
     FlanConfig,
     FlatMultiTaskConfig,
     FlatMultiTaskModule,
+    HeldOutFlatMultiTaskModule,
 )
 
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
@@ -86,7 +87,7 @@ def run_loss_eval(args):
 
     # add FlanEvaluator
 
-    data_module = FlatMultiTaskModule(
+    data_module = HeldOutFlatMultiTaskModule(
         FlatMultiTaskConfig(
             dataset=args.dataset,
             model=args.model,
@@ -121,7 +122,7 @@ def run_loss_eval(args):
 
     module.to("cuda")
     # evaluate all the category
-    loss = evaluator.get_loss(module, split="test", verbose=False, subsample=-1)
+    loss = evaluator.get_loss(module, split="val", verbose=False, subsample=-1)
     logger.info("Flan loss: {}".format(loss))
     del module
 
@@ -139,7 +140,7 @@ def run_eval(args):
 
     # add FlanEvaluator
 
-    data_module = FlatMultiTaskModule(
+    data_module = HeldOutFlatMultiTaskModule(
         FlatMultiTaskConfig(
             dataset=args.dataset,
             model=args.model,
@@ -174,7 +175,7 @@ def run_eval(args):
 
     module.to("cuda")
     # evaluate all the category
-    rouge = evaluator.evaluate(module, split="test", verbose=False, subsample=-1)
+    rouge = evaluator.evaluate(module, split="val", verbose=False, subsample=-1)
     logger.info("Flan rouge: {}".format(rouge))
     del module
 
