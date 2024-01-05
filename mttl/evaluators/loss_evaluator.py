@@ -16,7 +16,7 @@ class LossEvaluator(RougeEvaluator):
         all_loss = []
 
         dataloader = self.get_dataloader(
-            split="test", subsample=subsample, shuffle=False
+            split=split, subsample=subsample, shuffle=False
         )
 
         pbar = tqdm.tqdm(
