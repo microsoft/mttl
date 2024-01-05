@@ -175,6 +175,7 @@ class StoppingCriteriaSub(StoppingCriteria):
         self.max_length = max([len(s) for s in stop_tokens])
         self.tokenizer = tokenizer
         self.finished = None
+        self.num_tokens = 1
 
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor):
         """Stops on matching token strings and not ids."""
@@ -182,7 +183,10 @@ class StoppingCriteriaSub(StoppingCriteria):
             self.finished = [None for _ in range(input_ids.shape[0])]
 
         batch_size = input_ids.shape[0]
-        decoded = self.tokenizer.batch_decode(input_ids[:, -self.max_length :])
+        # must look as far as the number of generated tokens
+        decoded = self.tokenizer.batch_decode(
+            input_ids[:, -min(self.max_length, self.num_tokens) :]
+        )
 
         for j in range(batch_size):
             # fill the rest of input ids with pad tokens, the generation finished!
@@ -394,7 +398,7 @@ def setup_evaluators(
     max_output_length,
     predict_batch_size,
     truncation_side,
-    source_template_for_code=None,
+    instruct_template_for_code=False,
     output_path=None,
     tasks=None,
 ) -> EvaluatorRunner:
@@ -464,7 +468,7 @@ def setup_evaluators(
             )
             config = HumanEvalConfig(
                 **common_kwargs,
-                apply_source_template=source_template_for_code,
+                use_instruct_template=instruct_template_for_code,
             )
             evaluators["humaneval"] = HumanEvalEvaluator(
                 config, generation_kwargs=generation_kwargs
@@ -481,7 +485,8 @@ def setup_evaluators(
             )
             evaluators["mbpp"] = MBPPEvaluator(
                 MBPPDataConfig(
-                    **common_kwargs, apply_source_template=source_template_for_code
+                    **common_kwargs,
+                    use_instruct_template=instruct_template_for_code,
                 ),
                 generation_kwargs=generation_kwargs,
             )
