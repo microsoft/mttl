@@ -1,10 +1,10 @@
+from functools import partial
 from datasets import load_dataset
 from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from dataclasses import dataclass
 import os
 
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
-from mttl.datamodule.mt_seq_to_seq_module import apply_source_template
 
 
 @dataclass
@@ -43,7 +43,7 @@ def detect_indentation(func):
     return None
 
 
-def completion_template(example):
+def completion_template(for_generation, example):
     """Format the MBPP dataset into source and target."""
     example["task_source"] = "mbpp"
     example["task_name"] = "mbpp"
@@ -52,7 +52,15 @@ def completion_template(example):
     code_header = example["code"].partition(":")[0] + ":"
     code_body = example["code"].partition(":")[2].lstrip("\n")
     code_body = code_body.replace("    ", "\t")
-    indent = detect_indentation(code_body)
+
+    if for_generation:
+        # use tab for indentation when generating code
+        indent = "\t"
+    else:
+        # we need to match the indentation used in the code
+        # to ensure that source and target are aligned nicely and
+        # executable
+        indent = detect_indentation(code_body)
 
     # the format of the source is:
     # def function_name(arg1, arg2):  (code_header)
@@ -86,7 +94,7 @@ class MBPPDataModule(DefaultDataModule):
         dataset = dataset.map(
             instruct_template
             if self.config.use_instruct_template
-            else completion_template,
+            else partial(completion_template, self.for_generation),
             num_proc=n_proc,
             remove_columns=["task_id"],
         )
