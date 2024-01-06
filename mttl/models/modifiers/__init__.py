@@ -9,4 +9,3 @@ import mttl.models.modifiers.routing  # noqa: F401
 import mttl.models.modifiers.prompt_tuning  # noqa: F401
 import mttl.models.modifiers.kv_adapter  # noqa: F401
 import mttl.models.modifiers.hard_prompts  # noqa: F401
-import mttl.models.modifiers.plan_tokens  # noqa: F401
