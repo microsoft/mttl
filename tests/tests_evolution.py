@@ -51,7 +51,9 @@ def test_NGRoutingOptimizer(tmp_path):
 
     # create an NGRoutingOptimizer instance
     optimizer = NGRoutingOptimizer(
-        model=model,
+        model_constructor=lambda: MultiExpertModel(
+            model_object=model_object, tokenizer=None, **vars(config)
+        ),
         expert_lib=modules_2_dest,
         get_loss=get_loss,
         budget=1,
