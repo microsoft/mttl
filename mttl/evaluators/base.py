@@ -114,7 +114,7 @@ class Evaluator(ABC):
     def last_metrics(self):
         return self._last_metrics
 
-    def save_metrics(self, metrics, output_path):
+    def save_metrics(self, metrics, output_path, predictions=None):
         self._last_metrics = metrics
 
         if output_path is None:
@@ -127,6 +127,10 @@ class Evaluator(ABC):
 
         with open(output_path + "/metrics.json", "w") as f:
             json.dump(metrics, f, indent=2)
+
+        if predictions is not None:
+            with open(output_path + "/predictions.json", "w", encoding="utf-8") as f:
+                json.dump(predictions, f, ensure_ascii=False, indent=2)
 
     @abstractmethod
     def evaluate(

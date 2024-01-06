@@ -1,3 +1,4 @@
+import json
 import tqdm
 import os
 from evaluate import load
@@ -104,12 +105,5 @@ class CodeEvaluator(GenerativeEvaluator):
 
         metrics, _ = metric.compute(k=[1])
 
-        if output_path:
-            os.makedirs(output_path, exist_ok=True)
-
-            with open(output_path + "/predictions.json", "w") as f:
-                for prediction in all_predictions:
-                    f.write(prediction + "\n\n")
-
-        self.save_metrics(metrics, output_path)
+        self.save_metrics(metrics, output_path, predictions=all_predictions)
         return metrics["pass@1"]
