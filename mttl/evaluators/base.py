@@ -267,6 +267,10 @@ class GenerativeEvaluator(Evaluator):
             )
             extra_kwargs["stopping_criteria"] = stopping_criteria
 
+        if extra_kwargs.get("temperature", 0.0) == 0.0:
+            # stop hf from complaining
+            extra_kwargs["do_sample"] = False
+
         device = next(model.parameters()).device
         batch = transfer_batch_to_device(batch, device)
 
@@ -436,6 +440,7 @@ def setup_evaluators(
     }
     generation_kwargs_ = {
         "temperature": 0.0,
+        "do_sample": False,
     }
 
     if type(tasks) == str:
