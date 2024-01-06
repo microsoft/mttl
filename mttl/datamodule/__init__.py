@@ -28,26 +28,6 @@ def take_n_examples_per_task(task_names, n, rng=None):
     return indices
 
 
-def take_p_examples_per_task(task_names, list_of_task_p, rng=None):
-    """Returns size(task) * p indices per task given a list of task names."""
-    if rng is None:
-        rng = np.random.RandomState(0)
-
-    tasks_to_ids = defaultdict(list)
-    for i, task in enumerate(task_names):
-        tasks_to_ids[task].append(i)
-
-    indices = []
-    for task_p in list_of_task_p:
-        indices_for_p = []
-        for task, p in task_p.items():
-            indices_for_p += rng.choice(
-                tasks_to_ids[task], p * len(tasks_to_ids[task]), replace=False
-            ).tolist()
-        indices.append(indices_for_p)
-    return indices
-
-
 class TrainIndices:
     _instance = None
 
