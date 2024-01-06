@@ -13,7 +13,10 @@ from projects.wiki_experts.src.expert_model import (
 
 from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
 from mttl.models.modifiers.expert_containers import LoRAExpertContainer
-from mttl.models.modifiers.expert_containers.selectors import MOERKHSSelector
+from mttl.models.modifiers.expert_containers.selectors import (
+    BatchAndSequenceModulesAndWeightsSelectorOutput,
+    MOERKHSSelector,
+)
 from mttl.models.modifiers.lora import LoRA
 
 
@@ -32,6 +35,24 @@ def tmp_exp_config(tmp_path):
             self.model = "EleutherAI/gpt-neo-125m"
 
     return SimpleConfig()
+
+
+@pytest.fixture
+def dummy_batch():
+    torch.manual_seed(0)
+
+    bs = 10
+    max_seq_len = 100
+    batch = {
+        "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
+        "labels": torch.randint(10, 400, (bs, max_seq_len)),
+    }
+    seq_len = torch.randint(0, max_seq_len, (bs,))
+    attn_mask = torch.zeros(bs, max_seq_len, dtype=torch.int32)
+    attn_mask[torch.arange(bs), seq_len] = 1
+    attn_mask = 1 - attn_mask.cumsum(dim=-1)
+    batch["attention_mask"] = attn_mask
+    return batch
 
 
 def create_dummy_expert(config: ExpertConfig, exp_name) -> Expert:
@@ -145,7 +166,7 @@ def test_expert_selector_with_poly_routing(tmp_exp_config):
     assert isinstance(module.model.transformer.h[0].attn.attention.k_proj, LoRA)
 
 
-def test_expert_selector_with_moe_routing(tmp_exp_config, mocker):
+def test_expert_selector_with_moe_routing_soft(tmp_exp_config, mocker):
     seed_everything(0)
     config: ExpertConfig = tmp_exp_config
 
@@ -180,6 +201,38 @@ def test_expert_selector_with_moe_routing(tmp_exp_config, mocker):
     assert np.allclose(output.item(), 10.18, atol=0.1)
     assert spy.call_count == 1
     assert container.selector.total_calls_per_forward == 1
+    assert isinstance(spy.spy_return, BatchAndSequenceModulesAndWeightsSelectorOutput)
+    assert spy.spy_return.indices == None
+    assert spy.spy_return.weights.shape == (10, 100, 8)
+
+
+def test_expert_selector_with_moe_routing_hard(tmp_exp_config, mocker, dummy_batch):
+    seed_everything(0)
+    config: ExpertConfig = tmp_exp_config
+    config.router_selector = "moe_rkhs_router"
+    config.moe_top_k = 2
+
+    module = MoETrainer(
+        tokenizer=None,
+        expert_info={},
+        **vars(config),
+    )
+
+    container = module.model.transformer.h[0].attn.attention.k_proj
+    assert isinstance(container, LoRAExpertContainer)
+    assert isinstance(container.selector, MOERKHSSelector)
+    assert container.selector.top_k == 2
+
+    spy = mocker.spy(container.selector, "forward")
+
+    # Test Base Llama model
+    output = module(dummy_batch)
+    assert np.allclose(output.item(), 10.18, atol=0.1)
+    assert spy.call_count == 1
+    assert container.selector.total_calls_per_forward == 1
+    assert isinstance(spy.spy_return, BatchAndSequenceModulesAndWeightsSelectorOutput)
+    assert spy.spy_return.indices.shape == (10, 100, 2)
+    assert spy.spy_return.weights.shape == (10, 100, 2)
 
 
 def test_add_expert_with_action_merge(tmp_exp_config):
