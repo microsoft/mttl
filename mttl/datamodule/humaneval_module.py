@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
-from mttl.datamodule.mt_seq_to_seq_module import apply_source_template
 
 
 @dataclass
