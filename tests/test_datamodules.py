@@ -347,7 +347,7 @@ def test_mbpp():
 
     module = MBPPDataModule(config)
 
-    for ex in module.train_dataset["train"]:
+    for ex in module.train_dataset:
         # must be executable so that the model trains on valid code
         exec(ex["source"] + ex["target"])
 
