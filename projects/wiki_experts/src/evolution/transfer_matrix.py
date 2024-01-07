@@ -183,14 +183,25 @@ def produce_transfer_matrix(
 
     transfer_matrix = transfer_table.df
     if wandb.run is not None:
-        _size = 1 * len(transfer_matrix.columns)
-        plt.figure(figsize=(_size, _size))
-        transfer_matrix = transfer_matrix.set_index("eval_task")
-        ax = sns.heatmap(transfer_matrix, annot=True, linewidth=0.5)
-        ax.figure.tight_layout()
-        wandb.log({"transfer_matrix_heatmap": wandb.Image(ax.get_figure())})
+        try:
+            _size = 1 * len(transfer_matrix.columns)
+            plt.figure(figsize=(_size, _size))
+            transfer_matrix = transfer_matrix.set_index("eval_task")
+            ax = sns.heatmap(transfer_matrix, annot=True, linewidth=0.5)
+            ax.figure.tight_layout()
+            wandb.log({"transfer_matrix_heatmap": wandb.Image(ax.get_figure())})
+        except Exception as e:
+            print(e)
     plt.clf()
     return transfer_matrix
+
+
+def resolve_hf_repo_id(hf_repo_id):
+    parts = hf_repo_id.split("/")
+    if len(parts) == 3:
+        return "/".join(parts[:-1]), parts[-1]
+    else:
+        return hf_repo_id, None
 
 
 def run_eval(args: EvolExpertConfig, debug=None):
@@ -221,9 +232,15 @@ def run_eval(args: EvolExpertConfig, debug=None):
             {args.hf_repo_id: expert}, destination=temp_dir.name
         )
     else:
+        hf_repo_id, expert_name = resolve_hf_repo_id(args.hf_repo_id)
         expert_lib: LocalExpertLibrary = LocalExpertLibrary.create_from_remote(
-            HFExpertLibrary(repo_id=args.hf_repo_id), destination=args.output_dir
+            HFExpertLibrary(repo_id=hf_repo_id), destination=args.output_dir
         )
+        if expert_name is not None:
+            for name in list(expert_lib.keys()):
+                if name != expert_name:
+                    expert_lib.remove_expert(name)
+
         remove_outdated_experts_from_library(expert_lib)
 
     transfer_matrix: pd.DataFrame = produce_transfer_matrix(
