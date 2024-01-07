@@ -172,7 +172,7 @@ def train_classifier(args):
         train_batch_size=args.train_batch_size,
         finetune_task_name=args.finetune_task_name,
         predict_batch_size=args.predict_batch_size,
-        include_task_source="P3,Flan2021",
+        include_task_source="P3,Flan2021,CoT",
         include_template_type="*",
     )
     datamodule = FlanModule(config)
