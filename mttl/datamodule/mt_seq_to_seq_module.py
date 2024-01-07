@@ -229,6 +229,8 @@ class HeldOutFlatMultiTaskModule(DefaultDataModule):
         self.dev_dataset = sample_from_each_task(self.dev_dataset)
         if len(self.test_dataset) == 0:
             self.test_dataset = self.dev_dataset
+        else:
+            self.test_dataset = sample_from_each_task(self.test_dataset)
 
 
 @dataclass
