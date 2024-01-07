@@ -139,9 +139,11 @@ def test_loglike_eval():
     assert np.allclose(result, 0.2, rtol=0.01)
 
 
-def test_code_evaluator():
+def test_code_evaluator(mocker):
     from mttl.evaluators.mbpp_evaluator import MBPPEvaluator
+    from mttl.evaluators.humaneval_evaluator import HumanEvalEvaluator
     from mttl.datamodule.mbpp_datamodule import MBPPDataConfig
+    from mttl.datamodule.humaneval_module import HumanEvalConfig
 
     evaluator = MBPPEvaluator(
         MBPPDataConfig(
@@ -157,6 +159,23 @@ def test_code_evaluator():
     model = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-125m")
     result = evaluator.evaluate(model, num_batches=2)
     assert np.allclose(result, 0.0, rtol=0.01)
+
+    evaluator = HumanEvalEvaluator(
+        HumanEvalConfig(
+            model="EleutherAI/gpt-neo-125m",
+            model_family="gpt",
+            max_input_length=1024,
+            train_batch_size=1,
+            predict_batch_size=1,
+            max_output_length=20,
+        ),
+    )
+
+    gen_spy = mocker.spy(model, "generate")
+    result = evaluator.evaluate(model, num_batches=1)
+    assert np.allclose(result, 0.0, rtol=0.01)
+    assert gen_spy.call_args[1]["max_new_tokens"] == 20
+    assert gen_spy.call_args[1]["stopping_criteria"] is not None
 
 
 def test_setup_evaluators():

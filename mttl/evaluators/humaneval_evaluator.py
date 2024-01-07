@@ -13,6 +13,6 @@ class HumanEvalEvaluator(CodeEvaluator):
 
         super().__init__(
             datamodule=datamodule,
+            generation_kwargs=generation_kwargs,
             prepend_source=not datamodule.config.use_instruct_template,
-            **kwargs,
         )
