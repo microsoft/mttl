@@ -51,7 +51,6 @@ def completion_template(for_generation, example):
     # format the code and test cases
     code_header = example["code"].partition(":")[0] + ":"
     code_body = example["code"].partition(":")[2].lstrip("\n")
-    code_body = code_body.replace("    ", "\t")
 
     if for_generation:
         # use tab for indentation when generating code
@@ -96,7 +95,6 @@ class MBPPDataModule(DefaultDataModule):
             if self.config.use_instruct_template
             else partial(completion_template, self.for_generation),
             num_proc=n_proc,
-            remove_columns=["task_id"],
         )
 
         (

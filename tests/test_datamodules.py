@@ -345,10 +345,10 @@ def test_mbpp():
         predict_batch_size=4,
     )
 
-    module = MBPPDataModule(config)
-
+    module = MBPPDataModule(config, for_generation=False)
+    assert len(module.train_dataset) == 120
+    # must be executable so that the model trains on valid code
     for ex in module.train_dataset:
-        # must be executable so that the model trains on valid code
         exec(ex["source"] + ex["target"])
 
 
