@@ -1,6 +1,7 @@
 from mttl.datamodule.mt_seq_to_seq_module import (
     FlatMultiTaskModule,
     FlatMultiTaskConfig,
+    HeldOutFlatMultiTaskModule,
 )
 from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
 
@@ -31,7 +32,10 @@ def get_pairwise_dataset(args):
     #   for each input x, we want to creat a triple pair (x, m_positive, m_negative)
 
     # filter the dataset witl only the finetune_task_name
-    df = pd.read_csv(args.input_file)
+    if args.input_file.endswith(".jsonl"):
+        df = pd.read_json(args.input_file, lines=True)
+    elif args.input_file.endswith(".csv"):
+        df = pd.read_csv(args.input_file)
     fout = open(args.output_file, "w")
 
     for task in tqdm.tqdm(df["task_eval_on"].unique()):
@@ -39,7 +43,7 @@ def get_pairwise_dataset(args):
         # df_task_top = df_task.groupby(["eval_task", "m1"]).head(1)
         # print(df_task_top)
 
-        data_module = FlatMultiTaskModule(
+        data_module = HeldOutFlatMultiTaskModule(
             FlatMultiTaskConfig(
                 dataset="sordonia/adauni-v1-flat",
                 model="EleutherAI/gpt-neo-125m",
