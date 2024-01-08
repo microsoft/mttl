@@ -85,7 +85,7 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         config = MBPPDataConfig(
             **common_kwargs,
             # use full training set for training
-            name="full" if not for_generation else "sanitized",
+            name="sanitized",
         )
         dm = MBPPDataModule(config, for_generation=for_generation)
     else:

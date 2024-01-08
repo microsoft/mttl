@@ -389,7 +389,8 @@ class MoETrainer(MultiExpertModel):
                 )
         else:
             library = HFExpertLibrary(self.hparams.hf_lib_id)
-            self.add_experts_from_library(library)
+            for i, expert in enumerate(sorted(list(library.keys()))):
+                self.add_expert_instance(library[expert], expert_name=f"e{i}")
 
     def training_step(self, batch, _):
         loss = self.forward(batch)
