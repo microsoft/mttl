@@ -253,9 +253,12 @@ def run_eval(args: EvolExpertConfig, debug=None):
     print("Transfer matrix", transfer_matrix)
     transfer_matrix.to_csv(os.path.join(args.output_dir, "transfer_matrix.csv"))
 
-    # remove folder destination
     if os.path.isdir(destination):
-        os.rmdir(destination)
+        # remove nonempty dir
+        try:
+            os.system("rm -rf %s" % destination)
+        except:
+            pass
 
 
 if __name__ == "__main__":
