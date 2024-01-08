@@ -203,6 +203,9 @@ class SkilledLoRA(LoRA):
         self.n_skills = config.n_skills
         super().__init__(config, layer)
 
+    def __len__(self):
+        return self.n_skills
+
     def add_skill(self, lora: LoRA):
         self.n_skills += 1
 

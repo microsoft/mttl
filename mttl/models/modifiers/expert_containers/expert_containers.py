@@ -302,7 +302,13 @@ class CoalescedLoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixi
         self.merged_expert_names = []
 
         # create a skilled lora config with 0 skills
-        dummy_config = SkilledLoRAConfig(**config, n_skills=0)
+        dummy_config = SkilledLoRAConfig(
+            lora_alpha=config.lora_alpha,
+            lora_dropout=config.lora_dropout,
+            lora_init_b_random=config.lora_init_b_random,
+            lora_rank=config.lora_rank,
+            n_skills=0,
+        )
         self.experts = SkilledLoRA(dummy_config, layer)
 
     def _add_expert(self, expert_name, expert_info, expert_module):

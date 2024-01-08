@@ -81,7 +81,6 @@ def add_expert_to_transformer(
         transformer: the transformer model to modify
         Config: the config of the model to which the expert is added
     """
-
     expert_config = expert.expert_config
 
     if not expert.name:
@@ -168,5 +167,6 @@ def add_expert_to_transformer(
                         is_default=is_default,
                     )
 
-    logger.info("Adding expert to layers %s", added_layers)
+    logger.info("Added expert %s", expert.name)
+    logger.debug("Added expert to layers %s", added_layers)
     return transformer
