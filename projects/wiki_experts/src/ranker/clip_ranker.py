@@ -319,42 +319,42 @@ class CLIPTripletRanker(CLIPRanker):
         positive_expert_embeddings = self.expert_projection(positive_expert_features)
         negative_expert_embeddings = self.expert_projection(negative_expert_features)
 
-        self.score_positive = self.get_ConsineSimilarity(
-            text_embeddings, positive_expert_embeddings
-        )
-        self.score_negative = self.get_ConsineSimilarity(
-            text_embeddings, negative_expert_embeddings
-        )
+        # self.score_positive = self.get_ConsineSimilarity(
+        #     text_embeddings, positive_expert_embeddings
+        # )
+        # self.score_negative = self.get_ConsineSimilarity(
+        #     text_embeddings, negative_expert_embeddings
+        # )
 
-        # calculate the loss
-        loss = torch.max(
-            torch.tensor(0.0).to(device),
-            torch.subtract(
-                torch.tensor(0.1).to(device),
-                torch.subtract(self.score_positive, self.score_negative),
-            ),
-        )
+        # # calculate the loss
+        # loss = torch.max(
+        #     torch.tensor(0.0).to(device),
+        #     torch.subtract(
+        #         torch.tensor(0.1).to(device),
+        #         torch.subtract(self.score_positive, self.score_negative),
+        #     ),
+        # )
 
-        loss = torch.mean(loss)
+        # loss = torch.mean(loss)
 
-        # # l2 normalize the embeddings
-        # text_embeddings = F.normalize(text_embeddings, dim=-1)
-        # positive_expert_embeddings = F.normalize(positive_expert_embeddings, dim=-1)
-        # negative_expert_embeddings = F.normalize(negative_expert_embeddings, dim=-1)
+        # l2 normalize the embeddings
+        text_embeddings = F.normalize(text_embeddings, dim=-1)
+        positive_expert_embeddings = F.normalize(positive_expert_embeddings, dim=-1)
+        negative_expert_embeddings = F.normalize(negative_expert_embeddings, dim=-1)
 
         # Compute distances (positive and negative scores)
-        # positive_score = torch.mean(text_embeddings @ positive_expert_embeddings.T)
-        # negative_score = torch.mean(text_embeddings @ negative_expert_embeddings.T)
+        positive_score = torch.mean(text_embeddings @ positive_expert_embeddings.T)
+        negative_score = torch.mean(text_embeddings @ negative_expert_embeddings.T)
 
-        # # calculate tripled loss
-        # loss = nn.TripletMarginLoss(margin=1.0)(
-        #     text_embeddings, positive_expert_embeddings, negative_expert_embeddings
-        # )
+        # calculate tripled loss
+        loss = nn.TripletMarginLoss(margin=1.0)(
+            text_embeddings, positive_expert_embeddings, negative_expert_embeddings
+        )
 
         # log positive score and negative score
         self.log(
             "train/positive_score",
-            torch.mean(self.score_positive),
+            positive_score,
             on_step=True,
             on_epoch=True,
             prog_bar=True,
@@ -362,7 +362,7 @@ class CLIPTripletRanker(CLIPRanker):
         )
         self.log(
             "train/negative_score",
-            torch.mean(self.score_negative),
+            negative_score,
             on_step=True,
             on_epoch=True,
             prog_bar=True,
