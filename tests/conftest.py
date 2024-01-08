@@ -82,6 +82,8 @@ def setup_mmlu(session):
             tmp_path / f"mmlu.tar",
         )
 
+        print("Extracting data.tar to", tmp_path)
+
         os.system(f"tar -xf {tmp_path}/mmlu.tar -C {tmp_path}")
         os.environ["MMLU_DATA_DIR"] = os.path.join(str(tmp_path), "data")
         session.__MMLU_CACHE = str(tmp_path)

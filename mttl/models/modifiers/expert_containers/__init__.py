@@ -139,24 +139,26 @@ def add_expert_to_transformer(
                                 layer_name, routing_config.router_granularity
                             )
 
-                            if identifier not in transformer.selectors:
+                            create_new_selector = (
+                                identifier not in transformer.selectors
+                            )
+                            if create_new_selector:
                                 # Special case when you have a decoder layer in an enc-dec model
-                                transformer.selectors[identifier] = get_selector(
+                                selector = get_selector(
                                     routing_config,
                                     info_container=transformer.task_id_container,
                                     layer=layer,
                                     training_config=training_config,
                                 )
-                                transformer.selectors[identifier].__layer_name__ = (
-                                    identifier + ".selector"
-                                )
-
-                            selector: Selector = transformer.selectors[identifier]
-                            # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
-                            # this is used instead of the Viewer
-                            # Viewer is problematic, because the order of module calls is not same as the order in which the modules are added to the model
-                            # e.g. can happen that the true selector is added to the key module, but value (which has the viewer) is called before.
-                            selector.total_calls_per_forward += 1
+                                selector.__layer_name__ = identifier + ".selector"
+                                transformer.selectors[identifier] = selector
+                                # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
+                                selector.total_calls_per_forward += 1
+                            else:
+                                selector: Selector = transformer.selectors[identifier]
+                                # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
+                                selector.total_calls_per_forward += 1
+                                selector = selector.create_view()
 
                         CONTAINER_CLASS = get_container_class(model_modifier)
                         expert_container = CONTAINER_CLASS(
