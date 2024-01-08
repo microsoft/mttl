@@ -322,7 +322,3 @@ def test_add_expert_with_action_merge(tmp_exp_config):
     # Test Base Llama model
     output = module(batch)
     assert np.allclose(output.item(), 10.15, atol=0.1)
-
-
-if __name__ == "__main__":
-    pytest.main([__file__])
