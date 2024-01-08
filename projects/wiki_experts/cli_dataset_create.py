@@ -1701,6 +1701,9 @@ NIV2_CATEGORY_TO_TASK_NO_MMLU = {
 }
 
 
+PHI_TEMPLATE = "Instruct: {}\nAnswer:"
+
+
 def select_cutoff_by_task_name(dataset, cutoff=10_000):
     indices = []
     task_name_to_id = defaultdict(list)
@@ -1829,18 +1832,15 @@ def download_flan(
         if len(task_dataset) > cutoff:
             task_dataset = task_dataset.select(range(cutoff))
 
-        len_dataset_ = len(task_dataset)
-
-        num_train = int(len_dataset_ * 0.8)
-        num_test = int(len_dataset_ * 0.1)
-
         def assign_split(example, idx):
-            if idx < num_train:
+            rng = np.random.RandomState(idx)
+            draw = rng.rand()
+            if draw < 0.8:
                 return {"split": "train"}
-            elif num_train <= idx < num_train + num_test:
-                return {"split": "test"}
-            else:
+            elif draw < 0.9:
                 return {"split": "validation"}
+            else:
+                return {"split": "test"}
 
         task_dataset = task_dataset.map(assign_split, with_indices=True)
 
@@ -1848,10 +1848,11 @@ def download_flan(
             from mttl.datamodule.mt_seq_to_seq_module import apply_source_template
             from mttl.datamodule.mt_seq_to_seq_module import augment_few_shot_task
 
-            task_dataset = apply_source_template(task_dataset, "Instruct: {}\nAnswer:")
-            task_dataset = augment_few_shot_task(
+            task_dataset = apply_source_template(task_dataset, PHI_TEMPLATE)
+            few_shot_dataset = augment_few_shot_task(
                 task_dataset, 3, modify_task_source=False
             )
+            task_dataset = concatenate_datasets([task_dataset, few_shot_dataset])
 
         # randomly cut the dataset again
         task_dataset = task_dataset.shuffle(42)
@@ -1953,9 +1954,7 @@ def create_platypus_templated_instruct_answer(hf_repo_id):
     from mttl.datamodule.mt_seq_to_seq_module import apply_source_template
 
     dataset = load_dataset("sordonia/platypus-flat")
-    apply_source_template(dataset["train"], "Instruct: {}\nAnswer:").push_to_hub(
-        hf_repo_id
-    )
+    apply_source_template(dataset["train"], PHI_TEMPLATE).push_to_hub(hf_repo_id)
 
 
 def create_mbpp(hf_repo_id):
@@ -1967,6 +1966,8 @@ def create_mbpp(hf_repo_id):
         x["source"] = (
             x["text"] + "\n" + "\n".join(f">>> {test}" for test in x["test_list"])
         )
+        x["task_source"] = "mbpp"
+        x["task_name"] = "mbpp"
         x["target"] = x["code"]
         return x
 
@@ -1993,7 +1994,7 @@ def create_mbpp(hf_repo_id):
     test_dataset = dataset["validation"].map(add_test)
 
     apply_source_template(
-        concatenate_datasets([train_dataset, test_dataset]), "Instruct: {}\nAnswer:"
+        concatenate_datasets([train_dataset, test_dataset]), PHI_TEMPLATE
     ).push_to_hub(hf_repo_id)
 
 
@@ -2001,17 +2002,14 @@ def create_ultrachat_templated_instruct_answer(hf_repo_id):
     from mttl.datamodule.mt_seq_to_seq_module import apply_source_template
 
     dataset = load_dataset("sordonia/ultrachat-32c-10k-flat")
-    apply_source_template(dataset["train"], "Instruct: {}\nAnswer:").push_to_hub(
-        hf_repo_id
-    )
+    apply_source_template(dataset["train"], PHI_TEMPLATE).push_to_hub(hf_repo_id)
 
 
 def create_adauni_reduced_templated(hf_repo_id):
-    dataseta = load_dataset("sordonia/flan-templated-reduced-ia-flat")["train"]
+    dataseta = load_dataset("sordonia/flan-10k-reduced-templated-ia-flat")["train"]
     datasetb = load_dataset("sordonia/platypus-templated-ia-flat")["train"]
-    datasetc = load_dataset("sordonia/ultrachat-templated-ia-flat")["train"]
-    datasetd = load_dataset("sordonia/mbpp-templated-ia-flat")["train"]
-    datasets = concatenate_datasets([dataseta, datasetb, datasetc, datasetd])
+    datasetc = load_dataset("sordonia/ultrafeedback-templated-ia-flat")["train"]
+    datasets = concatenate_datasets([dataseta, datasetb, datasetc]).shuffle(42)
     datasets.push_to_hub(hf_repo_id)
 
 
@@ -2094,30 +2092,40 @@ def create_adauni(hf_repo_id):
     adauni.push_to_hub(hf_repo_id)
 
 
-def create_argilla(hf_repo_id):
-    dataset = load_dataset("argilla/ultrafeedback-binarized-preferences")["train"]
+def create_ultrafeedback_binarized_cleaned_templated_instruct_answer(hf_repo_id):
+    from mttl.datamodule.mt_seq_to_seq_module import apply_source_template
+
+    dataset = load_dataset("allenai/ultrafeedback_binarized_cleaned")
 
     def map_func(example):
         example["task_source"] = example["source"]
-        example["task_name"] = example["source"]
-        example["source"] = example["instruction"]
-        example["target"] = example["chosen_response"]
+        example["task_name"] = "ultrafeedback_binarized_cleaned"
+        example["source"] = example["prompt"]
+        example["target"] = [
+            x["content"] for x in example["chosen"] if x["role"] == "assistant"
+        ][0]
+        example["negative_target"] = [
+            x["content"] for x in example["rejected"] if x["role"] == "assistant"
+        ][0]
         return example
 
-    dataset = dataset.map(map_func, num_proc=16).shuffle()
-    len_dataset_ = len(dataset)
+    # we filter out the flan examples
+    dataset = dataset.filter(lambda x: "flan" not in x["source"])
+    dataset = dataset.map(map_func, num_proc=16)
 
-    num_train = int(len_dataset_ * 0.95)
+    train_dataset = dataset["train_sft"].map(lambda x: {"split": "train"})
+    val_dataset = dataset["test_sft"].map(lambda x: {"split": "validation"})
+    dataset = concatenate_datasets([train_dataset, val_dataset])
+    dataset = apply_source_template(dataset, PHI_TEMPLATE)
 
-    def assign_split(example, idx):
-        if idx < num_train:
-            return {"split": "train"}
-        else:
-            return {"split": "validation"}
-
-    dataset = dataset.map(assign_split, with_indices=True, num_proc=16)
-
-    columns = ["source", "target", "task_name", "task_source", "split"]
+    columns = [
+        "source",
+        "target",
+        "task_name",
+        "task_source",
+        "split",
+        "negative_target",
+    ]
     to_remove = set(dataset.column_names) - set(columns)
     dataset = dataset.remove_columns(list(to_remove))
 
@@ -2375,7 +2383,7 @@ def main(task):
         create_data("flan_task", "sordonia/flan-10k-flat", flat=True)
     elif task == "flan_reduced_templated":
         download_flan(
-            "sordonia/flan-10k-flat-reduced-templated",
+            "sordonia/flan-10k-reduced-templated-ia-flat",
             cutoff=10_000,
             filter_zs=True,
             template_examples=True,
@@ -2389,8 +2397,10 @@ def main(task):
         create_mbpp("sordonia/mbpp-templated-ia-flat")
     elif task == "adauni":
         create_adauni("sordonia/adauni-v3-10k-flat")
-    elif task == "argilla":
-        create_argilla("sordonia/argilla_notus-flat")
+    elif task == "ultrafeedback":
+        create_ultrafeedback_binarized_cleaned_templated_instruct_answer(
+            "sordonia/ultrafeedback-templated-ia-flat"
+        )
     elif task == "platypus-templated":
         create_platypus_templated("sordonia/platypus-templated-flat")
     elif task == "platypus-templated-instruct-answer":
