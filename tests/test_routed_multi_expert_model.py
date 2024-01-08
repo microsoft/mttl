@@ -254,9 +254,9 @@ class TestMultiExpertModel:
         assert np.allclose(output.item(), 10.15, atol=0.1)
 
     def test_expert_selector_with_moe_routing_soft(self, mocker, tmp_exp_config):
-        return
         seed_everything(0)
         config: ExpertConfig = tmp_exp_config
+
         module = MoETrainer(
             tokenizer=None,
             expert_info={},
@@ -270,11 +270,11 @@ class TestMultiExpertModel:
         assert container.selector.top_k == -1
 
         spy = mocker.spy(container.selector, "forward")
-
         batch = {
             "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
             "labels": torch.randint(10, 400, (bs, max_seq_len)),
         }
+
         seq_len = torch.randint(0, max_seq_len, (bs,))
         attn_mask = torch.zeros(bs, max_seq_len, dtype=torch.int32)
         attn_mask[torch.arange(bs), seq_len] = 1
@@ -295,10 +295,8 @@ class TestMultiExpertModel:
     def test_expert_selector_with_moe_routing_hard(
         self, mocker, tmp_exp_config, dummy_batch
     ):
-        return
         seed_everything(0)
         config: ExpertConfig = tmp_exp_config
-        config.router_selector = "moe_rkhs_router"
         config.moe_top_k = 2
 
         module = MoETrainer(
