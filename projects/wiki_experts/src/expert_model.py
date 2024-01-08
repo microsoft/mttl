@@ -167,6 +167,7 @@ class MultiExpertModel(ExpertTrainer):
         with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
             # Create a list to hold the futures
             futures = []
+
             for element in library.keys():
                 futures.append(executor.submit(partial(add_module, self), element))
 
@@ -365,9 +366,9 @@ class MultiExpertModelRanker(MultiExpertModel):
 
 class MoETrainer(MultiExpertModel):
     def __init__(self, **kwargs):
-        kwargs["trainable_param_names"] = kwargs["trainable_param_names"] + "|.*rkhs.*"
         kwargs["router_selector"] = "moe_rkhs_router"
         kwargs["router_granularity"] = "mlp"
+        kwargs["top_k"] = kwargs["moe_top_k"]
         kwargs["emb_dim"] = kwargs["moe_emb_dim"]
 
         super().__init__(**kwargs)

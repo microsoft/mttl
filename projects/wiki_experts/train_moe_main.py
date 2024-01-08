@@ -111,7 +111,7 @@ def run_multitask(args: ExpertConfig):
         devices=-1,
         accelerator="gpu",
         logger=loggers,
-        strategy="ddp_find_unused_parameters_true",
+        strategy="auto",
         num_sanity_val_steps=0,
         default_root_dir=args.output_dir,
         max_epochs=args.num_train_epochs,
