@@ -5,8 +5,7 @@ import wandb
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from torch import nn
-from typing import Dict, Union, Callable
+from typing import Dict
 from huggingface_hub import login
 from matplotlib import pyplot as plt
 from tempfile import TemporaryDirectory
@@ -39,7 +38,7 @@ from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.vllm_engines.engines import free_memory
 from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
 
-DEBUG = False
+DEBUG = True
 if "AMLT_OUTPUT_DIR" in os.environ:
     DEBUG = False
 if DEBUG:
@@ -50,26 +49,22 @@ class TransferMatrixConfig(EvolExpertConfig):
     def _set_defaults(self):
         super()._set_defaults()
         self.only_diagonal = False
+        self.eval_base = True
 
 
 def eval_expert_on_task(
     task,
-    module_constructor: Union[Callable, MultiExpertModel],
+    module: MultiExpertModel,
     expert,
     evaluator_train=None,
     evaluator_valid=None,
     evaluator_test=None,
     debug=False,
 ):
-    module = None
     logger.info(f"Evaluating perf for {task}")
 
     if expert is not None:
-        model_copy = (
-            module_constructor.deepcopy()
-            if isinstance(module_constructor, MultiExpertModel)
-            else module_constructor()
-        )
+        model_copy = copy.deepcopy(module)
         if isinstance(expert, str):
             model_copy.load_from_module_dict({task: expert}, action="route")
         elif isinstance(expert, Expert):
@@ -78,13 +73,6 @@ def eval_expert_on_task(
             raise ValueError(f"Checkpoint type {type(expert)} not supported")
         model_copy.replace_container_with_expert(task, get_expert_instance=False)
         module = model_copy
-
-    if module is None:
-        module = (
-            module_constructor
-            if isinstance(module_constructor, MultiExpertModel)
-            else module_constructor()
-        )
 
     result = {}
     if debug:
@@ -106,7 +94,7 @@ def eval_expert_on_task(
 
 def eval_all_experts_on_task(
     task_eval_on,
-    module_constructor: Union[Callable, MultiExpertModel],
+    base_model: MultiExpertModel,
     expert_lib: dict,
     evaluator: Evaluator = None,
     only_diagonal=False,
@@ -116,11 +104,7 @@ def eval_all_experts_on_task(
         if only_diagonal and expert.expert_info.expert_task_name != task_eval_on:
             continue
         score = eval_expert_on_task(
-            task_eval_on,
-            module_constructor,
-            expert,
-            evaluator_test=evaluator,
-            debug=DEBUG,
+            task_eval_on, base_model, expert, evaluator_test=evaluator, debug=DEBUG
         )
         log_row[expert_name] = score["test"]
     return log_row
@@ -151,8 +135,7 @@ def produce_transfer_matrix(
             args,
             args.dataset,
             tasks=task_eval_on,
-            split=args.transfer_matrix_split,
-            subsample=args.subsample_eval_set,
+            split="test",
         )
         module = MultiExpertModel(
             **vars(args),
@@ -168,10 +151,11 @@ def produce_transfer_matrix(
             only_diagonal=args.only_diagonal,
         )
         log_row.update(log_row_task)
-        # eval on base model
-        log_row["base"] = eval_expert_on_task(
-            task_eval_on, module, expert=None, evaluator_test=evaluator, debug=DEBUG
-        )["test"]
+
+        if args.eval_base:
+            log_row["base"] = eval_expert_on_task(
+                task_eval_on, module, None, evaluator_test=evaluator, debug=DEBUG
+            )["test"]
 
         print(transfer_table.df)
         transfer_table.log(log_row)
@@ -183,25 +167,14 @@ def produce_transfer_matrix(
 
     transfer_matrix = transfer_table.df
     if wandb.run is not None:
-        try:
-            _size = 1 * len(transfer_matrix.columns)
-            plt.figure(figsize=(_size, _size))
-            transfer_matrix = transfer_matrix.set_index("eval_task")
-            ax = sns.heatmap(transfer_matrix, annot=True, linewidth=0.5)
-            ax.figure.tight_layout()
-            wandb.log({"transfer_matrix_heatmap": wandb.Image(ax.get_figure())})
-        except Exception as e:
-            print(e)
+        _size = 1 * len(transfer_matrix.columns)
+        plt.figure(figsize=(_size, _size))
+        transfer_matrix = transfer_matrix.set_index("eval_task")
+        ax = sns.heatmap(transfer_matrix, annot=True, linewidth=0.5)
+        ax.figure.tight_layout()
+        wandb.log({"transfer_matrix_heatmap": wandb.Image(ax.get_figure())})
     plt.clf()
     return transfer_matrix
-
-
-def resolve_hf_repo_id(hf_repo_id):
-    parts = hf_repo_id.split("/")
-    if len(parts) == 3:
-        return "/".join(parts[:-1]), parts[-1]
-    else:
-        return hf_repo_id, None
 
 
 def run_eval(args: EvolExpertConfig, debug=None):
@@ -232,15 +205,9 @@ def run_eval(args: EvolExpertConfig, debug=None):
             {args.hf_repo_id: expert}, destination=temp_dir.name
         )
     else:
-        hf_repo_id, expert_name = resolve_hf_repo_id(args.hf_repo_id)
         expert_lib: LocalExpertLibrary = LocalExpertLibrary.create_from_remote(
-            HFExpertLibrary(repo_id=hf_repo_id), destination=args.output_dir
+            HFExpertLibrary(repo_id=args.hf_repo_id), destination="/tmp"
         )
-        if expert_name is not None:
-            for name in list(expert_lib.keys()):
-                if name != expert_name:
-                    expert_lib.remove_expert(name)
-
         remove_outdated_experts_from_library(expert_lib)
 
     transfer_matrix: pd.DataFrame = produce_transfer_matrix(
