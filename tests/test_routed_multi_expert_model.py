@@ -253,7 +253,7 @@ def test_add_expert_with_action_merge(tmp_exp_config):
     assert np.allclose(output.item(), 10.15, atol=0.1)
 
 
-@pytest.skip()
+@pytest.mark.skip()
 def test_expert_selector_with_moe_routing_soft(tmp_exp_config, mocker):
     seed_everything(0)
     config: ExpertConfig = tmp_exp_config
@@ -294,7 +294,7 @@ def test_expert_selector_with_moe_routing_soft(tmp_exp_config, mocker):
     assert spy.spy_return.weights.shape == (10, 100, 8)
 
 
-@pytest.skip()
+@pytest.mark.skip()
 def test_expert_selector_with_moe_routing_hard(tmp_exp_config, mocker, dummy_batch):
     seed_everything(0)
     config: ExpertConfig = tmp_exp_config
