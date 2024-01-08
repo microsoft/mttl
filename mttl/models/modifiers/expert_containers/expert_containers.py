@@ -11,7 +11,7 @@ from mttl.models.modifiers.base import (
 )
 
 from mttl.utils import logger
-from mttl.models.modifiers.lora import LoRA, LoRAConfig
+from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
 from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
 from mttl.models.modifiers.expert_containers.selectors import *
 from mttl.models.modifiers.expert_containers.module_graph import Expert
@@ -138,7 +138,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         else:
             expert_weights = None
 
-        if expert.name in self.experts:
+        if expert.name in self.expert_infos:
             raise ValueError(
                 "An expert with name {} already exists.".format(expert.name)
             )
@@ -161,12 +161,6 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
             self.merged_expert_names.append(expert.name)
 
         else:
-            # we keep track of the expert weights
-            if expert.name in self.experts:
-                raise ValueError(
-                    "An expert with name {} already exists.".format(expert.name)
-                )
-
             if is_default:
                 self.default_expert_name = expert.name
 
@@ -279,6 +273,80 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                     input.view(-1, input.size(-1)), skilled_loras, [weights]
                 )
             return module_output.view(input.shape[0], input.shape[1], -1)
+
+    def forward(self, input, **kwargs):
+        if len(self.experts) > 0:
+            selection = self.selector(input, **kwargs)
+            return self.route(input, selection, **kwargs)
+        return self.layer(input)
+
+
+class CoalescedLoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
+    """A coalesced version of the LoRA expert container, where the experts are kept
+    in memory in a single parameter.
+    """
+
+    __supports_configs__ = [LoRAConfig]
+
+    def __init__(self, config, task_id_container, layer, selector=None):
+        MergeableAdapter.__init__(self)
+        super().__init__(config, task_id_container, layer, selector)
+
+        if not isinstance(self.layer, nn.Linear):
+            raise ValueError(
+                "Expert containers for layers other than nn.Linear have not been implemented, current layer is {}".format(
+                    self.layer.__class__.__name__
+                )
+            )
+
+        self.merged_expert_names = []
+
+        # create a skilled lora config with 0 skills
+        dummy_config = SkilledLoRAConfig(**config, n_skills=0)
+        self.experts = SkilledLoRA(dummy_config, layer)
+
+    def _add_expert(self, expert_name, expert_info, expert_module):
+        self.expert_infos[expert_name] = expert_info
+        self.expert_names.append(expert_name)
+        self.experts.add_skill(expert_module)
+        self.add_expert_to_selector(expert_name, expert_info=expert_info)
+
+    def get_merged_weights(self, with_global_names=True, **merger_kwargs):
+        """
+        Merges experts to one expert according to weights, if weights are not given, it uses the selector to get the weights.
+        Does not merge the layer.
+        """
+        raise ValueError(
+            "Get merged weights is impossible for coalesced expert container."
+        )
+
+    def merge_with_layer(self):
+        raise ValueError("Cannot merge with layer for coalesced expert container.")
+
+    def route(self, input, selection, **kwargs):
+        """Depending on the selection output, we route and merge differently."""
+
+        if isinstance(selection, BatchModulesAndWeightsSelectorOutput):
+            raise NotImplementedError()
+        elif isinstance(selection, ModulesAndWeightsSelectorOutput):
+            raise NotImplementedError()
+        elif isinstance(selection, ModulesSelectorOutput):
+            raise NotImplementedError()
+        elif isinstance(selection, BatchAndSequenceModulesAndWeightsSelectorOutput):
+            if selection.indices is not None:
+                weights = torch.zeros(
+                    (
+                        selection.weights.shape[0],
+                        selection.weights.shape[1],
+                        self.experts.n_skills,
+                    ),
+                    device=selection.weights.device,
+                ).scatter_add(2, selection.indices, selection.weights)
+            else:
+                weights = selection.weights
+
+            module_output = self.experts(input.view(-1, input.size(-1)), weights)
+            return module_output
 
     def forward(self, input, **kwargs):
         if len(self.experts) > 0:

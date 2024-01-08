@@ -203,6 +203,28 @@ class SkilledLoRA(LoRA):
         self.n_skills = config.n_skills
         super().__init__(config, layer)
 
+    def add_skill(self, lora: LoRA):
+        self.n_skills += 1
+
+        self.lora_a.data = torch.cat(
+            [
+                self.lora_a.data,
+                lora.lora_a.data.reshape(
+                    1, self.n_splits, self.in_features // self.n_splits, self.rank
+                ),
+            ],
+            dim=0,
+        )
+        self.lora_b.data = torch.cat(
+            [
+                self.lora_b.data,
+                lora.lora_b.data.reshape(
+                    1, self.rank, self.n_splits, self.out_features // self.n_splits
+                ),
+            ],
+            dim=0,
+        )
+
     def create_for_layer(self, layer):
         if isinstance(layer, nn.Linear):
             self.lora_a = nn.Parameter(

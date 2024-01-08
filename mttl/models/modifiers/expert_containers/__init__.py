@@ -26,7 +26,11 @@ def _extract_identifier(string, match_on="coder"):
 
 
 def get_container_class(modifier: str):
+    import os
+
     if modifier == "lora":
+        if os.environ.get("COALESCED_LORA_CONTAINER", "False") == "1":
+            return CoalescedLoRAExpertContainer
         return LoRAExpertContainer
     elif modifier == "kv_adapter":
         return KVExpertContainer
@@ -122,16 +126,18 @@ def add_expert_to_transformer(
                                 layer_name, routing_config.router_granularity
                             )
 
-                            # Special case when you have a decoder layer in an enc-dec model
-                            transformer.selectors[identifier] = get_selector(
-                                routing_config,
-                                info_container=transformer.task_id_container,
-                                layer=layer,
-                                training_config=training_config,
-                            )
-                            transformer.selectors[identifier].__layer_name__ = (
-                                identifier + ".selector"
-                            )
+                            if identifier not in transformer.selectors:
+                                # Special case when you have a decoder layer in an enc-dec model
+                                transformer.selectors[identifier] = get_selector(
+                                    routing_config,
+                                    info_container=transformer.task_id_container,
+                                    layer=layer,
+                                    training_config=training_config,
+                                )
+                                transformer.selectors[identifier].__layer_name__ = (
+                                    identifier + ".selector"
+                                )
+
                             selector: Selector = transformer.selectors[identifier]
                             # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
                             # this is used instead of the Viewer
@@ -162,5 +168,5 @@ def add_expert_to_transformer(
                         is_default=is_default,
                     )
 
-    logger.debug("Adding expert to layers %s", added_layers)
+    logger.info("Adding expert to layers %s", added_layers)
     return transformer
