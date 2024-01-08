@@ -40,9 +40,23 @@ def get_container_class(modifier: str):
 
 def filter_expert_weights(layer_name, expert_weights):
     # subset the relevant expert weights starting w __layer_name__
+    keys = list(expert_weights.keys())
+
+    if "transformer.h" in keys[0] and "layers." in layer_name:
+        # phi-huggingface to phi-private
+        weights = {}
+        for k, v in expert_weights.items():
+            k = k.replace("transformer.h.", "layers.")
+            ks = k.split(".")
+            ks[1] = int(ks[1]) + 1
+            k = ".".join(map(str, ks))
+            weights[k] = v
+    else:
+        weights = expert_weights
+
     return {
         k.replace(layer_name + ".", ""): v
-        for k, v in expert_weights.items()
+        for k, v in weights.items()
         if k.startswith(layer_name)
     }
 

@@ -152,6 +152,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         self._check_config(expert.expert_config)
 
         expert_module = LoRA(expert.expert_config, self.layer)
+
         if expert_weights is not None:
             expert_module.load_lora_weights(expert_weights)
 
@@ -281,7 +282,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         return self.layer(input)
 
 
-class CoalescedLoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
+class CoalescedLoRAExpertContainer(LoRAExpertContainer):
     """A coalesced version of the LoRA expert container, where the experts are kept
     in memory in a single parameter.
     """
@@ -351,7 +352,7 @@ class CoalescedLoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixi
             else:
                 weights = selection.weights
 
-            module_output = self.experts(input.view(-1, input.size(-1)), weights)
+            module_output = self.experts(input, weights)
             return module_output
 
     def forward(self, input, **kwargs):
