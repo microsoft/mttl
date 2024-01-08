@@ -15,7 +15,9 @@ from mttl.models.modifiers.expert_containers.module_graph import Expert, load_ex
 from mttl.models.modifiers.expert_containers import LoRAExpertContainer
 from mttl.models.modifiers.expert_containers.selectors import (
     BatchAndSequenceModulesAndWeightsSelectorOutput,
+    PolySelectorDirect,
     MOERKHSSelector,
+    SelectorView,
 )
 from mttl.models.modifiers.lora import LoRA
 
@@ -100,7 +102,7 @@ def test_expert_selector_with_moe_routing_soft(tmp_exp_config, mocker):
 
     # Test Base Llama model
     output = module(batch)
-    assert np.allclose(output.item(), 10.18, atol=0.1)
+    assert np.allclose(output.item(), 10.80, atol=0.1)
     assert spy.call_count == 1
     assert container.selector.total_calls_per_forward == 1
     assert isinstance(spy.spy_return, BatchAndSequenceModulesAndWeightsSelectorOutput)
@@ -122,7 +124,9 @@ def test_expert_selector_with_moe_routing_hard(tmp_exp_config, mocker, dummy_bat
 
     container = module.model.transformer.h[0].attn.attention.k_proj
     assert isinstance(container, LoRAExpertContainer)
-    assert isinstance(container.selector, MOERKHSSelector)
+    assert isinstance(container.selector, MOERKHSSelector) or isinstance(
+        container.selector, SelectorView
+    )
     assert container.selector.top_k == 2
 
     spy = mocker.spy(container.selector, "forward")
@@ -256,9 +260,12 @@ def test_expert_selector_with_poly_routing(tmp_exp_config):
         and "mod2" in routing_weights["shared.selector"]
     )
 
+    assert isinstance(
+        module.model.transformer.h[0].attn.attention.k_proj.selector, PolySelectorDirect
+    )
     assert (
-        module.model.transformer.h[0].attn.attention.k_proj.selector
-        == module.model.transformer.h[0].attn.attention.q_proj.selector
+        module.model.transformer.h[0].attn.attention.q_proj.selector.selector_instance
+        == module.model.transformer.h[0].attn.attention.k_proj.selector
     )
 
     # change router_granularity to finegrained

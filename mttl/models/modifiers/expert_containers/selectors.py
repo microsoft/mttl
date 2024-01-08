@@ -155,6 +155,7 @@ class Selector(RoutingMixin, nn.Module):
     def __init__(self, info_container, config=None, **kwargs):
         nn.Module.__init__(self)
         RoutingMixin.__init__(self, info_container)
+
         self.config = config
         self.expert_names = []
         self.selector_views = []
@@ -176,6 +177,9 @@ class Selector(RoutingMixin, nn.Module):
     def forward(self, input, **kwargs) -> SelectorOutput:
         pass
 
+    def create_view(self) -> "SelectorView":
+        return SelectorView(self)
+
     @property
     def views(self):
         return self.selector_views
@@ -188,6 +192,23 @@ class Selector(RoutingMixin, nn.Module):
         return f"{self.__layer_name__}"
 
     @abstractmethod
+    def add_expert(self, expert_name: str, **kwargs):
+        pass
+
+
+class SelectorView:
+    def __init__(self, selector_instance):
+        self.selector_instance = selector_instance
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
+
+    def forward(self, *args, **kwargs):
+        return self.selector_instance.forward(*args, **kwargs)
+
+    def get_merged_weights(self, container, **selector_kwargs) -> Dict:
+        return self.selector_instance.get_merged_weights(container, **selector_kwargs)
+
     def add_expert(self, expert_name: str, **kwargs):
         pass
 

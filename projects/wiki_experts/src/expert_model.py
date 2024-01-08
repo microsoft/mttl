@@ -368,6 +368,7 @@ class MoETrainer(MultiExpertModel):
         kwargs["trainable_param_names"] = kwargs["trainable_param_names"] + "|.*rkhs.*"
         kwargs["router_selector"] = "moe_rkhs_router"
         kwargs["router_granularity"] = "mlp"
+        kwargs["top_k"] = kwargs["moe_top_k"]
         kwargs["emb_dim"] = kwargs["moe_emb_dim"]
 
         super().__init__(**kwargs)
