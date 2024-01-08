@@ -27,6 +27,7 @@ def tmp_exp_config(tmp_path):
     class SimpleConfig(ExpertConfig):
         def _set_defaults(self):
             super()._set_defaults()
+            self.hf_lib_id = None
             self.model_modifier = "lora"
             self.modify_layers = "c_fc|c_proj|k_proj|v_proj|q_proj|out_proj"
             self.modify_modules = ".*"
@@ -252,7 +253,7 @@ class TestMultiExpertModel:
         output = module(batch)
         assert np.allclose(output.item(), 10.15, atol=0.1)
 
-    def test_expert_selector_with_moe_routing_soft(self, tmp_exp_config, mocker):
+    def test_expert_selector_with_moe_routing_soft(self, mocker, tmp_exp_config):
         seed_everything(0)
         config: ExpertConfig = tmp_exp_config
         module = MoETrainer(
@@ -291,7 +292,7 @@ class TestMultiExpertModel:
         assert spy.spy_return.weights.shape == (10, 100, 8)
 
     def test_expert_selector_with_moe_routing_hard(
-        self, tmp_exp_config, mocker, dummy_batch
+        self, mocker, tmp_exp_config, dummy_batch
     ):
         seed_everything(0)
         config: ExpertConfig = tmp_exp_config
