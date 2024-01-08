@@ -272,7 +272,6 @@ class ExpertLibrary:
         except Exception as e:
             if isinstance(e, RepositoryNotFoundError):
                 logger.error("Repository not found: %s", self.repo_id)
-                return self.data, self._sliced
             raise e
 
         metadata = [
