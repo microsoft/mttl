@@ -117,13 +117,18 @@ class TestRoutedMultiExpertModel:
 
         # Test Base Llama model
         output = module(batch)
-        assert np.allclose(output.item(), 9.7, atol=0.1)
+        assert np.allclose(output.item(), 10.15, atol=0.1)
 
         # check the get_router_weights function
         routing_weights = module.get_router_weights()
         assert (
             "mod1" in routing_weights["shared.selector"]
             and "mod2" in routing_weights["shared.selector"]
+        )
+
+        assert (
+            module.model.transformer.h[0].attn.attention.k_proj.selector
+            == module.model.transformer.h[0].attn.attention.q_proj.selector
         )
 
         # change router_granularity to finegrained
@@ -136,7 +141,7 @@ class TestRoutedMultiExpertModel:
         module.load_from_module_dict(module_dict)
         output = module(batch)
         routing_weights = module.get_router_weights()
-        assert np.allclose(output.item(), 9.7, atol=0.1)
+        assert np.allclose(output.item(), 10.15, atol=0.1)
 
         expert = module.to_expert()
         assert isinstance(expert, Expert)
@@ -178,7 +183,7 @@ class TestRoutedMultiExpertModel:
 
         # Test Base Llama model
         output = module(batch)
-        assert np.allclose(output.item(), 9.7, atol=0.1)
+        assert np.allclose(output.item(), 10.15, atol=0.1)
 
 
 if __name__ == "__main__":

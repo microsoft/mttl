@@ -121,17 +121,18 @@ def add_expert_to_transformer(
                             identifier = _extract_identifier(
                                 layer_name, routing_config.router_granularity
                             )
+                            if identifier not in transformer.selectors:
+                                # Special case when you have a decoder layer in an enc-dec model
+                                transformer.selectors[identifier] = get_selector(
+                                    routing_config,
+                                    info_container=transformer.task_id_container,
+                                    layer=layer,
+                                    training_config=training_config,
+                                )
+                                transformer.selectors[identifier].__layer_name__ = (
+                                    identifier + ".selector"
+                                )
 
-                            # Special case when you have a decoder layer in an enc-dec model
-                            transformer.selectors[identifier] = get_selector(
-                                routing_config,
-                                info_container=transformer.task_id_container,
-                                layer=layer,
-                                training_config=training_config,
-                            )
-                            transformer.selectors[identifier].__layer_name__ = (
-                                identifier + ".selector"
-                            )
                             selector: Selector = transformer.selectors[identifier]
                             # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
                             # this is used instead of the Viewer
