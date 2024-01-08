@@ -234,9 +234,11 @@ def run_eval(args: EvolExpertConfig, debug=None):
             {args.hf_repo_id: expert}, destination=temp_dir.name
         )
     else:
+        destination = args.output_dir + "/library/"
+        os.makedirs(destination, exist_ok=True)
         hf_repo_id, expert_name = resolve_hf_repo_id(args.hf_repo_id)
         expert_lib: LocalExpertLibrary = LocalExpertLibrary.create_from_remote(
-            HFExpertLibrary(repo_id=hf_repo_id), destination=args.output_dir
+            HFExpertLibrary(repo_id=hf_repo_id), destination=destination
         )
         if expert_name is not None:
             for name in list(expert_lib.keys()):
@@ -250,6 +252,10 @@ def run_eval(args: EvolExpertConfig, debug=None):
     )
     print("Transfer matrix", transfer_matrix)
     transfer_matrix.to_csv(os.path.join(args.output_dir, "transfer_matrix.csv"))
+
+    # remove folder destination
+    if os.path.isdir(destination):
+        os.rmdir(destination)
 
 
 if __name__ == "__main__":
