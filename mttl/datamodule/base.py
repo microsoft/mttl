@@ -287,6 +287,11 @@ class DefaultCollator:
         output_batch["task_names"] = task_names
         output_batch["sources_texts"] = sources
         output_batch["labels_texts"] = labels
+
+        # append other fields that might be available
+        for key in batch[0].keys():
+            if key not in output_batch:
+                output_batch[key] = [b[key] for b in batch]
         return output_batch
 
 
@@ -550,8 +555,9 @@ class DefaultDataModule(LightningDataModule):
     def post_setup_dataset(self):
         for split in ["train", "dev", "test"]:
             subsample = getattr(self.config, f"subsample_{split}", None)
+
             if subsample:
-                logger.info(f"subsampling the {split} dataset to {subsample} samples")
+                logger.warn(f"subsampling the {split} dataset to {subsample} samples")
                 dataset = getattr(self, f"{split}_dataset")
                 sub_dataset = self.subsample_dataset(
                     dataset, subsample, per_task=self.config.subsample_per_task

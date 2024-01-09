@@ -10,7 +10,7 @@ from mttl.datamodule.mt_seq_to_seq_module import augment_few_shot_task
 @dataclass
 class BBHConfig(DatasetConfig):
     augment_few_shot: int = -1
-    apply_source_template: str = "Solve the following problem: {}\nAnswer:"
+    source_template: str = "Solve the following problem: {}\nAnswer:"
 
 
 class BBHDataModule(DefaultDataModule):
@@ -44,15 +44,11 @@ class BBHDataModule(DefaultDataModule):
                 num_proc=n_proc,
             )
 
-            if self.config.apply_source_template is not None:
+            if self.config.source_template is not None:
+                from mttl.datamodule.mt_seq_to_seq_module import apply_source_template
 
-                def apply_source_template(source_template, example):
-                    example["source"] = source_template.format(example["source"])
-                    return example
-
-                task_dataset = task_dataset.map(
-                    partial(apply_source_template, self.config.apply_source_template),
-                    num_proc=n_proc,
+                task_dataset = apply_source_template(
+                    task_dataset, self.config.source_template
                 )
 
             if self.config.augment_few_shot > 0:
