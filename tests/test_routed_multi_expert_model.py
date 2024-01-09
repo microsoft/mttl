@@ -256,6 +256,8 @@ class TestMultiExpertModel:
     def test_expert_selector_with_moe_routing_soft(self, mocker, tmp_exp_config):
         seed_everything(0)
         config: ExpertConfig = tmp_exp_config
+        config.moe_emb_dim = 10
+        config.moe_rkhs_dim = 10
 
         module = MoETrainer(
             tokenizer=None,
@@ -282,9 +284,8 @@ class TestMultiExpertModel:
         batch["attention_mask"] = attn_mask
 
         # Test Base Llama model
-        return
         output = module(batch)
-        assert np.allclose(output.item(), 10.18, atol=0.1)
+        assert np.allclose(output.item(), 10.04, atol=0.1)
         assert spy.call_count == 1
         assert container.selector.total_calls_per_forward == 1
         assert isinstance(
@@ -299,6 +300,8 @@ class TestMultiExpertModel:
         seed_everything(0)
         config: ExpertConfig = tmp_exp_config
         config.moe_top_k = 2
+        config.moe_emb_dim = 10
+        config.moe_rkhs_dim = 10
 
         module = MoETrainer(
             tokenizer=None,
@@ -316,7 +319,6 @@ class TestMultiExpertModel:
         spy = mocker.spy(container.selector, "forward")
 
         # Test Base Llama model
-        return
         output = module(dummy_batch)
         assert np.allclose(output.item(), 10.18, atol=0.1)
         assert spy.call_count == 1
