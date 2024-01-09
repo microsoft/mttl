@@ -2,6 +2,7 @@ from dataclasses import dataclass
 import readline
 import os
 import glob
+from termcolor import colored, cprint
 from typing import List
 
 
@@ -34,7 +35,7 @@ def generate(input, model, device):
     batch["attention_mask"] = batch["attention_mask"].to(device)
     output_ids = model.generate(
         batch,
-        max_length=200 + batch["input_ids"].shape[1],
+        max_new_tokens=200,
         eos_token_id=model.tokenizer.eos_token_id,
         pad_token_id=model.tokenizer.pad_token_id,
     )
@@ -70,14 +71,24 @@ class Conversation:
         self.responses = []
 
 
+@dataclass
+class ConversationNoTemplate(Conversation):
+    """A conversation between two agents."""
+
+    prompt_template: str = "{}"
+
+
 def main():
     from projects.wiki_experts.src.config import ExpertConfig
     from projects.wiki_experts.src.expert_model import MultiExpertModel
     from mttl.datamodule.utils import get_tokenizer_with_args
+    from mttl.utils import setup_logging
     from mttl.models.modifiers.expert_containers import module_graph
     import torch
 
     setup_autocomplete()
+    setup_logging()
+
     config = ExpertConfig.parse(
         raise_error=False, c="./configs/wiki-mmlu/phi-2_flan.json"
     )
@@ -87,15 +98,23 @@ def main():
 
     print("Welcome to the LLM playground! Type 'exit' to leave.")
 
-    conversation = Conversation([], [])
+    conversation = (
+        Conversation([], [])
+        if config.use_instruct_template
+        else ConversationNoTemplate([], [])
+    )
 
     while True:
         print()
-        user_input = input("> ")
+
+        expert_name = model.experts_names[0] if model.experts_names else None
+        prompt = "{}>> ".format(f"({expert_name}) " if expert_name else "")
+
+        user_input = input(prompt)
 
         if "load_mod" in user_input.lower():
             model.delete_expert_container()
-            _, path = user_input.lower().split(" ")
+            _, path = user_input.split(" ")
             expert = module_graph.load_expert(path)
             model.add_expert_instance(expert, "default")
             continue
@@ -115,7 +134,8 @@ def main():
         response = generate(conversation.to_str(), model, device)
         conversation.responses.append(response)
 
-        print("Conversation so far:", conversation.to_str())
+        print("------------------------------------")
+        print(response)
 
 
 if __name__ == "__main__":

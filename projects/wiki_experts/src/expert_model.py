@@ -168,6 +168,7 @@ class MultiExpertModel(ExpertTrainer):
         with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
             # Create a list to hold the futures
             futures = []
+
             for element in library.keys():
                 if filtering_experts is not None and element in filtering_experts:
                     print("skip expert: {}".format(element))
@@ -411,6 +412,7 @@ class MoETrainer(MultiExpertModel):
     def __init__(self, **kwargs):
         kwargs["router_selector"] = "moe_rkhs_router"
         kwargs["router_granularity"] = "mlp"
+        kwargs["top_k"] = kwargs["moe_top_k"]
         kwargs["emb_dim"] = kwargs["moe_emb_dim"]
 
         super().__init__(**kwargs)
@@ -431,7 +433,8 @@ class MoETrainer(MultiExpertModel):
                 )
         else:
             library = HFExpertLibrary(self.hparams.hf_lib_id)
-            self.add_experts_from_library(library)
+            for i, expert in enumerate(sorted(list(library.keys()))):
+                self.add_expert_instance(library[expert], expert_name=f"e{i}")
 
     def training_step(self, batch, _):
         loss = self.forward(batch)
@@ -447,14 +450,14 @@ class MoETrainer(MultiExpertModel):
                 values = values.to(torch.float32)
                 values = values.view(-1, values.shape[-1])
                 probs = torch.softmax(values, -1)
-                entropy += -(probs.mean(0) * torch.log(probs.mean(0))).sum(-1)
-                xentropy += -(probs * torch.log(probs)).sum(-1).mean(0)
+                entropy += -(probs.mean(0) * torch.log(probs.mean(0) + 1e-6)).sum(-1)
+                xentropy += -(probs * torch.log(probs + 1e-6)).sum(-1).mean(0)
                 num += 1.0
 
             self.model.task_id_container["routing_gates"].clear()
 
             mi_loss = (-entropy + xentropy) / num
-            total_loss += 2.5 * mi_loss
+            total_loss += self.hparams.moe_ent_reg * mi_loss
             self.log(
                 f"{self._log_pref}train/route_ent",
                 xentropy / num,
@@ -475,7 +478,7 @@ class MoETrainer(MultiExpertModel):
 
         for i, pg in enumerate(self.optimizers().optimizer.param_groups):
             self.log(f"train/lr_{i}", pg["lr"])
-        return loss
+        return total_loss
 
 
 class RoutedMultiExpertModel(MultiExpertModel):

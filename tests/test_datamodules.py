@@ -1,8 +1,14 @@
 import pytest
 import numpy as np
 from mttl.datamodule.base import AutoDataModule
-from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
+from mttl.datamodule.mt_seq_to_seq_module import (
+    FlanModule,
+    FlanConfig,
+    FlatMultiTaskModule,
+    FlatMultiTaskConfig,
+)
 from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
+from mttl.datamodule.mbpp_datamodule import MBPPDataConfig, MBPPDataModule
 
 
 @pytest.mark.parametrize("task_name", [None, "huggingface_xsum"])
@@ -328,3 +334,66 @@ def test_multichoice_collator():
     assert output["labels_texts"] == ["a", "a", "b"]
     assert output["num_options"] == [2, 1]
     assert output["task_names"] == ["t1", "t1", "t2"]
+
+
+def test_mbpp():
+    config = MBPPDataConfig(
+        model="EleutherAI/gpt-neo-125m",
+        model_family="gpt",
+        max_input_length=4096,
+        train_batch_size=4,
+        predict_batch_size=4,
+    )
+
+    module = MBPPDataModule(config, for_generation=False)
+    assert len(module.train_dataset) == 120
+    # must be executable so that the model trains on valid code
+    for ex in module.train_dataset:
+        exec(ex["source"] + ex["target"])
+
+
+def test_dst_subsample():
+    common_kwargs = {
+        "model": "EleutherAI/gpt-neo-125m",
+        "train_batch_size": 4,
+        "predict_batch_size": 4,
+        "model_family": "gpt",
+        "truncation_side": "left",
+        "finetune_task_name": "task966_ruletaker_fact_checking_based_on_given_context,task669_ambigqa_answer_generation",
+        "dataset": "sordonia/flan-debug-flat",
+        "subsample_train": 5,
+        "subsample_per_task": False,
+    }
+    config = FlatMultiTaskConfig(**common_kwargs)
+    dm_10 = FlatMultiTaskModule(config)
+    assert len(dm_10.train_dataset) == 5
+
+    common_kwargs = {
+        "model": "EleutherAI/gpt-neo-125m",
+        "train_batch_size": 4,
+        "predict_batch_size": 4,
+        "model_family": "gpt",
+        "truncation_side": "left",
+        "finetune_task_name": "task966_ruletaker_fact_checking_based_on_given_context,task669_ambigqa_answer_generation",
+        "dataset": "sordonia/flan-debug-flat",
+        "subsample_train": 5,
+        "subsample_per_task": True,
+    }
+    config = FlatMultiTaskConfig(**common_kwargs)
+    dm_10 = FlatMultiTaskModule(config)
+    assert len(dm_10.train_dataset) == 10
+
+    common_kwargs = {
+        "model": "EleutherAI/gpt-neo-125m",
+        "train_batch_size": 4,
+        "predict_batch_size": 4,
+        "model_family": "gpt",
+        "truncation_side": "left",
+        "finetune_task_name": "task966_ruletaker_fact_checking_based_on_given_context,task669_ambigqa_answer_generation",
+        "dataset": "sordonia/flan-debug-flat",
+        "subsample_train": 0.5,
+        "subsample_per_task": True,
+    }
+    config = FlatMultiTaskConfig(**common_kwargs)
+    dm_10 = FlatMultiTaskModule(config)
+    assert len(dm_10.train_dataset) == 8

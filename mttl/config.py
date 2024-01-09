@@ -299,6 +299,9 @@ class Config:
         self.router_selector_cluster_temp = 1.0  # temperature for the cluster selector
         self.poly_average_correction = False  # correct the poly average
         self.poly_use_shared_skill = False  # use one skill shared by all tasks
+        self.skip_unseen_tokens = (
+            True  # skip unseen tokens in PerTokenPoly during evaluation
+        )
 
         self.module_logits_relaxed_bernoulli = True
         self.module_logits_straight_through = False

@@ -26,7 +26,11 @@ def _extract_identifier(string, match_on="coder"):
 
 
 def get_container_class(modifier: str):
+    import os
+
     if modifier == "lora":
+        if os.environ.get("COALESCED_LORA_CONTAINER", "False") == "1":
+            return CoalescedLoRAExpertContainer
         return LoRAExpertContainer
     elif modifier == "kv_adapter":
         return KVExpertContainer
@@ -36,9 +40,23 @@ def get_container_class(modifier: str):
 
 def filter_expert_weights(layer_name, expert_weights):
     # subset the relevant expert weights starting w __layer_name__
+    keys = list(expert_weights.keys())
+
+    if "transformer.h" in keys[0] and "layers." in layer_name:
+        # phi-huggingface to phi-private
+        weights = {}
+        for k, v in expert_weights.items():
+            k = k.replace("transformer.h.", "layers.")
+            ks = k.split(".")
+            ks[1] = int(ks[1]) + 1
+            k = ".".join(map(str, ks))
+            weights[k] = v
+    else:
+        weights = expert_weights
+
     return {
         k.replace(layer_name + ".", ""): v
-        for k, v in expert_weights.items()
+        for k, v in weights.items()
         if k.startswith(layer_name)
     }
 
@@ -77,7 +95,6 @@ def add_expert_to_transformer(
         transformer: the transformer model to modify
         Config: the config of the model to which the expert is added
     """
-
     expert_config = expert.expert_config
 
     if not expert.name:
@@ -122,22 +139,26 @@ def add_expert_to_transformer(
                                 layer_name, routing_config.router_granularity
                             )
 
-                            # Special case when you have a decoder layer in an enc-dec model
-                            transformer.selectors[identifier] = get_selector(
-                                routing_config,
-                                info_container=transformer.task_id_container,
-                                layer=layer,
-                                training_config=training_config,
+                            create_new_selector = (
+                                identifier not in transformer.selectors
                             )
-                            transformer.selectors[identifier].__layer_name__ = (
-                                identifier + ".selector"
-                            )
-                            selector: Selector = transformer.selectors[identifier]
-                            # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
-                            # this is used instead of the Viewer
-                            # Viewer is problematic, because the order of module calls is not same as the order in which the modules are added to the model
-                            # e.g. can happen that the true selector is added to the key module, but value (which has the viewer) is called before.
-                            selector.total_calls_per_forward += 1
+                            if create_new_selector:
+                                # Special case when you have a decoder layer in an enc-dec model
+                                selector = get_selector(
+                                    routing_config,
+                                    info_container=transformer.task_id_container,
+                                    layer=layer,
+                                    training_config=training_config,
+                                )
+                                selector.__layer_name__ = identifier + ".selector"
+                                transformer.selectors[identifier] = selector
+                                # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
+                                selector.total_calls_per_forward += 1
+                            else:
+                                selector: Selector = transformer.selectors[identifier]
+                                # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
+                                selector.total_calls_per_forward += 1
+                                selector = selector.create_view()
 
                         CONTAINER_CLASS = get_container_class(model_modifier)
                         expert_container = CONTAINER_CLASS(
@@ -162,5 +183,6 @@ def add_expert_to_transformer(
                         is_default=is_default,
                     )
 
-    logger.debug("Adding expert to layers %s", added_layers)
+    logger.info("Added expert %s", expert.name)
+    logger.debug("Added expert to layers %s", added_layers)
     return transformer

@@ -114,7 +114,7 @@ class Evaluator(ABC):
     def last_metrics(self):
         return self._last_metrics
 
-    def save_metrics(self, metrics, output_path):
+    def save_metrics(self, metrics, output_path, predictions=None):
         self._last_metrics = metrics
 
         if output_path is None:
@@ -127,6 +127,10 @@ class Evaluator(ABC):
 
         with open(output_path + "/metrics.json", "w") as f:
             json.dump(metrics, f, indent=2)
+
+        if predictions is not None:
+            with open(output_path + "/predictions.json", "w", encoding="utf-8") as f:
+                json.dump(predictions, f, ensure_ascii=False, indent=2)
 
     @abstractmethod
     def evaluate(
@@ -175,6 +179,7 @@ class StoppingCriteriaSub(StoppingCriteria):
         self.max_length = max([len(s) for s in stop_tokens])
         self.tokenizer = tokenizer
         self.finished = None
+        self.num_tokens = 1
 
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor):
         """Stops on matching token strings and not ids."""
@@ -182,7 +187,11 @@ class StoppingCriteriaSub(StoppingCriteria):
             self.finished = [None for _ in range(input_ids.shape[0])]
 
         batch_size = input_ids.shape[0]
-        decoded = self.tokenizer.batch_decode(input_ids[:, -self.max_length :])
+        # must look as far as the number of generated tokens
+        decoded = self.tokenizer.batch_decode(
+            input_ids[:, -min(self.max_length, self.num_tokens) :]
+        )
+        self.num_tokens += 1
 
         for j in range(batch_size):
             # fill the rest of input ids with pad tokens, the generation finished!
@@ -261,6 +270,10 @@ class GenerativeEvaluator(Evaluator):
                 [StoppingCriteriaSub(stop_tokens, tokenizer=self.tokenizer)]
             )
             extra_kwargs["stopping_criteria"] = stopping_criteria
+
+        if extra_kwargs.get("temperature", 0.0) == 0.0:
+            # stop hf from complaining
+            extra_kwargs["do_sample"] = False
 
         device = next(model.parameters()).device
         batch = transfer_batch_to_device(batch, device)
@@ -394,6 +407,7 @@ def setup_evaluators(
     max_output_length,
     predict_batch_size,
     truncation_side,
+    instruct_template_for_code=False,
     output_path=None,
     tasks=None,
 ) -> EvaluatorRunner:
@@ -430,6 +444,7 @@ def setup_evaluators(
     }
     generation_kwargs_ = {
         "temperature": 0.0,
+        "do_sample": False,
     }
 
     if type(tasks) == str:
@@ -458,11 +473,11 @@ def setup_evaluators(
                     "top_p": 0.95,
                     "do_sample": True,
                     "max_new_tokens": 300,
-                    "stop_tokens": ["\n\n"],
                 }
             )
             config = HumanEvalConfig(
                 **common_kwargs,
+                use_instruct_template=instruct_template_for_code,
             )
             evaluators["humaneval"] = HumanEvalEvaluator(
                 config, generation_kwargs=generation_kwargs
@@ -474,11 +489,13 @@ def setup_evaluators(
                     "top_p": 0.95,
                     "do_sample": True,
                     "max_new_tokens": 300,
-                    "stop_tokens": ["\n\n"],
                 }
             )
             evaluators["mbpp"] = MBPPEvaluator(
-                MBPPDataConfig(**common_kwargs),
+                MBPPDataConfig(
+                    **common_kwargs,
+                    use_instruct_template=instruct_template_for_code,
+                ),
                 generation_kwargs=generation_kwargs,
             )
         elif task == "boolq":

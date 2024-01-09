@@ -317,22 +317,27 @@ def get_checkpoint_path(path, step=None, use_last=False):
         return path
 
     # use glob to avoid explicitly writing out long paths
-    match = glob.glob(f"{path}/**/*.ckpt", recursive=True)
+    matches = glob.glob(f"{path}/**/*.ckpt", recursive=True)
 
     if use_last:
         # search for last.ckpt
-        match = [m for m in match if "last.ckpt" in m]
+        match = [m for m in matches if "last.ckpt" in m]
         if len(match) != 1:
             raise ValueError(
                 "last.ckpt not found or found multiple (?) in the list of checkpoints!"
             )
         path = match[0]
     else:
-        match = [m for m in match if "best" in m]
+        # match the filename
+        match = [m for m in matches if "best" in m.split("/")[-1]]
         if len(match) == 0:
-            raise ValueError("No best checkpoints found!")
+            logger.warn("No best checkpoints found! Defaulting to 'last'.")
+
+            match = [m for m in matches if "last" in m]
+            path = match[0]
         elif len(match) > 1:
             logger.warn("Multiple best checkpoints found! Taking the most recent one!")
+            logger.warn(match)
             path = max(match, key=os.path.getctime)
         else:
             path = match[0]
