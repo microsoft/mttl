@@ -42,6 +42,7 @@ class ExpertTrainer(EfficientCheckpointModule):
                 load_in_8bit=self.hparams.load_in_8bit,
                 device_map=getattr(self.hparams, "device_map", "cpu"),
             )
+
         if self.hparams.load_in_8bit:
             model_object = prepare_model_for_kbit_training(model_object)
 
@@ -70,6 +71,7 @@ class ExpertTrainer(EfficientCheckpointModule):
         input_ids, labels = batch["input_ids"], batch["labels"]
 
         self.set_routing_infos(batch)
+
         outputs = self.model.forward(input_ids, attention_mask=batch["attention_mask"])
 
         # calculate loss, could also be done inside of the model
