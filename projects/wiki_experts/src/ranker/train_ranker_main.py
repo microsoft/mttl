@@ -59,6 +59,7 @@ def train_triplet_clip(args):
         projection_dim=args.projection_dim,
         # pretrained_embedding=cls.out_projecter.weight,
         # pretrained_ids_to_tasks_names=cls.ids_to_tasks_names,
+        learning_rate=args.learning_rate,
     )
     if args.ranker_path:
         model = model.load_from_checkpoint(args.ranker_path)

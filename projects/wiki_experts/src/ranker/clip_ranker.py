@@ -117,6 +117,7 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
         encoder_model_name: str = "all-MiniLM-L6-v2",
         pretrained_embedding=None,
         pretrained_ids_to_tasks_names=None,
+        learning_rate: float = 1e-3,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -146,6 +147,7 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
         # mask for available tasks
         self.available_mask: torch.Tensor = torch.ones(self.expert_num)
         self.temperature = temperature
+        self.learning_rate = learning_rate
         self.save_hyperparameters()
 
     def forward(self, batch):
@@ -288,7 +290,7 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
         return optimizer
 
 
