@@ -282,7 +282,7 @@ class TestMultiExpertModel:
             spy.spy_return, BatchAndSequenceModulesAndWeightsSelectorOutput
         )
         assert spy.spy_return.indices == None
-        assert spy.spy_return.weights.shape == (10, 100, 8)
+        assert spy.spy_return.weights.shape == (2, 3, 2)
 
     def test_expert_selector_with_moe_routing_hard(
         self, mocker, tmp_exp_config, dummy_batch
@@ -316,5 +316,5 @@ class TestMultiExpertModel:
         assert isinstance(
             spy.spy_return, BatchAndSequenceModulesAndWeightsSelectorOutput
         )
-        assert spy.spy_return.indices.shape == (10, 100, 2)
-        assert spy.spy_return.weights.shape == (10, 100, 2)
+        assert spy.spy_return.indices.shape == (2, 3, 2)
+        assert spy.spy_return.weights.shape == (2, 3, 2)
