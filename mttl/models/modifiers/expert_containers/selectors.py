@@ -141,11 +141,10 @@ def forward_with_cache(func):
         if self.forward_cache is not None and not self.clear_cache:
             self.count_call()
             return self.forward_cache
+
         output = func(self, input, **kwargs)
         self.forward_cache = output
-
         self.count_call()
-
         return output
 
     return wrapper
@@ -197,6 +196,12 @@ class Selector(RoutingMixin, nn.Module):
 
 
 class SelectorView:
+    """A view on a selector that allows it to call forward but doesn't act on add_expert.
+
+    This is because add expert is to be called only on the main instance of this selector
+    and not on the multiple views across the network.
+    """
+
     def __init__(self, selector_instance):
         self.selector_instance = selector_instance
 
