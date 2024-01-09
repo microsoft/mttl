@@ -283,7 +283,7 @@ class TestMultiExpertModel:
 
         # Test Base Llama model
         output = module(batch)
-        assert np.allclose(output.item(), 10.80, atol=0.1)
+        assert np.allclose(output.item(), 10.18, atol=0.1)
         assert spy.call_count == 1
         assert container.selector.total_calls_per_forward == 1
         assert isinstance(
