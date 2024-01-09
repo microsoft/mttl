@@ -252,6 +252,38 @@ class TestMultiExpertModel:
         output = module(batch)
         assert np.allclose(output.item(), 10.15, atol=0.1)
 
+    def test_expert_selector_with_moe_routing_soft(
+        self, mocker, tmp_exp_config, dummy_batch
+    ):
+        seed_everything(0)
+        config: ExpertConfig = tmp_exp_config
+        config.moe_emb_dim = 10
+        config.moe_rkhs_dim = 10
+
+        module = MoETrainer(
+            tokenizer=None,
+            expert_info={},
+            **vars(config),
+        )
+
+        container = module.model.transformer.h[0].attn.attention.k_proj
+        assert isinstance(container, LoRAExpertContainer)
+        assert isinstance(container.selector, MOERKHSSelector)
+        assert container.selector.top_k == -1
+
+        # Test Base Llama model
+        spy = mocker.spy(container.selector, "forward")
+        output = module(dummy_batch)
+        assert np.allclose(output.item(), 18, atol=0.1)
+        assert container.selector.total_calls_per_forward == 1
+
+        assert spy.call_count == 1
+        assert isinstance(
+            spy.spy_return, BatchAndSequenceModulesAndWeightsSelectorOutput
+        )
+        assert spy.spy_return.indices == None
+        assert spy.spy_return.weights.shape == (10, 100, 8)
+
     def test_expert_selector_with_moe_routing_hard(
         self, mocker, tmp_exp_config, dummy_batch
     ):
@@ -275,14 +307,14 @@ class TestMultiExpertModel:
         assert container.selector.top_k == 2
 
         # Test Base Llama model
+        spy = mocker.spy(container.selector, "forward")
         output = module(dummy_batch)
         assert np.allclose(output.item(), 18, atol=0.1)
         assert container.selector.total_calls_per_forward == 1
 
-        # spy = mocker.spy(container.selector, "forward")
-        # assert spy.call_count == 1
-        # assert isinstance(
-        #    spy.spy_return, BatchAndSequenceModulesAndWeightsSelectorOutput
-        # )
-        # assert spy.spy_return.indices.shape == (10, 100, 2)
-        # assert spy.spy_return.weights.shape == (10, 100, 2)
+        assert spy.call_count == 1
+        assert isinstance(
+            spy.spy_return, BatchAndSequenceModulesAndWeightsSelectorOutput
+        )
+        assert spy.spy_return.indices.shape == (10, 100, 2)
+        assert spy.spy_return.weights.shape == (10, 100, 2)
