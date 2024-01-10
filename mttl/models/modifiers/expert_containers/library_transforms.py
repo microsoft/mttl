@@ -3,7 +3,9 @@ from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibra
 from mttl.models.modifiers.expert_containers.module_graph import Expert
 from mttl.utils import logger
 from mttl.models.modifiers.modify_model import get_modifier_type
+from typing import Optional
 
+import copy
 import torch
 from tqdm import tqdm
 import numpy as np
@@ -84,3 +86,61 @@ class SVDEmbeddingTransform(LibraryTransform):
                         experts_embeddings[i],
                     )
         return experts_embeddings
+
+
+class WeightedExpert(LibraryTransform):
+    """
+    Computes a uniform weight mixture across experts of a given library
+    """
+
+    def __init__(self, config, weights: Optional[dict] = None):
+        super().__init__(config)
+
+        if config.hf_lib_id is None:
+            raise ValueError("AverageExpert requires a library id!")
+
+        self.weights = weights
+        self.library = HFExpertLibrary(config.hf_lib_id)
+        self._expert = None
+
+    @torch.no_grad()
+    def compute(self, return_expert=False):
+        if self._expert is None:
+            expert_names = list(self.library.keys())
+            experts = [self.library[name] for name in expert_names]
+
+            logger.info("Averaging {} experts".format(len(experts)))
+
+            if self.weights is not None:
+                assert set(self.weights.keys()) == set(
+                    expert_names
+                ), "Weights must have the same keys as the experts"
+                if sum(self.weights.values()) != 1.0:
+                    logger.warn(
+                        "Weights do not sum to 1.0, please make sure this is intended"
+                    )
+
+            base_expert = copy.deepcopy(experts[0])
+            base_expert.name = "weighted_expert"
+
+            for expert_name, expert in zip(expert_names[1:], experts[1:]):
+                # Validate that the expert is compatible
+
+                assert type(expert.expert_info.expert_config) == type(
+                    base_expert.expert_info.expert_config
+                ), "Expert configs must be the same type"
+                assert set(expert.expert_weights.keys()) == set(
+                    base_expert.expert_weights.keys()
+                ), "Expert weights must have the same keys"
+
+                for k, v in expert.expert_weights.items():
+                    base_expert.expert_weights[k] += v
+
+            # Normalize the final expert
+            for k, v in base_expert.expert_weights.items():
+                base_expert.expert_weights[k] /= len(experts)
+
+            self._expert = base_expert
+
+        if return_expert:
+            return self._expert
