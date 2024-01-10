@@ -349,6 +349,9 @@ class SkilledLoRA(LoRA):
             skilled_loras_b = torch.stack(
                 [lora.lora_b for lora in skilled_loras], dim=0
             )
+        else:
+            skilled_loras_a = skilled_loras[0].lora_a
+            skilled_loras_b = skilled_loras[0].lora_b
 
         if type(weights) == list:
             weights = torch.stack(weights, dim=0).to(device)
