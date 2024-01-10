@@ -47,7 +47,8 @@ class ExpertConfig(Config):
         self.moe_num_experts = 8
         self.moe_emb_dim = 128
         self.moe_rkhs_dim = 512
-        self.moe_ent_reg = 2.5
+        self.moe_ent_reg = 0.0
+        self.moe_ent_free_bits = 0.0
         self.moe_top_k = -1
 
         self.expand_val_set_w_downstream = False

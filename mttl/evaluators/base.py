@@ -85,6 +85,7 @@ class Evaluator(ABC):
         datamodule=None,
         config=None,
         use_vllm=False,
+        split="test",
         **_,
     ):
         if config is None and datamodule is None:
@@ -97,6 +98,7 @@ class Evaluator(ABC):
         self.config = deepcopy(config)
         self.use_vllm = use_vllm
         self._last_metrics = None
+        self.split = split
 
     def get_dataloader(self, split, subsample, shuffle):
         if self.datamodule is None:
@@ -136,7 +138,7 @@ class Evaluator(ABC):
     def evaluate(
         self,
         model,
-        split="test",
+        split=None,
         shuffle=False,
         subsample=-1,
         output_path=None,
@@ -217,8 +219,9 @@ class GenerativeEvaluator(Evaluator):
         config=None,
         use_vllm=False,
         generation_kwargs=None,
+        split="test",
     ):
-        super().__init__(datamodule, config, use_vllm)
+        super().__init__(datamodule, config, use_vllm, split)
 
         self.generation_kwargs = generation_kwargs or {}
 
@@ -330,7 +333,7 @@ class GenerativeEvaluator(Evaluator):
             for i in range(len(generated_texts)):
                 if (
                     finished_with[i] is not None
-                    and finished_with[i][0] is not self.tokenizer.eos_token
+                    and finished_with[i][0] != self.tokenizer.eos_token
                 ):
                     generated_texts[i] = generated_texts[i].rpartition(
                         finished_with[i][0]
@@ -351,15 +354,14 @@ class GenerativeEvaluator(Evaluator):
 
 
 class EvaluatorRunner:
-    def __init__(self, output_path=None, verbose=False):
+    def __init__(self, output_path=None):
         self.evaluators = {}
-        self.verbose = verbose
         self.output_path = output_path
 
     def add_evaluator(self, name, evaluator):
         self.evaluators[name] = evaluator
 
-    def run(self, module):
+    def run(self, module, verbose=False):
         import json
         import prettytable
         from mttl.utils import logger
@@ -379,7 +381,7 @@ class EvaluatorRunner:
 
             scores[name] = self.evaluators[name].evaluate(
                 module,
-                verbose=self.verbose,
+                verbose=verbose,
                 output_path=task_output_path,
             )
 
@@ -498,6 +500,23 @@ def setup_evaluators(
                 ),
                 generation_kwargs=generation_kwargs,
             )
+        elif task == "mbpp-train":
+            generation_kwargs.update(
+                {
+                    "temperature": 0.05,
+                    "top_p": 0.95,
+                    "do_sample": True,
+                    "max_new_tokens": 300,
+                }
+            )
+            evaluators["mbpp-train"] = MBPPEvaluator(
+                MBPPDataConfig(
+                    **common_kwargs,
+                    use_instruct_template=instruct_template_for_code,
+                ),
+                generation_kwargs=generation_kwargs,
+                split="train",
+            )
         elif task == "boolq":
             config = SuperGLUEDataConfig(
                 **common_kwargs,
@@ -574,8 +593,7 @@ def setup_evaluators(
         else:
             raise ValueError("No active tasks")
 
-    runner = EvaluatorRunner(output_path, verbose=False)
+    runner = EvaluatorRunner(output_path)
     for name, evaluator in evaluators.items():
         runner.add_evaluator(name, evaluator)
-
     return runner

@@ -342,10 +342,7 @@ class SkilledLoRA(LoRA):
 
         num_skilled_loras = len(skilled_loras)
 
-        if num_skilled_loras == 1:
-            skilled_loras_a = skilled_loras[0].lora_a.unsqueeze(0)
-            skilled_loras_b = skilled_loras[0].lora_b.unsqueeze(0)
-        else:
+        if num_skilled_loras != 1:
             skilled_loras_a = torch.stack(
                 [lora.lora_a for lora in skilled_loras], dim=0
             )
@@ -374,9 +371,7 @@ class SkilledLoRA(LoRA):
         ).to(device=device, dtype=skilled_loras[0].lora_a.dtype)
 
         if num_skilled_loras == 1:
-            # no batch, skilled lora is shared across all examples, remove batch dimension
-            skilled_loras_a = skilled_loras_a.squeeze(0)
-            skilled_loras_b = skilled_loras_b.squeeze(0)
+            # no batch, skilled lora is shared across all examples
             weights = weights.squeeze(0)
             scaling = scaling.squeeze(0)
 
