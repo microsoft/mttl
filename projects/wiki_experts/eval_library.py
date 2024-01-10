@@ -21,20 +21,6 @@ from projects.wiki_experts.src.config import ExpertConfig
 from mttl.models.modifiers.expert_containers.library_transforms import WeightedExpert
 
 
-def update_modifier_args_from_ckpt(args, ckpt_args):
-    from projects.wiki_experts.src.config import ExpertConfig
-
-    ckpt_training_config = ExpertConfig.fromdict(ckpt_args)
-
-    for name, value in vars(ckpt_training_config).items():
-        current_value = getattr(args, name, None)
-        if (current_value is None and value is not None) or current_value != value:
-            logger.info(f"overwriting {name} from {current_value} to {value}")
-            setattr(args, name, value)
-
-    args.model_name = ckpt_args["model"]
-
-
 def run_multitask(args: ExpertConfig):
     seed_everything(args.seed, workers=True)
 
@@ -43,6 +29,7 @@ def run_multitask(args: ExpertConfig):
 
     logger.info("Args: {}".format(args.to_json()))
 
+    breakpoint()
     if args.hf_token_hub:
         login(token=args.hf_token_hub)
 
@@ -52,20 +39,14 @@ def run_multitask(args: ExpertConfig):
     exp = library[next(iter(library.keys()))]
     tr_cfg, exp_cfg = exp.training_config, exp.expert_config
 
-    # create a base model, according to the loaded training config
-    model_args = deepcopy(args)
-    update_modifier_args_from_ckpt(model_args, vars(tr_cfg))
-
-    # create backbone
-    # module = MultiExpertModel(**vars(model_args))
-    # module = MoETrainer(**vars(model_args))
-    module = ExpertTrainer(**vars(model_args))
-    breakpoint()
+    module = MultiExpertModel(**vars(args))
+    
     # create weighted expert
-    # weighted_expert = transform.compute(return_expert=True)
+    weighted_expert = transform.compute(return_expert=True)
     # add weighted expert
-    # module.add_expert_instance(exp, is_default=True)
-
+    module.add_expert_instance(exp, is_default=True)
+     
+    model_args = args
     from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 
     runner: EvaluatorRunner = setup_evaluators(
