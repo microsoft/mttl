@@ -52,7 +52,7 @@ def run_multitask(args: ExpertConfig):
         model_family=module.hparams.model_family,
         max_input_length=module.hparams.max_input_length,
         max_output_length=module.hparams.max_output_length,
-        predict_batch_size=args.predict_batch_size,
+        predict_batch_size=4,
         truncation_side=module.hparams.truncation_side,
         tasks=args.pipeline_eval_tasks,
         output_path=os.path.join(args.output_dir, "DOWNSTREAM"),
