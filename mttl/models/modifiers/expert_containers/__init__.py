@@ -123,6 +123,7 @@ def add_expert_to_transformer(
 
     total_layers = 0
     added_layers = []
+    n_selectors = len(transformer.selectors)
 
     for m_name, module in dict(transformer.named_modules()).items():
         if re.fullmatch(expert_config.modify_modules, m_name):
@@ -183,6 +184,7 @@ def add_expert_to_transformer(
                         is_default=is_default,
                     )
 
-    logger.info("Added expert %s", expert.name)
+    n_new_selectors = len(transformer.selectors) - n_selectors
+    logger.info("Added expert %s and %d new selectors", expert.name, n_new_selectors)
     logger.debug("Added expert to layers %s", added_layers)
     return transformer
