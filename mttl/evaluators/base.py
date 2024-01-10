@@ -330,8 +330,9 @@ class GenerativeEvaluator(Evaluator):
             for i in range(len(generated_texts)):
                 if (
                     finished_with[i] is not None
-                    and finished_with[i][0] is not self.tokenizer.eos_token
+                    and finished_with[i][0] != self.tokenizer.eos_token
                 ):
+                    assert finished_with[i][0] in generated_texts[i]
                     generated_texts[i] = generated_texts[i].rpartition(
                         finished_with[i][0]
                     )[0]
