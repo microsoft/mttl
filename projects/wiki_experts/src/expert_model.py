@@ -366,8 +366,8 @@ class MultiExpertModelRanker(MultiExpertModel):
 
 class MoETrainer(MultiExpertModel):
     def __init__(self, **kwargs):
-        kwargs["router_selector"] = "moe_rkhs_router"
-        kwargs["router_granularity"] = "finegrained"
+        kwargs["router_selector"] = kwargs.get("router_selector", "moe_rkhs_router")
+        kwargs["router_granularity"] = kwargs.get("router_granularity", "finegrained")
         kwargs["top_k"] = kwargs["moe_top_k"]
         kwargs["emb_dim"] = kwargs["moe_emb_dim"]
         kwargs["rkhs_dim"] = kwargs["moe_rkhs_dim"]
