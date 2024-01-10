@@ -342,25 +342,24 @@ class SkilledLoRA(LoRA):
 
         num_skilled_loras = len(skilled_loras)
 
-        if num_skilled_loras != 1:
+        if num_skilled_loras == 1:
+            skilled_loras_a = skilled_loras[0].lora_a.unsqueeze(0)
+            skilled_loras_b = skilled_loras[0].lora_b.unsqueeze(0)
+        else:
             skilled_loras_a = torch.stack(
                 [lora.lora_a for lora in skilled_loras], dim=0
             )
             skilled_loras_b = torch.stack(
                 [lora.lora_b for lora in skilled_loras], dim=0
             )
-        else:
-            # lame, fix later
-            skilled_loras_a = skilled_loras[0].lora_a.unsqueeze(0)
-            skilled_loras_b = skilled_loras[0].lora_b.unsqueeze(0)
+
+        if type(weights) == list:
+            weights = torch.stack(weights, dim=0).to(device)
 
         assert skilled_loras_a.shape[2] == 1, "Only 1 split is supported for now."
         assert skilled_loras_b.shape[3] == 1, "Only 1 split is supported for now."
         skilled_loras_a = skilled_loras_a.squeeze(2)
         skilled_loras_b = skilled_loras_b.squeeze(3)
-
-        if type(weights) == list:
-            weights = torch.stack(weights, dim=0).to(device)
 
         # up-type the input for lora computation
         input_lora = input.to(dtype=skilled_loras[0].lora_a.dtype)
@@ -375,7 +374,9 @@ class SkilledLoRA(LoRA):
         ).to(device=device, dtype=skilled_loras[0].lora_a.dtype)
 
         if num_skilled_loras == 1:
-            # no batch, skilled lora is shared across all examples
+            # no batch, skilled lora is shared across all examples, remove batch dimension
+            skilled_loras_a = skilled_loras_a.squeeze(0)
+            skilled_loras_b = skilled_loras_b.squeeze(0)
             weights = weights.squeeze(0)
             scaling = scaling.squeeze(0)
 

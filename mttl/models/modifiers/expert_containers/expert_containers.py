@@ -352,7 +352,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             else:
                 weights = selection.weights
 
-            weights = selection.weights.view(-1, selection.weights.shape[-1])
+            weights = selection.weights.view(-1, weights.shape[-1])
             module_output = SkilledLoRA.parallel_linear_weighted_forward(
                 input.view(-1, input.size(-1)), [self.experts], [weights]
             )
@@ -360,7 +360,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
 
     def forward(self, input, **kwargs):
         if len(self.experts) > 0:
-            selection = self.selector(input, **kwargs)
+            selection = self.selector(input, container=self, **kwargs)
             return self.route(input, selection, **kwargs)
         return self.layer(input)
 
