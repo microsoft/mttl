@@ -226,6 +226,7 @@ class PolySelectorConfig(SelectorConfig):
 @register_multi_expert_selector("poly_router", PolySelectorConfig)
 class PolySelector(Selector):
     """
+      eval_every=10_000
     Implements routing at a per-layer or per-model level
     """
 
@@ -360,6 +361,140 @@ class MOERKHSSelector(Selector):
                 ).uniform_(-0.02, 0.02),
             ],
             dim=0,
+        )
+
+
+@dataclass
+class PerTokenLinearSelectorConfig(SelectorConfig):
+    pass
+
+
+@register_multi_expert_selector("per_token_linear_router", PerTokenLinearSelectorConfig)
+class PerTokenLinearSelector(Selector):
+    def __init__(self, info_container, config, **kwargs) -> None:
+        super().__init__(info_container, config)
+
+        if "layer" not in kwargs:
+            raise ValueError(
+                "PerTokenLinearSelector requires a layer to be passed in kwargs to infer the input dimension."
+            )
+
+        self.input_dim = kwargs["layer"].weight.data.shape[-1]
+        self.device = kwargs["layer"].weight.device
+
+        self.router_W = nn.Parameter(torch.empty(0, self.input_dim, device=self.device))
+
+    def _get_weights(self, input):
+        return F.linear(input, self.router_W)
+
+    @forward_with_cache
+    def forward(
+        self, input, **kwargs
+    ) -> BatchAndSequenceModulesAndWeightsSelectorOutput:
+        # do routing business on fp32
+        input = input.to(dtype=self.router_W.dtype)
+        router_logits = self._get_weights(input)
+        routing_weights = F.softmax(router_logits, dim=-1, dtype=torch.float)
+
+        g = self.info_container.get("routing_gates", [])
+        g.append(router_logits)
+        self.info_container["routing_gates"] = g
+
+        return BatchAndSequenceModulesAndWeightsSelectorOutput(
+            indices=None, weights=routing_weights
+        )
+
+    def get_merged_weights(self, container, **selector_kwargs) -> Dict:
+        raise ValueError("Not supported for MOESelector.")
+
+    def get_routing_weights(self):
+        raise ValueError("Not supported for MOESelector.")
+
+    def add_expert(self, expert_name: str, **kwargs):
+        """It is important to guard against multiple calls as this can be called multiple times."""
+
+        self.expert_names.append(expert_name)
+        self.router_W.data = torch.cat(
+            [
+                self.router_W.data,
+                torch.zeros(1, self.input_dim, device=self.router_W.device).uniform_(
+                    -0.01, 0.01
+                ),
+            ],
+            dim=0,
+        )
+
+
+@dataclass
+class PerTokenPolytroponSelectorConfig(SelectorConfig):
+    pass
+
+
+@register_multi_expert_selector(
+    "per_token_poly_router", PerTokenPolytroponSelectorConfig
+)
+class PerTokenPolytroponSelector(Selector):
+    def __init__(self, info_container, config, **kwargs) -> None:
+        super().__init__(info_container, config)
+
+        if "layer" not in kwargs:
+            raise ValueError(
+                "PerTokenPolytroponSelector requires a layer to be passed in kwargs to infer the input dimension."
+            )
+
+        self.input_dim = kwargs["layer"].weight.data.shape[-1]
+        self.device = kwargs["layer"].weight.device
+        self.vocab_size = kwargs["training_config"].vocab_size
+        self.module_logits = nn.Parameter(
+            torch.empty(self.vocab_size, 0, device=self.device)
+        )
+
+    def _get_weights(self, input):
+        sq = input.size(1)
+        input_ids = self.info_container["routing_infos"].input_ids[:, -sq:]
+
+        if input_ids.max() >= self.vocab_size:
+            raise ValueError("Input ids are out of bounds of the vocab size.")
+
+        module_logits = self.module_logits[input_ids]
+        module_logits = torch.sigmoid(module_logits)
+        module_weights = module_logits / (module_logits.sum(dim=-1, keepdim=True) + EPS)
+        return module_weights
+
+    @forward_with_cache
+    def forward(
+        self, input, **kwargs
+    ) -> BatchAndSequenceModulesAndWeightsSelectorOutput:
+        # do routing business on fp32
+        input = input.to(dtype=self.module_logits.dtype)
+        routing_weights = self._get_weights(input)
+
+        g = self.info_container.get("routing_gates", [])
+        g.append(routing_weights)
+        self.info_container["routing_gates"] = g
+
+        return BatchAndSequenceModulesAndWeightsSelectorOutput(
+            indices=None, weights=routing_weights
+        )
+
+    def get_merged_weights(self, container, **selector_kwargs) -> Dict:
+        raise ValueError("Not supported for MOESelector.")
+
+    def get_routing_weights(self):
+        raise ValueError("Not supported for MOESelector.")
+
+    def add_expert(self, expert_name: str, **kwargs):
+        """It is important to guard against multiple calls as this can be called multiple times."""
+
+        self.expert_names.append(expert_name)
+        self.module_logits.data = torch.cat(
+            [
+                self.module_logits.data,
+                torch.zeros(
+                    self.vocab_size, 1, device=self.module_logits.device
+                ).uniform_(-0.02, 0.02),
+            ],
+            dim=1,
         )
 
 
