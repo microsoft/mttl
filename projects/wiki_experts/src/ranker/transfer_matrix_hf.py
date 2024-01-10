@@ -33,7 +33,7 @@ from projects.wiki_experts.src.expert_model import (
     MultiExpertModel,
     MultiExpertModelRanker,
 )
-from mttl.vllm_engines.engines import free_memory
+# from mttl.vllm_engines.engines import free_memory
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
 from mttl.evaluators.loss_evaluator import LossEvaluator
 
@@ -134,7 +134,7 @@ def product_transfer_matrix_loss(
         )
 
         del module
-        free_memory()
+        # free_memory()
         ################# add default expert end ###############
 
         for expert_name in candidate_expert_names:
@@ -179,7 +179,7 @@ def product_transfer_matrix_loss(
             fout.flush()
 
             del module
-            free_memory()
+            # free_memory()
 
         print(transfer_table.df)
         transfer_table.log_table_wandb()
@@ -257,7 +257,7 @@ def produce_transfer_matrix_mmlu(
         print(f"Scores on of {expert_name} for {task_eval_on}: {all['mean']}")
 
         del module
-        free_memory()
+        # free_memory()
         ################# add default expert ###############
         for expert_name, expert_dump in expert_lib.items():
             module_dest = expert_lib[expert_name]
@@ -303,7 +303,7 @@ def produce_transfer_matrix_mmlu(
             fout.flush()
 
             del module
-            free_memory()
+            # free_memory()
         fout.write(json.dumps(log_row) + "\n")
         fout.flush()
         transfer_table.log(log_row)
