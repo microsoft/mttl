@@ -21,8 +21,8 @@ from projects.wiki_experts.src.config import ExpertConfig
 
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.models.modifiers.expert_containers.library_transforms import (
-    WeightedExpert,
-    WeightedExpertConfig,
+    WeightedLinearMerge,
+    WeightedLinearMergeConfig,
 )
 
 
@@ -37,10 +37,7 @@ def run_multitask(args: ExpertConfig):
     if args.hf_token_hub:
         login(token=args.hf_token_hub)
 
-    library = HFExpertLibrary(args.hf_lib_id)
-    transform = WeightedExpert(WeightedExpertConfig())
-    uniform_expert: Expert = transform.transform(library)
-
+    uniform_expert = WeightedLinearMerge().transform(args.hf_lib_id)
     module = MultiExpertModel(**vars(uniform_expert.training_config)).to("cuda")
     module.add_expert_instance(uniform_expert, is_default=True)
 

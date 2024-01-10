@@ -89,17 +89,17 @@ class SVDEmbeddingTransform(LibraryTransform):
 
 
 @dataclass
-class WeightedExpertConfig:
+class WeightedLinearMergeConfig:
     weights: dict = None
 
 
-class WeightedExpert(LibraryTransform):
+class WeightedLinearMerge(LibraryTransform):
     """
     Computes a uniform weight mixture across experts of a given library
     """
 
-    def __init__(self, config):
-        super().__init__(config)
+    def __init__(self, config: WeightedLinearMergeConfig = None):
+        super().__init__(config or WeightedLinearMergeConfig())
 
     @torch.no_grad()
     def transform(self, library) -> Expert:
