@@ -48,6 +48,10 @@ class ExpertTrainer(EfficientCheckpointModule):
 
         # rebuild the training config, a bit cumbersome, but that's life
         self.training_config = ExpertConfig.fromdict(kwargs)
+        self.training_config.vocab_size = (
+            model_object.get_input_embeddings().num_embeddings
+        )
+
         # init the transformer just with the modifier config, this avoids
         # passing the whole training config to the modify_transformer func
         self.modifier_config = ModifierConfig.from_training_config(self.training_config)
