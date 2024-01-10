@@ -36,15 +36,14 @@ class DownstreamEvalCallback(cb.Callback):
     def on_validation_epoch_start(
         self, trainer: Trainer, pl_module: ExpertTrainer
     ) -> None:
-        if trainer.current_epoch > 0 and trainer.current_epoch % 10 == 0:
-            metrics = self.runner.run(pl_module, verbose=True)
-            for task, metric in metrics.items():
-                pl_module.log(
-                    f"{self.METRIC_KEY}/{task}",
-                    metric,
-                    on_epoch=True,
-                    prog_bar=True,
-                )
+        metrics = self.runner.run(pl_module, verbose=True)
+        for task, metric in metrics.items():
+            pl_module.log(
+                f"{self.METRIC_KEY}/{task}",
+                metric,
+                on_epoch=True,
+                prog_bar=True,
+            )
 
     def on_test_epoch_end(self, trainer: Trainer, pl_module: ExpertTrainer) -> None:
         metrics = self.runner.run(pl_module)
