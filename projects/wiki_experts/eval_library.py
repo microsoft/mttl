@@ -3,9 +3,11 @@ import sys
 import json
 from copy import deepcopy
 
+from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.models.modifiers.expert_containers.module_graph import Expert
+
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-import torch
 from huggingface_hub import login
 from pytorch_lightning import seed_everything
 import json
@@ -14,11 +16,14 @@ from mttl.utils import logger, setup_logging
 
 from projects.wiki_experts.src.expert_model import (
     MultiExpertModel,
-    MoETrainer,
-    ExpertTrainer,
 )
 from projects.wiki_experts.src.config import ExpertConfig
-from mttl.models.modifiers.expert_containers.library_transforms import WeightedExpert
+
+from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
+from mttl.models.modifiers.expert_containers.library_transforms import (
+    WeightedExpert,
+    WeightedExpertConfig,
+)
 
 
 def run_multitask(args: ExpertConfig):
@@ -29,39 +34,30 @@ def run_multitask(args: ExpertConfig):
 
     logger.info("Args: {}".format(args.to_json()))
 
-    breakpoint()
     if args.hf_token_hub:
         login(token=args.hf_token_hub)
 
-    transform = WeightedExpert(args)
-    # get the config of an expert in the library
-    library = transform.library
-    exp = library[next(iter(library.keys()))]
-    tr_cfg, exp_cfg = exp.training_config, exp.expert_config
+    library = HFExpertLibrary(args.hf_lib_id)
+    transform = WeightedExpert(WeightedExpertConfig())
+    uniform_expert: Expert = transform.transform(library)
 
-    module = MultiExpertModel(**vars(args))
-    
-    # create weighted expert
-    weighted_expert = transform.compute(return_expert=True)
-    # add weighted expert
-    module.add_expert_instance(exp, is_default=True)
-     
-    model_args = args
-    from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
+    module = MultiExpertModel(**vars(uniform_expert.training_config)).to("cuda")
+    module.add_expert_instance(uniform_expert, is_default=True)
+
+    if args.pipeline_eval_tasks == "all":
+        args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
 
     runner: EvaluatorRunner = setup_evaluators(
-        model_type=model_args.model,
-        model_family=model_args.model_family,
-        max_input_length=model_args.max_input_length,
-        max_output_length=model_args.max_output_length,
+        model_type=module.hparams.model,
+        model_family=module.hparams.model_family,
+        max_input_length=module.hparams.max_input_length,
+        max_output_length=module.hparams.max_output_length,
         predict_batch_size=args.predict_batch_size,
-        truncation_side=model_args.truncation_side,
+        truncation_side=module.hparams.truncation_side,
         tasks=args.pipeline_eval_tasks,
         output_path=os.path.join(args.output_dir, "DOWNSTREAM"),
     )
-
-    metrics = runner.run(module)
-    breakpoint()
+    runner.run(module)
 
 
 if __name__ == "__main__":

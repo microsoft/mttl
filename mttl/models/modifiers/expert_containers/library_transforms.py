@@ -88,59 +88,55 @@ class SVDEmbeddingTransform(LibraryTransform):
         return experts_embeddings
 
 
+@dataclass
+class WeightedExpertConfig:
+    weights: dict = None
+
+
 class WeightedExpert(LibraryTransform):
     """
     Computes a uniform weight mixture across experts of a given library
     """
 
-    def __init__(self, config, weights: Optional[dict] = None):
+    def __init__(self, config):
         super().__init__(config)
 
-        if config.hf_lib_id is None:
-            raise ValueError("AverageExpert requires a library id!")
-
-        self.weights = weights
-        self.library = HFExpertLibrary(config.hf_lib_id)
-        self._expert = None
-
     @torch.no_grad()
-    def compute(self, return_expert=False):
-        if self._expert is None:
-            expert_names = list(self.library.keys())
-            experts = [self.library[name] for name in expert_names]
+    def transform(self, library) -> Expert:
+        if type(library) == str:
+            library = HFExpertLibrary(library)
 
-            logger.info("Averaging {} experts".format(len(experts)))
+        expert_names = list(library.keys())
+        experts = [library[name] for name in expert_names]
 
-            if self.weights is not None:
-                assert set(self.weights.keys()) == set(
-                    expert_names
-                ), "Weights must have the same keys as the experts"
-                if sum(self.weights.values()) != 1.0:
-                    logger.warn(
-                        "Weights do not sum to 1.0, please make sure this is intended"
-                    )
+        logger.info("Averaging {} experts".format(len(experts)))
 
-            base_expert = copy.deepcopy(experts[0])
-            base_expert.name = "weighted_expert"
+        if self.config.weights is not None:
+            assert set(self.config.weights.keys()) == set(
+                expert_names
+            ), "Weights must have the same keys as the experts"
+            if sum(self.config.weights.values()) != 1.0:
+                logger.warn(
+                    "Weights do not sum to 1.0, please make sure this is intended"
+                )
 
-            for expert_name, expert in zip(expert_names[1:], experts[1:]):
-                # Validate that the expert is compatible
+        base_expert = copy.deepcopy(experts[0])
+        base_expert.name = "weighted_expert"
 
-                assert type(expert.expert_info.expert_config) == type(
-                    base_expert.expert_info.expert_config
-                ), "Expert configs must be the same type"
-                assert set(expert.expert_weights.keys()) == set(
-                    base_expert.expert_weights.keys()
-                ), "Expert weights must have the same keys"
+        for _, expert in zip(expert_names[1:], experts[1:]):
+            # Validate that the expert is compatible
+            assert type(expert.expert_info.expert_config) == type(
+                base_expert.expert_info.expert_config
+            ), "Expert configs must be the same type"
+            assert set(expert.expert_weights.keys()) == set(
+                base_expert.expert_weights.keys()
+            ), "Expert weights must have the same keys"
 
-                for k, v in expert.expert_weights.items():
-                    base_expert.expert_weights[k] += v
+            for k, v in expert.expert_weights.items():
+                base_expert.expert_weights[k] += v
 
-            # Normalize the final expert
-            for k, v in base_expert.expert_weights.items():
-                base_expert.expert_weights[k] /= len(experts)
+        # Normalize the final expert
+        for k, v in base_expert.expert_weights.items():
+            base_expert.expert_weights[k] /= len(experts)
 
-            self._expert = base_expert
-
-        if return_expert:
-            return self._expert
+        return base_expert
