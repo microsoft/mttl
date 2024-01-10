@@ -84,6 +84,8 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
         expert_weights = [
             [weight.item() for weight in weights] for weights in expert_indices.values
         ]
+        # increate the entropy of the weights
+        expert_weights = np.array(expert_weights) / 10
         expert_weights = np.exp(np.array(expert_weights))
         expert_weights = expert_weights / expert_weights.sum(axis=1, keepdims=True)
 
