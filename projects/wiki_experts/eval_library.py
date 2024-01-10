@@ -37,7 +37,20 @@ def run_multitask(args: ExpertConfig):
     if args.hf_token_hub:
         login(token=args.hf_token_hub)
 
-    uniform_expert = WeightedLinearMerge().transform(args.hf_lib_id)
+    exclude_phi_tasks = [
+        "hellaswag_1_1_0",
+        "ai2_arc_ARC_Challenge_1_0_0",
+        "ai2_arc_ARC_Easy_1_0_0",
+        "piqa_1_0_0",
+        "winogrande_1_1_0",
+        "bool_q_1_0_0",
+        "openbookqa_0_1_0",
+    ]
+
+    library = HFExpertLibrary(
+        repo_id=args.hf_lib_id, exclude_selection=exclude_phi_tasks
+    )
+    uniform_expert = WeightedLinearMerge().transform(library)
     module = MultiExpertModel(**vars(uniform_expert.training_config)).to("cuda")
     module.add_expert_instance(uniform_expert, is_default=True)
 
