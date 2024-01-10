@@ -21,6 +21,7 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
         task_names,
         hidden_size=768,
         transformer_embed_dim=384,
+        temperature=1,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -29,7 +30,7 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
         self.ids_to_tasks_names = task_names
         self.task_names_to_ids = {task: i for i, task in enumerate(task_names)}
         self.num_labels = len(task_names)
-
+        self.temperature = temperature
         # mask for available tasks
         self.available_mask: torch.Tensor = torch.ones(self.num_labels)
 
@@ -85,7 +86,7 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
             [weight.item() for weight in weights] for weights in expert_indices.values
         ]
         # increate the entropy of the weights
-        expert_weights = np.array(expert_weights) / 10
+        expert_weights = np.array(expert_weights) / self.temperature
         expert_weights = np.exp(np.array(expert_weights))
         expert_weights = expert_weights / expert_weights.sum(axis=1, keepdims=True)
 
