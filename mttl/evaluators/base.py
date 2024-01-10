@@ -482,7 +482,7 @@ def setup_evaluators(
                 use_instruct_template=instruct_template_for_code,
             )
             evaluators["humaneval"] = HumanEvalEvaluator(
-                config, generation_kwargs=generation_kwargs
+                config, generation_kwargs=generation_kwargs, split="test"
             )
         elif task == "mbpp":
             generation_kwargs.update(
