@@ -36,7 +36,7 @@ class DownstreamEvalCallback(cb.Callback):
     def on_validation_epoch_start(
         self, trainer: Trainer, pl_module: ExpertTrainer
     ) -> None:
-        metrics = self.runner.run(pl_module, verbose=True)
+        metrics = self.runner.run(pl_module)
         for task, metric in metrics.items():
             pl_module.log(
                 f"{self.METRIC_KEY}/{task}",
