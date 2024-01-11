@@ -255,6 +255,7 @@ class ClusterPredictor(SentenceTransformerClassifier):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.cluster_names = {}
+        self.cluster_names_to_expert_ids = {}
         self.cluster_names[
             "phi2_joint_lora_embed_clustersc9_2e_3epoch"
         ] = "natural_questions_open_1_0_0,web_questions_whats_the_answer,web_questions_question_answer,dbpedia_14_pick_one_category_for_the_following_text,kilt_tasks_hotpotqa_combining_facts,web_questions_short_general_knowledge_q,kilt_tasks_hotpotqa_straighforward_qa,adversarial_qa_dbidaf_generate_question,adversarial_qa_droberta_based_on,web_questions_get_the_answer,kilt_tasks_hotpotqa_complex_question,web_questions_potential_correct_answer,trivia_qa_rc_1_1_0,kilt_tasks_hotpotqa_formulate,adversarial_qa_dbert_based_on,adversarial_qa_dbidaf_based_on,squad_v1_1_3_0_0"
@@ -286,32 +287,53 @@ class ClusterPredictor(SentenceTransformerClassifier):
             "phi2_joint_lora_embed_clustersc7_2e_3epoch"
         ] = "dream_read_the_following_conversation_and_answer_the_question,app_reviews_convert_to_star_rating,cos_e_v1_11_question_option_description_text,social_i_qa_Show_choices_and_generate_answer,quartz_answer_question_based_on,sciq_Direct_Question_Closed_Book_,qasc_qa_with_separated_facts_3,quartz_given_the_fact_answer_the_q,quartz_answer_question_below,kilt_tasks_hotpotqa_final_exam,sciq_Multiple_Choice,wiqa_does_the_supposed_perturbation_have_an_effect,cos_e_v1_11_question_description_option_text,wiki_qa_Is_This_True_,quartz_use_info_from_question_paragraph,sciq_Direct_Question,qasc_qa_with_separated_facts_2,wiqa_which_of_the_following_is_the_supposed_perturbation,app_reviews_convert_to_rating,cos_e_v1_11_question_option_description_id,wiqa_effect_with_string_answer,qasc_qa_with_separated_facts_5,dream_baseline,quartz_having_read_above_passage,cos_e_v1_11_question_description_option_id,qasc_qa_with_separated_facts_1,cos_e_v1_11_description_question_option_text,qasc_qa_with_combined_facts_1,qasc_is_correct_1,cos_e_v1_11_description_question_option_id,social_i_qa_Check_if_a_random_answer_is_valid_or_not,sciq_Multiple_Choice_Closed_Book_,quartz_use_info_from_paragraph_question,qasc_is_correct_2,qasc_qa_with_separated_facts_4,quartz_read_passage_below_choose,quartz_paragraph_question_plain_concat,sciq_Multiple_Choice_Question_First"
 
+        for cluster_name in self.cluster_names:
+            self.cluster_names_to_expert_ids[cluster_name] = [
+                self.task_names_to_ids[task_name]
+                for task_name in self.cluster_names[cluster_name].split(",")
+            ]
+
+        self.cluster_names_to_ids = {
+            cluster_name: i for i, cluster_name in enumerate(self.cluster_names)
+        }
+
+        self.ids_to_cluster_names = {
+            i: cluster_name for i, cluster_name in enumerate(self.cluster_names)
+        }
+
     @torch.no_grad()
     def predict_batch(self, batch, n=1):
         logits = self(batch["sources_texts"]).detach().cpu()
 
-        if self.available_mask is not None:
-            logits = logits + (1.0 - self.available_mask) * -100
+        # softmax
+        logits = torch.softmax(logits, dim=-1)
 
-        # safe softmax
-        max_logits = torch.max(logits, dim=1, keepdim=True).values
-        logits = logits - max_logits
+        # get the cluster distribution
+        cluster_distribution = torch.zeros(logits.shape[0], len(self.cluster_names))
+        for cluster_name in self.cluster_names_to_ids:
+            cluster_distribution[
+                :, self.cluster_names_to_ids[cluster_name]
+            ] = torch.sum(
+                logits[:, self.cluster_names_to_expert_ids[cluster_name]], dim=-1
+            )
 
-        expert_indices = torch.topk(logits, k=n, dim=1)
+        # get the topk clusters
+        cluster_indices = torch.topk(cluster_distribution, k=n, dim=1)
 
-        expert_prediction = [
-            [self.ids_to_tasks_names[index.item()] for index in indices]
-            for indices in expert_indices.indices
+        cluster_prediction = [
+            [self.ids_to_cluster_names[index.item()] for index in indices]
+            for indices in cluster_indices.indices
         ]
-        expert_weights = [
-            [weight.item() for weight in weights] for weights in expert_indices.values
+
+        cluster_weights = [
+            [weight.item() for weight in weights] for weights in cluster_indices.values
         ]
         # increate the entropy of the weights
-        expert_weights = np.array(expert_weights) / self.temperature
-        expert_weights = np.exp(np.array(expert_weights))
-        expert_weights = expert_weights / expert_weights.sum(axis=1, keepdims=True)
+        cluster_weights = np.array(cluster_weights) / self.temperature
+        cluster_weights = np.exp(np.array(cluster_weights))
+        cluster_weights = cluster_weights / cluster_weights.sum(axis=1, keepdims=True)
 
-        return expert_prediction, expert_weights.tolist()
+        return cluster_prediction, cluster_weights.tolist()
 
 
 class T5Classifier(SentenceTransformerClassifier):

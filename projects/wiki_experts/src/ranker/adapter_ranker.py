@@ -22,6 +22,7 @@ class AdapterRankerHelper:
         from projects.wiki_experts.src.ranker.classifier_ranker import (
             SentenceTransformerClassifier,
             T5Classifier,
+            ClusterPredictor,
         )
         from projects.wiki_experts.src.ranker.clip_ranker import (
             CLIPRanker,
@@ -47,6 +48,9 @@ class AdapterRankerHelper:
             return model
         elif ranker_model == "kate":
             model = KATERanker.from_pretrained(ranker_path)
+            return model
+        elif ranker_model == "cluster_predictor":
+            model = ClusterPredictor.from_pretrained(ranker_path)
             return model
         else:
             raise ValueError(f"Unknown retrieval model: {ranker_model}")
