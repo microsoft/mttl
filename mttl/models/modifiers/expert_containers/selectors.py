@@ -408,6 +408,10 @@ class ZeroSelector(Selector):
             # soft routing
             selected_experts = None
 
+        g = self.info_container.get("routing_gates", [])
+        g.append(torch.log(routing_weights + 1e-6))
+        self.info_container["routing_gates"] = g
+
         return BatchAndSequenceModulesAndWeightsSelectorOutput(
             indices=selected_experts, weights=routing_weights
         )
