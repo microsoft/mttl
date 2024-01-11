@@ -85,7 +85,6 @@ class Evaluator(ABC):
         datamodule=None,
         config=None,
         use_vllm=False,
-        split="test",
         **_,
     ):
         if config is None and datamodule is None:
@@ -98,7 +97,6 @@ class Evaluator(ABC):
         self.config = deepcopy(config)
         self.use_vllm = use_vllm
         self._last_metrics = None
-        self.split = split
 
     def get_dataloader(self, split, subsample, shuffle):
         if self.datamodule is None:
@@ -108,8 +106,10 @@ class Evaluator(ABC):
             dataloader = self.datamodule.test_dataloader(subsample, shuffle)
         elif split in ["train", "training"]:
             dataloader = self.datamodule.train_dataloader(subsample)
-        else:
+        elif split in ["val", "valid", "validation", "dev"]:
             dataloader = self.datamodule.val_dataloader(subsample, shuffle)
+        else:
+            raise ValueError("Unknown split: {}".format(split))
         return dataloader
 
     @property
@@ -219,9 +219,8 @@ class GenerativeEvaluator(Evaluator):
         config=None,
         use_vllm=False,
         generation_kwargs=None,
-        split="test",
     ):
-        super().__init__(datamodule, config, use_vllm, split)
+        super().__init__(datamodule, config, use_vllm)
 
         self.generation_kwargs = generation_kwargs or {}
 

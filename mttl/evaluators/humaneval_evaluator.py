@@ -5,7 +5,7 @@ from mttl.evaluators.code_evaluator import CodeEvaluator
 class HumanEvalEvaluator(CodeEvaluator):
     STOP_TOKENS = ["\n\n", "\ndef"]
 
-    def __init__(self, config, generation_kwargs=None, **kwargs):
+    def __init__(self, config, generation_kwargs=None, **_):
         datamodule = HumanEvalDataModule(config, for_generation=True)
 
         generation_kwargs = generation_kwargs or {}

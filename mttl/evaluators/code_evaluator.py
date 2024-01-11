@@ -49,8 +49,9 @@ class CodeEvaluator(GenerativeEvaluator):
             datamodule=datamodule,
             use_vllm=use_vllm,
             generation_kwargs=generation_kwargs,
-            split=split,
         )
+
+        self.split = split
         self.prepend_source = prepend_source
         os.environ["HF_ALLOW_CODE_EVAL"] = "1"
 
