@@ -217,13 +217,13 @@ class ClassifierSmooth(SentenceTransformerClassifier):
 
         # get the expert distribution for the batch. [batch, N]
         expert_distribution = self.get_task_names_distribution(batch["task_names"])
-        breakpoint()
-
         return logits, expert_distribution
 
     def training_step(self, batch, batch_idx):
         logits, scores = self(batch)
-        scores = torch.softmax(-scores, -1)  # note that expert scores are loss scores
+        scores = (
+            torch.softmax(-scores, -1) * logits.shape[-1]
+        )  # note that expert scores are loss scores
         probs = torch.log_softmax(logits, -1)
         loss = torch.mean(-probs * scores)
         self.log(
@@ -238,7 +238,9 @@ class ClassifierSmooth(SentenceTransformerClassifier):
 
     def validation_step(self, batch, batch_idx):
         logits, scores = self(batch)
-        scores = torch.softmax(-scores, -1)
+        scores = (
+            torch.softmax(-scores, -1) * logits.shape[-1]
+        )  # multply the number of experts
         probs = torch.log_softmax(logits, -1)
         loss = torch.mean(-probs * scores)
         self.log(

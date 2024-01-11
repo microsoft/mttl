@@ -2,6 +2,7 @@ import pytorch_lightning as pl
 from projects.wiki_experts.src.ranker.classifier_ranker import (
     SentenceTransformerClassifier,
     T5Classifier,
+    ClassifierSmooth,
 )
 from mttl.datamodule.mt_seq_to_seq_module import (
     FlanConfig,
@@ -220,6 +221,64 @@ def train_classifier(args):
         wandb_logger.experiment.finish()
 
 
+def train_classifier_smooth(args):
+    # using wandb project
+    seed_everything(args.seed, workers=True)
+    wandb_logger = None
+    if os.environ.get("WANDB_API_KEY") or args.wandb_project:
+        import wandb
+
+        project = os.environ.get("WANDB_PROJECT", "wiki_experts")
+        project = args.wandb_project if args.wandb_project is not None else project
+        args.exp_name = "dev_run" if args.exp_name is None else args.exp_name
+        wandb_logger = pl.loggers.WandbLogger(
+            project=project,
+            name=args.exp_name,  # , config=args_
+            settings=wandb.Settings(start_method="fork"),
+        )
+        wandb_logger.experiment.save("*.py")
+        wandb_logger.experiment.save("*/*.py")
+
+    # train the classifier
+    if "flat" not in args.dataset:
+        raise ValueError("Only flat datamodule supported for now.")
+
+    config = FlanConfig(
+        dataset=args.dataset,
+        model=args.model,
+        train_batch_size=args.train_batch_size,
+        finetune_task_name=args.finetune_task_name,
+        predict_batch_size=args.predict_batch_size,
+        include_task_source="P3,Flan2021,CoT",
+        include_template_type="*",
+    )
+    datamodule = FlanModule(config)
+    print("num of labels", len(datamodule.task_names))
+
+    module = ClassifierSmooth(task_names=datamodule.task_names)
+    checkpoint_callback = pl.callbacks.ModelCheckpoint(
+        monitor="val/loss_epoch",
+        dirpath=f"classifier_smooth_ranker_{args.exp_name}",
+        filename="classifier-{epoch:02d}-{val/loss:.2f}",
+        save_top_k=1,
+        mode="min",
+    )
+
+    trainer = pl.Trainer(
+        max_epochs=args.num_train_epochs,
+        accelerator="gpu",
+        callbacks=[checkpoint_callback],
+        devices=1,
+        logger=wandb_logger,
+        val_check_interval=0.5,
+        limit_val_batches=0.5,
+    )
+    trainer.fit(module, datamodule.val_dataloader())
+    trainer.test(module, datamodule.test_dataloader())
+    if wandb_logger:
+        wandb_logger.experiment.finish()
+
+
 if __name__ == "__main__":
     from projects.wiki_experts.src.ranker.config import RankerConfig
 
@@ -230,3 +289,5 @@ if __name__ == "__main__":
         train_clip(args)
     elif args.ranker_model == "clip_triplet":
         train_triplet_clip(args)
+    elif args.ranker_model == "classifier_smooth":
+        train_classifier_smooth(args)
