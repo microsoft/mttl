@@ -211,15 +211,12 @@ class ClassifierSmooth(SentenceTransformerClassifier):
         return expert_distribution
 
     def training_step(self, batch, batch_idx):
-        logits = self(batch)
+        logits = self(batch["sources_texts"])
         scores = self.get_expert_distribution(batch)
-        scores = (
-            torch.softmax(-scores, -1) * logits.shape[-1]
-        )  # note that scores are loss scores
+        scores = torch.softmax(-scores / 0.1, -1)  # note that scores are loss scores
         # logits = logits / 0.1
-        scores = scores / 0.1
         probs = torch.log_softmax(logits, -1)
-        loss = torch.mean(-probs * scores)
+        loss = torch.mean(-(probs * scores).sum(1))
         self.log(
             "train/loss",
             loss,
@@ -231,15 +228,12 @@ class ClassifierSmooth(SentenceTransformerClassifier):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        logits = self(batch)
+        logits = self(batch["sources_texts"])
         scores = self.get_expert_distribution(batch)
-        scores = (
-            torch.softmax(-scores, -1) * logits.shape[-1]
-        )  # note that scores are loss scores
+        scores = torch.softmax(-scores / 0.1, -1)  # note that scores are loss scores
         # logits = logits / 0.1
-        scores = scores / 0.1
         probs = torch.log_softmax(logits, -1)
-        loss = torch.mean(-probs * scores)
+        loss = torch.mean(-(probs * scores).sum(1))
         self.log(
             "val/loss",
             loss,
