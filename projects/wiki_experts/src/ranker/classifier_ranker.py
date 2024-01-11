@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 from transformers import T5Tokenizer, T5ForConditionalGeneration
 from sentence_transformers import SentenceTransformer
-
+from datasets import load_dataset
 from mttl.models.utils import EfficientCheckpointModule
 from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRanker
 
@@ -160,6 +160,95 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
         acc = torch.sum(preds == label).item() / len(label)
         self.log("test/acc", acc, on_epoch=True, prog_bar=True)
         return loss
+
+
+class ClassifierSmooth(SentenceTransformerClassifier):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        dataset = load_dataset("zhan1993/transfer_matrix_v3")
+        self.transfer_matrix_df = dataset["train"].to_pandas()
+        self.transfer_matrix_df.set_index(["expert_name", "task_eval_on"], inplace=True)
+        self.task_names_to_distribution = {}
+        for task_name in self.task_names_to_ids:
+            # initialize the distribution
+            self.task_names_to_distribution[task_name] = np.ones(
+                len(self.task_names_to_ids)
+            )
+            for expert_name in self.task_names_to_ids:
+                # we get each expert score for each task
+                if (expert_name, task_name) in self.transfer_matrix_df.index:
+                    loss_score = self.transfer_matrix_df.loc[
+                        (expert_name, task_name), "score"
+                    ]
+                else:
+                    loss_score = 100
+                self.task_names_to_distribution[task_name][
+                    self.task_names_to_ids[expert_name]
+                ] = loss_score
+
+    def get_task_names_distribution(self, task_names):
+        """
+        Converts a list of task names to their corresponding scores. Here
+        the scores are from the transfer matrix distribution.
+
+        Args:
+            task_names (list): A list of task names.
+            [batch(task_names)]
+        Returns:
+            batch [batch,N] N is the number of available experts.
+        """
+        loss_scores = []
+        for task_name in task_names:
+            assert task_name in self.task_names_to_ids
+            loss_scores.append(self.task_names_to_distribution[task_name])
+        batch_score = torch.tensor(loss_scores).to(device)
+        return batch_score
+
+    def forward(self, batch):
+        # Encode the text input
+        text_output = torch.tensor(
+            self.text_encoder.encode(batch["sources_texts"], show_progress_bar=False)
+        ).to(device)
+        # conver the text output to hidden vector
+        text_output_projecter = self.text_projecter(text_output)
+        # Calculate the logits
+        logits = self.out_projecter(text_output_projecter)
+
+        # get the expert distribution for the batch. [batch, N]
+        expert_distribution = self.get_task_names_distribution(batch["task_names"])
+        breakpoint()
+
+        return logits, expert_distribution
+
+    def training_step(self, batch, batch_idx):
+        logits, scores = self(batch)
+        scores = torch.softmax(-scores, -1)  # note that expert scores are loss scores
+        probs = torch.log_softmax(logits, -1)
+        loss = torch.mean(-probs * scores)
+        self.log(
+            "train/loss",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            batch_size=len(batch["sources_texts"]),
+        )
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        logits, scores = self(batch)
+        scores = torch.softmax(-scores, -1)
+        probs = torch.log_softmax(logits, -1)
+        loss = torch.mean(-probs * scores)
+        self.log(
+            "val/loss",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            batch_size=len(batch["sources_texts"]),
+        )
 
 
 class ClusterPredictor(SentenceTransformerClassifier):
