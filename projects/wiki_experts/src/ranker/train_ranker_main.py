@@ -271,10 +271,11 @@ def train_classifier_smooth(args):
         devices=1,
         logger=wandb_logger,
         val_check_interval=0.5,
-        limit_val_batches=0.5,
+        # limit_val_batches=0.1,
+        # limit_train_batches=0.1,
     )
     trainer.fit(module, datamodule.val_dataloader())
-    trainer.test(module, datamodule.test_dataloader())
+    trainer.test(module, datamodule.val_dataloader())
     if wandb_logger:
         wandb_logger.experiment.finish()
 

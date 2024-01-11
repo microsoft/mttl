@@ -205,25 +205,19 @@ class ClassifierSmooth(SentenceTransformerClassifier):
         batch_score = torch.tensor(loss_scores).to(device)
         return batch_score
 
-    def forward(self, batch):
-        # Encode the text input
-        text_output = torch.tensor(
-            self.text_encoder.encode(batch["sources_texts"], show_progress_bar=False)
-        ).to(device)
-        # conver the text output to hidden vector
-        text_output_projecter = self.text_projecter(text_output)
-        # Calculate the logits
-        logits = self.out_projecter(text_output_projecter)
-
+    def get_expert_distribution(self, batch):
         # get the expert distribution for the batch. [batch, N]
         expert_distribution = self.get_task_names_distribution(batch["task_names"])
-        return logits, expert_distribution
+        return expert_distribution
 
     def training_step(self, batch, batch_idx):
-        logits, scores = self(batch)
+        logits = self(batch)
+        scores = self.get_expert_distribution(batch)
         scores = (
             torch.softmax(-scores, -1) * logits.shape[-1]
-        )  # note that expert scores are loss scores
+        )  # note that scores are loss scores
+        # logits = logits / 0.1
+        scores = scores / 0.1
         probs = torch.log_softmax(logits, -1)
         loss = torch.mean(-probs * scores)
         self.log(
@@ -237,10 +231,13 @@ class ClassifierSmooth(SentenceTransformerClassifier):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        logits, scores = self(batch)
+        logits = self(batch)
+        scores = self.get_expert_distribution(batch)
         scores = (
             torch.softmax(-scores, -1) * logits.shape[-1]
-        )  # multply the number of experts
+        )  # note that scores are loss scores
+        # logits = logits / 0.1
+        scores = scores / 0.1
         probs = torch.log_softmax(logits, -1)
         loss = torch.mean(-probs * scores)
         self.log(
