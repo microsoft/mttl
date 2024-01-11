@@ -152,7 +152,9 @@ class PrototypeComputerConfig:
         False  # This computes sentence embeddings without the adapter
     )
     model: str = None  # If `use_base_model_only`, can pass a specific model to compute embeddings with
-    max_samples_per_task: int = 100
+    max_samples_per_task: int = 25
+    upload_to_hf: bool = False
+    name: str = "dataset_centroids"
 
 
 class DatasetCentroidComputer(LibraryTransform):
@@ -170,17 +172,23 @@ class DatasetCentroidComputer(LibraryTransform):
                 setattr(args, k, v)
 
     @torch.no_grad()
-    def transform(self, library, default_args=None) -> Expert:
+    def transform(self, library, upload_to_hf=False, default_args=None) -> Expert:
         # TODO: remove project import
         from projects.wiki_experts.train_experts_main import get_datamodule
 
         if type(library) == str:
             library = HFExpertLibrary(library)
 
+        # try to fetch auxiliary data
+        output = library.get_auxiliary_data(data_type=self.config.name)
+        if len(output) == len(library):
+            logger.info("Found {} precomputed centroids".format(len(output)))
+            return output
+
         logger.info("Computing centroids for {} experts".format(len(library)))
         output = {}
 
-        for expert_name, expert in library.items():
+        for e_id, (expert_name, expert) in enumerate(library.items()):
             training_config = expert.training_config
             if default_args is not None:
                 self._fill_missing_args(training_config, default_args)
@@ -196,12 +204,14 @@ class DatasetCentroidComputer(LibraryTransform):
             train_tasks = expert.expert_info.expert_task_name.split(",")
 
             centroid, count = 0, 0
-            for train_task in train_tasks:
+            for t_id, train_task in enumerate(train_tasks):
                 # get datamodule
                 training_config.subsample_train = self.config.max_samples_per_task
                 training_config.dataset = expert.expert_info.dataset
                 training_config.finetune_task_name = train_task
-                training_config.train_batch_size = 4
+                training_config.train_batch_size = (
+                    default_args.predict_batch_size if default_args is not None else 4
+                )
 
                 dm = get_datamodule(training_config)
                 dataloader = dm.train_dataloader()
@@ -241,5 +251,18 @@ class DatasetCentroidComputer(LibraryTransform):
             # average over all batches
             centroid /= count
             output[expert_name] = F.normalize(centroid, p=2, dim=-1).cpu()
+
+        if upload_to_hf:
+            logger.info("Uploading centroids to HF")
+            # add embeddings to the library
+            with library.batched_commit():
+                for i, name in enumerate(output.keys()):
+                    library.add_auxiliary_data(
+                        data_type=self.config.name,
+                        expert_name=expert_name,
+                        config=self.config.__dict__,
+                        data=output[name],
+                        force=True,
+                    )
 
         return output
