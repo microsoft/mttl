@@ -66,7 +66,7 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
         raise NotImplementedError("Not implemented yet.")
 
     @torch.no_grad()
-    def predict_batch(self, batch, n=1, uniform=False):
+    def predict_batch(self, batch, n=1, uniform="random"):
         logits = self(batch["sources_texts"]).detach().cpu()
 
         if self.available_mask is not None:
@@ -90,8 +90,11 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
         expert_weights = np.exp(np.array(expert_weights))
         expert_weights = expert_weights / expert_weights.sum(axis=1, keepdims=True)
 
-        if uniform:
-            expert_weights = np.ones_like(expert_weights) / n
+        # give a uniform distribution
+        if uniform == "random":
+            expert_weights = np.random.uniform(0, 1, size=expert_weights.shape)
+        elif uniform == "uniform":
+            expert_weights = np.ones_like(expert_weights) / len(expert_weights[0])
 
         return expert_prediction, expert_weights.tolist()
 
@@ -298,7 +301,7 @@ class ClusterPredictor(SentenceTransformerClassifier):
         }
 
     @torch.no_grad()
-    def predict_batch(self, batch, n=1, uniform=False):
+    def predict_batch(self, batch, n=1, uniform="uniform"):
         logits = self(batch["sources_texts"]).detach().cpu()
 
         # softmax
@@ -329,8 +332,11 @@ class ClusterPredictor(SentenceTransformerClassifier):
         cluster_weights = np.exp(np.array(cluster_weights))
         cluster_weights = cluster_weights / cluster_weights.sum(axis=1, keepdims=True)
 
-        if uniform:
-            cluster_weights = np.ones_like(cluster_weights) / n
+        # give a uniform distribution
+        if uniform == "random":
+            cluster_weights = np.random.uniform(0, 1, size=cluster_weights.shape)
+        elif uniform == "uniform":
+            cluster_weights = np.ones_like(cluster_weights) / len(cluster_weights[0])
 
         return cluster_prediction, cluster_weights.tolist()
 

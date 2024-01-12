@@ -28,7 +28,7 @@ class ExpertConfig(Config):
         self.ranker_top_k = 1
         self.ranker_path = None
         self.ranker_model = None
-        self.ranker_uniform = False
+        self.ranker_uniform = "none"
 
         self.expert_name = None
         self.routing = "subject"
