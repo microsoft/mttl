@@ -20,7 +20,7 @@ def _extract_identifier(string, match_on="coder"):
     if match_on == "coarsegrained":
         return "shared"
     pos = string.find(f"{match_on}")
-    if pos > 0:
+    if pos >= 0:
         return string[: pos + len(match_on)]
     return string
 
@@ -91,6 +91,8 @@ def add_expert_to_transformer(
     training_config: Config = None,
 ):
     """
+    Routine to add an expert to the transformer architecture.
+
     Params:
         transformer: the transformer model to modify
         Config: the config of the model to which the expert is added
@@ -122,6 +124,7 @@ def add_expert_to_transformer(
         )
 
     total_layers = 0
+    n_selectors, n_selectors_views = 0, 0
     added_layers = []
 
     for m_name, module in dict(transformer.named_modules()).items():
@@ -154,11 +157,13 @@ def add_expert_to_transformer(
                                 transformer.selectors[identifier] = selector
                                 # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
                                 selector.total_calls_per_forward += 1
+                                n_selectors += 1
                             else:
                                 selector: Selector = transformer.selectors[identifier]
                                 # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
                                 selector.total_calls_per_forward += 1
                                 selector = selector.create_view()
+                                n_selectors_views += 1
 
                         CONTAINER_CLASS = get_container_class(model_modifier)
                         expert_container = CONTAINER_CLASS(
@@ -183,6 +188,14 @@ def add_expert_to_transformer(
                         is_default=is_default,
                     )
 
+    if routing_config is not None and n_selectors == 0:
+        raise ValueError(
+            "No selectors were created but a routing config was specified. Check your routing_config and model architecture."
+        )
+
     logger.info("Added expert %s", expert.name)
+    logger.info(
+        "Added %d selectors and %d selector views", n_selectors, n_selectors_views
+    )
     logger.debug("Added expert to layers %s", added_layers)
     return transformer

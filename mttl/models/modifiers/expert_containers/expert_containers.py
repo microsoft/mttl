@@ -356,7 +356,9 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                         selection.weights.shape[0],
                         selection.weights.shape[1],
                         self.experts.n_skills,
-                    ),
+                    )
+                    if selection.weights.ndim == 3
+                    else (selection.weights.shape[0], self.experts.n_skills),
                     device=selection.weights.device,
                 ).scatter_add(
                     selection.weights.ndim - 1, selection.modules, selection.weights
