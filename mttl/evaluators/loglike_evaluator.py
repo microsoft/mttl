@@ -118,10 +118,10 @@ class LogLikeEvaluator(Evaluator):
                 pbar.set_description("Accuracy: {:.4f}".format(np.mean(all_accuracies)))
 
         metrics = {
-            "loss": np.mean(all_losses),
-            "loglike": -np.mean(all_losses),
+            "loss": float(np.mean(all_losses)),
+            "loglike": -float(np.mean(all_losses)),
             "predictions": all_predictions,
-            "accuracy": np.mean(all_accuracies) if all_accuracies else None,
+            "accuracy": float(np.mean(all_accuracies)) if all_accuracies else None,
         }
 
         self.save_metrics(metrics, output_path)

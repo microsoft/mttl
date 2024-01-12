@@ -117,18 +117,30 @@ class Evaluator(ABC):
         return self._last_metrics
 
     def save_metrics(self, metrics, output_path, predictions=None):
+        import json
+
+        class JsonCustomEncoder(json.JSONEncoder):
+            """<cropped for brevity>"""
+
+            def default(self, obj):
+                if isinstance(obj, (np.ndarray, np.number)):
+                    return obj.tolist()
+                elif isinstance(obj, set):
+                    return list(obj)
+                elif isinstance(obj, bytes):  # pragma: py3
+                    return obj.decode()
+                return json.JSONEncoder.default(self, obj)
+
         self._last_metrics = metrics
 
         if output_path is None:
             return
 
-        import json
-
         if not os.path.exists(output_path):
             os.makedirs(output_path, exist_ok=True)
 
         with open(output_path + "/metrics.json", "w") as f:
-            json.dump(metrics, f, indent=2)
+            json.dump(metrics, f, indent=2, cls=JsonCustomEncoder)
 
         if predictions is not None:
             with open(output_path + "/predictions.json", "w", encoding="utf-8") as f:
