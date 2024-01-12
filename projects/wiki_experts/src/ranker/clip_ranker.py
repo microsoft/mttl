@@ -229,7 +229,7 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
         return expert_prediction, expert_weights.tolist()
 
     @torch.no_grad()
-    def predict_batch(self, batch, n=1):
+    def predict_batch(self, batch, n=1, uniform=False):
         text_features = self.text_encoder(batch["sources_texts"])
         # Getting the expert and text embeddings with the same dimension
         text_embeddings = self.text_projection(text_features)
@@ -260,6 +260,9 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
         ]
         expert_weights = np.exp(np.array(expert_weights))
         expert_weights = expert_weights / expert_weights.sum(axis=1, keepdims=True)
+
+        if uniform:
+            expert_weights = np.ones_like(expert_weights) / len(expert_weights[0])
 
         return expert_prediction, expert_weights.tolist()
 
