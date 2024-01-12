@@ -54,7 +54,9 @@ def run_multitask(args: ExpertConfig):
     )
 
     cfg = PrototypeComputerConfig(name="centroids", upload_to_hf=True)
-    centroids = DatasetCentroidComputer(cfg).transform(library, default_args=args)
+    centroids = DatasetCentroidComputer(cfg).transform(
+        library, default_args=args, upload_to_hf=True
+    )
 
     uniform_expert = WeightedLinearMerge().transform(library)
     module = MultiExpertModel(**vars(uniform_expert.training_config)).to("cuda")
