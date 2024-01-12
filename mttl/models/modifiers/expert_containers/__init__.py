@@ -188,14 +188,12 @@ def add_expert_to_transformer(
                         is_default=is_default,
                     )
 
-    if routing_config is not None and n_selectors == 0:
+    if routing_config is not None and not transformer.selectors:
         raise ValueError(
             "No selectors were created but a routing config was specified. Check your routing_config and model architecture."
         )
 
     logger.info("Added expert %s", expert.name)
-    logger.info(
-        "Added %d selectors and %d selector views", n_selectors, n_selectors_views
-    )
+    logger.info("Added %d selectors", len(transformer.selectors))
     logger.debug("Added expert to layers %s", added_layers)
     return transformer
