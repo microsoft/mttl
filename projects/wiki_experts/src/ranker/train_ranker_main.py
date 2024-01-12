@@ -256,6 +256,8 @@ def train_classifier_smooth(args):
     print("num of labels", len(datamodule.task_names))
 
     module = ClassifierSmooth(task_names=datamodule.task_names)
+    if args.ranker_path:
+        module = module.from_pretrained(args.ranker_path)
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
         monitor="val/loss_epoch",
         dirpath=f"classifier_smooth_ranker_{args.exp_name}",
@@ -271,11 +273,11 @@ def train_classifier_smooth(args):
         devices=1,
         logger=wandb_logger,
         val_check_interval=0.5,
-        # limit_val_batches=0.1,
+        limit_val_batches=0.1,
         # limit_train_batches=0.1,
     )
-    trainer.fit(module, datamodule.val_dataloader())
-    trainer.test(module, datamodule.val_dataloader())
+    trainer.fit(module, datamodule)
+    trainer.test(module, datamodule.test_dataloader())
     if wandb_logger:
         wandb_logger.experiment.finish()
 
