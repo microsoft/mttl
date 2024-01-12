@@ -123,15 +123,15 @@ class ModulesAndWeightsSelectorOutput(SelectorOutput):
 class BatchModulesAndWeightsSelectorOutput(SelectorOutput):
     """A selector output that contains a list of modules and weights for each example."""
 
-    modules: List[List[str]]
+    modules: Union[List[List[str]], torch.Tensor]
     weights: Union[List[List[float]], torch.Tensor]
 
 
 @dataclass
-class BatchAndSequenceModulesAndWeightsSelectorOutput(SelectorOutput):
+class BatchSequenceModulesAndWeightsSelectorOutput(SelectorOutput):
     """A selector output that contains a list of modules and weights for each example and token."""
 
-    indices: torch.Tensor
+    modules: torch.Tensor
     weights: Union[List[List[float]], torch.Tensor]
 
 
@@ -312,9 +312,7 @@ class MOERKHSSelector(Selector):
         return self.rkhs_hid(input_view).reshape(input.shape[0], input.shape[1], -1)
 
     @forward_with_cache
-    def forward(
-        self, input, **kwargs
-    ) -> BatchAndSequenceModulesAndWeightsSelectorOutput:
+    def forward(self, input, **kwargs) -> BatchSequenceModulesAndWeightsSelectorOutput:
         # do routing business on fp32
         input = input.to(dtype=self.rkhs_exp.weight.dtype)
 
@@ -338,7 +336,7 @@ class MOERKHSSelector(Selector):
         g.append(router_logits)
         self.info_container["routing_gates"] = g
 
-        return BatchAndSequenceModulesAndWeightsSelectorOutput(
+        return BatchSequenceModulesAndWeightsSelectorOutput(
             indices=selected_experts, weights=routing_weights
         )
 
@@ -385,7 +383,70 @@ class ZeroSelector(Selector):
     @forward_with_cache
     def forward(
         self, input, container, **kwargs
-    ) -> BatchAndSequenceModulesAndWeightsSelectorOutput:
+    ) -> BatchModulesAndWeightsSelectorOutput:
+        # do routing business on fp32
+        input = input.to(dtype=container.experts.lora_a.dtype)
+
+        logits = (
+            torch.einsum("bsd,kpdr->bskrp", input, container.experts.lora_a)
+            .squeeze(-1)
+            .pow(2.0)
+            .sum(-1)
+            .sqrt()
+        ).mean(
+            1
+        )  # bk
+        routing_weights = torch.softmax(logits, dim=-1)
+
+        if self.top_k > 0:
+            routing_weights, selected_experts = torch.topk(
+                routing_weights, self.top_k, dim=-1
+            )
+            # we cast back to the input dtype
+            routing_weights = routing_weights.to(input.dtype)
+        else:
+            # soft routing
+            selected_experts = None
+
+        g = self.info_container.get("routing_gates", [])
+        g.append(torch.log(routing_weights + 1e-6))
+        self.info_container["routing_gates"] = g
+
+        return BatchModulesAndWeightsSelectorOutput(
+            modules=selected_experts, weights=routing_weights
+        )
+
+    def get_merged_weights(self, container, **selector_kwargs) -> Dict:
+        raise ValueError("Not supported for MOESelector.")
+
+    def get_routing_weights(self):
+        raise ValueError("Not supported for MOESelector.")
+
+
+@dataclass
+class ZeroPerTokenSelectorConfig(SelectorConfig):
+    top_k: int = -1
+
+
+@register_multi_expert_selector("zero_per_token_router", ZeroPerTokenSelectorConfig)
+class ZeroPerTokenSelector(Selector):
+    def __init__(self, info_container, config, **kwargs) -> None:
+        super().__init__(info_container, config)
+
+        if "layer" not in kwargs:
+            raise ValueError(
+                "MOERKHSSelector requires a layer to be passed in kwargs to infer the input dimension."
+            )
+
+        self.top_k = config.top_k
+        self.input_dim = kwargs["layer"].weight.data.shape[-1]
+        # dependency injection
+        self._container = None
+
+    @forward_with_cache
+    def forward(
+        self, input, container, **kwargs
+    ) -> BatchSequenceModulesAndWeightsSelectorOutput:
         # do routing business on fp32
         input = input.to(dtype=container.experts.lora_a.dtype)
 
@@ -412,7 +473,7 @@ class ZeroSelector(Selector):
         g.append(torch.log(routing_weights + 1e-6))
         self.info_container["routing_gates"] = g
 
-        return BatchAndSequenceModulesAndWeightsSelectorOutput(
+        return BatchSequenceModulesAndWeightsSelectorOutput(
             indices=selected_experts, weights=routing_weights
         )
 

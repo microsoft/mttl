@@ -14,7 +14,7 @@ from projects.wiki_experts.src.expert_model import (
 from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
 from mttl.models.modifiers.expert_containers import LoRAExpertContainer
 from mttl.models.modifiers.expert_containers.selectors import (
-    BatchAndSequenceModulesAndWeightsSelectorOutput,
+    BatchSequenceModulesAndWeightsSelectorOutput,
     PolySelectorDirect,
     MOERKHSSelector,
     SelectorView,
@@ -278,9 +278,7 @@ class TestMultiExpertModel:
         assert container.selector.total_calls_per_forward == 1
 
         assert spy.call_count == 1
-        assert isinstance(
-            spy.spy_return, BatchAndSequenceModulesAndWeightsSelectorOutput
-        )
+        assert isinstance(spy.spy_return, BatchSequenceModulesAndWeightsSelectorOutput)
         assert spy.spy_return.indices == None
         assert spy.spy_return.weights.shape == (2, 3, 8)
 
@@ -313,8 +311,6 @@ class TestMultiExpertModel:
         assert container.selector.total_calls_per_forward == 1
 
         assert spy.call_count == 1
-        assert isinstance(
-            spy.spy_return, BatchAndSequenceModulesAndWeightsSelectorOutput
-        )
+        assert isinstance(spy.spy_return, BatchSequenceModulesAndWeightsSelectorOutput)
         assert spy.spy_return.indices.shape == (2, 3, 2)
         assert spy.spy_return.weights.shape == (2, 3, 2)
