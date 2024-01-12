@@ -193,7 +193,8 @@ def add_expert_to_transformer(
             "No selectors were created but a routing config was specified. Check your routing_config and model architecture."
         )
 
-    logger.info("Added expert %s", expert.name)
-    logger.info("Added %d selectors", len(transformer.selectors))
-    logger.debug("Added expert to layers %s", added_layers)
+    logger.info(
+        "Added expert %s, with %s selectors", expert.name, len(transformer.selectors)
+    )
+    logger.debug("Patched layers: %s", added_layers)
     return transformer
