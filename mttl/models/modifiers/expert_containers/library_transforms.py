@@ -155,6 +155,7 @@ class PrototypeComputerConfig:
     max_samples_per_task: int = 25
     upload_to_hf: bool = False
     name: str = "dataset_centroids"
+    recompute: bool = False
 
 
 class DatasetCentroidComputer(LibraryTransform):
@@ -181,7 +182,7 @@ class DatasetCentroidComputer(LibraryTransform):
 
         # try to fetch auxiliary data
         output = library.get_auxiliary_data(data_type=self.config.name)
-        if len(output) == len(library):
+        if len(output) == len(library) and not self.config.recompute:
             logger.info("Found {} precomputed centroids".format(len(output)))
             return output
 
