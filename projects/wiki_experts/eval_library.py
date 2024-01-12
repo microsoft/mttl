@@ -23,6 +23,8 @@ from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.models.modifiers.expert_containers.library_transforms import (
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
+    DatasetCentroidComputer,
+    PrototypeComputerConfig,
 )
 
 
@@ -50,6 +52,10 @@ def run_multitask(args: ExpertConfig):
     library = HFExpertLibrary(
         repo_id=args.hf_lib_id, exclude_selection=exclude_phi_tasks
     )
+
+    cfg = PrototypeComputerConfig(name="centroids", upload_to_hf=True)
+    centroids = DatasetCentroidComputer(cfg).transform(library, default_args=args)
+
     uniform_expert = WeightedLinearMerge().transform(library)
     module = MultiExpertModel(**vars(uniform_expert.training_config)).to("cuda")
     module.add_expert_instance(uniform_expert, is_default=True)
