@@ -257,6 +257,7 @@ class TestMultiExpertModel:
     ):
         seed_everything(0)
         config: ExpertConfig = tmp_exp_config
+        config.router_selector = "moe_rkhs_selector"
         config.moe_emb_dim = 10
         config.moe_rkhs_dim = 10
 
@@ -287,6 +288,7 @@ class TestMultiExpertModel:
     ):
         seed_everything(0)
         config: ExpertConfig = tmp_exp_config
+        config.router_selector = "moe_rkhs_selector"
         config.moe_top_k = 2
         config.moe_emb_dim = 10
         config.moe_rkhs_dim = 10
