@@ -2,8 +2,12 @@ from dataclasses import dataclass
 import readline
 import os
 import glob
+import sys
 from termcolor import colored, cprint
 from typing import List
+
+from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.evaluators.base import StoppingCriteriaSub, StoppingCriteriaList
 
 
 def path_completer(text, state):
@@ -38,7 +42,11 @@ def generate(input, model, device):
         max_new_tokens=200,
         eos_token_id=model.tokenizer.eos_token_id,
         pad_token_id=model.tokenizer.pad_token_id,
+        stopping_criteria=StoppingCriteriaList(
+            [StoppingCriteriaSub(["\n\n"], model.tokenizer)]
+        ),
     )
+
     output_ids = output_ids[0][batch["input_ids"].shape[1] :]
     return model.tokenizer.decode(output_ids, skip_special_tokens=True)
 
@@ -90,7 +98,9 @@ def main():
     setup_logging()
 
     config = ExpertConfig.parse(
-        raise_error=False, c="./configs/wiki-mmlu/phi-2_flan.json"
+        raise_error=False,
+        c="./configs/wiki-mmlu/phi-2_flan_v3.json",
+        extra_kwargs=dict(k.split("=") for k in sys.argv[1:]),
     )
     tokenizer = get_tokenizer_with_args(config.model, "gpt", "left", "left", True)
     model = MultiExpertModel(**vars(config), tokenizer=tokenizer).to("cuda")
@@ -105,37 +115,41 @@ def main():
     )
 
     while True:
-        print()
+        try:
+            print()
 
-        expert_name = model.experts_names[0] if model.experts_names else None
-        prompt = "{}>> ".format(f"({expert_name}) " if expert_name else "")
+            expert_name = model.experts_names[0] if model.experts_names else None
+            prompt = "{}>> ".format(f"({expert_name}) " if expert_name else "")
 
-        user_input = input(prompt)
+            user_input = input(prompt)
 
-        if "load_mod" in user_input.lower():
-            model.delete_expert_container()
-            _, path = user_input.split(" ")
-            expert = module_graph.load_expert(path)
-            model.add_expert_instance(expert, "default")
-            continue
+            if "%load" in user_input.lower():
+                parts = user_input.partition("%load")[2].partition("from")
+                module = parts[0].strip()
+                library = parts[2].strip()
+                model.delete_expert_container()
+                expert = HFExpertLibrary(library)[module]
+                model.add_expert_instance(expert, "default")
+                continue
 
-        if "clear_mod" in user_input.lower():
-            model.delete_expert_container()
-            continue
+            if "%unload" in user_input.lower():
+                model.delete_expert_container()
+                continue
 
-        if user_input.lower() in ["exit", "quit"]:
-            break
+            if user_input.lower() in ["exit", "quit"]:
+                break
 
-        if user_input.lower() == "clear":
-            conversation.clear()
-            continue
+            if user_input.lower() == "clear":
+                conversation.clear()
+                continue
 
-        conversation.prompts.append(user_input)
-        response = generate(conversation.to_str(), model, device)
-        conversation.responses.append(response)
+            conversation.prompts.append(user_input)
+            response = generate(conversation.to_str(), model, device)
+            conversation.responses.append(response)
 
-        print("------------------------------------")
-        print(response)
+            print(response)
+        except Exception as e:
+            print.info("Error detected (%s). Type `exit` to leave." % e)
 
 
 if __name__ == "__main__":
