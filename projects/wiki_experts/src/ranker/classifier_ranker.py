@@ -87,13 +87,14 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
         ]
         # increate the entropy of the weights
         expert_weights = np.array(expert_weights) / self.temperature
+
+        if uniform == "random":
+            expert_weights = np.random.uniform(0, 1, size=expert_weights.shape)
         expert_weights = np.exp(np.array(expert_weights))
         expert_weights = expert_weights / expert_weights.sum(axis=1, keepdims=True)
 
         # give a uniform distribution
-        if uniform == "random":
-            expert_weights = np.random.uniform(0, 1, size=expert_weights.shape)
-        elif uniform == "uniform":
+        if uniform == "uniform":
             expert_weights = np.ones_like(expert_weights) / len(expert_weights[0])
 
         return expert_prediction, expert_weights.tolist()
@@ -329,13 +330,15 @@ class ClusterPredictor(SentenceTransformerClassifier):
         ]
         # increate the entropy of the weights
         cluster_weights = np.array(cluster_weights) / self.temperature
+
+        # give a random distribution
+        if uniform == "random":
+            cluster_weights = np.random.uniform(0, 1, size=cluster_weights.shape)
         cluster_weights = np.exp(np.array(cluster_weights))
         cluster_weights = cluster_weights / cluster_weights.sum(axis=1, keepdims=True)
 
         # give a uniform distribution
-        if uniform == "random":
-            cluster_weights = np.random.uniform(0, 1, size=cluster_weights.shape)
-        elif uniform == "uniform":
+        if uniform == "uniform":
             cluster_weights = np.ones_like(cluster_weights) / len(cluster_weights[0])
 
         return cluster_prediction, cluster_weights.tolist()

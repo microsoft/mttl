@@ -258,13 +258,14 @@ class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
         expert_weights = [
             [weight.item() for weight in weights] for weights in expert_indices.values
         ]
+
+        if uniform == "random":
+            expert_weights = np.random.uniform(0, 1, size=expert_weights.shape)
         expert_weights = np.exp(np.array(expert_weights))
         expert_weights = expert_weights / expert_weights.sum(axis=1, keepdims=True)
 
         # give a uniform distribution
-        if uniform == "random":
-            expert_weights = np.random.uniform(0, 1, size=expert_weights.shape)
-        elif uniform == "uniform":
+        if uniform == "uniform":
             expert_weights = np.ones_like(expert_weights) / len(expert_weights[0])
 
         return expert_prediction, expert_weights.tolist()
