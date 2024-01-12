@@ -66,7 +66,7 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
         raise NotImplementedError("Not implemented yet.")
 
     @torch.no_grad()
-    def predict_batch(self, batch, n=1):
+    def predict_batch(self, batch, n=1, uniform=False):
         logits = self(batch["sources_texts"]).detach().cpu()
 
         if self.available_mask is not None:
@@ -89,6 +89,9 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
         expert_weights = np.array(expert_weights) / self.temperature
         expert_weights = np.exp(np.array(expert_weights))
         expert_weights = expert_weights / expert_weights.sum(axis=1, keepdims=True)
+
+        if uniform:
+            expert_weights = np.ones_like(expert_weights) / n
 
         return expert_prediction, expert_weights.tolist()
 
@@ -295,7 +298,7 @@ class ClusterPredictor(SentenceTransformerClassifier):
         }
 
     @torch.no_grad()
-    def predict_batch(self, batch, n=1):
+    def predict_batch(self, batch, n=1, uniform=False):
         logits = self(batch["sources_texts"]).detach().cpu()
 
         # softmax
@@ -325,6 +328,9 @@ class ClusterPredictor(SentenceTransformerClassifier):
         cluster_weights = np.array(cluster_weights) / self.temperature
         cluster_weights = np.exp(np.array(cluster_weights))
         cluster_weights = cluster_weights / cluster_weights.sum(axis=1, keepdims=True)
+
+        if uniform:
+            cluster_weights = np.ones_like(cluster_weights) / n
 
         return cluster_prediction, cluster_weights.tolist()
 

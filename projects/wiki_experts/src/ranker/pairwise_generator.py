@@ -31,7 +31,7 @@ parser.add_argument(
     "--transfer_matrix_path",
     type=str,
     default="",
-    help="ftransfer_matrix_path",
+    help="transfer_matrix_path",
 )
 
 # if create pair dataset or pair dataset with input

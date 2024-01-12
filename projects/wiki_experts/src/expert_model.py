@@ -370,6 +370,7 @@ class MultiExpertModelRanker(MultiExpertModel):
         mod_names, mod_weights = self.expert_ranker.predict_batch(
             batch,
             n=self.hparams.ranker_top_k,
+            uniform=self.hparams.ranker_uniform,
         )
 
         if self.routing == "random":
