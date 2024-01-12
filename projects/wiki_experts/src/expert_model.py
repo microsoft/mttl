@@ -34,7 +34,6 @@ from mttl.models.modifiers.expert_containers.module_graph import (
     ModuleGraph,
     load_expert,
 )
-import random
 
 
 def push_expert_to_hub(
@@ -368,17 +367,16 @@ class MultiExpertModelRanker(MultiExpertModel):
 
         self.expert_ranker.set_available_tasks(self.experts_names)
         mod_names, mod_weights = self.expert_ranker.predict_batch(
-            batch,
-            n=self.hparams.ranker_top_k,
-            uniform=self.hparams.ranker_uniform,
+            batch, n=self.hparams.ranker_top_k
         )
 
+        if self.routing == "uniform":
+            mod_weights = (np.ones_like(mod_weights) / len(mod_weights[0])).tolist()
         if self.routing == "random":
-            mod_names = [
-                [random.choice(self.experts_names)]
-                for _ in range(len(batch["task_names"]))
-            ]
-            mod_weights = [[1.0] for _ in range(len(batch["task_names"]))]
+            mod_names = np.random.choice(
+                self.experts_names, size=np.array(mod_names).shape
+            ).tolist()
+            mod_weights = (np.ones_like(mod_weights) / len(mod_weights[0])).tolist()
 
         # fill in the weights for the routing selector, for now just take the first one
         # mod_names = [['mod1', 'mod2'], ['mod3', 'mod4']]
@@ -405,8 +403,8 @@ class MultiExpertModelRanker(MultiExpertModel):
                 )
             self.fout.write(task_name + "\t" + mod_names[e][0] + "\n")
         self.fout.flush()
-        logger.info(f"Most similar: {str(mod_names)}")
-        logger.info(f"Most similar weights: {str(mod_weights)}")
+        logger.info(f"routing:{self.routing} Most similar: {str(mod_names)}")
+        logger.info(f"routing:{self.routing} Most similar weights: {str(mod_weights)}")
 
 
 class MoETrainer(MultiExpertModel):
