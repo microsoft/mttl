@@ -8,8 +8,8 @@ class RankerConfig(ExpertConfig):
         self.ranker_model = "classifier"
         self.ranker_path = None
         self.subsample = -1
-        self.encoder_model_name = "t5-small"
-        self.text_embedding_dim = 512
+        self.encoder_model_name = "all-MiniLM-L6-v2"
+        self.text_embedding_dim = 384
         self.expert_embedding_dim = 512
         self.projection_dim = 512
 
