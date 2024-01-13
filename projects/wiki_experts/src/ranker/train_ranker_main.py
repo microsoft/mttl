@@ -191,7 +191,8 @@ def train_classifier(args):
             module = SentenceTransformerClassifier(task_names=datamodule.task_names)
         elif args.ranker_model == "t5":
             module = T5Classifier(
-                task_names=datamodule.task_names, transformer_embed_dim=512
+                task_names=datamodule.task_names,
+                transformer_embed_dim=args.transformer_embed_dim,
             )
         else:
             raise ValueError("Only classifier and t5 models supported for now.")
@@ -274,7 +275,7 @@ def train_classifier_smooth(args):
         logger=wandb_logger,
         val_check_interval=0.5,
         limit_val_batches=0.1,
-        # limit_train_batches=0.1,
+        limit_train_batches=0.1,
     )
     trainer.fit(module, datamodule)
     trainer.test(module, datamodule.test_dataloader())
@@ -286,7 +287,7 @@ if __name__ == "__main__":
     from projects.wiki_experts.src.ranker.config import RankerConfig
 
     args = RankerConfig.parse()
-    if args.ranker_model == "classifier" or args.ranker_model == "t5":
+    if args.ranker_model == "classifier" or args.ranker_model == "classifier_t5":
         train_classifier(args)
     elif args.ranker_model == "clip":
         train_clip(args)
