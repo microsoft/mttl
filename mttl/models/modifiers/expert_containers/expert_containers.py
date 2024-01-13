@@ -335,8 +335,6 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
         raise ValueError("Cannot merge with layer for coalesced expert container.")
 
     def route(self, input, selection, **kwargs):
-        """Depending on the selection output, we route and merge differently."""
-
         if isinstance(selection, ModulesAndWeightsSelectorOutput):
             raise NotImplementedError()
         elif isinstance(selection, ModulesSelectorOutput):
@@ -350,7 +348,6 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                 assert isinstance(
                     selection.modules, torch.Tensor
                 ), "Tensor expected, return indices of selected experts!"
-
                 weights = torch.zeros(
                     (
                         selection.weights.shape[0],
@@ -368,7 +365,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
 
             weights = weights.view(-1, weights.shape[-1])
             module_output = SkilledLoRA.parallel_linear_weighted_forward(
-                input, [self.experts], [weights]
+                input.view(-1, input.shape[-1]), [self.experts], [weights]
             )
             return module_output.view(input.shape[0], input.shape[1], -1)
 
