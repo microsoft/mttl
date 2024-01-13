@@ -10,9 +10,10 @@ from mttl.utils import logger
 from mttl.models.modifiers.expert_containers.module_graph import Expert
 
 
-def _extract_identifier(string, match_on="coder"):
+def _extract_identifier(string, match_on="finegrained"):
     """Returns a unique identifier for the "chunk" of layers sharing the
     same underlying selector
+
     e.g. 'block' : 'encoder.block.0.layer.0.SelfAttention' -> 'encoder.block.0'
     """
     if match_on == "finegrained":
@@ -20,9 +21,11 @@ def _extract_identifier(string, match_on="coder"):
     if match_on == "coarsegrained":
         return "shared"
     pos = string.find(f"{match_on}")
-    if pos >= 0:
-        return string[: pos + len(match_on)]
-    return string
+    if pos == -1:
+        raise ValueError(
+            "Cannot resolve the selected router granularity: %s" % match_on
+        )
+    return string[: pos + len(match_on)]
 
 
 def get_container_class(modifier: str):

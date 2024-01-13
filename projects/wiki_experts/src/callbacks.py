@@ -22,6 +22,7 @@ class DownstreamEvalCallback(cb.Callback):
     def __init__(self, args) -> None:
         super().__init__()
 
+        self.args = args
         self.runner: EvaluatorRunner = setup_evaluators(
             model_type=args.model,
             model_family=args.model_family,
@@ -36,6 +37,12 @@ class DownstreamEvalCallback(cb.Callback):
     def on_validation_epoch_start(
         self, trainer: Trainer, pl_module: ExpertTrainer
     ) -> None:
+        if (
+            self.args.eval_every_n_epoch
+            and trainer.current_epoch % self.args.eval_every_n_epoch != 0
+        ):
+            return
+
         metrics = self.runner.run(pl_module)
         for task, metric in metrics.items():
             pl_module.log(

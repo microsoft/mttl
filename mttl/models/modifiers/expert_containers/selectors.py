@@ -106,14 +106,21 @@ class SelectorOutput:
 
 @dataclass
 class ModulesSelectorOutput(SelectorOutput):
-    """A selector output that contains a list of modules without weights."""
+    """A selector output that contains a list of modules without weights.
+
+    modules: names of the selected modules
+    """
 
     modules: List[str]
 
 
 @dataclass
 class ModulesAndWeightsSelectorOutput(SelectorOutput):
-    """A selector output that contains a list of modules and weights shared across the batch."""
+    """A selector output that contains a list of modules and weights shared across the batch.
+
+    modules: names of the selected modules
+    weights: their weights
+    """
 
     modules: List[str]
     weights: Union[List[float], torch.Tensor]
@@ -121,7 +128,11 @@ class ModulesAndWeightsSelectorOutput(SelectorOutput):
 
 @dataclass
 class BatchModulesAndWeightsSelectorOutput(SelectorOutput):
-    """A selector output that contains a list of modules and weights for each example."""
+    """A selector output that contains a list of modules and weights for each example.
+
+    modules: either names or indices of the selected modules
+    weights: their weights
+    """
 
     modules: Union[List[List[str]], torch.Tensor]
     weights: Union[List[List[float]], torch.Tensor]
@@ -129,7 +140,11 @@ class BatchModulesAndWeightsSelectorOutput(SelectorOutput):
 
 @dataclass
 class BatchSequenceModulesAndWeightsSelectorOutput(SelectorOutput):
-    """A selector output that contains a list of modules and weights for each example and token."""
+    """A selector output that contains a list of modules and weights for each example and token.
+
+    modules: indices of the selected modules
+    weights: their weights
+    """
 
     modules: torch.Tensor
     weights: Union[List[List[float]], torch.Tensor]
@@ -176,7 +191,8 @@ class Selector(RoutingMixin, nn.Module):
         pass
 
     def create_view(self) -> "SelectorView":
-        return SelectorView(self)
+        self.selector_views.append(SelectorView(self))
+        return self.selector_views[-1]
 
     @property
     def views(self):
@@ -337,7 +353,7 @@ class MOERKHSSelector(Selector):
         self.info_container["routing_gates"] = g
 
         return BatchSequenceModulesAndWeightsSelectorOutput(
-            indices=selected_experts, weights=routing_weights
+            modules=selected_experts, weights=routing_weights
         )
 
     def get_merged_weights(self, container, **selector_kwargs) -> Dict:
@@ -474,7 +490,7 @@ class ZeroPerTokenSelector(Selector):
         self.info_container["routing_gates"] = g
 
         return BatchSequenceModulesAndWeightsSelectorOutput(
-            indices=selected_experts, weights=routing_weights
+            modules=selected_experts, weights=routing_weights
         )
 
     def get_merged_weights(self, container, **selector_kwargs) -> Dict:
