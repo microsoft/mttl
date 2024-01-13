@@ -38,13 +38,20 @@ def filter_code(completion: str) -> str:
 
 class CodeEvaluator(GenerativeEvaluator):
     def __init__(
-        self, datamodule, use_vllm=False, generation_kwargs=None, prepend_source=True
+        self,
+        datamodule,
+        use_vllm=False,
+        generation_kwargs=None,
+        prepend_source=True,
+        split="test",
     ):
         super().__init__(
             datamodule=datamodule,
             use_vllm=use_vllm,
             generation_kwargs=generation_kwargs,
         )
+
+        self.split = split
         self.prepend_source = prepend_source
         os.environ["HF_ALLOW_CODE_EVAL"] = "1"
 
@@ -52,7 +59,7 @@ class CodeEvaluator(GenerativeEvaluator):
     def evaluate(
         self,
         model,
-        split="test",
+        split=None,
         subsample=-1,
         num_batches=None,
         verbose=True,
@@ -60,7 +67,9 @@ class CodeEvaluator(GenerativeEvaluator):
         output_path=None,
         **kwargs,
     ):
-        dataloader = self.get_dataloader(split, subsample, shuffle=shuffle)
+        dataloader = self.get_dataloader(
+            split or self.split, subsample, shuffle=shuffle
+        )
 
         if self.use_vllm:
             return self.evaluate_with_vllm(model, dataloader, num_batches, verbose)

@@ -203,6 +203,31 @@ class SkilledLoRA(LoRA):
         self.n_skills = config.n_skills
         super().__init__(config, layer)
 
+    def __len__(self):
+        return self.n_skills
+
+    def add_skill(self, lora: LoRA):
+        self.n_skills += 1
+
+        self.lora_a.data = torch.cat(
+            [
+                self.lora_a.data,
+                lora.lora_a.data.reshape(
+                    1, self.n_splits, self.in_features // self.n_splits, self.rank
+                ),
+            ],
+            dim=0,
+        )
+        self.lora_b.data = torch.cat(
+            [
+                self.lora_b.data,
+                lora.lora_b.data.reshape(
+                    1, self.rank, self.n_splits, self.out_features // self.n_splits
+                ),
+            ],
+            dim=0,
+        )
+
     def create_for_layer(self, layer):
         if isinstance(layer, nn.Linear):
             self.lora_a = nn.Parameter(
@@ -366,10 +391,12 @@ class SkilledLoRA(LoRA):
                 A = torch.einsum("bs,sdr->bdr", (weights, skilled_loras_a))
                 B = torch.einsum("bs,srd->brd", (weights, skilled_loras_b))
 
-                adapter_out = (
-                    torch.bmm(torch.bmm(input_lora.unsqueeze(1), A), B).squeeze()
-                    * scaling
-                )
+                if input_lora.ndim == 2:
+                    partial_out = torch.einsum("bd,bdr->br", (input_lora, A))
+                    adapter_out = torch.einsum("br,brd->bd", (partial_out, B))
+                    adapter_out = adapter_out * scaling
+                else:
+                    adapter_out = torch.bmm(torch.bmm(input_lora, A), B) * scaling
         elif n_skills == 1:
             # this is basically standard lora forward, we are here by accident
             # !!!warning!!!! this ignores the weights
@@ -380,11 +407,12 @@ class SkilledLoRA(LoRA):
             A = torch.einsum("bs,bsdr->bdr", (weights, skilled_loras_a))
             B = torch.einsum("bs,bsrd->brd", (weights, skilled_loras_b))
 
-            # (n_examples, seq_len, out_features)
+            # (n_examples, out_features)
             if input_lora.ndim == 2:
                 partial_out = torch.einsum("bd,bdr->br", (input_lora, A))
                 adapter_out = torch.einsum("br,brd->bd", (partial_out, B))
                 adapter_out = adapter_out * scaling[:, None]
+            # (n_examples, seq_len, out_features)
             else:
                 partial_out = torch.einsum("bsd,bdr->bsr", (input_lora, A))
                 adapter_out = torch.einsum("bsr,brd->bsd", (partial_out, B))

@@ -94,17 +94,14 @@ class Expert:
     expert_optimizer_state: Dict[str, torch.Tensor] = None
 
     def clone(self):
-        return Expert(
-            expert_info=ExpertInfo.fromdict(self.expert_info.asdict()),
-            expert_weights={k: v.clone() for k, v in self.expert_weights.items()}
-            if self.expert_weights is not None
-            else None,
-            expert_optimizer_state={
-                k: v.clone() for k, v in self.expert_optimizer_state.items()
-            }
-            if self.expert_optimizer_state is not None
-            else None,
+        import copy
+
+        copy = Expert(
+            expert_info=copy.deepcopy(self.expert_info),
+            expert_weights=copy.deepcopy(self.expert_weights),
+            expert_optimizer_state=copy.deepcopy(self.expert_optimizer_state),
         )
+        return copy
 
     @classmethod
     def fromdict(cls, data):

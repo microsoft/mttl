@@ -85,7 +85,7 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         config = MBPPDataConfig(
             **common_kwargs,
             # use full training set for training
-            name="full" if not for_generation else "sanitized",
+            name="sanitized",
         )
         dm = MBPPDataModule(config, for_generation=for_generation)
     else:
@@ -113,11 +113,18 @@ def run_multitask(args: ExpertConfig):
 
     # get metric monitors for models
     callbacks = get_monitors(args)
+    if "mbpp" in args.dataset:
+        monitor = "downstream/mbpp"
+        mode = "max"
+    else:
+        monitor = "val/loss"
+        mode = "min"
+
     checkpoint_callback = LiveCheckpointCallback(
         dirpath=args.output_dir,
-        monitor="val/loss",
+        monitor=monitor,
         save_last=True,
-        mode="min",
+        mode=mode,
     )
     callbacks.append(checkpoint_callback)
 

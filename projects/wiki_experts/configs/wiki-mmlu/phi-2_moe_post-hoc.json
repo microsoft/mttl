@@ -3,7 +3,7 @@
     "lora_dropout": 0.05,
     "weight_decay": 0.0,
     "n_skills": 1,
-    "trainable_param_names": ".*rkhs.*",
+    "trainable_param_names": ".*rkhs.*|.*experts.*",
     "num_train_epochs": 5,
     "learning_rate": 1e-4,
     "micro_batch_size": 1,
