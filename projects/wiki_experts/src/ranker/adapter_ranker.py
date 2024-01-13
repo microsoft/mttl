@@ -21,7 +21,6 @@ class AdapterRankerHelper:
         from projects.wiki_experts.src.ranker.baseline_rankers import KATERanker
         from projects.wiki_experts.src.ranker.classifier_ranker import (
             SentenceTransformerClassifier,
-            T5Classifier,
             ClusterPredictor,
         )
         from projects.wiki_experts.src.ranker.clip_ranker import (
@@ -42,9 +41,6 @@ class AdapterRankerHelper:
             model = SentenceTransformerClassifier.from_pretrained(ranker_path).to(
                 device
             )
-            return model
-        elif ranker_model == "classifier_t5":
-            model = T5Classifier.from_pretrained(ranker_path).to(device)
             return model
         elif ranker_model == "kate":
             model = KATERanker.from_pretrained(ranker_path)

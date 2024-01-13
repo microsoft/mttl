@@ -14,6 +14,51 @@ from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRanker
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+class TextEncoder(nn.Module):
+    def __init__(
+        self,
+        trainable: bool = False,
+        model_name: str = "all-MiniLM-L6-v2",
+    ):
+        super().__init__()
+        if model_name == "all-MiniLM-L6-v2":
+            self.transformer_encoder = SentenceTransformer(
+                model_name
+            )  # You need to define your text encoder
+
+            # frozen the transformer parameters
+            auto_model = self.transformer_encoder._first_module().auto_model
+            if not trainable:
+                for param in auto_model.parameters():
+                    param.requires_grad = False
+        elif model_name == "t5-small":
+            self.tokenizer = T5Tokenizer.from_pretrained(model_name)
+            self.transformer_encoder = T5ForConditionalGeneration.from_pretrained(
+                model_name, return_dict=True
+            )
+        else:
+            raise NotImplementedError
+
+    def forward(self, x):
+        if isinstance(self.transformer_encoder, SentenceTransformer):
+            outputs = self.transformer_encoder.encode(
+                x, show_progress_bar=False, device=device, convert_to_tensor=True
+            )
+        elif isinstance(self.transformer_encoder, T5ForConditionalGeneration):
+            input_ids = self.tokenizer(
+                x, return_tensors="pt", padding=True, truncation=True, max_length=512
+            ).input_ids.to(device)
+            last_hidden_states = self.transformer_encoder.encoder(
+                input_ids=input_ids
+            ).last_hidden_state
+            # Pooling strategy: here, we just take the representation of the first token
+            outputs = last_hidden_states[:, 0]
+        else:
+            raise NotImplementedError
+
+        return outputs
+
+
 class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
     # define the classifier, the x is the input, the task_id or expert_id is the label
     def __init__(
@@ -22,11 +67,13 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
         hidden_size=768,
         transformer_embed_dim=384,
         temperature=1,
+        encoder_model_name="all-MiniLM-L6-v2",
         **kwargs,
     ):
         super().__init__(**kwargs)
 
-        self.text_encoder = self.text_encoder_init(requires_grad=False)
+        # self.text_encoder = self.text_encoder_init(requires_grad=False)
+        self.text_encoder = TextEncoder(model_name=encoder_model_name)
         self.ids_to_tasks_names = task_names
         self.task_names_to_ids = {task: i for i, task in enumerate(task_names)}
         self.num_labels = len(task_names)
@@ -41,9 +88,7 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
 
     def forward(self, x):
         # Encode the text input
-        text_output = torch.tensor(
-            self.text_encoder.encode(x, show_progress_bar=False)
-        ).to(device)
+        text_output = self.text_encoder(x)
         # conver the text output to hidden vector
         text_output_projecter = self.text_projecter(text_output)
         # Calculate the logits
@@ -333,37 +378,3 @@ class ClusterPredictor(SentenceTransformerClassifier):
         cluster_weights = cluster_weights / cluster_weights.sum(axis=1, keepdims=True)
 
         return cluster_prediction, cluster_weights.tolist()
-
-
-class T5Classifier(SentenceTransformerClassifier):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    def text_encoder_init(self, requires_grad=False, model_name="t5-small"):
-        self.tokenizer = T5Tokenizer.from_pretrained(model_name)
-
-        model = T5ForConditionalGeneration.from_pretrained(model_name, return_dict=True)
-
-        # Freeze all the parameters
-        for param in model.parameters():
-            param.requires_grad = requires_grad
-        return model
-
-    def forward(self, x):
-        # Encode the text input
-        input_ids = self.tokenizer(
-            x, return_tensors="pt", padding=True, truncation=True, max_length=512
-        ).input_ids.to(device)
-
-        last_hidden_states = self.text_encoder.encoder(
-            input_ids=input_ids
-        ).last_hidden_state
-
-        # Pooling strategy: here, we just take the representation of the first token
-        pooled_output = last_hidden_states[:, 0]
-
-        # Calculate the logits
-        text_output_projecter = self.text_projecter(pooled_output)
-        # Calculate the logits
-        logits = self.out_projecter(text_output_projecter)
-        return logits
