@@ -3,7 +3,16 @@ from mttl.evaluators.code_evaluator import CodeEvaluator
 
 
 class HumanEvalEvaluator(CodeEvaluator):
-    def __init__(self, config, **kwargs):
+    STOP_TOKENS = ["\n\n", "\ndef"]
+
+    def __init__(self, config, generation_kwargs=None, **_):
         datamodule = HumanEvalDataModule(config, for_generation=True)
 
-        super().__init__(datamodule=datamodule, **kwargs)
+        generation_kwargs = generation_kwargs or {}
+        generation_kwargs.update({"stop_tokens": self.STOP_TOKENS})
+
+        super().__init__(
+            datamodule=datamodule,
+            generation_kwargs=generation_kwargs,
+            prepend_source=not datamodule.config.use_instruct_template,
+        )

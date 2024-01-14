@@ -106,33 +106,51 @@ class Evaluator(ABC):
             dataloader = self.datamodule.test_dataloader(subsample, shuffle)
         elif split in ["train", "training"]:
             dataloader = self.datamodule.train_dataloader(subsample)
-        else:
+        elif split in ["val", "valid", "validation", "dev"]:
             dataloader = self.datamodule.val_dataloader(subsample, shuffle)
+        else:
+            raise ValueError("Unknown split: {}".format(split))
         return dataloader
 
     @property
     def last_metrics(self):
         return self._last_metrics
 
-    def save_metrics(self, metrics, output_path):
+    def save_metrics(self, metrics, output_path, predictions=None):
+        import json
+
+        class JsonCustomEncoder(json.JSONEncoder):
+            """<cropped for brevity>"""
+
+            def default(self, obj):
+                if isinstance(obj, (np.ndarray, np.number)):
+                    return obj.tolist()
+                elif isinstance(obj, set):
+                    return list(obj)
+                elif isinstance(obj, bytes):  # pragma: py3
+                    return obj.decode()
+                return json.JSONEncoder.default(self, obj)
+
         self._last_metrics = metrics
 
         if output_path is None:
             return
 
-        import json
-
         if not os.path.exists(output_path):
             os.makedirs(output_path, exist_ok=True)
 
         with open(output_path + "/metrics.json", "w") as f:
-            json.dump(metrics, f, indent=2)
+            json.dump(metrics, f, indent=2, cls=JsonCustomEncoder)
+
+        if predictions is not None:
+            with open(output_path + "/predictions.json", "w", encoding="utf-8") as f:
+                json.dump(predictions, f, ensure_ascii=False, indent=2)
 
     @abstractmethod
     def evaluate(
         self,
         model,
-        split="test",
+        split=None,
         shuffle=False,
         subsample=-1,
         output_path=None,
@@ -175,6 +193,7 @@ class StoppingCriteriaSub(StoppingCriteria):
         self.max_length = max([len(s) for s in stop_tokens])
         self.tokenizer = tokenizer
         self.finished = None
+        self.num_tokens = 1
 
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor):
         """Stops on matching token strings and not ids."""
@@ -182,7 +201,11 @@ class StoppingCriteriaSub(StoppingCriteria):
             self.finished = [None for _ in range(input_ids.shape[0])]
 
         batch_size = input_ids.shape[0]
-        decoded = self.tokenizer.batch_decode(input_ids[:, -self.max_length :])
+        # must look as far as the number of generated tokens
+        decoded = self.tokenizer.batch_decode(
+            input_ids[:, -min(self.max_length, self.num_tokens) :]
+        )
+        self.num_tokens += 1
 
         for j in range(batch_size):
             # fill the rest of input ids with pad tokens, the generation finished!
@@ -262,6 +285,10 @@ class GenerativeEvaluator(Evaluator):
             )
             extra_kwargs["stopping_criteria"] = stopping_criteria
 
+        if extra_kwargs.get("temperature", 0.0) == 0.0:
+            # stop hf from complaining
+            extra_kwargs["do_sample"] = False
+
         device = next(model.parameters()).device
         batch = transfer_batch_to_device(batch, device)
 
@@ -317,8 +344,9 @@ class GenerativeEvaluator(Evaluator):
             for i in range(len(generated_texts)):
                 if (
                     finished_with[i] is not None
-                    and finished_with[i][0] is not self.tokenizer.eos_token
+                    and finished_with[i][0] != self.tokenizer.eos_token
                 ):
+                    assert finished_with[i][0] in generated_texts[i]
                     generated_texts[i] = generated_texts[i].rpartition(
                         finished_with[i][0]
                     )[0]
@@ -338,15 +366,14 @@ class GenerativeEvaluator(Evaluator):
 
 
 class EvaluatorRunner:
-    def __init__(self, output_path=None, verbose=False):
+    def __init__(self, output_path=None):
         self.evaluators = {}
-        self.verbose = verbose
         self.output_path = output_path
 
     def add_evaluator(self, name, evaluator):
         self.evaluators[name] = evaluator
 
-    def run(self, module):
+    def run(self, module, verbose=False):
         import json
         import prettytable
         from mttl.utils import logger
@@ -366,7 +393,7 @@ class EvaluatorRunner:
 
             scores[name] = self.evaluators[name].evaluate(
                 module,
-                verbose=self.verbose,
+                verbose=verbose,
                 output_path=task_output_path,
             )
 
@@ -394,6 +421,7 @@ def setup_evaluators(
     max_output_length,
     predict_batch_size,
     truncation_side,
+    instruct_template_for_code=False,
     output_path=None,
     tasks=None,
 ) -> EvaluatorRunner:
@@ -430,6 +458,7 @@ def setup_evaluators(
     }
     generation_kwargs_ = {
         "temperature": 0.0,
+        "do_sample": False,
     }
 
     if type(tasks) == str:
@@ -458,14 +487,14 @@ def setup_evaluators(
                     "top_p": 0.95,
                     "do_sample": True,
                     "max_new_tokens": 300,
-                    "stop_tokens": ["\n\n"],
                 }
             )
             config = HumanEvalConfig(
                 **common_kwargs,
+                use_instruct_template=instruct_template_for_code,
             )
             evaluators["humaneval"] = HumanEvalEvaluator(
-                config, generation_kwargs=generation_kwargs
+                config, generation_kwargs=generation_kwargs, split="test"
             )
         elif task == "mbpp":
             generation_kwargs.update(
@@ -474,12 +503,31 @@ def setup_evaluators(
                     "top_p": 0.95,
                     "do_sample": True,
                     "max_new_tokens": 300,
-                    "stop_tokens": ["\n\n"],
                 }
             )
             evaluators["mbpp"] = MBPPEvaluator(
-                MBPPDataConfig(**common_kwargs),
+                MBPPDataConfig(
+                    **common_kwargs,
+                    use_instruct_template=instruct_template_for_code,
+                ),
                 generation_kwargs=generation_kwargs,
+            )
+        elif task == "mbpp-train":
+            generation_kwargs.update(
+                {
+                    "temperature": 0.05,
+                    "top_p": 0.95,
+                    "do_sample": True,
+                    "max_new_tokens": 300,
+                }
+            )
+            evaluators["mbpp-train"] = MBPPEvaluator(
+                MBPPDataConfig(
+                    **common_kwargs,
+                    use_instruct_template=instruct_template_for_code,
+                ),
+                generation_kwargs=generation_kwargs,
+                split="train",
             )
         elif task == "boolq":
             config = SuperGLUEDataConfig(
@@ -557,8 +605,7 @@ def setup_evaluators(
         else:
             raise ValueError("No active tasks")
 
-    runner = EvaluatorRunner(output_path, verbose=False)
+    runner = EvaluatorRunner(output_path)
     for name, evaluator in evaluators.items():
         runner.add_evaluator(name, evaluator)
-
     return runner

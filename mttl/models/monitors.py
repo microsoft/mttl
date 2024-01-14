@@ -13,6 +13,7 @@ from pytorch_lightning import Callback
 
 from mttl.utils import agg_dicts, Averager
 from mttl.models.modifiers.routing import RoutingSelector
+from mttl.models.modifiers.poly import PolytroponSelector, PerTokenPolytroponSelector
 
 try:
     import wandb
@@ -31,7 +32,8 @@ def get_monitors(config):
         )
     ):
         monitors += [PolytroponLog()]
-    if "llama_adapter" in config.model_modifier:
+
+    if config.model_modifier and "llama_adapter" in config.model_modifier:
         monitors += [AlphaLog()]
 
     return monitors
@@ -92,6 +94,33 @@ class PolytroponLog(Callback):
                     pl_module.log(
                         f"Z/{coder}.{k}", v, on_epoch=True, on_step=True, sync_dist=True
                     )
+
+        # Finally, log seen task information
+        counts = None
+        if PolytroponSelector.seen_samples_per_task is not None:
+            counts = PolytroponSelector.seen_samples_per_task
+        elif PerTokenPolytroponSelector.seen_samples_per_token is not None:
+            counts = PerTokenPolytroponSelector.seen_samples_per_token
+
+        if counts is not None:
+            is_seen = counts > 0
+            n_seen, n_unseen = is_seen.sum(), (~is_seen).sum()
+            seen_tasks = counts[is_seen]
+            seen_min, seen_max = seen_tasks.min(), seen_tasks.max()
+            to_log = {
+                "n_seen": n_seen,
+                "n_unseen": n_unseen,
+                "seen_min": seen_min,
+                "seen_max": seen_max,
+            }
+            for k, v in to_log.items():
+                pl_module.log(
+                    f"Z/{k}",
+                    v.float().item(),
+                    on_epoch=True,
+                    on_step=True,
+                    sync_dist=True,
+                )
 
 
 class SelectorRoutingsLog(Callback):

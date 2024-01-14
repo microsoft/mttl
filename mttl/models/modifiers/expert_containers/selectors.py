@@ -1,4 +1,3 @@
-from abc import abstractproperty
 from dataclasses import dataclass
 from typing import Dict, List, Union
 from pyparsing import abstractmethod
@@ -106,26 +105,49 @@ class SelectorOutput:
 
 
 @dataclass
+class ModulesSelectorOutput(SelectorOutput):
+    """A selector output that contains a list of modules without weights.
+
+    modules: names of the selected modules
+    """
+
+    modules: List[str]
+
+
+@dataclass
 class ModulesAndWeightsSelectorOutput(SelectorOutput):
+    """A selector output that contains a list of modules and weights shared across the batch.
+
+    modules: names of the selected modules
+    weights: their weights
+    """
+
     modules: List[str]
     weights: Union[List[float], torch.Tensor]
 
 
 @dataclass
 class BatchModulesAndWeightsSelectorOutput(SelectorOutput):
-    modules: List[List[str]]
+    """A selector output that contains a list of modules and weights for each example.
+
+    modules: either names or indices of the selected modules
+    weights: their weights
+    """
+
+    modules: Union[List[List[str]], torch.Tensor]
     weights: Union[List[List[float]], torch.Tensor]
 
 
 @dataclass
-class BatchAndSequenceModulesAndWeightsSelectorOutput(SelectorOutput):
-    indices: torch.Tensor
+class BatchSequenceModulesAndWeightsSelectorOutput(SelectorOutput):
+    """A selector output that contains a list of modules and weights for each example and token.
+
+    modules: indices of the selected modules
+    weights: their weights
+    """
+
+    modules: torch.Tensor
     weights: Union[List[List[float]], torch.Tensor]
-
-
-@dataclass
-class ModulesSelectorOutput(SelectorOutput):
-    modules: List[str]
 
 
 def forward_with_cache(func):
@@ -133,11 +155,10 @@ def forward_with_cache(func):
         if self.forward_cache is not None and not self.clear_cache:
             self.count_call()
             return self.forward_cache
+
         output = func(self, input, **kwargs)
         self.forward_cache = output
-
         self.count_call()
-
         return output
 
     return wrapper
@@ -147,12 +168,12 @@ class Selector(RoutingMixin, nn.Module):
     def __init__(self, info_container, config=None, **kwargs):
         nn.Module.__init__(self)
         RoutingMixin.__init__(self, info_container)
+
         self.config = config
         self.expert_names = []
         self.selector_views = []
         self.forward_cache = None
         self.total_calls_per_forward = 0
-
         self._calls_counter = 0
 
     @property
@@ -169,6 +190,10 @@ class Selector(RoutingMixin, nn.Module):
     def forward(self, input, **kwargs) -> SelectorOutput:
         pass
 
+    def create_view(self) -> "SelectorView":
+        self.selector_views.append(SelectorView(self))
+        return self.selector_views[-1]
+
     @property
     def views(self):
         return self.selector_views
@@ -181,6 +206,29 @@ class Selector(RoutingMixin, nn.Module):
         return f"{self.__layer_name__}"
 
     @abstractmethod
+    def add_expert(self, expert_name: str, **kwargs):
+        pass
+
+
+class SelectorView:
+    """A view on a selector that allows it to call forward but doesn't act on add_expert.
+
+    This is because add expert is to be called only on the main instance of this selector
+    and not on the multiple views across the network.
+    """
+
+    def __init__(self, selector_instance):
+        self.selector_instance = selector_instance
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
+
+    def forward(self, *args, **kwargs):
+        return self.selector_instance.forward(*args, **kwargs)
+
+    def get_merged_weights(self, container, **selector_kwargs) -> Dict:
+        return self.selector_instance.get_merged_weights(container, **selector_kwargs)
+
     def add_expert(self, expert_name: str, **kwargs):
         pass
 
@@ -249,6 +297,7 @@ class PolySelector(Selector):
 class MOERKHSSelectorConfig(SelectorConfig):
     rkhs_dim: int = 512
     emb_dim: int = 128
+    top_k: int = -1
 
 
 @register_multi_expert_selector("moe_rkhs_router", MOERKHSSelectorConfig)
@@ -261,7 +310,7 @@ class MOERKHSSelector(Selector):
                 "MOERKHSSelector requires a layer to be passed in kwargs to infer the input dimension."
             )
 
-        self.topk = 2
+        self.top_k = config.top_k
         self.input_dim = kwargs["layer"].weight.data.shape[-1]
         self.rkhs_dim = config.rkhs_dim
         self.emb_dim = config.emb_dim
@@ -279,9 +328,7 @@ class MOERKHSSelector(Selector):
         return self.rkhs_hid(input_view).reshape(input.shape[0], input.shape[1], -1)
 
     @forward_with_cache
-    def forward(
-        self, input, **kwargs
-    ) -> BatchAndSequenceModulesAndWeightsSelectorOutput:
+    def forward(self, input, **kwargs) -> BatchSequenceModulesAndWeightsSelectorOutput:
         # do routing business on fp32
         input = input.to(dtype=self.rkhs_exp.weight.dtype)
 
@@ -290,20 +337,23 @@ class MOERKHSSelector(Selector):
 
         router_logits = torch.matmul(rkhs_enc, rkhs_emb.T)
         routing_weights = F.softmax(router_logits, dim=-1, dtype=torch.float)
-        routing_weights, selected_experts = torch.topk(
-            routing_weights, self.topk, dim=-1
-        )
-        routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
 
-        # we cast back to the input dtype
-        routing_weights = routing_weights.to(input.dtype)
+        if self.top_k > 0:
+            routing_weights, selected_experts = torch.topk(
+                routing_weights, self.top_k, dim=-1
+            )
+            # we cast back to the input dtype
+            routing_weights = routing_weights.to(input.dtype)
+        else:
+            # soft routing
+            selected_experts = None
 
         g = self.info_container.get("routing_gates", [])
         g.append(router_logits)
         self.info_container["routing_gates"] = g
 
-        return BatchAndSequenceModulesAndWeightsSelectorOutput(
-            indices=selected_experts, weights=routing_weights
+        return BatchSequenceModulesAndWeightsSelectorOutput(
+            modules=selected_experts, weights=routing_weights
         )
 
     def get_merged_weights(self, container, **selector_kwargs) -> Dict:
@@ -324,6 +374,130 @@ class MOERKHSSelector(Selector):
             ],
             dim=0,
         )
+
+
+@dataclass
+class ZeroSelectorConfig(SelectorConfig):
+    top_k: int = -1
+
+
+@register_multi_expert_selector("zero_router", ZeroSelectorConfig)
+class ZeroSelector(Selector):
+    def __init__(self, info_container, config, **kwargs) -> None:
+        super().__init__(info_container, config)
+
+        if "layer" not in kwargs:
+            raise ValueError(
+                "MOERKHSSelector requires a layer to be passed in kwargs to infer the input dimension."
+            )
+
+        self.top_k = config.top_k
+        self.input_dim = kwargs["layer"].weight.data.shape[-1]
+        # dependency injection
+        self._container = None
+
+    @forward_with_cache
+    def forward(
+        self, input, container, **kwargs
+    ) -> BatchModulesAndWeightsSelectorOutput:
+        # do routing business on fp32
+        input = input.to(dtype=container.experts.lora_a.dtype)
+
+        logits = (
+            torch.einsum("bsd,kpdr->bskrp", input, container.experts.lora_a)
+            .squeeze(-1)
+            .pow(2.0)
+            .sum(-1)
+            .sqrt()
+        ).mean(
+            1
+        )  # bk
+        routing_weights = torch.softmax(logits, dim=-1)
+
+        if self.top_k > 0:
+            routing_weights, selected_experts = torch.topk(
+                routing_weights, self.top_k, dim=-1
+            )
+            # we cast back to the input dtype
+            routing_weights = routing_weights.to(input.dtype)
+        else:
+            # soft routing
+            selected_experts = None
+
+        g = self.info_container.get("routing_gates", [])
+        g.append(torch.log(routing_weights + 1e-6))
+        self.info_container["routing_gates"] = g
+
+        return BatchModulesAndWeightsSelectorOutput(
+            modules=selected_experts, weights=routing_weights
+        )
+
+    def get_merged_weights(self, container, **selector_kwargs) -> Dict:
+        raise ValueError("Not supported for MOESelector.")
+
+    def get_routing_weights(self):
+        raise ValueError("Not supported for MOESelector.")
+
+
+@dataclass
+class ZeroPerTokenSelectorConfig(SelectorConfig):
+    top_k: int = -1
+
+
+@register_multi_expert_selector("zero_per_token_router", ZeroPerTokenSelectorConfig)
+class ZeroPerTokenSelector(Selector):
+    def __init__(self, info_container, config, **kwargs) -> None:
+        super().__init__(info_container, config)
+
+        if "layer" not in kwargs:
+            raise ValueError(
+                "MOERKHSSelector requires a layer to be passed in kwargs to infer the input dimension."
+            )
+
+        self.top_k = config.top_k
+        self.input_dim = kwargs["layer"].weight.data.shape[-1]
+        # dependency injection
+        self._container = None
+
+    @forward_with_cache
+    def forward(
+        self, input, container, **kwargs
+    ) -> BatchSequenceModulesAndWeightsSelectorOutput:
+        # do routing business on fp32
+        input = input.to(dtype=container.experts.lora_a.dtype)
+
+        logits = (
+            torch.einsum("bsd,kpdr->bskrp", input, container.experts.lora_a)
+            .squeeze(-1)
+            .pow(2.0)
+            .sum(-1)
+            .sqrt()
+        )
+        routing_weights = torch.softmax(logits, dim=-1)
+
+        if self.top_k > 0:
+            routing_weights, selected_experts = torch.topk(
+                routing_weights, self.top_k, dim=-1
+            )
+            # we cast back to the input dtype
+            routing_weights = routing_weights.to(input.dtype)
+        else:
+            # soft routing
+            selected_experts = None
+
+        g = self.info_container.get("routing_gates", [])
+        g.append(torch.log(routing_weights + 1e-6))
+        self.info_container["routing_gates"] = g
+
+        return BatchSequenceModulesAndWeightsSelectorOutput(
+            modules=selected_experts, weights=routing_weights
+        )
+
+    def get_merged_weights(self, container, **selector_kwargs) -> Dict:
+        raise ValueError("Not supported for MOESelector.")
+
+    def get_routing_weights(self):
+        raise ValueError("Not supported for MOESelector.")
 
 
 @dataclass

@@ -1,3 +1,4 @@
+import json
 import tqdm
 import os
 from evaluate import load
@@ -36,19 +37,29 @@ def filter_code(completion: str) -> str:
 
 
 class CodeEvaluator(GenerativeEvaluator):
-    def __init__(self, datamodule, use_vllm=False, generation_kwargs=None):
+    def __init__(
+        self,
+        datamodule,
+        use_vllm=False,
+        generation_kwargs=None,
+        prepend_source=True,
+        split="test",
+    ):
         super().__init__(
             datamodule=datamodule,
             use_vllm=use_vllm,
             generation_kwargs=generation_kwargs,
         )
+
+        self.split = split
+        self.prepend_source = prepend_source
         os.environ["HF_ALLOW_CODE_EVAL"] = "1"
 
     @switch_to_eval_mode
     def evaluate(
         self,
         model,
-        split="val",
+        split=None,
         subsample=-1,
         num_batches=None,
         verbose=True,
@@ -56,7 +67,9 @@ class CodeEvaluator(GenerativeEvaluator):
         output_path=None,
         **kwargs,
     ):
-        dataloader = self.get_dataloader(split, subsample, shuffle=shuffle)
+        dataloader = self.get_dataloader(
+            split or self.split, subsample, shuffle=shuffle
+        )
 
         if self.use_vllm:
             return self.evaluate_with_vllm(model, dataloader, num_batches, verbose)
@@ -66,20 +79,26 @@ class CodeEvaluator(GenerativeEvaluator):
             total=len(dataloader),
         )
 
+        all_predictions = []
+
         metric = load("code_eval")
         for num_batch, batch in pbar:
-            sources_texts = batch["sources_texts"]
-            labels_texts = batch["labels_texts"]
+            # we assume code prefixes are available and these are "completion" tasks
+            sources_texts = batch["code_prefix"]
+            tests = batch["code_tests"]
 
             predictions = self.generate_for_batch(model, batch)
+            generated = list(
+                map(
+                    lambda x: filter_code(fix_indents(x)),
+                    predictions.generated_texts,
+                )
+            )
             predictions = [
-                [s + p]
+                [(s if self.prepend_source else "") + p]
                 for s, p in zip(
                     sources_texts,
-                    map(
-                        lambda x: filter_code(fix_indents(x)),
-                        predictions.generated_texts,
-                    ),
+                    generated,
                 )
             ]
 
@@ -87,10 +106,13 @@ class CodeEvaluator(GenerativeEvaluator):
                 logger.info("Prediction:")
                 logger.info(predictions[0][0])
 
-            metric.add_batch(predictions=predictions, references=labels_texts)
+            all_predictions.extend([p[0] for p in predictions])
+            metric.add_batch(predictions=predictions, references=tests)
 
             if num_batches is not None and num_batch >= num_batches:
                 break
 
         metrics, _ = metric.compute(k=[1])
+
+        self.save_metrics(metrics, output_path, predictions=all_predictions)
         return metrics["pass@1"]

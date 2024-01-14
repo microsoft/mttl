@@ -5,6 +5,7 @@ import glob
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
+from mttl.datamodule.mbpp_datamodule import MBPPDataConfig, MBPPDataModule
 from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
 
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
@@ -81,11 +82,18 @@ def run_multitask(args: ExpertConfig):
 
     # get metric monitors for models
     callbacks = get_monitors(args)
+    if "mbpp" in args.dataset:
+        monitor = "downstream/mbpp"
+        mode = "max"
+    else:
+        monitor = "val/loss"
+        mode = "min"
+
     checkpoint_callback = LiveCheckpointCallback(
         dirpath=args.output_dir,
-        monitor="val/loss",
+        monitor=monitor,
         save_last=True,
-        mode="min",
+        mode=mode,
     )
     callbacks.append(checkpoint_callback)
 
@@ -144,6 +152,7 @@ def run_multitask(args: ExpertConfig):
         strategy=args.compute_strategy if args.compute_strategy else "auto",
         callbacks=callbacks,
         enable_checkpointing=False,
+        log_every_n_steps=args.gradient_accumulation_steps,
         accumulate_grad_batches=args.gradient_accumulation_steps,
         precision=int(args.precision)
         if args.precision in ["16", "32"]
@@ -153,25 +162,27 @@ def run_multitask(args: ExpertConfig):
 
     # initial validation only for a bunch of datasets... ?
     trainer.validate(module, dm)
-    trainer.fit(module, dm)
 
-    torch.cuda.empty_cache()
+    if args.do_train:
+        trainer.fit(module, dm)
 
-    # reload best model before pushing!
-    checkpoint = (
-        checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
-    )
-    module.load_state_dict(torch.load(checkpoint)["state_dict"])
-    trainer.test(module, dm)
+        torch.cuda.empty_cache()
 
-    if args.hf_lib_id and checkpoint:
-        library = HFExpertLibrary(args.hf_lib_id, create=True)
-        library.add_expert_from_ckpt(checkpoint)
+        # reload best model before pushing!
+        checkpoint = (
+            checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
+        )
+        module.load_state_dict(torch.load(checkpoint)["state_dict"])
+        trainer.test(module, dm)
 
-    if args.hf_repo_id and checkpoint:
-        from projects.wiki_experts.src.expert_model import push_expert_to_hub
+        if args.hf_lib_id and checkpoint:
+            library = HFExpertLibrary(args.hf_lib_id, create=True)
+            library.add_expert_from_ckpt(checkpoint)
 
-        push_expert_to_hub(checkpoint, args.hf_repo_id, auto_search=False)
+        if args.hf_repo_id and checkpoint:
+            from projects.wiki_experts.src.expert_model import push_expert_to_hub
+
+            push_expert_to_hub(checkpoint, args.hf_repo_id, auto_search=False)
 
     create_transfer_matrix(args, checkpoint)
 

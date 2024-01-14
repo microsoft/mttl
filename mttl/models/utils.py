@@ -109,6 +109,8 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
 class SimpleLogger(pl.loggers.logger.DummyLogger):
     def __init__(self, output_dir):
         self.output_file = os.path.join(output_dir, "metrics.json")
+        os.makedirs(output_dir, exist_ok=True)
+
         if os.path.exists(self.output_file):
             os.remove(self.output_file)
 
@@ -355,7 +357,7 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
             ) * self.trainer.max_epochs
 
         if args.warmup_steps == -1 or args.warmup_proportion > 0.0:
-            logger.info(
+            logger.warn(
                 "Warmup proportion is set to {}, has priority over warmup_steps".format(
                     args.warmup_proportion
                 )
@@ -363,7 +365,11 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
 
             args.warmup_steps = int(args.warmup_proportion * args.total_steps)
 
-        # args.scheduler = "linear_decay_with_warmup"
+        logger.info("Optimizer setup:")
+        logger.info("Total steps: {}".format(args.total_steps))
+        logger.info("Warmup steps: {}".format(args.warmup_steps))
+        logger.info("Scheduler: {}".format(args.scheduler))
+
         scheduler = get_scheduler(optimizer, args)
 
         return {
@@ -441,7 +447,7 @@ def model_loader_helper(model_name, device_map="auto", load_in_8bit=False):
         )
     elif "phi-2" in model_name:
         model_object = AutoModelForCausalLM.from_pretrained(
-            os.environ.get("PHI_PATH", None),
+            os.environ["PHI_PATH"],
             load_in_8bit=load_in_8bit,
             torch_dtype=torch.bfloat16,
             device_map=device_map,

@@ -2,7 +2,12 @@ from dataclasses import dataclass
 import readline
 import os
 import glob
+import sys
+from termcolor import colored, cprint
 from typing import List
+
+from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.evaluators.base import StoppingCriteriaSub, StoppingCriteriaList
 
 
 def path_completer(text, state):
@@ -34,10 +39,14 @@ def generate(input, model, device):
     batch["attention_mask"] = batch["attention_mask"].to(device)
     output_ids = model.generate(
         batch,
-        max_length=200 + batch["input_ids"].shape[1],
+        max_new_tokens=200,
         eos_token_id=model.tokenizer.eos_token_id,
         pad_token_id=model.tokenizer.pad_token_id,
+        stopping_criteria=StoppingCriteriaList(
+            [StoppingCriteriaSub(["\n\n"], model.tokenizer)]
+        ),
     )
+
     output_ids = output_ids[0][batch["input_ids"].shape[1] :]
     return model.tokenizer.decode(output_ids, skip_special_tokens=True)
 
@@ -70,16 +79,28 @@ class Conversation:
         self.responses = []
 
 
+@dataclass
+class ConversationNoTemplate(Conversation):
+    """A conversation between two agents."""
+
+    prompt_template: str = "{}"
+
+
 def main():
     from projects.wiki_experts.src.config import ExpertConfig
     from projects.wiki_experts.src.expert_model import MultiExpertModel
     from mttl.datamodule.utils import get_tokenizer_with_args
+    from mttl.utils import setup_logging
     from mttl.models.modifiers.expert_containers import module_graph
     import torch
 
     setup_autocomplete()
+    setup_logging()
+
     config = ExpertConfig.parse(
-        raise_error=False, c="./configs/wiki-mmlu/phi-2_flan.json"
+        raise_error=False,
+        c="./configs/wiki-mmlu/phi-2_flan_v3.json",
+        extra_kwargs=dict(k.split("=") for k in sys.argv[1:]),
     )
     tokenizer = get_tokenizer_with_args(config.model, "gpt", "left", "left", True)
     model = MultiExpertModel(**vars(config), tokenizer=tokenizer).to("cuda")
@@ -87,35 +108,48 @@ def main():
 
     print("Welcome to the LLM playground! Type 'exit' to leave.")
 
-    conversation = Conversation([], [])
+    conversation = (
+        Conversation([], [])
+        if config.use_instruct_template
+        else ConversationNoTemplate([], [])
+    )
 
     while True:
-        print()
-        user_input = input("> ")
+        try:
+            print()
 
-        if "load_mod" in user_input.lower():
-            model.delete_expert_container()
-            _, path = user_input.lower().split(" ")
-            expert = module_graph.load_expert(path)
-            model.add_expert_instance(expert, "default")
-            continue
+            expert_name = model.experts_names[0] if model.experts_names else None
+            prompt = "{}>> ".format(f"({expert_name}) " if expert_name else "")
 
-        if "clear_mod" in user_input.lower():
-            model.delete_expert_container()
-            continue
+            user_input = input(prompt)
 
-        if user_input.lower() in ["exit", "quit"]:
-            break
+            if "%load" in user_input.lower():
+                parts = user_input.partition("%load")[2].partition("from")
+                module = parts[0].strip()
+                library = parts[2].strip()
+                model.delete_expert_container()
+                expert = HFExpertLibrary(library)[module]
+                model.add_expert_instance(expert, "default")
+                continue
 
-        if user_input.lower() == "clear":
-            conversation.clear()
-            continue
+            if "%unload" in user_input.lower():
+                model.delete_expert_container()
+                continue
 
-        conversation.prompts.append(user_input)
-        response = generate(conversation.to_str(), model, device)
-        conversation.responses.append(response)
+            if user_input.lower() in ["exit", "quit"]:
+                break
 
-        print("Conversation so far:", conversation.to_str())
+            if user_input.lower() == "clear":
+                conversation.clear()
+                continue
+
+            conversation.prompts.append(user_input)
+            response = generate(conversation.to_str(), model, device)
+            conversation.responses.append(response)
+
+            print(response)
+        except Exception as e:
+            print.info("Error detected (%s). Type `exit` to leave." % e)
 
 
 if __name__ == "__main__":
