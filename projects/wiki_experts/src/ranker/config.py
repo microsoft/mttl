@@ -4,7 +4,7 @@ from projects.wiki_experts.src.config import ExpertConfig
 class RankerConfig(ExpertConfig):
     def _set_defaults(self):
         super()._set_defaults()
-        # training expert
+        # training ranker
         self.ranker_model = "classifier"
         self.ranker_path = None
         self.subsample = -1
@@ -12,6 +12,9 @@ class RankerConfig(ExpertConfig):
         self.text_embedding_dim = 384
         self.expert_embedding_dim = 512
         self.projection_dim = 512
+        self.val_check_interval = 1.0
+        self.limit_val_batches = 1.0
+        self.limit_train_batches = 1.0
 
     def post_init(self):
         if self.micro_batch_size is None:

@@ -203,8 +203,8 @@ def train_classifier(args):
         callbacks=[checkpoint_callback],
         devices=1,
         logger=wandb_logger,
-        val_check_interval=0.5,
-        limit_val_batches=0.5,
+        val_check_interval=args.val_check_interval,
+        limit_val_batches=args.limit_val_batches,
     )
     trainer.fit(module, datamodule)
     trainer.test(module, datamodule.test_dataloader())
@@ -267,9 +267,9 @@ def train_classifier_smooth(args):
         callbacks=[checkpoint_callback],
         devices=1,
         logger=wandb_logger,
-        val_check_interval=0.5,
-        # limit_val_batches=0.1,
-        # limit_train_batches=0.1,
+        val_check_interval=args.val_check_interval,
+        limit_val_batches=args.limit_val_batches,
+        limit_train_batches=args.limit_train_batches,
     )
     trainer.fit(module, datamodule)
     trainer.test(module, datamodule.test_dataloader())
