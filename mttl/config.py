@@ -228,6 +228,7 @@ class Config:
         self.num_tasks_per_batch = None
         self.save_every = None
         self.eval_every = None
+        self.eval_every_n_epoch = None
         self.debug = False
         self.seed = 42
 

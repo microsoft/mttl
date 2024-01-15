@@ -10,9 +10,10 @@ from mttl.utils import logger
 from mttl.models.modifiers.expert_containers.module_graph import Expert
 
 
-def _extract_identifier(string, match_on="coder"):
+def _extract_identifier(string, match_on="finegrained"):
     """Returns a unique identifier for the "chunk" of layers sharing the
     same underlying selector
+
     e.g. 'block' : 'encoder.block.0.layer.0.SelfAttention' -> 'encoder.block.0'
     """
     if match_on == "finegrained":
@@ -20,9 +21,11 @@ def _extract_identifier(string, match_on="coder"):
     if match_on == "coarsegrained":
         return "shared"
     pos = string.find(f"{match_on}")
-    if pos > 0:
-        return string[: pos + len(match_on)]
-    return string
+    if pos == -1:
+        raise ValueError(
+            "Cannot resolve the selected router granularity: %s" % match_on
+        )
+    return string[: pos + len(match_on)]
 
 
 def get_container_class(modifier: str):
@@ -91,6 +94,8 @@ def add_expert_to_transformer(
     training_config: Config = None,
 ):
     """
+    Routine to add an expert to the transformer architecture.
+
     Params:
         transformer: the transformer model to modify
         Config: the config of the model to which the expert is added
@@ -122,6 +127,7 @@ def add_expert_to_transformer(
         )
 
     total_layers = 0
+    n_selectors, n_selectors_views = 0, 0
     added_layers = []
 
     for m_name, module in dict(transformer.named_modules()).items():
@@ -154,11 +160,13 @@ def add_expert_to_transformer(
                                 transformer.selectors[identifier] = selector
                                 # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
                                 selector.total_calls_per_forward += 1
+                                n_selectors += 1
                             else:
                                 selector: Selector = transformer.selectors[identifier]
                                 # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
                                 selector.total_calls_per_forward += 1
                                 selector = selector.create_view()
+                                n_selectors_views += 1
 
                         CONTAINER_CLASS = get_container_class(model_modifier)
                         expert_container = CONTAINER_CLASS(
@@ -183,6 +191,13 @@ def add_expert_to_transformer(
                         is_default=is_default,
                     )
 
-    logger.info("Added expert %s", expert.name)
-    logger.debug("Added expert to layers %s", added_layers)
+    if routing_config is not None and not transformer.selectors:
+        raise ValueError(
+            "No selectors were created but a routing config was specified. Check your routing_config and model architecture."
+        )
+
+    logger.info(
+        "Added expert %s, with %s selectors", expert.name, len(transformer.selectors)
+    )
+    logger.debug("Patched layers: %s", added_layers)
     return transformer

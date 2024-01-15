@@ -54,7 +54,9 @@ class EMEvaluator(GenerativeEvaluator):
         extra_kwargs = {}
         extra_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
         extra_kwargs["eos_token_id"] = self.tokenizer.eos_token_id
+
         all_em = []
+        all_predictions = []
 
         for num_batch, batch in pbar:
             if num_batches is not None and num_batch >= num_batches:
@@ -69,6 +71,7 @@ class EMEvaluator(GenerativeEvaluator):
 
             eval_metrics = compute_metrics(predictions, references, reduction="none")
             all_em.extend(eval_metrics["exact_match"])
+            all_predictions.extend(predictions)
 
             if verbose:
                 logger.info("Sources:\n%s", sources_texts[0])
@@ -77,4 +80,7 @@ class EMEvaluator(GenerativeEvaluator):
 
             pbar.set_description(f"exact_match: {np.mean(all_em):.4f}")
 
+        self.save_metrics(
+            {"exact_match": np.mean(all_em)}, output_path, predictions=all_predictions
+        )
         return np.mean(all_em)

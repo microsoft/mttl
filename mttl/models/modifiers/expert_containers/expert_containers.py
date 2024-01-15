@@ -212,9 +212,13 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
             return LoRA.parallel_linear_forward(
                 input, [self.get(module) for module in selection.modules]
             )
-        elif isinstance(selection, BatchAndSequenceModulesAndWeightsSelectorOutput):
-            if selection.indices is not None:
-                indices = selection.indices.reshape(-1, selection.indices.shape[-1])
+        elif isinstance(selection, BatchSequenceModulesAndWeightsSelectorOutput):
+            if selection.modules is not None:
+                assert isinstance(
+                    selection.modules, torch.Tensor
+                ), "Tensor expected, return indices of selected experts!"
+
+                indices = selection.modules.reshape(-1, selection.modules.shape[-1])
                 weights = selection.weights.reshape(-1, selection.weights.shape[-1])
 
                 # set of active indices
@@ -331,36 +335,43 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
         raise ValueError("Cannot merge with layer for coalesced expert container.")
 
     def route(self, input, selection, **kwargs):
-        """Depending on the selection output, we route and merge differently."""
-
-        if isinstance(selection, BatchModulesAndWeightsSelectorOutput):
-            raise NotImplementedError()
-        elif isinstance(selection, ModulesAndWeightsSelectorOutput):
+        if isinstance(selection, ModulesAndWeightsSelectorOutput):
             raise NotImplementedError()
         elif isinstance(selection, ModulesSelectorOutput):
             raise NotImplementedError()
-        elif isinstance(selection, BatchAndSequenceModulesAndWeightsSelectorOutput):
-            if selection.indices is not None:
+        elif isinstance(
+            selection, BatchSequenceModulesAndWeightsSelectorOutput
+        ) or isinstance(selection, BatchModulesAndWeightsSelectorOutput):
+            # selection.weights can be 2 dim if sentence routing or 3 dim if per-token routing
+            # selection.modules can be 2 dim ... or 3 dim if ... or None if no top-k
+            if selection.modules is not None:
+                assert isinstance(
+                    selection.modules, torch.Tensor
+                ), "Tensor expected, return indices of selected experts!"
                 weights = torch.zeros(
                     (
                         selection.weights.shape[0],
                         selection.weights.shape[1],
                         self.experts.n_skills,
-                    ),
+                    )
+                    if selection.weights.ndim == 3
+                    else (selection.weights.shape[0], self.experts.n_skills),
                     device=selection.weights.device,
-                ).scatter_add(2, selection.indices, selection.weights)
+                ).scatter_add(
+                    selection.weights.ndim - 1, selection.modules, selection.weights
+                )
             else:
                 weights = selection.weights
 
-            weights = selection.weights.reshape(-1, selection.weights.shape[-1])
+            weights = weights.view(-1, weights.shape[-1])
             module_output = SkilledLoRA.parallel_linear_weighted_forward(
-                input.view(-1, input.size(-1)), [self.experts], [weights]
+                input.view(-1, input.shape[-1]), [self.experts], [weights]
             )
             return module_output.view(input.shape[0], input.shape[1], -1)
 
     def forward(self, input, **kwargs):
         if len(self.experts) > 0:
-            selection = self.selector(input, **kwargs)
+            selection = self.selector(input, container=self, **kwargs)
             return self.route(input, selection, **kwargs)
         return self.layer(input)
 
