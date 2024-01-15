@@ -3,6 +3,7 @@ import torch
 
 from mttl.config import Config
 import mttl.datamodule.task_sequences
+import mttl.datamodule.task_cluster_flan
 from mttl.utils import logger
 
 
@@ -101,7 +102,14 @@ class ExpertConfig(Config):
                 "+"
             )  # use "+" for assign multiple task set vars to be found in task_sequences
             for task_name in tasks:
-                task_names.extend(
-                    getattr(mttl.datamodule.task_sequences, task_name, [task_name])
-                )
+                if task_name in mttl.datamodule.task_sequences.__dict__:
+                    task_names.extend(
+                        getattr(mttl.datamodule.task_sequences.__dict__, task_name)
+                    )
+                elif task_name in mttl.datamodule.task_cluster_flan.__dict__:
+                    task_names.extend(
+                        getattr(mttl.datamodule.task_cluster_flan, task_name)
+                    )
+                else:
+                    task_names.extend([task_name])
             self.finetune_task_name = ",".join(task_names)
