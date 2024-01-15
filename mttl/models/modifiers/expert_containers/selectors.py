@@ -388,7 +388,7 @@ class ZeroSelector(Selector):
 
         if "layer" not in kwargs:
             raise ValueError(
-                "MOERKHSSelector requires a layer to be passed in kwargs to infer the input dimension."
+                "ZeroSelector requires a layer to be passed in kwargs to infer the input dimension."
             )
 
         self.top_k = config.top_k
@@ -400,6 +400,11 @@ class ZeroSelector(Selector):
     def forward(
         self, input, container, **kwargs
     ) -> BatchModulesAndWeightsSelectorOutput:
+        from mttl.models.modifiers.expert_containers.expert_containers import CoalescedLoRAExpertContainer
+
+        if not isinstance(container, CoalescedLoRAExpertContainer):
+            raise ValueError("ZeroSelector requires a coalesced LoRA container. Set COALESCED_LORA_CONTAINER=1 as env variable.")
+
         # do routing business on fp32
         input = input.to(dtype=container.experts.lora_a.dtype)
 
