@@ -147,12 +147,97 @@ class WeightedLinearMerge(LibraryTransform):
 
 
 @dataclass
+class TiesMergeConfig:
+    top_k: float = 0.1
+
+
+class TiesMerge(LibraryTransform):
+    """
+    Computes a uniform weight mixture across experts of a given library
+    """
+
+    def __init__(self, config: TiesMergeConfig = None):
+        super().__init__(config or TiesMergeConfig())
+
+        assert self.config.top_k > 0.0 and self.config.top_k <= 1.0
+
+    @torch.no_grad()
+    def transform(self, library) -> Expert:
+        if type(library) == str:
+            library = HFExpertLibrary(library)
+
+        expert_names = list(library.keys())
+        experts = [library[name] for name in expert_names]
+
+        logger.info("Averaging {} experts".format(len(experts)))
+
+        base_expert = copy.deepcopy(experts[0])
+        base_expert.name = "ties_weighted_expert"
+
+        state_dict_keys = list(base_expert.expert_weights.keys())
+
+        # Build n_tasks x D experts
+        # TODO: No need to build this matrix, can be done 1 expert at a time
+        expert_vectors = []
+        for expert in experts:
+            expert_vectors += [
+                torch.nn.utils.parameters_to_vector(
+                    list(expert.expert_weights[k] for k in state_dict_keys)
+                )
+            ]
+
+        expert_vectors = torch.stack(expert_vectors, dim=0)
+        per_exp_th = expert_vectors.abs().quantile(1.0 - self.config.top_k, dim=1)
+        keep_param = expert_vectors.abs() >= per_exp_th.view(-1, 1)
+
+        mean_valid_per_task = keep_param.float().mean(1)
+        assert torch.all((mean_valid_per_task - self.config.top_k).abs() < 1e-6)
+
+        used, kept, total = 0, 0, 0
+
+        for param_name in state_dict_keys:
+            # stack the expert weights
+            expert_weights = torch.stack(
+                [expert.expert_weights[param_name] for expert in experts], dim=0
+            )
+
+            # keep weights over the threshold
+            TH = per_exp_th.view(-1, *((1,) * (expert_weights.ndim - 1)))
+            expert_weights[expert_weights.abs() < TH] = 0.0
+
+            # sign majority vote
+            sign_per_dim = expert_weights.sign().sum(0, keepdim=True).sign()
+
+            # keep only weights whose sign agree with the majority
+            use_for_avg = expert_weights.sign() == sign_per_dim
+
+            deno = use_for_avg.sum(0).clamp(min=1.0)
+            sum_param = (expert_weights * use_for_avg).sum(0)
+            final_param = sum_param / deno
+
+            used += (use_for_avg & (sign_per_dim != 0.0)).sum().item()
+            kept += (expert_weights.abs() >= TH).sum()
+            total += expert_weights.numel()
+
+            base_expert.expert_weights[param_name].data.copy_(final_param)
+
+        logger.info(
+            "Params not reset to 0 in TIES merge: {:.5f}%".format(100.0 * kept / total)
+        )
+        logger.info(
+            "Params used to compute TIES mean: {:.5f}%".format(100.0 * used / total)
+        )
+
+        return base_expert
+
+
+@dataclass
 class PrototypeComputerConfig:
     use_base_model_only: bool = (
         False  # This computes sentence embeddings without the adapter
     )
     model: str = None  # If `use_base_model_only`, can pass a specific model to compute embeddings with
-    max_samples_per_task: int = 25
+    max_samples_per_task: int = 100
     upload_to_hf: bool = False
     name: str = "dataset_centroids"
     recompute: bool = False
@@ -173,7 +258,7 @@ class DatasetCentroidComputer(LibraryTransform):
                 setattr(args, k, v)
 
     @torch.no_grad()
-    def transform(self, library, upload_to_hf=False, default_args=None) -> Expert:
+    def transform(self, library, default_args=None) -> Expert:
         # TODO: remove project import
         from projects.wiki_experts.train_experts_main import get_datamodule
 
@@ -253,7 +338,7 @@ class DatasetCentroidComputer(LibraryTransform):
             centroid /= count
             output[expert_name] = F.normalize(centroid, p=2, dim=-1).cpu()
 
-        if upload_to_hf:
+        if self.config.upload_to_hf:
             logger.info("Uploading centroids to HF")
             # add embeddings to the library
             with library.batched_commit():
@@ -263,7 +348,7 @@ class DatasetCentroidComputer(LibraryTransform):
                         expert_name=expert_name,
                         config=self.config.__dict__,
                         data=output[name],
-                        force=True,
+                        force=True,  # make sure we overwrite
                     )
 
         return output
