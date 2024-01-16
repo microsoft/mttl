@@ -25,6 +25,8 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     WeightedLinearMergeConfig,
     DatasetCentroidComputer,
     PrototypeComputerConfig,
+    TiesMerge,
+    TiesMergeConfig,
 )
 
 
@@ -53,14 +55,10 @@ def run_multitask(args: ExpertConfig):
         repo_id=args.hf_lib_id, exclude_selection=exclude_phi_tasks
     )
 
-    cfg = PrototypeComputerConfig(name="centroids", upload_to_hf=True)
-    centroids = DatasetCentroidComputer(cfg).transform(
-        library, default_args=args, upload_to_hf=True
-    )
-
-    uniform_expert = WeightedLinearMerge().transform(library)
-    module = MultiExpertModel(**vars(uniform_expert.training_config)).to("cuda")
-    module.add_expert_instance(uniform_expert, is_default=True)
+    cfg = TiesMergeConfig(top_k=0.2)
+    ties_expert = TiesMerge(cfg).transform(library)
+    module = MultiExpertModel(**vars(ties_expert.training_config)).to("cuda")
+    module.add_expert_instance(ties_expert, is_default=True)
 
     if args.pipeline_eval_tasks == "all":
         args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"

@@ -115,17 +115,21 @@ class WeightedLinearMerge(LibraryTransform):
 
         logger.info("Averaging {} experts".format(len(experts)))
 
+        base_expert = copy.deepcopy(experts[0])
+        base_expert.name = "weighted_expert"
+
         if self.config.weights is not None:
             assert set(self.config.weights.keys()) == set(
                 expert_names
             ), "Weights must have the same keys as the experts"
-            if sum(self.config.weights.values()) != 1.0:
+            if not (1 - 1e-6) <= sum(self.config.weights.values()) <= (1 + 1e-6):
                 logger.warn(
                     "Weights do not sum to 1.0, please make sure this is intended"
                 )
 
-        base_expert = copy.deepcopy(experts[0])
-        base_expert.name = "weighted_expert"
+            # scale the base expert
+            for k, v in base_expert.expert_weights.items():
+                base_expert.expert_weights[k] *= self.config.weights[expert_names[0]]
 
         for _, expert in zip(expert_names[1:], experts[1:]):
             # Validate that the expert is compatible
@@ -136,19 +140,24 @@ class WeightedLinearMerge(LibraryTransform):
                 base_expert.expert_weights.keys()
             ), "Expert weights must have the same keys"
 
+            weight = 1.0
+            if self.config.weights is not None:
+                weight = self.config.weights[expert.expert_info.expert_name]
+
             for k, v in expert.expert_weights.items():
-                base_expert.expert_weights[k] += v
+                base_expert.expert_weights[k] += v * weight
 
         # Normalize the final expert
-        for k, v in base_expert.expert_weights.items():
-            base_expert.expert_weights[k] /= len(experts)
+        if self.config.weights is None:
+            for k, v in base_expert.expert_weights.items():
+                base_expert.expert_weights[k] /= len(experts)
 
         return base_expert
 
 
 @dataclass
 class TiesMergeConfig:
-    top_k: float = 0.1
+    top_k: float = 0.2
 
 
 class TiesMerge(LibraryTransform):
@@ -191,7 +200,7 @@ class TiesMerge(LibraryTransform):
         keep_param = expert_vectors.abs() >= per_exp_th.view(-1, 1)
 
         mean_valid_per_task = keep_param.float().mean(1)
-        assert torch.all((mean_valid_per_task - self.config.top_k).abs() < 1e-6)
+        assert torch.all((mean_valid_per_task - self.config.top_k).abs() < 1e-4)
 
         used, kept, total = 0, 0, 0
 
@@ -203,10 +212,12 @@ class TiesMerge(LibraryTransform):
 
             # keep weights over the threshold
             TH = per_exp_th.view(-1, *((1,) * (expert_weights.ndim - 1)))
-            expert_weights[expert_weights.abs() < TH] = 0.0
+            keep_mask = expert_weights.abs() >= TH
+            expert_weights = expert_weights * keep_mask
 
             # sign majority vote
             sign_per_dim = expert_weights.sign().sum(0, keepdim=True).sign()
+            sign_per_dim = expert_weights.sum(0, keepdim=True).sign()
 
             # keep only weights whose sign agree with the majority
             use_for_avg = expert_weights.sign() == sign_per_dim
@@ -216,16 +227,16 @@ class TiesMerge(LibraryTransform):
             final_param = sum_param / deno
 
             used += (use_for_avg & (sign_per_dim != 0.0)).sum().item()
-            kept += (expert_weights.abs() >= TH).sum()
+            kept += (expert_weights.abs() > TH).sum()
             total += expert_weights.numel()
 
             base_expert.expert_weights[param_name].data.copy_(final_param)
 
         logger.info(
-            "Params not reset to 0 in TIES merge: {:.5f}%".format(100.0 * kept / total)
+            "Params not reset to 0 in TIES merge: {:.10f}%".format(100.0 * kept / total)
         )
         logger.info(
-            "Params used to compute TIES mean: {:.5f}%".format(100.0 * used / total)
+            "Params used to compute TIES mean: {:.10f}%".format(100.0 * used / total)
         )
 
         return base_expert
@@ -342,13 +353,12 @@ class DatasetCentroidComputer(LibraryTransform):
             logger.info("Uploading centroids to HF")
             # add embeddings to the library
             with library.batched_commit():
-                for i, name in enumerate(output.keys()):
+                for i, expert_name in enumerate(output.keys()):
                     library.add_auxiliary_data(
                         data_type=self.config.name,
                         expert_name=expert_name,
                         config=self.config.__dict__,
-                        data=output[name],
+                        data=output[expert_name],
                         force=True,  # make sure we overwrite
                     )
-
         return output
