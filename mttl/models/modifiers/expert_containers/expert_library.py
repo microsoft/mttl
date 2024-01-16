@@ -120,24 +120,14 @@ def retry(max_retries=10, wait_seconds=60):
                 try:
                     result = func(*args, **kwargs)
                     return result
-                except requests.exceptions.HTTPError as e:
-                    if e.response.status_code == 429:
-                        print(
-                            f"HTTPError 429: Rate limit exceeded. Attempt {attempt}/{max_retries}."
-                        )
-                        if attempt < max_retries:
-                            print(f"Waiting {wait_seconds} seconds before retrying...")
-                            time.sleep(wait_seconds)
-                    else:
-                        # Re-raise the HTTPError if it's not a 429 error
-                        raise e
-                except Exception as e:
-                    raise e
+                except Exception as e:  # requests.exceptions.HTTPError as e:
+                    print(e, type(e), "retrying...")
+                    if attempt < max_retries:
+                        print(f"Waiting {wait_seconds} seconds before retrying...")
+                        time.sleep(wait_seconds)
             raise RuntimeError(
                 f"Function {func.__name__} failed after {max_retries} attempts."
             )
-
-        return wrapper
 
 
 class HuggingfaceHubEngine(BackendEngine):
