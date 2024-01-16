@@ -11,7 +11,6 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
 from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
-from mttl.utils import get_mlf_logger, setup_logging, logger
 from projects.wiki_experts.src.config import ExpertConfig
 from config import EvolExpertConfig
 from typing import List
@@ -38,10 +37,6 @@ def train_module(
     silent=False,
 ):
     seed_everything(args.seed, workers=True)
-
-    mlf_logger = get_mlf_logger()
-    if mlf_logger:
-        loggers.append(mlf_logger)
 
     if args.tensorboard:
         tb_logger = pl.loggers.TensorBoardLogger(save_dir=args.output_dir)
