@@ -129,7 +129,6 @@ def add_expert_to_transformer(
     total_layers = 0
     n_selectors, n_selectors_views = 0, 0
     added_layers = []
-    n_selectors = len(transformer.selectors)
 
     for m_name, module in dict(transformer.named_modules()).items():
         if re.fullmatch(expert_config.modify_modules, m_name):
