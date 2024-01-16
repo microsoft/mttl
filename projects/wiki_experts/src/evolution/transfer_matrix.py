@@ -230,8 +230,9 @@ def run_eval(args: EvolExpertConfig, debug=None):
         expert.expert_info.expert_name = "joint"
         expert.expert_info.expert_task_name = "joint"
         temp_dir = TemporaryDirectory(dir=args.output_dir + "/")
+        destination = temp_dir.name
         expert_lib = LocalExpertLibrary.from_expert_dict(
-            {args.hf_repo_id: expert}, destination=temp_dir.name
+            {args.hf_repo_id: expert}, destination=destination
         )
     else:
         destination = args.output_dir + "/library/"
