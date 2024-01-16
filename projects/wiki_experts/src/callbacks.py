@@ -37,6 +37,9 @@ class DownstreamEvalCallback(cb.Callback):
     def on_validation_epoch_start(
         self, trainer: Trainer, pl_module: ExpertTrainer
     ) -> None:
+        if trainer.global_step == 0 and not self.args.eval_before_training:
+            return
+
         if (
             self.args.eval_every_n_epoch
             and trainer.current_epoch % self.args.eval_every_n_epoch != 0
