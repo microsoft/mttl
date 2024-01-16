@@ -66,15 +66,6 @@ def run_multitask(args: ExpertConfig):
         login(token=args.hf_token_hub)
 
     loggers = get_pl_loggers(args)
-    # all files starting with best_mode in the output directory
-    best_checkpoints = glob.glob(os.path.join(args.output_dir, "best_mode*"))
-    if len(best_checkpoints) > 0:
-        best_checkpoint = best_checkpoints[0]
-        logger.info(f"Found best checkpoint {best_checkpoint}")
-        create_transfer_matrix(args, best_checkpoint)
-        # end program
-        sys.exit(0)
-
     # select dataloader
     model_class = ExpertTrainer
     dm = get_datamodule(args)
