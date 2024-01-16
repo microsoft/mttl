@@ -12,9 +12,12 @@ from projects.wiki_experts.src.expert_model import (
 )
 
 from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
-from mttl.models.modifiers.expert_containers import LoRAExpertContainer
+from mttl.models.modifiers.expert_containers import (
+    LoRAExpertContainer,
+    CoalescedLoRAExpertContainer,
+)
 from mttl.models.modifiers.expert_containers.selectors import (
-    BatchAndSequenceModulesAndWeightsSelectorOutput,
+    BatchSequenceModulesAndWeightsSelectorOutput,
     PolySelectorDirect,
     MOERKHSSelector,
     SelectorView,
@@ -257,6 +260,8 @@ class TestMultiExpertModel:
     ):
         seed_everything(0)
         config: ExpertConfig = tmp_exp_config
+        config.router_selector = "moe_rkhs_router"
+        config.router_granularity = "finegrained"
         config.moe_emb_dim = 10
         config.moe_rkhs_dim = 10
 
@@ -278,10 +283,79 @@ class TestMultiExpertModel:
         assert container.selector.total_calls_per_forward == 1
 
         assert spy.call_count == 1
-        assert isinstance(
-            spy.spy_return, BatchAndSequenceModulesAndWeightsSelectorOutput
+        assert isinstance(spy.spy_return, BatchSequenceModulesAndWeightsSelectorOutput)
+        assert spy.spy_return.modules == None
+        assert spy.spy_return.weights.shape == (2, 3, 8)
+
+    def test_expert_selector_with_moe_routing_soft_granularity(
+        self, mocker, tmp_exp_config, dummy_batch
+    ):
+        seed_everything(0)
+        config: ExpertConfig = tmp_exp_config
+        config.router_selector = "moe_rkhs_router"
+        config.router_granularity = "coarsegrained"
+        config.moe_emb_dim = 10
+        config.moe_rkhs_dim = 10
+
+        module = MoETrainer(
+            tokenizer=None,
+            expert_info={},
+            **vars(config),
         )
-        assert spy.spy_return.indices == None
+
+        container = module.model.transformer.h[0].attn.attention.k_proj
+        assert isinstance(container, LoRAExpertContainer)
+        assert isinstance(container.selector, MOERKHSSelector)
+        assert len(container.selector.views) == 71
+        assert container.selector.top_k == -1
+        # Test Base Llama model
+        output = module(dummy_batch)
+        assert np.allclose(output.item(), 18, atol=0.1)
+        assert container.selector.total_calls_per_forward == 72
+
+        config: ExpertConfig = tmp_exp_config
+        config.router_granularity = "mixer"
+        # mixer not found
+        with pytest.raises(ValueError):
+            module = MoETrainer(
+                tokenizer=None,
+                expert_info={},
+                **vars(config),
+            )
+
+    def test_expert_selector_with_moe_routing_soft_coalesced(
+        self, mocker, tmp_exp_config, dummy_batch, monkeypatch
+    ):
+        monkeypatch.setenv("COALESCED_LORA_CONTAINER", "1")
+
+        seed_everything(0)
+        config: ExpertConfig = tmp_exp_config
+        config.router_selector = "moe_rkhs_router"
+        config.router_granularity = "finegrained"
+        config.moe_to_k = -1
+        config.moe_emb_dim = 10
+        config.moe_rkhs_dim = 10
+
+        module = MoETrainer(
+            tokenizer=None,
+            expert_info={},
+            **vars(config),
+        )
+
+        container = module.model.transformer.h[0].attn.attention.k_proj
+        assert isinstance(container, CoalescedLoRAExpertContainer)
+        assert isinstance(container.selector, MOERKHSSelector)
+        assert container.selector.top_k == -1
+
+        # Test Base Llama model
+        spy = mocker.spy(container.selector, "forward")
+        output = module(dummy_batch)
+        assert np.allclose(output.item(), 18, atol=0.1)
+        assert container.selector.total_calls_per_forward == 1
+
+        assert spy.call_count == 1
+        assert isinstance(spy.spy_return, BatchSequenceModulesAndWeightsSelectorOutput)
+        assert spy.spy_return.modules == None
         assert spy.spy_return.weights.shape == (2, 3, 8)
 
     def test_expert_selector_with_moe_routing_hard(
@@ -289,6 +363,8 @@ class TestMultiExpertModel:
     ):
         seed_everything(0)
         config: ExpertConfig = tmp_exp_config
+        config.router_selector = "moe_rkhs_router"
+        config.router_granularity = "finegrained"
         config.moe_top_k = 2
         config.moe_emb_dim = 10
         config.moe_rkhs_dim = 10
@@ -301,9 +377,7 @@ class TestMultiExpertModel:
 
         container = module.model.transformer.h[0].attn.attention.k_proj
         assert isinstance(container, LoRAExpertContainer)
-        assert isinstance(container.selector, MOERKHSSelector) or isinstance(
-            container.selector, SelectorView
-        )
+        assert isinstance(container.selector, MOERKHSSelector)
         assert container.selector.top_k == 2
 
         # Test Base Llama model
@@ -313,8 +387,6 @@ class TestMultiExpertModel:
         assert container.selector.total_calls_per_forward == 1
 
         assert spy.call_count == 1
-        assert isinstance(
-            spy.spy_return, BatchAndSequenceModulesAndWeightsSelectorOutput
-        )
-        assert spy.spy_return.indices.shape == (2, 3, 2)
+        assert isinstance(spy.spy_return, BatchSequenceModulesAndWeightsSelectorOutput)
+        assert spy.spy_return.modules.shape == (2, 3, 2)
         assert spy.spy_return.weights.shape == (2, 3, 2)

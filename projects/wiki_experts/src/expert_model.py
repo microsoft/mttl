@@ -1,4 +1,5 @@
 from functools import partial
+import math
 import threading
 import torch
 import re
@@ -88,6 +89,14 @@ class MultiExpertModel(ExpertTrainer):
 
         self.experts_names = []
         self.lock = threading.Lock()
+
+    def deepcopy(self):
+        lock = self.lock
+        self.lock = None
+        _copy = copy.deepcopy(self)
+        _copy.lock = lock
+        self.lock = lock
+        return _copy
 
     @property
     def experts_containers(self) -> List[ExpertContainer]:
@@ -366,8 +375,6 @@ class MultiExpertModelRanker(MultiExpertModel):
 
 class MoETrainer(MultiExpertModel):
     def __init__(self, **kwargs):
-        kwargs["router_selector"] = kwargs.get("router_selector", "moe_rkhs_router")
-        kwargs["router_granularity"] = kwargs.get("router_granularity", "finegrained")
         kwargs["top_k"] = kwargs["moe_top_k"]
         kwargs["emb_dim"] = kwargs["moe_emb_dim"]
         kwargs["rkhs_dim"] = kwargs["moe_rkhs_dim"]
@@ -388,10 +395,12 @@ class MoETrainer(MultiExpertModel):
                         lora_init_b_random=True,
                     ),
                 )
+            self.moe_num_experts = kwargs["moe_num_experts"]
         else:
             library = HFExpertLibrary(self.hparams.hf_lib_id)
             for i, expert in enumerate(sorted(list(library.keys()))):
                 self.add_expert_instance(library[expert], expert_name=f"e{i}")
+            self.moe_num_experts = i + 1
 
     def training_step(self, batch, _):
         loss = self.forward(batch)
@@ -399,25 +408,33 @@ class MoETrainer(MultiExpertModel):
 
         if self.model.task_id_container["routing_gates"]:
             num = 0.0
-            entropy = 0.0
-            xentropy = 0.0
+            entropy_of_avg = 0.0
+            entropy_of_route = 0.0
 
             for values in self.model.task_id_container["routing_gates"]:
                 # compute MI loss
                 values = values.to(torch.float32)
                 values = values.view(-1, values.shape[-1])
                 probs = torch.softmax(values, -1)
-                entropy += -(probs.mean(0) * torch.log(probs.mean(0) + 1e-6)).sum(-1)
-                xentropy += -(probs * torch.log(probs + 1e-6)).sum(-1).mean(0)
+                entropy_of_avg += -(
+                    probs.mean(0) * torch.log(probs.mean(0) + 1e-6)
+                ).sum(-1)
+                entropy_of_route += -(probs * torch.log(probs + 1e-6)).sum(-1).mean(0)
                 num += 1.0
 
-            self.model.task_id_container["routing_gates"].clear()
+            entropy_of_avg = entropy_of_avg / num
+            entropy_of_route = entropy_of_route / num
+            mi_loss = -entropy_of_avg + entropy_of_route
 
-            mi_loss = (-entropy + xentropy) / num
-            total_loss += self.hparams.moe_ent_reg * mi_loss
             self.log(
-                f"{self._log_pref}train/route_ent",
-                xentropy / num,
+                f"{self._log_pref}train/entropy_of_route",
+                entropy_of_route,
+                on_step=True,
+                prog_bar=True,
+            )
+            self.log(
+                f"{self._log_pref}train/entropy_of_avg",
+                entropy_of_avg,
                 on_step=True,
                 prog_bar=True,
             )
@@ -427,6 +444,17 @@ class MoETrainer(MultiExpertModel):
                 on_step=True,
                 prog_bar=True,
             )
+
+            if self.hparams.moe_ent_reg > 0.0:
+                total_loss += self.hparams.moe_ent_reg * mi_loss
+
+            elif self.hparams.moe_ent_free_bits > 0.0:
+                normalized_entropy = entropy_of_route / math.log(self.moe_num_experts)
+                total_loss += (
+                    (1.0 - normalized_entropy) >= self.hparams.moe_ent_free_bits
+                ) * -entropy_of_route
+
+            self.model.task_id_container["routing_gates"].clear()
 
         self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
         self.log(

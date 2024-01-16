@@ -74,7 +74,7 @@ def test_compute_embeddings():
         SVDEmbeddingTransformConfig,
     )
 
-    embeddings = SVDEmbeddingTransform(
+    embeddings, svd = SVDEmbeddingTransform(
         SVDEmbeddingTransformConfig(n_components=2)
     ).transform("sordonia/test-library", upload_to_hf=False)
     assert embeddings.shape[1] == 2

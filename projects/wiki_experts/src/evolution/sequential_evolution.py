@@ -16,7 +16,6 @@ from huggingface_hub import create_repo, login, HfApi
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
-from projects.wiki_experts.train_experts_main import get_datamodule
 from projects.wiki_experts.src.evolution.utils import (
     get_loss,
     init_wandb_logger,

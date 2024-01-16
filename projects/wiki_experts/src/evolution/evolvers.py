@@ -16,7 +16,7 @@ from huggingface_hub import create_repo, login, HfApi
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
-from projects.wiki_experts.train_experts import get_datamodule
+from projects.wiki_experts.utils import get_datamodule
 from projects.wiki_experts.src.evolution.utils import get_loss, get_task_expert
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
@@ -71,7 +71,8 @@ def evolve_with_sgd(
     dm_eval = evaluator_valid.datamodule
     args.finetune_task_name = task
     dm_train = get_datamodule(
-        args, for_generation=False, subsample=args.subsample_train_set
+        args,
+        for_generation=False,
     )
     assert dm_train.for_generation == False
 

@@ -2375,6 +2375,21 @@ def create_mmlu_platy():
     )
 
 
+def create_dolphin_coder():
+    dataset = load_dataset("cognitivecomputations/dolphin-coder")
+    dataset = dataset.map(
+        lambda x: {
+            "source": PHI_TEMPLATE.format(x["question"]),
+            "target": x["response"],
+            "task_name": "dolphin-coder",
+            "task_source": "dolphin-coder",
+            "split": "train" if np.random.rand() < 0.95 else "validation",
+        },
+        remove_columns=["question", "response"],
+    )
+    dataset.push_to_hub("sordonia/dolphin-coder-templated-ia-flat")
+
+
 @click.command()
 @click.argument("task")
 def main(task):
@@ -2417,6 +2432,8 @@ def main(task):
         create_alpaca_code("sordonia/alpaca-code-flat")
     elif task == "adauni-reduced-templated":
         create_adauni_reduced_templated("sordonia/adauni-templated-reduced-ia-flat")
+    elif task == "dolphin":
+        create_dolphin_coder()
     else:
         raise ValueError("Unknown task")
 

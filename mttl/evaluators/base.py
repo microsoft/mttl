@@ -106,8 +106,10 @@ class Evaluator(ABC):
             dataloader = self.datamodule.test_dataloader(subsample, shuffle)
         elif split in ["train", "training"]:
             dataloader = self.datamodule.train_dataloader(subsample)
-        else:
+        elif split in ["val", "valid", "validation", "dev"]:
             dataloader = self.datamodule.val_dataloader(subsample, shuffle)
+        else:
+            raise ValueError("Unknown split: {}".format(split))
         return dataloader
 
     @property
@@ -115,18 +117,30 @@ class Evaluator(ABC):
         return self._last_metrics
 
     def save_metrics(self, metrics, output_path, predictions=None):
+        import json
+
+        class JsonCustomEncoder(json.JSONEncoder):
+            """<cropped for brevity>"""
+
+            def default(self, obj):
+                if isinstance(obj, (np.ndarray, np.number)):
+                    return obj.tolist()
+                elif isinstance(obj, set):
+                    return list(obj)
+                elif isinstance(obj, bytes):  # pragma: py3
+                    return obj.decode()
+                return json.JSONEncoder.default(self, obj)
+
         self._last_metrics = metrics
 
         if output_path is None:
             return
 
-        import json
-
         if not os.path.exists(output_path):
             os.makedirs(output_path, exist_ok=True)
 
         with open(output_path + "/metrics.json", "w") as f:
-            json.dump(metrics, f, indent=2)
+            json.dump(metrics, f, indent=2, cls=JsonCustomEncoder)
 
         if predictions is not None:
             with open(output_path + "/predictions.json", "w", encoding="utf-8") as f:
@@ -136,7 +150,7 @@ class Evaluator(ABC):
     def evaluate(
         self,
         model,
-        split="test",
+        split=None,
         shuffle=False,
         subsample=-1,
         output_path=None,
@@ -352,15 +366,14 @@ class GenerativeEvaluator(Evaluator):
 
 
 class EvaluatorRunner:
-    def __init__(self, output_path=None, verbose=False):
+    def __init__(self, output_path=None):
         self.evaluators = {}
-        self.verbose = verbose
         self.output_path = output_path
 
     def add_evaluator(self, name, evaluator):
         self.evaluators[name] = evaluator
 
-    def run(self, module):
+    def run(self, module, verbose=False):
         import json
         import prettytable
         from mttl.utils import logger
@@ -380,7 +393,7 @@ class EvaluatorRunner:
 
             scores[name] = self.evaluators[name].evaluate(
                 module,
-                verbose=self.verbose,
+                verbose=verbose,
                 output_path=task_output_path,
             )
 
@@ -481,7 +494,7 @@ def setup_evaluators(
                 use_instruct_template=instruct_template_for_code,
             )
             evaluators["humaneval"] = HumanEvalEvaluator(
-                config, generation_kwargs=generation_kwargs
+                config, generation_kwargs=generation_kwargs, split="test"
             )
         elif task == "mbpp":
             generation_kwargs.update(
@@ -498,6 +511,23 @@ def setup_evaluators(
                     use_instruct_template=instruct_template_for_code,
                 ),
                 generation_kwargs=generation_kwargs,
+            )
+        elif task == "mbpp-train":
+            generation_kwargs.update(
+                {
+                    "temperature": 0.05,
+                    "top_p": 0.95,
+                    "do_sample": True,
+                    "max_new_tokens": 300,
+                }
+            )
+            evaluators["mbpp-train"] = MBPPEvaluator(
+                MBPPDataConfig(
+                    **common_kwargs,
+                    use_instruct_template=instruct_template_for_code,
+                ),
+                generation_kwargs=generation_kwargs,
+                split="train",
             )
         elif task == "boolq":
             config = SuperGLUEDataConfig(
@@ -575,8 +605,7 @@ def setup_evaluators(
         else:
             raise ValueError("No active tasks")
 
-    runner = EvaluatorRunner(output_path, verbose=False)
+    runner = EvaluatorRunner(output_path)
     for name, evaluator in evaluators.items():
         runner.add_evaluator(name, evaluator)
-
     return runner
