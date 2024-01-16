@@ -124,7 +124,7 @@ def apply_source_template(dataset, source_template):
     if source_template is not None:
         dataset = dataset.map(
             partial(apply_source_template_, source_template),
-            num_proc=os.environ.get("MTTL_NUM_PROC_DATASETS", 16),
+            num_proc=int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16)),
         )
     return dataset
 
@@ -305,7 +305,7 @@ class T0FlatModule(DefaultDataModule):
 
             train_dataset = train_dataset.map(
                 concat_templates_and_task,
-                num_proc=os.environ.get("MTTL_NUM_PROC_DATASETS", 16),
+                num_proc=int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16)),
             )
 
             self._task_names = sorted(list(set(train_dataset["task_name"])))

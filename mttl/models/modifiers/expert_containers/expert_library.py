@@ -647,6 +647,7 @@ class ExpertLibrary:
         self._in_transaction = True
         yield
         if len(self._pending_operations) == 0:
+            self._in_transaction = False
             return
         logger.info(f"Committing {len(self._pending_operations)} operations...")
         if self._pending_pre_uploads:
@@ -818,10 +819,10 @@ class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
 
         # delete experts that are in remote_lib but were deleted from the local_lib
         with remote_lib.batched_commit():
-            for name, expert in remote_lib.items():
+            for name, metadatum in list(remote_lib.data.items()):
                 if (
                     name not in local_lib.keys()
-                    and expert.expert_info.expert_task_name in only_tasks
+                    and metadatum.expert_task_name in only_tasks
                 ):
                     remote_lib.remove_expert(name, soft_delete=True)
 
@@ -837,6 +838,16 @@ class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
                         continue
 
             # TODO: upload the embeddings
+            embeddings = local_lib.get_auxiliary_data(data_type="embeddings")
+            for expert_name, expert_embeddings in embeddings.items():
+                for embedding in expert_embeddings.values():
+                    try:
+                        remote_lib.add_embeddings(
+                            expert_name, embedding["config"], embedding["embeddings"]
+                        )
+                    except ValueError as e:
+                        logger.error(e)
+                        continue
 
         return remote_lib
 

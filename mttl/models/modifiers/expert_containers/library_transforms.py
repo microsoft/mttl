@@ -83,4 +83,4 @@ class SVDEmbeddingTransform(LibraryTransform):
                         self.config.__dict__,
                         experts_embeddings[i],
                     )
-        return experts_embeddings
+        return experts_embeddings, svd

@@ -1,6 +1,10 @@
 import os
 import sys
 import pytorch_lightning as pl
+import glob
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
+
 from mttl.datamodule.mbpp_datamodule import MBPPDataConfig, MBPPDataModule
 from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
 
@@ -10,21 +14,12 @@ from mttl.callbacks import LiveCheckpointCallback
 from mttl.models.monitors import get_monitors
 from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import torch
 from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
 
-from mttl.datamodule.mt_seq_to_seq_module import (
-    FlanConfig,
-    FlanModule,
-    FlatMultiTaskConfig,
-    FlatMultiTaskModule,
-)
-
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
-
+from projects.wiki_experts.utils import get_datamodule
 from mttl.callbacks import NanoMMLUCallback, RougeCallback
 from mttl.utils import (
     get_pl_loggers,
@@ -34,63 +29,30 @@ from mttl.utils import (
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
+from projects.wiki_experts.src.evolution.transfer_matrix import (
+    TransferMatrixConfig,
+    run_eval as produce_transfer_matrix,
+)
 
 
-def get_datamodule(args, for_generation=False, dataset_override=None):
-    # refactor all the common arguments below into a dict common kwargs
-    dataset = args.dataset if not dataset_override else dataset_override
-
-    common_kwargs = {
-        "model": args.model,
-        "train_batch_size": args.train_batch_size,
-        "predict_batch_size": args.predict_batch_size,
-        "max_input_length": args.max_input_length,
-        "max_output_length": args.max_output_length,
-        "validation_portion": args.validation_portion,
-        "model_family": args.model_family,
-        "finetune_task_name": args.finetune_task_name,
-        "truncation_side": args.truncation_side,
-        "dataset": dataset,
-        "train_on_inputs": False,
-        "add_eos_to_targets": "qamc"
-        not in args.dataset,  # do not add eos for mmlu stuff (for now)
-        "subsample_train": args.subsample_train,
-        "subsample_dev": args.subsample_dev,
-        "subsample_test": args.subsample_test,
-    }
-    if "flan" in dataset:
-        config = FlanConfig(
-            **common_kwargs,
-            source_template="Instruct: {}\nAnswer:"
-            if args.use_instruct_template
-            else None,
-            remove_phi_eval_tasks=args.remove_phi_eval_tasks,
-        )
-        dm = FlanModule(config, for_generation=for_generation)
-    elif "flat" in dataset:
-        config = FlatMultiTaskConfig(
-            **common_kwargs,
-            source_template="Instruct: {}\nAnswer:"
-            if args.use_instruct_template
-            else None,
-            augment_few_shot=args.augment_few_shot,
-        )
-        dm = FlatMultiTaskModule(config, for_generation=for_generation)
-    elif "mmlu" in dataset:
-        config = MMLUDataConfig(
-            **common_kwargs,
-        )
-        dm = MMLUDataModule(config, for_generation=for_generation)
-    elif "mbpp" in dataset:
-        config = MBPPDataConfig(
-            **common_kwargs,
-            # use full training set for training
-            name="sanitized",
-        )
-        dm = MBPPDataModule(config, for_generation=for_generation)
-    else:
-        raise ValueError(f"Unknown dataset {args.dataset}")
-    return dm
+def create_transfer_matrix(args, checkpoint):
+    ########################
+    # create transfer matrix
+    config = TransferMatrixConfig()
+    for k, v in vars(args).items():
+        if k in vars(config):
+            setattr(config, k, v)
+    config.eval_base = False
+    config.eval_metric = "rougeL"
+    config.hf_repo_id = checkpoint
+    config.finetune_task_name = (
+        args.finetune_task_name.split(",")
+        if not isinstance(args.finetune_task_name, list)
+        else args.finetune_task_name
+    )
+    if len(config.finetune_task_name) < 70:
+        produce_transfer_matrix(config, debug=False)
+    ########################
 
 
 def run_multitask(args: ExpertConfig):
@@ -103,12 +65,12 @@ def run_multitask(args: ExpertConfig):
     if args.hf_token_hub:
         login(token=args.hf_token_hub)
 
+    loggers = get_pl_loggers(args)
     # select dataloader
     model_class = ExpertTrainer
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
 
-    loggers = get_pl_loggers(args)
     module = model_class(**vars(args), tokenizer=dm.tokenizer)
 
     # get metric monitors for models
@@ -214,6 +176,8 @@ def run_multitask(args: ExpertConfig):
             from projects.wiki_experts.src.expert_model import push_expert_to_hub
 
             push_expert_to_hub(checkpoint, args.hf_repo_id, auto_search=False)
+
+    create_transfer_matrix(args, checkpoint)
 
 
 if __name__ == "__main__":
