@@ -3,18 +3,23 @@ import sys
 import pytorch_lightning as pl
 import glob
 
+import copy
+
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.datamodule.mbpp_datamodule import MBPPDataConfig, MBPPDataModule
 from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
 
-from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.models.modifiers.expert_containers.expert_library import (
+    HFExpertLibrary,
+    ExpertLibrary,
+)
 from mttl.callbacks import LiveCheckpointCallback
 
 from mttl.models.monitors import get_monitors
 from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
-from projects.wiki_experts.src.expert_model import MoETrainer
-from mttl.models.modifiers.expert_containers.module_graph import load_expert
+from projects.wiki_experts.src.expert_model import MoETrainer, RoutedMultiExpertModel
+from mttl.models.modifiers.expert_containers.module_graph import load_expert, Expert
 
 
 import torch
@@ -30,11 +35,99 @@ from mttl.utils import (
     logger,
 )
 
+from typing import Callable
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
 
 
-def run_multitask(args: ExpertConfig):
+FINETUNE_FUNCTIONS: dict[str, Callable] = {}
+
+
+def register_finetune_func(name):
+    def decorator(func):
+        if name not in FINETUNE_FUNCTIONS:
+            FINETUNE_FUNCTIONS[name] = func
+        else:
+            raise ValueError(f"Duplicate name {name} in finetune functions")
+        return func
+
+    return decorator
+
+
+def load_lora_expert_in_expert_trainer(module: ExpertTrainer, expert: Expert):
+    keys = module.model.load_state_dict(expert.expert_weights, strict=False)
+    assert sum(["lora" in k for k in keys.missing_keys]) == 0, "Some keys are missing"
+
+
+def load_expert_from_checkpoint(checkpoint):
+    ckpt = torch.load(checkpoint)
+    if "expert_dumps" in ckpt:
+        expert_dumps = ckpt["expert_dumps"]
+        expert: Expert = Expert.fromdict(expert_dumps)
+    else:
+        expert: Expert = load_expert(checkpoint)
+    return expert
+
+
+@register_finetune_func("lib_mu")
+def finetune_polylib_full(args: ExpertConfig, dm):
+    """
+    1. Averages the library to a single expert
+    2. Fine-tunes this expert on the downstream task
+    """
+    # we init as uniform combination of retrieved experts
+    args_copy = copy.deepcopy(args)
+    args_copy.router_selector = "uniform"
+
+    expert_lib = HFExpertLibrary(args.hf_lib_id)
+    module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
+    module.load_from_module_dict(expert_lib)
+    mean_expert: Expert = module.to_expert()
+
+    module = ExpertTrainer(**vars(args), device_map="auto")
+    module.to("cuda")
+    load_lora_expert_in_expert_trainer(module, mean_expert)
+
+    checkpoint = train_module(args, module, dm)
+    return load_expert_from_checkpoint(checkpoint)
+
+
+@register_finetune_func("polylib_full")
+def finetune_polylib_full(args: ExpertConfig, dm):
+    """
+    Tunes selector and experts on downstream task.
+
+    Returns the resulting expert.
+    """
+
+    args.trainable_param_names = (
+        args.trainable_param_names
+        + "|.*module_logits.*|.*selector.*"  # adds selector params to trainable params
+    )
+    args.router_selector = "poly_router"
+
+    module = MoETrainer(**vars(args), device_map="auto")
+    module.to("cuda")
+    checkpoint = train_module(args, module, dm)
+    return load_expert_from_checkpoint(checkpoint)
+
+
+@register_finetune_func("polylib_selector")
+def finetune_polylib_sel(args: ExpertConfig, dm):
+    """
+    Only trains the selector on the downstream task.
+    """
+
+    args.trainable_param_names = "|.*module_logits.*|.*selector.*"
+    args.router_selector = "poly_router"
+
+    module = MoETrainer(**vars(args), device_map="auto")
+    module.to("cuda")
+    checkpoint = train_module(args, module, dm)
+    return load_expert_from_checkpoint(checkpoint)
+
+
+def run_multitask(args: ExpertConfig, module):
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file
@@ -44,7 +137,6 @@ def run_multitask(args: ExpertConfig):
     if args.hf_token_hub:
         login(token=args.hf_token_hub)
 
-    loggers = get_pl_loggers(args)
     # select dataloader
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
@@ -65,18 +157,19 @@ def run_multitask(args: ExpertConfig):
             module.model.switch_selector_to_average()
         elif expert.training_config.model_modifier == "poly":
             module.model.resize_module_logits(1)
+        train_module(args, module, dm)
+
     elif args.hf_lib_id is not None:
-        # load a MultiExpertModel
-        if args.library_to_expert_transform:
-            # load the appropriate transform
-            # load library and pass to transform
-            # retrieve expert, and add as previously done.
-            raise NotImplementedError()
-        else:
-            module = MoETrainer(**vars(args), tokenizer=dm.tokenizer)
+        # fine-tuning with expert library
+        assert args.finetune_regime in FINETUNE_FUNCTIONS
+        expert: Expert = FINETUNE_FUNCTIONS[args.finetune_regime](args)
+        # can load expert to hf lib optionally here
     else:
         raise ValueError("please specify a library, or a checkpoint")
 
+
+def train_module(args: ExpertConfig, module, dm):
+    loggers = get_pl_loggers(args)
     # get metric monitors for models
     callbacks = get_monitors(args)
     if "mbpp" in args.dataset:
@@ -138,6 +231,11 @@ def run_multitask(args: ExpertConfig):
     # initial validation only for a bunch of datasets... ?
     trainer.validate(module, dm)
     trainer.fit(module, dm)
+
+    checkpoint = (
+        checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
+    )
+    return checkpoint
 
 
 if __name__ == "__main__":
