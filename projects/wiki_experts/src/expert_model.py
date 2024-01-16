@@ -375,7 +375,7 @@ class MultiExpertModelRanker(MultiExpertModel):
             mod_weights = (np.ones_like(mod_weights) / len(mod_weights[0])).tolist()
         if self.routing == "random":
             mod_names = np.random.choice(
-                self.experts_names, size=np.array(mod_names).shape, replace=False
+                self.experts_names, size=np.array(mod_names).shape
             ).tolist()
             mod_weights = (np.ones_like(mod_weights) / len(mod_weights[0])).tolist()
 
