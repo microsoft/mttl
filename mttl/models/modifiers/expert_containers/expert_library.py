@@ -299,7 +299,7 @@ class ExpertLibrary:
             self.data[key] = metadatum
 
         if self.selection:
-            logger.warn("Only including expertts in selection: %s", self.selection)
+            logger.warn("Only including experts in selection: %s", self.selection)
             self._sliced = True
             self.data = {k: v for k, v in self.data.items() if k in self.selection}
         elif self.exclude_selection:

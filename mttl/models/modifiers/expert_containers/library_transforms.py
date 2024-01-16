@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 from mttl.models.modifiers.expert_containers.module_graph import Expert
-from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.utils import logger
 from mttl.models.modifiers.modify_model import get_modifier_type
 from mttl.models.utils import model_loader_helper
@@ -272,6 +271,7 @@ class DatasetCentroidComputer(LibraryTransform):
     def transform(self, library, default_args=None) -> Expert:
         # TODO: remove project import
         from projects.wiki_experts.train_experts_main import get_datamodule
+        from projects.wiki_experts.src.expert_model import MultiExpertModel
 
         if type(library) == str:
             library = HFExpertLibrary(library)
