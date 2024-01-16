@@ -241,6 +241,7 @@ class PolySelectorConfig(SelectorConfig):
 @register_multi_expert_selector("poly_router", PolySelectorConfig)
 class PolySelector(Selector):
     """
+      eval_every=10_000
     Implements routing at a per-layer or per-model level
     """
 
@@ -400,10 +401,14 @@ class ZeroSelector(Selector):
     def forward(
         self, input, container, **kwargs
     ) -> BatchModulesAndWeightsSelectorOutput:
-        from mttl.models.modifiers.expert_containers.expert_containers import CoalescedLoRAExpertContainer
+        from mttl.models.modifiers.expert_containers.expert_containers import (
+            CoalescedLoRAExpertContainer,
+        )
 
         if not isinstance(container, CoalescedLoRAExpertContainer):
-            raise ValueError("ZeroSelector requires a coalesced LoRA container. Set COALESCED_LORA_CONTAINER=1 as env variable.")
+            raise ValueError(
+                "ZeroSelector requires a coalesced LoRA container. Set COALESCED_LORA_CONTAINER=1 as env variable."
+            )
 
         # do routing business on fp32
         input = input.to(dtype=container.experts.lora_a.dtype)
