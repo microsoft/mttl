@@ -48,7 +48,8 @@ elif "phi" in hf_repo_id:
 
 def create_embeddings():
     svd_embedder = SVDEmbeddingTransform(
-        SVDEmbeddingTransformConfig(sparsity_threshold=sparsity_threshold)
+        SVDEmbeddingTransformConfig(sparsity_threshold=sparsity_threshold),
+        random_state=42,
     )
     svd_embedder.transform(expert_lib, upload_to_hf=True)
     del svd_embedder
