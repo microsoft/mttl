@@ -105,8 +105,12 @@ def finetune_polylib_full(args: ExpertConfig, dm):
         + "|.*module_logits.*|.*selector.*"  # adds selector params to trainable params
     )
     args.router_selector = "poly_router"
-
     module = MoETrainer(**vars(args), device_map="auto")
+
+    for n, p in module.named_parameters():
+        if "selector" in n:
+            assert p.requires_grad
+
     module.to("cuda")
     checkpoint = train_module(args, module, dm)
     return load_expert_from_checkpoint(checkpoint)
@@ -122,6 +126,9 @@ def finetune_polylib_sel(args: ExpertConfig, dm):
     args.router_selector = "poly_router"
 
     module = MoETrainer(**vars(args), device_map="auto")
+    for n, p in module.named_parameters():
+        if "selector" in n:
+            assert p.requires_grad
     module.to("cuda")
     checkpoint = train_module(args, module, dm)
     return load_expert_from_checkpoint(checkpoint)
@@ -168,7 +175,7 @@ def run_multitask(args: ExpertConfig):
         raise ValueError("please specify a library, or a checkpoint")
 
 
-def train_module(args: ExpertConfig, module, dm):
+def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
     loggers = get_pl_loggers(args)
     # get metric monitors for models
     callbacks = get_monitors(args)
@@ -186,13 +193,13 @@ def train_module(args: ExpertConfig, module, dm):
         mode=mode,
     )
     callbacks.append(checkpoint_callback)
-
+    eval_callback = None
     if args.pipeline_eval_tasks:
         if args.pipeline_eval_tasks == "all":
             args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
 
-        eval = DownstreamEvalCallback(args)
-        callbacks.append(eval)
+        eval_callback = DownstreamEvalCallback(args)
+        callbacks.append(eval_callback)
     else:
         logger.warn(
             "Deactivating downstream eval callback as it is not enabled in the config. Please set `pipeline_eval_tasks`."
@@ -235,6 +242,8 @@ def train_module(args: ExpertConfig, module, dm):
     checkpoint = (
         checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
     )
+    module.load_state_dict(torch.load(checkpoint)["state_dict"])
+    trainer.test(module, dm)
     return checkpoint
 
 

@@ -40,7 +40,7 @@ class DownstreamEvalCallback(cb.Callback):
         if trainer.global_step == 0 and not self.args.eval_before_training:
             return
 
-        if (
+        if self.args.eval_every_n_epoch is None or (
             self.args.eval_every_n_epoch
             and trainer.current_epoch % self.args.eval_every_n_epoch != 0
         ):

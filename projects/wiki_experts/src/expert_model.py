@@ -406,7 +406,10 @@ class MoETrainer(MultiExpertModel):
         loss = self.forward(batch)
         total_loss = loss.clone()
 
-        if self.model.task_id_container["routing_gates"]:
+        if (
+            "routing_gates" in self.model.task_id_container
+            and self.model.task_id_container["routing_gates"]
+        ):
             num = 0.0
             entropy_of_avg = 0.0
             entropy_of_route = 0.0
