@@ -362,3 +362,93 @@ class DatasetCentroidComputer(LibraryTransform):
                         force=True,  # make sure we overwrite
                     )
         return output
+
+
+@dataclass
+class ExpertProjectorConfig:
+    name: str = "expert_projector"
+    granularity: str = "finegrained"
+    project_over_all_experts: bool = False
+
+
+class ExpertProjector(LibraryTransform):
+    """
+    Given a library of clustered experts, project each one onto the basis generated
+    by the individual experts of each cluster.
+    """
+
+    def __init__(self, config: ExpertProjectorConfig = None):
+        super().__init__(config or ExpertProjectorConfig())
+
+    def _project(self, source_expert, expert_basis, granularity="coarsegrained"):
+        source_sd = source_expert.expert_weights
+        state_dict_keys = list(source_sd.keys())
+
+        assert set(state_dict_keys) == set(
+            expert_basis[0].expert_weights.keys()
+        ), breakpoint()
+
+        if granularity == "coarsegrained":
+            # build a n_experts x D matrix of concatenated parameters
+            basis_vectors = []
+            for expert in expert_basis:
+                basis_vectors += [
+                    torch.nn.utils.parameters_to_vector(
+                        list(expert.expert_weights[k] for k in state_dict_keys)
+                    )
+                ]
+            basis_vector = torch.stack(basis_vectors)
+            project_vector = torch.nn.utils.parameters_to_vector(
+                list(source_sd[k] for k in state_dict_keys)
+            )
+
+            # Treat as a min-squares problem
+            global_alpha = torch.linalg.lstsq(
+                basis_vector.T, project_vector.view(-1, 1)
+            ).solution
+        else:
+            assert granularity == "finegrained"
+
+        projected_expert = copy.deepcopy(source_expert)
+        for key in state_dict_keys:
+            basis_vector = torch.stack(
+                [expert.expert_weights[key].flatten() for expert in expert_basis]
+            )
+
+            if granularity == "coarsegrained":
+                alpha = global_alpha
+            else:
+                alpha = torch.linalg.lstsq(
+                    basis_vector.T, source_sd[key].view(-1, 1)
+                ).solution
+
+            # project the source expert onto the basis
+            projected = (basis_vector.T @ alpha).view(source_sd[key].shape)
+            projected_expert.expert_weights[key].data.copy_(projected)
+
+        return projected_expert
+
+    @torch.no_grad()
+    def transform(self, expert_library, cluster_library) -> Expert:
+        if isinstance(expert_library, str):
+            expert_library = HFExpertLibrary(expert_library)
+
+        if isinstance(cluster_library, str):
+            cluster_library = HFExpertLibrary(cluster_library)
+
+        output = {}
+        for cluster_name, cluster_exp in cluster_library.items():
+            logger.info(f"processing cluster {cluster_name}")
+            if self.config.project_over_all_experts:
+                task_experts = [
+                    expert_library[expert_name] for expert_name in expert_library.keys()
+                ]
+            else:
+                tasks = cluster_exp.expert_info.expert_task_name.split(",")
+                task_experts = [expert_library[expert_name] for expert_name in tasks]
+            projected_expert = self._project(
+                cluster_exp, task_experts, granularity=self.config.granularity
+            )
+            output[cluster_name] = projected_expert
+
+        return output
