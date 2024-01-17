@@ -76,6 +76,8 @@ class ExpertConfig(Config):
         self.reset_lr = False
         self.reset_optim = False
 
+        self.create_transfer_matrix = False
+
     def post_init(self):
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size
@@ -104,7 +106,7 @@ class ExpertConfig(Config):
             for task_name in tasks:
                 if task_name in mttl.datamodule.task_sequences.__dict__:
                     task_names.extend(
-                        getattr(mttl.datamodule.task_sequences.__dict__, task_name)
+                        getattr(mttl.datamodule.task_sequences, task_name)
                     )
                 elif task_name in mttl.datamodule.task_cluster_flan.__dict__:
                     task_names.extend(

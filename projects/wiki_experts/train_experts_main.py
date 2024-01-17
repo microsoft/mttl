@@ -170,20 +170,15 @@ def run_multitask(args: ExpertConfig):
         trainer.test(module, dm)
 
         if args.hf_lib_id and checkpoint:
-
-            @retry(max_retries=3, wait_seconds=120)
-            def upload_expert():
-                library = HFExpertLibrary(args.hf_lib_id, create=True)
-                library.add_expert_from_ckpt(checkpoint)
-
-            upload_expert()
+            library = HFExpertLibrary(args.hf_lib_id, create=True)
+            library.add_expert_from_ckpt(checkpoint)
 
         if args.hf_repo_id and checkpoint:
             from projects.wiki_experts.src.expert_model import push_expert_to_hub
 
             push_expert_to_hub(checkpoint, args.hf_repo_id, auto_search=False)
-
-        create_transfer_matrix(args, checkpoint)
+        if args.create_transfer_matrix:
+            create_transfer_matrix(args, checkpoint)
 
 
 if __name__ == "__main__":
