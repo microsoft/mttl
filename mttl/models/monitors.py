@@ -44,6 +44,7 @@ class PolytroponLog(Callback):
 
     LOG_EVERY = 500
 
+    @torch.no_grad()
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:
         if trainer.global_step == 0 or trainer.global_step % self.LOG_EVERY > 0:
             return
