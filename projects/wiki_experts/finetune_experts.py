@@ -13,6 +13,9 @@ from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
 from mttl.models.modifiers.expert_containers.expert_library import (
     HFExpertLibrary,
     ExpertLibrary,
+    LocalExpertLibrary,
+    VirtualLocalLibrary,
+    retry,
 )
 from mttl.callbacks import LiveCheckpointCallback
 
@@ -20,6 +23,10 @@ from mttl.models.monitors import get_monitors
 from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
 from projects.wiki_experts.src.expert_model import MoETrainer, RoutedMultiExpertModel
 from mttl.models.modifiers.expert_containers.module_graph import load_expert, Expert
+from projects.wiki_experts.src.evolution.retrievers import (
+    RandomRetriever,
+    SVDEmbeddingRetriever,
+)
 
 
 import torch
@@ -34,13 +41,21 @@ from mttl.utils import (
     setup_logging,
     logger,
 )
-
+from mttl.models.modifiers.expert_containers.library_transforms import (
+    SVDEmbeddingTransform,
+    SVDEmbeddingTransformConfig,
+)
 from typing import Callable
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
 
 
 FINETUNE_FUNCTIONS: dict[str, Callable] = {}
+
+
+@retry(max_retries=5, wait_seconds=60)
+def svd_transform_with_retry(svd_embedder, expert_lib, upload_to_hf=True, force=True):
+    return svd_embedder.transform(expert_lib, upload_to_hf=upload_to_hf, force=force)
 
 
 def register_finetune_func(name):
@@ -52,6 +67,20 @@ def register_finetune_func(name):
         return func
 
     return decorator
+
+
+def get_task_expert(task, library):
+    if task not in library.tasks:
+        raise ValueError(f"Task {task} not found in repository.")
+    task_experts = []
+    for name, metadata in library.data.items():
+        if metadata.expert_deleted:
+            continue
+        if metadata.expert_task_name == task:
+            task_experts.append(name)
+
+    assert len(task_experts) == 1, f"Found {len(task_experts)} experts for task {task}"
+    return library[task_experts[0]]
 
 
 def load_lora_expert_in_expert_trainer(module: ExpertTrainer, expert: Expert):
@@ -69,20 +98,126 @@ def load_expert_from_checkpoint(checkpoint):
     return expert
 
 
+def create_mean_expert(args: ExpertConfig, library: ExpertLibrary = None) -> Expert:
+    args_copy = copy.deepcopy(args)
+    args_copy.router_selector = "uniform"
+
+    expert_lib = HFExpertLibrary(args.hf_lib_id) if library is None else library
+    module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
+    module.load_from_module_dict(expert_lib)
+    mean_expert: Expert = module.to_expert()
+    return mean_expert
+
+
+def retrieve(args: ExpertConfig, task, k, retrieve_with="random"):
+    if retrieve_with == "random":
+        k = args.sk
+        retriever = RandomRetriever(args, sk=k)
+
+        lib_location = f"/tmp/{args.hf_lib_id}"
+        os.makedirs(lib_location, exist_ok=True)
+        library = LocalExpertLibrary.create_from_remote(
+            HFExpertLibrary(args.hf_lib_id), destination=lib_location
+        )
+        library: VirtualLocalLibrary = retriever.transform(
+            library, current_task=args.finetune_task_name
+        )
+    elif retrieve_with == "svdemb":
+        k = args.sk
+        assert args.hf_repo_query is not None, "Please specify hf_repo_query"
+        query_library = HFExpertLibrary(args.hf_repo_query)
+        task = args.finetune_task_name
+        query_expert: Expert = get_task_expert(task, query_library)
+
+        retriever = SVDEmbeddingRetriever(args, sk=k)
+
+        lib_location = f"/tmp/{args.hf_lib_id}"
+        if os.path.exists(lib_location):
+            library = LocalExpertLibrary(lib_location)
+            library.update_from_remote(HFExpertLibrary(args.hf_lib_id))
+        else:
+            os.makedirs(lib_location, exist_ok=True)
+            library = LocalExpertLibrary.create_from_remote(
+                HFExpertLibrary(args.hf_lib_id), destination=lib_location
+            )
+        if query_expert in library:
+            library.remove_expert(query_expert.name)
+        library.add_expert(query_expert)
+        ###########################################################################
+        # redo SVD with the query expert included
+        if "neo" in args.hf_lib_id:
+            sparsity_threshold = 0.7
+        elif "phi" in args.hf_lib_id:
+            sparsity_threshold = 0.5
+        else:
+            raise ValueError("'Neo' nor 'phi' in hf_lib_id,sparsity_threshold not set")
+
+        logger.info(f"!!!!!!! Using sparsity threshold {sparsity_threshold}")
+        svd_embedder = SVDEmbeddingTransform(
+            SVDEmbeddingTransformConfig(sparsity_threshold=sparsity_threshold),
+            random_state=42,
+        )
+        svd_transform_with_retry(svd_embedder, library, upload_to_hf=True, force=True)
+        ###########################################################################
+        library: VirtualLocalLibrary = retriever.transform(
+            library, current_task=args.finetune_task_name, task_expert=query_expert
+        )
+    else:
+        raise ValueError(f"Unknown retriever {retrieve_with}")
+    return library
+
+
 @register_finetune_func("lib_mu")
-def finetune_polylib_full(args: ExpertConfig, dm):
+def finetune_lib_mu(args: ExpertConfig, dm):
     """
     1. Averages the library to a single expert
     2. Fine-tunes this expert on the downstream task
     """
-    # we init as uniform combination of retrieved experts
-    args_copy = copy.deepcopy(args)
-    args_copy.router_selector = "uniform"
+    mean_expert: Expert = create_mean_expert(args)
 
-    expert_lib = HFExpertLibrary(args.hf_lib_id)
-    module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
-    module.load_from_module_dict(expert_lib)
-    mean_expert: Expert = module.to_expert()
+    module = ExpertTrainer(**vars(args), device_map="auto")
+    module.to("cuda")
+    load_lora_expert_in_expert_trainer(module, mean_expert)
+
+    checkpoint = train_module(args, module, dm)
+    return load_expert_from_checkpoint(checkpoint)
+
+
+@register_finetune_func("lib_mu_randretr")
+def finetune_lib_mu_with_rand_retrieval(args: ExpertConfig, dm):
+    """
+    1. Retrieves randomly args.sk experts from the library
+    2. Averages the library to a single expert
+    3. Fine-tunes this expert on the downstream task
+    """
+    library = retrieve(args, args.finetune_task_name, args.sk, retrieve_with="random")
+    assert (
+        len(library) == args.sk
+    ), f"Retrieved {len(library)} experts, expected {args.sk}"
+
+    mean_expert: Expert = create_mean_expert(args, library)
+
+    module = ExpertTrainer(**vars(args), device_map="auto")
+    module.to("cuda")
+    load_lora_expert_in_expert_trainer(module, mean_expert)
+
+    checkpoint = train_module(args, module, dm)
+    return load_expert_from_checkpoint(checkpoint)
+
+
+@register_finetune_func("lib_mu_svdretr")
+def finetune_lib_mu_with_svd_retrieval(args: ExpertConfig, dm):
+    """
+    1. Retrieves randomly args.sk experts from the library using SVD embeddings
+    2. Averages the library to a single expert
+    3. Fine-tunes this expert on the downstream task
+    """
+    library = retrieve(args, args.finetune_task_name, args.sk, retrieve_with="svdemb")
+    assert (
+        len(library) == args.sk
+    ), f"Retrieved {len(library)} experts, expected {args.sk}"
+
+    mean_expert: Expert = create_mean_expert(args, library)
 
     module = ExpertTrainer(**vars(args), device_map="auto")
     module.to("cuda")
@@ -129,6 +264,50 @@ def finetune_polylib_sel(args: ExpertConfig, dm):
     for n, p in module.named_parameters():
         if "selector" in n:
             assert p.requires_grad
+    module.to("cuda")
+    checkpoint = train_module(args, module, dm)
+    return load_expert_from_checkpoint(checkpoint)
+
+
+@register_finetune_func("polylib_full_randretr")
+def finetune_polylib_full_with_rand_retrieval(args: ExpertConfig, dm):
+    """
+    Like polylib_full, but here we perform random expert selection before training.
+    """
+    library = retrieve(args, args.finetune_task_name, args.sk, retrieve_with="random")
+    assert (
+        len(library) == args.sk
+    ), f"Retrieved {len(library)} experts, expected {args.sk}"
+
+    args.router_selector = "poly_router"
+    module = MoETrainer(**vars(args), device_map="auto", expert_library=library)
+
+    for n, p in module.named_parameters():
+        if "selector" in n:
+            assert p.requires_grad
+
+    module.to("cuda")
+    checkpoint = train_module(args, module, dm)
+    return load_expert_from_checkpoint(checkpoint)
+
+
+@register_finetune_func("polylib_full_svdretr")
+def finetune_polylib_full_with_svd_retrieval(args: ExpertConfig, dm):
+    """
+    Like polylib_full, but here we perform expert selection with SVD embeddings before training.
+    """
+    library = retrieve(args, args.finetune_task_name, args.sk, retrieve_with="svdemb")
+    assert (
+        len(library) == args.sk
+    ), f"Retrieved {len(library)} experts, expected {args.sk}"
+
+    args.router_selector = "poly_router"
+    module = MoETrainer(**vars(args), device_map="auto", expert_library=library)
+
+    for n, p in module.named_parameters():
+        if "selector" in n:
+            assert p.requires_grad
+
     module.to("cuda")
     checkpoint = train_module(args, module, dm)
     return load_expert_from_checkpoint(checkpoint)

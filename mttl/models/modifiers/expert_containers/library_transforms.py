@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 from mttl.models.modifiers.expert_containers.module_graph import Expert
 from mttl.utils import logger
@@ -32,7 +33,11 @@ class SVDEmbeddingTransform(LibraryTransform):
     of the adapter modules.
     """
 
-    def transform(self, library, upload_to_hf=True):
+    def __init__(self, config, random_state=None):
+        super().__init__(config)
+        self.random_state = random_state
+
+    def transform(self, library, upload_to_hf=True, force=False):
         if type(library) == str:
             library = HFExpertLibrary(library)
 
@@ -42,7 +47,7 @@ class SVDEmbeddingTransform(LibraryTransform):
             n_iter=5,
             n_oversamples=10,
             power_iteration_normalizer="auto",
-            random_state=None,
+            random_state=self.random_state,
             tol=0.0,
         )
 
@@ -82,5 +87,6 @@ class SVDEmbeddingTransform(LibraryTransform):
                         name,
                         self.config.__dict__,
                         experts_embeddings[i],
+                        force=force,
                     )
         return experts_embeddings, svd

@@ -397,7 +397,9 @@ class MoETrainer(MultiExpertModel):
                 )
             self.moe_num_experts = kwargs["moe_num_experts"]
         else:
-            library = HFExpertLibrary(self.hparams.hf_lib_id)
+            library = kwargs.get(
+                "expert_library", HFExpertLibrary(self.hparams.hf_lib_id)
+            )
             for i, expert in enumerate(sorted(list(library.keys()))):
                 self.add_expert_instance(library[expert], expert_name=f"e{i}")
             self.moe_num_experts = i + 1
