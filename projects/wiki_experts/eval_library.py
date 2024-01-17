@@ -55,10 +55,12 @@ def run_multitask(args: ExpertConfig):
         repo_id=args.hf_lib_id, exclude_selection=exclude_phi_tasks
     )
 
-    cfg = TiesMergeConfig(top_k=0.2)
-    ties_expert = TiesMerge(cfg).transform(library)
-    module = MultiExpertModel(**vars(ties_expert.training_config)).to("cuda")
-    module.add_expert_instance(ties_expert, is_default=True)
+    # cfg = TiesMergeConfig(top_k=0.2)
+    # ties_expert = TiesMerge(cfg).transform(library)
+    ave_cfg = WeightedLinearMergeConfig()
+    ave_expert = WeightedLinearMerge(ave_cfg).transform(library)
+    module = MultiExpertModel(**vars(ave_expert.training_config)).to("cuda")
+    module.add_expert_instance(ave_expert, is_default=True)
 
     if args.pipeline_eval_tasks == "all":
         args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
