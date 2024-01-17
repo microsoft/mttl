@@ -127,7 +127,7 @@ def finetune_polylib_sel(args: ExpertConfig, dm):
     return load_expert_from_checkpoint(checkpoint)
 
 
-def run_multitask(args: ExpertConfig, module):
+def run_multitask(args: ExpertConfig):
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file
@@ -162,7 +162,7 @@ def run_multitask(args: ExpertConfig, module):
     elif args.hf_lib_id is not None:
         # fine-tuning with expert library
         assert args.finetune_regime in FINETUNE_FUNCTIONS
-        expert: Expert = FINETUNE_FUNCTIONS[args.finetune_regime](args)
+        expert: Expert = FINETUNE_FUNCTIONS[args.finetune_regime](args, dm)
         # can load expert to hf lib optionally here
     else:
         raise ValueError("please specify a library, or a checkpoint")
