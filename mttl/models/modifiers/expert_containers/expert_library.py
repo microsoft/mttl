@@ -582,12 +582,14 @@ class ExpertLibrary:
         expert_name: str,
         embedding_config: Dict,
         expert_embedding: np.ndarray,
+        force: bool = False,
     ):
         return self.add_auxiliary_data(
             data_type="embeddings",
             expert_name=expert_name,
             config=embedding_config,
             data=expert_embedding,
+            force=force,
         )
 
     def _update_readme(self):
