@@ -378,26 +378,29 @@ class MoETrainer(MultiExpertModel):
         kwargs["top_k"] = kwargs["moe_top_k"]
         kwargs["emb_dim"] = kwargs["moe_emb_dim"]
         kwargs["rkhs_dim"] = kwargs["moe_rkhs_dim"]
-
+        library = kwargs.pop("expert_library", None)
         super().__init__(**kwargs)
 
         # 8 experts
-        if not self.hparams.hf_lib_id:
-            for i in range(self.hparams.moe_num_experts):
-                self.add_empty_expert(
-                    f"e{i}",
-                    LoRAConfig(
-                        modify_layers=self.hparams.modify_layers,
-                        modify_modules=self.hparams.modify_modules,
-                        lora_alpha=self.hparams.lora_alpha,
-                        lora_dropout=self.hparams.lora_dropout,
-                        lora_rank=self.hparams.lora_rank,
-                        lora_init_b_random=True,
-                    ),
-                )
-            self.moe_num_experts = kwargs["moe_num_experts"]
-        else:
-            library = HFExpertLibrary(self.hparams.hf_lib_id)
+        if library is None:
+            if not self.hparams.hf_lib_id:
+                for i in range(self.hparams.moe_num_experts):
+                    self.add_empty_expert(
+                        f"e{i}",
+                        LoRAConfig(
+                            modify_layers=self.hparams.modify_layers,
+                            modify_modules=self.hparams.modify_modules,
+                            lora_alpha=self.hparams.lora_alpha,
+                            lora_dropout=self.hparams.lora_dropout,
+                            lora_rank=self.hparams.lora_rank,
+                            lora_init_b_random=True,
+                        ),
+                    )
+                self.moe_num_experts = kwargs["moe_num_experts"]
+            else:
+                library = HFExpertLibrary(self.hparams.hf_lib_id)
+
+        if library is not None:
             for i, expert in enumerate(sorted(list(library.keys()))):
                 self.add_expert_instance(library[expert], expert_name=f"e{i}")
             self.moe_num_experts = i + 1
@@ -406,7 +409,10 @@ class MoETrainer(MultiExpertModel):
         loss = self.forward(batch)
         total_loss = loss.clone()
 
-        if self.model.task_id_container["routing_gates"]:
+        if (
+            "routing_gates" in self.model.task_id_container
+            and self.model.task_id_container["routing_gates"]
+        ):
             num = 0.0
             entropy_of_avg = 0.0
             entropy_of_route = 0.0
