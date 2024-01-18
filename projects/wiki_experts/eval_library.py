@@ -3,7 +3,10 @@ import sys
 import json
 from copy import deepcopy
 
-from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.models.modifiers.expert_containers.expert_library import (
+    HFExpertLibrary,
+    LocalExpertLibrary,
+)
 from mttl.models.modifiers.expert_containers.module_graph import Expert
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -23,10 +26,14 @@ from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.models.modifiers.expert_containers.library_transforms import (
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
-    DatasetCentroidComputer,
-    PrototypeComputerConfig,
+    HiddenStateComputer,
+    HiddenStateComputerConfig,
     TiesMerge,
     TiesMergeConfig,
+    ExpertProjector,
+    ExpertProjectorConfig,
+    SVDEmbeddingTransform,
+    SVDEmbeddingTransformConfig,
 )
 
 
@@ -54,11 +61,42 @@ def run_multitask(args: ExpertConfig):
     library = HFExpertLibrary(
         repo_id=args.hf_lib_id, exclude_selection=exclude_phi_tasks
     )
+    transform = HiddenStateComputer(HiddenStateComputerConfig(upload_to_hf=True))
+    transform.transform(library)
 
-    cfg = TiesMergeConfig(top_k=0.2)
-    ties_expert = TiesMerge(cfg).transform(library)
-    module = MultiExpertModel(**vars(ties_expert.training_config)).to("cuda")
-    module.add_expert_instance(ties_expert, is_default=True)
+    # cfg = TiesMergeConfig(top_k=0.975, only_sparsify=True)
+    # expert = WeightedLinearMerge().transform(library)
+    # expert = TiesMerge(cfg).transform(library)
+
+    # svd_embedder = SVDEmbeddingTransform(
+    #     SVDEmbeddingTransformConfig(sparsity_threshold=0.5, recompute=False)
+    # )
+    # out, svd = svd_embedder.transform(library, upload_to_hf=True)
+
+    """
+    single_exp = {'merged': expert}
+    cfg = ExpertProjectorConfig(granularity='coarsegrained', project_over_all_experts=True)
+    transform = ExpertProjector(cfg)
+    projected_library = transform.transform(
+        'sordonia/library-phi_2-v3', 
+        single_exp
+    )
+    expert = WeightedLinearMerge().transform(projected_library)
+    """
+    module = MultiExpertModel(**vars(expert.training_config)).to("cuda")
+    module.add_expert_instance(expert, is_default=True)
+
+    """
+    local_library = LocalExpertLibrary.create_from_remote(library, destination='/data/lucas/local_libraries')
+    if 'codex-shared' not in local_library.keys():
+        local_library.add_expert_from_ckpt('sordonia/expert_phi-2_code')
+    expert = WeightedLinearMerge().transform(local_library)
+    """
+
+    # cfg = TiesMergeConfig(top_k=0.2)
+    # ties_expert = TiesMerge(cfg).transform(library)
+    # module = MultiExpertModel(**vars(ties_expert.training_config)).to("cuda")
+    # module.add_expert_instance(ties_expert, is_default=True)
 
     if args.pipeline_eval_tasks == "all":
         args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"

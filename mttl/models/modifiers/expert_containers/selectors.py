@@ -515,6 +515,11 @@ class PolySelectorDirectConfig(SelectorConfig):
     pass
 
 
+@dataclass
+class PolySelectorDirectConfigUniform(SelectorConfig):
+    pass
+
+
 @register_multi_expert_selector("poly_router_dir", PolySelectorDirectConfig)
 class PolySelectorDirect(PolySelector):
     def __init__(self, info_container, **kwargs) -> None:
@@ -583,6 +588,22 @@ class PolySelectorDirect(PolySelector):
         weights = self._get_weights()
         modules = list(self.module_logits_dict.keys())
         return ModulesAndWeightsSelectorOutput(modules, weights)
+
+
+@register_multi_expert_selector("uniform", PolySelectorDirectConfigUniform)
+class PolyUniform(PolySelectorDirect):
+    """
+    Currently only used for uniform merging of experts.
+    """
+
+    def add_expert(self, expert_name: str, **kwargs):
+        if expert_name not in self.module_logits_dict:
+            self.module_logits_dict[expert_name] = torch.nn.Parameter(
+                torch.ones(1).to(self.device)
+            )
+            for name in self.module_logits_dict.keys():
+                self.module_logits_dict[name].data = torch.ones(1).to(self.device)
+                self.module_logits_dict[name].data /= len(self.module_logits_dict)
 
 
 @dataclass

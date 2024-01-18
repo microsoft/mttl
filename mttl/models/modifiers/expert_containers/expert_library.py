@@ -120,24 +120,18 @@ def retry(max_retries=10, wait_seconds=60):
                 try:
                     result = func(*args, **kwargs)
                     return result
-                except requests.exceptions.HTTPError as e:
-                    if e.response.status_code == 429:
-                        print(
-                            f"HTTPError 429: Rate limit exceeded. Attempt {attempt}/{max_retries}."
-                        )
-                        if attempt < max_retries:
-                            print(f"Waiting {wait_seconds} seconds before retrying...")
-                            time.sleep(wait_seconds)
-                    else:
-                        # Re-raise the HTTPError if it's not a 429 error
-                        raise e
-                except Exception as e:
-                    raise e
+                except Exception as e:  # requests.exceptions.HTTPError as e:
+                    print(e, type(e), "retrying...")
+                    if attempt < max_retries:
+                        print(f"Waiting {wait_seconds} seconds before retrying...")
+                        time.sleep(wait_seconds)
             raise RuntimeError(
                 f"Function {func.__name__} failed after {max_retries} attempts."
             )
 
         return wrapper
+
+    return decorator
 
 
 class HuggingfaceHubEngine(BackendEngine):
@@ -604,12 +598,14 @@ class ExpertLibrary:
         expert_name: str,
         embedding_config: Dict,
         expert_embedding: np.ndarray,
+        force=False,
     ):
         return self.add_auxiliary_data(
             data_type="embeddings",
             expert_name=expert_name,
             config=embedding_config,
             data=expert_embedding,
+            force=force,
         )
 
     def _update_readme(self):
@@ -862,6 +858,29 @@ class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
                         continue
 
         return remote_lib
+
+
+class VirtualLocalLibrary(LocalExpertLibrary):
+    """
+    A virtual library is not stored on disk, but only in memory. Useful for temporary library objects used during runtime.
+    """
+
+    def _upload_metadata(self, metadata):
+        pass
+
+    def _upload_weights(self, expert_name, expert_dump):
+        pass
+
+    def _update_readme(self):
+        pass
+
+    @classmethod
+    def from_local(cls, local_lib: LocalExpertLibrary):
+        new_lib = VirtualLocalLibrary(repo_id=local_lib.repo_id)
+        for name, expert in local_lib.items():
+            if expert not in new_lib:
+                new_lib.add_expert(expert)
+        return new_lib
 
 
 def get_best_expert_for_score(library: HFExpertLibrary, hash) -> Expert:

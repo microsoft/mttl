@@ -397,7 +397,9 @@ class MoETrainer(MultiExpertModel):
                 )
             self.moe_num_experts = kwargs["moe_num_experts"]
         else:
-            library = HFExpertLibrary(self.hparams.hf_lib_id)
+            library = kwargs.get(
+                "expert_library", HFExpertLibrary(self.hparams.hf_lib_id)
+            )
             for i, expert in enumerate(sorted(list(library.keys()))):
                 self.add_expert_instance(library[expert], expert_name=f"e{i}")
             self.moe_num_experts = i + 1
@@ -406,7 +408,10 @@ class MoETrainer(MultiExpertModel):
         loss = self.forward(batch)
         total_loss = loss.clone()
 
-        if self.model.task_id_container["routing_gates"]:
+        if (
+            "routing_gates" in self.model.task_id_container
+            and self.model.task_id_container["routing_gates"]
+        ):
             num = 0.0
             entropy_of_avg = 0.0
             entropy_of_route = 0.0
