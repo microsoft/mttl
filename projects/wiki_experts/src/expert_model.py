@@ -29,6 +29,7 @@ from mttl.models.modifiers.expert_containers import (
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRankerHelper
+from projects.wiki_experts.src.ranker.classifier_ranker import ClusterPredictor
 
 from mttl.models.modifiers.expert_containers.module_graph import Expert, ExpertInfo
 from mttl.models.modifiers.expert_containers.module_graph import (
@@ -370,6 +371,9 @@ class MultiExpertModelRanker(MultiExpertModel):
         self.fout = open(
             os.path.join(self.hparams.output_dir, "analyse_predict_expert.txt"), "w"
         )
+
+        if isinstance(self.expert_ranker, ClusterPredictor):
+            self.expert_ranker.init_clusters(kwargs["hf_lib_id"])
 
     def set_routing_infos(self, batch, generate=False):
         self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
