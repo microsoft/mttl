@@ -1,6 +1,7 @@
 import os
 import torch
 
+import json
 from mttl.config import Config
 import mttl.datamodule.task_sequences
 import mttl.datamodule.task_cluster_flan
@@ -77,6 +78,7 @@ class ExpertConfig(Config):
         self.reset_optim = False
 
         self.create_transfer_matrix = False
+        self.tasksets_path = None
 
     def post_init(self):
         if self.micro_batch_size is None:
@@ -103,15 +105,22 @@ class ExpertConfig(Config):
             tasks = self.finetune_task_name.split(
                 "+"
             )  # use "+" for assign multiple task set vars to be found in task_sequences
+            task_sets = None
+            if self.tasksets_path is not None:
+                task_sets = json.load(open(self.tasksets_path))
+
             for task_name in tasks:
-                if task_name in mttl.datamodule.task_sequences.__dict__:
-                    task_names.extend(
-                        getattr(mttl.datamodule.task_sequences, task_name)
-                    )
-                elif task_name in mttl.datamodule.task_cluster_flan.__dict__:
-                    task_names.extend(
-                        getattr(mttl.datamodule.task_cluster_flan, task_name)
-                    )
+                if task_sets is not None and task_name in task_sets:
+                    task_names.extend(task_sets[task_name])
                 else:
-                    task_names.extend([task_name])
+                    if task_name in mttl.datamodule.task_sequences.__dict__:
+                        task_names.extend(
+                            getattr(mttl.datamodule.task_sequences, task_name)
+                        )
+                    elif task_name in mttl.datamodule.task_cluster_flan.__dict__:
+                        task_names.extend(
+                            getattr(mttl.datamodule.task_cluster_flan, task_name)
+                        )
+                    else:
+                        task_names.extend([task_name])
             self.finetune_task_name = ",".join(task_names)
