@@ -339,6 +339,50 @@ class MultiExpertModel(ExpertTrainer):
     def forward(self, batch, reduction="mean"):
         return super().forward(batch, reduction)
 
+    def to_expert(self, weights: dict = None, with_global_names=True) -> Expert:
+        """
+        Converts the current expert model into an instance of the Expert class.
+
+        Args:
+            weights (dict, optional): A dictionary of weights to merge the experts. If not provided, the router's weights will be used.
+            with_global_names (bool, optional): Whether to include global names in the merged weights. Defaults to True.
+
+        Returns:
+            Expert: An instance of the Expert class.
+
+        Raises:
+            None
+
+        Example:
+            model = ExpertModel()
+            expert = model.to_expert(weights={'expert1': 0.5, 'expert2': 0.5}, with_global_names=True)
+        """
+
+        expert_weights = {}
+        for container in self.experts_containers:
+            assert type(container) == LoRAExpertContainer
+            if hasattr(container, "get_merged_weights"):
+                expert_config, _weights = container.get_merged_weights(
+                    with_global_names=with_global_names, weights=weights
+                )
+                expert_weights.update(_weights)
+        if len(expert_weights) == 0:
+            return None
+
+        expert_info = ExpertInfo(
+            expert_name=self.hparams.finetune_task_name,
+            expert_task_name=self.hparams.finetune_task_name,
+            training_config=self.training_config,
+            expert_config=expert_config,
+        )
+        return Expert(expert_info=expert_info, expert_weights=expert_weights)
+
+    def on_save_checkpoint(self, ckpt):
+        expert: Expert = self.to_expert()
+        if expert is not None:
+            ckpt["expert_dumps"] = expert.asdict()
+            ckpt["merging_weights"] = self.get_router_weights()
+
 
 class MultiExpertModelRanker(MultiExpertModel):
     def __init__(self, **kwargs):
@@ -474,6 +518,7 @@ class MoETrainer(MultiExpertModel):
 
 class RoutedMultiExpertModel(MultiExpertModel):
     """
+    TODO: This is depreciated. Use MultiExpertModel instead.
     Class that allows to route to different experts with a learned router from mttl.models.modifiers.experts.Router.
     """
 
