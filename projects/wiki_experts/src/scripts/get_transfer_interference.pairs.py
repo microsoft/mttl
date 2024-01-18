@@ -28,12 +28,12 @@ user = HfApi(token=hf_api_key).whoami()
 # hf_repo_id="oostapeno/flan-lib-neo-1B-20phi"
 hf_repo_id = "ostapeno/library-gptneo_1B_flan_2ep"
 
-expert_lib = HFExpertLibrary(hf_repo_id)
 local_lib_location = f"/tmp/{hf_repo_id}"
 if os.path.exists(local_lib_location):
     expert_lib = LocalExpertLibrary(local_lib_location)
-    expert_lib.update_from_remote(expert_lib)
+    expert_lib.update_from_remote(hf_repo_id)
 else:
+    expert_lib = HFExpertLibrary(hf_repo_id)
     os.makedirs(local_lib_location, exist_ok=True)
     expert_lib: LocalExpertLibrary = LocalExpertLibrary.create_from_remote(
         expert_lib, local_lib_location
@@ -51,14 +51,14 @@ def create_embeddings():
         SVDEmbeddingTransformConfig(sparsity_threshold=sparsity_threshold),
         random_state=42,
     )
-    svd_embedder.transform(expert_lib, upload_to_hf=True)
+    svd_embedder.transform(expert_lib, upload_to_hf=True, force=True)
     del svd_embedder
 
 
-embeds = expert_lib.get_auxiliary_data("embeddings")
-if len(embeds) == 0:
-    print("creating embeddings")
-    create_embeddings()
+# embeds = expert_lib.get_auxiliary_data("embeddings")
+# if len(embeds) == 0:
+print("creating embeddings")
+create_embeddings()
 
 # module to embedding
 embeddings = {}
