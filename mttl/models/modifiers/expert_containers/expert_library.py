@@ -598,7 +598,7 @@ class ExpertLibrary:
         expert_name: str,
         embedding_config: Dict,
         expert_embedding: np.ndarray,
-        force=False,
+        force: bool = False,
     ):
         return self.add_auxiliary_data(
             data_type="embeddings",

@@ -4,15 +4,13 @@ import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
-
+from mttl.datamodule.codex_data_module import CodexDataConfig, CodexDataModule
 from mttl.datamodule.mt_seq_to_seq_module import (
     FlanConfig,
     FlanModule,
     FlatMultiTaskConfig,
     FlatMultiTaskModule,
 )
-
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
 def get_datamodule(args, for_generation=False, dataset_override=None):
@@ -55,6 +53,11 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
             **common_kwargs,
         )
         dm = MMLUDataModule(config, for_generation=for_generation)
+    elif "codex" in dataset:
+        config = CodexDataConfig(
+            **common_kwargs,
+        )
+        dm = CodexDataModule(config, for_generation=for_generation)
     else:
         raise ValueError(f"Unknown dataset {args.dataset}")
     return dm

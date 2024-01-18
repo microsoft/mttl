@@ -85,6 +85,15 @@ class ExpertConfig(Config):
         self.library_to_expert_transform = None
         self.eval_before_training = True
 
+        # hidden state computation transform
+        self.use_base_model_only = False
+        self.model = None
+        self.max_samples_per_task = 10
+        self.track = "each_layer"
+        self.pool = "last"
+
+        self.router_temp = None
+
     def post_init(self):
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size
