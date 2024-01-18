@@ -4,6 +4,7 @@ import pytorch_lightning as pl
 import glob
 
 import copy
+import shutil
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -132,14 +133,10 @@ def retrieve(args: ExpertConfig, task, k, retrieve_with="random"):
         retriever = SVDEmbeddingRetriever(args, sk=k)
 
         lib_location = f"/tmp/{args.hf_lib_id}"
-        if os.path.exists(lib_location):
-            library = LocalExpertLibrary(lib_location)
-            library.update_from_remote(HFExpertLibrary(args.hf_lib_id))
-        else:
-            os.makedirs(lib_location, exist_ok=True)
-            library = LocalExpertLibrary.create_from_remote(
-                HFExpertLibrary(args.hf_lib_id), destination=lib_location
-            )
+        os.makedirs(lib_location, exist_ok=True)
+        library = LocalExpertLibrary.create_from_remote(
+            HFExpertLibrary(args.hf_lib_id), destination=lib_location
+        )
         if query_expert in library:
             library.remove_expert(query_expert.name)
         library.add_expert(query_expert)
@@ -162,6 +159,7 @@ def retrieve(args: ExpertConfig, task, k, retrieve_with="random"):
         library: VirtualLocalLibrary = retriever.transform(
             library, current_task=args.finetune_task_name, task_expert=query_expert
         )
+        shutil.rmtree(lib_location, ignore_errors=True)
     else:
         raise ValueError(f"Unknown retriever {retrieve_with}")
     return library
