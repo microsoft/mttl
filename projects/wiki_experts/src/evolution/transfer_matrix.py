@@ -149,11 +149,7 @@ def produce_transfer_matrix(
         log_row["eval_task"] = task_eval_on
 
         evaluator: Evaluator = prepare_evaluator(
-            args,
-            args.dataset,
-            tasks=task_eval_on,
-            split=args.transfer_matrix_split,
-            subsample=args.subsample_eval_set,
+            args, args.dataset, tasks=task_eval_on, split=args.transfer_matrix_split
         )
         module = MultiExpertModel(
             **vars(args),
