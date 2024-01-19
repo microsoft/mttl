@@ -354,10 +354,34 @@ class HiddenStateComputer(LibraryTransform):
         if type(library) == str:
             library = HFExpertLibrary(library)
 
+        args_in_name = [
+            "name",
+            "model",
+            "use_base_model_only",
+            "max_samples_per_task",
+            "track",
+            "pool",
+        ]
+        save_name = "-".join(
+            [
+                "" if x is None else str(x)
+                for x in [getattr(self.config, k) for k in args_in_name]
+            ]
+        )
+        print("save_name", save_name)
+
         # try to fetch auxiliary data
-        output = library.get_auxiliary_data(data_type=self.config.name)
+        output = library.get_auxiliary_data(data_type=save_name)
         if len(output) == len(library) and not self.config.recompute:
             logger.info("Found {} precomputed centroids".format(len(output)))
+            # format the output to be dict[expert_name][layer_name] = embedding
+            output = {
+                expert_name: {
+                    k: v for k, v in expert_data[self.config.name][save_name].items()
+                }
+                for expert_name, expert_data in output.items()
+            }
+
             return output
 
         logger.info("Computing centroids for {} experts".format(len(library)))
@@ -368,7 +392,7 @@ class HiddenStateComputer(LibraryTransform):
             if default_args is not None:
                 self._fill_missing_args(training_config, default_args)
 
-            if self.config.use_base_model_only and self.config.model_name is not None:
+            if self.config.use_base_model_only and self.config.model is not None:
                 training_config.model = self.config.model
 
             model = MultiExpertModel(**vars(training_config)).to("cuda")
@@ -379,11 +403,14 @@ class HiddenStateComputer(LibraryTransform):
             self._track_hidden_states(model, keys=expert.expert_weights.keys())
 
             training_config.dataset = expert.expert_info.dataset
-            train_tasks = expert.expert_info.expert_task_name.split(",")
-            training_config.subsample_train = self.config.max_samples_per_task * len(
-                train_tasks
-            )
-            training_config.finetune_task_name = ",".join(train_tasks)
+            training_config.subsample_train = self.config.max_samples_per_task
+            if expert.expert_info.expert_task_name:
+                train_tasks = expert.expert_info.expert_task_name.split(",")
+                training_config.finetune_task_name = ",".join(train_tasks)
+                training_config.subsample_train *= len(train_tasks)
+            else:
+                train_tasks = None
+
             training_config.train_batch_size = (
                 default_args.predict_batch_size if default_args is not None else 4
             )
@@ -445,7 +472,7 @@ class HiddenStateComputer(LibraryTransform):
             with library.batched_commit():
                 for i, expert_name in enumerate(output.keys()):
                     library.add_auxiliary_data(
-                        data_type=self.config.name,
+                        data_type=save_name,
                         expert_name=expert_name,
                         config=self.config.__dict__,
                         data=output[expert_name],

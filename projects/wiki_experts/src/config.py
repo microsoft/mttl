@@ -91,6 +91,7 @@ class ExpertConfig(Config):
         self.max_samples_per_task = 10
         self.track = "each_layer"
         self.pool = "last"
+        self.delta_scale = None
 
         self.router_temp = None
 

@@ -175,6 +175,7 @@ class Selector(RoutingMixin, nn.Module):
         self.forward_cache = None
         self.total_calls_per_forward = 0
         self._calls_counter = 0
+        self.layer_name = kwargs.get("layer_name", None)
 
     @property
     def clear_cache(self):
@@ -375,6 +376,86 @@ class MOERKHSSelector(Selector):
             ],
             dim=0,
         )
+
+
+@dataclass
+class ClownRouterConfig(SelectorConfig):
+    router_granularity: str = "finegrained"
+    router_temp: float = 1.0
+    moe_top_k: int = -1
+
+
+@register_multi_expert_selector("clown_router", ClownRouterConfig)
+class ClownSelector(Selector):
+    def __init__(self, info_container, config, **kwargs) -> None:
+        super().__init__(info_container, config, **kwargs)
+
+        if "layer" not in kwargs:
+            raise ValueError(
+                "Selector requires a layer to be passed in kwargs to infer the input dimension."
+            )
+
+        layer = kwargs["layer"]
+        self.output_dim, self.input_dim = layer.weight.data.shape
+
+        self.prototypes = nn.Parameter(
+            torch.empty((0, self.input_dim), device=layer.weight.device)
+        )
+
+    def overwrite_prototypes(self, prototypes):
+        self.prototypes.data = prototypes.type_as(self.prototypes)
+
+    @forward_with_cache
+    def forward(self, input, **kwargs) -> BatchSequenceModulesAndWeightsSelectorOutput:
+        # do routing business on fp32
+        if self.prototypes.size(0) != len(self.expert_names):
+            raise ValueError("Prototypes not initialized correctly.")
+
+        input = input.to(dtype=self.prototypes.dtype)
+
+        router_logits = F.linear(input, self.prototypes)
+        routing_weights = F.softmax(
+            router_logits / self.config.router_temp, dim=-1, dtype=torch.float
+        )
+
+        if self.config.moe_top_k > 0:
+            _, selected_experts = torch.topk(
+                routing_weights, self.config.moe_top_k, dim=-1
+            )
+
+            routing_weights = torch.zeros_like(routing_weights)
+            value = (
+                torch.ones(
+                    size=(1,),
+                    device=routing_weights.device,
+                    dtype=routing_weights.dtype,
+                )
+                / self.config.moe_top_k
+            )
+            value = value.expand_as(selected_experts)
+            routing_weights.scatter_(dim=-1, index=selected_experts, src=value)
+
+            # _, not_selected = torch.topk(
+            #    routing_weights, routing_weights.size(-1) - self.config.moe_top_k, dim=-1
+            # )
+            # print('not selected ', [self.expert_names[i.item()] for i in torch.unique(not_selected)])
+
+        g = self.info_container.get("routing_gates", [])
+        g.append(router_logits)
+        self.info_container["routing_gates"] = g
+
+        return BatchSequenceModulesAndWeightsSelectorOutput(
+            modules=None, weights=routing_weights
+        )
+
+    def get_merged_weights(self, container, **selector_kwargs) -> Dict:
+        raise ValueError("Not supported for ClownSelector.")
+
+    def get_routing_weights(self):
+        raise ValueError("Not supported for ClownSelector.")
+
+    def add_expert(self, expert_name: str, **kwargs):
+        self.expert_names.append(expert_name)
 
 
 @dataclass
