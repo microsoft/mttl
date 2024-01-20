@@ -133,7 +133,7 @@ class AverageSelector(RoutingSelector):
         )
 
     def forward(self, routing_infos, **kwargs):
-        bs = routing_infos.task_ids.size(0)
+        bs = routing_infos.input_ids.size(0)
         module_logits = self.module_logits.view(1, self.n_splits, self.n_skills)
         return module_logits.expand(bs, -1, -1)
 
