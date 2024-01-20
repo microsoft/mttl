@@ -78,7 +78,7 @@ class RouterWrapper:
                     setattr(
                         module,
                         name,
-                        AverageSelector(**kwargs),
+                        AverageSelector(inner_mod.config, **kwargs),
                     )
                     success = True
         return success
