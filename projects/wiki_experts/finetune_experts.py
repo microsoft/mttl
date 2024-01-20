@@ -311,6 +311,34 @@ def finetune_polylib_full_with_svd_retrieval(args: ExpertConfig, dm):
     return load_expert_from_checkpoint(checkpoint)
 
 
+@register_finetune_func("pretrain_poly")
+def finetune_polylib_full_with_svd_retrieval(args: ExpertConfig, dm):
+    """
+    Loads (the old) Poly / MHR pretrained checkoint, and fine-tunes it on the downstream task.
+    """
+    assert args.checkpoint is not None, "Please specify a checkpoint"
+
+    # Passing a checkpoint assumes the use of `ExpertTrainer`
+    # e.g. for poly-μ and MHR-μ
+    ckpt_path = get_checkpoint_path(args.checkpoint)
+    expert = load_expert(ckpt_path)
+    module = ExpertTrainer(**vars(expert.training_config))
+
+    ckpt = torch.load(ckpt_path)
+    result = module.load_state_dict(ckpt["state_dict"], strict=False)
+    assert len(result.unexpected_keys) == 0, result.unexpected_keys
+
+    # For Poly and MHR, apply potential averaging, or resizing
+    if args.finetune_type and args.finetune_type == "MuZ":
+        module.model.switch_selector_to_average()
+    elif expert.training_config.model_modifier == "poly":
+        module.model.resize_module_logits(1)
+
+    module.to("cuda")
+    checkpoint = train_module(args, module, dm)
+    return load_expert_from_checkpoint(checkpoint)
+
+
 def run_multitask(args: ExpertConfig):
     seed_everything(args.seed, workers=True)
 
@@ -325,25 +353,7 @@ def run_multitask(args: ExpertConfig):
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
 
-    if args.checkpoint is not None:
-        # Passing a checkpoint assumes the use of `ExpertTrainer`
-        # e.g. for poly-μ and MHR-μ
-        ckpt_path = get_checkpoint_path(args.checkpoint)
-        expert = load_expert(ckpt_path)
-        module = ExpertTrainer(**vars(expert.training_config))
-
-        ckpt = torch.load(ckpt_path)
-        result = module.load_state_dict(ckpt["state_dict"], strict=False)
-        assert len(result.unexpected_keys) == 0, result.unexpected_keys
-
-        # For Poly and MHR, apply potential averaging, or resizing
-        if args.finetune_type and args.finetune_type == "MuZ":
-            module.model.switch_selector_to_average()
-        elif expert.training_config.model_modifier == "poly":
-            module.model.resize_module_logits(1)
-        train_module(args, module, dm)
-
-    elif args.hf_lib_id is not None:
+    if args.hf_lib_id is not None or args.checkpoint is not None:
         # fine-tuning with expert library
         assert args.finetune_regime in FINETUNE_FUNCTIONS
         expert: Expert = FINETUNE_FUNCTIONS[args.finetune_regime](args, dm)
