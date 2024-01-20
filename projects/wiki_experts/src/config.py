@@ -88,12 +88,12 @@ class ExpertConfig(Config):
         # hidden state computation transform
         self.use_base_model_only = False
         self.model = None
-        self.max_samples_per_task = 10
+        self.max_samples_per_task = 100
         self.track = "each_layer"
         self.pool = "last"
         self.delta_scale = None
 
-        self.router_temp = None
+        self.router_temp = 1.0
 
     def post_init(self):
         if self.micro_batch_size is None:
