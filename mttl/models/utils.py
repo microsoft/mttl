@@ -27,12 +27,6 @@ def convert_and_push_to_hub(
     expert,
     repo_id,
 ) -> None:
-    """Searches into local path for the checkpoint with lowest validation loss,
-    then uploads that.
-
-    if use_last is True, then uses the last checkpoint `last.ckpt` instead
-    of the one with lowest validation loss.
-    """
     import huggingface_hub
     import io
 
