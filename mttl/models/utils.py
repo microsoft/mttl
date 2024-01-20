@@ -37,7 +37,7 @@ def convert_and_push_to_hub(
     import io
 
     with io.BytesIO() as buffer:
-        torch.save(expert.dumps(), buffer)
+        torch.save(expert.asdict(), buffer)
 
         huggingface_hub.create_repo(repo_id, repo_type="model", exist_ok=True)
         huggingface_hub.upload_file(
