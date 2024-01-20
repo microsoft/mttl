@@ -190,7 +190,7 @@ class SVDEmbeddingRetriever(Retriever):
 
         logger.info(
             "Retrieved experts: {} with metric {}".format(
-                list(resulting_library.keys()), "LoraSimilarity"
+                list(resulting_library.keys()), "SVDEmbeddingRetriever"
             )
         )
         logger.disabled = False

@@ -84,6 +84,7 @@ class ExpertConfig(Config):
         self.finetune_regime = None  # polylib_full, lib_mu, polylib_selector
         self.library_to_expert_transform = None
         self.eval_before_training = True
+        self.remove_experts = None
 
     def post_init(self):
         if self.micro_batch_size is None:

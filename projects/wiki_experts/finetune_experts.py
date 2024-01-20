@@ -99,14 +99,31 @@ def load_expert_from_checkpoint(checkpoint):
     return expert
 
 
+def prepare_expert_lib(args: ExpertConfig, lib_location) -> LocalExpertLibrary:
+    library = LocalExpertLibrary.create_from_remote(
+        HFExpertLibrary(args.hf_lib_id), destination=lib_location
+    )
+    if args.remove_experts is not None:
+        remove_experts = args.remove_experts.split(",")
+        for expert_name in remove_experts:
+            logger.info(f"Removing expert {expert_name}")
+            library.remove_expert(expert_name, soft_delete=False)
+    return library
+
+
 def create_mean_expert(args: ExpertConfig, library: ExpertLibrary = None) -> Expert:
     args_copy = copy.deepcopy(args)
     args_copy.router_selector = "uniform"
-
-    expert_lib = HFExpertLibrary(args.hf_lib_id) if library is None else library
+    lib_location = None
+    if library is None:
+        lib_location = f"/tmp/{args.hf_lib_id}"
+        os.makedirs(lib_location, exist_ok=True)
+        library = prepare_expert_lib(args, lib_location)
     module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
-    module.load_from_module_dict(expert_lib)
+    module.load_from_module_dict(library)
     mean_expert: Expert = module.to_expert()
+    if lib_location is not None:
+        shutil.rmtree(lib_location, ignore_errors=True)
     return mean_expert
 
 
@@ -117,9 +134,7 @@ def retrieve(args: ExpertConfig, task, k, retrieve_with="random"):
 
         lib_location = f"/tmp/{args.hf_lib_id}"
         os.makedirs(lib_location, exist_ok=True)
-        library = LocalExpertLibrary.create_from_remote(
-            HFExpertLibrary(args.hf_lib_id), destination=lib_location
-        )
+        library = prepare_expert_lib(args, lib_location)
         library: VirtualLocalLibrary = retriever.transform(
             library, current_task=args.finetune_task_name
         )
@@ -134,16 +149,14 @@ def retrieve(args: ExpertConfig, task, k, retrieve_with="random"):
 
         lib_location = f"/tmp/{args.hf_lib_id}"
         os.makedirs(lib_location, exist_ok=True)
-        library = LocalExpertLibrary.create_from_remote(
-            HFExpertLibrary(args.hf_lib_id), destination=lib_location
-        )
+        library = prepare_expert_lib(args, lib_location)
         if query_expert in library:
             library.remove_expert(query_expert.name)
         library.add_expert(query_expert)
         ###########################################################################
         # redo SVD with the query expert included
         if "neo" in args.hf_lib_id:
-            sparsity_threshold = 0.7
+            sparsity_threshold = 0.5
         elif "phi" in args.hf_lib_id:
             sparsity_threshold = 0.5
         else:
@@ -159,7 +172,6 @@ def retrieve(args: ExpertConfig, task, k, retrieve_with="random"):
         library: VirtualLocalLibrary = retriever.transform(
             library, current_task=args.finetune_task_name, task_expert=query_expert
         )
-        shutil.rmtree(lib_location, ignore_errors=True)
     else:
         raise ValueError(f"Unknown retriever {retrieve_with}")
     return library
@@ -347,6 +359,7 @@ def run_multitask(args: ExpertConfig):
         # fine-tuning with expert library
         assert args.finetune_regime in FINETUNE_FUNCTIONS
         expert: Expert = FINETUNE_FUNCTIONS[args.finetune_regime](args, dm)
+        shutil.rmtree(f"/tmp/{args.hf_lib_id}", ignore_errors=True)
         # can load expert to hf lib optionally here
     else:
         raise ValueError("please specify a library, or a checkpoint")
