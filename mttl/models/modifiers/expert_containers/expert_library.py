@@ -219,6 +219,7 @@ class ExpertLibrary:
         hf_token_hub=None,
         model_name=None,
         selection=None,
+        exclude_selection=None,
         create=False,
         ignore_sliced=False,
     ):
@@ -227,6 +228,7 @@ class ExpertLibrary:
         self.repo_id = repo_id
         self._sliced = False
         self.selection = selection
+        self.exclude_selection = exclude_selection
         self.model_name = model_name
         self._in_transaction = False
         self._pending_operations = []
@@ -234,6 +236,9 @@ class ExpertLibrary:
         self.data = {}
 
         self.ignore_sliced = ignore_sliced
+
+        if self.selection and self.exclude_selection:
+            raise ValueError("Cannot use both selection and exclude_selection.")
 
         if "HF_TOKEN" in os.environ or hf_token_hub:
             self.login(token=os.environ.get("HF_TOKEN", hf_token_hub))
@@ -288,8 +293,15 @@ class ExpertLibrary:
             self.data[key] = metadatum
 
         if self.selection:
+            logger.warn("Only including experts in selection: %s", self.selection)
             self._sliced = True
-            self.data = {k: v for k, v in self.data.items() if self.selection in k}
+            self.data = {k: v for k, v in self.data.items() if k in self.selection}
+        elif self.exclude_selection:
+            logger.warn("Excluding experts in selection: %s", self.exclude_selection)
+            self._sliced = True
+            self.data = {
+                k: v for k, v in self.data.items() if k not in self.exclude_selection
+            }
 
     def _download_model(self, model_name):
         if model_name not in self.data:
@@ -586,7 +598,7 @@ class ExpertLibrary:
         expert_name: str,
         embedding_config: Dict,
         expert_embedding: np.ndarray,
-        force=False,
+        force: bool = False,
     ):
         return self.add_auxiliary_data(
             data_type="embeddings",
