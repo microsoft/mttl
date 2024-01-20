@@ -388,7 +388,7 @@ class MoETrainer(MultiExpertModel):
                     f"e{i}",
                     LoRAConfig(
                         modify_layers=self.hparams.modify_layers,
-                        modify_modules=self.hparams.modify_modules,
+                        modify_modulea=self.hparams.modify_modules,
                         lora_alpha=self.hparams.lora_alpha,
                         lora_dropout=self.hparams.lora_dropout,
                         lora_rank=self.hparams.lora_rank,
@@ -400,8 +400,16 @@ class MoETrainer(MultiExpertModel):
             library = kwargs.get(
                 "expert_library", HFExpertLibrary(self.hparams.hf_lib_id)
             )
-            for i, expert in enumerate(sorted(list(library.keys()))):
-                self.add_expert_instance(library[expert], expert_name=f"e{i}")
+            if self.training_config.router_selector == "clown_router":
+                # add clown router support directly from library
+                for i, expert in enumerate(sorted(list(library.keys()))):
+                    self.add_expert_instance(library[expert])
+                from projects.wiki_experts.eval_library import patch_prototypes
+
+                patch_prototypes(self, library, self.training_config)
+            else:
+                for i, expert in enumerate(sorted(list(library.keys()))):
+                    self.add_expert_instance(library[expert], expert_name=f"e{i}")
             self.moe_num_experts = i + 1
 
     def training_step(self, batch, _):

@@ -3,6 +3,7 @@ import sys
 import json
 import torch
 from copy import deepcopy
+import torch.nn.functional as F
 
 from mttl.models.modifiers.expert_containers.expert_library import (
     HFExpertLibrary,
@@ -73,6 +74,48 @@ def get_hidden_states(library, args):
     return output
 
 
+def patch_prototypes(module, library, args):
+    hidden_states = get_hidden_states(library, args)
+
+    for mod in module.modules():
+        if isinstance(mod, ClownSelector):
+            prototypes = []
+            params = []
+            # full_params = []
+            for expert_name in mod.expert_names:
+                layer_names = hidden_states[expert_name].keys()
+                valid_layer_names = [
+                    k for k in layer_names if k.startswith(mod.layer_name)
+                ]
+                key = sorted(valid_layer_names)[0]
+                prototypes += [hidden_states[expert_name][key]]
+
+                # get params too
+                # expert = library[expert_name]
+                # expert_params = [expert.expert_weights[k] for k in valid_layer_names]
+                # full_params += [(expert_params[0] @ expert_params[1]).flatten()]
+                # expert_params = torch.cat([p.flatten() for p in expert_params])
+                # params += [expert_params]
+
+            # compute similarity over parameters too
+            # params = torch.stack(params)
+            # sim = F.cosine_similarity(params.unsqueeze(0), params.unsqueeze(1), dim=-1)
+
+            # normalize the similarities to go between -1 and 1
+            # sim = (sim - sim.min()) / (sim.max() - sim.min()) # between 0 and 1
+            # sim = (sim * 2) - 1 # between -1 and 1
+
+            logger.info(
+                f"setting prototypes for selector at {mod.layer_name} with hidden states from {key}"
+            )
+            prototypes = torch.stack(prototypes)
+
+            # modify the prototypes to account for similarity in embeddings
+            # prototypes = torch.einsum('BC,CD->BD', sim.type_as(prototypes), prototypes)
+
+            mod.overwrite_prototypes(prototypes)
+
+
 def run_multitask(args: ExpertConfig):
     seed_everything(args.seed, workers=True)
 
@@ -107,23 +150,7 @@ def run_multitask(args: ExpertConfig):
     args_copy.precision = 32
     module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
     module.load_from_module_dict(library)
-
-    for mod in module.modules():
-        if isinstance(mod, ClownSelector):
-            prototypes = []
-            for expert_name in mod.expert_names:
-                layer_names = hidden_states[expert_name].keys()
-                valid_layer_names = [
-                    k for k in layer_names if k.startswith(mod.layer_name)
-                ]
-                key = sorted(valid_layer_names)[0]
-                prototypes += [hidden_states[expert_name][key]]
-
-            logger.info(
-                f"setting prototypes for selector at {mod.layer_name} with hidden states from {key}"
-            )
-            prototypes = torch.stack(prototypes)
-            mod.overwrite_prototypes(prototypes)
+    patch_prototypes(module, library, args)
 
     # transform = HiddenStateComputer(HiddenStateComputerConfig(upload_to_hf=True))
     # transform.transform(library)
