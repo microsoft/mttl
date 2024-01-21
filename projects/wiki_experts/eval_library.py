@@ -81,7 +81,6 @@ def patch_prototypes(module, library, args):
         if isinstance(mod, ClownSelector):
             prototypes = []
             params = []
-            # full_params = []
             for expert_name in mod.expert_names:
                 layer_names = hidden_states[expert_name].keys()
                 valid_layer_names = [
@@ -90,28 +89,29 @@ def patch_prototypes(module, library, args):
                 key = sorted(valid_layer_names)[0]
                 prototypes += [hidden_states[expert_name][key]]
 
-                # get params too
-                # expert = library[expert_name]
-                # expert_params = [expert.expert_weights[k] for k in valid_layer_names]
-                # full_params += [(expert_params[0] @ expert_params[1]).flatten()]
-                # expert_params = torch.cat([p.flatten() for p in expert_params])
-                # params += [expert_params]
-
-            # compute similarity over parameters too
-            # params = torch.stack(params)
-            # sim = F.cosine_similarity(params.unsqueeze(0), params.unsqueeze(1), dim=-1)
-
-            # normalize the similarities to go between -1 and 1
-            # sim = (sim - sim.min()) / (sim.max() - sim.min()) # between 0 and 1
-            # sim = (sim * 2) - 1 # between -1 and 1
+                if args.use_similarity_scaling:
+                    # get params too
+                    expert = library[expert_name]
+                    expert_params = [
+                        expert.expert_weights[k] for k in valid_layer_names
+                    ]
+                    expert_params = torch.cat([p.flatten() for p in expert_params])
+                    params += [expert_params]
 
             logger.info(
                 f"setting prototypes for selector at {mod.layer_name} with hidden states from {key}"
             )
             prototypes = torch.stack(prototypes)
 
-            # modify the prototypes to account for similarity in embeddings
-            # prototypes = torch.einsum('BC,CD->BD', sim.type_as(prototypes), prototypes)
+            if args.use_similarity_scaling:
+                params = torch.stack(params)
+                sim = F.cosine_similarity(
+                    params.unsqueeze(0), params.unsqueeze(1), dim=-1
+                )
+                sim = (sim - sim.min()) / (sim.max() - sim.min())
+                prototypes = torch.einsum(
+                    "BC,CD->BD", sim.type_as(prototypes), prototypes
+                )
 
             mod.overwrite_prototypes(prototypes)
 
@@ -141,28 +141,26 @@ def run_multitask(args: ExpertConfig):
         repo_id=args.hf_lib_id, exclude_selection=exclude_phi_tasks
     )
 
-    hidden_states = get_hidden_states(library, args)
-    an_expert = library[next(iter(library.keys()))]
-    args_copy = deepcopy(an_expert.training_config)
-    args_copy.router_selector = "clown_router"
-    args_copy.router_temp = args.router_temp
-    args_copy.moe_top_k = args.moe_top_k
-    args_copy.precision = 32
-    module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
-    module.load_from_module_dict(library)
-    patch_prototypes(module, library, args)
+    if args.merge_or_route == "uniform":
+        expert = WeightedLinearMerge().transform(library)
+        module = MultiExpertModel(**vars(expert.training_config)).to("cuda")
+        module.add_expert_instance(expert, is_default=True)
+    elif args.merge_or_route == "ties":
+        cfg = TiesMergeConfig(top_k=0.2)
+        ties_expert = TiesMerge(cfg).transform(library)
+        module = MultiExpertModel(**vars(ties_expert.training_config)).to("cuda")
+        module.add_expert_instance(ties_expert, is_default=True)
+    elif args.merge_or_route == "clown":
+        an_expert = library[next(iter(library.keys()))]
+        args_copy = deepcopy(an_expert.training_config)
+        args_copy.router_selector = "clown_router"
+        args_copy.router_temp = args.router_temp
+        args_copy.moe_top_k = args.moe_top_k
+        args_copy.precision = 32
 
-    # transform = HiddenStateComputer(HiddenStateComputerConfig(upload_to_hf=True))
-    # transform.transform(library)
-
-    # cfg = TiesMergeConfig(top_k=0.975, only_sparsify=True)
-    # expert = WeightedLinearMerge().transform(library)
-    # expert = TiesMerge(cfg).transform(library)
-
-    # svd_embedder = SVDEmbeddingTransform(
-    #     SVDEmbeddingTransformConfig(sparsity_threshold=0.5, recompute=False)
-    # )
-    # out, svd = svd_embedder.transform(library, upload_to_hf=True)
+        module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
+        module.load_from_module_dict(library)
+        patch_prototypes(module, library, args)
 
     """
     single_exp = {'merged': expert}
@@ -174,20 +172,6 @@ def run_multitask(args: ExpertConfig):
     )
     expert = WeightedLinearMerge().transform(projected_library)
     """
-    # module = MultiExpertModel(**vars(expert.training_config)).to("cuda")
-    # module.add_expert_instance(expert, is_default=True)
-
-    """
-    local_library = LocalExpertLibrary.create_from_remote(library, destination='/data/lucas/local_libraries')
-    if 'codex-shared' not in local_library.keys():
-        local_library.add_expert_from_ckpt('sordonia/expert_phi-2_code')
-    expert = WeightedLinearMerge().transform(local_library)
-    """
-
-    # cfg = TiesMergeConfig(top_k=0.2)
-    # ties_expert = TiesMerge(cfg).transform(library)
-    # module = MultiExpertModel(**vars(ties_expert.training_config)).to("cuda")
-    # module.add_expert_instance(ties_expert, is_default=True)
 
     if args.pipeline_eval_tasks == "all":
         args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"

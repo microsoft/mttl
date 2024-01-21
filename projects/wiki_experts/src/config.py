@@ -87,13 +87,19 @@ class ExpertConfig(Config):
 
         # hidden state computation transform
         self.use_base_model_only = False
-        self.model = None
         self.max_samples_per_task = 100
         self.track = "each_layer"
         self.pool = "last"
-        self.delta_scale = None
+        self.delta_scale = None  # how much to extrapolate the shift in the expert's prototype direction
+        self.use_similarity_scaling = (
+            False  # whether to scale the centroids as a function of LoRA similarity
+        )
 
+        # Clown Router
         self.router_temp = 1.0
+
+        # Eval Library
+        self.merge_or_route = None  # "uniform", "ties", "clown"
 
     def post_init(self):
         if self.micro_batch_size is None:
