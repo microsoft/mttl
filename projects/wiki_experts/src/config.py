@@ -85,6 +85,8 @@ class ExpertConfig(Config):
         self.library_to_expert_transform = None
         self.eval_before_training = True
         self.remove_experts = None
+        self.create_transfer_matrix = False
+        self.rouge_every_opt_step = 0
 
     def post_init(self):
         if self.micro_batch_size is None:
