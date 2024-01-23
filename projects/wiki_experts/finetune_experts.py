@@ -265,6 +265,16 @@ def finetune_polylib_full(args: ExpertConfig, dm):
     return load_expert_from_checkpoint(checkpoint), checkpoint
 
 
+@register_finetune_func("polylib_uniform")
+def finetune_polylib_full(args: ExpertConfig, dm):
+    args.router_selector = "uniform"
+    module = MoETrainer(**vars(args), device_map="auto")
+
+    module.to("cuda")
+    checkpoint = train_module(args, module, dm)
+    return load_expert_from_checkpoint(checkpoint), checkpoint
+
+
 @register_finetune_func("polylib_selector")
 def finetune_polylib_sel(args: ExpertConfig, dm):
     """
