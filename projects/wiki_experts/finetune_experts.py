@@ -180,6 +180,42 @@ def retrieve(args: ExpertConfig, task, k, retrieve_with="random"):
     return library
 
 
+@register_finetune_func("nevergrad")
+def finetune_with_nevergrad(args: ExpertConfig, dm):
+    """
+    LoraHub baselines
+    """
+    from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
+    from mttl.evaluators.rouge_evaluator import RougeEvaluator
+
+    lib_location = f"/tmp/{args.hf_lib_id}"
+    os.makedirs(lib_location, exist_ok=True)
+    expert_lib = prepare_expert_lib(args, lib_location)
+
+    dm_for_gen = get_datamodule(args, for_generation=True)
+
+    rouge_evaluator = RougeEvaluator(dm_for_gen)
+
+    def get_loss(model):
+        return -1.0 * rouge_evaluator.evaluate(model, split="val", verbose=False)
+
+    module = RoutedMultiExpertModel(**vars(args), device_map="auto")
+
+    optimizer = NGRoutingOptimizer(
+        model=module,
+        expert_lib=expert_lib,
+        get_loss=get_loss,
+        budget=args.n_ng_iterations,
+        action="route",
+        regularizer_factor=0.0,
+    )
+
+    best_weights, best_graph_string = optimizer.optimize()
+    module.load_from_graph_string(best_graph_string, "route", expert_library=expert_lib)
+    expert = module.replace_container_with_expert("new_task")
+    return expert, None
+
+
 @register_finetune_func("lib_mu")
 def finetune_lib_mu(args: ExpertConfig, dm):
     """
@@ -269,6 +305,10 @@ def finetune_polylib_full(args: ExpertConfig, dm):
 def finetune_polylib_full(args: ExpertConfig, dm):
     args.router_selector = "uniform"
     module = MoETrainer(**vars(args), device_map="auto")
+
+    # for n, p in module.named_parameters():
+    #     if "selector" in n:
+    #         assert p.requires_grad==False
 
     module.to("cuda")
     checkpoint = train_module(args, module, dm)
@@ -448,7 +488,7 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
 
     if args.pipeline_eval_tasks:
         if args.pipeline_eval_tasks == "all":
-            args.pipeline_eval_tasks = "arc_challenge,arc_easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
+            args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
 
         eval_callback = DownstreamEvalCallback(args)
         callbacks.append(eval_callback)

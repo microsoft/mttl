@@ -88,6 +88,7 @@ class ExpertConfig(Config):
         self.create_transfer_matrix = False
         self.rouge_every_opt_step = 0
         self.es_metric = "loss"
+        self.n_ng_iterations = 30  # number of iterations for LoraHub
 
     def post_init(self):
         if self.micro_batch_size is None:
