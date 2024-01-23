@@ -197,7 +197,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
     rouge_evaluator = RougeEvaluator(dm_for_gen)
 
     def get_loss(model):
-        return -1.0 * rouge_evaluator.evaluate(model, split="val", verbose=False)
+        return -1.0 * rouge_evaluator.evaluate(model, split="train", verbose=False)
 
     module = RoutedMultiExpertModel(**vars(args), device_map="auto")
 
@@ -431,7 +431,7 @@ def run_multitask(args: ExpertConfig):
         expert, checkpoint = FINETUNE_FUNCTIONS[args.finetune_regime](args, dm)
 
         if args.create_transfer_matrix:
-            if "polylib" in args.finetune_regime:
+            if "polylib" in args.finetune_regime or "nevergrad" in args.finetune_regime:
                 create_transfer_matrix(args, expert)
             else:
                 create_transfer_matrix(args, checkpoint)
