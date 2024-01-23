@@ -87,6 +87,7 @@ class ExpertConfig(Config):
         self.remove_experts = None
         self.create_transfer_matrix = False
         self.rouge_every_opt_step = 0
+        self.es_metric = "rougeL"
 
     def post_init(self):
         if self.micro_batch_size is None:

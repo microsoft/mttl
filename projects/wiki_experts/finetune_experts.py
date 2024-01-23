@@ -19,11 +19,6 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     retry,
 )
 
-from mttl.models.modifiers.expert_containers.library_transforms import (
-    WeightedLinearMerge,
-    WeightedLinearMergeConfig,
-)
-
 from mttl.callbacks import LiveCheckpointCallback
 
 from mttl.models.monitors import get_monitors
@@ -56,6 +51,7 @@ from typing import Callable
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.train_experts_main import create_transfer_matrix
+from projects.wiki_experts.src.callbacks import RougeLCallback
 
 
 FINETUNE_FUNCTIONS: dict[str, Callable] = {}
@@ -407,14 +403,39 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
         monitor = "val/loss"
         mode = "min"
 
-    checkpoint_callback = LiveCheckpointCallback(
-        dirpath=args.output_dir,
-        monitor=monitor,
-        save_last=True,
-        mode=mode,
-    )
+    if "rouge" in args.es_metric:  # early stop on Rouge
+        from projects.wiki_experts.src.callbacks import RougeLCallback
+
+        dm_for_gen = get_datamodule(args, for_generation=True)
+        checkpoint_callback = RougeLCallback(
+            datamodule=dm_for_gen,
+            output_dir=args.output_dir,
+            eval_every_opt_step=args.eval_every,
+            name=f"rougeL_val",
+            split="val",
+            checkpoint_oracle=True,
+        )
+        val_check_interval = 0.2
+    else:
+        checkpoint_callback = LiveCheckpointCallback(
+            dirpath=args.output_dir,
+            monitor=monitor,
+            save_last=True,
+            mode=mode,
+        )
+        val_check_interval = args.eval_every
+        if val_check_interval == -1 or val_check_interval is None:
+            val_check_interval = None
+        else:
+            val_check_interval = args.gradient_accumulation_steps * args.eval_every
+            if val_check_interval > len(dm.train_dataloader()):
+                val_check_interval = len(dm.train_dataloader())
+            elif val_check_interval > args.total_steps and args.total_steps != -1:
+                val_check_interval = args.total_steps
+
     callbacks.append(checkpoint_callback)
     eval_callback = None
+
     if args.pipeline_eval_tasks:
         if args.pipeline_eval_tasks == "all":
             args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
@@ -425,28 +446,6 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
         logger.warn(
             "Deactivating downstream eval callback as it is not enabled in the config. Please set `pipeline_eval_tasks`."
         )
-
-    if args.rouge_every_opt_step > 0:
-        from projects.wiki_experts.src.callbacks import RougeLCallback
-
-        rouge_callback = RougeLCallback(
-            datamodule=dm,
-            output_dir=args.output_dir,
-            eval_every_opt_step=args.eval_every,
-            name=f"rougeL_val_es",
-            checkpoint_oracle=False,
-        )
-        callbacks.append(rouge_callback)
-
-    val_check_interval = args.eval_every
-    if val_check_interval == -1 or val_check_interval is None:
-        val_check_interval = None
-    else:
-        val_check_interval = args.gradient_accumulation_steps * args.eval_every
-        if val_check_interval > len(dm.train_dataloader()):
-            val_check_interval = len(dm.train_dataloader())
-        elif val_check_interval > args.total_steps and args.total_steps != -1:
-            val_check_interval = args.total_steps
 
     trainer = Trainer(
         devices=-1,
