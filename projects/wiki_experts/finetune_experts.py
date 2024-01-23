@@ -448,7 +448,7 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
 
     if args.pipeline_eval_tasks:
         if args.pipeline_eval_tasks == "all":
-            args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
+            args.pipeline_eval_tasks = "arc_challenge,arc_easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
 
         eval_callback = DownstreamEvalCallback(args)
         callbacks.append(eval_callback)
