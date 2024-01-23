@@ -18,7 +18,7 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     VirtualLocalLibrary,
     retry,
 )
-from mttl.callbacks import LiveCheckpointCallback
+from mttl.callbacks import LiveCheckpointCallback, RougeCallback
 
 from mttl.models.monitors import get_monitors
 from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
@@ -390,6 +390,17 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
     else:
         logger.warn(
             "Deactivating downstream eval callback as it is not enabled in the config. Please set `pipeline_eval_tasks`."
+        )
+
+    if args.eval_rouge_flag:
+        rouge = RougeCallback(
+            get_datamodule(args, for_generation=True),
+            every_n_epochs=3 if args.num_train_epochs > 3 else 1,
+        )
+        callbacks.append(rouge)
+    else:
+        logger.warn(
+            "Deactivating rouge callback as it is not enabled in the config. Please set `eval_rouge_flag=True`."
         )
 
     val_check_interval = args.eval_every
