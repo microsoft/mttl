@@ -28,8 +28,8 @@ class LiveCheckpointCallback(pl.Callback):
         save_last=True,
         save_weights_only=True,
         save_each_epoch=False,
-        library_name="library-phi_2-v3-debug",
-        huggingface_token=None,
+        library_name="library_debug",
+        hf_token_hub=None,
     ):
         if not monitor and not save_last:
             raise ValueError(
@@ -48,9 +48,9 @@ class LiveCheckpointCallback(pl.Callback):
         self.save_each_epoch = save_each_epoch
         self.library_name = library_name
 
-        self.huggingface_token = huggingface_token
-        if self.huggingface_token is not None:
-            huggingface_hub.login(token=huggingface_token)
+        self.hf_token_hub = hf_token_hub
+        if self.hf_token_hub is not None:
+            huggingface_hub.login(token=hf_token_hub)
 
     def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         # save each checkpoint after each epoch
@@ -62,9 +62,11 @@ class LiveCheckpointCallback(pl.Callback):
                 self.save_model_path, weights_only=self.save_weights_only
             )
 
-        if self.huggingface_token is not None:
+        if self.hf_token_hub is not None:
             # create the library
-            library_name = f"{self.library_name}-{self.dirpath}"
+            library_name = (
+                f"{self.library_name}-{self.dirpath}-epoch_{trainer.current_epoch}"
+            )
             library_dest = HFExpertLibrary(library_name, create=True)
             with library_dest.batched_commit():
                 expert = load_expert(self.save_model_path)

@@ -89,7 +89,8 @@ def run_multitask(args: ExpertConfig):
         save_last=True,
         mode=mode,
         save_each_epoch=args.save_each_epoch,
-        library_name=args.hf_lib_id,
+        library_name=args.library_name,
+        hf_token_hub=args.hf_token_hub,
     )
     callbacks.append(checkpoint_callback)
 

@@ -80,6 +80,7 @@ class ExpertConfig(Config):
         self.create_transfer_matrix = False
         self.tasksets_path = None
         self.save_each_epoch = False
+        self.library_name = "library_debug"
 
     def post_init(self):
         if self.micro_batch_size is None:
