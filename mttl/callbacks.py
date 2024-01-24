@@ -10,7 +10,9 @@ from torch.optim import Optimizer
 
 from mttl.utils import logger
 from mttl.models.utils import transfer_batch_to_device
-
+from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.models.modifiers.expert_containers.module_graph import load_expert
+import huggingface_hub
 
 DEBUG = False
 
@@ -26,6 +28,8 @@ class LiveCheckpointCallback(pl.Callback):
         save_last=True,
         save_weights_only=True,
         save_each_epoch=False,
+        library_name="library-phi_2-v3-debug",
+        huggingface_token=None,
     ):
         if not monitor and not save_last:
             raise ValueError(
@@ -42,6 +46,11 @@ class LiveCheckpointCallback(pl.Callback):
         self._last_value = None
         self.save_weights_only = save_weights_only
         self.save_each_epoch = save_each_epoch
+        self.library_name = library_name
+
+        self.huggingface_token = huggingface_token
+        if self.huggingface_token is not None:
+            huggingface_hub.login(token=huggingface_token)
 
     def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         # save each checkpoint after each epoch
@@ -52,6 +61,17 @@ class LiveCheckpointCallback(pl.Callback):
             trainer.save_checkpoint(
                 self.save_model_path, weights_only=self.save_weights_only
             )
+
+        if self.huggingface_token is not None:
+            # create the library
+            library_name = f"{self.library_name}-{self.dirpath}"
+            library_dest = HFExpertLibrary(library_name, create=True)
+            with library_dest.batched_commit():
+                expert = load_expert(self.save_model_path)
+                expert_name = self.dirpath
+                expert.expert_info.expert_name = expert_name
+                if expert.name not in library_dest:
+                    library_dest.add_expert(expert)
 
     def on_train_end(self, trainer, pl_module):
         """Saves the last checkpoint."""
