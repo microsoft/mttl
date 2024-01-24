@@ -18,8 +18,7 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     VirtualLocalLibrary,
     retry,
 )
-
-from mttl.callbacks import LiveCheckpointCallback
+from mttl.callbacks import LiveCheckpointCallback, RougeCallback
 
 from mttl.models.monitors import get_monitors
 from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
@@ -353,6 +352,34 @@ def finetune_polylib_full_with_svd_retrieval(args: ExpertConfig, dm):
     return load_expert_from_checkpoint(checkpoint), checkpoint
 
 
+@register_finetune_func("pretrain_poly")
+def finetune_polylib_full_with_svd_retrieval(args: ExpertConfig, dm):
+    """
+    Loads (the old) Poly / MHR pretrained checkoint, and fine-tunes it on the downstream task.
+    """
+    assert args.checkpoint is not None, "Please specify a checkpoint"
+
+    # Passing a checkpoint assumes the use of `ExpertTrainer`
+    # e.g. for poly-μ and MHR-μ
+    ckpt_path = get_checkpoint_path(args.checkpoint)
+    expert = load_expert(ckpt_path)
+    module = ExpertTrainer(**vars(expert.training_config))
+
+    ckpt = torch.load(ckpt_path)
+    result = module.load_state_dict(ckpt["state_dict"], strict=False)
+    assert len(result.unexpected_keys) == 0, result.unexpected_keys
+
+    # For Poly and MHR, apply potential averaging, or resizing
+    if args.finetune_type and args.finetune_type == "MuZ":
+        module.model.switch_selector_to_average()
+    elif expert.training_config.model_modifier == "poly":
+        module.model.resize_module_logits(1)
+
+    module.to("cuda")
+    checkpoint = train_module(args, module, dm)
+    return load_expert_from_checkpoint(checkpoint)
+
+
 def run_multitask(args: ExpertConfig):
     seed_everything(args.seed, workers=True)
 
@@ -366,28 +393,8 @@ def run_multitask(args: ExpertConfig):
     # select dataloader
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
-
-    if args.checkpoint is not None:
-        # Passing a checkpoint assumes the use of `ExpertTrainer`
-        # e.g. for poly-μ and MHR-μ
-        ckpt_path = get_checkpoint_path(args.checkpoint)
-        expert = load_expert(ckpt_path)
-        module = ExpertTrainer(**vars(expert.training_config))
-
-        ckpt = torch.load(ckpt_path)
-        result = module.load_state_dict(ckpt["state_dict"], strict=False)
-        assert len(result.unexpected_keys) == 0, result.unexpected_keys
-
-        # For Poly and MHR, apply potential averaging, or resizing
-        if args.finetune_type and args.finetune_type == "MuZ":
-            module.model.switch_selector_to_average()
-        elif expert.training_config.model_modifier == "poly":
-            module.model.resize_module_logits(1)
-        checkpoint = train_module(args, module, dm)
-        if args.create_transfer_matrix:
-            create_transfer_matrix(args, checkpoint)
-
-    elif args.hf_lib_id is not None:
+    
+    if args.hf_lib_id is not None or args.checkpoint is not None:
         # fine-tuning with expert library
         assert args.finetune_regime in FINETUNE_FUNCTIONS
         expert, checkpoint = FINETUNE_FUNCTIONS[args.finetune_regime](args, dm)
@@ -454,6 +461,27 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
         logger.warn(
             "Deactivating downstream eval callback as it is not enabled in the config. Please set `pipeline_eval_tasks`."
         )
+        
+    if args.eval_rouge_flag:
+        rouge = RougeCallback(
+            get_datamodule(args, for_generation=True),
+            every_n_epochs=3 if args.num_train_epochs > 3 else 1,
+        )
+        callbacks.append(rouge)
+    else:
+        logger.warn(
+            "Deactivating rouge callback as it is not enabled in the config. Please set `eval_rouge_flag=True`."
+        )
+
+    val_check_interval = args.eval_every
+    if val_check_interval == -1 or val_check_interval is None:
+        val_check_interval = None
+    else:
+        val_check_interval = args.gradient_accumulation_steps * args.eval_every
+        if val_check_interval > len(dm.train_dataloader()):
+            val_check_interval = len(dm.train_dataloader())
+        elif val_check_interval > args.total_steps and args.total_steps != -1:
+            val_check_interval = args.total_steps
 
     trainer = Trainer(
         devices=-1,

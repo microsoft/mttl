@@ -241,6 +241,7 @@ class PolySelectorConfig(SelectorConfig):
 @register_multi_expert_selector("poly_router", PolySelectorConfig)
 class PolySelector(Selector):
     """
+      eval_every=10_000
     Implements routing at a per-layer or per-model level
     """
 

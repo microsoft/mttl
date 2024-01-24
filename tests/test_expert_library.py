@@ -36,6 +36,16 @@ def test_expert_lib(mocker):
     assert len(library) == 0
     assert library._sliced
 
+    library = HFExpertLibrary(
+        "sordonia/test-library", exclude_selection=["abstract_algebra"]
+    )
+
+    assert len(library) == 1
+    assert library._sliced
+
+    with pytest.raises(ValueError):
+        module_dump = library["abstract_algebra"]
+
 
 def test_soft_delete(mocker):
     from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary

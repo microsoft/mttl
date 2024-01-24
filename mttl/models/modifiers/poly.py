@@ -93,19 +93,23 @@ class PolytroponSelector(RoutingSelector):
         task_ids = routing_infos.task_ids
 
         if task_ids is None:
-            if not self.use_avg_last:
-                logger.warning("task_ids is None, using AverageSelector instead")
+            # If there is only one task, we are in finetuning mode, so just use said task
+            if self.module_logits.size(0) == 1:
+                task_ids = torch.zeros_like(routing_infos.input_ids[:, 0])
+            else:
+                if not self.use_avg_last:
+                    logger.warning("task_ids is None, using AverageSelector instead")
 
-            self.use_avg_last = True
-            bs = routing_infos.input_ids.size(0)
-            module_weights = torch.ones(
-                (bs, self.n_splits, self.n_skills),
-                device=routing_infos.input_ids.device,
-            )
-            module_weights = (
-                module_weights / module_weights.sum(dim=-1, keepdim=True) + EPS
-            )
-            return module_weights
+                self.use_avg_last = True
+                bs = routing_infos.input_ids.size(0)
+                module_weights = torch.ones(
+                    (bs, self.n_splits, self.n_skills),
+                    device=routing_infos.input_ids.device,
+                )
+                module_weights = (
+                    module_weights / module_weights.sum(dim=-1, keepdim=True) + EPS
+                )
+                return module_weights
 
         self.use_avg_last = False
         if self.training and not hasattr(routing_infos, "logged_task_ids"):
