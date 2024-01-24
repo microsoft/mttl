@@ -529,7 +529,7 @@ def setup_evaluators(
                 generation_kwargs=generation_kwargs,
                 split="train",
             )
-        elif task == "boolq":
+        elif task in ["boolq", "bool_q_1_0_0"]:
             config = SuperGLUEDataConfig(
                 **common_kwargs,
             )
@@ -554,7 +554,7 @@ def setup_evaluators(
             evaluators["bbh-fast"] = DirectBBHEvaluatorFast(
                 config, generation_kwargs=generation_kwargs
             )
-        elif task == "arc_easy":
+        elif task in ["arc-easy", "ai2_arc_ARC_Easy_1_0_0"]:
             config = ArcDataConfig(
                 **common_kwargs,
                 arc_type="ARC-Easy",
@@ -562,7 +562,7 @@ def setup_evaluators(
             evaluators["arc_easy"] = ArcEvaluator(
                 config, generation_kwargs=generation_kwargs
             )
-        elif task == "arc_challenge":
+        elif task in ["arc-challenge", "ai2_arc_ARC_Challenge_1_0_0"]:
             config = ArcDataConfig(
                 **common_kwargs,
                 arc_type="ARC-Challenge",
@@ -570,24 +570,24 @@ def setup_evaluators(
             evaluators["arc_challenge"] = ArcEvaluator(
                 config, generation_kwargs=generation_kwargs
             )
-        elif task == "piqa":
+        elif task in ["piqa", "piqa_1_0_0"]:
             config = PiqaDataConfig(
                 **common_kwargs,
             )
             evaluators["piqa"] = PiqaEvaluator(
                 config, generation_kwargs=generation_kwargs
             )
-        elif task == "hellaswag":
+        elif task in ["hellaswag", "hellaswag_1_1_0", "hswag"]:
             evaluators["hellaswag"] = HellaswagEvaluator(
                 HellaswagDataConfig(**common_kwargs),
                 generation_kwargs=generation_kwargs,
             )
-        elif task == "winogrande":
+        elif task in ["winogrande", "winogrande_1_1_0"]:
             evaluators["winogrande"] = WinograndeEvaluator(
                 WinograndeDataConfig(**common_kwargs),
                 generation_kwargs=generation_kwargs,
             )
-        elif task == "openbookqa":
+        elif task in ["openbookqa", "openbookqa_0_1_0"]:
             evaluators["openbookqa"] = OpenbookQAEvaluator(
                 OpenbookQADataConfig(**common_kwargs),
                 generation_kwargs=generation_kwargs,
