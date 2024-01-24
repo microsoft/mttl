@@ -366,11 +366,19 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             else:
                 weights = selection.weights
 
-            weights = weights.view(-1, weights.shape[-1])
-            module_output = SkilledLoRA.parallel_linear_weighted_forward(
-                input.view(-1, input.shape[-1]), [self.experts], [weights]
-            )
-            return module_output.view(input.shape[0], input.shape[1], -1)
+            if weights.ndim == 2:
+                # only weights for each example
+                module_output = SkilledLoRA.parallel_linear_weighted_forward(
+                    input, [self.experts], [weights]
+                )
+                return module_output
+            else:
+                # weights for examples and sequence length
+                weights = weights.view(-1, weights.shape[-1])
+                module_output = SkilledLoRA.parallel_linear_weighted_forward(
+                    input.view(-1, input.shape[-1]), [self.experts], [weights]
+                )
+                return module_output.view(input.shape[0], input.shape[1], -1)
 
     def forward(self, input, **kwargs):
         if len(self.experts) > 0:

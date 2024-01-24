@@ -33,6 +33,7 @@ from projects.wiki_experts.src.evolution.transfer_matrix import (
     TransferMatrixConfig,
     run_eval as produce_transfer_matrix,
 )
+from mttl.models.modifiers.expert_containers.expert_library import retry
 
 
 def create_transfer_matrix(args, checkpoint):
@@ -176,8 +177,8 @@ def run_multitask(args: ExpertConfig):
             from projects.wiki_experts.src.expert_model import push_expert_to_hub
 
             push_expert_to_hub(checkpoint, args.hf_repo_id, auto_search=False)
-
-    create_transfer_matrix(args, checkpoint)
+        if args.create_transfer_matrix:
+            create_transfer_matrix(args, checkpoint)
 
 
 if __name__ == "__main__":
