@@ -152,11 +152,12 @@ class LoRA(MergeableAdapter, ModifyMixin):
         if len(set([lora.layer for lora in loras])) > 1:
             raise ValueError("Cannot parallelize loras applied to different layers.")
 
-        # (n_examples, in_features, rank)
+        # (batch, in_features, rank)
         lora_a = torch.stack([lora.lora_a for lora in loras], dim=0)
-        # (n_examples, rank, out_features)
+        # (batch, rank, out_features)
         lora_b = torch.stack([lora.lora_b for lora in loras], dim=0)
-        # (n_examples,)
+
+        # (batch,)
         scaling = torch.cat(
             [torch.FloatTensor([lora.scaling]) for lora in loras], dim=0
         ).to(device=lora_a.device, dtype=lora_a.dtype)
@@ -169,6 +170,7 @@ class LoRA(MergeableAdapter, ModifyMixin):
         adapter_out = (
             torch.bmm(torch.bmm(input_lora, lora_a), lora_b) * scaling[:, None, None]
         )
+
         return layer_out + adapter_out.to(dtype=input.dtype)
 
     def reset_parameters(self):
@@ -226,7 +228,7 @@ class SkilledLoRA(LoRA):
                 self.lora_a.data,
                 lora.lora_a.data.reshape(
                     1, self.n_splits, self.in_features // self.n_splits, self.rank
-                ),
+                ).to(device=self.lora_a.device, dtype=self.lora_a.dtype),
             ],
             dim=0,
         )
@@ -235,7 +237,7 @@ class SkilledLoRA(LoRA):
                 self.lora_b.data,
                 lora.lora_b.data.reshape(
                     1, self.rank, self.n_splits, self.out_features // self.n_splits
-                ),
+                ).to(device=self.lora_a.device, dtype=self.lora_a.dtype),
             ],
             dim=0,
         )
@@ -376,18 +378,19 @@ class SkilledLoRA(LoRA):
         skilled_loras_a = skilled_loras_a.squeeze(2)
         skilled_loras_b = skilled_loras_b.squeeze(3)
 
-        # up-type the input for lora computation
-        input_lora = input.to(dtype=skilled_loras[0].lora_a.dtype)
-        weights = weights.to(dtype=skilled_loras[0].lora_a.dtype)
+        # (n_examples, seq_len, out_features)
+        layer_out = skilled_loras[0].layer(input)
 
-        # apply some dropout
+        input_lora = input.to(skilled_loras[0].lora_a.dtype)
         input_lora = skilled_loras[0].dropout_layer(input_lora)
+        weights = weights.to(dtype=skilled_loras[0].lora_a.dtype)
 
         # (n_examples,)
         scaling = torch.cat(
             [torch.FloatTensor([lora.scaling]) for lora in skilled_loras], dim=0
         ).to(device=device, dtype=skilled_loras[0].lora_a.dtype)
 
+        # make all ops in float32
         if num_skilled_loras == 1:
             # no batch, skilled lora is shared across all examples, remove batch dimension
             skilled_loras_a = skilled_loras_a.squeeze(0)
@@ -455,8 +458,8 @@ class SkilledLoRA(LoRA):
                 adapter_out = torch.einsum("bsr,brd->bsd", (partial_out, B))
                 adapter_out = adapter_out * scaling[:, None, None]
 
-        layer_out = skilled_loras[0].layer(input)
-        return layer_out + adapter_out.to(dtype=layer_out.dtype)
+        # adapter out is float32
+        return layer_out + adapter_out.to(dtype=input.dtype)
 
 
 class LoRAView(LoRA):

@@ -354,7 +354,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                     (len(selection.modules), self.experts.n_skills),
                 )
                 .scatter_add(1, indices, torch.ones((len(selection.modules), 1)))
-                .to(device=self.experts.lora_a.device)
+                .to(device=self.experts.lora_a.device, dtype=torch.float32)
             )
             module_output = SkilledLoRA.parallel_linear_weighted_forward(
                 input, [self.experts], [weights]
@@ -402,7 +402,8 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
         if len(self.experts) > 0:
             selection = self.selector(input, container=self, **kwargs)
             return self.route(input, selection, **kwargs)
-        return self.layer(input)
+        else:
+            return self.layer(input)
 
 
 class KVExpertContainer(KVAdapter, ExpertContainer):
