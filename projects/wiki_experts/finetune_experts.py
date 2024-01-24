@@ -24,7 +24,11 @@ from mttl.callbacks import LiveCheckpointCallback
 from mttl.models.monitors import get_monitors
 from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
 from projects.wiki_experts.src.expert_model import MoETrainer, RoutedMultiExpertModel
-from mttl.models.modifiers.expert_containers.module_graph import load_expert, Expert
+from mttl.models.modifiers.expert_containers.module_graph import (
+    load_expert,
+    Expert,
+    ExpertInfo,
+)
 from projects.wiki_experts.src.evolution.retrievers import (
     RandomRetriever,
     SVDEmbeddingRetriever,
@@ -187,6 +191,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
     """
     LoraHub baselines
     """
+    get_pl_loggers(args)
     from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
     from mttl.evaluators.rouge_evaluator import RougeEvaluator
 
@@ -215,6 +220,9 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
     best_weights, best_graph_string = optimizer.optimize()
     module.load_from_graph_string(best_graph_string, "route", expert_library=expert_lib)
     expert = module.replace_container_with_expert("new_task")
+    expert.expert_config = ExpertInfo(
+        expert_name=f"nevergrad_{args.finetune_task_name}"
+    )
     return expert, None
 
 
@@ -432,11 +440,8 @@ def run_multitask(args: ExpertConfig):
         assert args.finetune_regime in FINETUNE_FUNCTIONS
         expert, checkpoint = FINETUNE_FUNCTIONS[args.finetune_regime](args, dm)
 
-        if args.create_transfer_matrix:
-            if "polylib" in args.finetune_regime or "nevergrad" in args.finetune_regime:
-                create_transfer_matrix(args, expert)
-            else:
-                create_transfer_matrix(args, checkpoint)
+        if args.create_transfer_matrix or args.finetune_regime == "nevergrad":
+            create_transfer_matrix(args, expert)
 
         shutil.rmtree(f"/tmp/{args.hf_lib_id}", ignore_errors=True)
         # can load expert to hf lib optionally here
