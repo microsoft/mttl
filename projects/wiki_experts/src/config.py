@@ -1,6 +1,7 @@
 import os
 import torch
 
+import json
 from mttl.config import Config
 import mttl.datamodule.task_sequences
 import mttl.datamodule.task_cluster_flan
@@ -69,7 +70,7 @@ class ExpertConfig(Config):
         self.eval_mmlu_few_shot = True  # use few-shot for mmlu, default
         self.eval_mmlu_flag = False  # eval mmlu performance during training
         self.eval_rouge_flag = False  # eval rouge during training
-        self.pipeline_eval_tasks = None
+        self.pipeline_eval_tasks = "all"
 
         self.eval_metric = "loss"
         self.use_vllm = False
@@ -82,6 +83,8 @@ class ExpertConfig(Config):
         )
         self.sk = 5  # number of experts to retrieve from a library
         self.finetune_regime = None  # polylib_full, lib_mu, polylib_selector
+
+        self.tasksets_path = None
         self.library_to_expert_transform = None
         self.eval_before_training = True
         self.remove_experts = None
@@ -115,15 +118,23 @@ class ExpertConfig(Config):
             tasks = self.finetune_task_name.split(
                 "+"
             )  # use "+" for assign multiple task set vars to be found in task_sequences
+
+            task_sets = None
+            if self.tasksets_path is not None:
+                task_sets = json.load(open(self.tasksets_path))
+
             for task_name in tasks:
-                if task_name in mttl.datamodule.task_sequences.__dict__:
-                    task_names.extend(
-                        getattr(mttl.datamodule.task_sequences.__dict__, task_name)
-                    )
-                elif task_name in mttl.datamodule.task_cluster_flan.__dict__:
-                    task_names.extend(
-                        getattr(mttl.datamodule.task_cluster_flan, task_name)
-                    )
+                if task_sets is not None and task_name in task_sets:
+                    task_names.extend(task_sets[task_name])
                 else:
-                    task_names.extend([task_name])
+                    if task_name in mttl.datamodule.task_sequences.__dict__:
+                        task_names.extend(
+                            getattr(mttl.datamodule.task_sequences, task_name)
+                        )
+                    elif task_name in mttl.datamodule.task_cluster_flan.__dict__:
+                        task_names.extend(
+                            getattr(mttl.datamodule.task_cluster_flan, task_name)
+                        )
+                    else:
+                        task_names.extend([task_name])
             self.finetune_task_name = ",".join(task_names)

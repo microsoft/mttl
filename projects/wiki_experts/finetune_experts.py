@@ -8,9 +8,6 @@ import shutil
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.datamodule.mbpp_datamodule import MBPPDataConfig, MBPPDataModule
-from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
-
 from mttl.models.modifiers.expert_containers.expert_library import (
     HFExpertLibrary,
     ExpertLibrary,
@@ -20,15 +17,19 @@ from mttl.models.modifiers.expert_containers.expert_library import (
 )
 
 from mttl.callbacks import LiveCheckpointCallback
-
 from mttl.models.monitors import get_monitors
 from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
-from projects.wiki_experts.src.expert_model import MoETrainer, RoutedMultiExpertModel
-from mttl.models.modifiers.expert_containers.module_graph import (
-    load_expert,
-    Expert,
-    ExpertInfo,
+from projects.wiki_experts.src.expert_model import (
+    MoETrainer,
+    MultiExpertModel,
+    RoutedMultiExpertModel,
 )
+from mttl.models.modifiers.expert_containers.module_graph import load_expert, Expert
+from mttl.models.modifiers.expert_containers.library_transforms import (
+    WeightedLinearMerge,
+    WeightedLinearMergeConfig,
+)
+
 from projects.wiki_experts.src.evolution.retrievers import (
     RandomRetriever,
     SVDEmbeddingRetriever,
@@ -81,6 +82,7 @@ def register_finetune_func(name):
 def get_task_expert(task, library):
     if task not in library.tasks:
         raise ValueError(f"Task {task} not found in repository.")
+
     task_experts = []
     for name, metadata in library.data.items():
         if metadata.expert_deleted:
@@ -90,11 +92,6 @@ def get_task_expert(task, library):
 
     assert len(task_experts) == 1, f"Found {len(task_experts)} experts for task {task}"
     return library[task_experts[0]]
-
-
-def load_lora_expert_in_expert_trainer(module: ExpertTrainer, expert: Expert):
-    keys = module.model.load_state_dict(expert.expert_weights, strict=False)
-    assert sum(["lora" in k for k in keys.missing_keys]) == 0, "Some keys are missing"
 
 
 def load_expert_from_checkpoint(checkpoint):
@@ -120,21 +117,10 @@ def prepare_expert_lib(args: ExpertConfig, lib_location) -> LocalExpertLibrary:
 
 
 def create_mean_expert(args: ExpertConfig, library: ExpertLibrary = None) -> Expert:
-    args_copy = copy.deepcopy(args)
-    args_copy.router_selector = "uniform"
-    lib_location = None
-
     if library is None:
-        lib_location = f"/tmp/{args.hf_lib_id}"
-        os.makedirs(lib_location, exist_ok=True)
-        library = prepare_expert_lib(args, lib_location)
+        library = args.hf_lib_id
 
-    module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
-    module.load_from_module_dict(library)
-    mean_expert: Expert = module.to_expert()
-    if lib_location is not None:
-        shutil.rmtree(lib_location, ignore_errors=True)
-    return mean_expert
+    return WeightedLinearMerge(WeightedLinearMergeConfig()).transform(library)
 
 
 def retrieve(args: ExpertConfig, task, k, retrieve_with="random"):
@@ -245,13 +231,12 @@ def finetune_lib_mu(args: ExpertConfig, dm):
     2. Fine-tunes this expert on the downstream task
     """
     mean_expert: Expert = create_mean_expert(args)
+    mean_expert.name = args.finetune_task_name
 
-    module = ExpertTrainer(**vars(args), device_map="auto")
-    module.to("cuda")
-    load_lora_expert_in_expert_trainer(module, mean_expert)
+    module = MultiExpertModel(**vars(args)).to("cuda")
+    module.add_expert_instance(mean_expert)
 
-    checkpoint = train_module(args, module, dm)
-    return load_expert_from_checkpoint(checkpoint), checkpoint
+    return train_module(args, module, dm)
 
 
 @register_finetune_func("lib_mu_randretr")
@@ -268,12 +253,10 @@ def finetune_lib_mu_with_rand_retrieval(args: ExpertConfig, dm):
 
     mean_expert: Expert = create_mean_expert(args, library)
 
-    module = ExpertTrainer(**vars(args), device_map="auto")
-    module.to("cuda")
-    load_lora_expert_in_expert_trainer(module, mean_expert)
+    module = MultiExpertModel(**vars(args)).to("cuda")
+    module.add_expert_instance(mean_expert, is_default=True)
 
-    checkpoint = train_module(args, module, dm)
-    return load_expert_from_checkpoint(checkpoint), checkpoint
+    return train_module(args, module, dm)
 
 
 @register_finetune_func("lib_mu_svdretr")
@@ -290,12 +273,10 @@ def finetune_lib_mu_with_svd_retrieval(args: ExpertConfig, dm):
 
     mean_expert: Expert = create_mean_expert(args, library)
 
-    module = ExpertTrainer(**vars(args), device_map="auto")
-    module.to("cuda")
-    load_lora_expert_in_expert_trainer(module, mean_expert)
+    module = MultiExpertModel(**vars(args)).to("cuda")
+    module.add_expert_instance(mean_expert, is_default=True)
 
-    checkpoint = train_module(args, module, dm)
-    return load_expert_from_checkpoint(checkpoint), checkpoint
+    return train_module(args, module, dm)
 
 
 @register_finetune_func("polylib_full")
@@ -319,8 +300,7 @@ def finetune_polylib_full(args: ExpertConfig, dm):
             assert p.requires_grad
 
     module.to("cuda")
-    checkpoint = train_module(args, module, dm)
-    return load_expert_from_checkpoint(checkpoint), checkpoint
+    return train_module(args, module, dm)
 
 
 @register_finetune_func("polylib_uniform")
@@ -333,8 +313,7 @@ def finetune_polylib_full(args: ExpertConfig, dm):
     #         assert p.requires_grad==False
 
     module.to("cuda")
-    checkpoint = train_module(args, module, dm)
-    return load_expert_from_checkpoint(checkpoint), checkpoint
+    return train_module(args, module, dm)
 
 
 @register_finetune_func("polylib_selector")
@@ -344,16 +323,16 @@ def finetune_polylib_sel(args: ExpertConfig, dm):
     """
 
     args.trainable_param_names = "|.*module_logits.*|.*selector.*"
-    # args.router_selector = "poly_router"
     assert args.router_selector is not None
 
     module = MoETrainer(**vars(args), device_map="auto")
+
     for n, p in module.named_parameters():
         if "selector" in n:
             assert p.requires_grad
+
     module.to("cuda")
-    checkpoint = train_module(args, module, dm)
-    return load_expert_from_checkpoint(checkpoint), checkpoint
+    return train_module(args, module, dm)
 
 
 @register_finetune_func("polylib_full_randretr")
@@ -375,8 +354,7 @@ def finetune_polylib_full_with_rand_retrieval(args: ExpertConfig, dm):
             assert p.requires_grad
 
     module.to("cuda")
-    checkpoint = train_module(args, module, dm)
-    return load_expert_from_checkpoint(checkpoint), checkpoint
+    return train_module(args, module, dm)
 
 
 @register_finetune_func("private")
@@ -384,10 +362,9 @@ def finetune_private(args: ExpertConfig, dm):
     """
     Just train an expert from scratch
     """
-    module = ExpertTrainer(**vars(args), device_map="auto")
-    module.to("cuda")
-    checkpoint = train_module(args, module, dm)
-    return load_expert_from_checkpoint(checkpoint), checkpoint
+
+    module = ExpertTrainer(**vars(args)).to("cuda")
+    return train_module(args, module, dm)
 
 
 @register_finetune_func("polylib_full_svdretr")
@@ -409,8 +386,7 @@ def finetune_polylib_full_with_svd_retrieval(args: ExpertConfig, dm):
             assert p.requires_grad
 
     module.to("cuda")
-    checkpoint = train_module(args, module, dm)
-    return load_expert_from_checkpoint(checkpoint), checkpoint
+    return train_module(args, module, dm)
 
 
 def run_multitask(args: ExpertConfig):
@@ -443,9 +419,8 @@ def run_multitask(args: ExpertConfig):
             module.model.switch_selector_to_average()
         elif expert.training_config.model_modifier == "poly":
             module.model.resize_module_logits(1)
-        checkpoint = train_module(args, module, dm)
-        if args.create_transfer_matrix:
-            create_transfer_matrix(args, checkpoint)
+
+        train_module(args, module, dm)
 
     elif args.hf_lib_id is not None:
         # fine-tuning with expert library
@@ -454,9 +429,7 @@ def run_multitask(args: ExpertConfig):
 
         if args.create_transfer_matrix or args.finetune_regime == "nevergrad":
             create_transfer_matrix(args, expert)
-
         shutil.rmtree(f"/tmp/{args.hf_lib_id}", ignore_errors=True)
-        # can load expert to hf lib optionally here
     else:
         raise ValueError("please specify a library, or a checkpoint")
 
@@ -465,21 +438,18 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
     loggers = get_pl_loggers(args)
     callbacks = get_monitors(args)
 
-    if "mbpp" in args.dataset:
-        monitor = "downstream/mbpp"
-        mode = "max"
-    else:
-        monitor = "val/loss"
-        mode = "min"
+    monitor = "val/loss"
+    mode = "min"
 
     if "rouge" in args.es_metric:  # early stop on Rouge
-        dm_for_gen = get_datamodule(args, for_generation=True)
-        rouge_callback = RougeCallback(
-            datamodule=dm_for_gen,
-        )
-        callbacks.append(rouge_callback)
         monitor = "val/rougeL"
         mode = "max"
+
+    dm_for_gen = get_datamodule(args, for_generation=True)
+    rouge_callback = RougeCallback(
+        datamodule=dm_for_gen,
+    )
+    callbacks.append(rouge_callback)
 
     checkpoint_callback = LiveCheckpointCallback(
         dirpath=args.output_dir,
@@ -487,6 +457,7 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
         save_last=True,
         mode=mode,
     )
+    callbacks.append(checkpoint_callback)
 
     val_check_interval = args.eval_every
     if val_check_interval == -1 or val_check_interval is None:
@@ -498,9 +469,7 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
         elif val_check_interval > args.total_steps and args.total_steps != -1:
             val_check_interval = args.total_steps
 
-    callbacks.append(checkpoint_callback)
     eval_callback = None
-
     if args.pipeline_eval_tasks:
         if args.pipeline_eval_tasks == "all":
             args.pipeline_eval_tasks = "arc_challenge,arc_easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
@@ -534,12 +503,17 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
 
     # initial validation only for a bunch of datasets... ?
     trainer.validate(module, dm)
-    trainer.fit(module, dm)
 
-    checkpoint = (
-        checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
-    )
-    module.load_state_dict(torch.load(checkpoint)["state_dict"])
+    if args.do_train:
+        trainer.fit(module, dm)
+
+        checkpoint = (
+            checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
+        )
+        module.load_state_dict(torch.load(checkpoint)["state_dict"])
+    else:
+        checkpoint = None
+
     trainer.test(module, dm)
     return checkpoint
 
