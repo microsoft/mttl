@@ -141,8 +141,24 @@ def run_multitask(args: ExpertConfig):
         repo_id=args.hf_lib_id, exclude_selection=exclude_phi_tasks
     )
 
-    if args.merge_or_route == "uniform":
-        expert = WeightedLinearMerge().transform(library)
+    if args.merge_or_route in ["uniform", "weighted"]:
+        weights = None
+        if args.merge_or_route == "weighted":
+            # get weights from 10 cluster
+            from mttl.datamodule import task_cluster_flan
+
+            tasks = []
+            for i in range(10):
+                tasks += [getattr(task_cluster_flan, f"c{i}_2e")]
+            n_tasks = sum([len(t) for t in tasks])
+            weights = {}
+            for task_subset in tasks:
+                for task in task_subset:
+                    weights[task] = 1 / len(task_subset) / 10
+
+        expert = WeightedLinearMerge(
+            WeightedLinearMergeConfig(weights=weights)
+        ).transform(library)
         module = MultiExpertModel(**vars(expert.training_config)).to("cuda")
         module.add_expert_instance(expert, is_default=True)
     elif args.merge_or_route == "ties":
