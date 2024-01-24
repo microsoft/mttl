@@ -23,6 +23,7 @@ from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
 from mttl.evaluators import MMLUEvaluator
 from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from projects.wiki_experts.src.evolution.config import EvolExpertConfig as ExpertConfig
+import wandb
 
 
 def mmlu_get_loss(
@@ -103,8 +104,10 @@ class NGRoutingOptimizer:
         base_module_name=None,
         regularizer_factor=0.0,
         action="route",
+        log=True,
     ) -> None:
         self.action = action
+        self.log = log
         self.regularizer_factor = regularizer_factor
         self.task_name = task_name
         self.model: MultiExpertModel = model
@@ -126,6 +129,8 @@ class NGRoutingOptimizer:
             parametrization=self.parametrization, budget=budget
         )
         self.get_loss = get_loss
+
+        self._iteration = 0
 
     def construct_graph(self, modules_to_dest: Union[Dict, ExpertLibrary]):
         return ModuleGraph.from_expert_dict(modules_to_dest, module_name="new_task")
@@ -160,10 +165,19 @@ class NGRoutingOptimizer:
             loss = get_loss(
                 model=model,
             )
+            if self.log:
+                wandb.log(
+                    {
+                        "loss": loss,
+                        "iteration": self._iteration,
+                    }
+                )
+
             # L1 regularization term
             metric_val = loss + self.regularizer_factor * get_regular(weights)
             del model
             free_memory()
+            self._iteration += 1
             return metric_val
 
         _get_score = partial(

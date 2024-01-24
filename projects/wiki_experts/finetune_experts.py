@@ -56,6 +56,7 @@ from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.train_experts_main import create_transfer_matrix
 from projects.wiki_experts.src.callbacks import RougeLCallback
+from mttl.models.modifiers.base import ModifierConfig
 
 
 FINETUNE_FUNCTIONS: dict[str, Callable] = {}
@@ -214,14 +215,19 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
         get_loss=get_loss,
         budget=args.n_ng_iterations,
         action="route",
-        regularizer_factor=0.0,
+        regularizer_factor=0.05,
     )
 
     best_weights, best_graph_string = optimizer.optimize()
     module.load_from_graph_string(best_graph_string, "route", expert_library=expert_lib)
     expert = module.replace_container_with_expert("new_task")
-    expert.expert_config = ExpertInfo(
-        expert_name=f"nevergrad_{args.finetune_task_name}"
+    expert = Expert(
+        ExpertInfo(
+            expert_name="nevergrad",
+            expert_config=ModifierConfig.from_training_config(args),
+            training_config=args,
+        ),
+        expert.expert_weights,
     )
     return expert, None
 
@@ -491,7 +497,7 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
 
     if args.pipeline_eval_tasks:
         if args.pipeline_eval_tasks == "all":
-            args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
+            args.pipeline_eval_tasks = "arc_challenge,arc_easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
 
         eval_callback = DownstreamEvalCallback(args)
         callbacks.append(eval_callback)
