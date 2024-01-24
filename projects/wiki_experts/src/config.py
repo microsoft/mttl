@@ -83,6 +83,8 @@ class ExpertConfig(Config):
         )
         self.sk = 5  # number of experts to retrieve from a library
         self.finetune_regime = None  # polylib_full, lib_mu, polylib_selector
+
+        self.tasksets_path = None
         self.library_to_expert_transform = None
         self.eval_before_training = True
         self.remove_experts = None
@@ -115,6 +117,7 @@ class ExpertConfig(Config):
             tasks = self.finetune_task_name.split(
                 "+"
             )  # use "+" for assign multiple task set vars to be found in task_sequences
+
             task_sets = None
             if self.tasksets_path is not None:
                 task_sets = json.load(open(self.tasksets_path))

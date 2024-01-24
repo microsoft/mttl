@@ -8,9 +8,6 @@ import shutil
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.datamodule.mbpp_datamodule import MBPPDataConfig, MBPPDataModule
-from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
-
 from mttl.models.modifiers.expert_containers.expert_library import (
     HFExpertLibrary,
     ExpertLibrary,
@@ -20,11 +17,15 @@ from mttl.models.modifiers.expert_containers.expert_library import (
 )
 
 from mttl.callbacks import LiveCheckpointCallback
-
 from mttl.models.monitors import get_monitors
 from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
 from projects.wiki_experts.src.expert_model import MoETrainer, RoutedMultiExpertModel
 from mttl.models.modifiers.expert_containers.module_graph import load_expert, Expert
+from mttl.models.modifiers.expert_containers.library_transforms import (
+    WeightedLinearMerge,
+    WeightedLinearMergeConfig,
+)
+
 from projects.wiki_experts.src.evolution.retrievers import (
     RandomRetriever,
     SVDEmbeddingRetriever,
@@ -115,21 +116,7 @@ def prepare_expert_lib(args: ExpertConfig, lib_location) -> LocalExpertLibrary:
 
 
 def create_mean_expert(args: ExpertConfig, library: ExpertLibrary = None) -> Expert:
-    args_copy = copy.deepcopy(args)
-    args_copy.router_selector = "uniform"
-    lib_location = None
-
-    if library is None:
-        lib_location = f"/tmp/{args.hf_lib_id}"
-        os.makedirs(lib_location, exist_ok=True)
-        library = prepare_expert_lib(args, lib_location)
-
-    module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
-    module.load_from_module_dict(library)
-    mean_expert: Expert = module.to_expert()
-    if lib_location is not None:
-        shutil.rmtree(lib_location, ignore_errors=True)
-    return mean_expert
+    return WeightedLinearMerge(WeightedLinearMergeConfig()).transform(library)
 
 
 def retrieve(args: ExpertConfig, task, k, retrieve_with="random"):
