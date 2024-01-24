@@ -341,7 +341,25 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             )
             return module_output
         elif isinstance(selection, ModulesSelectorOutput):
-            raise NotImplementedError()
+            indices = torch.LongTensor(
+                [
+                    self.expert_names.index(module)
+                    if module in self.expert_names
+                    else self.expert_names.index(self.default_expert_name)
+                    for module in selection.modules
+                ]
+            ).unsqueeze(1)
+            weights = (
+                torch.zeros(
+                    (len(selection.modules), self.experts.n_skills),
+                )
+                .scatter_add(1, indices, torch.ones((len(selection.modules), 1)))
+                .to(device=self.experts.lora_a.device)
+            )
+            module_output = SkilledLoRA.parallel_linear_weighted_forward(
+                input, [self.experts], [weights]
+            )
+            return module_output
         elif isinstance(
             selection, BatchSequenceModulesAndWeightsSelectorOutput
         ) or isinstance(selection, BatchModulesAndWeightsSelectorOutput):

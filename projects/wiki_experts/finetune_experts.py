@@ -266,13 +266,14 @@ def finetune_polylib_sel(args: ExpertConfig, dm):
     """
 
     args.trainable_param_names = "|.*module_logits.*|.*selector.*"
-    # args.router_selector = "poly_router"
     assert args.router_selector is not None
 
     module = MoETrainer(**vars(args), device_map="auto")
+
     for n, p in module.named_parameters():
         if "selector" in n:
             assert p.requires_grad
+
     module.to("cuda")
     return train_module(args, module, dm)
 
