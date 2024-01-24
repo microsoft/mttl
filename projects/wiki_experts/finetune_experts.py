@@ -118,10 +118,12 @@ def create_mean_expert(args: ExpertConfig, library: ExpertLibrary = None) -> Exp
     args_copy = copy.deepcopy(args)
     args_copy.router_selector = "uniform"
     lib_location = None
+
     if library is None:
         lib_location = f"/tmp/{args.hf_lib_id}"
         os.makedirs(lib_location, exist_ok=True)
         library = prepare_expert_lib(args, lib_location)
+
     module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
     module.load_from_module_dict(library)
     mean_expert: Expert = module.to_expert()
@@ -444,8 +446,8 @@ def run_multitask(args: ExpertConfig):
 
 def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
     loggers = get_pl_loggers(args)
-    # get metric monitors for models
     callbacks = get_monitors(args)
+
     if "mbpp" in args.dataset:
         monitor = "downstream/mbpp"
         mode = "max"
@@ -454,34 +456,30 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
         mode = "min"
 
     if "rouge" in args.es_metric:  # early stop on Rouge
-        from projects.wiki_experts.src.callbacks import RougeLCallback
-
         dm_for_gen = get_datamodule(args, for_generation=True)
-        checkpoint_callback = RougeLCallback(
+        rouge_callback = RougeCallback(
             datamodule=dm_for_gen,
-            output_dir=args.output_dir,
-            eval_every_opt_step=args.eval_every,
-            name=f"rougeL_val",
-            split="val",
-            checkpoint_oracle=True,
         )
-        val_check_interval = 0.2
+        callbacks.append(rouge_callback)
+        monitor = "val/rougeL"
+        mode = "max"
+
+    checkpoint_callback = LiveCheckpointCallback(
+        dirpath=args.output_dir,
+        monitor=monitor,
+        save_last=True,
+        mode=mode,
+    )
+
+    val_check_interval = args.eval_every
+    if val_check_interval == -1 or val_check_interval is None:
+        val_check_interval = None
     else:
-        checkpoint_callback = LiveCheckpointCallback(
-            dirpath=args.output_dir,
-            monitor=monitor,
-            save_last=True,
-            mode=mode,
-        )
-        val_check_interval = args.eval_every
-        if val_check_interval == -1 or val_check_interval is None:
-            val_check_interval = None
-        else:
-            val_check_interval = args.gradient_accumulation_steps * args.eval_every
-            if val_check_interval > len(dm.train_dataloader()):
-                val_check_interval = len(dm.train_dataloader())
-            elif val_check_interval > args.total_steps and args.total_steps != -1:
-                val_check_interval = args.total_steps
+        val_check_interval = args.gradient_accumulation_steps * args.eval_every
+        if val_check_interval > len(dm.train_dataloader()):
+            val_check_interval = len(dm.train_dataloader())
+        elif val_check_interval > args.total_steps and args.total_steps != -1:
+            val_check_interval = args.total_steps
 
     callbacks.append(checkpoint_callback)
     eval_callback = None

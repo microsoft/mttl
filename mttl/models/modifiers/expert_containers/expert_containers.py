@@ -336,7 +336,10 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
 
     def route(self, input, selection, **kwargs):
         if isinstance(selection, ModulesAndWeightsSelectorOutput):
-            raise NotImplementedError()
+            module_output = SkilledLoRA.parallel_linear_weighted_forward(
+                input, [self.experts], [selection.weights]
+            )
+            return module_output
         elif isinstance(selection, ModulesSelectorOutput):
             raise NotImplementedError()
         elif isinstance(
