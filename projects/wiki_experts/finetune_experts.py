@@ -241,7 +241,7 @@ def finetune_lib_mu(args: ExpertConfig, dm):
     module = MultiExpertModel(**vars(args)).to("cuda")
     module.add_expert_instance(mean_expert)
 
-    return train_module(args, module, dm)
+    return (train_module(args, module, dm),)
 
 
 @register_finetune_func("lib_mu_randretr")
@@ -459,7 +459,7 @@ def run_multitask(args: ExpertConfig):
     elif args.hf_lib_id is not None:
         # fine-tuning with expert library
         assert args.finetune_regime in FINETUNE_FUNCTIONS
-        expert, checkpoint = FINETUNE_FUNCTIONS[args.finetune_regime](args, dm)
+        expert = FINETUNE_FUNCTIONS[args.finetune_regime](args, dm)
 
         if args.create_transfer_matrix or args.finetune_regime == "nevergrad":
             create_transfer_matrix(args, expert)
