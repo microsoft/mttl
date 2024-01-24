@@ -116,6 +116,9 @@ def prepare_expert_lib(args: ExpertConfig, lib_location) -> LocalExpertLibrary:
 
 
 def create_mean_expert(args: ExpertConfig, library: ExpertLibrary = None) -> Expert:
+    if library is None:
+        library = args.hf_lib_id
+
     return WeightedLinearMerge(WeightedLinearMergeConfig()).transform(library)
 
 
