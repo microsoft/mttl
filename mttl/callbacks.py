@@ -25,6 +25,7 @@ class LiveCheckpointCallback(pl.Callback):
         mode="min",
         save_last=True,
         save_weights_only=True,
+        save_each_epoch=False,
     ):
         if not monitor and not save_last:
             raise ValueError(
@@ -40,6 +41,17 @@ class LiveCheckpointCallback(pl.Callback):
         self._last_step = -1
         self._last_value = None
         self.save_weights_only = save_weights_only
+        self.save_each_epoch = save_each_epoch
+
+    def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        # save each checkpoint after each epoch
+        if self.save_each_epoch:
+            self.save_model_path = os.path.join(
+                f"{self.dirpath}", f"epoch_{trainer.current_epoch}.ckpt"
+            )
+            trainer.save_checkpoint(
+                self.save_model_path, weights_only=self.save_weights_only
+            )
 
     def on_train_end(self, trainer, pl_module):
         """Saves the last checkpoint."""
