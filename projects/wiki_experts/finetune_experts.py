@@ -192,7 +192,13 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
     """
     LoraHub baselines
     """
+    import wandb
+
     get_pl_loggers(args)
+    if wandb.run is not None:
+        # log args to wandb
+        wandb.config.update(args)
+
     from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
     from mttl.evaluators.rouge_evaluator import RougeEvaluator
 
