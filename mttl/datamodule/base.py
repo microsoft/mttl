@@ -556,7 +556,7 @@ class DefaultDataModule(LightningDataModule):
         for split in ["train", "dev", "test"]:
             subsample = getattr(self.config, f"subsample_{split}", None)
 
-            if subsample:
+            if subsample and subsample > 0:
                 logger.warn(f"subsampling the {split} dataset to {subsample} samples")
                 dataset = getattr(self, f"{split}_dataset")
                 sub_dataset = self.subsample_dataset(
