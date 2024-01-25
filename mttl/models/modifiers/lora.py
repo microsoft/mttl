@@ -170,7 +170,6 @@ class LoRA(MergeableAdapter, ModifyMixin):
         adapter_out = (
             torch.bmm(torch.bmm(input_lora, lora_a), lora_b) * scaling[:, None, None]
         )
-
         return layer_out + adapter_out.to(dtype=input.dtype)
 
     def reset_parameters(self):
