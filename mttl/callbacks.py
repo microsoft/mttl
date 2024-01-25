@@ -30,6 +30,7 @@ class LiveCheckpointCallback(pl.Callback):
         save_each_epoch=False,
         library_name="library_debug",
         hf_token_hub=None,
+        cluster_name="cluster_1",
     ):
         if not monitor and not save_last:
             raise ValueError(
@@ -47,6 +48,7 @@ class LiveCheckpointCallback(pl.Callback):
         self.save_weights_only = save_weights_only
         self.save_each_epoch = save_each_epoch
         self.library_name = library_name
+        self.cluster_name = cluster_name
 
         self.hf_token_hub = hf_token_hub
         if self.hf_token_hub is not None:
@@ -64,13 +66,11 @@ class LiveCheckpointCallback(pl.Callback):
 
         if self.hf_token_hub is not None:
             # create the library
-            library_name = (
-                f"{self.library_name}-{self.dirpath}-epoch_{trainer.current_epoch}"
-            )
+            library_name = f"{self.library_name}-epoch_{trainer.current_epoch}"
             library_dest = HFExpertLibrary(library_name, create=True)
             with library_dest.batched_commit():
                 expert = load_expert(self.save_model_path)
-                expert_name = self.dirpath
+                expert_name = self.cluster_name
                 expert.expert_info.expert_name = expert_name
                 if expert.name not in library_dest:
                     library_dest.add_expert(expert)
