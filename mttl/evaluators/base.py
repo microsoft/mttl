@@ -468,8 +468,8 @@ def setup_evaluators(
         "humaneval",
         "mbpp",
         "boolq",
-        "arc-easy",
-        "arc-challenge",
+        "arc_easy",
+        "arc_challenge",
         "piqa",
         "hellaswag",
         "winogrande",
@@ -554,20 +554,20 @@ def setup_evaluators(
             evaluators["bbh-fast"] = DirectBBHEvaluatorFast(
                 config, generation_kwargs=generation_kwargs
             )
-        elif task in ["arc-easy", "ai2_arc_ARC_Easy_1_0_0"]:
+        elif task in ["arc-easy", "ai2_arc_ARC_Easy_1_0_0", "arc_easy"]:
             config = ArcDataConfig(
                 **common_kwargs,
                 arc_type="ARC-Easy",
             )
-            evaluators["arc-easy"] = ArcEvaluator(
+            evaluators["arc_easy"] = ArcEvaluator(
                 config, generation_kwargs=generation_kwargs
             )
-        elif task in ["arc-challenge", "ai2_arc_ARC_Challenge_1_0_0"]:
+        elif task in ["arc-challenge", "ai2_arc_ARC_Challenge_1_0_0", "arc_challenge"]:
             config = ArcDataConfig(
                 **common_kwargs,
                 arc_type="ARC-Challenge",
             )
-            evaluators["arc-challenge"] = ArcEvaluator(
+            evaluators["arc_challenge"] = ArcEvaluator(
                 config, generation_kwargs=generation_kwargs
             )
         elif task in ["piqa", "piqa_1_0_0"]:

@@ -220,7 +220,21 @@ def run_eval(args: EvolExpertConfig, debug=None):
 
     print("###### Tasks", args.finetune_task_name)
     # can work with other library types as well, but need to implement clone and filter_with_tasks
-    if os.path.isfile(args.hf_repo_id):
+
+    if args.hf_repo_id is None:
+        # empty lib, eval only base model
+        temp_dir = TemporaryDirectory(dir=args.output_dir + "/")
+        destination = temp_dir.name
+        expert_lib = LocalExpertLibrary(repo_id=destination)
+    elif isinstance(args.hf_repo_id, Expert):
+        expert: Expert = args.hf_repo_id
+        expert.expert_info.expert_name = "joint"
+        expert.expert_info.expert_task_name = "joint"
+        temp_dir = TemporaryDirectory(dir=args.output_dir + "/")
+        destination = temp_dir.name
+        expert_lib = LocalExpertLibrary(repo_id=destination)
+        expert_lib.add_expert(expert)
+    elif os.path.isfile(args.hf_repo_id):
         # testing a single model
         expert = load_expert(args.hf_repo_id)
         expert.expert_info.expert_name = "joint"

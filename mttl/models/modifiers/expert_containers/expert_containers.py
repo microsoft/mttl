@@ -336,9 +336,30 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
 
     def route(self, input, selection, **kwargs):
         if isinstance(selection, ModulesAndWeightsSelectorOutput):
-            raise NotImplementedError()
+            module_output = SkilledLoRA.parallel_linear_weighted_forward(
+                input, [self.experts], [selection.weights]
+            )
+            return module_output
         elif isinstance(selection, ModulesSelectorOutput):
-            raise NotImplementedError()
+            indices = torch.LongTensor(
+                [
+                    self.expert_names.index(module)
+                    if module in self.expert_names
+                    else self.expert_names.index(self.default_expert_name)
+                    for module in selection.modules
+                ]
+            ).unsqueeze(1)
+            weights = (
+                torch.zeros(
+                    (len(selection.modules), self.experts.n_skills),
+                )
+                .scatter_add(1, indices, torch.ones((len(selection.modules), 1)))
+                .to(device=self.experts.lora_a.device, dtype=torch.float32)
+            )
+            module_output = SkilledLoRA.parallel_linear_weighted_forward(
+                input, [self.experts], [weights]
+            )
+            return module_output
         elif isinstance(
             selection, BatchSequenceModulesAndWeightsSelectorOutput
         ) or isinstance(selection, BatchModulesAndWeightsSelectorOutput):
@@ -363,17 +384,26 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             else:
                 weights = selection.weights
 
-            weights = weights.view(-1, weights.shape[-1])
-            module_output = SkilledLoRA.parallel_linear_weighted_forward(
-                input.view(-1, input.shape[-1]), [self.experts], [weights]
-            )
-            return module_output.view(input.shape[0], input.shape[1], -1)
+            if weights.ndim == 2:
+                # only weights for each example
+                module_output = SkilledLoRA.parallel_linear_weighted_forward(
+                    input, [self.experts], [weights]
+                )
+                return module_output
+            else:
+                # weights for examples and sequence length
+                weights = weights.view(-1, weights.shape[-1])
+                module_output = SkilledLoRA.parallel_linear_weighted_forward(
+                    input.view(-1, input.shape[-1]), [self.experts], [weights]
+                )
+                return module_output.view(input.shape[0], input.shape[1], -1)
 
     def forward(self, input, **kwargs):
         if len(self.experts) > 0:
             selection = self.selector(input, container=self, **kwargs)
             return self.route(input, selection, **kwargs)
-        return self.layer(input)
+        else:
+            return self.layer(input)
 
 
 class KVExpertContainer(KVAdapter, ExpertContainer):
