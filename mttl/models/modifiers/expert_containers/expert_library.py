@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 import glob
@@ -9,6 +10,8 @@ from typing import Any, Dict, List, Union
 import torch
 import os
 import time
+import asyncio
+
 import requests
 import numpy as np
 
@@ -28,7 +31,11 @@ from huggingface_hub import (
 from functools import total_ordering
 from huggingface_hub.utils._errors import RepositoryNotFoundError
 
-from huggingface_hub import HfApi
+from azure.storage.blob import BlobServiceClient
+from azure.storage.blob.aio import BlobServiceClient as AsyncBlobServiceClient
+from azure.core.exceptions import ResourceExistsError
+
+
 from mttl.utils import logger
 from mttl.models.modifiers.expert_containers.module_graph import (
     Expert,
@@ -87,28 +94,37 @@ class MetadataEntry(ExpertInfo):
         return data
 
 
-class BackendEngine:
+class BackendEngine(ABC):
+
+    @abstractmethod
     def snapshot_download(self, repo_id, allow_patterns=None):
         raise NotImplementedError
 
+    @abstractmethod
     def create_repo(self, repo_id, repo_type, exist_ok, private=True):
         raise NotImplementedError
 
+    @abstractmethod
     def create_commit(self, repo_id, operations, commit_message):
         raise NotImplementedError
 
+    @abstractmethod
     def preupload_lfs_files(self, repo_id, additions):
         raise NotImplementedError
 
+    @abstractmethod
     def hf_hub_download(self, repo_id, filename):
         raise NotImplementedError
 
+    @abstractmethod
     def login(self, token):
         raise NotImplementedError
 
+    @abstractmethod
     def repo_info(self, repo_id):
         raise NotImplementedError
 
+    @abstractmethod
     def list_repo_files(self, repo_id):
         raise NotImplementedError
 
@@ -158,6 +174,91 @@ class HuggingfaceHubEngine(BackendEngine):
 
     def list_repo_files(self, repo_id):
         return HfApi().list_repo_files(repo_id)
+
+
+class BlobStorageEngine(BackendEngine):
+
+    @property
+    def token(self):
+        if self._token is None:
+            raise ValueError("Token is not set. Please login first.")
+        return self._token
+
+    @property
+    def blob_service_client(self):
+        if getattr(self, "_blob_service_client", None) is None:
+            self._blob_service_client = BlobServiceClient(self.token)
+        return self._blob_service_client
+
+    def snapshot_download(self, repo_id, allow_patterns=None):
+        """Downloads the entire repository.
+        Downloads are made concurrently to speed-up the process."""
+        repo_files = self.list_repo_files(repo_id)
+        # if allow_patterns is None:
+        #     allow_patterns = ["**/*"]
+        # filtered_files = [
+        #     f for f in repo_files
+        #     if any([re.match(pattern, f) for pattern in allow_patterns])
+        # ]
+        local_filenames = asyncio.run(
+            self.async_download_all_blobs_to_files(repo_id, repo_files)
+        )
+        return local_filenames
+
+    def create_repo(self, repo_id, repo_type, exist_ok, private=True):
+
+        try:
+            self.blob_service_client.create_container(name=repo_id, )
+        except ResourceExistsError:
+            print('A container with this name already exists')
+
+    def create_commit(self, repo_id, operations, commit_message):
+        pass
+
+    def preupload_lfs_files(self, repo_id, additions):
+        pass
+
+    def hf_hub_download(self, repo_id, filename):
+        blob_client = self.blob_service_client.get_blob_client(container=repo_id, blob=filename)
+
+        local_cache = os.path.join(r'/tmp', repo_id, filename)
+        os.makedirs(os.path.dirname(local_cache), exist_ok=True)
+
+        with open(file=local_cache, mode="wb") as blob_file:
+            download_stream = blob_client.download_blob()
+            blob_file.write(download_stream.readall())
+
+        return local_cache
+
+    async def async_download_all_blobs_to_files(self, repo_id, filesnames):
+        tasks = [
+            self.async_download_blob_to_file(repo_id, filename)
+            for filename in filesnames
+        ]
+        local_filenames = await asyncio.gather(*tasks)
+        return local_filenames
+
+    async def async_download_blob_to_file(self, repo_id, filename):
+        async with AsyncBlobServiceClient(self.token) as blob_service_client:
+            blob_client = blob_service_client.get_blob_client(container=repo_id, blob=filename)
+            local_filename = os.path.join(r'/tmp', repo_id, filename)
+            os.makedirs(os.path.dirname(local_filename), exist_ok=True)
+            with open(file=local_filename, mode="wb") as blob_file:
+                download_stream = await blob_client.download_blob()
+                data = await download_stream.readall()
+                blob_file.write(data)
+            return local_filename
+
+    def repo_info(self, repo_id):
+        pass
+
+    def login(self, token):
+        #  token == sas_url
+        self._token = token
+
+    def list_repo_files(self, repo_id):
+        container_client = self.blob_service_client.get_container_client(repo_id)
+        return [b.name for b in container_client.list_blobs()]
 
 
 class LocalFSEngine(BackendEngine):
