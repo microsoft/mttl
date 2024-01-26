@@ -236,10 +236,11 @@ def finetune_lib_mu(args: ExpertConfig, dm):
     2. Fine-tunes this expert on the downstream task
     """
     mean_expert: Expert = create_mean_expert(args)
-    mean_expert.name = args.finetune_task_name
+    if args.finetune_task_name:
+        mean_expert.name = args.finetune_task_name
 
     module = MultiExpertModel(**vars(args)).to("cuda")
-    module.add_expert_instance(mean_expert)
+    module.add_expert_instance(mean_expert, is_default=True)
 
     return (train_module(args, module, dm),)
 
@@ -479,11 +480,18 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
         monitor = "val/rougeL"
         mode = "max"
 
-    dm_for_gen = get_datamodule(args, for_generation=True)
-    rouge_callback = RougeCallback(
-        datamodule=dm_for_gen,
-    )
-    callbacks.append(rouge_callback)
+    try:
+        dm_for_gen = get_datamodule(args, for_generation=True)
+        rouge_callback = RougeCallback(
+            datamodule=dm_for_gen,
+        )
+        callbacks.append(rouge_callback)
+    except:
+        logger.warn("Deactivating rouge callback. Exception thrown.")
+        if "rouge" in args.es_metric:
+            raise ValueError(
+                "Cannot stop on Rouge if no rouge callback is present! An exception was encountered while trying to load it."
+            )
 
     checkpoint_callback = LiveCheckpointCallback(
         dirpath=args.output_dir,
