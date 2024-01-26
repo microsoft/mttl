@@ -20,9 +20,7 @@ class SuperGLUEMultiChoiceDataModule(MultiChoiceDataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
 
-        dataset = load_dataset(
-            "super_glue", name=self.TASK_NAME, split=self.DATASET_SPLIT
-        )
+        dataset = load_dataset("super_glue", name=self.TASK_NAME)
 
         # convert task_id to task_name and labels
         dataset = dataset.map(
@@ -33,9 +31,9 @@ class SuperGLUEMultiChoiceDataModule(MultiChoiceDataModule):
         self._task_to_id = {}
         self._task_names = []
 
-        self.train_dataset = None
-        self.dev_dataset = dataset
-        self.test_dataset = dataset
+        self.train_dataset = dataset["train"]
+        self.dev_dataset = dataset[self.DATASET_SPLIT]
+        self.test_dataset = dataset[self.DATASET_SPLIT]
 
 
 class BoolQDataModule(SuperGLUEMultiChoiceDataModule):
