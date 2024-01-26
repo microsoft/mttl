@@ -44,5 +44,5 @@ class ArcMultiChoiceDataModule(MultiChoiceDataModule):
         self._task_names = []
 
         self.train_dataset = dataset["train"]
-        self.dev_dataset = dataset["test"]
+        self.dev_dataset = dataset["validation"]
         self.test_dataset = dataset["test"]
