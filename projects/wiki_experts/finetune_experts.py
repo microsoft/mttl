@@ -172,6 +172,8 @@ def finetune_lib_mu(args: ExpertConfig, dm):
     2. Fine-tunes this expert on the downstream task
     """
     mean_expert: Expert = create_mean_expert(args)
+    if args.finetune_task_name:
+        mean_expert.name = args.finetune_task_name
 
     module = ExpertTrainer(**vars(args), device_map="auto")
     module.to("cuda")
