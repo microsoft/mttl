@@ -41,14 +41,14 @@ class HellaswagMultiChoiceDataModule(MultiChoiceDataModule):
             example["label_index"] = int(example["label"])
             return example
 
-        dataset = dataset.map(
-            map_example,
-            num_proc=n_proc,
-        )
-
         self._task_to_id = {}
         self._task_names = []
 
-        self.train_dataset = dataset["train"]
-        self.dev_dataset = dataset["validation"]
-        self.test_dataset = dataset["validation"]
+        self.train_dataset = dataset["train"].map(
+            map_example,
+            num_proc=n_proc,
+        )
+        self.dev_dataset = self.test_dataset = dataset["validation"].map(
+            map_example,
+            num_proc=n_proc,
+        )
