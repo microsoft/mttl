@@ -37,6 +37,9 @@ class DownstreamEvalCallback(cb.Callback):
     def on_validation_epoch_start(
         self, trainer: Trainer, pl_module: ExpertTrainer
     ) -> None:
+        if trainer.global_step == 0 and not self.args.eval_before_training:
+            return
+
         if self.args.eval_every_n_epoch is None or (
             self.args.eval_every_n_epoch
             and trainer.current_epoch % self.args.eval_every_n_epoch != 0
@@ -181,6 +184,7 @@ class RougeLCallback(cb.Callback):
         name="rougeL",
         eval_every_opt_step=1,
         checkpoint_oracle=False,
+        split="val",
     ):
         self.name = name
         self.output_dir = output_dir
@@ -192,6 +196,7 @@ class RougeLCallback(cb.Callback):
         self.do_checkpoint = checkpoint_oracle
         self._checkpoint_now = False
         self._prev_checkpoint = None
+        self.split = split
         self.evaluator = RougeEvaluator(datamodule)
 
     @property
@@ -251,7 +256,7 @@ class RougeLCallback(cb.Callback):
         self._checkpoint_now = False
 
     def test(self, pl_module: LightningModule):
-        rougeL = self.evaluator.evaluate(pl_module, verbose=False)
+        rougeL = self.evaluator.evaluate(pl_module, split=self.split, verbose=False)
         return rougeL
 
     def log_metrics(self, metrics, pl_module: pl.LightningModule, on_step=True):

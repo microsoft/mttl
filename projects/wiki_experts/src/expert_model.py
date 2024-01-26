@@ -360,12 +360,14 @@ class MultiExpertModel(ExpertTrainer):
 
         expert_weights = {}
         for container in self.experts_containers:
-            assert type(container) == LoRAExpertContainer
+            assert isinstance(container, LoRAExpertContainer)
+
             if hasattr(container, "get_merged_weights"):
                 expert_config, _weights = container.get_merged_weights(
                     with_global_names=with_global_names, weights=weights
                 )
                 expert_weights.update(_weights)
+
         if len(expert_weights) == 0:
             return None
 
@@ -377,17 +379,10 @@ class MultiExpertModel(ExpertTrainer):
         )
         return Expert(expert_info=expert_info, expert_weights=expert_weights)
 
-    def on_save_checkpoint(self, ckpt):
-        expert: Expert = self.to_expert()
-        if expert is not None:
-            ckpt["expert_dumps"] = expert.asdict()
-            ckpt["merging_weights"] = self.get_router_weights()
-
 
 class MultiExpertModelRanker(MultiExpertModel):
     def __init__(self, **kwargs):
         kwargs["router_selector"] = "info_selector"
-
         super().__init__(**kwargs)
 
         self.expert_ranker = AdapterRankerHelper.get_ranker_instance(
