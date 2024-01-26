@@ -4,6 +4,7 @@ import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
+from mttl.datamodule.arc_data_module import ArcDataConfig, ArcMultiChoiceDataModule
 from mttl.datamodule.codex_data_module import CodexDataConfig, CodexDataModule
 from mttl.datamodule.mt_seq_to_seq_module import (
     FlanConfig,
@@ -35,7 +36,13 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         "subsample_dev": args.subsample_dev,
         "subsample_test": args.subsample_test,
     }
-    if "flan" in dataset:
+    if dataset == "arc-easy":
+        config = ArcDataConfig(
+            **common_kwargs,
+        )
+        assert not for_generation
+        dm = ArcMultiChoiceDataModule(config)
+    elif "flan" in dataset:
         config = FlanConfig(
             **common_kwargs,
             remove_phi_eval_tasks=args.remove_phi_eval_tasks,

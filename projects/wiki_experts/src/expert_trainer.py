@@ -71,6 +71,50 @@ class ExpertTrainer(EfficientCheckpointModule):
     def set_routing_infos(self, batch, generate=False):
         self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
 
+    def forward_unlikelihood(self, batch):
+        input_ids, labels = batch["input_ids"], batch["labels"]
+
+        self.set_routing_infos(batch)
+
+        outputs = self.model.forward(input_ids, attention_mask=batch["attention_mask"])
+
+        # calculate loss, could also be done inside of the model
+        bs = input_ids.size(0)
+        logits = outputs.logits
+        vocab_size = logits.size(-1)
+        labels = labels.squeeze(-1)
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+
+        # Flatten the tokens
+        loss_fct = torch.nn.CrossEntropyLoss(reduction="none")
+        shift_logits = shift_logits.view(-1, vocab_size)
+        shift_labels = shift_labels.view(-1)
+
+        # Enable model parallelism
+        shift_labels = shift_labels.to(shift_logits.device)
+        loss = loss_fct(shift_logits, shift_labels)
+
+        # reshape back
+        loss = loss.view((bs, -1))
+        # mean only non-zero
+        non_zero_loss = (loss != 0).sum(dim=-1)
+        non_zero_loss[non_zero_loss == 0] = 1
+        loss = loss.sum(dim=-1) / non_zero_loss
+
+        del outputs, shift_logits, shift_labels
+
+        num = 0
+        lm_loss, mc_loss = 0.0, 0.0
+        for i, num_options in enumerate(batch["num_options"]):
+            loss_slice = loss[num : num + num_options]
+            lm_loss += loss_slice[batch["labels_index"][i]]
+            mc_loss += -torch.nn.functional.log_softmax(-loss_slice, dim=0)[
+                batch["labels_index"][i]
+            ]
+            num += num_options
+        return lm_loss + mc_loss
+
     def forward(self, batch, reduction="mean"):
         input_ids, labels = batch["input_ids"], batch["labels"]
 
@@ -107,7 +151,11 @@ class ExpertTrainer(EfficientCheckpointModule):
         return loss
 
     def training_step(self, batch, _):
-        loss = self.forward(batch)
+        if "num_options" in batch:
+            loss = self.forward(batch)
+        else:
+            loss = self.forward_unlikelihood(batch)
+
         total_loss = loss
 
         self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
