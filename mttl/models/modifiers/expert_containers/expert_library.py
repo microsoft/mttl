@@ -180,7 +180,7 @@ class BlobStorageEngine(BackendEngine):
 
     @property
     def token(self):
-        if self._token is None:
+        if getattr(self, "_token", None) is None:
             raise ValueError("Token is not set. Please login first.")
         return self._token
 
@@ -203,20 +203,34 @@ class BlobStorageEngine(BackendEngine):
         local_filenames = asyncio.run(
             self.async_download_all_blobs_to_files(repo_id, repo_files)
         )
-        return local_filenames
+        return os.path.join(r'/tmp', repo_id)
 
     def create_repo(self, repo_id, repo_type, exist_ok, private=True):
-
         try:
-            self.blob_service_client.create_container(name=repo_id, )
+            self.blob_service_client.create_container(name=repo_id)
         except ResourceExistsError:
             print('A container with this name already exists')
 
     def create_commit(self, repo_id, operations, commit_message):
-        pass
+        container_client = self.blob_service_client.get_container_client(repo_id)
+        for op in operations:
+            if type(op) == CommitOperationAdd:
+                container_client.upload_blob(
+                    op.path_in_repo,
+                    op.path_or_fileobj.read(),
+                    overwrite=True,
+                )
+            elif type(op) == CommitOperationCopy:
+                import shutil
+                shutil.copyfile(
+                    os.path.join(r'/tmp', repo_id, op.src_path_in_repo),
+                    os.path.join(r'/tmp', repo_id, op.path_in_repo),
+                )
+            elif type(op) == CommitOperationDelete:
+                os.remove(os.path.join(r'/tmp', repo_id, op.path_in_repo))
 
     def preupload_lfs_files(self, repo_id, additions):
-        pass
+        pass  # additions list of CommitOperations
 
     def hf_hub_download(self, repo_id, filename):
         blob_client = self.blob_service_client.get_blob_client(container=repo_id, blob=filename)
@@ -250,7 +264,13 @@ class BlobStorageEngine(BackendEngine):
             return local_filename
 
     def repo_info(self, repo_id):
-        pass
+        import datetime
+        # return the current time into string format
+        class RepoInfo:
+            pass
+        repo_info = RepoInfo()
+        repo_info.lastModified = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return repo_info
 
     def login(self, token):
         #  token == sas_url
@@ -756,7 +776,7 @@ class ExpertLibrary:
             return
         logger.info(f"Committing {len(self._pending_operations)} operations...")
         if self._pending_pre_uploads:
-            preupload_lfs_files(self.repo_id, additions=self._pending_pre_uploads)
+            self.preupload_lfs_files(self.repo_id, additions=self._pending_pre_uploads)
         self.create_commit(
             self.repo_id,
             operations=self._pending_operations,
