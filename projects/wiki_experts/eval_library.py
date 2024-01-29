@@ -38,21 +38,26 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     ExpertProjectorConfig,
     SVDEmbeddingTransform,
     SVDEmbeddingTransformConfig,
+    SVDInputExtractor,
+    SVDInputExtractorConfig,
 )
 
 
 def get_hidden_states(library, args):
     if args.delta_scale:
         cfg = HiddenStateComputerConfig(
-            use_base_model_only=True,
             max_samples_per_task=args.max_samples_per_task,
             track=args.track,
             pool=args.pool,
             upload_to_hf=True,
+            # compute_delta=False,
+            use_base_model_only=True,
         )
-        base = HiddenStateComputer(cfg).transform(library)
+        base = HiddenStateComputer(cfg).transform(library, default_args=args)
+        # cfg.compute_delta = True
+        # delta = HiddenStateComputer(cfg).transform(library, default_args=args)
         cfg.use_base_model_only = False
-        expert = HiddenStateComputer(cfg).transform(library)
+        expert = HiddenStateComputer(cfg).transform(library, default_args=args)
         output = {
             exp_name: {
                 k: (expert[exp_name][k] - base[exp_name][k]) * args.delta_scale
@@ -74,20 +79,31 @@ def get_hidden_states(library, args):
     return output
 
 
+def get_svd_embeddings(library, args):
+    cfg = SVDInputExtractorConfig(
+        top_k=args.transform_sparsity, name="svd_input_ab2", recompute=False
+    )
+    svd_input_extractor = SVDInputExtractor(cfg)
+    return svd_input_extractor.transform(library)
+
+
 def patch_prototypes(module, library, args):
-    hidden_states = get_hidden_states(library, args)
+    if args.proto_init == "svd":
+        proto_inits = get_svd_embeddings(library, args)
+    elif args.proto_init == "hidden":
+        proto_inits = get_hidden_states(library, args)
 
     for mod in module.modules():
         if isinstance(mod, ClownSelector):
             prototypes = []
             params = []
             for expert_name in mod.expert_names:
-                layer_names = hidden_states[expert_name].keys()
+                layer_names = proto_inits[expert_name].keys()
                 valid_layer_names = [
                     k for k in layer_names if k.startswith(mod.layer_name)
                 ]
                 key = sorted(valid_layer_names)[0]
-                prototypes += [hidden_states[expert_name][key]]
+                prototypes += [proto_inits[expert_name][key]]
 
                 if args.use_similarity_scaling:
                     # get params too
@@ -162,7 +178,7 @@ def run_multitask(args: ExpertConfig):
         module = MultiExpertModel(**vars(expert.training_config)).to("cuda")
         module.add_expert_instance(expert, is_default=True)
     elif args.merge_or_route == "ties":
-        cfg = TiesMergeConfig(top_k=0.2)
+        cfg = TiesMergeConfig(top_k=args.transform_sparsity)
         ties_expert = TiesMerge(cfg).transform(library)
         module = MultiExpertModel(**vars(ties_expert.training_config)).to("cuda")
         module.add_expert_instance(ties_expert, is_default=True)
@@ -173,10 +189,13 @@ def run_multitask(args: ExpertConfig):
         args_copy.router_temp = args.router_temp
         args_copy.moe_top_k = args.moe_top_k
         args_copy.precision = 32
+        args_copy.router_window_size = args.router_window_size
+        args_copy.clown_mode = args.clown_mode
 
         module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
         patch_prototypes(module, library, args)
+        module = module.to("cuda")
 
     """
     single_exp = {'merged': expert}
