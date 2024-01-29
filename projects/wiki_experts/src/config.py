@@ -94,9 +94,14 @@ class ExpertConfig(Config):
         self.use_similarity_scaling = (
             False  # whether to scale the centroids as a function of LoRA similarity
         )
+        self.transform_sparsity = 1.0
 
         # Clown Router
         self.router_temp = 1.0
+        self.notes = None
+        self.proto_init = "hidden"  # also "svd"
+        self.router_window_size = 3
+        self.clown_mode = "per_token"
 
         # Eval Library
         self.merge_or_route = None  # "uniform", "ties", "clown"
