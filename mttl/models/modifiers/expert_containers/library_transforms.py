@@ -633,7 +633,7 @@ class SVDInputExtractor(LibraryTransform):
 
                 # Save eigenvector and eigvenvalue
                 output[expert_name][param_name] = (
-                    largest.real.cpu().numpy(),
+                    largest.real.cpu(),
                     out.eigenvalues.real[0].item(),
                 )
 
