@@ -7,6 +7,7 @@ from mttl.models.modifiers.modify_model import get_modifier_type
 from mttl.models.utils import model_loader_helper
 from typing import Optional
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
+from mttl.models.modifiers.lora import LoRAConfig
 
 import copy
 import torch
@@ -283,6 +284,7 @@ class HiddenStateComputerConfig:
     recompute: bool = False
     track: str = "each_layer"  # last layer, or each layer
     pool: str = "last"  # last, or mean
+    compute_delta: str = False
 
 
 class HiddenStateComputer(LibraryTransform):
@@ -315,19 +317,19 @@ class HiddenStateComputer(LibraryTransform):
         return model
 
     def _track_hidden_states(self, model, keys=None):
-        self.container = {}
+        model.container = {}
 
         if self.config.track == "last_layer":
             # Add a hook to the last layer
             def fetch_input(module, input, output):
-                self.container["last_layer"] = input[0].detach()
+                model.container["last_layer"] = input[0].detach()
 
             model.model.get_output_embeddings().register_forward_hook(fetch_input)
         elif self.config.track == "each_layer":
             # add a hook for all the layers that an expert modifies
             def build_hook(name):
                 def retrieve_input(module, input, output):
-                    self.container[name] = input[0].detach()
+                    model.container[name] = input[0].detach()
 
                 return retrieve_input
 
@@ -337,11 +339,11 @@ class HiddenStateComputer(LibraryTransform):
         else:
             raise NotImplementedError()
 
-    def _retrieve_hidden_states(self):
-        keys = list(self.container.keys())
-        values = [self.container[k] for k in keys]
+    def _retrieve_hidden_states(self, model):
+        keys = list(model.container.keys())
+        values = [model.container[k] for k in keys]
         for key in keys:
-            del self.container[key]
+            del model.container[key]
 
         return {k: v for k, v in zip(keys, values)}
 
@@ -368,6 +370,10 @@ class HiddenStateComputer(LibraryTransform):
                 for x in [getattr(self.config, k) for k in args_in_name]
             ]
         )
+
+        if self.config.compute_delta:
+            save_name += "-delta"
+
         print("save_name", save_name)
 
         # try to fetch auxiliary data
@@ -395,12 +401,21 @@ class HiddenStateComputer(LibraryTransform):
             if self.config.use_base_model_only and self.config.model is not None:
                 training_config.model = self.config.model
 
-            model = MultiExpertModel(**vars(training_config)).to("cuda")
+            if self.config.compute_delta:
+                model = MultiExpertModel(**vars(training_config)).to("cuda")
+                expert_model = MultiExpertModel(**vars(training_config)).to("cuda")
+                expert_model.add_expert_instance(expert, is_default=True)
+            else:
+                model = MultiExpertModel(**vars(training_config)).to("cuda")
 
             if not self.config.use_base_model_only:
                 model.add_expert_instance(expert, is_default=True)
 
             self._track_hidden_states(model, keys=expert.expert_weights.keys())
+            if self.config.compute_delta:
+                self._track_hidden_states(
+                    expert_model, keys=expert.expert_weights.keys()
+                )
 
             training_config.dataset = expert.expert_info.dataset
             training_config.subsample_train = self.config.max_samples_per_task
@@ -429,16 +444,30 @@ class HiddenStateComputer(LibraryTransform):
 
                 if isinstance(model, EfficientCheckpointModule):
                     model.forward(batch, reduction="none")
+                    if self.config.compute_delta:
+                        expert_model.forward(batch, reduction="none")
                 else:
                     model.forward(
                         input_ids=batch["input_ids"],
                         attention_mask=batch["attention_mask"],
                     )
+                    if self.config.compute_delta:
+                        expert_model.forward(
+                            input_ids=batch["input_ids"],
+                            attention_mask=batch["attention_mask"],
+                        )
 
                 bs = batch["input_ids"].size(0)
                 bs_idx = torch.arange(bs, device=device)
                 last_token_idx = batch["attention_mask"].sum(1) - 1
-                hidden_states = self._retrieve_hidden_states()
+                hidden_states = self._retrieve_hidden_states(model)
+
+                if self.config.compute_delta:
+                    expert_hidden_states = self._retrieve_hidden_states(expert_model)
+                    hidden_states = {
+                        k: expert_hidden_states[k] - hidden_states[k]
+                        for k in hidden_states.keys()
+                    }
 
                 for layer, hidden_state in hidden_states.items():
                     assert hidden_state.ndim == 3
@@ -478,6 +507,169 @@ class HiddenStateComputer(LibraryTransform):
                         data=output[expert_name],
                         force=True,  # make sure we overwrite
                     )
+        return output
+
+
+@dataclass
+class SVDInputExtractorConfig:
+    name: str = "svd_input_extractor"
+    top_k: float = 1.0
+    upload_to_hf: bool = True
+    recompute: bool = False
+    ab_only: bool = True
+
+
+class SVDInputExtractor(LibraryTransform):
+    """
+    Given a library of experts, extract the input direction most affected by the linear transforms
+    """
+
+    def __init__(self, config: SVDInputExtractorConfig = None):
+        super().__init__(config or SVDInputExtractorConfig())
+
+    @torch.no_grad()
+    def transform(self, library) -> Expert:
+        if isinstance(library, str):
+            library = HFExpertLibrary(library)
+
+        save_name = self.config.name
+        if self.config.ab_only:
+            save_name += "-ab"
+
+        # try to fetch auxiliary data
+        output = library.get_auxiliary_data(data_type=save_name)
+        if len(output) == len(library) and not self.config.recompute:
+            logger.info("Found {} precomputed centroids".format(len(output)))
+            # format the output to be dict[expert_name][layer_name] = embedding
+            output = {
+                expert_name: {
+                    k: v for k, v in expert_data[self.config.name][save_name].items()
+                }
+                for expert_name, expert_data in output.items()
+            }
+
+            return output
+
+        # get the base model
+        an_expert = library[next(iter(library.keys()))]
+        training_config = an_expert.training_config
+        training_config.model_modifier = None
+        from projects.wiki_experts.src.expert_model import MultiExpertModel
+
+        model = MultiExpertModel(**vars(training_config)).to("cuda")
+
+        state_dict_keys = list(
+            set(".".join(k.split(".")[:-1]) for k in an_expert.expert_weights.keys())
+        )
+        expert_names = list(library.keys())
+        output = {expert_name: {} for expert_name in expert_names}
+
+        for param_name in state_dict_keys:
+            base_W = model.model.state_dict()[f"{param_name}.weight"]
+            logger.info(f"Computing SVD Input extraction for param {param_name}")
+
+            weights, As, Bs = [], [], []
+            for expert_name in expert_names:
+                expert = library[expert_name]
+                assert isinstance(expert.expert_info.expert_config, LoRAConfig)
+
+                # NOTE: This may break if we use another base model than phi-2
+                A, B = (
+                    expert.expert_weights[f"{param_name}.lora_a"],
+                    expert.expert_weights[f"{param_name}.lora_b"],
+                )
+                W = (A @ B).T
+
+                if self.config.top_k < 1.0:
+                    th = torch.quantile(torch.abs(W), 1.0 - self.config.top_k)
+                    W = torch.where(torch.abs(W) > th, W, torch.zeros_like(W))
+
+                weights += [W]
+                As += [A]
+                Bs += [B]
+
+            # Find (direction of x) that maximizes ||Wx - ABx||^2_2
+            # == ||(W - AB)x||^2_2
+            # == x^T (W - AB)^T (W - AB) x
+            # == largest eigvenvector of (W - AB)^T (W - AB)
+            weights = torch.stack(weights, dim=0)  # .to('cuda')
+            As = torch.stack(As, dim=0)  # .to('cuda')
+            Bs = torch.stack(Bs, dim=0)  # .to('cuda')
+
+            if self.config.ab_only:
+                """
+                # Compute SVD of B
+                U_B, S_B, V_B = torch.linalg.svd(Bs, full_matrices=False)
+                U_A, S_A, V_A = torch.linalg.svd(As, full_matrices=False)
+
+                # Compute A^T A
+                A_trans_A = torch.matmul(As.transpose(1, 2), As)
+                B_trans_B = torch.matmul(Bs, Bs.transpose(1,2))
+
+                # Transform A^T A into the basis of U_B
+                transformed_A_trans_A = torch.matmul(torch.matmul(U_B.transpose(1,2), A_trans_A), U_B)
+                transformed_B_trans_B = torch.matmul(torch.matmul(V_A.transpose(1,2), B_trans_B), V_A)
+
+                eigvals, eigvecs = torch.linalg.eigh(transformed_A_trans_A)
+                eigenvectors_WTW = torch.matmul(V_B.transpose(1, 2), eigvecs)
+
+                eigvals, eigvecs = torch.linalg.eigh(transformed_B_trans_B)
+                eigenvectors_WWT = torch.matmul(U_A, eigvecs)
+
+                """
+
+                diff = weights
+                # Use Efficient SVD exploiring low rank structure
+            else:
+                diff = W - base_W.unsqueeze(
+                    0
+                )  # why difference between terms ?  # out_features, in_features
+
+            sym_diff = torch.matmul(diff.transpose(1, 2), diff)
+
+            out = torch.linalg.eig(sym_diff)
+            eigvector = out.eigenvectors
+            img_eig_vals = eigvector.imag.abs().mean().item()
+            if img_eig_vals < 1e-1:
+                logger.warning(
+                    f"Found {img_eig_vals} imaginary eigenvalues, this is likely due to numerical instability"
+                )
+
+            largest, smallest = eigvector[:, :, 0], eigvector[:, :, -1]
+            assert torch.norm(sym_diff @ largest.real.unsqueeze(-1)) >= torch.norm(
+                sym_diff @ smallest.real.unsqueeze(-1)
+            ), breakpoint()
+
+            empirical_eigvalue = (sym_diff @ largest.real.unsqueeze(-1)).squeeze(
+                -1
+            ) / largest.real
+            max_, min_ = (
+                empirical_eigvalue.max(1).values,
+                empirical_eigvalue.min(1).values,
+            )
+            ratio_diff = (max_ - min_).abs().mean().item()
+            if ratio_diff > 1e-1:
+                logger.warning(
+                    f"Found {ratio_diff} max variation of A * v_eig / v, this is likely due to numerical instability"
+                )
+
+            # store
+            for i, expert in enumerate(expert_names):
+                output[expert][param_name] = largest.real[i].cpu()
+
+        if self.config.upload_to_hf:
+            logger.info("Uploading SVD centroids to HF")
+            # add embeddings to the library
+            with library.batched_commit():
+                for i, expert_name in enumerate(output.keys()):
+                    library.add_auxiliary_data(
+                        data_type=save_name,
+                        expert_name=expert_name,
+                        config=self.config.__dict__,
+                        data=output[expert_name],
+                        force=True,  # make sure we overwrite
+                    )
+
         return output
 
 
