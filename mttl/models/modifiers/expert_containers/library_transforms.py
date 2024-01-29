@@ -517,6 +517,7 @@ class SVDInputExtractorConfig:
     upload_to_hf: bool = True
     recompute: bool = False
     ab_only: bool = True
+    scale: bool = False  # If True, scale by eigenvalue
 
 
 class SVDInputExtractor(LibraryTransform):
@@ -526,6 +527,19 @@ class SVDInputExtractor(LibraryTransform):
 
     def __init__(self, config: SVDInputExtractorConfig = None):
         super().__init__(config or SVDInputExtractorConfig())
+
+    def _maybe_scale(self, output_tuples):
+        """Post Processing of the retrieved outputs,
+        scales the output by the eigenvalue if needed"""
+
+        output = {k: {} for k in output_tuples.keys()}
+        for expert_name, expert_data in output_tuples.items():
+            for layer_name, (v, eig) in expert_data.items():
+                if self.config.scale:
+                    v *= eig
+                output[expert_name][layer_name] = v
+
+        return output
 
     @torch.no_grad()
     def transform(self, library) -> Expert:
@@ -548,120 +562,86 @@ class SVDInputExtractor(LibraryTransform):
                 for expert_name, expert_data in output.items()
             }
 
-            return output
+            return self._maybe_scale(output)
 
-        # get the base model
-        an_expert = library[next(iter(library.keys()))]
-        training_config = an_expert.training_config
-        training_config.model_modifier = None
-        from projects.wiki_experts.src.expert_model import MultiExpertModel
+        output = {}
+        base_model = None
+        for expert_name, expert in library.items():
+            logger.info(f"Computing SVD for expert {expert_name}")
+            output[expert_name] = {}
 
-        model = MultiExpertModel(**vars(training_config)).to("cuda")
+            if not self.config.ab_only and base_model is None:
+                training_config = expert.training_config
+                training_config.model_modifier = None
+                from projects.wiki_experts.src.expert_model import MultiExpertModel
 
-        state_dict_keys = list(
-            set(".".join(k.split(".")[:-1]) for k in an_expert.expert_weights.keys())
-        )
-        expert_names = list(library.keys())
-        output = {expert_name: {} for expert_name in expert_names}
+                base_model = MultiExpertModel(**vars(training_config))
 
-        for param_name in state_dict_keys:
-            base_W = model.model.state_dict()[f"{param_name}.weight"]
-            logger.info(f"Computing SVD Input extraction for param {param_name}")
+            state_dict_keys = sorted(
+                list(
+                    set(
+                        ".".join(k.split(".")[:-1])
+                        for k in expert.expert_weights.keys()
+                    )
+                )
+            )
 
-            weights, As, Bs = [], [], []
-            for expert_name in expert_names:
-                expert = library[expert_name]
-                assert isinstance(expert.expert_info.expert_config, LoRAConfig)
-
-                # NOTE: This may break if we use another base model than phi-2
+            for param_name in state_dict_keys:
+                logger.info(f"\tComputing SVD for parameter {param_name}")
                 A, B = (
                     expert.expert_weights[f"{param_name}.lora_a"],
                     expert.expert_weights[f"{param_name}.lora_b"],
                 )
-                W = (A @ B).T
+                W = (A @ B).T  # out_features, in_features
 
                 if self.config.top_k < 1.0:
                     th = torch.quantile(torch.abs(W), 1.0 - self.config.top_k)
                     W = torch.where(torch.abs(W) > th, W, torch.zeros_like(W))
 
-                weights += [W]
-                As += [A]
-                Bs += [B]
+                if self.config.ab_only:
+                    eig_input = W.T @ W  # in_features, in_features
+                else:
+                    base_W = base_model.model.state_dict()[f"{param_name}.weight"]
+                    W_AB = base_W + W
+                    eig_input = W_AB.T @ W_AB
 
-            # Find (direction of x) that maximizes ||Wx - ABx||^2_2
-            # == ||(W - AB)x||^2_2
-            # == x^T (W - AB)^T (W - AB) x
-            # == largest eigvenvector of (W - AB)^T (W - AB)
-            weights = torch.stack(weights, dim=0)  # .to('cuda')
-            As = torch.stack(As, dim=0)  # .to('cuda')
-            Bs = torch.stack(Bs, dim=0)  # .to('cuda')
+                out = torch.linalg.eig(eig_input)
+                eigvector = out.eigenvectors
+                img_eig_vals = eigvector.imag.abs().mean().item()
+                if img_eig_vals > 1e-2:
+                    logger.warning(
+                        f"Found {img_eig_vals} imaginary eigenvalues, this is likely due to numerical instability"
+                    )
 
-            if self.config.ab_only:
-                """
-                # Compute SVD of B
-                U_B, S_B, V_B = torch.linalg.svd(Bs, full_matrices=False)
-                U_A, S_A, V_A = torch.linalg.svd(As, full_matrices=False)
+                largest, smallest = eigvector[:, 0], eigvector[:, -1]
+                assert torch.norm(eig_input @ largest.real.unsqueeze(-1)) >= torch.norm(
+                    eig_input @ smallest.real.unsqueeze(-1)
+                ), breakpoint()
 
-                # Compute A^T A
-                A_trans_A = torch.matmul(As.transpose(1, 2), As)
-                B_trans_B = torch.matmul(Bs, Bs.transpose(1,2))
+                empirical_eigvalue = (eig_input @ largest.real.unsqueeze(-1)).squeeze(
+                    -1
+                ) / largest.real
+                max_, min_ = (
+                    empirical_eigvalue.max(),
+                    empirical_eigvalue.min(),
+                )
+                ratio_diff = (max_ - min_).abs().mean().item()
+                if ratio_diff > 1e-1:
+                    logger.warning(
+                        f"Found {ratio_diff} max variation of A * v_eig / v, this is likely due to numerical instability"
+                    )
 
-                # Transform A^T A into the basis of U_B
-                transformed_A_trans_A = torch.matmul(torch.matmul(U_B.transpose(1,2), A_trans_A), U_B)
-                transformed_B_trans_B = torch.matmul(torch.matmul(V_A.transpose(1,2), B_trans_B), V_A)
-
-                eigvals, eigvecs = torch.linalg.eigh(transformed_A_trans_A)
-                eigenvectors_WTW = torch.matmul(V_B.transpose(1, 2), eigvecs)
-
-                eigvals, eigvecs = torch.linalg.eigh(transformed_B_trans_B)
-                eigenvectors_WWT = torch.matmul(U_A, eigvecs)
-
-                """
-
-                diff = weights
-                # Use Efficient SVD exploiring low rank structure
-            else:
-                diff = W - base_W.unsqueeze(
-                    0
-                )  # why difference between terms ?  # out_features, in_features
-
-            sym_diff = torch.matmul(diff.transpose(1, 2), diff)
-
-            out = torch.linalg.eig(sym_diff)
-            eigvector = out.eigenvectors
-            img_eig_vals = eigvector.imag.abs().mean().item()
-            if img_eig_vals < 1e-1:
-                logger.warning(
-                    f"Found {img_eig_vals} imaginary eigenvalues, this is likely due to numerical instability"
+                # Save eigenvector and eigvenvalue
+                output[expert_name][param_name] = (
+                    largest.real.cpu().numpy(),
+                    out.eigenvalues.real[0].item(),
                 )
 
-            largest, smallest = eigvector[:, :, 0], eigvector[:, :, -1]
-            assert torch.norm(sym_diff @ largest.real.unsqueeze(-1)) >= torch.norm(
-                sym_diff @ smallest.real.unsqueeze(-1)
-            ), breakpoint()
-
-            empirical_eigvalue = (sym_diff @ largest.real.unsqueeze(-1)).squeeze(
-                -1
-            ) / largest.real
-            max_, min_ = (
-                empirical_eigvalue.max(1).values,
-                empirical_eigvalue.min(1).values,
-            )
-            ratio_diff = (max_ - min_).abs().mean().item()
-            if ratio_diff > 1e-1:
-                logger.warning(
-                    f"Found {ratio_diff} max variation of A * v_eig / v, this is likely due to numerical instability"
-                )
-
-            # store
-            for i, expert in enumerate(expert_names):
-                output[expert][param_name] = largest.real[i].cpu()
-
-        if self.config.upload_to_hf:
-            logger.info("Uploading SVD centroids to HF")
-            # add embeddings to the library
-            with library.batched_commit():
-                for i, expert_name in enumerate(output.keys()):
+            # Upload to HF 1 expert at a time
+            if self.config.upload_to_hf:
+                logger.info(f"Uploading SVD centroids to HF for expert {expert_name}")
+                # add embeddings to the library
+                with library.batched_commit():
                     library.add_auxiliary_data(
                         data_type=save_name,
                         expert_name=expert_name,
@@ -670,7 +650,7 @@ class SVDInputExtractor(LibraryTransform):
                         force=True,  # make sure we overwrite
                     )
 
-        return output
+        return self._maybe_scale(output)
 
 
 @dataclass
