@@ -6,7 +6,7 @@ import io
 import re
 import json
 import sys
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 import torch
 import os
 import time
@@ -31,7 +31,7 @@ from huggingface_hub import (
 from functools import total_ordering
 from huggingface_hub.utils._errors import RepositoryNotFoundError
 
-from azure.storage.blob import BlobServiceClient
+from azure.storage.blob import BlobServiceClient as SyncBlobServiceClient
 from azure.storage.blob.aio import BlobServiceClient as AsyncBlobServiceClient
 from azure.core.exceptions import ResourceExistsError
 
@@ -178,17 +178,45 @@ class HuggingfaceHubEngine(BackendEngine):
 
 class BlobStorageEngine(BackendEngine):
 
+    def __init__(self):
+        """Initialize the backend engine.
+        MTTL_CACHE_DIR
+        MTTL_STORAGE_TOKEN
+        """
+        super().__init__()
+        self._token = None
+        self.cache_dir = self._get_cache_dir(self)
+
+    @staticmethod
+    def _get_cache_dir():
+        """Get the cache directory from envvar MTTL_CACHE_DIR.
+        If not set, use the default cache directory ~/.mttl_cache"""
+        if "MTTL_CACHE_DIR" in os.environ:
+            cache_dir = os.environ["MTTL_CACHE_DIR"]
+        else:
+            cache_dir = os.path.join(os.path.expanduser("~"), ".mttl_cache")
+        return cache_dir
+
     @property
     def token(self):
-        if getattr(self, "_token", None) is None:
-            raise ValueError("Token is not set. Please login first.")
+        if self._token is None:
+            self.login()
         return self._token
+
+    def login(self, token: Optional[str] = None):
+        """Set the SAS token to use for authentication."""
+        if token is None:
+            token = os.environ.get("MTTL_STORAGE_TOKEN", None)
+        if token is None:
+            raise ValueError("No token provided. Please provide a token when login or set MTTL_STORAGE_TOKEN.")
+        self._token = token
+
+    def _get_local_filepath(self, repo_id, filename):
+        return os.path.join(self.cache_dir, repo_id, filename)
 
     @property
     def blob_service_client(self):
-        if getattr(self, "_blob_service_client", None) is None:
-            self._blob_service_client = BlobServiceClient(self.token)
-        return self._blob_service_client
+        return SyncBlobServiceClient(self.token)
 
     def snapshot_download(self, repo_id, allow_patterns=None):
         """Downloads the entire repository.
@@ -201,9 +229,9 @@ class BlobStorageEngine(BackendEngine):
         #     if any([re.match(pattern, f) for pattern in allow_patterns])
         # ]
         local_filenames = asyncio.run(
-            self.async_download_all_blobs_to_files(repo_id, repo_files)
+            self.async_download_blobs(repo_id, repo_files)
         )
-        return os.path.join(r'/tmp', repo_id)
+        return os.path.join(self.cache_dir, repo_id)
 
     def create_repo(self, repo_id, repo_type, exist_ok, private=True):
         try:
@@ -271,10 +299,6 @@ class BlobStorageEngine(BackendEngine):
         repo_info = RepoInfo()
         repo_info.lastModified = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         return repo_info
-
-    def login(self, token):
-        #  token == sas_url
-        self._token = token
 
     def list_repo_files(self, repo_id):
         container_client = self.blob_service_client.get_container_client(repo_id)
