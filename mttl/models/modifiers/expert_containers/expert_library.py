@@ -33,7 +33,10 @@ from huggingface_hub.utils._errors import RepositoryNotFoundError
 
 from azure.storage.blob import BlobServiceClient as SyncBlobServiceClient
 from azure.storage.blob.aio import BlobServiceClient as AsyncBlobServiceClient
-from azure.core.exceptions import ResourceExistsError
+from azure.core.exceptions import (
+    ResourceExistsError,
+    ResourceNotFoundError,
+)
 
 
 from mttl.utils import logger
@@ -183,6 +186,8 @@ class BlobStorageEngine(BackendEngine):
         through the environment variable MTTL_STORAGE_TOKEN. The cache directory can be
         provided as an argument or through the environment variable MTTL_CACHE_DIR.
         If no cache directory is provided, the default cache directory ~/.mttl_cache is used.
+
+        IMPORTANT: Underscore "_" is not allowed in the repo_id, use dash "-" instead.
         """
         super().__init__()
         self.login(token)
@@ -220,10 +225,6 @@ class BlobStorageEngine(BackendEngine):
     def _get_local_filepath(self, repo_id, filename):
         return os.path.join(self.cache_dir, repo_id, filename)
 
-    @property
-    def blob_service_client(self):
-        return SyncBlobServiceClient(self.token)
-
     def snapshot_download(self, repo_id, allow_patterns=None):
         """Downloads the entire repository.
         Downloads are made concurrently to speed-up the process."""
@@ -239,14 +240,29 @@ class BlobStorageEngine(BackendEngine):
         )
         return os.path.join(self.cache_dir, repo_id)
 
-    def create_repo(self, repo_id, repo_type, exist_ok, private=True):
+    def create_repo(self, repo_id, repo_type=None, exist_ok=True, private=True):
+        """ Creates a new repository. repo_type and private are ignored for blob storage."""
         try:
-            self.blob_service_client.create_container(name=repo_id)
-        except ResourceExistsError:
-            print('A container with this name already exists')
+            SyncBlobServiceClient(self.token).create_container(name=repo_id)
+        except ResourceExistsError as error:
+            error_message = 'A container with this name already exists'
+            if exist_ok:
+                print(error_message)
+            else:
+                raise ValueError(error_message) from error
+
+    def delete_repo(self, repo_id):
+        """Deletes a repository."""
+        container_client = SyncBlobServiceClient(self.token).get_container_client(
+            container=repo_id
+        )
+        try:
+            container_client.delete_container()
+        except ResourceNotFoundError:
+            print(f"Container {repo_id} not found.")
 
     def create_commit(self, repo_id, operations, commit_message):
-        container_client = self.blob_service_client.get_container_client(repo_id)
+        container_client = SyncBlobServiceClient(self.token).get_container_client(repo_id)
         for op in operations:
             if type(op) == CommitOperationAdd:
                 container_client.upload_blob(
@@ -267,35 +283,8 @@ class BlobStorageEngine(BackendEngine):
         pass  # additions list of CommitOperations
 
     def hf_hub_download(self, repo_id, filename):
-        blob_client = self.blob_service_client.get_blob_client(container=repo_id, blob=filename)
-
-        local_cache = os.path.join(r'/tmp', repo_id, filename)
-        os.makedirs(os.path.dirname(local_cache), exist_ok=True)
-
-        with open(file=local_cache, mode="wb") as blob_file:
-            download_stream = blob_client.download_blob()
-            blob_file.write(download_stream.readall())
-
-        return local_cache
-
-    async def async_download_all_blobs_to_files(self, repo_id, filesnames):
-        tasks = [
-            self.async_download_blob_to_file(repo_id, filename)
-            for filename in filesnames
-        ]
-        local_filenames = await asyncio.gather(*tasks)
-        return local_filenames
-
-    async def async_download_blob_to_file(self, repo_id, filename):
-        async with AsyncBlobServiceClient(self.token) as blob_service_client:
-            blob_client = blob_service_client.get_blob_client(container=repo_id, blob=filename)
-            local_filename = os.path.join(r'/tmp', repo_id, filename)
-            os.makedirs(os.path.dirname(local_filename), exist_ok=True)
-            with open(file=local_filename, mode="wb") as blob_file:
-                download_stream = await blob_client.download_blob()
-                data = await download_stream.readall()
-                blob_file.write(data)
-            return local_filename
+        local_filename = asyncio.run(self.async_download_blobs(repo_id, filename))
+        return local_filename
 
     def repo_info(self, repo_id):
         import datetime
@@ -307,8 +296,94 @@ class BlobStorageEngine(BackendEngine):
         return repo_info
 
     def list_repo_files(self, repo_id):
-        container_client = self.blob_service_client.get_container_client(repo_id)
-        return [b.name for b in container_client.list_blobs()]
+        """List all files in a repository. The files might not be downloaded locally."""
+        try:
+            container_client = SyncBlobServiceClient(self.token).get_container_client(repo_id)
+            return [b.name for b in container_client.list_blobs()]
+        except ResourceNotFoundError as error:
+            raise ValueError(f"Repository {repo_id} not found") from error
+
+    async def async_upload_blobs(self, repo_id: str, filenames: Union[List[str], str]):
+        is_str = isinstance(filenames, str)
+        if is_str:
+            filenames = [filenames]
+        tasks = [
+            self._async_upload_blob(repo_id, filename)
+            for filename in filenames
+        ]
+        await asyncio.gather(*tasks)
+        return filenames[0] if is_str else filenames
+
+    async def _async_upload_blob(self, repo_id, filename):
+        async with AsyncBlobServiceClient(self.token) as blob_service_client:
+            blob_client = blob_service_client.get_blob_client(container=repo_id, blob=filename)
+            local_cache = self._get_local_filepath(repo_id, filename)
+            with open(file=local_cache, mode="rb") as blob_file:
+                await blob_client.upload_blob(blob_file)
+
+    async def async_download_blobs(self, repo_id: str, filesnames: Union[List[str], str]) -> str:
+        is_str = isinstance(filesnames, str)
+        if is_str:
+            filesnames = [filesnames]
+        tasks = [
+            self._async_download_blob(repo_id, filename)
+            for filename in filesnames
+        ]
+        local_filenames = await asyncio.gather(*tasks)
+        return local_filenames[0] if is_str else local_filenames
+
+    async def _async_download_blob(self, repo_id, filename):
+        async with AsyncBlobServiceClient(self.token) as blob_service_client:
+            blob_client = blob_service_client.get_blob_client(container=repo_id, blob=filename)
+            local_filename = self._get_local_filepath(repo_id, filename)
+            os.makedirs(os.path.dirname(local_filename), exist_ok=True)
+            with open(file=local_filename, mode="wb") as blob_file:
+                download_stream = await blob_client.download_blob()
+                data = await download_stream.readall()
+                blob_file.write(data)
+            return local_filename
+
+    async def async_copy_blobs(self, source_repo_ids, source_filenames, destination_repo_ids, destination_filenames, overwrite=True):
+        inputs = [source_repo_ids, source_filenames, destination_repo_ids, destination_filenames]
+        # if any input is a string, convert it to a list
+        inputs = [[i] if isinstance(i, str) else i for i in inputs]
+
+        # Check that all lists have the same length
+        if not all(len(i) == len(inputs[0]) for i in inputs):
+            raise ValueError("All lists must have the same length.")
+
+        tasks = [
+            self._async_copy_blob(
+                source_repo_id,
+                source_filename,
+                destination_repo_id,
+                destination_filename,
+                overwrite=overwrite
+            )
+            for source_repo_id, source_filename, destination_repo_id, destination_filename
+            in zip(inputs[0], inputs[1], inputs[2], inputs[3])
+        ]
+        await asyncio.gather(*tasks)
+
+    async def _async_copy_blob(self, source_repo_id, source_filename, destination_repo_id, destination_filename, overwrite=True):
+        async with AsyncBlobServiceClient(self.token) as blob_service_client:
+            source_blob_client = blob_service_client.get_blob_client(container=source_repo_id, blob=source_filename)
+            destination_blob_client = blob_service_client.get_blob_client(container=destination_repo_id, blob=destination_filename)
+            await destination_blob_client.upload_blob_from_url(source_url=source_blob_client.url, overwrite=overwrite)
+
+    async def async_delete_blobs(self, repo_id: str, filesnames: Union[List[str], str]):
+        if isinstance(filesnames, str):
+            filesnames = [filesnames]
+        tasks = [
+            self._async_delete_blob(repo_id, filename)
+            for filename in filesnames
+        ]
+        await asyncio.gather(*tasks)
+
+    async def _async_delete_blob(self, repo_id, filename):
+        async with AsyncBlobServiceClient(self.token) as blob_service_client:
+            blob_client = blob_service_client.get_blob_client(container=repo_id, blob=filename)
+            await blob_client.delete_blob()
 
 
 class LocalFSEngine(BackendEngine):

@@ -2,6 +2,7 @@
 import os
 import pytest
 import asyncio
+import uuid
 from mttl.models.modifiers.expert_containers.expert_library import (
     BlobStorageEngine,
     HFExpertLibrary,
@@ -136,6 +137,9 @@ def build_local_files():
         return filenames
     return _build_files
 
+@pytest.fixture
+def repo_id():
+    return str(uuid.uuid4())
 
 @pytest.fixture
 def setup_repo():
@@ -151,8 +155,7 @@ def setup_repo():
 
 
 @pytest.mark.skipif(token is None, reason="Requires access to Azure Blob Storage")
-def test_create_and_delete_repo(tmp_path):
-    repo_id = "test-repo"
+def test_create_and_delete_repo(tmp_path, repo_id):
     engine = BlobStorageEngine(token=token, cache_dir=tmp_path)
     engine.delete_repo(repo_id)
     engine.create_repo(repo_id)
@@ -163,8 +166,7 @@ def test_create_and_delete_repo(tmp_path):
 
 
 @pytest.mark.skipif(token is None, reason="Requires access to Azure Blob Storage")
-def test_async_upload_and_delete_blobs(tmp_path, build_local_files, setup_repo):
-    repo_id = "test-repo"
+def test_async_upload_and_delete_blobs(tmp_path, build_local_files, setup_repo, repo_id):
     engine = BlobStorageEngine(token=token, cache_dir=tmp_path)
     setup_repo(engine, repo_id)
 
@@ -183,8 +185,7 @@ def test_async_upload_and_delete_blobs(tmp_path, build_local_files, setup_repo):
 
 
 @pytest.mark.skipif(token is None, reason="Requires access to Azure Blob Storage")
-def test_snapshot_download(tmp_path, build_local_files, setup_repo):
-    repo_id = "test-repo"
+def test_snapshot_download(tmp_path, build_local_files, setup_repo, repo_id):
     engine = BlobStorageEngine(token=token, cache_dir=tmp_path)
     setup_repo(engine, repo_id)
 
@@ -209,66 +210,29 @@ def test_snapshot_download(tmp_path, build_local_files, setup_repo):
     }
 
 
-def test_BlobStorageEngine():
-    from mttl.models.modifiers.expert_containers.expert_library import (
-        BlobStorageEngine,
-    )
+@pytest.mark.skipif(token is None, reason="Requires access to Azure Blob Storage")
+def test_hf_hub_download(tmp_path, build_local_files, setup_repo, repo_id):
+    engine = BlobStorageEngine(token=token, cache_dir=tmp_path)
+    setup_repo(engine, repo_id)
 
-    container_name = "mhr"
-    blob_file_name = "blob_data.txt"
+    local_path = tmp_path / repo_id
+    local_path.mkdir()
+    filenames = build_local_files(local_path, 2)
+    _ = asyncio.run(engine.async_upload_blobs(repo_id, filenames))
 
-    engine = BlobStorageEngine()
-    engine.login(token)
+    for filename in filenames:
+        (local_path / filename).unlink()
+    assert os.listdir(local_path) == []
 
-    repo_files = engine.list_repo_files(container_name)
-    blob_data_path = engine.hf_hub_download(container_name, blob_file_name)
-    assert blob_data_path == f"/tmp/{container_name}/{blob_file_name}"
+    filename_1, filename_2 = filenames
+
+    # Download the file 1 from the remote
+    blob_data_path = engine.hf_hub_download(repo_id, filename_1)
+    assert blob_data_path == str(local_path / filename_1)
     with open(blob_data_path, "rb") as f:
-        assert f.read() == b"Blob data"
-    assert [f["name"] for f in repo_files] == ['blob_data.txt', 'blob_data.txt_data']
+        assert f.read() == b"Blob data 1"
+    assert os.listdir(local_path) == [filename_1]
 
-
-def test_async_download_blob_to_file():
-    from mttl.models.modifiers.expert_containers.expert_library import (
-        BlobStorageEngine,
-    )
-    container_name = "mhr"
-    blob_file_name = "blob_data.txt"
-    engine = BlobStorageEngine()
-    engine.login(token)
-    blob_data_path = asyncio.run(engine.async_download_blob_to_file(container_name, blob_file_name))
-    assert blob_data_path == f"/tmp/{container_name}/{blob_file_name}"
-    with open(blob_data_path, "rb") as f:
-        assert f.read() == b"Blob data"
-
-
-def test_snapshot_download():
-    from mttl.models.modifiers.expert_containers.expert_library import (
-        BlobStorageEngine,
-    )
-    container_name = "mhr"
-    engine = BlobStorageEngine()
-    engine.login(token)
-    blob_data_paths = engine.snapshot_download(container_name)
-    assert blob_data_paths == [f"/tmp/{container_name}/blob_data.txt", f"/tmp/{container_name}/blob_data.txt_data"]
-
-
-def test_push_data_blob_storage(tmp_path):
-    sas_url = token
-    from azure.storage.blob import BlobServiceClient
-    blob_service_client = BlobServiceClient(sas_url)
-    # requires list permission
-    # list(blob_service_client.list_containers())
-
-    container_name = "mhr"
-    container_client = blob_service_client.get_container_client(container_name)
-    list(container_client.list_blobs())
-
-    blob_file_name = "blob_data.txt"
-    local_data_path = f"{tmp_path}/{blob_file_name}"
-    # Write a temporary file to upload
-    with open(local_data_path, "wb") as my_blob:
-        my_blob.write(b"Blob data")
-
-    with open(local_data_path, "rb") as my_blob:
-        container_client.upload_blob(blob_file_name, my_blob, overwrite=True)
+    # Two files stored in the remote repo
+    repo_files = engine.list_repo_files(repo_id)
+    assert set(repo_files) == {filename_1, filename_2}
