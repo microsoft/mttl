@@ -2,7 +2,10 @@
 import os
 import pytest
 import asyncio
-from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.models.modifiers.expert_containers.expert_library import (
+    BlobStorageEngine,
+    HFExpertLibrary,
+)
 
 
 def test_expert_lib(mocker):
@@ -117,7 +120,94 @@ def test_add_auxiliary_data(mocker, tmp_path):
         == 1
     )
 
-token = os.getenv("BLOB_STORAGE_TOKEN")
+
+token = os.getenv("MTTL_STORAGE_TOKEN")
+
+@pytest.fixture
+def build_local_files():
+    def _build_files(local_path, num_files):
+        filenames = []
+        for i in range(1, num_files + 1):
+            blob_file_name = f"blob_data_{i}.txt"
+            filenames.append(blob_file_name)
+            local_data_path = str(local_path / blob_file_name)
+            with open(local_data_path, "wb") as my_blob:
+                my_blob.write(f"Blob data {i}".encode())
+        return filenames
+    return _build_files
+
+
+@pytest.fixture
+def setup_repo():
+    """Create a repository and delete it once the test is done"""
+    engine_repo_refs = []
+    def _create_repo(engine, repo_id):
+        engine_repo_refs.append((engine, repo_id))
+        engine.create_repo(repo_id)
+        files = engine.list_repo_files(repo_id)
+        assert not files
+    yield _create_repo
+    [e.delete_repo(r) for e, r in engine_repo_refs]
+
+
+@pytest.mark.skipif(token is None, reason="Requires access to Azure Blob Storage")
+def test_create_and_delete_repo(tmp_path):
+    repo_id = "test-repo"
+    engine = BlobStorageEngine(token=token, cache_dir=tmp_path)
+    engine.delete_repo(repo_id)
+    engine.create_repo(repo_id)
+    engine.create_repo(repo_id, exist_ok=True)
+    with pytest.raises(ValueError):
+        engine.create_repo(repo_id, exist_ok=False)
+    engine.delete_repo(repo_id)
+
+
+@pytest.mark.skipif(token is None, reason="Requires access to Azure Blob Storage")
+def test_async_upload_and_delete_blobs(tmp_path, build_local_files, setup_repo):
+    repo_id = "test-repo"
+    engine = BlobStorageEngine(token=token, cache_dir=tmp_path)
+    setup_repo(engine, repo_id)
+
+    # Write two temp files to upload
+    local_path = tmp_path / repo_id
+    local_path.mkdir()
+    filenames = build_local_files(local_path, 2)
+    _ = asyncio.run(engine.async_upload_blobs(repo_id, filenames))
+    files = engine.list_repo_files(repo_id)
+    assert set(files) == {"blob_data_1.txt", "blob_data_2.txt"}
+
+
+    asyncio.run(engine.async_delete_blobs(repo_id, filenames))
+    files = engine.list_repo_files(repo_id)
+    assert not files
+
+
+@pytest.mark.skipif(token is None, reason="Requires access to Azure Blob Storage")
+def test_snapshot_download(tmp_path, build_local_files, setup_repo):
+    repo_id = "test-repo"
+    engine = BlobStorageEngine(token=token, cache_dir=tmp_path)
+    setup_repo(engine, repo_id)
+
+    # Upload two temp files to download
+    local_path = tmp_path / repo_id
+    local_path.mkdir()
+    filenames = build_local_files(local_path, 2)
+    _ = asyncio.run(engine.async_upload_blobs(repo_id, filenames))
+
+    # Remove cached files
+    for filename in filenames:
+        (local_path / filename).unlink()
+    assert os.listdir(local_path) == []
+
+    # Download the files from the remote
+    blob_data_path = engine.snapshot_download(repo_id)
+
+    assert blob_data_path == str(local_path)
+    assert set(os.listdir(blob_data_path)) == {
+        f"blob_data_1.txt",
+        f"blob_data_2.txt"
+    }
+
 
 def test_BlobStorageEngine():
     from mttl.models.modifiers.expert_containers.expert_library import (
