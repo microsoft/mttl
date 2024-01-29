@@ -178,19 +178,22 @@ class HuggingfaceHubEngine(BackendEngine):
 
 class BlobStorageEngine(BackendEngine):
 
-    def __init__(self):
-        """Initialize the backend engine.
-        MTTL_CACHE_DIR
-        MTTL_STORAGE_TOKEN
+    def __init__(self, token:Optional[str] = None, cache_dir:Optional[str] = None):
+        """Initialize the blob storage engine. SAS token can be provided as an argument or
+        through the environment variable MTTL_STORAGE_TOKEN. The cache directory can be
+        provided as an argument or through the environment variable MTTL_CACHE_DIR.
+        If no cache directory is provided, the default cache directory ~/.mttl_cache is used.
         """
         super().__init__()
-        self._token = None
-        self.cache_dir = self._get_cache_dir(self)
+        self.login(token)
+        self.cache_dir = self._get_cache_dir(cache_dir)
 
     @staticmethod
-    def _get_cache_dir():
-        """Get the cache directory from envvar MTTL_CACHE_DIR.
-        If not set, use the default cache directory ~/.mttl_cache"""
+    def _get_cache_dir(chache_dir: Optional[str] = None):
+        """If cache_dir is not provided, get it from envvar MTTL_CACHE_DIR.
+        Use the default cache directory ~/.mttl_cache if not provided."""
+        if chache_dir is not None:
+            return chache_dir
         if "MTTL_CACHE_DIR" in os.environ:
             cache_dir = os.environ["MTTL_CACHE_DIR"]
         else:
@@ -208,7 +211,10 @@ class BlobStorageEngine(BackendEngine):
         if token is None:
             token = os.environ.get("MTTL_STORAGE_TOKEN", None)
         if token is None:
-            raise ValueError("No token provided. Please provide a token when login or set MTTL_STORAGE_TOKEN.")
+            raise ValueError(
+                "No token provided. Please provide a token when initializing "
+                "the engine or set the MTTL_STORAGE_TOKEN environment variable."
+            )
         self._token = token
 
     def _get_local_filepath(self, repo_id, filename):
