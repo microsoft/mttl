@@ -154,6 +154,7 @@ class RoutingInfo:
     example_ids: List[int] = None
     labels: torch.Tensor = None
     input_ids: torch.Tensor = None
+    attention_mask: torch.Tensor = None
     task_weights: torch.nn.ParameterDict = None
     aux_losses: Dict = field(default_factory=dict)
 
@@ -170,6 +171,7 @@ class RoutingInfo:
             input_ids=batch.get("input_ids", None),
             example_ids=batch.get("example_ids", None),
             labels=batch.get("labels", None),
+            attention_mask=batch.get("attention_mask", None),
             **kwargs,
         )
         return ri
