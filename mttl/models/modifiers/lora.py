@@ -206,6 +206,7 @@ class ScaleGradient(torch.autograd.Function):
         return grad_output * ctx.scalar, None
 
 
+@register_modifier("skilled_lora", config_cls=SkilledLoRAConfig)
 class SkilledLoRA(LoRA):
     def __init__(
         self,
@@ -371,11 +372,10 @@ class SkilledLoRA(LoRA):
         if type(weights) == list:
             weights = torch.stack(weights, dim=0).to(device)
 
-        assert skilled_loras_a.shape[2] == 1, "Only 1 split is supported for now."
-        assert skilled_loras_b.shape[3] == 1, "Only 1 split is supported for now."
-
-        skilled_loras_a = skilled_loras_a.squeeze(2)
-        skilled_loras_b = skilled_loras_b.squeeze(3)
+        # assert skilled_loras_a.shape[2] == 1, "Only 1 split is supported for now."
+        # assert skilled_loras_b.shape[3] == 1, "Only 1 split is supported for now."
+        # skilled_loras_a = skilled_loras_a.squeeze(2)
+        # skilled_loras_b = skilled_loras_b.squeeze(3)
 
         # (n_examples, seq_len, out_features)
         layer_out = skilled_loras[0].layer(input)
@@ -428,6 +428,31 @@ class SkilledLoRA(LoRA):
                     adapter_out = torch.bmm(torch.bmm(input_lora, A), B) * scaling
                 else:
                     raise NotImplementedError("Only 2D and 3D inputs are supported.")
+            elif weights.ndim == 3:
+                # breakpoint()
+                # we are in the case in which we have a single skilled lora applied with different weights
+                A = torch.einsum("bqs,sqdr->bqdr", (weights, skilled_loras_a))
+                B = torch.einsum("bqs,srqd->brqd", (weights, skilled_loras_b))
+
+                # combine n_splits, and d_split into a single dimension
+                A, B = A.flatten(1, 2), B.flatten(2, 3)
+
+                if scale_gradient:
+                    A = ScaleGradient.apply(
+                        A, 1 / torch.max(weights, dim=1)[0][:, None, None]
+                    )
+                    B = ScaleGradient.apply(
+                        B, 1 / torch.max(weights, dim=1)[0][:, None, None]
+                    )
+
+                if input_lora.ndim == 2:
+                    partial_out = torch.einsum("bd,bdr->br", (input_lora, A))
+                    adapter_out = torch.einsum("br,brd->bd", (partial_out, B))
+                    adapter_out = adapter_out * scaling
+                elif input_lora.ndim == 3:
+                    adapter_out = torch.bmm(torch.bmm(input_lora, A), B) * scaling
+                else:
+                    raise NotImplementedError("Only 2D and 3D inputs are supported.")
         elif n_skills == 1:
             # this is basically standard lora forward, we are here by accident
             # !!!warning!!!! this ignores the weights
@@ -435,6 +460,12 @@ class SkilledLoRA(LoRA):
                 input, [sk_lora.to_loras()[0] for sk_lora in skilled_loras]
             )
         else:
+            assert skilled_loras_a.shape[2] == 1, "Only 1 split is supported for now."
+            assert skilled_loras_b.shape[3] == 1, "Only 1 split is supported for now."
+
+            skilled_loras_a = skilled_loras_a.squeeze(2)
+            skilled_loras_b = skilled_loras_b.squeeze(3)
+
             A = torch.einsum("bs,bsdr->bdr", (weights, skilled_loras_a))
             B = torch.einsum("bs,bsrd->brd", (weights, skilled_loras_b))
 

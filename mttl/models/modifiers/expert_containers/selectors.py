@@ -235,6 +235,8 @@ class SelectorView:
 
 @dataclass
 class PolySelectorConfig(SelectorConfig):
+    n_tasks: int = 1
+    n_splits: int = 1
     pass
 
 
@@ -246,13 +248,23 @@ class PolySelector(Selector):
     """
 
     def __init__(self, info_container, **kwargs) -> None:
-        super().__init__(info_container)
+        super().__init__(info_container, **kwargs)
 
-        self.module_logits = nn.Parameter(torch.empty(1).uniform_(-1e-3, 1e-3))
+        self.module_logits = nn.Parameter(
+            torch.empty(self.config.n_tasks, self.config.n_splits).uniform_(-1e-3, 1e-3)
+        )
 
     def _get_weights(self):
-        module_logits = torch.sigmoid(self.module_logits)
+        if self.config.n_tasks == 1:
+            module_logits = torch.sigmoid(self.module_logits)
+        else:
+            task_ids = self.info_container["routing_infos"].task_ids
+            module_logits = torch.sigmoid(self.module_logits[task_ids])
         module_weights = module_logits / (module_logits.sum(dim=-1, keepdim=True) + EPS)
+
+        module_weights = module_weights.view(
+            module_weights.size(0), self.config.n_splits, len(self.expert_names)
+        )
         return module_weights
 
     @forward_with_cache
@@ -289,9 +301,9 @@ class PolySelector(Selector):
 
     def add_expert(self, expert_name: str, **kwargs):
         self.expert_names.append(expert_name)
-        self.module_logits.data = torch.empty(len(self.expert_names)).uniform_(
-            -1e-3, 1e-3
-        )
+        self.module_logits.data = torch.empty(
+            self.config.n_tasks, self.config.n_splits * len(self.expert_names)
+        ).uniform_(-1e-3, 1e-3)
 
 
 @dataclass

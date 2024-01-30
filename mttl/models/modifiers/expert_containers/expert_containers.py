@@ -291,7 +291,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
     in memory in a single parameter.
     """
 
-    __supports_configs__ = [LoRAConfig]
+    __supports_configs__ = [SkilledLoRAConfig, LoRAConfig]
 
     def __init__(self, config, task_id_container, layer, selector=None):
         MergeableAdapter.__init__(self)
@@ -312,6 +312,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             lora_dropout=config.lora_dropout,
             lora_init_b_random=config.lora_init_b_random,
             lora_rank=config.lora_rank,
+            n_splits=config.n_splits,
             n_skills=0,
         )
         self.experts = SkilledLoRA(dummy_config, layer)
