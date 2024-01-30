@@ -215,6 +215,44 @@ def test_snapshot_download(tmp_path, build_local_files, setup_repo, repo_id):
 
 
 @pytest.mark.skipif(token is None, reason="Requires access to Azure Blob Storage")
+@pytest.mark.parametrize("allow_patterns,expected_files", [
+    (["blob_data_1.txt"], ["blob_data_1.txt"]),
+    (["*.txt"], ["blob_data_1.txt", "blob_data_2.txt"]),
+    (["blob_data_1.*"], ["blob_data_1.txt", "blob_data_1.json"]),
+    (["*1.txt", "*2.json"], ["blob_data_1.txt", "blob_data_2.json"]),
+])
+def test_snapshot_download_filtered(tmp_path, setup_repo, repo_id, allow_patterns, expected_files):
+    engine = BlobStorageEngine(token=token, cache_dir=tmp_path)
+    setup_repo(engine, repo_id)
+
+    # Upload two temp files to download
+    local_path = tmp_path / repo_id
+    local_path.mkdir()
+    filenames = [
+        "blob_data_1.txt",
+        "blob_data_2.txt",
+        "blob_data_1.json",
+        "blob_data_2.json",
+    ]
+    for filename in filenames:
+        local_data_path = str(local_path / filename)
+        with open(local_data_path, "wb") as my_blob:
+            my_blob.write(f"{filename}".encode())
+    _ = asyncio.run(engine.async_upload_blobs(repo_id, filenames))
+
+    # Remove cached files
+    for filename in filenames:
+        (local_path / filename).unlink()
+    assert os.listdir(local_path) == []
+
+    # Download the files from the remote
+    blob_data_path = engine.snapshot_download(repo_id, allow_patterns=allow_patterns)
+
+    assert blob_data_path == str(local_path)
+    assert set(os.listdir(blob_data_path)) == set(expected_files)
+
+
+@pytest.mark.skipif(token is None, reason="Requires access to Azure Blob Storage")
 def test_hf_hub_download(tmp_path, build_local_files, setup_repo, repo_id):
     engine = BlobStorageEngine(token=token, cache_dir=tmp_path)
     setup_repo(engine, repo_id)

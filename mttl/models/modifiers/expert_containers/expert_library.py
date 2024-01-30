@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 import datetime
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
+from fnmatch import fnmatch
 import glob
 import io
 import re
@@ -226,18 +227,28 @@ class BlobStorageEngine(BackendEngine):
     def _get_local_filepath(self, repo_id, filename):
         return os.path.join(self.cache_dir, repo_id, filename)
 
-    def snapshot_download(self, repo_id, allow_patterns=None):
-        """Downloads the entire repository.
-        Downloads are made concurrently to speed-up the process."""
+    def snapshot_download(self, repo_id, allow_patterns: Optional[Union[List[str], str]] = None):
+        """Downloads the entire repository, or a subset of files if allow_patterns is provided.
+        If allow_patterns is provided, paths must match at least one pattern from the allow_patterns.
+
+        Downloads are made concurrently to speed-up the process.
+        """
         repo_files = self.list_repo_files(repo_id)
-        # if allow_patterns is None:
-        #     allow_patterns = ["**/*"]
-        # filtered_files = [
-        #     f for f in repo_files
-        #     if any([re.match(pattern, f) for pattern in allow_patterns])
-        # ]
+
+        if isinstance(allow_patterns, str):
+            allow_patterns = [allow_patterns]
+
+        if allow_patterns is None:
+            filtered_files = repo_files
+        else:
+            filtered_files = [
+                repo_file
+                for repo_file in repo_files
+                if any(fnmatch(repo_file, r) for r in allow_patterns)
+            ]
+
         local_filenames = asyncio.run(
-            self.async_download_blobs(repo_id, repo_files)
+            self.async_download_blobs(repo_id, filtered_files)
         )
         return os.path.join(self.cache_dir, repo_id)
 
