@@ -5,6 +5,9 @@ from datasets import load_dataset
 import numpy as np
 from mttl.utils import retry_with_exponential_backoff
 
+from huggingface_hub import login, whoami, HfApi
+from huggingface_hub.utils._errors import HfHubHTTPError
+
 
 INVALID_RESPONSE = object()
 
@@ -51,16 +54,15 @@ def upload_to_hf_(
     seed=42,
 ):
     import pandas as pd
-    import huggingface_hub
     from collections import Counter
     from datasets import concatenate_datasets
 
     hf_token = os.environ.get("HF_TOKEN")
-    huggingface_hub.login(token=hf_token)
+    login(token=hf_token)
 
     if hf_destination is None:
         dts_name = dataset_path.split("/")[-1].replace(".jsonl", "")
-        hf_user = huggingface_hub.whoami()["name"]
+        hf_user = whoami()["name"]
         hf_destination = f"{hf_user}/{dts_name}"
 
     rng = np.random.RandomState(seed)
@@ -130,8 +132,6 @@ def upload_to_hf_(
     )
 
     if configuration is not None:
-        from huggingface_hub import HfApi
-
         api = HfApi()
         setting_dict = configuration.__dict__
 
@@ -140,7 +140,7 @@ def upload_to_hf_(
                 f.write(f"## {k}: {v}\n")
 
         @retry_with_exponential_backoff(
-            errors=huggingface_hub.utils._errors.HfHubHTTPError
+            errors=HfHubHTTPError
         )
         def upload():
             api.upload_file(

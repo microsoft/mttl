@@ -2248,10 +2248,10 @@ def create_sni(hf_repo_id):
 def create_data(dataset_folder, hf_destination, flat=True):
     import glob
     from datasets import DatasetDict
-    import huggingface_hub
+    from huggingface_hub import login
 
     hf_token = os.environ.get("HF_TOKEN")
-    huggingface_hub.login(token=hf_token)
+    login(token=hf_token)
 
     files = glob.glob(os.path.join(dataset_folder, "*.json"))
     dataset_dict = DatasetDict()

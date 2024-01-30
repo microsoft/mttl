@@ -4,10 +4,9 @@ import seaborn as sns
 from dataclasses import replace
 from functools import partial
 from matplotlib import pyplot as plt
-from huggingface_hub import login
 from tempfile import TemporaryDirectory
 from pytorch_lightning import seed_everything
-from huggingface_hub import create_repo, login, HfApi
+from huggingface_hub import login, HfApi  # whoami
 from mttl.models.modifiers.expert_containers.expert_library import (
     LocalExpertLibrary,
     HFExpertLibrary,
@@ -16,9 +15,6 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     SVDEmbeddingTransform,
     SVDEmbeddingTransformConfig,
 )
-import os
-from huggingface_hub import login, HfApi, logout
-import numpy as np
 from projects.wiki_experts.src.evolution.utils import get_svd_embedding
 
 hf_api_key = os.environ["HF_TOKEN"]

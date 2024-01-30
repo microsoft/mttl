@@ -5,8 +5,6 @@ from dataclasses import dataclass, replace
 from fnmatch import fnmatch
 import glob
 import io
-import re
-import json
 import sys
 from typing import Any, Dict, List, Optional, Union
 import torch
@@ -14,9 +12,7 @@ import os
 import time
 import asyncio
 
-import requests
 import numpy as np
-
 
 from huggingface_hub import (
     hf_hub_download,
@@ -39,7 +35,6 @@ from azure.core.exceptions import (
     ResourceExistsError,
     ResourceNotFoundError,
 )
-
 
 from mttl.utils import logger
 from mttl.models.modifiers.expert_containers.module_graph import (
