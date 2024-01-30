@@ -526,7 +526,7 @@ def run_multitask(args: ExpertConfig):
         if args.create_transfer_matrix:
             create_transfer_matrix(args, checkpoint)
 
-    elif args.hf_lib_id is not None:
+    else:
         # fine-tuning with expert library
         assert args.finetune_regime in FINETUNE_FUNCTIONS
         expert = FINETUNE_FUNCTIONS[args.finetune_regime](args, dm)
@@ -534,8 +534,6 @@ def run_multitask(args: ExpertConfig):
         if args.create_transfer_matrix or "nevergrad" in args.finetune_regime:
             create_transfer_matrix(args, expert)
         shutil.rmtree(f"/tmp/{args.hf_lib_id}", ignore_errors=True)
-    else:
-        raise ValueError("please specify a library, or a checkpoint")
 
 
 @register_finetune_func("poly_from_scratch")
@@ -544,12 +542,13 @@ def finetune_polylib_full(args: ExpertConfig, dm):
     Trains poly from scratch, fine- or coarsegrained
     """
 
-    assert (
-        "module_logits" in args.trainable_param_names
-        or "selector" in args.trainable_param_names
-    )
+    if (
+        "module_logits" not in args.trainable_param_names
+        and "selector" in args.trainable_param_names
+    ):
+        args.trainable_param_names += "|.*module_logits.*|.*selector.*"
+    assert args.hf_lib_id is None
     args.router_selector = "poly_router"
-    assert args.router_selector is not None
     module = MoETrainer(**vars(args), device_map="auto")
     module.to("cuda")
     return train_module(args, module, dm)
