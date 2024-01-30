@@ -1,4 +1,5 @@
 # unit test for adapter_ranker
+import io
 import os
 import pytest
 import asyncio
@@ -8,9 +9,12 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     HFExpertLibrary,
 )
 
+from huggingface_hub import (
+    CommitOperationAdd,
+    CommitOperationDelete,
+    CommitOperationCopy,
+)
 
-def test_expert_lib(mocker):
-    library = HFExpertLibrary("sordonia/test-library")
 
     assert len(library) == 2
     assert not library._sliced
@@ -236,3 +240,37 @@ def test_hf_hub_download(tmp_path, build_local_files, setup_repo, repo_id):
     # Two files stored in the remote repo
     repo_files = engine.list_repo_files(repo_id)
     assert set(repo_files) == {filename_1, filename_2}
+
+
+@pytest.mark.skipif(token is None, reason="Requires access to Azure Blob Storage")
+def test_create_commit(tmp_path, build_local_files, setup_repo, repo_id):
+    engine = BlobStorageEngine(token=token, cache_dir=tmp_path)
+    setup_repo(engine, repo_id)
+
+    local_path = tmp_path / repo_id
+    local_path.mkdir()
+    filenames = build_local_files(local_path, 4)
+    f1, f2, f3, f4 = filenames
+    f5 = "blob_data_5.txt"
+
+    # Upload f3 and f4
+    _ = asyncio.run(engine.async_upload_blobs(repo_id, [f3, f4]))
+
+    # Load f1 into memory, keep f2 as a file object
+    with open(local_path / f1, "rb") as f:
+        buffer = io.BytesIO(f.read())
+
+    # Create ops: upload f1 and f2, delete f3, copy f4 to f5
+    ops = [
+        CommitOperationAdd(path_in_repo=f1, path_or_fileobj=buffer),
+        CommitOperationAdd(path_in_repo=f2, path_or_fileobj=local_path / f2),
+        CommitOperationDelete(path_in_repo=f3),
+        CommitOperationCopy(src_path_in_repo=f4, path_in_repo=f5),
+    ]
+
+    engine.create_commit(repo_id, ops, "Commit message")
+
+    assert set(engine.list_repo_files(repo_id)) == {f1, f2, f4, f5}
+    f5_path = engine.hf_hub_download(repo_id, f5)
+    with open(f5_path, "rb") as f:
+        assert f.read() == b"Blob data 4"

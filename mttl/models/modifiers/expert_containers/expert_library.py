@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import datetime
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 import glob
@@ -31,7 +32,7 @@ from huggingface_hub import (
 from functools import total_ordering
 from huggingface_hub.utils._errors import RepositoryNotFoundError
 
-from azure.storage.blob import BlobServiceClient as SyncBlobServiceClient
+from azure.storage.blob import BlobServiceClient
 from azure.storage.blob.aio import BlobServiceClient as AsyncBlobServiceClient
 from azure.core.exceptions import (
     ResourceExistsError,
@@ -243,7 +244,7 @@ class BlobStorageEngine(BackendEngine):
     def create_repo(self, repo_id, repo_type=None, exist_ok=True, private=True):
         """ Creates a new repository. repo_type and private are ignored for blob storage."""
         try:
-            SyncBlobServiceClient(self.token).create_container(name=repo_id)
+            BlobServiceClient(self.token).create_container(name=repo_id)
         except ResourceExistsError as error:
             error_message = 'A container with this name already exists'
             if exist_ok:
@@ -253,7 +254,7 @@ class BlobStorageEngine(BackendEngine):
 
     def delete_repo(self, repo_id):
         """Deletes a repository."""
-        container_client = SyncBlobServiceClient(self.token).get_container_client(
+        container_client = BlobServiceClient(self.token).get_container_client(
             container=repo_id
         )
         try:
@@ -262,25 +263,36 @@ class BlobStorageEngine(BackendEngine):
             print(f"Container {repo_id} not found.")
 
     def create_commit(self, repo_id, operations, commit_message):
-        container_client = SyncBlobServiceClient(self.token).get_container_client(repo_id)
+        asyncio.run(self.async_create_commit(repo_id, operations))
+
+    async def async_create_commit(self, repo_id, operations):
+        tasks = []
         for op in operations:
-            if type(op) == CommitOperationAdd:
-                container_client.upload_blob(
-                    op.path_in_repo,
-                    op.path_or_fileobj.read(),
+            if isinstance(op, CommitOperationAdd):
+                tasks.append(self._async_upload_blob(
+                    repo_id=repo_id,
+                    filename=op.path_in_repo,
+                    buffer=op.path_or_fileobj,
                     overwrite=True,
-                )
-            elif type(op) == CommitOperationCopy:
-                import shutil
-                shutil.copyfile(
-                    os.path.join(r'/tmp', repo_id, op.src_path_in_repo),
-                    os.path.join(r'/tmp', repo_id, op.path_in_repo),
-                )
-            elif type(op) == CommitOperationDelete:
-                os.remove(os.path.join(r'/tmp', repo_id, op.path_in_repo))
+                ))
+            elif isinstance(op, CommitOperationCopy):
+                tasks.append(self._async_copy_blob(
+                    source_repo_id=repo_id,
+                    source_filename=op.src_path_in_repo,
+                    destination_repo_id=repo_id,
+                    destination_filename=op.path_in_repo,
+                    overwrite=True,
+                ))
+            elif isinstance(op, CommitOperationDelete):
+                tasks.append(self._async_delete_blob(
+                    repo_id=repo_id,
+                    filename=op.path_in_repo,
+                ))
+        await asyncio.gather(*tasks)
 
     def preupload_lfs_files(self, repo_id, additions):
-        pass  # additions list of CommitOperations
+        # for blob storage, these operations are done in create_commit
+        pass
 
     def hf_hub_download(self, repo_id, filename):
         local_filename = asyncio.run(self.async_download_blobs(repo_id, filename))
@@ -298,28 +310,36 @@ class BlobStorageEngine(BackendEngine):
     def list_repo_files(self, repo_id):
         """List all files in a repository. The files might not be downloaded locally."""
         try:
-            container_client = SyncBlobServiceClient(self.token).get_container_client(repo_id)
+            container_client = BlobServiceClient(self.token).get_container_client(repo_id)
             return [b.name for b in container_client.list_blobs()]
         except ResourceNotFoundError as error:
             raise ValueError(f"Repository {repo_id} not found") from error
 
-    async def async_upload_blobs(self, repo_id: str, filenames: Union[List[str], str]):
+    async def async_upload_blobs(self, repo_id: str, filenames: Union[List[str], str], buffers=None, overwrite=False):
         is_str = isinstance(filenames, str)
         if is_str:
             filenames = [filenames]
+        if buffers is None:
+            buffers = [None] * len(filenames)
+        else:
+            if len(buffers) != len(filenames):
+                raise ValueError("Filenames and buffers must have the same length.")
         tasks = [
-            self._async_upload_blob(repo_id, filename)
-            for filename in filenames
+            self._async_upload_blob(repo_id, filename, buffer, overwrite)
+            for filename, buffer in zip(filenames, buffers)
         ]
         await asyncio.gather(*tasks)
         return filenames[0] if is_str else filenames
 
-    async def _async_upload_blob(self, repo_id, filename):
+    async def _async_upload_blob(self, repo_id, filename, buffer=None, overwrite=False):
         async with AsyncBlobServiceClient(self.token) as blob_service_client:
             blob_client = blob_service_client.get_blob_client(container=repo_id, blob=filename)
-            local_cache = self._get_local_filepath(repo_id, filename)
-            with open(file=local_cache, mode="rb") as blob_file:
-                await blob_client.upload_blob(blob_file)
+            if buffer is not None:
+                await blob_client.upload_blob(buffer, overwrite=overwrite)
+            else:
+                local_cache = self._get_local_filepath(repo_id, filename)
+                with open(file=local_cache, mode="rb") as blob_file:
+                    await blob_client.upload_blob(blob_file, overwrite=overwrite)
 
     async def async_download_blobs(self, repo_id: str, filesnames: Union[List[str], str]) -> str:
         is_str = isinstance(filesnames, str)
@@ -418,8 +438,6 @@ class LocalFSEngine(BackendEngine):
         pass
 
     def repo_info(self, repo_id):
-        import datetime
-
         # return the current time into string format
         class RepoInfo:
             pass
