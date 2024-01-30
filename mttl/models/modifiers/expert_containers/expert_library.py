@@ -586,6 +586,7 @@ class ExpertLibrary:
         if self._in_transaction:
             self._pending_operations.extend(operations)
         else:
+            self.preupload_lfs_files(self.repo_id, additions=operations)
             self.create_commit(
                 self.repo_id,
                 operations=operations,
