@@ -44,8 +44,14 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
 
 
 def get_hidden_states(library, args):
+    if "phi" in library.repo_id:
+        centroid_name = "dataset_centroids"
+    else:
+        centroid_name = "dataset_centroids_2"
+
     if args.delta_scale:
         cfg = HiddenStateComputerConfig(
+            name=centroid_name,
             max_samples_per_task=args.max_samples_per_task,
             track=args.track,
             pool=args.pool,
@@ -68,6 +74,7 @@ def get_hidden_states(library, args):
         }
     else:
         cfg = HiddenStateComputerConfig(
+            name=centroid_name,
             use_base_model_only=args.use_base_model_only,
             max_samples_per_task=args.max_samples_per_task,
             track=args.track,
@@ -80,9 +87,7 @@ def get_hidden_states(library, args):
 
 
 def get_svd_embeddings(library, args):
-    cfg = SVDInputExtractorConfig(
-        top_k=args.transform_sparsity, name="svd_input_ab2", recompute=False
-    )
+    cfg = SVDInputExtractorConfig(top_k=args.transform_sparsity, recompute=True)
     svd_input_extractor = SVDInputExtractor(cfg)
     return svd_input_extractor.transform(library)
 
@@ -197,17 +202,6 @@ def run_multitask(args: ExpertConfig):
         patch_prototypes(module, library, args)
         module = module.to("cuda")
 
-    """
-    single_exp = {'merged': expert}
-    cfg = ExpertProjectorConfig(granularity='coarsegrained', project_over_all_experts=True)
-    transform = ExpertProjector(cfg)
-    projected_library = transform.transform(
-        'sordonia/library-phi_2-v3', 
-        single_exp
-    )
-    expert = WeightedLinearMerge().transform(projected_library)
-    """
-
     if args.pipeline_eval_tasks == "all":
         args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
 
@@ -222,7 +216,14 @@ def run_multitask(args: ExpertConfig):
             tasks=args.pipeline_eval_tasks,
             output_path=os.path.join(args.output_dir, "DOWNSTREAM"),
         )
-        runner.run(module)
+        scores = runner.run(module)
+
+    if os.environ.get("WANDB_API_KEY"):
+        import wandb
+
+        wandb.init(project="0shot_routing", config=args.asdict())
+        wandb.log({f"downstream/{k}": v for k, v in scores.items()})
+        wandb.finish()
 
 
 if __name__ == "__main__":
