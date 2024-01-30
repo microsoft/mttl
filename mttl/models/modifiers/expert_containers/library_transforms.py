@@ -280,7 +280,7 @@ class HiddenStateComputerConfig:
     model: str = None  # If `use_base_model_only`, can pass a specific model to compute embeddings with
     max_samples_per_task: int = 10
     upload_to_hf: bool = False
-    name: str = "dataset_centroids"
+    name: str = "dataset_centroids_2"
     recompute: bool = False
     track: str = "each_layer"  # last layer, or each layer
     pool: str = "last"  # last, or mean
@@ -492,22 +492,21 @@ class HiddenStateComputer(LibraryTransform):
                 centroid[layer] /= count
                 centroid[layer] = F.normalize(centroid[layer], p=2, dim=-1).cpu()
 
-            # can't pickle a defaultdict
-            output[expert_name] = {k: v for k, v in centroid.items()}
+            # convert to regular dict
+            centroids = {k: v for k, v in centroid.items()}
 
-        if self.config.upload_to_hf:
-            logger.info("Uploading centroids to HF")
-            # add embeddings to the library
-            with library.batched_commit():
-                for i, expert_name in enumerate(output.keys()):
-                    library.add_auxiliary_data(
-                        data_type=save_name,
+            if self.config.upload_to_hf:
+                logger.info("Uploading centroids to HF")
+                # add embeddings to the library
+                with library.batched_commit():
+                    library.add_embedding_dict(
+                        dump_name=save_name,
                         expert_name=expert_name,
-                        config=self.config.__dict__,
-                        data=output[expert_name],
+                        data=centroids,
                         force=True,  # make sure we overwrite
                     )
-        return output
+
+            return output
 
 
 @dataclass
@@ -647,31 +646,22 @@ class SVDInputExtractor(LibraryTransform):
                     )
 
                 # Save eigenvector and eigvenvalue
-                vectors[expert_name][param_name] = largest.real.cpu()
+                vectors[expert_name][param_name] = largest.real.cpu().numpy()
                 eigvals[expert_name][param_name] = out.eigenvalues.real[0].item()
 
-            sorted_keys = sorted(vectors[expert_name].keys())
-            stacked_vector = torch.stack(
-                [vectors[expert_name][k] for k in sorted_keys], dim=0
-            ).numpy()
-            stacked_eigvals = torch.tensor(
-                [eigvals[expert_name][k] for k in sorted_keys]
-            ).numpy()
             # Upload to HF 1 expert at a time
             if self.config.upload_to_hf:
                 logger.info(f"Uploading SVD centroids to HF for expert {expert_name}")
                 # add embeddings to the library
                 with library.batched_commit():
                     for name, data in [
-                        ("keys", sorted_keys),
-                        ("vectors", stacked_vector),
-                        ("eigvals", stacked_eigvals),
+                        ("vectors", vectors),
+                        ("eigvals", eigvals),
                     ]:
-                        library.add_auxiliary_data(
-                            data_type=save_name + "_" + name,
+                        library.add_embedding_dict(
+                            dump_name=save_name + "_" + name,
                             expert_name=expert_name,
-                            config=self.config.__dict__,
-                            data=data,
+                            data=data[expert_name],
                             force=True,  # make sure we overwrite
                         )
 
