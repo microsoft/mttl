@@ -496,14 +496,16 @@ class HiddenStateComputer(LibraryTransform):
             centroids = {k: v for k, v in centroid.items()}
             output[expert_name] = centroids
 
-            if self.config.upload_to_hf:
-                logger.info("Uploading centroids to HF")
-                # add embeddings to the library
-                with library.batched_commit():
+        if self.config.upload_to_hf:
+            logger.info("Uploading centroids to HF")
+
+            # add embeddings to the library
+            with library.batched_commit():
+                for expert_name, data in output.items():
                     library.add_embedding_dict(
                         dump_name=save_name,
                         expert_name=expert_name,
-                        data=centroids,
+                        data=data,
                         force=True,  # make sure we overwrite
                     )
 
