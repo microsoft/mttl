@@ -548,7 +548,7 @@ class SVDInputExtractor(LibraryTransform):
 
         save_name = self.config.name
         if self.config.ab_only:
-            save_name += "-ab"
+            save_name += "_ab"
 
         # try to fetch auxiliary data
         output = library.get_auxiliary_data(data_type=save_name)
