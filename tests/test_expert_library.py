@@ -285,7 +285,7 @@ def test_hf_hub_download(tmp_path, build_local_files, setup_repo, repo_id):
 
 
 @pytest.mark.skipif(token is None, reason="Requires access to Azure Blob Storage")
-def test_create_commit(tmp_path, build_local_files, setup_repo, repo_id):
+def test_create_commit_sync(tmp_path, build_local_files, setup_repo, repo_id):
     engine = BlobStorageEngine(token=token, cache_dir=tmp_path)
     setup_repo(engine, repo_id)
 
@@ -294,6 +294,7 @@ def test_create_commit(tmp_path, build_local_files, setup_repo, repo_id):
     filenames = build_local_files(local_path, 4)
     f1, f2, f3, f4 = filenames
     f5 = "blob_data_5.txt"
+    f6 = "blob_data_6.txt"
 
     # Upload f3 and f4
     _ = asyncio.run(engine.async_upload_blobs(repo_id, [f3, f4]))
@@ -302,17 +303,51 @@ def test_create_commit(tmp_path, build_local_files, setup_repo, repo_id):
     with open(local_path / f1, "rb") as f:
         buffer = io.BytesIO(f.read())
 
-    # Create ops: upload f1 and f2, delete f3, copy f4 to f5
+    # Create ops: upload f1 and f2, copy f3 to f5 and f4 to f5, delete f3 and f5
     ops = [
         CommitOperationAdd(path_in_repo=f1, path_or_fileobj=buffer),
         CommitOperationAdd(path_in_repo=f2, path_or_fileobj=local_path / f2),
+        CommitOperationCopy(src_path_in_repo=f3, path_in_repo=f5),
+        CommitOperationCopy(src_path_in_repo=f4, path_in_repo=f6),
         CommitOperationDelete(path_in_repo=f3),
-        CommitOperationCopy(src_path_in_repo=f4, path_in_repo=f5),
+        CommitOperationDelete(path_in_repo=f5),
     ]
 
-    engine.create_commit(repo_id, ops, "Commit message")
+    engine.create_commit(repo_id, ops, "Commit operations in order")
 
-    assert set(engine.list_repo_files(repo_id)) == {f1, f2, f4, f5}
-    f5_path = engine.hf_hub_download(repo_id, f5)
-    with open(f5_path, "rb") as f:
+    assert set(engine.list_repo_files(repo_id)) == {f1, f2, f4, f6}
+    f6_path = engine.hf_hub_download(repo_id, f6)
+    with open(f6_path, "rb") as f:
         assert f.read() == b"Blob data 4"
+
+
+@pytest.mark.skipif(token is None, reason="Requires access to Azure Blob Storage")
+def test_create_commit_async(tmp_path, build_local_files, setup_repo, repo_id):
+    engine = BlobStorageEngine(token=token, cache_dir=tmp_path)
+    setup_repo(engine, repo_id)
+
+    local_path = tmp_path / repo_id
+    local_path.mkdir()
+    filenames = build_local_files(local_path, 4)
+    f1, f2, f3, f4 = filenames
+
+    ops = [
+        CommitOperationAdd(path_in_repo=f1, path_or_fileobj=local_path / f1),
+        CommitOperationAdd(path_in_repo=f2, path_or_fileobj=local_path / f2),
+        CommitOperationAdd(path_in_repo=f3, path_or_fileobj=local_path / f3),
+        CommitOperationAdd(path_in_repo=f4, path_or_fileobj=local_path / f4),
+    ]
+
+    engine.create_commit(repo_id, ops, "Push files async", async_mode=True)
+
+    assert set(engine.list_repo_files(repo_id)) == {f1, f2, f3, f4}
+
+    ops = [
+        CommitOperationDelete(path_in_repo=f1),
+        CommitOperationDelete(path_in_repo=f2),
+        CommitOperationDelete(path_in_repo=f3),
+        CommitOperationDelete(path_in_repo=f4),
+    ]
+
+    engine.create_commit(repo_id, ops, "Delete files async", async_mode=True)
+    assert not engine.list_repo_files(repo_id)

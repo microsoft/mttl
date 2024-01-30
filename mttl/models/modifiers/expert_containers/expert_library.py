@@ -273,10 +273,10 @@ class BlobStorageEngine(BackendEngine):
         except ResourceNotFoundError:
             print(f"Container {repo_id} not found.")
 
-    def create_commit(self, repo_id, operations, commit_message):
-        asyncio.run(self.async_create_commit(repo_id, operations))
+    def create_commit(self, repo_id, operations, commit_message="", async_mode=False):
+        asyncio.run(self.async_create_commit(repo_id, operations, async_mode=async_mode))
 
-    async def async_create_commit(self, repo_id, operations):
+    async def async_create_commit(self, repo_id, operations, async_mode=False):
         tasks = []
         for op in operations:
             if isinstance(op, CommitOperationAdd):
@@ -299,7 +299,11 @@ class BlobStorageEngine(BackendEngine):
                     repo_id=repo_id,
                     filename=op.path_in_repo,
                 ))
-        await asyncio.gather(*tasks)
+        if async_mode:
+            await asyncio.gather(*tasks)
+        else:
+            for task in tasks:
+                await task
 
     def preupload_lfs_files(self, repo_id, additions):
         # for blob storage, these operations are done in create_commit
