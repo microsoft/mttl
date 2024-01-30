@@ -512,7 +512,7 @@ class HiddenStateComputer(LibraryTransform):
 
 @dataclass
 class SVDInputExtractorConfig:
-    name: str = "svd_input_extractor_bin"
+    name: str = "svd_input_extractor"
     top_k: float = 1.0
     upload_to_hf: bool = True
     recompute: bool = False
@@ -554,9 +554,17 @@ class SVDInputExtractor(LibraryTransform):
         if isinstance(library, str):
             library = HFExpertLibrary(library)
 
-        save_name = self.config.name
-        if not self.config.ab_only:
-            save_name += "_delta"
+        args_in_name = [
+            "name",
+            "top_k",
+            "ab_only",
+        ]
+        save_name = "-".join(
+            [
+                "" if x is None else str(x)
+                for x in [getattr(self.config, k) for k in args_in_name]
+            ]
+        )
 
         # try to fetch auxiliary data
         vectors = library.get_auxiliary_data(data_type=save_name + "_vectors")
@@ -639,20 +647,31 @@ class SVDInputExtractor(LibraryTransform):
                     )
 
                 # Save eigenvector and eigvenvalue
-                vectors[expert_name][param_name] = largest.real.cpu().numpy()
+                vectors[expert_name][param_name] = largest.real.cpu()
                 eigvals[expert_name][param_name] = out.eigenvalues.real[0].item()
 
+            sorted_keys = sorted(vectors[expert_name].keys())
+            stacked_vector = torch.stack(
+                [vectors[expert_name][k] for k in sorted_keys], dim=0
+            ).numpy()
+            stacked_eigvals = torch.tensor(
+                [eigvals[expert_name][k] for k in sorted_keys]
+            ).numpy()
             # Upload to HF 1 expert at a time
             if self.config.upload_to_hf:
                 logger.info(f"Uploading SVD centroids to HF for expert {expert_name}")
                 # add embeddings to the library
                 with library.batched_commit():
-                    for name, data in [("vectors", vectors), ("eigvals", eigvals)]:
+                    for name, data in [
+                        ("keys", sorted_keys),
+                        ("vectors", stacked_vector),
+                        ("eigvals", stacked_eigvals),
+                    ]:
                         library.add_auxiliary_data(
                             data_type=save_name + "_" + name,
                             expert_name=expert_name,
                             config=self.config.__dict__,
-                            data=data[expert_name],
+                            data=data,
                             force=True,  # make sure we overwrite
                         )
 
