@@ -299,12 +299,12 @@ class BlobStorageEngine(BackendEngine):
         return local_filename
 
     def repo_info(self, repo_id):
-        import datetime
-        # return the current time into string format
         class RepoInfo:
             pass
+        container_client = BlobServiceClient(self.token).get_container_client(repo_id)
+        container_properties = container_client.get_container_properties()
         repo_info = RepoInfo()
-        repo_info.lastModified = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        repo_info.lastModified = container_properties.last_modified.strftime("%Y-%m-%d %H:%M:%S")
         return repo_info
 
     def list_repo_files(self, repo_id):
