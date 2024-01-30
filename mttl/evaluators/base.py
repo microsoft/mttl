@@ -469,7 +469,7 @@ def setup_evaluators(
         "mbpp",
         "boolq",
         "arc_easy",
-        "arc_challenge",
+        "arc-easy" "arc-challenge" "arc_challenge",
         "piqa",
         "hellaswag",
         "winogrande",

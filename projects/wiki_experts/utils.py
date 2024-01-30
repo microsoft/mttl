@@ -54,6 +54,8 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
     if dataset in [
         "arc-easy",
         "arc-challenge",
+        "arc_easy",
+        "arc_challenge",
         "openbookqa",
         "boolq",
         "piqa",
@@ -65,7 +67,15 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
                 ArcDataConfig(**common_kwargs, arc_type="ARC-Easy"),
                 ArcMultiChoiceDataModule,
             ),
+            "arc_easy": (
+                ArcDataConfig(**common_kwargs, arc_type="ARC-Easy"),
+                ArcMultiChoiceDataModule,
+            ),
             "arc-challenge": (
+                ArcDataConfig(**common_kwargs, arc_type="ARC-Challenge"),
+                ArcMultiChoiceDataModule,
+            ),
+            "arc_challenge": (
                 ArcDataConfig(**common_kwargs, arc_type="ARC-Challenge"),
                 ArcMultiChoiceDataModule,
             ),

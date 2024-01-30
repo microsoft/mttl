@@ -26,7 +26,8 @@ login(token=hf_api_key)
 user = HfApi(token=hf_api_key).whoami()
 
 # hf_repo_id="oostapeno/flan-lib-neo-1B-20phi"
-hf_repo_id = "ostapeno/library-gptneo_1B_flan_2ep"
+# hf_repo_id = "ostapeno/library-gptneo_1B_flan_2ep"
+hf_repo_id = "ostapeno/library-stablelm_flan_5ep"
 
 local_lib_location = f"/tmp/{hf_repo_id}"
 if os.path.exists(local_lib_location):
@@ -40,6 +41,7 @@ else:
     )
 ##########################################################################################
 
+sparsity_threshold = 0.1
 if "neo" in hf_repo_id:
     sparsity_threshold = 0.7
 elif "phi" in hf_repo_id:
@@ -96,7 +98,7 @@ for i in range(similarity_table.shape[0]):
             pairs[pair] = similarity_table[i, j]
 pairs = [(i, j, v) for (i, j), v in pairs.items()]
 pairs = sorted(pairs, key=lambda x: x[2], reverse=True)
-
+# plots is a list of pairs of tasks and their similarity
 n_pairs = 50
 tasks = list(embeddings.keys())
 # Extract the third element from each tuple
