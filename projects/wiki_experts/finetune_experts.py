@@ -178,6 +178,58 @@ def retrieve(args: ExpertConfig, task, k, retrieve_with="random"):
     return library
 
 
+@register_finetune_func("nevergrad_randretr")
+def finetune_with_nevergrad(args: ExpertConfig, dm):
+    """
+    LoraHub baselines
+    """
+    import wandb
+
+    get_pl_loggers(args)
+    if wandb.run is not None:
+        # log args to wandb
+        wandb.config.update(args)
+
+    from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
+    from mttl.evaluators.rouge_evaluator import RougeEvaluator
+
+    library = retrieve(args, args.finetune_task_name, args.sk, retrieve_with="random")
+    assert (
+        len(library) == args.sk
+    ), f"Retrieved {len(library)} experts, expected {args.sk}"
+
+    dm_for_gen = get_datamodule(args, for_generation=True)
+
+    rouge_evaluator = RougeEvaluator(dm_for_gen)
+
+    def get_loss(model):
+        return -1.0 * rouge_evaluator.evaluate(model, split="train", verbose=False)
+
+    module = RoutedMultiExpertModel(**vars(args), device_map="auto")
+
+    optimizer = NGRoutingOptimizer(
+        model=module,
+        expert_lib=library,
+        get_loss=get_loss,
+        budget=args.n_ng_iterations,
+        action="route",
+        regularizer_factor=0.05,
+    )
+
+    best_weights, best_graph_string = optimizer.optimize()
+    module.load_from_graph_string(best_graph_string, "route", expert_library=library)
+    expert = module.replace_container_with_expert("new_task")
+    expert = Expert(
+        ExpertInfo(
+            expert_name="nevergrad",
+            expert_config=ModifierConfig.from_training_config(args),
+            training_config=args,
+        ),
+        expert.expert_weights,
+    )
+    return expert, None
+
+
 @register_finetune_func("nevergrad")
 def finetune_with_nevergrad(args: ExpertConfig, dm):
     """
@@ -423,6 +475,23 @@ def finetune_polylib_full_with_svd_retrieval(args: ExpertConfig, dm):
     return load_expert_from_checkpoint(checkpoint)
 
 
+@register_finetune_func("joint")
+def finetune_joint(args: ExpertConfig, dm):
+    """
+    Finetunes a pretrained shared model
+    """
+    from projects.wiki_experts.src.evolution.transfer_matrix import resolve_hf_repo_id
+
+    hf_repo_id, expert_name = resolve_hf_repo_id(args.hf_lib_id)
+    library = HFExpertLibrary(hf_repo_id)
+    expert: Expert = library[expert_name]
+    pretrain_args = expert.training_config
+    module = ExpertTrainer(**vars(pretrain_args))
+    module.load_state_dict(expert.expert_weights)
+
+    return train_module(args, module, dm)
+
+
 def run_multitask(args: ExpertConfig):
     seed_everything(args.seed, workers=True)
 
@@ -462,11 +531,28 @@ def run_multitask(args: ExpertConfig):
         assert args.finetune_regime in FINETUNE_FUNCTIONS
         expert = FINETUNE_FUNCTIONS[args.finetune_regime](args, dm)
 
-        if args.create_transfer_matrix or args.finetune_regime == "nevergrad":
+        if args.create_transfer_matrix or "nevergrad" in args.finetune_regime:
             create_transfer_matrix(args, expert)
         shutil.rmtree(f"/tmp/{args.hf_lib_id}", ignore_errors=True)
     else:
         raise ValueError("please specify a library, or a checkpoint")
+
+
+@register_finetune_func("poly_from_scratch")
+def finetune_polylib_full(args: ExpertConfig, dm):
+    """
+    Trains poly from scratch, fine- or coarsegrained
+    """
+
+    assert (
+        "module_logits" in args.trainable_param_names
+        or "selector" in args.trainable_param_names
+    )
+    args.router_selector = "poly_router"
+    assert args.router_selector is not None
+    module = MoETrainer(**vars(args), device_map="auto")
+    module.to("cuda")
+    return train_module(args, module, dm)
 
 
 def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
@@ -478,6 +564,10 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
 
     if "rouge" in args.es_metric:  # early stop on Rouge
         monitor = "val/rougeL"
+        mode = "max"
+
+    elif "downstream" in args.es_metric:  # early stop on downstream eval
+        monitor = f"downstream/{args.finetune_task_name}"
         mode = "max"
 
     try:
@@ -521,17 +611,6 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
     else:
         logger.warn(
             "Deactivating downstream eval callback as it is not enabled in the config. Please set `pipeline_eval_tasks`."
-        )
-
-    if args.eval_rouge_flag:
-        rouge = RougeCallback(
-            get_datamodule(args, for_generation=True),
-            every_n_epochs=3 if args.num_train_epochs > 3 else 1,
-        )
-        callbacks.append(rouge)
-    else:
-        logger.warn(
-            "Deactivating rouge callback as it is not enabled in the config. Please set `eval_rouge_flag=True`."
         )
 
     val_check_interval = args.eval_every
