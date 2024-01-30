@@ -494,6 +494,7 @@ class HiddenStateComputer(LibraryTransform):
 
             # convert to regular dict
             centroids = {k: v for k, v in centroid.items()}
+            output[expert_name] = centroids
 
             if self.config.upload_to_hf:
                 logger.info("Uploading centroids to HF")
@@ -506,7 +507,7 @@ class HiddenStateComputer(LibraryTransform):
                         force=True,  # make sure we overwrite
                     )
 
-            return output
+        return output
 
 
 @dataclass
