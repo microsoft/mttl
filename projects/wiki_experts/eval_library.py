@@ -5,6 +5,7 @@ import torch
 from copy import deepcopy
 import torch.nn.functional as F
 
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from mttl.models.modifiers.expert_containers.expert_library import (
     HFExpertLibrary,
     LocalExpertLibrary,
@@ -12,7 +13,6 @@ from mttl.models.modifiers.expert_containers.expert_library import (
 from mttl.models.modifiers.expert_containers.module_graph import Expert
 from mttl.models.modifiers.expert_containers.selectors import ClownSelector
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from huggingface_hub import login
 from pytorch_lightning import seed_everything
