@@ -218,8 +218,12 @@ def test_snapshot_download(tmp_path, build_local_files, setup_repo, repo_id):
 @pytest.mark.parametrize("allow_patterns,expected_files", [
     (["blob_data_1.txt"], ["blob_data_1.txt"]),
     (["*.txt"], ["blob_data_1.txt", "blob_data_2.txt"]),
+    ("*.txt", ["blob_data_1.txt", "blob_data_2.txt"]),  # str is also allowed
     (["blob_data_1.*"], ["blob_data_1.txt", "blob_data_1.json"]),
     (["*1.txt", "*2.json"], ["blob_data_1.txt", "blob_data_2.json"]),
+    (None, ["blob_data_1.txt", "blob_data_2.txt", "blob_data_1.json", "blob_data_2.json"]),
+    ([], []),
+    ("", []),
 ])
 def test_snapshot_download_filtered(tmp_path, setup_repo, repo_id, allow_patterns, expected_files):
     engine = BlobStorageEngine(token=token, cache_dir=tmp_path)
