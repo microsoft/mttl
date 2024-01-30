@@ -512,7 +512,7 @@ class HiddenStateComputer(LibraryTransform):
 
 @dataclass
 class SVDInputExtractorConfig:
-    name: str = "svd_input_extractor"
+    name: str = "svd_input_extractor_bin"
     top_k: float = 1.0
     upload_to_hf: bool = True
     recompute: bool = False
@@ -528,18 +528,26 @@ class SVDInputExtractor(LibraryTransform):
     def __init__(self, config: SVDInputExtractorConfig = None):
         super().__init__(config or SVDInputExtractorConfig())
 
-    def _maybe_scale(self, output_tuples):
+    def _maybe_scale(self, vectors, eigvals):
         """Post Processing of the retrieved outputs,
         scales the output by the eigenvalue if needed"""
-
-        output = {k: {} for k in output_tuples.keys()}
-        for expert_name, expert_data in output_tuples.items():
-            for layer_name, (v, eig) in expert_data.items():
+        output = {}
+        for expert_name, expert_data in vectors.items():
+            output[expert_name] = {}
+            for layer_name, vector in expert_data.items():
                 if self.config.scale:
-                    v *= eig
-                output[expert_name][layer_name] = v
+                    vector = vector * eigvals[expert_name][layer_name]
+                output[expert_name][layer_name] = vector
 
         return output
+
+    def _extract_from_hf_file(self, adidct, save_name):
+        return {
+            expert_name: {
+                k: v for k, v in expert_data[self.config.name][save_name].items()
+            }
+            for expert_name, expert_data in adidct.items()
+        }
 
     @torch.no_grad()
     def transform(self, library) -> Expert:
@@ -547,28 +555,27 @@ class SVDInputExtractor(LibraryTransform):
             library = HFExpertLibrary(library)
 
         save_name = self.config.name
-        if self.config.ab_only:
-            save_name += "_ab"
+        if not self.config.ab_only:
+            save_name += "_delta"
 
         # try to fetch auxiliary data
-        output = library.get_auxiliary_data(data_type=save_name)
-        if len(output) == len(library) and not self.config.recompute:
-            logger.info("Found {} precomputed centroids".format(len(output)))
+        vectors = library.get_auxiliary_data(data_type=save_name + "_vectors")
+        eigvals = library.get_auxiliary_data(data_type=save_name + "_eigvals")
+
+        if len(vectors) == len(eigvals) == len(library) and not self.config.recompute:
+            logger.info("Found {} precomputed centroids".format(len(vectors)))
+
             # format the output to be dict[expert_name][layer_name] = embedding
-            output = {
-                expert_name: {
-                    k: v for k, v in expert_data[self.config.name][save_name].items()
-                }
-                for expert_name, expert_data in output.items()
-            }
+            vectors = self._extract_from_hf_file(vectors, save_name + "_vectors")
+            eigvals = self._extract_from_hf_file(eigvals, save_name + "_eigvals")
+            return self._maybe_scale(vectors, eigvals)
 
-            return self._maybe_scale(output)
-
-        output = {}
         base_model = None
+        vectors, eigvals = {}, {}
         for expert_name, expert in library.items():
             logger.info(f"Computing SVD for expert {expert_name}")
-            output[expert_name] = {}
+            vectors[expert_name] = {}
+            eigvals[expert_name] = {}
 
             if not self.config.ab_only and base_model is None:
                 training_config = expert.training_config
@@ -632,25 +639,24 @@ class SVDInputExtractor(LibraryTransform):
                     )
 
                 # Save eigenvector and eigvenvalue
-                output[expert_name][param_name] = (
-                    largest.real.cpu(),
-                    out.eigenvalues.real[0].item(),
-                )
+                vectors[expert_name][param_name] = largest.real.cpu().numpy()
+                eigvals[expert_name][param_name] = out.eigenvalues.real[0].item()
 
             # Upload to HF 1 expert at a time
             if self.config.upload_to_hf:
                 logger.info(f"Uploading SVD centroids to HF for expert {expert_name}")
                 # add embeddings to the library
                 with library.batched_commit():
-                    library.add_auxiliary_data(
-                        data_type=save_name,
-                        expert_name=expert_name,
-                        config=self.config.__dict__,
-                        data=output[expert_name],
-                        force=True,  # make sure we overwrite
-                    )
+                    for name, data in [("vectors", vectors), ("eigvals", eigvals)]:
+                        library.add_auxiliary_data(
+                            data_type=save_name + "_" + name,
+                            expert_name=expert_name,
+                            config=self.config.__dict__,
+                            data=data[expert_name],
+                            force=True,  # make sure we overwrite
+                        )
 
-        return self._maybe_scale(output)
+        return self._maybe_scale(vectors, eigvals)
 
 
 @dataclass
