@@ -584,8 +584,44 @@ class ExpertLibrary:
         operations.append(addition_a)
 
         if self._in_transaction:
+            self._pending_pre_uploads.extend(operations)
             self._pending_operations.extend(operations)
         else:
+            self.preupload_lfs_files(self.repo_id, additions=operations)
+            self.create_commit(
+                self.repo_id,
+                operations=operations,
+                commit_message=f"Update library with embedding for {expert_name}.",
+            )
+            logger.info(f"Embedding for {expert_name} uploaded successfully.")
+
+    def add_embedding_dict(
+        self,
+        dump_name: str,
+        expert_name: str,
+        data: np.ndarray,
+        force: bool = False,
+    ):
+        if expert_name not in self.data:
+            raise ValueError(f"Expert {expert_name} not found in repository.")
+
+        operations = []
+        aux_file = f"{expert_name}.{dump_name}.bin"
+
+        buffer = io.BytesIO()
+        torch.save(data, buffer)
+        buffer.flush()
+
+        addition_a = CommitOperationAdd(
+            path_in_repo=f"{aux_file}", path_or_fileobj=buffer
+        )
+        operations.append(addition_a)
+
+        if self._in_transaction:
+            self._pending_pre_uploads.extend(operations)
+            self._pending_operations.extend(operations)
+        else:
+            self.preupload_lfs_files(self.repo_id, additions=operations)
             self.create_commit(
                 self.repo_id,
                 operations=operations,
@@ -658,6 +694,7 @@ class ExpertLibrary:
             self._in_transaction = False
             return
         logger.info(f"Committing {len(self._pending_operations)} operations...")
+
         if self._pending_pre_uploads:
             preupload_lfs_files(self.repo_id, additions=self._pending_pre_uploads)
         self.create_commit(
@@ -665,6 +702,7 @@ class ExpertLibrary:
             operations=self._pending_operations,
             commit_message="Update library with new ops.",
         )
+
         # exit transaction and clear pending operations
         self._in_transaction = False
         self._pending_pre_uploads.clear()
