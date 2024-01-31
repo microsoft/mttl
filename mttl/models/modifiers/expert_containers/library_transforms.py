@@ -377,16 +377,24 @@ class HiddenStateComputer(LibraryTransform):
         print("save_name", save_name)
 
         # try to fetch auxiliary data
+        # support for old version
+        old_version = True
         output = library.get_auxiliary_data(data_type=save_name)
+        if len(output) == 0:
+            output = library.get_auxiliary_data(data_type=save_name + ".bin")
+            old_version = False
+
         if len(output) == len(library) and not self.config.recompute:
             logger.info("Found {} precomputed centroids".format(len(output)))
             # format the output to be dict[expert_name][layer_name] = embedding
-            output = {
-                expert_name: {
-                    k: v for k, v in expert_data[self.config.name][save_name].items()
+            if old_version:
+                output = {
+                    expert_name: {
+                        k: v
+                        for k, v in expert_data[self.config.name][save_name].items()
+                    }
+                    for expert_name, expert_data in output.items()
                 }
-                for expert_name, expert_data in output.items()
-            }
 
             return output
 
