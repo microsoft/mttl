@@ -539,17 +539,9 @@ class SVDInputExtractor(LibraryTransform):
             for layer_name, vector in expert_data.items():
                 if self.config.scale:
                     vector = vector * eigvals[expert_name][layer_name]
-                output[expert_name][layer_name] = vector
+                output[expert_name][layer_name] = torch.from_numpy(vector)
 
         return output
-
-    def _extract_from_hf_file(self, adidct, save_name):
-        return {
-            expert_name: {
-                k: v for k, v in expert_data[self.config.name][save_name].items()
-            }
-            for expert_name, expert_data in adidct.items()
-        }
 
     @torch.no_grad()
     def transform(self, library) -> Expert:
@@ -569,15 +561,12 @@ class SVDInputExtractor(LibraryTransform):
         )
 
         # try to fetch auxiliary data
-        vectors = library.get_auxiliary_data(data_type=save_name + "_vectors")
-        eigvals = library.get_auxiliary_data(data_type=save_name + "_eigvals")
+        vectors = library.get_auxiliary_data(data_type=save_name + "_vectors.bin")
+        eigvals = library.get_auxiliary_data(data_type=save_name + "_eigvals.bin")
 
         if len(vectors) == len(eigvals) == len(library) and not self.config.recompute:
             logger.info("Found {} precomputed centroids".format(len(vectors)))
 
-            # format the output to be dict[expert_name][layer_name] = embedding
-            vectors = self._extract_from_hf_file(vectors, save_name + "_vectors")
-            eigvals = self._extract_from_hf_file(eigvals, save_name + "_eigvals")
             return self._maybe_scale(vectors, eigvals)
 
         base_model = None
