@@ -100,6 +100,7 @@ class ExpertConfig(Config):
         self.router_temp = 1.0
         self.notes = None
         self.proto_init = "hidden"  # also "svd"
+        self.scale_prototypes = False  # clown routing with SVD
         self.router_window_size = 3
         self.clown_mode = "per_token"
 
