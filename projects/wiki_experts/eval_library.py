@@ -87,7 +87,9 @@ def get_hidden_states(library, args):
 
 
 def get_svd_embeddings(library, args):
-    cfg = SVDInputExtractorConfig(top_k=args.transform_sparsity, recompute=True)
+    cfg = SVDInputExtractorConfig(
+        top_k=args.transform_sparsity, recompute=False, scale=args.scale_prototypes
+    )
     svd_input_extractor = SVDInputExtractor(cfg)
     return svd_input_extractor.transform(library)
 
@@ -123,6 +125,10 @@ def patch_prototypes(module, library, args):
                 f"setting prototypes for selector at {mod.layer_name} with hidden states from {key}"
             )
             prototypes = torch.stack(prototypes)
+            if args.scale_prototypes:
+                # prototypes are not normalized, we will at least make their norm smaller than 1
+                max_norm = torch.norm(prototypes, dim=1, p=2).max()
+                prototypes = prototypes / max_norm
 
             if args.use_similarity_scaling:
                 params = torch.stack(params)

@@ -385,6 +385,7 @@ class ClownRouterConfig(SelectorConfig):
     moe_top_k: int = -1
     clown_mode: str = "window"  # "last", "mean", "per_token", "window"
     router_window_size: int = 3
+    proto_init: str = "hidden"
 
 
 @register_multi_expert_selector("clown_router", ClownRouterConfig)
@@ -427,7 +428,10 @@ class ClownSelector(Selector):
         attn_mask = self.info_container["routing_infos"].attention_mask
 
         if self.config.clown_mode == "per_token":
-            router_logits = F.linear(input, self.prototypes).abs()
+            router_logits = F.linear(input, self.prototypes)
+            if self.config.proto_init == "svd":
+                router_logits = router_logits.abs()
+
             routing_weights = F.softmax(
                 router_logits / self.config.router_temp, dim=-1, dtype=torch.float
             )
@@ -463,7 +467,9 @@ class ClownSelector(Selector):
                 # we are in generation mode
                 router_input = input.squeeze(1)
 
-            router_logits = F.linear(router_input, self.prototypes).abs()
+            router_logits = F.linear(router_input, self.prototypes)
+            if self.config.proto_init == "svd":
+                router_logits = router_logits.abs()
             routing_weights = F.softmax(
                 router_logits / self.config.router_temp, dim=-1, dtype=torch.float
             )
