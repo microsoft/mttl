@@ -166,8 +166,8 @@ def run_multitask(args: ExpertConfig):
         module.load_state_dict(torch.load(checkpoint)["state_dict"])
         trainer.test(module, dm)
 
-        if args.hf_lib_id and checkpoint:
-            library = HFExpertLibrary(args.hf_lib_id, create=True)
+        if args.library_id and checkpoint:
+            library = HFExpertLibrary(args.library_id, create=True)
             # library.add_expert_from_ckpt(checkpoint, force=True)
             library.add_expert_from_ckpt(checkpoint)
 

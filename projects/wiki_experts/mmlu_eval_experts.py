@@ -115,8 +115,8 @@ def run_eval(args):
     else:
         module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
 
-    if args.hf_lib_id:
-        library = HFExpertLibrary(args.hf_lib_id)
+    if args.library_id:
+        library = HFExpertLibrary(args.library_id)
     else:
         library = None
 

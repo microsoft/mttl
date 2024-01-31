@@ -36,17 +36,17 @@ def run_eval(args):
     else:
         module = MultiExpertModel(**vars(args))
 
-    if args.hf_lib_id:
-        if os.path.exists(args.hf_lib_id):
+    if args.library_id:
+        if os.path.exists(args.library_id):
             # it's a local library
             library = LocalExpertLibrary("/tmp/experts", create=True)
 
-            for file in glob.glob(os.path.join(args.hf_lib_id, "*")):
+            for file in glob.glob(os.path.join(args.library_id, "*")):
                 library.add_expert_from_ckpt(file, force=True)
         else:
-            library = HFExpertLibrary(args.hf_lib_id)
+            library = HFExpertLibrary(args.library_id)
 
-        logger.info("Loaded library: {}".format(args.hf_lib_id))
+        logger.info("Loaded library: {}".format(args.library_id))
     else:
         library = None
 
@@ -56,7 +56,7 @@ def run_eval(args):
             module.load_expert(**expert_kwargs, expert_library=library)
     elif args.module_graph is not None:
         module.load_from_graph_string(args.module_graph, expert_library=library)
-    elif args.hf_lib_id is not None:
+    elif args.library_id is not None:
         module.add_experts_from_library(library)
     module.to("cuda")
 

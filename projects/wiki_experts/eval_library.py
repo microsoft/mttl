@@ -50,7 +50,7 @@ def run_multitask(args: ExpertConfig):
     ]
 
     library = HFExpertLibrary(
-        repo_id=args.hf_lib_id, exclude_selection=exclude_phi_tasks
+        repo_id=args.library_id, exclude_selection=exclude_phi_tasks
     )
 
     cfg = TiesMergeConfig(top_k=0.2)
