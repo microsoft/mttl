@@ -15,13 +15,10 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
 from mttl.models.modifiers.expert_containers.expert_library import (
     ExpertLibrary,
-    HFExpertLibrary,
     LocalExpertLibrary,
+    get_expert_library,
 )
 
-# from projects.wiki_experts.src.evolution.evolving_expert_library import (
-#     EvolvingHFExpertLibrary,
-# )
 from projects.wiki_experts.src.evolution.config import EvolExpertConfig
 from projects.wiki_experts.src.evolution.utils import (
     log_wandb,
@@ -234,7 +231,7 @@ def run_eval(args: EvolExpertConfig, debug=None):
         os.makedirs(destination, exist_ok=True)
         hf_repo_id, expert_name = resolve_hf_repo_id(args.hf_repo_id)
         expert_lib: LocalExpertLibrary = LocalExpertLibrary.create_from_remote(
-            HFExpertLibrary(repo_id=hf_repo_id), destination=destination
+            get_expert_library(repo_id=hf_repo_id), destination=destination
         )
         if expert_name is not None:
             for name in list(expert_lib.keys()):

@@ -185,7 +185,7 @@ class BlobStorageEngine(BackendEngine):
 
     def __init__(self, token:Optional[str] = None, cache_dir:Optional[str] = None):
         """Initialize the blob storage engine. SAS token can be provided as an argument or
-        through the environment variable BLOB_STORAGE_TOKEN. The cache directory can be
+        through the environment variable BLOB_SAS_URL. The cache directory can be
         provided as an argument or through the environment variable BLOB_CACHE_DIR.
         If no cache directory is provided, the default cache directory ~/.mttl_cache is used.
 
@@ -216,11 +216,11 @@ class BlobStorageEngine(BackendEngine):
     def login(self, token: Optional[str] = None):
         """Set the SAS token to use for authentication."""
         if token is None:
-            token = os.environ.get("BLOB_STORAGE_TOKEN", None)
+            token = os.environ.get("BLOB_SAS_URL", None)
         if token is None:
             raise ValueError(
                 "No token provided. Please provide a token when initializing "
-                "the engine or set the BLOB_STORAGE_TOKEN environment variable."
+                "the engine or set the BLOB_SAS_URL environment variable."
             )
         self._token = token
 
@@ -471,7 +471,7 @@ class ExpertLibrary:
     def __init__(
         self,
         repo_id,
-        remote_token=None,
+        token=None,
         model_name=None,
         selection=None,
         exclude_selection=None,
@@ -495,7 +495,7 @@ class ExpertLibrary:
         if self.selection and self.exclude_selection:
             raise ValueError("Cannot use both selection and exclude_selection.")
 
-        self.login(token=remote_token)
+        self.login(token=token)
 
         try:
             if create:
@@ -508,7 +508,7 @@ class ExpertLibrary:
             sys.exit(1)
 
         self._build_lib()
-        logger.info("Loaded %s experts from huggingface hub", len(self.data))
+        logger.info("Loaded %s experts from remote storage", len(self.data))
 
     @property
     def sliced(self):
@@ -1016,7 +1016,7 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
 
         """
         if isinstance(remote_lib, str):
-            remote_lib = HFExpertLibrary(remote_lib)
+            remote_lib = get_expert_library(remote_lib)
         for name, expert in remote_lib.items():
             if expert not in self and not expert.expert_info.expert_deleted:
                 self.add_expert(expert)
@@ -1049,17 +1049,58 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
                 new_lib.add_expert(expert)
         return new_lib
 
-    def clone(self, destination):
-        """
-        Clone the library into a new repository.
-        """
-        destination = os.path.join(destination, self.repo_id)
-        new_lib = LocalExpertLibrary(repo_id=destination, create=True)
-        for name, expert in self.items():
-            if expert not in new_lib:
-                new_lib.add_expert(expert)
-        return new_lib
 
+class BlobExpertLibrary(ExpertLibrary, BlobStorageEngine):
+    @classmethod
+    def from_local(
+        cls,
+        local_lib: LocalExpertLibrary,
+        repo_id,
+        force=False,
+        upload_aux_data=False,
+        only_tasks=None,
+    ):
+        remote_lib = BlobExpertLibrary(repo_id=repo_id, create=True)
+
+        only_tasks = only_tasks or local_lib.tasks
+        with remote_lib.batched_commit():
+            for name, expert in local_lib.items():
+                if expert.name not in remote_lib:
+                    remote_lib.add_expert(expert, name, force=force)
+
+        # delete experts that are in remote_lib but were deleted from the local_lib
+        with remote_lib.batched_commit():
+            for name, metadatum in list(remote_lib.data.items()):
+                if (
+                    name not in local_lib.keys()
+                    and metadatum.expert_task_name in only_tasks
+                ):
+                    remote_lib.remove_expert(name, soft_delete=True)
+
+        # also update the scores
+        if upload_aux_data:
+            scores = local_lib.get_auxiliary_data(data_type="scores")
+            for expert_name, expert_scores in scores.items():
+                for score in expert_scores.values():
+                    try:
+                        remote_lib.add_score(expert_name, Score(**score))
+                    except ValueError as e:
+                        logger.error(e)
+                        continue
+
+            # TODO: upload the embeddings
+            embeddings = local_lib.get_auxiliary_data(data_type="embeddings")
+            for expert_name, expert_embeddings in embeddings.items():
+                for embedding in expert_embeddings.values():
+                    try:
+                        remote_lib.add_embeddings(
+                            expert_name, embedding["config"], embedding["embeddings"]
+                        )
+                    except ValueError as e:
+                        logger.error(e)
+                        continue
+
+        return remote_lib
 
 class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
     @classmethod
@@ -1149,3 +1190,56 @@ def get_best_expert_for_task(library: HFExpertLibrary, task, hash) -> Expert:
             best_expert = metadata
     assert best_expert is not None
     return library[best_expert.expert_name]
+
+
+def get_expert_library(
+        repo_id,
+        token: str = None,
+        model_name=None,
+        selection=None,
+        exclude_selection=None,
+        create=False,
+        ignore_sliced=False,
+        expert_library_type: str = None,
+):
+    """Select the appropriate expert library based on the following order of priority:
+    1. If expert_library_type is provided, uses that type.
+    2. If repo_id is a directory, uses LocalExpertLibrary.
+    3. If token is provided and contains "blob.core.windows.net", uses BlobExpertLibrary.
+    4. Otherwise, uses HFExpertLibrary.
+    """
+
+    available_libraries = {
+        "local": LocalExpertLibrary,
+        "blob_storage": BlobExpertLibrary,
+        "huggingface_hub": HFExpertLibrary,
+    }
+    if expert_library_type is None:
+        if os.path.isdir(repo_id):
+            expert_library_type = "local"
+        else:
+            token = token or os.environ.get("BLOB_SAS_URL", os.environ.get("HF_TOKEN"))
+            if token is None:
+                raise ValueError(
+                    "Please provide a valid token, set BLOB_SAS_URL or "
+                    "HF_TOKEN environment variable, provide a local directory, "
+                    "or specify the expert_library_type `local`."
+                )
+            if "blob.core.windows.net" in token:
+                expert_library_type = "blob_storage"
+            else:
+                expert_library_type = "huggingface_hub"
+    try:
+        expert_lib_class = available_libraries[expert_library_type]
+        expert_lib = expert_lib_class(
+            repo_id=repo_id,
+            token=token,
+            model_name=model_name,
+            selection=selection,
+            exclude_selection=exclude_selection,
+            create=create,
+            ignore_sliced=ignore_sliced,
+        )
+    except KeyError:
+        raise ValueError(f"Unknown expert library type {expert_library_type}.")
+    return expert_lib

@@ -26,12 +26,11 @@ from projects.wiki_experts.src.evolution.utils import (
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from mttl.models.modifiers.expert_containers.expert_library import (
-    get_best_expert_for_task,
-    get_best_expert_for_score,
     LocalExpertLibrary,
     HFExpertLibrary,
     ExpertLibrary,
     Score,
+    get_expert_library,
 )
 from projects.wiki_experts.src.evolution.train_router import train_module
 from projects.wiki_experts.src.evolution.evaluators import (
@@ -136,7 +135,7 @@ def setup(args: EvolExpertConfig):
     os.makedirs(local_lib_location, exist_ok=True)
     print("Local lib location", local_lib_location)
     expert_lib = LocalExpertLibrary.create_from_remote(
-        HFExpertLibrary(args.hf_repo_id), local_lib_location
+        get_expert_library(args.hf_repo_id), local_lib_location
     )
     expert_lib.ignore_sliced = True
 

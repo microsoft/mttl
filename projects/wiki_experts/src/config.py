@@ -16,7 +16,7 @@ class ExpertConfig(Config):
         self.wandb_project = None
         self.tensorboard = False
         self.remote_token = None
-        self.hf_lib_id = None
+        self.library_id = None
         self.hf_repo_id = None
         self.do_train = True
 

@@ -14,7 +14,7 @@ from mttl.models.modifiers.expert_containers.expert_containers import (
 )
 from mttl.models.modifiers.expert_containers.expert_library import (
     ExpertLibrary,
-    HFExpertLibrary,
+    get_expert_library,
 )
 import copy
 
@@ -398,7 +398,7 @@ class MoETrainer(MultiExpertModel):
                 )
             self.moe_num_experts = kwargs["moe_num_experts"]
         else:
-            library = HFExpertLibrary(self.hparams.library_id)
+            library = get_expert_library(self.hparams.library_id)
             for i, expert in enumerate(sorted(list(library.keys()))):
                 self.add_expert_instance(library[expert], expert_name=f"e{i}")
             self.moe_num_experts = i + 1

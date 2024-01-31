@@ -21,7 +21,7 @@ def remote_login(token: Optional[str] = None):
     """Caches the provided token and login to remote service (Azure Blob Storage or Hugging Face Hub).
 
     When token contains "blob.core.windows.net", no login is performed for Azure Blob Storage,
-    instead it sets the environment variable "BLOB_STORAGE_TOKEN" for later use.
+    instead it sets the environment variable "BLOB_SAS_URL" for later use.
 
     Otherwise, the environment variable "HF_TOKEN" is set and Hugging Face Hub login is performed.
     If no token is is provided, tries to login to Hugging Face Hub using HF_TOKEN environment variable.
@@ -34,7 +34,7 @@ def remote_login(token: Optional[str] = None):
     """
     if token is not None:
         if "blob.core.windows.net" in token:
-            os.environ["BLOB_STORAGE_TOKEN"] = token
+            os.environ["BLOB_SAS_URL"] = token
         else:
             from huggingface_hub import login as hf_hub_login
             hf_hub_login(token=token)

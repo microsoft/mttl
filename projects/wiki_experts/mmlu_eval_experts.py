@@ -1,7 +1,7 @@
 import os
 import sys
 from pytorch_lightning import seed_everything
-from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
 from mttl.models.modifiers.expert_containers.module_graph import Expert, ExpertInfo
 from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
 
@@ -116,7 +116,7 @@ def run_eval(args):
         module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
 
     if args.library_id:
-        library = HFExpertLibrary(args.library_id)
+        library = get_expert_library(args.library_id)
     else:
         library = None
 

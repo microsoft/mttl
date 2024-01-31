@@ -1,9 +1,6 @@
 import os
 import sys
 from pytorch_lightning import seed_everything
-from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
-from mttl.models.modifiers.expert_containers.module_graph import Expert, ExpertInfo
-from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 

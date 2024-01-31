@@ -3,7 +3,7 @@ import sys
 import pytorch_lightning as pl
 from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
 
-from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
 from mttl.callbacks import LiveCheckpointCallback
 
 from mttl.models.monitors import get_monitors
@@ -141,7 +141,7 @@ def run_multitask(args: ExpertConfig):
         trainer.test(module, dm)
 
         if args.library_id and checkpoint:
-            library = HFExpertLibrary(args.library_id, create=True)
+            library = get_expert_library(args.library_id, create=True)
             library.add_expert_from_ckpt(checkpoint)
 
         if args.hf_repo_id and checkpoint:

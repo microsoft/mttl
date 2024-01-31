@@ -128,7 +128,7 @@ def test_add_auxiliary_data(mocker, tmp_path):
     )
 
 
-token = os.getenv("BLOB_STORAGE_TOKEN")
+token = os.getenv("BLOB_SAS_URL")
 
 @pytest.fixture
 def build_local_files():

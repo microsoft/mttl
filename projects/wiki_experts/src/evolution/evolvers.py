@@ -18,14 +18,7 @@ from projects.wiki_experts.utils import get_datamodule
 from projects.wiki_experts.src.evolution.utils import get_loss, get_task_expert
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
-from mttl.models.modifiers.expert_containers.expert_library import (
-    get_best_expert_for_task,
-    get_best_expert_for_score,
-    LocalExpertLibrary,
-    HFExpertLibrary,
-    ExpertLibrary,
-    Score,
-)
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from projects.wiki_experts.src.evolution.train_router import train_module
 from projects.wiki_experts.src.evolution.evaluators import Evaluator
 from mttl.models.modifiers.expert_containers.module_graph import Expert

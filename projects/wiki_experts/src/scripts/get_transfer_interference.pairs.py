@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 from pytorch_lightning import seed_everything
 from mttl.models.modifiers.expert_containers.expert_library import (
     LocalExpertLibrary,
-    HFExpertLibrary,
+    get_expert_library,
 )
 from mttl.models.modifiers.expert_containers.library_transforms import (
     SVDEmbeddingTransform,
@@ -27,7 +27,7 @@ if os.path.exists(local_lib_location):
     expert_lib = LocalExpertLibrary(local_lib_location)
     expert_lib.update_from_remote(hf_repo_id)
 else:
-    expert_lib = HFExpertLibrary(hf_repo_id)
+    expert_lib = get_expert_library(hf_repo_id)
     os.makedirs(local_lib_location, exist_ok=True)
     expert_lib: LocalExpertLibrary = LocalExpertLibrary.create_from_remote(
         expert_lib, local_lib_location

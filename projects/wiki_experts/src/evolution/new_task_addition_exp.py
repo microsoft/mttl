@@ -24,19 +24,10 @@ from projects.wiki_experts.src.evolution.utils import (
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from mttl.models.modifiers.expert_containers.expert_library import (
-    get_best_expert_for_task,
-    get_best_expert_for_score,
     LocalExpertLibrary,
-    HFExpertLibrary,
     ExpertLibrary,
-    Score,
+    get_expert_library,
 )
-from projects.wiki_experts.src.evolution.evaluators import (
-    Evaluator,
-    prepare_evaluator,
-    EvalCallback,
-)
-
 
 from mttl.models.modifiers.expert_containers.module_graph import Expert
 
@@ -49,10 +40,6 @@ from mttl.utils import remote_login, setup_logging, logger
 from projects.wiki_experts.src.expert_model import MultiExpertModel
 from projects.wiki_experts.src.evolution.experiment_state import ExperimentState
 from mttl.vllm_engines.engines import free_memory
-from projects.wiki_experts.src.evolution.transfer_matrix import (
-    eval_all_experts_on_task,
-    eval_expert_on_task,
-)
 
 ai = 0
 DEBUG = True
@@ -97,7 +84,7 @@ def setup(args: EvolExpertConfig):
         remote_login(token=args.remote_token)
 
         expert_lib = LocalExpertLibrary.create_from_remote(
-            HFExpertLibrary(args.hf_repo_id), local_lib_location
+            get_expert_library(args.hf_repo_id), local_lib_location
         )
         expert_lib.ignore_sliced = True
         # make sure we only consider modules of the latest version
