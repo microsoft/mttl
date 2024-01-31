@@ -13,7 +13,6 @@ from projects.wiki_experts.src.expert_model import MoETrainer
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import torch
-from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
 
 from mttl.datamodule.mt_seq_to_seq_module import (
@@ -28,6 +27,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from mttl.callbacks import NanoMMLUCallback, RougeCallback
 from mttl.utils import (
     get_pl_loggers,
+    remote_login,
     setup_logging,
     logger,
 )
@@ -43,9 +43,7 @@ def run_multitask(args: ExpertConfig):
     setup_logging(args.output_dir)
     logger.info("Args: {}".format(args.to_json()))
 
-    if args.hf_token_hub:
-        login(token=args.hf_token_hub)
-
+    remote_login(args.remote_token)
     # select dataloader
     model_class = MoETrainer
     dm = get_datamodule(args)

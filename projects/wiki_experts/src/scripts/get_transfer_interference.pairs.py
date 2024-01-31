@@ -6,7 +6,6 @@ from functools import partial
 from matplotlib import pyplot as plt
 from tempfile import TemporaryDirectory
 from pytorch_lightning import seed_everything
-from huggingface_hub import login, HfApi  # whoami
 from mttl.models.modifiers.expert_containers.expert_library import (
     LocalExpertLibrary,
     HFExpertLibrary,
@@ -15,11 +14,10 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     SVDEmbeddingTransform,
     SVDEmbeddingTransformConfig,
 )
+from mttl.utils import remote_login
 from projects.wiki_experts.src.evolution.utils import get_svd_embedding
 
-hf_api_key = os.environ["HF_TOKEN"]
-login(token=hf_api_key)
-user = HfApi(token=hf_api_key).whoami()
+remote_login()
 
 # hf_repo_id="oostapeno/flan-lib-neo-1B-20phi"
 hf_repo_id = "ostapeno/library-gptneo_1B_flan_2ep"

@@ -11,7 +11,7 @@ from functools import partial
 from matplotlib import pyplot as plt
 from tempfile import TemporaryDirectory
 from pytorch_lightning import seed_everything
-from huggingface_hub import create_repo, login, HfApi
+from huggingface_hub import create_repo, HfApi
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
@@ -48,7 +48,7 @@ from projects.wiki_experts.src.evolution.config import (
     increase_version,
 )
 from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
-from mttl.utils import setup_logging, logger
+from mttl.utils import remote_login, setup_logging, logger
 from projects.wiki_experts.src.expert_model import (
     MultiExpertModel,
 )
@@ -131,8 +131,7 @@ def setup(args: EvolExpertConfig):
     else:
         local_lib_location = os.path.join(args.output_dir, args.hf_repo_id)
 
-    if args.hf_token_hub:
-        login(token=args.hf_token_hub)
+    remote_login(token=args.remote_token)
 
     os.makedirs(local_lib_location, exist_ok=True)
     print("Local lib location", local_lib_location)
@@ -161,8 +160,7 @@ def setup(args: EvolExpertConfig):
 
     if args.upload_lib_to_hub:
         global to_repo_id
-        token = os.environ.get("HF_TOKEN", args.hf_token_hub)
-        login(token=token)
+        token = os.environ.get("HF_TOKEN", args.remote_token)
         user_name = HfApi().whoami(token=token)["name"]
 
         exp_name: str = os.getenv("AMLT_JOB_NAME", "_test_evol")

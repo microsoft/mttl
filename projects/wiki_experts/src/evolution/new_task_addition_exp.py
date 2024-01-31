@@ -10,7 +10,6 @@ from functools import partial
 from matplotlib import pyplot as plt
 from tempfile import TemporaryDirectory
 from pytorch_lightning import seed_everything
-from huggingface_hub import login
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
@@ -46,7 +45,7 @@ from projects.wiki_experts.src.evolution.config import (
     increase_version,
 )
 from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
-from mttl.utils import setup_logging, logger
+from mttl.utils import remote_login, setup_logging, logger
 from projects.wiki_experts.src.expert_model import MultiExpertModel
 from projects.wiki_experts.src.evolution.experiment_state import ExperimentState
 from mttl.vllm_engines.engines import free_memory
@@ -95,8 +94,7 @@ def setup(args: EvolExpertConfig):
 
         os.makedirs(local_lib_location, exist_ok=True)
 
-        if args.hf_token_hub:
-            login(token=args.hf_token_hub)
+        remote_login(token=args.remote_token)
 
         expert_lib = LocalExpertLibrary.create_from_remote(
             HFExpertLibrary(args.hf_repo_id), local_lib_location

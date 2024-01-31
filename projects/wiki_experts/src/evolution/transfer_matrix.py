@@ -7,7 +7,6 @@ import pandas as pd
 import seaborn as sns
 from torch import nn
 from typing import Dict, Union, Callable
-from huggingface_hub import login
 from matplotlib import pyplot as plt
 from tempfile import TemporaryDirectory
 from pytorch_lightning import seed_everything
@@ -32,7 +31,7 @@ from projects.wiki_experts.src.evolution.utils import (
 )
 
 from projects.wiki_experts.src.evolution.evaluators import Evaluator, prepare_evaluator
-from mttl.utils import setup_logging, logger
+from mttl.utils import remote_login, setup_logging, logger
 
 # register models
 from projects.wiki_experts.src.expert_model import MultiExpertModel
@@ -215,8 +214,8 @@ def run_eval(args: EvolExpertConfig, debug=None):
     # if not DEBUG:
     if wandb.run is None:
         init_wandb_logger(args)
-    if args.hf_token_hub:
-        login(token=args.hf_token_hub)
+
+    remote_login(token=args.remote_token)
 
     print("###### Tasks", args.finetune_task_name)
     # can work with other library types as well, but need to implement clone and filter_with_tasks

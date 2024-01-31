@@ -8,11 +8,10 @@ from mttl.models.modifiers.expert_containers.module_graph import Expert
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from huggingface_hub import login
 from pytorch_lightning import seed_everything
 import json
 
-from mttl.utils import logger, setup_logging
+from mttl.utils import logger, remote_login, setup_logging
 
 from projects.wiki_experts.src.expert_model import (
     MultiExpertModel,
@@ -38,8 +37,7 @@ def run_multitask(args: ExpertConfig):
 
     logger.info("Args: {}".format(args.to_json()))
 
-    if args.hf_token_hub:
-        login(token=args.hf_token_hub)
+    remote_login(args.remote_token)
 
     exclude_phi_tasks = [
         "hellaswag_1_1_0",

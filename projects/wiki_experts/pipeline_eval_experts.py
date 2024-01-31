@@ -3,7 +3,6 @@ import os
 import sys
 
 import prettytable
-from huggingface_hub import login
 from pytorch_lightning import seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -13,7 +12,7 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     HFExpertLibrary,
     LocalExpertLibrary,
 )
-from mttl.utils import setup_logging, logger
+from mttl.utils import remote_login, setup_logging, logger
 from projects.wiki_experts.src.expert_model import (
     MultiExpertModel,
     MultiExpertModelRanker,
@@ -30,9 +29,7 @@ def run_eval(args):
 
     logger.info("Args: {}".format(args.to_json()))
 
-    if args.hf_token_hub:
-        login(token=args.hf_token_hub)
-
+    remote_login(args.remote_token)
     # load module
     if args.ranker_model is not None:
         module = MultiExpertModelRanker(**vars(args))

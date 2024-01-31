@@ -38,7 +38,7 @@ class RoutingConfig(Config):
         self.router_shared_weights = True  # share weights between teacher and student
 
         self.fast_dev_run = False
-        self.hf_token_hub = None
+        self.remote_token = None
         self.validation_portion = 0.03
 
         self.eval_superni = False

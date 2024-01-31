@@ -16,7 +16,6 @@ import numpy as np
 
 from huggingface_hub import (
     hf_hub_download,
-    login,
     CommitOperationAdd,
     CommitOperationDelete,
     CommitOperationCopy,
@@ -36,7 +35,7 @@ from azure.core.exceptions import (
     ResourceNotFoundError,
 )
 
-from mttl.utils import logger
+from mttl.utils import logger, remote_login
 from mttl.models.modifiers.expert_containers.module_graph import (
     Expert,
     load_expert,
@@ -94,6 +93,23 @@ class MetadataEntry(ExpertInfo):
         return data
 
 
+def retry(max_retries=10, wait_seconds=60):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            for attempt in range(1, max_retries + 1):
+                try:
+                    result = func(*args, **kwargs)
+                    return result
+                except Exception as e:  # requests.exceptions.HTTPError as e:
+                    print(e, type(e), "retrying...")
+                    if attempt < max_retries:
+                        print(f"Waiting {wait_seconds} seconds before retrying...")
+                        time.sleep(wait_seconds)
+            raise RuntimeError(
+                f"Function {func.__name__} failed after {max_retries} attempts."
+            )
+
+
 class BackendEngine(ABC):
 
     @abstractmethod
@@ -117,7 +133,7 @@ class BackendEngine(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def login(self, token):
+    def login(self, token: Optional[str] = None):
         raise NotImplementedError
 
     @abstractmethod
@@ -127,24 +143,6 @@ class BackendEngine(ABC):
     @abstractmethod
     def list_repo_files(self, repo_id):
         raise NotImplementedError
-
-
-def retry(max_retries=10, wait_seconds=60):
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            for attempt in range(1, max_retries + 1):
-                try:
-                    result = func(*args, **kwargs)
-                    return result
-                except Exception as e:  # requests.exceptions.HTTPError as e:
-                    print(e, type(e), "retrying...")
-                    if attempt < max_retries:
-                        print(f"Waiting {wait_seconds} seconds before retrying...")
-                        time.sleep(wait_seconds)
-            raise RuntimeError(
-                f"Function {func.__name__} failed after {max_retries} attempts."
-            )
-
 
 class HuggingfaceHubEngine(BackendEngine):
     def snapshot_download(self, repo_id, allow_patterns=None):
@@ -169,8 +167,15 @@ class HuggingfaceHubEngine(BackendEngine):
     def repo_info(self, repo_id):
         return HfApi().repo_info(repo_id)
 
-    def login(self, token):
-        return login(token=token)
+    def login(self, token: Optional[str] = None):
+        if token is None:
+            token = os.environ.get("HF_TOKEN", None)
+        if token is None:
+            raise ValueError(
+                "No token provided. Please provide a token when initializing "
+                "the engine or set the HF_TOKEN environment variable."
+            )
+        remote_login(token=token)
 
     def list_repo_files(self, repo_id):
         return HfApi().list_repo_files(repo_id)
@@ -180,24 +185,24 @@ class BlobStorageEngine(BackendEngine):
 
     def __init__(self, token:Optional[str] = None, cache_dir:Optional[str] = None):
         """Initialize the blob storage engine. SAS token can be provided as an argument or
-        through the environment variable MTTL_STORAGE_TOKEN. The cache directory can be
-        provided as an argument or through the environment variable MTTL_CACHE_DIR.
+        through the environment variable BLOB_STORAGE_TOKEN. The cache directory can be
+        provided as an argument or through the environment variable BLOB_CACHE_DIR.
         If no cache directory is provided, the default cache directory ~/.mttl_cache is used.
 
         IMPORTANT: Underscore "_" is not allowed in the repo_id, use dash "-" instead.
         """
         super().__init__()
-        self.login(token)
+        self._token = None
         self.cache_dir = self._get_cache_dir(cache_dir)
 
     @staticmethod
     def _get_cache_dir(chache_dir: Optional[str] = None):
-        """If cache_dir is not provided, get it from envvar MTTL_CACHE_DIR.
+        """If cache_dir is not provided, get it from envvar BLOB_CACHE_DIR.
         Use the default cache directory ~/.mttl_cache if not provided."""
         if chache_dir is not None:
             return chache_dir
-        if "MTTL_CACHE_DIR" in os.environ:
-            cache_dir = os.environ["MTTL_CACHE_DIR"]
+        if "BLOB_CACHE_DIR" in os.environ:
+            cache_dir = os.environ["BLOB_CACHE_DIR"]
         else:
             cache_dir = os.path.join(os.path.expanduser("~"), ".mttl_cache")
         return cache_dir
@@ -211,11 +216,11 @@ class BlobStorageEngine(BackendEngine):
     def login(self, token: Optional[str] = None):
         """Set the SAS token to use for authentication."""
         if token is None:
-            token = os.environ.get("MTTL_STORAGE_TOKEN", None)
+            token = os.environ.get("BLOB_STORAGE_TOKEN", None)
         if token is None:
             raise ValueError(
                 "No token provided. Please provide a token when initializing "
-                "the engine or set the MTTL_STORAGE_TOKEN environment variable."
+                "the engine or set the BLOB_STORAGE_TOKEN environment variable."
             )
         self._token = token
 
@@ -444,7 +449,7 @@ class LocalFSEngine(BackendEngine):
     def hf_hub_download(self, repo_id, filename):
         return os.path.join(repo_id, filename)
 
-    def login(self, token):
+    def login(self, token: Optional[str] = None):
         pass
 
     def repo_info(self, repo_id):
@@ -466,7 +471,7 @@ class ExpertLibrary:
     def __init__(
         self,
         repo_id,
-        hf_token_hub=None,
+        remote_token=None,
         model_name=None,
         selection=None,
         exclude_selection=None,
@@ -490,8 +495,7 @@ class ExpertLibrary:
         if self.selection and self.exclude_selection:
             raise ValueError("Cannot use both selection and exclude_selection.")
 
-        if "HF_TOKEN" in os.environ or hf_token_hub:
-            self.login(token=os.environ.get("HF_TOKEN", hf_token_hub))
+        self.login(token=remote_token)
 
         try:
             if create:

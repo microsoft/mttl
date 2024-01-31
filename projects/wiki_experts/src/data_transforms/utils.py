@@ -5,9 +5,10 @@ from datasets import load_dataset
 import numpy as np
 from mttl.utils import retry_with_exponential_backoff
 
-from huggingface_hub import login, whoami, HfApi
+from huggingface_hub import whoami, HfApi
 from huggingface_hub.utils._errors import HfHubHTTPError
 
+from mttl.utils import remote_login
 
 INVALID_RESPONSE = object()
 
@@ -58,7 +59,7 @@ def upload_to_hf_(
     from datasets import concatenate_datasets
 
     hf_token = os.environ.get("HF_TOKEN")
-    login(token=hf_token)
+    remote_login(token=hf_token)
 
     if hf_destination is None:
         dts_name = dataset_path.split("/")[-1].replace(".jsonl", "")

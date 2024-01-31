@@ -1,4 +1,3 @@
-from collections import defaultdict
 import glob
 import json
 import logging
@@ -10,12 +9,41 @@ import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 from torch import Tensor
-from typing import Dict
+from typing import Dict, Optional
 import hashlib
 from pytorch_lightning.utilities.rank_zero import rank_zero_info
 from torch.autograd.function import Function
 
 logger = logging.getLogger("mttl")
+
+
+def remote_login(token: Optional[str] = None):
+    """Caches the provided token and login to remote service (Azure Blob Storage or Hugging Face Hub).
+
+    When token contains "blob.core.windows.net", no login is performed for Azure Blob Storage,
+    instead it sets the environment variable "BLOB_STORAGE_TOKEN" for later use.
+
+    Otherwise, the environment variable "HF_TOKEN" is set and Hugging Face Hub login is performed.
+    If no token is is provided, tries to login to Hugging Face Hub using HF_TOKEN environment variable.
+
+    Args:
+        token (str): The token to use for login.
+
+    Returns:
+        None
+    """
+    if token is not None:
+        if "blob.core.windows.net" in token:
+            os.environ["BLOB_STORAGE_TOKEN"] = token
+        else:
+            from huggingface_hub import login as hf_hub_login
+            hf_hub_login(token=token)
+            os.environ["HF_TOKEN"] = token
+    else:
+        token = os.environ.get("HF_TOKEN", None)
+        if token is not None:
+            from huggingface_hub import login as hf_hub_login
+            hf_hub_login(token=token)
 
 
 def hash_example(example):

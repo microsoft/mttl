@@ -15,7 +15,7 @@ class ExpertConfig(Config):
         self.load_in_8bit = False
         self.wandb_project = None
         self.tensorboard = False
-        self.hf_token_hub = None
+        self.remote_token = None
         self.hf_lib_id = None
         self.hf_repo_id = None
         self.do_train = True
