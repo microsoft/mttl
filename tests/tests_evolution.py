@@ -8,7 +8,6 @@ from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
 from conftest import make_tiny_llama
-from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 
 
 def create_dummy_expert(config: ExpertConfig, exp_name) -> Expert:
