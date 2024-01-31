@@ -202,6 +202,7 @@ def run_multitask(args: ExpertConfig):
         args_copy.precision = 32
         args_copy.router_window_size = args.router_window_size
         args_copy.clown_mode = args.clown_mode
+        args_copy.proto_init = args.proto_init
 
         module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
