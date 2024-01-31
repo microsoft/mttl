@@ -427,7 +427,7 @@ class ClownSelector(Selector):
         attn_mask = self.info_container["routing_infos"].attention_mask
 
         if self.config.clown_mode == "per_token":
-            router_logits = F.linear(input, self.prototypes)
+            router_logits = F.linear(input, self.prototypes).abs()
             routing_weights = F.softmax(
                 router_logits / self.config.router_temp, dim=-1, dtype=torch.float
             )
