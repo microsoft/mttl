@@ -386,6 +386,7 @@ class ClownRouterConfig(SelectorConfig):
     clown_mode: str = "window"  # "last", "mean", "per_token", "window"
     router_window_size: int = 3
     proto_init: str = "hidden"
+    normalize_router_input: bool = True
 
 
 @register_multi_expert_selector("clown_router", ClownRouterConfig)
@@ -423,6 +424,9 @@ class ClownSelector(Selector):
             raise ValueError("Prototypes not initialized correctly.")
 
         input = input.to(dtype=self.prototypes.dtype)
+
+        if self.config.normalize_router_input:
+            input /= input.norm(dim=-1, p=2, keepdim=True).clamp(min=EPS)
 
         input_ids = self.info_container["routing_infos"].input_ids
         attn_mask = self.info_container["routing_infos"].attention_mask

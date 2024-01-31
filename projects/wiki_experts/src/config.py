@@ -103,6 +103,7 @@ class ExpertConfig(Config):
         self.scale_prototypes = False  # clown routing with SVD
         self.router_window_size = 3
         self.clown_mode = "per_token"
+        self.normalize_router_input = False
 
         # Eval Library
         self.merge_or_route = None  # "uniform", "ties", "clown"
