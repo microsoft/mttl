@@ -431,6 +431,7 @@ class ClownSelector(Selector):
 
         input_ids = self.info_container["routing_infos"].input_ids
         attn_mask = self.info_container["routing_infos"].attention_mask
+        bs, sq, D = input.shape
 
         if self.config.clown_mode == "per_token":
             router_logits = F.linear(input, self.prototypes)
@@ -441,7 +442,6 @@ class ClownSelector(Selector):
                 router_logits / self.config.router_temp, dim=-1, dtype=torch.float
             )
         else:
-            bs, sq, D = input.shape
             attn_mask = self.info_container["routing_infos"].attention_mask
             if sq == attn_mask.size(1):
                 if self.config.clown_mode == "mean":
@@ -490,10 +490,14 @@ class ClownSelector(Selector):
 
         # uniform routing entropy
         ent_routing = -1 * (routing_weights * torch.log(routing_weights + 1e-6)).sum(-1)
-        ent_routing = (ent_routing * attn_mask).sum() / attn_mask.sum()
-        valid_ps = routing_weights[attn_mask == 1]
-        max_p, min_p = valid_ps.max(), valid_ps.min()
+        if sq == 1:
+            ent_routing = ent_routing.sum()
+            valid_ps = routing_weights
+        else:
+            ent_routing = (ent_routing * attn_mask).sum() / attn_mask.sum()
+            valid_ps = routing_weights[attn_mask == 1]
 
+        max_p, min_p = valid_ps.max(), valid_ps.min()
         to_store = {
             "ent_uniform": np.log(len(self.expert_names)),
             "ent_routing": ent_routing.item(),
