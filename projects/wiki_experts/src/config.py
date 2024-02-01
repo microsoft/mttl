@@ -110,8 +110,8 @@ class ExpertConfig(Config):
                 "+"
             )  # use "+" for assign multiple task set vars to be found in task_sequences
             task_sets = None
-            if self.tasksets_path is not None:
-                task_sets = json.load(open(self.tasksets_path))
+            # if self.tasksets_path is not None:
+            #     task_sets = json.load(open(self.tasksets_path))
 
             for task_name in tasks:
                 if task_sets is not None and task_name in task_sets:
