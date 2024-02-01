@@ -509,16 +509,6 @@ class ClownSelector(Selector):
         task_container = self.info_container.get(task, {})
         count = task_container.get("routing_count", 0)
 
-        if task not in self.info_container:
-            print("new task : ", task)
-            print(
-                [
-                    self.info_container[k]
-                    for k in self.info_container.keys()
-                    if k != "routing_infos"
-                ]
-            )
-
         for name, value in to_store.items():
             old_value = task_container.get(name, 0)
             task_container[name] = (old_value * count + value) / (count + 1)
