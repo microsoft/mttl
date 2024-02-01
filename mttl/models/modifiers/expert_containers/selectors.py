@@ -3,6 +3,7 @@ from typing import Dict, List, Union
 from pyparsing import abstractmethod
 import torch
 import math
+import numpy as np
 from torch import nn
 import torch.nn.functional as F
 from mttl.models.modifiers.routing import RoutingMixin
@@ -486,6 +487,40 @@ class ClownSelector(Selector):
         # max_prob = routing_weights.max(dim=-1, keepdim=True)[0]
         # min_prob = routing_weights.min(dim=-1, keepdim=True)[0]
         # print('max prob mean, min prob mean', max_prob.mean().item(), min_prob.mean().item())
+
+        # uniform routing entropy
+        ent_routing = -1 * (routing_weights * torch.log(routing_weights + 1e-6)).sum(-1)
+        ent_routing = (ent_routing * attn_mask).sum() / attn_mask.sum()
+        valid_ps = routing_weights[attn_mask == 1]
+        max_p, min_p = valid_ps.max(), valid_ps.min()
+
+        to_store = {
+            "ent_uniform": np.log(len(self.expert_names)),
+            "ent_routing": ent_routing.item(),
+            "max_p": max_p.item(),
+            "min_p": min_p.item(),
+        }
+
+        task = self.info_container["routing_infos"].task_names[0]
+        task_container = self.info_container.get(task, {})
+        count = task_container.get("routing_count", 0)
+
+        if task not in self.info_container:
+            print("new task : ", task)
+            print(
+                [
+                    self.info_container[k]
+                    for k in self.info_container.keys()
+                    if k != "routing_infos"
+                ]
+            )
+
+        for name, value in to_store.items():
+            old_value = task_container.get(name, 0)
+            task_container[name] = (old_value * count + value) / (count + 1)
+
+        task_container["routing_count"] = count + 1
+        self.info_container[task] = task_container
 
         if self.config.moe_top_k > 0:
             _, selected_experts = torch.topk(

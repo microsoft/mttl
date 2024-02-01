@@ -226,11 +226,25 @@ def run_multitask(args: ExpertConfig):
         )
         scores = runner.run(module)
 
+    # try to fetch routing statistifs
+    routing_stats = {}
+    for task_name in module.model.task_id_container.keys():
+        if task_name == "routing_infos":
+            continue
+
+        task_dict = module.model.task_id_container[task_name]
+        for k, v in task_dict.items():
+            routing_stats[f"{task_name}/{k}"] = v
+
     if os.environ.get("WANDB_API_KEY"):
         import wandb
 
         wandb.init(project="0shot_routing", config=args.asdict())
         wandb.log({f"downstream/{k}": v for k, v in scores.items()})
+
+        if len(routing_stats) > 0:
+            wandb.log(routing_stats)
+
         wandb.finish()
 
 
