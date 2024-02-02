@@ -776,3 +776,130 @@ class LibraryClusterer(LibraryTransform):
     def transform(self, library) -> Expert:
         if isinstance(library, str):
             library = HFExpertLibrary(library)
+
+        raise NotImplementedError()
+
+
+@dataclass
+class CrossExpertNormComputerConfig:
+    pass
+
+
+class CrossExpertNormComputer(HiddenStateComputer):
+    """
+    Given a library of experts, compute the norm of ABx for both in-dist and ood experts
+    """
+
+    def __init__(self, config: CrossExpertNormComputerConfig = None):
+        super().__init__(config or CrossExpertNormComputerConfig())
+
+    @torch.no_grad()
+    def transform(self, library, default_args=None) -> Expert:
+        if isinstance(library, str):
+            library = HFExpertLibrary(library)
+
+        expert_names = list(library.keys())
+        an_expert = library[expert_names[0]]
+        training_config = an_expert.training_config
+
+        # overwrite required args
+        training_config.hf_lib_id = library.repo_id
+        training_config.router_selector = "task_selector"
+        if default_args is not None:
+            self._fill_missing_args(training_config, default_args)
+
+        training_config.train_batch_size = (
+            default_args.predict_batch_size if default_args is not None else 4
+        )
+        training_config.finetune_task_name = ",".join(
+            [
+                library[exp_name].training_config.finetune_task_name
+                for exp_name in library.keys()
+            ]
+        )
+
+        from projects.wiki_experts.train_experts_main import get_datamodule
+        from projects.wiki_experts.src.expert_model import MoETrainer
+        from mttl.models.modifiers.expert_containers import ExpertContainer
+
+        model = MoETrainer(**vars(training_config)).to("cuda")
+
+        # build a hook to forward across other (ood) experts
+        def build_hook(layer_name, container, task_id_container):
+            def retrieve_input(module, input, output):
+                task_names = task_id_container["routing_infos"].task_names
+                attn_mask = task_id_container["routing_infos"].attention_mask
+                container[layer_name] = input[0].detach()
+
+                # output (bs, seq_len, D) is the correctly routed outpu
+                # let's generate the outputs for random task routing
+
+                not_picked = np.array(
+                    list(set(module.selector.expert_names) - set(task_names))
+                )
+                random_tasks = np.random.choice(
+                    not_picked,
+                    size=len(task_names),
+                    replace=not_picked.size < len(task_names),
+                )
+
+                # Redo ExpertContainer forward
+                selector_out = module.selector(input[0])
+                selector_out.modules = random_tasks.tolist()
+                random_out = module.route(input[0], selector_out)
+
+                norm_correct = (output * attn_mask.unsqueeze(-1)).pow(2).sum(
+                    -1
+                ).sqrt().sum() / attn_mask.sum()
+                norm_wrong = (random_out * attn_mask.unsqueeze(-1)).pow(2).sum(
+                    -1
+                ).sqrt().sum() / attn_mask.sum()
+
+                container[layer_name] = (norm_correct, norm_wrong)
+
+                return output
+
+            return retrieve_input
+
+        hooks = []
+        container = {}
+        for module_name, module in model.named_modules():
+            if isinstance(module, ExpertContainer):
+                hook = build_hook(module_name, container, model.model.task_id_container)
+                module.register_forward_hook(hook)
+                hooks += [hook]
+
+        logger.info(f"set {len(hooks)} hooks")
+        training_config.subsample_train = 2_000
+        dm = get_datamodule(training_config)
+        dataloader = dm.train_dataloader()
+
+        pbar = tqdm(enumerate(dataloader), total=len(dataloader))
+        device = next(model.parameters()).device
+
+        total_avg_diff, total_rel_diff = [], []
+        for num_batch, batch in pbar:
+            batch = transfer_batch_to_device(batch, device)
+
+            if isinstance(model, EfficientCheckpointModule):
+                model.forward(batch, reduction="none")
+            else:
+                model.forward(
+                    input_ids=batch["input_ids"],
+                    attention_mask=batch["attention_mask"],
+                )
+
+            avg_diff, rel_diff = 0, 0
+            for layer, (correct, wrong) in container.items():
+                avg_diff += (correct - wrong).item()
+                rel_diff += (correct / wrong).item()
+
+            avg_diff /= len(container)
+            rel_diff /= len(container)
+
+            total_avg_diff += [avg_diff]
+            total_rel_diff += [rel_diff]
+
+            print(
+                f"avg_diff: {avg_diff / len(container)}, rel_diff: {rel_diff / len(container)}"
+            )
