@@ -992,6 +992,57 @@ class ExpertLibrary:
             if metadatum.expert_task_name == task
         ]
 
+    @classmethod
+    def from_local(
+        cls,
+        local_lib: "LocalExpertLibrary",
+        repo_id,
+        force=False,
+        upload_aux_data=False,
+        only_tasks=None,
+    ):
+        remote_lib = cls(repo_id=repo_id, create=True)
+
+        only_tasks = only_tasks or local_lib.tasks
+        with remote_lib.batched_commit():
+            for name, expert in local_lib.items():
+                if expert.name not in remote_lib:
+                    remote_lib.add_expert(expert, name, force=force)
+
+        # delete experts that are in remote_lib but were deleted from the local_lib
+        with remote_lib.batched_commit():
+            for name, metadatum in list(remote_lib.data.items()):
+                if (
+                    name not in local_lib.keys()
+                    and metadatum.expert_task_name in only_tasks
+                ):
+                    remote_lib.remove_expert(name, soft_delete=True)
+
+        # also update the scores
+        if upload_aux_data:
+            scores = local_lib.get_auxiliary_data(data_type="scores")
+            for expert_name, expert_scores in scores.items():
+                for score in expert_scores.values():
+                    try:
+                        remote_lib.add_score(expert_name, Score(**score))
+                    except ValueError as e:
+                        logger.error(e)
+                        continue
+
+            # TODO: upload the embeddings
+            embeddings = local_lib.get_auxiliary_data(data_type="embeddings")
+            for expert_name, expert_embeddings in embeddings.items():
+                for embedding in expert_embeddings.values():
+                    try:
+                        remote_lib.add_embeddings(
+                            expert_name, embedding["config"], embedding["embeddings"]
+                        )
+                    except ValueError as e:
+                        logger.error(e)
+                        continue
+
+        return remote_lib
+
 
 class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
     def add_expert(
@@ -1048,108 +1099,10 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
 
 
 class BlobExpertLibrary(ExpertLibrary, BlobStorageEngine):
-    @classmethod
-    def from_local(
-        cls,
-        local_lib: LocalExpertLibrary,
-        repo_id,
-        force=False,
-        upload_aux_data=False,
-        only_tasks=None,
-    ):
-        remote_lib = BlobExpertLibrary(repo_id=repo_id, create=True)
-
-        only_tasks = only_tasks or local_lib.tasks
-        with remote_lib.batched_commit():
-            for name, expert in local_lib.items():
-                if expert.name not in remote_lib:
-                    remote_lib.add_expert(expert, name, force=force)
-
-        # delete experts that are in remote_lib but were deleted from the local_lib
-        with remote_lib.batched_commit():
-            for name, metadatum in list(remote_lib.data.items()):
-                if (
-                    name not in local_lib.keys()
-                    and metadatum.expert_task_name in only_tasks
-                ):
-                    remote_lib.remove_expert(name, soft_delete=True)
-
-        # also update the scores
-        if upload_aux_data:
-            scores = local_lib.get_auxiliary_data(data_type="scores")
-            for expert_name, expert_scores in scores.items():
-                for score in expert_scores.values():
-                    try:
-                        remote_lib.add_score(expert_name, Score(**score))
-                    except ValueError as e:
-                        logger.error(e)
-                        continue
-
-            # TODO: upload the embeddings
-            embeddings = local_lib.get_auxiliary_data(data_type="embeddings")
-            for expert_name, expert_embeddings in embeddings.items():
-                for embedding in expert_embeddings.values():
-                    try:
-                        remote_lib.add_embeddings(
-                            expert_name, embedding["config"], embedding["embeddings"]
-                        )
-                    except ValueError as e:
-                        logger.error(e)
-                        continue
-
-        return remote_lib
+    pass
 
 class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
-    @classmethod
-    def from_local(
-        cls,
-        local_lib: LocalExpertLibrary,
-        repo_id,
-        force=False,
-        upload_aux_data=False,
-        only_tasks=None,
-    ):
-        remote_lib = HFExpertLibrary(repo_id=repo_id, create=True)
-
-        only_tasks = only_tasks or local_lib.tasks
-        with remote_lib.batched_commit():
-            for name, expert in local_lib.items():
-                if expert.name not in remote_lib:
-                    remote_lib.add_expert(expert, name, force=force)
-
-        # delete experts that are in remote_lib but were deleted from the local_lib
-        with remote_lib.batched_commit():
-            for name, metadatum in list(remote_lib.data.items()):
-                if (
-                    name not in local_lib.keys()
-                    and metadatum.expert_task_name in only_tasks
-                ):
-                    remote_lib.remove_expert(name, soft_delete=True)
-
-        # also update the scores
-        if upload_aux_data:
-            scores = local_lib.get_auxiliary_data(data_type="scores")
-            for expert_name, expert_scores in scores.items():
-                for score in expert_scores.values():
-                    try:
-                        remote_lib.add_score(expert_name, Score(**score))
-                    except ValueError as e:
-                        logger.error(e)
-                        continue
-
-            # TODO: upload the embeddings
-            embeddings = local_lib.get_auxiliary_data(data_type="embeddings")
-            for expert_name, expert_embeddings in embeddings.items():
-                for embedding in expert_embeddings.values():
-                    try:
-                        remote_lib.add_embeddings(
-                            expert_name, embedding["config"], embedding["embeddings"]
-                        )
-                    except ValueError as e:
-                        logger.error(e)
-                        continue
-
-        return remote_lib
+    pass
 
 
 def get_best_expert_for_score(library: HFExpertLibrary, hash) -> Expert:
