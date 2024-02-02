@@ -19,6 +19,7 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     HFExpertLibrary,
     ExpertLibrary,
     Score,
+    get_expert_library,
 )
 
 from projects.wiki_experts.src.evolution.config import (
@@ -83,7 +84,7 @@ def setup(args: EvolExpertConfig):
         temp_dir = TemporaryDirectory(dir=args.output_dir + "/")
         local_lib_location = temp_dir.name
 
-    remote_lib = HFExpertLibrary(args.hf_repo_id)
+    remote_lib = get_expert_library(args.hf_repo_id)
     os.makedirs(local_lib_location, exist_ok=True)
     expert_lib = LocalExpertLibrary.create_from_remote(
         remote_lib, destination=local_lib_location

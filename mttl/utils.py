@@ -35,10 +35,6 @@ def remote_login(token: Optional[str] = None):
     if token is not None:
         if "blob.core.windows.net" in token:
             os.environ["BLOB_SAS_URL"] = token
-        else:
-            from huggingface_hub import login as hf_hub_login
-            hf_hub_login(token=token)
-            os.environ["HF_TOKEN"] = token
     else:
         token = os.environ.get("HF_TOKEN", None)
         if token is not None:

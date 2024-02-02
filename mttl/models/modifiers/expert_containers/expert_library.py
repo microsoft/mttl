@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 from fnmatch import fnmatch
 import glob
 import io
+import logging
 import sys
 from typing import Any, Dict, List, Optional, Union
 import torch
@@ -168,13 +169,6 @@ class HuggingfaceHubEngine(BackendEngine):
         return HfApi().repo_info(repo_id)
 
     def login(self, token: Optional[str] = None):
-        if token is None:
-            token = os.environ.get("HF_TOKEN", None)
-        if token is None:
-            raise ValueError(
-                "No token provided. Please provide a token when initializing "
-                "the engine or set the HF_TOKEN environment variable."
-            )
         remote_login(token=token)
 
     def list_repo_files(self, repo_id):
@@ -184,27 +178,30 @@ class HuggingfaceHubEngine(BackendEngine):
 class BlobStorageEngine(BackendEngine):
 
     def __init__(self, token:Optional[str] = None, cache_dir:Optional[str] = None):
-        """Initialize the blob storage engine. SAS token can be provided as an argument or
-        through the environment variable BLOB_SAS_URL. The cache directory can be
+        """Initialize the blob storage engine. The cache directory can be
         provided as an argument or through the environment variable BLOB_CACHE_DIR.
-        If no cache directory is provided, the default cache directory ~/.mttl_cache is used.
+        If no cache directory is provided, the default cache directory ~/.cache/mttl is used.
+        You can provide a SAS URL as an argument when login or set the environment variable BLOB_SAS_URL.
 
-        IMPORTANT: Underscore "_" is not allowed in the repo_id, use dash "-" instead.
+        IMPORTANT: Some special characters such as underscore "_" are not allowed in the repo_id.
+        Please use dashes "-" instead. For more information on the naming recommendation, see:
+        https://learn.microsoft.com/en-us/rest/api/storageservices/naming-and-referencing-containers--blobs--and-metadata
         """
         super().__init__()
-        self._token = None
+        self._token = token
         self.cache_dir = self._get_cache_dir(cache_dir)
+        logging.getLogger('azure').setLevel(logging.WARNING)  # Quiet down the azure logging
 
     @staticmethod
     def _get_cache_dir(chache_dir: Optional[str] = None):
         """If cache_dir is not provided, get it from envvar BLOB_CACHE_DIR.
-        Use the default cache directory ~/.mttl_cache if not provided."""
+        Use the default cache directory ~/.cache/mttl if not provided."""
         if chache_dir is not None:
             return chache_dir
         if "BLOB_CACHE_DIR" in os.environ:
             cache_dir = os.environ["BLOB_CACHE_DIR"]
         else:
-            cache_dir = os.path.join(os.path.expanduser("~"), ".mttl_cache")
+            cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "mttl")
         return cache_dir
 
     @property
@@ -1204,9 +1201,10 @@ def get_expert_library(
 ):
     """Select the appropriate expert library based on the following order of priority:
     1. If expert_library_type is provided, uses that type.
-    2. If repo_id is a directory, uses LocalExpertLibrary.
+    2. If repo_id is a directory that exists on the local file system, uses LocalExpertLibrary.
     3. If token is provided and contains "blob.core.windows.net", uses BlobExpertLibrary.
-    4. Otherwise, uses HFExpertLibrary.
+    4. If token is not provided, but the BLOB_SAS_URL envvar is set, uses BlobExpertLibrary.
+    5. Otherwise, uses HFExpertLibrary.
     """
 
     available_libraries = {
@@ -1218,14 +1216,8 @@ def get_expert_library(
         if os.path.isdir(repo_id):
             expert_library_type = "local"
         else:
-            token = token or os.environ.get("BLOB_SAS_URL", os.environ.get("HF_TOKEN"))
-            if token is None:
-                raise ValueError(
-                    "Please provide a valid token, set BLOB_SAS_URL or "
-                    "HF_TOKEN environment variable, provide a local directory, "
-                    "or specify the expert_library_type `local`."
-                )
-            if "blob.core.windows.net" in token:
+            token = token or os.environ.get("BLOB_SAS_URL", None)
+            if token is not None and "blob.core.windows.net" in token:
                 expert_library_type = "blob_storage"
             else:
                 expert_library_type = "huggingface_hub"

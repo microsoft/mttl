@@ -86,9 +86,12 @@ def test_compute_embeddings():
         SVDEmbeddingTransformConfig,
     )
 
+    # TODO: both work, decide which one to use
+    library = HFExpertLibrary("sordonia/test-library")
+    # library = get_expert_library("test-library")  # requires BLOB_SAS_URL env var
     embeddings, svd = SVDEmbeddingTransform(
         SVDEmbeddingTransformConfig(n_components=2)
-    ).transform("sordonia/test-library", upload_to_hf=False)
+    ).transform(library=library, upload_to_hf=False)
     assert embeddings.shape[1] == 2
 
 
