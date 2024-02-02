@@ -165,7 +165,6 @@ def run_multitask(args: ExpertConfig):
 
         if args.library_id and checkpoint:
             library = get_expert_library(args.library_id, create=True)
-            # library.add_expert_from_ckpt(checkpoint, force=True)
             library.add_expert_from_ckpt(checkpoint)
 
         if args.hf_repo_id and checkpoint:
