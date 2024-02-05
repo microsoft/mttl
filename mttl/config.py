@@ -37,11 +37,17 @@ class Config:
             overwrite_logs += self.update_kwargs(kwargs, raise_error=raise_error, silent=silent)
 
         # setup logging to the output dir
-        setup_logging(self.output_dir)
+        try:
+            setup_logging(self.output_dir)
+        except Exception as e:
+            if raise_error:
+                raise ValueError("Error setting up logging") from e
+            elif not silent:
+                logger.warning(f"Error setting up logging to {self.output_dir}")
 
         # log the overwrites
         for log in overwrite_logs:
-            logger.warn(log)
+            logger.warning(log)
 
         self.post_init(silent=silent)
 
