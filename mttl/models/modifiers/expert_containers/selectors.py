@@ -523,19 +523,19 @@ class ZeroPerTokenSelector(Selector):
 
 
 @dataclass
-class PolySelectorDirectConfig(SelectorConfig):
+class PolySelectorDirectConfig(PolySelectorConfig):
     pass
 
 
 @dataclass
-class PolySelectorDirectConfigUniform(SelectorConfig):
+class PolySelectorDirectConfigUniform(PolySelectorConfig):
     pass
 
 
 @register_multi_expert_selector("poly_router_dir", PolySelectorDirectConfig)
 class PolySelectorDirect(PolySelector):
     def __init__(self, info_container, **kwargs) -> None:
-        super().__init__(info_container)
+        super().__init__(info_container, **kwargs)
 
         self.module_logits_dict = nn.ParameterDict()
 

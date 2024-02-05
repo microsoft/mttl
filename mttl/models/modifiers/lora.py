@@ -398,8 +398,11 @@ class SkilledLoRA(LoRA):
             scaling = scaling.squeeze(0)
 
             if weights.ndim == 1:
-                A = torch.einsum("s,sdr->dr", (weights, skilled_loras_a))
-                B = torch.einsum("s,srd->rd", (weights, skilled_loras_b))
+                A = torch.einsum("s,sqdr->qdr", (weights, skilled_loras_a))
+                B = torch.einsum("s,srqd->rqd", (weights, skilled_loras_b))
+
+                # combine n_splits, and d_split into a single dimension
+                A, B = A.flatten(0, 1), B.flatten(1, 2)
 
                 if scale_gradient:
                     A = ScaleGradient.apply(A, 1 / torch.max(weights))
@@ -409,8 +412,11 @@ class SkilledLoRA(LoRA):
                 adapter_out = torch.matmul(torch.matmul(input_lora, A), B) * scaling
             elif weights.ndim == 2:
                 # we are in the case in which we have a single skilled lora applied with different weights
-                A = torch.einsum("bs,sdr->bdr", (weights, skilled_loras_a))
-                B = torch.einsum("bs,srd->brd", (weights, skilled_loras_b))
+                A = torch.einsum("bs,sqdr->bqdr", (weights, skilled_loras_a))
+                B = torch.einsum("bs,srqd->brqd", (weights, skilled_loras_b))
+
+                # combine n_splits, and d_split into a single dimension
+                A, B = A.flatten(1, 2), B.flatten(2, 3)
 
                 if scale_gradient:
                     A = ScaleGradient.apply(

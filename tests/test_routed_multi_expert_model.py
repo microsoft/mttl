@@ -39,6 +39,7 @@ def tmp_exp_config(tmp_path):
             self.router_selector = "poly_router_dir"
             self.router_granularity = "coarsegrained"
             self.model = "EleutherAI/gpt-neo-125m"
+            self.n_tasks = 1
 
     return SimpleConfig()
 
