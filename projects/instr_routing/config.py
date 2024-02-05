@@ -74,7 +74,7 @@ class RoutingConfig(Config):
         self.soft_prompt_hidden_dim = None
         self.soft_prompt_learn_kv = False
 
-    def post_init(self):
+    def post_init(self, silent=False):
         if self.eval_mmlu and "MMLU_DATA_DIR" not in os.environ:
             raise ValueError("MMLU_DATA_DIR not set in env but eval_mmlu = True.")
 
