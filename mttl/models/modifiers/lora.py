@@ -429,7 +429,6 @@ class SkilledLoRA(LoRA):
                 else:
                     raise NotImplementedError("Only 2D and 3D inputs are supported.")
             elif weights.ndim == 3:
-                # breakpoint()
                 # we are in the case in which we have a single skilled lora applied with different weights
                 A = torch.einsum("bqs,sqdr->bqdr", (weights, skilled_loras_a))
                 B = torch.einsum("bqs,srqd->brqd", (weights, skilled_loras_b))
