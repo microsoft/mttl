@@ -1168,12 +1168,10 @@ def get_expert_library(
     if expert_library_type is None:
         if os.path.isdir(repo_id):
             expert_library_type = "local"
+        elif len(repo_id.split("/")) == 2:
+            expert_library_type = "huggingface_hub"
         else:
-            token = token or os.environ.get("BLOB_SAS_URL", None)
-            if token is not None and "blob.core.windows.net" in token:
-                expert_library_type = "blob_storage"
-            else:
-                expert_library_type = "huggingface_hub"
+            expert_library_type = "blob_storage"
     try:
         expert_lib_class = available_libraries[expert_library_type]
         expert_lib = expert_lib_class(

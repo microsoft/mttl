@@ -23,7 +23,7 @@ def remote_login(token: Optional[str] = None):
     When token contains "blob.core.windows.net", no login is performed for Azure Blob Storage,
     instead it sets the environment variable "BLOB_SAS_URL" for later use.
 
-    Otherwise, the environment variable "HF_TOKEN" is set and Hugging Face Hub login is performed.
+    Otherwise, Hugging Face Hub login is performed.
     If no token is is provided, tries to login to Hugging Face Hub using HF_TOKEN environment variable.
 
     Args:
