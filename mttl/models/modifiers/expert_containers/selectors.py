@@ -6,6 +6,7 @@ import math
 from torch import nn
 import torch.nn.functional as F
 from mttl.models.modifiers.routing import RoutingMixin
+from mttl.utils import logger
 
 
 SELECTORS_NAME_TO_KLASS = {}
@@ -247,6 +248,12 @@ class PolySelector(Selector):
     Implements routing at a per-layer or per-model level
     """
 
+    avg_selector_warned: bool = False
+
+    @property
+    def n_experts(self):
+        return len(self.expert_names)
+
     def __init__(self, info_container, **kwargs) -> None:
         super().__init__(info_container, **kwargs)
 
@@ -259,11 +266,30 @@ class PolySelector(Selector):
             module_logits = torch.sigmoid(self.module_logits)
         else:
             task_ids = self.info_container["routing_infos"].task_ids
-            module_logits = torch.sigmoid(self.module_logits[task_ids])
+            if task_ids is not None:
+                module_logits = torch.sigmoid(self.module_logits[task_ids])
+                if PolySelector.avg_selector_warned:
+                    logger.warning(
+                        f"Task ids were found. Reverting to default task-based routing"
+                    )
+
+                PolySelector.avg_selector_warned = False
+            else:
+                bs = self.info_container["routing_infos"].input_ids.size(0)
+                if not PolySelector.avg_selector_warned:
+                    logger.warning(
+                        f"Task ids are None. Defaulting to average selector."
+                    )
+                    PolySelector.avg_selector_warned = True
+
+                module_logits = torch.full_like(
+                    self.module_logits[:bs], fill_value=1.0 / self.n_experts
+                )
+
         module_weights = module_logits / (module_logits.sum(dim=-1, keepdim=True) + EPS)
 
         module_weights = module_weights.view(
-            module_weights.size(0), self.config.n_splits, len(self.expert_names)
+            module_weights.size(0), self.config.n_splits, self.n_experts
         )
         return module_weights
 
