@@ -50,6 +50,7 @@ def run_multitask(args: ExpertConfig):
     model_class = MoETrainer
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
+    args.task_names = dm._task_names
 
     loggers = get_pl_loggers(args)
     module = model_class(**vars(args), tokenizer=dm.tokenizer)

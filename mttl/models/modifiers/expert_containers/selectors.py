@@ -236,8 +236,8 @@ class SelectorView:
 
 @dataclass
 class PolySelectorConfig(SelectorConfig):
-    n_tasks: int = 1
     n_splits: int = 1
+    task_names: List[str] = None
     pass
 
 
@@ -257,35 +257,49 @@ class PolySelector(Selector):
     def __init__(self, info_container, **kwargs) -> None:
         super().__init__(info_container, **kwargs)
 
+        self.n_tasks = len(self.config.task_names)
+
+        # We add an extra task for the default (average) expert if not found
         self.module_logits = nn.Parameter(
-            torch.empty(self.config.n_tasks, self.config.n_splits).uniform_(-1e-3, 1e-3)
+            torch.empty(self.n_tasks + 1, self.config.n_splits).uniform_(-1e-3, 1e-3)
         )
 
     def _get_weights(self):
-        if self.config.n_tasks == 1:
-            module_logits = torch.sigmoid(self.module_logits)
+        if hasattr(self.info_container["routing_infos"], "task_ids_from_name"):
+            task_ids = self.info_container["routing_infos"].task_ids_from_name
         else:
-            task_ids = self.info_container["routing_infos"].task_ids
-            if task_ids is not None:
-                module_logits = torch.sigmoid(self.module_logits[task_ids])
-                if PolySelector.avg_selector_warned:
-                    logger.warning(
-                        f"Task ids were found. Reverting to default task-based routing"
-                    )
-
-                PolySelector.avg_selector_warned = False
-            else:
-                bs = self.info_container["routing_infos"].input_ids.size(0)
-                if not PolySelector.avg_selector_warned:
-                    logger.warning(
-                        f"Task ids are None. Defaulting to average selector."
-                    )
-                    PolySelector.avg_selector_warned = True
-
-                module_logits = torch.full_like(
-                    self.module_logits[:bs], fill_value=1.0 / self.n_experts
+            task_ids = [
+                self.config.task_names.index(t)
+                if t in self.config.task_names
+                else self.n_tasks
+                for t in self.info_container["routing_infos"].task_names
+            ]
+            task_ids = torch.LongTensor(task_ids).to(self.module_logits.device)
+            self.info_container["routing_infos"].task_ids_from_name = task_ids
+        if task_ids.max() < self.n_tasks:
+            if PolySelector.avg_selector_warned:
+                logger.warning(
+                    f"Task ids were found. Reverting to default task-based routing"
                 )
 
+            PolySelector.avg_selector_warned = False
+        else:
+            if not PolySelector.avg_selector_warned:
+                not_found_tasks = set(
+                    [
+                        t
+                        for t in self.info_container["routing_infos"].task_names
+                        if t not in self.config.task_names
+                    ]
+                )
+                logger.warning(
+                    f"Tasks {not_found_tasks} not in taining tasks. Defaulting to average selector."
+                )
+                PolySelector.avg_selector_warned = True
+
+            assert not self.training, "Unknown tasks during training"
+
+        module_logits = torch.sigmoid(self.module_logits[task_ids])
         module_weights = module_logits / (module_logits.sum(dim=-1, keepdim=True) + EPS)
 
         module_weights = module_weights.view(
@@ -328,8 +342,11 @@ class PolySelector(Selector):
     def add_expert(self, expert_name: str, **kwargs):
         self.expert_names.append(expert_name)
         self.module_logits.data = torch.empty(
-            self.config.n_tasks, self.config.n_splits * len(self.expert_names)
+            self.n_tasks + 1, self.config.n_splits * len(self.expert_names)
         ).uniform_(-1e-3, 1e-3)
+
+        # Last expert is exactly uniform
+        self.module_logits.data[-1] = 0.0
 
 
 @dataclass

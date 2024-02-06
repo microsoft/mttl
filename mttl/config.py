@@ -277,6 +277,7 @@ class Config:
         # n-skills for router-based methods
         self.n_skills = 8
         self.n_tasks = None
+        self.task_names = None
 
         # which modules to modify and which layers for adapters
         self.modify_modules = None
