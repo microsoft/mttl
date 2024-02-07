@@ -37,7 +37,7 @@ from mttl.utils import setup_logging, logger
 # register models
 from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.vllm_engines.engines import free_memory
-from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
+from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 
 DEBUG = False
 if "AMLT_OUTPUT_DIR" in os.environ:

@@ -96,8 +96,6 @@ def run_eval(args):
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:
             module.load_expert(**expert_kwargs)
-    elif args.module_graph is not None:
-        module.load_from_graph_string(args.module_graph)
 
     module.to("cuda")
     # evaluate all the category

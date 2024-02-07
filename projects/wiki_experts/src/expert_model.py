@@ -30,9 +30,9 @@ from mttl.models.modifiers.expert_containers import (
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRankerHelper
 
-from mttl.models.modifiers.expert_containers.module_graph import Expert, ExpertInfo
-from mttl.models.modifiers.expert_containers.module_graph import (
-    ModuleGraph,
+from mttl.models.modifiers.expert_containers.expert import (
+    Expert,
+    ExpertInfo,
     load_expert,
 )
 
@@ -116,19 +116,6 @@ class MultiExpertModel(ExpertTrainer):
         for _, selector in self.selectors.items():
             weights[selector.name] = selector.get_routing_weights()
         return weights
-
-    def load_from_graph(self, graph: ModuleGraph, action="route", **kwargs):
-        for name, module in graph.create_modules(
-            base_hparams=self.hparams, **kwargs
-        ).items():
-            print("Loading module: {}".format(module.name))
-            # loading from graph gets the name of the root node
-            self.add_expert_instance(
-                module,
-                action=action,
-                expert_name=name,
-                is_default=name == "default",
-            )
 
     def delete_expert_container(self):
         """
@@ -240,12 +227,6 @@ class MultiExpertModel(ExpertTrainer):
             )
             if action != "merge":
                 self.experts_names.append(expert_instance.name)
-
-    def load_from_graph_string(self, s, action="route", expert_library=None):
-        from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
-
-        graph = ModuleGraph.from_string(s, expert_library=expert_library)
-        self.load_from_graph(graph, action=action)
 
     def load_from_library(self, library, subsample_library_experts=0):
         import copy
@@ -391,7 +372,7 @@ class MultiExpertModelRanker(MultiExpertModel):
         )
 
     def set_routing_infos(self, batch, generate=False):
-        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
+        self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
 
         self.expert_ranker.set_available_tasks(self.experts_names)
         mod_names, mod_weights = self.expert_ranker.predict_batch(
@@ -404,8 +385,8 @@ class MultiExpertModelRanker(MultiExpertModel):
         # mod_wgths = [[0.5, 0.5], [0.3, 0.7]]
         # mod_names = [['default', 'mod1']]
         # mod_wgths = [[0.7, 0.3]]
-        self.model.task_id_container["routing_infos"].routing_modules = mod_names
-        self.model.task_id_container["routing_infos"].routing_weights = mod_weights
+        self.model.info_container["routing_infos"].routing_modules = mod_names
+        self.model.info_container["routing_infos"].routing_weights = mod_weights
 
         # infos
         logger.info(f"Most similar: {str(mod_names)}")
@@ -432,6 +413,7 @@ class MoETrainer(MultiExpertModel):
                         lora_rank=self.hparams.lora_rank,
                         lora_init_b_random=True,
                         n_splits=self.hparams.n_splits,
+                        phi_2_align_heads=self.hparams.phi_2_align_heads,
                     )
                     self.add_empty_expert(f"e{i}", exp_config)
                 self.moe_num_experts = kwargs["moe_num_experts"]
@@ -448,14 +430,14 @@ class MoETrainer(MultiExpertModel):
         total_loss = loss.clone()
 
         if (
-            "routing_gates" in self.model.task_id_container
-            and self.model.task_id_container["routing_gates"]
+            "routing_gates" in self.model.info_container
+            and self.model.info_container["routing_gates"]
         ):
             num = 0.0
             entropy_of_avg = 0.0
             entropy_of_route = 0.0
 
-            for values in self.model.task_id_container["routing_gates"]:
+            for values in self.model.info_container["routing_gates"]:
                 # compute MI loss
                 values = values.to(torch.float32)
                 values = values.view(-1, values.shape[-1])
@@ -498,7 +480,7 @@ class MoETrainer(MultiExpertModel):
                     (1.0 - normalized_entropy) >= self.hparams.moe_ent_free_bits
                 ) * -entropy_of_route
 
-            self.model.task_id_container["routing_gates"].clear()
+            self.model.info_container["routing_gates"].clear()
 
         self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
         self.log(

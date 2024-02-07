@@ -35,7 +35,6 @@ class ExpertConfig(Config):
         self.routing = "subject"
         self.mmlu_test_split = "test"
         self.load_module = None
-        self.module_graph = None
         self.micro_batch_size = None
         self.validation_portion = 0.03
 
@@ -92,6 +91,8 @@ class ExpertConfig(Config):
         self.rouge_every_opt_step = 0
         self.es_metric = "loss"
         self.n_ng_iterations = 30  # number of iterations for LoraHub
+
+        self.phi_2_align_heads = False
 
     def post_init(self):
         if self.micro_batch_size is None:

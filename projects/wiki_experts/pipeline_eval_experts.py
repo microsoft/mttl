@@ -57,9 +57,7 @@ def run_eval(args):
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:
             module.load_expert(**expert_kwargs, expert_library=library)
-    elif args.module_graph is not None:
-        module.load_from_graph_string(args.module_graph, expert_library=library)
-    elif args.hf_lib_id is not None:
+    if args.hf_lib_id is not None:
         module.add_experts_from_library(library)
     module.to("cuda")
 

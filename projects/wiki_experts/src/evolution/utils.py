@@ -26,7 +26,7 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     get_best_expert_for_task,
 )
 from projects.wiki_experts.src.evolution.config import find_version
-from mttl.models.modifiers.expert_containers.module_graph import Expert
+from mttl.models.modifiers.expert_containers.expert import Expert
 
 
 class TableLogger:

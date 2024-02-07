@@ -11,7 +11,7 @@ from mttl.models.modifiers.expert_containers.selectors import (
 from mttl.models.modifiers.expert_containers import ExpertContainer
 from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
 from mttl.models.modifiers.modify_model import register_modifier
-from mttl.models.modifiers.expert_containers.module_graph import Expert
+from mttl.models.modifiers.expert_containers.expert import Expert
 
 
 class HardPromptDecoderWrapper(nn.Module):
@@ -84,7 +84,7 @@ def add_hard_prompt_to_transformer(
     if not isinstance(transformer, HardPromptDecoderWrapper):
         expert_container = HardPromptExpertContainer(
             expert_config,
-            transformer.task_id_container,
+            transformer.info_container,
             selector=None,
         )
         # patch the decoder
@@ -100,11 +100,11 @@ def add_hard_prompt_to_transformer(
 
 
 class HardPromptExpertContainer(ExpertContainer):
-    def __init__(self, config, task_id_container, selector=None):
-        super().__init__(config, task_id_container, layer=None)
+    def __init__(self, config, info_container, selector=None):
+        super().__init__(config, info_container, layer=None)
 
         self.config = config
-        self.selector: Selector = selector or TaskNameSelector(task_id_container)
+        self.selector: Selector = selector or TaskNameSelector(info_container)
 
         self.default_expert_name = None
         self.merged_expert_names = []

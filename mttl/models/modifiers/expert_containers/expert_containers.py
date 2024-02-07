@@ -8,23 +8,24 @@ from mttl.models.modifiers.base import (
     MergeableAdapter,
     ModifierConfig,
     ModifyMixin,
+    Adapter,
 )
 
 from mttl.utils import logger
 from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
 from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
 from mttl.models.modifiers.expert_containers.selectors import *
-from mttl.models.modifiers.expert_containers.module_graph import Expert
+from mttl.models.modifiers.expert_containers.expert import Expert
 
 
 class ExpertContainer:
     __supports_configs__ = []
 
-    def __init__(self, config, task_id_container, layer, selector=None):
+    def __init__(self, config, info_container, layer, selector=None):
         self.config = config
         self.layer = layer
-        self.task_id_container = task_id_container
-        self.selector = selector or TaskNameSelector(task_id_container)
+        self.info_container = info_container
+        self.selector = selector or TaskNameSelector(info_container)
 
         self.experts: dict = None
         self.expert_infos = {}
@@ -109,9 +110,9 @@ class ExpertContainer:
 class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
     __supports_configs__ = [LoRAConfig]
 
-    def __init__(self, config, task_id_container, layer, selector=None):
+    def __init__(self, config, info_container, layer, selector=None):
         MergeableAdapter.__init__(self)
-        super().__init__(config, task_id_container, layer, selector)
+        super().__init__(config, info_container, layer, selector)
 
         if not isinstance(self.layer, nn.Linear):
             raise ValueError(
@@ -293,9 +294,9 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
 
     __supports_configs__ = [SkilledLoRAConfig, LoRAConfig]
 
-    def __init__(self, config, task_id_container, layer, selector=None):
+    def __init__(self, config, info_container, layer, selector=None):
         MergeableAdapter.__init__(self)
-        super().__init__(config, task_id_container, layer, selector)
+        super().__init__(config, info_container, layer, selector)
 
         if not isinstance(self.layer, nn.Linear):
             raise ValueError(
@@ -314,6 +315,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             lora_rank=config.lora_rank,
             n_splits=config.n_splits,
             n_skills=0,
+            phi_2_align_heads=config.phi_2_align_heads,
         )
         self.experts = SkilledLoRA(dummy_config, layer)
 
@@ -407,26 +409,38 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             return self.layer(input)
 
 
-class KVExpertContainer(KVAdapter, ExpertContainer):
+class KVExpertContainer(ExpertContainer, ModifyMixin, Adapter):
     """Expert Container for KVAdapters.
-    Unlike the LoRAExpertContainer, the KVExpertContainer is a KVAdapter itself,
+    Unlike the LoRAExpertContainer, the KVExpertContainer is a KVAdapter itself.
 
-    See `KVSelector` for info on how the routing is done.
-    See `KVAdapter` for info on the control flow of the forward pass.
+    `KVAdapter` control flow is as follows:
+
+    It modifies the self-attention call with the following execution :
+    1. adapter_k, adapter_v = adapter.get_kv_weights(k_proj, v_proj)
+    2. adapter_weights = adapter.route(query_states, adapter_k, self)
+        2.1 `adapter.route` calls get_gate(adapter_weights)
+    3. adapter_output = adapter.aggregate(adapter_weights, adapter_v)
+
+    The container does the following :
+    1. It checks if the given selector overwrote any of
+    `get_kv_weights`, `route`, `aggregate` or `get_gate` methods.
+    If so, it delegates the call to the selector.
+    If not, it calls the base adapter method.
     """
 
     __supports_configs__ = [KVAdapterConfig]
 
-    def __init__(self, config, task_id_container, layer, selector=None):
+    def __init__(self, config, info_container, layer, selector=None):
+        Adapter.__init__(self)
         super().__init__(
             config,
-            task_id_container,
+            info_container,
             layer,
-            selector or KVTaskNameSelector(task_id_container),
+            selector or KVTaskNameSelector(info_container),
         )
 
         # Check if layer is an attention layer :
-        if not hasattr(self.attn_layer, "k_proj") and self.config.model != "phi-2":
+        if not hasattr(layer, "k_proj") and self.config.model != "phi-2":
             raise ValueError(
                 "`KVExpertContainer` should wrap an attention layer. {}".format(
                     self.attn_layer.__class__.__name__
@@ -435,6 +449,10 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
 
         self.default_expert_name = None
         self.experts = nn.ModuleDict({})
+
+    def forward(self, *args, **kwargs):
+        breakpoint()
+        xx = 1
 
     # skip creating the adapter weights
     def create_for_layer(self, attn_layer):
@@ -486,7 +504,7 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
         expert_config = ModifierConfig.from_training_config(expert.expert_config)
         self._check_config(expert_config)
 
-        expert_module = KVAdapter(expert_config, self.attn_layer)
+        expert_module = KVAdapter(expert_config, self.layer)
         expert_module.load_adapter_weights(expert_weights)
 
         if is_default:
