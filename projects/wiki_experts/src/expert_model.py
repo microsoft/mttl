@@ -405,7 +405,9 @@ class MoETrainer(MultiExpertModel):
         if library is None:
             if not self.hparams.hf_lib_id:
                 for i in range(self.hparams.moe_num_experts):
+                    # Adding a Skilled LoRA with 1 skill.
                     exp_config = SkilledLoRAConfig(
+                        n_skills=1,
                         modify_layers=self.hparams.modify_layers,
                         modify_modules=self.hparams.modify_modules,
                         lora_alpha=self.hparams.lora_alpha,
