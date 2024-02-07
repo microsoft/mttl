@@ -15,9 +15,11 @@ class ExpertConfig(Config):
         self.load_in_8bit = False
         self.wandb_project = None
         self.tensorboard = False
-        self.hf_token_hub = None
-        self.hf_lib_id = None
-        self.hf_repo_id = None
+        self.hf_token_hub = None  # deprecated in favor of remote_token
+        self.remote_token = None
+        self.hf_lib_id = None  # deprecated in favor of library_id
+        self.library_id = None
+        self.hf_repo_id = None  # TODO: deprecate in favor of repository_id
         self.do_train = True
 
         # just a lame flag to 0 out all adapter weights
@@ -80,7 +82,10 @@ class ExpertConfig(Config):
         self.create_transfer_matrix = False
         self.tasksets_path = None
 
-    def post_init(self):
+    def post_init(self, silent=False):
+
+        self._load_deprecated_configs(silent)
+
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size
 
@@ -124,3 +129,27 @@ class ExpertConfig(Config):
                     else:
                         task_names.extend([task_name])
             self.finetune_task_name = ",".join(task_names)
+
+    def _load_deprecated_configs(self, silent=False):
+        """Load deprecated config keys and issue warnings."""
+        key_map = {
+            "hf_token_hub": "remote_token",
+            "hf_lib_id": "library_id",
+        }
+        for old_key, new_key in key_map.items():
+            old_key_value = getattr(self, old_key, None)
+            if old_key_value is not None:
+                if not silent:
+                    logger.warn(
+                        f"The `{old_key}` config is deprecated. "
+                        f"Please use `{new_key}` instead."
+                    )
+                    if getattr(self, new_key, None) is None:
+                        # Overwriting hf_lib_id to test
+                        logger.warn(f"Overwriting {new_key} to {old_key_value}")
+                    else:
+                        logger.warn(
+                            f"The `{new_key}` key is already set. "
+                            f"Ignoring `{old_key}`."
+                        )
+                setattr(self, new_key, old_key_value)
