@@ -193,6 +193,7 @@ class LoRA(MergeableAdapter, ModifyMixin):
 class SkilledLoRAConfig(LoRAConfig):
     n_skills: int = 1
     n_splits: int = 1
+    phi_2_align_heads: bool = False
 
 
 class ScaleGradient(torch.autograd.Function):
@@ -379,6 +380,7 @@ class SkilledLoRA(LoRA):
 
         # (n_examples, seq_len, out_features)
         layer_out = skilled_loras[0].layer(input)
+        phi_2_align_heads = skilled_loras[0].config.phi_2_align_heads
 
         input_lora = input.to(skilled_loras[0].lora_a.dtype)
         input_lora = skilled_loras[0].dropout_layer(input_lora)
@@ -398,6 +400,8 @@ class SkilledLoRA(LoRA):
             scaling = scaling.squeeze(0)
 
             if weights.ndim == 1:
+                assert not phi_2_align_heads
+
                 A = torch.einsum("s,sqdr->qdr", (weights, skilled_loras_a))
                 B = torch.einsum("s,srqd->rqd", (weights, skilled_loras_b))
 
@@ -411,6 +415,8 @@ class SkilledLoRA(LoRA):
                 # scaling is a float (only 1 skilled lora)
                 adapter_out = torch.matmul(torch.matmul(input_lora, A), B) * scaling
             elif weights.ndim == 2:
+                assert not phi_2_align_heads
+
                 # we are in the case in which we have a single skilled lora applied with different weights
                 A = torch.einsum("bs,sqdr->bqdr", (weights, skilled_loras_a))
                 B = torch.einsum("bs,srqd->brqd", (weights, skilled_loras_b))
@@ -438,6 +444,17 @@ class SkilledLoRA(LoRA):
                 # we are in the case in which we have a single skilled lora applied with different weights
                 A = torch.einsum("bqs,sqdr->bqdr", (weights, skilled_loras_a))
                 B = torch.einsum("bqs,srqd->brqd", (weights, skilled_loras_b))
+
+                if (
+                    phi_2_align_heads and B.size(-1) // A.size(-2) == 3
+                ):  # last only true for Wqkv weight
+                    # phi_2 formats the B as  "... (three h d) -> ... three h d"
+                    # We want to make sure that the `h` here aligns with n_splits, or `q` index
+                    bs, rank, n_splits, d_split = B.shape
+                    # (h, 3 * d) -> (h, 3, d)
+                    B = B.view(bs, rank, n_splits, 3, d_split // 3)
+                    # (bs, r, h, 3, d) -> (bs, r, 3, h, d) -> ... (bs, r, 3 * h * d)
+                    B = B.transpose(2, 3).reshape(bs, rank, n_splits, d_split)
 
                 # combine n_splits, and d_split into a single dimension
                 A, B = A.flatten(1, 2), B.flatten(2, 3)
