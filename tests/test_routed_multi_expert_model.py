@@ -11,7 +11,7 @@ from projects.wiki_experts.src.expert_model import (
     RoutedMultiExpertModel,
 )
 
-from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
+from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 from mttl.models.modifiers.expert_containers import (
     LoRAExpertContainer,
     CoalescedLoRAExpertContainer,
