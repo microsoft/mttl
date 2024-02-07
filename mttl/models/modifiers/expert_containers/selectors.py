@@ -211,6 +211,10 @@ class Selector(nn.Module):
     def n_experts(self):
         return len(self.expert_names)
 
+    @property
+    def routing_infos(self):
+        return self.info_container.get("routing_infos", None)
+
     @abstractmethod
     def add_expert(self, expert_name: str, **kwargs):
         pass
@@ -743,10 +747,6 @@ class KVSelector(Selector):
     @property
     def name(self):
         return f"{self.__layer_name__}"
-
-    @property
-    def n_experts(self):
-        return len(self.expert_names)
 
 
 @dataclass
