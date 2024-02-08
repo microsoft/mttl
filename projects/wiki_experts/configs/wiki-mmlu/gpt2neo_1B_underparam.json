@@ -1,0 +1,21 @@
+{
+    "num_train_epochs": 1,
+    "learning_rate": 0.0003,
+    "micro_batch_size": 8,
+    "train_batch_size": 32,
+    "predict_batch_size": 1,
+    "model": "EleutherAI/gpt-neo-1.3B",
+    "model_family": "gpt",
+    "optimizer": "adamw",
+    "warmup_steps": 100,
+    "precision": "bf16",
+    "dataset": "sordonia/wiki_mmlu_from_valid_all",
+    "lora_rank": 4,
+    "lora_dropout": 0.05,
+    "weight_decay": 0.00,
+    "n_skills": 1,
+    "model_modifier": "lora",
+    "modify_modules": ".*",
+    "modify_layers": "k_proj|v_proj|q_proj|out_proj",
+    "trainable_param_names": ".*lora_[ab].*"
+}
