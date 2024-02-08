@@ -1,5 +1,5 @@
 {
-    "first100":[
+    "first100": [
         "cot_strategyqa_ii",
         "duorc_ParaphraseRC_movie_director",
         "math_dataset_algebra__linear_1d_1_0_0",
@@ -101,29 +101,284 @@
         "cot_esnli_ii",
         "qasc_qa_with_separated_facts_1"
     ],
-    "c2o10_5e":
-     ["glue_sst2_2_0_0", "natural_questions_open_1_0_0", "duorc_SelfRC_generate_question_by_answer", "lambada_1_0_0", "kilt_tasks_hotpotqa_final_exam", "glue_cola_2_0_0", "ag_news_subset_1_0_0", "cot_gsm8k_ii", "kilt_tasks_hotpotqa_combining_facts", "duorc_ParaphraseRC_generate_question", "kilt_tasks_hotpotqa_straighforward_qa", "cot_strategyqa", "cot_ecqa_ii", "duorc_ParaphraseRC_generate_question_by_answer", "gigaword_1_2_0", "kilt_tasks_hotpotqa_complex_question", "glue_qnli_2_0_0", "kilt_tasks_hotpotqa_formulate", "para_crawl_enes", "cosmos_qa_1_0_0", "cot_esnli_ii", "cot_qasc"],
-    "c8o10_5e":
-     ["adversarial_qa_droberta_generate_question", "cot_esnli", "cot_gsm8k", "cot_sensemaking", "dream_generate_last_utterance", "gem_dart_1_1_0", "gem_common_gen_1_1_0", "cot_creak", "duorc_ParaphraseRC_title_generation", "adversarial_qa_dbidaf_generate_question", "fix_punct", "duorc_SelfRC_title_generation", "gem_web_nlg_en_1_1_0", "app_reviews_generate_review", "cot_ecqa", "dream_generate_first_utterance", "gem_e2e_nlg_1_1_0", "adversarial_qa_dbert_generate_question"],
-    "c5o10_5e":
-     ["adversarial_qa_dbidaf_question_context_answer", "adversarial_qa_dbidaf_answer_the_following_q"],
-    "c1o10_5e":
-     ["app_reviews_convert_to_star_rating", "app_reviews_categorize_rating_using_review", "cos_e_v1_11_question_description_option_text", "math_dataset_algebra__linear_1d_1_0_0", "dbpedia_14_pick_one_category_for_the_following_text", "dbpedia_14_given_a_choice_of_categories_", "app_reviews_convert_to_rating", "dbpedia_14_given_list_what_category_does_the_paragraph_belong_to", "glue_qqp_2_0_0", "dream_baseline", "dbpedia_14_given_a_list_of_category_what_does_the_title_belong_to", "qasc_qa_with_separated_facts_1", "cot_creak_ii", "cos_e_v1_11_description_question_option_text", "qasc_qa_with_combined_facts_1", "qasc_is_correct_1", "cot_sensemaking_ii", "qasc_is_correct_2", "duorc_SelfRC_generate_question", "definite_pronoun_resolution_1_1_0", "glue_wnli_2_0_0", "cot_strategyqa_ii"],
-    "c6o10_5e":
-     ["cos_e_v1_11_question_option_description_text", "cos_e_v1_11_question_option_description_id", "cos_e_v1_11_question_description_option_id", "cos_e_v1_11_description_question_option_id"],
-    "c7o10_5e":
-     ["cos_e_v1_11_rationale", "cos_e_v1_11_generate_explanation_given_text", "cos_e_v1_11_i_think", "cos_e_v1_11_explain_why_human", "cos_e_v1_11_aligned_with_common_sense"],
-    "c9o10_5e":
-     ["anli_r3_0_1_0", "paws_wiki_1_1_0", "glue_mnli_2_0_0", "glue_mrpc_2_0_0"],
-    "c3o10_5e":
-     ["duorc_ParaphraseRC_movie_director", "duorc_ParaphraseRC_answer_question", "duorc_ParaphraseRC_decide_worth_it", "duorc_SelfRC_question_answering", "duorc_ParaphraseRC_extract_answer", "duorc_SelfRC_answer_question", "duorc_SelfRC_decide_worth_it", "duorc_ParaphraseRC_question_answering", "duorc_SelfRC_extract_answer", "duorc_SelfRC_movie_director"],
-    "c4o10_5e":
-     ["adversarial_qa_droberta_tell_what_it_is", "adversarial_qa_droberta_based_on", "adversarial_qa_dbert_answer_the_following_q", "adversarial_qa_droberta_question_context_answer", "adversarial_qa_droberta_answer_the_following_q", "adversarial_qa_dbert_tell_what_it_is", "adversarial_qa_dbert_based_on", "adversarial_qa_dbidaf_based_on", "adversarial_qa_dbert_question_context_answer", "adversarial_qa_dbidaf_tell_what_it_is"],
-    "c0o10_5e":
-     ["anli_r2_0_1_0", "anli_r1_0_1_0", "glue_stsb_2_0_0"],     
-    "c1o5_5e": ["glue_sst2_2_0_0", "natural_questions_open_1_0_0", "kilt_tasks_hotpotqa_final_exam", "ag_news_subset_1_0_0", "adversarial_qa_droberta_tell_what_it_is", "cot_gsm8k_ii", "kilt_tasks_hotpotqa_combining_facts", "kilt_tasks_hotpotqa_straighforward_qa", "cot_strategyqa", "cot_ecqa_ii", "adversarial_qa_droberta_based_on", "adversarial_qa_dbert_answer_the_following_q", "kilt_tasks_hotpotqa_complex_question", "adversarial_qa_droberta_question_context_answer", "glue_qnli_2_0_0", "adversarial_qa_droberta_answer_the_following_q", "adversarial_qa_dbert_tell_what_it_is", "kilt_tasks_hotpotqa_formulate", "cosmos_qa_1_0_0", "cot_esnli_ii", "adversarial_qa_dbert_based_on", "adversarial_qa_dbidaf_based_on", "cot_qasc", "adversarial_qa_dbert_question_context_answer", "adversarial_qa_dbidaf_tell_what_it_is"],
-    "c4o5_5e": ["adversarial_qa_droberta_generate_question", "cot_esnli", "cot_gsm8k", "cot_sensemaking", "cos_e_v1_11_rationale", "duorc_SelfRC_generate_question_by_answer", "lambada_1_0_0", "dream_generate_last_utterance", "glue_cola_2_0_0", "gem_dart_1_1_0", "cos_e_v1_11_generate_explanation_given_text", "gem_common_gen_1_1_0", "cot_creak", "duorc_ParaphraseRC_title_generation", "duorc_ParaphraseRC_generate_question", "adversarial_qa_dbidaf_generate_question", "cos_e_v1_11_i_think", "fix_punct", "duorc_SelfRC_title_generation", "duorc_ParaphraseRC_generate_question_by_answer", "gigaword_1_2_0", "gem_web_nlg_en_1_1_0", "cos_e_v1_11_explain_why_human", "app_reviews_generate_review", "cot_ecqa", "cos_e_v1_11_aligned_with_common_sense", "dream_generate_first_utterance", "gem_e2e_nlg_1_1_0", "para_crawl_enes", "adversarial_qa_dbert_generate_question"],
-    "c3o5_5e": ["adversarial_qa_dbidaf_question_context_answer", "duorc_ParaphraseRC_movie_director", "duorc_ParaphraseRC_answer_question", "duorc_ParaphraseRC_decide_worth_it", "duorc_SelfRC_question_answering", "duorc_ParaphraseRC_extract_answer", "duorc_SelfRC_answer_question", "duorc_SelfRC_decide_worth_it", "duorc_ParaphraseRC_question_answering", "anli_r2_0_1_0", "anli_r1_0_1_0", "glue_stsb_2_0_0", "duorc_SelfRC_extract_answer", "duorc_SelfRC_movie_director"],
-    "c0o5_5e": ["app_reviews_convert_to_star_rating", "app_reviews_categorize_rating_using_review", "paws_wiki_1_1_0", "cos_e_v1_11_question_description_option_text", "math_dataset_algebra__linear_1d_1_0_0", "dbpedia_14_pick_one_category_for_the_following_text", "dbpedia_14_given_a_choice_of_categories_", "app_reviews_convert_to_rating", "dbpedia_14_given_list_what_category_does_the_paragraph_belong_to", "glue_qqp_2_0_0", "dream_baseline", "dbpedia_14_given_a_list_of_category_what_does_the_title_belong_to", "qasc_qa_with_separated_facts_1", "cot_creak_ii", "cos_e_v1_11_description_question_option_text", "qasc_qa_with_combined_facts_1", "qasc_is_correct_1", "cot_sensemaking_ii", "glue_mnli_2_0_0", "qasc_is_correct_2", "duorc_SelfRC_generate_question", "definite_pronoun_resolution_1_1_0", "glue_wnli_2_0_0", "glue_mrpc_2_0_0", "cot_strategyqa_ii"],
-    "c2o5_5e": ["cos_e_v1_11_question_option_description_text", "anli_r3_0_1_0", "cos_e_v1_11_question_option_description_id", "cos_e_v1_11_question_description_option_id", "cos_e_v1_11_description_question_option_id", "adversarial_qa_dbidaf_answer_the_following_q"]
+    "c2o10_5e": [
+        "glue_sst2_2_0_0",
+        "natural_questions_open_1_0_0",
+        "duorc_SelfRC_generate_question_by_answer",
+        "lambada_1_0_0",
+        "kilt_tasks_hotpotqa_final_exam",
+        "glue_cola_2_0_0",
+        "ag_news_subset_1_0_0",
+        "cot_gsm8k_ii",
+        "kilt_tasks_hotpotqa_combining_facts",
+        "duorc_ParaphraseRC_generate_question",
+        "kilt_tasks_hotpotqa_straighforward_qa",
+        "cot_strategyqa",
+        "cot_ecqa_ii",
+        "duorc_ParaphraseRC_generate_question_by_answer",
+        "gigaword_1_2_0",
+        "kilt_tasks_hotpotqa_complex_question",
+        "glue_qnli_2_0_0",
+        "kilt_tasks_hotpotqa_formulate",
+        "para_crawl_enes",
+        "cosmos_qa_1_0_0",
+        "cot_esnli_ii",
+        "cot_qasc"
+    ],
+    "c8o10_5e": [
+        "adversarial_qa_droberta_generate_question",
+        "cot_esnli",
+        "cot_gsm8k",
+        "cot_sensemaking",
+        "dream_generate_last_utterance",
+        "gem_dart_1_1_0",
+        "gem_common_gen_1_1_0",
+        "cot_creak",
+        "duorc_ParaphraseRC_title_generation",
+        "adversarial_qa_dbidaf_generate_question",
+        "fix_punct",
+        "duorc_SelfRC_title_generation",
+        "gem_web_nlg_en_1_1_0",
+        "app_reviews_generate_review",
+        "cot_ecqa",
+        "dream_generate_first_utterance",
+        "gem_e2e_nlg_1_1_0",
+        "adversarial_qa_dbert_generate_question"
+    ],
+    "c5o10_5e": [
+        "adversarial_qa_dbidaf_question_context_answer",
+        "adversarial_qa_dbidaf_answer_the_following_q"
+    ],
+    "c1o10_5e": [
+        "app_reviews_convert_to_star_rating",
+        "app_reviews_categorize_rating_using_review",
+        "cos_e_v1_11_question_description_option_text",
+        "math_dataset_algebra__linear_1d_1_0_0",
+        "dbpedia_14_pick_one_category_for_the_following_text",
+        "dbpedia_14_given_a_choice_of_categories_",
+        "app_reviews_convert_to_rating",
+        "dbpedia_14_given_list_what_category_does_the_paragraph_belong_to",
+        "glue_qqp_2_0_0",
+        "dream_baseline",
+        "dbpedia_14_given_a_list_of_category_what_does_the_title_belong_to",
+        "qasc_qa_with_separated_facts_1",
+        "cot_creak_ii",
+        "cos_e_v1_11_description_question_option_text",
+        "qasc_qa_with_combined_facts_1",
+        "qasc_is_correct_1",
+        "cot_sensemaking_ii",
+        "qasc_is_correct_2",
+        "duorc_SelfRC_generate_question",
+        "definite_pronoun_resolution_1_1_0",
+        "glue_wnli_2_0_0",
+        "cot_strategyqa_ii"
+    ],
+    "c6o10_5e": [
+        "cos_e_v1_11_question_option_description_text",
+        "cos_e_v1_11_question_option_description_id",
+        "cos_e_v1_11_question_description_option_id",
+        "cos_e_v1_11_description_question_option_id"
+    ],
+    "c7o10_5e": [
+        "cos_e_v1_11_rationale",
+        "cos_e_v1_11_generate_explanation_given_text",
+        "cos_e_v1_11_i_think",
+        "cos_e_v1_11_explain_why_human",
+        "cos_e_v1_11_aligned_with_common_sense"
+    ],
+    "c9o10_5e": [
+        "anli_r3_0_1_0",
+        "paws_wiki_1_1_0",
+        "glue_mnli_2_0_0",
+        "glue_mrpc_2_0_0"
+    ],
+    "c3o10_5e": [
+        "duorc_ParaphraseRC_movie_director",
+        "duorc_ParaphraseRC_answer_question",
+        "duorc_ParaphraseRC_decide_worth_it",
+        "duorc_SelfRC_question_answering",
+        "duorc_ParaphraseRC_extract_answer",
+        "duorc_SelfRC_answer_question",
+        "duorc_SelfRC_decide_worth_it",
+        "duorc_ParaphraseRC_question_answering",
+        "duorc_SelfRC_extract_answer",
+        "duorc_SelfRC_movie_director"
+    ],
+    "c4o10_5e": [
+        "adversarial_qa_droberta_tell_what_it_is",
+        "adversarial_qa_droberta_based_on",
+        "adversarial_qa_dbert_answer_the_following_q",
+        "adversarial_qa_droberta_question_context_answer",
+        "adversarial_qa_droberta_answer_the_following_q",
+        "adversarial_qa_dbert_tell_what_it_is",
+        "adversarial_qa_dbert_based_on",
+        "adversarial_qa_dbidaf_based_on",
+        "adversarial_qa_dbert_question_context_answer",
+        "adversarial_qa_dbidaf_tell_what_it_is"
+    ],
+    "c0o10_5e": [
+        "anli_r2_0_1_0",
+        "anli_r1_0_1_0",
+        "glue_stsb_2_0_0"
+    ],
+    "c1o5_5e": [
+        "glue_sst2_2_0_0",
+        "natural_questions_open_1_0_0",
+        "kilt_tasks_hotpotqa_final_exam",
+        "ag_news_subset_1_0_0",
+        "adversarial_qa_droberta_tell_what_it_is",
+        "cot_gsm8k_ii",
+        "kilt_tasks_hotpotqa_combining_facts",
+        "kilt_tasks_hotpotqa_straighforward_qa",
+        "cot_strategyqa",
+        "cot_ecqa_ii",
+        "adversarial_qa_droberta_based_on",
+        "adversarial_qa_dbert_answer_the_following_q",
+        "kilt_tasks_hotpotqa_complex_question",
+        "adversarial_qa_droberta_question_context_answer",
+        "glue_qnli_2_0_0",
+        "adversarial_qa_droberta_answer_the_following_q",
+        "adversarial_qa_dbert_tell_what_it_is",
+        "kilt_tasks_hotpotqa_formulate",
+        "cosmos_qa_1_0_0",
+        "cot_esnli_ii",
+        "adversarial_qa_dbert_based_on",
+        "adversarial_qa_dbidaf_based_on",
+        "cot_qasc",
+        "adversarial_qa_dbert_question_context_answer",
+        "adversarial_qa_dbidaf_tell_what_it_is"
+    ],
+    "c4o5_5e": [
+        "adversarial_qa_droberta_generate_question",
+        "cot_esnli",
+        "cot_gsm8k",
+        "cot_sensemaking",
+        "cos_e_v1_11_rationale",
+        "duorc_SelfRC_generate_question_by_answer",
+        "lambada_1_0_0",
+        "dream_generate_last_utterance",
+        "glue_cola_2_0_0",
+        "gem_dart_1_1_0",
+        "cos_e_v1_11_generate_explanation_given_text",
+        "gem_common_gen_1_1_0",
+        "cot_creak",
+        "duorc_ParaphraseRC_title_generation",
+        "duorc_ParaphraseRC_generate_question",
+        "adversarial_qa_dbidaf_generate_question",
+        "cos_e_v1_11_i_think",
+        "fix_punct",
+        "duorc_SelfRC_title_generation",
+        "duorc_ParaphraseRC_generate_question_by_answer",
+        "gigaword_1_2_0",
+        "gem_web_nlg_en_1_1_0",
+        "cos_e_v1_11_explain_why_human",
+        "app_reviews_generate_review",
+        "cot_ecqa",
+        "cos_e_v1_11_aligned_with_common_sense",
+        "dream_generate_first_utterance",
+        "gem_e2e_nlg_1_1_0",
+        "para_crawl_enes",
+        "adversarial_qa_dbert_generate_question"
+    ],
+    "c3o5_5e": [
+        "adversarial_qa_dbidaf_question_context_answer",
+        "duorc_ParaphraseRC_movie_director",
+        "duorc_ParaphraseRC_answer_question",
+        "duorc_ParaphraseRC_decide_worth_it",
+        "duorc_SelfRC_question_answering",
+        "duorc_ParaphraseRC_extract_answer",
+        "duorc_SelfRC_answer_question",
+        "duorc_SelfRC_decide_worth_it",
+        "duorc_ParaphraseRC_question_answering",
+        "anli_r2_0_1_0",
+        "anli_r1_0_1_0",
+        "glue_stsb_2_0_0",
+        "duorc_SelfRC_extract_answer",
+        "duorc_SelfRC_movie_director"
+    ],
+    "c0o5_5e": [
+        "app_reviews_convert_to_star_rating",
+        "app_reviews_categorize_rating_using_review",
+        "paws_wiki_1_1_0",
+        "cos_e_v1_11_question_description_option_text",
+        "math_dataset_algebra__linear_1d_1_0_0",
+        "dbpedia_14_pick_one_category_for_the_following_text",
+        "dbpedia_14_given_a_choice_of_categories_",
+        "app_reviews_convert_to_rating",
+        "dbpedia_14_given_list_what_category_does_the_paragraph_belong_to",
+        "glue_qqp_2_0_0",
+        "dream_baseline",
+        "dbpedia_14_given_a_list_of_category_what_does_the_title_belong_to",
+        "qasc_qa_with_separated_facts_1",
+        "cot_creak_ii",
+        "cos_e_v1_11_description_question_option_text",
+        "qasc_qa_with_combined_facts_1",
+        "qasc_is_correct_1",
+        "cot_sensemaking_ii",
+        "glue_mnli_2_0_0",
+        "qasc_is_correct_2",
+        "duorc_SelfRC_generate_question",
+        "definite_pronoun_resolution_1_1_0",
+        "glue_wnli_2_0_0",
+        "glue_mrpc_2_0_0",
+        "cot_strategyqa_ii"
+    ],
+    "c2o5_5e": [
+        "cos_e_v1_11_question_option_description_text",
+        "anli_r3_0_1_0",
+        "cos_e_v1_11_question_option_description_id",
+        "cos_e_v1_11_question_description_option_id",
+        "cos_e_v1_11_description_question_option_id",
+        "adversarial_qa_dbidaf_answer_the_following_q"
+    ],
+    "c15o25_5e": ["glue_sst2_2_0_0", "glue_stsb_2_0_0", "glue_qnli_2_0_0", "cosmos_qa_1_0_0"
+    ],
+    "c7o25_5e": ["adversarial_qa_droberta_generate_question", "adversarial_qa_dbidaf_generate_question", "adversarial_qa_dbert_generate_question"
+    ],
+    "c11o25_5e": ["adversarial_qa_dbidaf_question_context_answer", "adversarial_qa_dbidaf_answer_the_following_q"
+    ],
+    "c16o25_5e": ["app_reviews_convert_to_star_rating", "app_reviews_categorize_rating_using_review", "math_dataset_algebra__linear_1d_1_0_0", "dbpedia_14_pick_one_category_for_the_following_text", "dbpedia_14_given_a_choice_of_categories_", "app_reviews_convert_to_rating", "dbpedia_14_given_list_what_category_does_the_paragraph_belong_to", "dbpedia_14_given_a_list_of_category_what_does_the_title_belong_to", "qasc_qa_with_combined_facts_1"
+    ],
+    "c12o25_5e": ["cos_e_v1_11_question_option_description_text", "cos_e_v1_11_question_option_description_id", "cos_e_v1_11_question_description_option_id", "cos_e_v1_11_description_question_option_id"
+    ],
+    "c21o25_5e": ["cot_esnli", "cot_sensemaking", "cot_creak", "cot_ecqa"
+    ],
+    "c22o25_5e": ["cot_gsm8k"
+    ],
+    "c8o25_5e": ["cos_e_v1_11_rationale", "cos_e_v1_11_generate_explanation_given_text", "cos_e_v1_11_i_think", "cos_e_v1_11_explain_why_human", "cos_e_v1_11_aligned_with_common_sense"
+    ],
+    "c10o25_5e": ["natural_questions_open_1_0_0", "kilt_tasks_hotpotqa_final_exam", "kilt_tasks_hotpotqa_combining_facts", "kilt_tasks_hotpotqa_straighforward_qa", "kilt_tasks_hotpotqa_complex_question", "kilt_tasks_hotpotqa_formulate"
+    ],
+    "c6o25_5e": ["anli_r3_0_1_0", "anli_r2_0_1_0", "anli_r1_0_1_0"
+    ],
+    "c13o25_5e": ["duorc_SelfRC_generate_question_by_answer", "duorc_ParaphraseRC_generate_question", "duorc_ParaphraseRC_generate_question_by_answer"
+    ],
+    "c4o25_5e": ["duorc_ParaphraseRC_movie_director", "duorc_ParaphraseRC_answer_question", "duorc_ParaphraseRC_extract_answer", "duorc_ParaphraseRC_question_answering"
+    ],
+    "c18o25_5e": ["lambada_1_0_0", "ag_news_subset_1_0_0", "gigaword_1_2_0"
+    ],
+    "c20o25_5e": ["dream_generate_last_utterance", "dream_generate_first_utterance"
+    ],
+    "c17o25_5e": ["glue_cola_2_0_0", "fix_punct", "para_crawl_enes"
+    ],
+    "c9o25_5e": ["paws_wiki_1_1_0", "glue_mnli_2_0_0", "glue_mrpc_2_0_0"
+    ],
+    "c5o25_5e": ["gem_dart_1_1_0", "gem_common_gen_1_1_0", "gem_web_nlg_en_1_1_0", "gem_e2e_nlg_1_1_0"
+    ],
+    "c1o25_5e": ["adversarial_qa_droberta_tell_what_it_is", "adversarial_qa_droberta_based_on", "adversarial_qa_dbert_answer_the_following_q", "adversarial_qa_droberta_question_context_answer", "adversarial_qa_droberta_answer_the_following_q", "adversarial_qa_dbert_tell_what_it_is", "adversarial_qa_dbert_based_on", "adversarial_qa_dbidaf_based_on", "adversarial_qa_dbert_question_context_answer", "adversarial_qa_dbidaf_tell_what_it_is"
+    ],
+    "c3o25_5e": ["cos_e_v1_11_question_description_option_text", "dream_baseline", "qasc_qa_with_separated_facts_1", "cos_e_v1_11_description_question_option_text"
+    ],
+    "c2o25_5e": ["cot_gsm8k_ii", "cot_strategyqa", "cot_ecqa_ii", "cot_esnli_ii", "cot_qasc"
+    ],
+    "c24o25_5e": ["duorc_ParaphraseRC_title_generation", "duorc_SelfRC_title_generation"
+    ],
+    "c23o25_5e": ["duorc_ParaphraseRC_decide_worth_it", "duorc_SelfRC_decide_worth_it", "duorc_SelfRC_extract_answer", "duorc_SelfRC_movie_director"
+    ],
+    "c14o25_5e": ["duorc_SelfRC_question_answering", "duorc_SelfRC_answer_question"
+    ],
+    "c0o25_5e": ["glue_qqp_2_0_0", "cot_creak_ii", "qasc_is_correct_1", "cot_sensemaking_ii", "qasc_is_correct_2", "duorc_SelfRC_generate_question", "definite_pronoun_resolution_1_1_0", "glue_wnli_2_0_0", "cot_strategyqa_ii"
+    ],
+    "c19o25_5e": ["app_reviews_generate_review"
+    ]
 }
