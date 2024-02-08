@@ -196,6 +196,7 @@ class SkilledLoRAConfig(LoRAConfig):
     phi_2_align_heads: bool = False
 
 
+@register_modifier("skilled_lora", config_cls=SkilledLoRAConfig)
 class SkilledLoRA(LoRA):
     def __init__(
         self,
