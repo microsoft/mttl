@@ -82,8 +82,11 @@ class ExpertConfig(Config):
         self.create_transfer_matrix = False
         self.tasksets_path = None
 
-    def post_init(self, silent=False):
+        # for MBC
+        self.k = 10  # number of clusters
+        self.local_libs_path = "/tmp/hf_libs/"
 
+    def post_init(self, silent=False):
         self._load_deprecated_configs(silent)
 
         if self.micro_batch_size is None:

@@ -392,7 +392,9 @@ class MBCWithCosSimTransform(LibraryTransform):
     def __init__(self, config: MBClusteringTransformConfig = None):
         super().__init__(config or MBClusteringTransformConfig())
 
-    def transform(self, library, default_args=None) -> dict[str, list[str]]:
+    def transform(
+        self, library: ExpertLibrary, default_args=None
+    ) -> dict[str, list[str]]:
         def get_svd_embedding(lib: ExpertLibrary, expert_name: str):
             try:
                 embeddings = lib.get_auxiliary_data(
@@ -413,7 +415,9 @@ class MBCWithCosSimTransform(LibraryTransform):
             del svd_embedder
             return embeddings, svd
 
-        if self.config.recompute_embeddings:
+        embeds = library.get_auxiliary_data("embeddings")
+        if len(embeds) != len(library) or self.config.recompute_embeddings:
+            logger.info("Recomputing embeddings")
             create_embeddings()
 
         # module to embedding
