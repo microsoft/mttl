@@ -35,7 +35,7 @@ def test_prefix_prompt_tuning():
     model = LlamaForCausalLM(small_config).eval()
 
     bs, max_seq_len = 10, 100
-    model.task_id_container = {}
+    model.info_container = {}
     seed_everything(0)
     batch = {
         "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
@@ -53,14 +53,14 @@ def test_prefix_prompt_tuning():
         batch["labels"][i, : sq - ll] = -100
         batch["labels"][i, sq:] = -100
 
-    model.task_id_container["routing_infos"] = RoutingInfo(task_ids=task_ids)
+    model.info_container["routing_infos"] = RoutingInfo(task_ids=task_ids)
 
     # Test Base Llama model
     output = model(**batch)
     assert round(output.loss.item(), 4) == 6.0884
 
     new_model = modify_transformer(model, adapter_config)
-    new_model.task_id_container["routing_infos"] = RoutingInfo(task_ids=task_ids)
+    new_model.info_container["routing_infos"] = RoutingInfo(task_ids=task_ids)
 
     # Test Fresh Soft Prompt Init
     labels = batch.pop("labels")
@@ -113,7 +113,7 @@ def test_suffix_prompt_tuning():
     model = LlamaForCausalLM(small_config)
 
     bs, max_seq_len = 10, 100
-    model.task_id_container = {}
+    model.info_container = {}
     seed_everything(0)
     batch = {
         "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
@@ -131,7 +131,7 @@ def test_suffix_prompt_tuning():
         batch["labels"][i, : sq - ll] = -100
         batch["labels"][i, sq:] = -100
 
-    model.task_id_container["routing_infos"] = RoutingInfo(
+    model.info_container["routing_infos"] = RoutingInfo(
         task_ids=task_ids, labels=batch["labels"]
     )
 
@@ -140,7 +140,7 @@ def test_suffix_prompt_tuning():
     assert round(output.loss.item(), 4) == 6.0884
 
     new_model = modify_transformer(model, adapter_config)
-    new_model.task_id_container["routing_infos"] = RoutingInfo(
+    new_model.info_container["routing_infos"] = RoutingInfo(
         task_ids=task_ids, labels=batch["labels"]
     )
 

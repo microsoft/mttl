@@ -17,12 +17,13 @@ from mttl.evaluators.base import compute_task_aggregation
 
 from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.utils import logger, setup_logging
-from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
 from mttl.evaluators import MMLUEvaluator
 from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from projects.wiki_experts.src.evolution.config import EvolExpertConfig as ExpertConfig
 import wandb
+
+from mttl.models.modifiers.expert_containers.expert import ModuleGraph
 
 
 def mmlu_get_loss(

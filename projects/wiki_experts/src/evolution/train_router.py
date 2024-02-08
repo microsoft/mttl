@@ -10,7 +10,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
-from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
+from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 from projects.wiki_experts.src.config import ExpertConfig
 from config import EvolExpertConfig
 from typing import List
@@ -127,7 +127,7 @@ def train_module(
 
 if __name__ == "__main__":
     from tempfile import TemporaryDirectory
-    from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
+    from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
     from mttl.datamodule.base import AutoDataModule
 
     def create_dummy_expert(config: ExpertConfig, exp_name) -> Expert:

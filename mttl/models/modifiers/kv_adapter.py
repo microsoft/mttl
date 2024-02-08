@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import types
 import math
 import torch
 import torch.nn as nn
@@ -8,14 +9,12 @@ from functools import partial
 from typing import Optional, Tuple
 from mttl.utils import logger
 from einops import rearrange, repeat
-from mttl.models.modifiers.base import Adapter, ModifierConfig, ModifyMixin
-from mttl.models.modifiers.base import ModifyMixin, ModifierConfig
-from mttl.models.modifiers.routing import RoutingMixin, modify_with_routing
-from mttl.models.modifiers.poly import SkillWrapper, PolytroponConfig
-import types
-
-# from mttl.models.modifiers.experts import Router
-
+from mttl.models.modifiers.base import (
+    Adapter,
+    ModifierConfig,
+    ModifyMixin,
+    ModifierConfig,
+)
 from transformers.models.llama.modeling_llama import apply_rotary_pos_emb
 
 
@@ -27,12 +26,6 @@ class KVAdapterConfig(ModifierConfig):
     n_tasks: int = None
     # This argument is deprecated, to ensure compatibility with `add_expert_to_transformer`
     patch_last_k_layers: int = -1
-
-
-@dataclass
-class PolyKVAdapterConfig(KVAdapterConfig, PolytroponConfig):
-    n_skills: int = 1
-    n_splits: int = 1
 
 
 @register_modifier("kv_adapter", config_cls=KVAdapterConfig)
@@ -174,81 +167,6 @@ class KVAdapter(Adapter, ModifyMixin):
     def aggregate(self, adapter_weights, adapter_v):
         """(3) Aggregate the weighted values according to the adapter weights"""
         return torch.matmul(adapter_weights, adapter_v)
-
-
-@register_modifier("poly_kv_adapter", config_cls=PolyKVAdapterConfig)
-class PolyKVAdapter(KVAdapter, RoutingMixin):
-    def __init__(self, config, task_id_ptr, layer, selector):
-        # Call the Module constructor to set `selector` attribute
-        self.n_skills = config.n_skills
-        self.n_splits = config.n_splits
-        self._selector_ptr = lambda: selector
-        KVAdapter.__init__(self, config, layer)
-        RoutingMixin.__init__(self, task_id_ptr)
-
-    def create_for_layer(self, attn_layer):
-        if self.soft_prompt_learn_kv:
-            out_dim = attn_layer.hidden_size * 2
-        else:
-            out_dim = attn_layer.hidden_size
-
-        self.split_dim = out_dim // self.n_splits
-        self.adapter_query = nn.Embedding(
-            self.soft_prompt_length, self.n_skills * out_dim, device=self.device
-        )
-        # create the gate, and embeddings here
-        self.adapter_gate = torch.nn.Parameter(
-            torch.zeros(1, attn_layer.num_heads, 1, 1, device=self.device),
-        )
-
-        # set as attribute after `super nn.Module` has been called
-        self.selector = self._selector_ptr()
-        assert self.selector is not None
-
-    def load_adapter_weights(self, state_dict):
-        # load the weights from state_dict
-        self.adapter_query.weight.data.copy_(state_dict["adapter_query.weight"])
-        self.adapter_gate.data.copy_(state_dict["adapter_gate"])
-        self.selector.load_state_dict(state_dict["selector"])
-
-    def get_kv_weights(self, k_proj, v_proj):
-        """(1) Computes the key and value pairs to be used for augmented attention"""
-
-        embedding_weights = self.adapter_query.weight.view(
-            self.soft_prompt_length, self.n_skills, self.n_splits, self.split_dim
-        )
-        # first, we route according to the selector # (bs, S, K)
-        mixing_weights = self.selector(self.routing_infos).to(
-            dtype=embedding_weights.dtype
-        )
-
-        mixed_weights = torch.einsum(
-            "lksd,bsk->blsd", embedding_weights, mixing_weights
-        )
-        mixed_weights = mixed_weights.flatten(-2)
-
-        if self.learn_kv:
-            adapter_k, adapter_v = mixed_weights.chunk(2, dim=-1)
-        else:
-            adapter_k = type_safe_linear(mixed_weights, k_proj)
-            adapter_v = type_safe_linear(mixed_weights, v_proj)
-
-        out_shp = (
-            -1,
-            self.soft_prompt_length,
-            self.attn_layer.num_heads,
-            self.attn_layer.head_dim,
-        )
-        adapter_k = adapter_k.view(*out_shp).transpose(1, 2)
-        adapter_v = adapter_v.view(*out_shp).transpose(1, 2)
-        return adapter_k, adapter_v
-
-    @classmethod
-    def modify_transformer(cls, transformer, config, optional_wrapper=None):
-        if config.router_selector is None:
-            config.router_selector = "poly"
-
-        return modify_with_routing(cls, transformer, config, SkillWrapper)
 
 
 """ """ """ """

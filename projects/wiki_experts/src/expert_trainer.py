@@ -8,12 +8,11 @@ from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.routing import RoutingInfo
 from transformers import AutoModelForCausalLM
 
-from mttl.models.modifiers.expert_containers.module_graph import ExpertInfo
+from mttl.models.modifiers.expert_containers.expert import ExpertInfo
 from mttl.models.utils import (
     EfficientCheckpointModule,
     prepare_model_for_kbit_training,
 )
-from mttl.models.modifiers.expert_containers.module_graph import Expert
 from projects.wiki_experts.src.config import ExpertConfig
 from mttl.models.modifiers.expert_containers.selectors import SelectorConfig
 
@@ -69,7 +68,7 @@ class ExpertTrainer(EfficientCheckpointModule):
         self._log_pref = kwargs.get("logging_prefix", "")
 
     def set_routing_infos(self, batch, generate=False):
-        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
+        self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
 
     def forward_unlikelihood(self, batch, reduction="mean"):
         # compute lm losses for all the options

@@ -25,7 +25,7 @@ from projects.wiki_experts.src.expert_model import (
     MultiExpertModel,
     RoutedMultiExpertModel,
 )
-from mttl.models.modifiers.expert_containers.module_graph import (
+from mttl.models.modifiers.expert_containers.expert import (
     load_expert,
     Expert,
     ExpertInfo,

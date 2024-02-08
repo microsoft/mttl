@@ -34,7 +34,9 @@ class Config:
                 )
 
         if kwargs:
-            overwrite_logs += self.update_kwargs(kwargs, raise_error=raise_error, silent=silent)
+            overwrite_logs += self.update_kwargs(
+                kwargs, raise_error=raise_error, silent=silent
+            )
 
         # setup logging to the output dir
         try:
@@ -294,6 +296,7 @@ class Config:
         # n-skills for router-based methods
         self.n_skills = 8
         self.n_tasks = None
+        self.task_names = None
 
         # which modules to modify and which layers for adapters
         self.modify_modules = None

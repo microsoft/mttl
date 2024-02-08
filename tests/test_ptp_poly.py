@@ -43,7 +43,7 @@ def test_ptp_poly():
         max_position_embeddings=512,
     )
     model = LlamaForCausalLM(small_config).eval()
-    model.task_id_container = {}
+    model.info_container = {}
 
     # non perturbed input
     output = model(**batch)
@@ -59,7 +59,7 @@ def test_ptp_poly():
     )
 
     modify_transformer(model, adapter_config)
-    model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
+    model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
     model.eval()
 
     # loss at init. same, as (i) B is init to 0 and (ii) skipping unseen tokens

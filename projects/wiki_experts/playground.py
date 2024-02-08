@@ -91,7 +91,6 @@ def main():
     from projects.wiki_experts.src.expert_model import MultiExpertModel
     from mttl.datamodule.utils import get_tokenizer_with_args
     from mttl.utils import setup_logging
-    from mttl.models.modifiers.expert_containers import module_graph
     import torch
 
     setup_autocomplete()

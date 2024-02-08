@@ -277,7 +277,7 @@ def modify_with_routing(cls, transformer, config, optional_wrapper=None):
 
                     wrapper = cls(
                         config,
-                        transformer.task_id_container,
+                        transformer.info_container,
                         layer,
                         selector=selector,
                     )

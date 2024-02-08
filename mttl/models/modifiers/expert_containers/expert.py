@@ -133,6 +133,79 @@ class Expert:
         self.expert_info.expert_name = name
 
 
+def load_expert(
+    expert_path: str,
+    expert_library: Union[Dict, "ExpertLibrary"] = None,
+    expert_name: str = None,
+    **kwargs,
+):
+    """Transforms a potentially lightning checkpoint into an Expert object."""
+    # load the expert weights
+    import os
+
+    if expert_library is not None and expert_path in expert_library:
+        return expert_library[expert_path]
+
+    if os.path.isfile(expert_path) or os.path.isdir(expert_path):
+        expert_checkpoint = get_checkpoint_path(expert_path)
+    else:
+        expert_checkpoint = download_from_hub(expert_path)
+
+    logger.info(f"Loading expert from {expert_checkpoint}...")
+    expert_checkpoint = torch.load(expert_checkpoint, map_location="cpu")
+
+    if "hyper_parameters" in expert_checkpoint:
+        # this is a PL checkpoint
+        if "tokenizer" in expert_checkpoint["hyper_parameters"]:
+            del expert_checkpoint["hyper_parameters"]["tokenizer"]
+
+        expert_info_data = expert_checkpoint.get("expert_info", {})
+
+        # fix bug in checkpoints
+        if "tokenizer" in expert_checkpoint["hyper_parameters"]:
+            expert_checkpoint["hyper_parameters"].pop("tokenizer")
+
+        if not expert_info_data.get("expert_config", None):
+            expert_info_data["expert_config"] = expert_checkpoint["hyper_parameters"]
+        else:
+            if "tokenizer" in expert_info_data["expert_config"]:
+                expert_info_data["expert_config"].pop("tokenizer")
+
+        if not expert_info_data.get("expert_name", None):
+            expert_info_data["expert_name"] = expert_checkpoint["hyper_parameters"][
+                "expert_name"
+            ]
+        if not expert_info_data.get("expert_task_name", None):
+            expert_info_data["expert_task_name"] = expert_checkpoint[
+                "hyper_parameters"
+            ]["finetune_task_name"]
+
+        # back-compatibility, we removed this
+        expert_info_data.pop("expert_embeddings", None)
+        expert_info_data.pop("expert_scores", None)
+
+        expert_weights = expert_checkpoint["state_dict"]
+        expert_weights = {
+            k.replace("model.", "", 1): v for k, v in expert_weights.items()
+        }
+        expert = Expert.fromdict(
+            {
+                "expert_info": expert_info_data,
+                "expert_weights": expert_weights,
+            }
+        )
+    else:
+        expert = Expert.fromdict(expert_checkpoint)
+
+    # override expert name
+    if expert_name is not None:
+        expert.name = expert_name
+    return expert
+
+
+### Adding module_graph code back. Let's remove it completely in a separate PR
+
+
 class Node:
     def __init__(self, name):
         self.name = name
@@ -431,111 +504,3 @@ class ModuleGraph:
         for root in self.roots:
             variables += root.collect_variables()
         return variables
-
-
-def load_expert(
-    expert_path: str,
-    expert_library: Union[Dict, "ExpertLibrary"] = None,
-    expert_name: str = None,
-    **kwargs,
-):
-    """Transforms a potentially lightning checkpoint into an Expert object."""
-    # load the expert weights
-    import os
-
-    if expert_library is not None and expert_path in expert_library:
-        return expert_library[expert_path]
-
-    if os.path.isfile(expert_path) or os.path.isdir(expert_path):
-        expert_checkpoint = get_checkpoint_path(expert_path)
-    else:
-        expert_checkpoint = download_from_hub(expert_path)
-
-    logger.info(f"Loading expert from {expert_checkpoint}...")
-    expert_checkpoint = torch.load(expert_checkpoint, map_location="cpu")
-
-    if "hyper_parameters" in expert_checkpoint:
-        # this is a PL checkpoint
-        if "tokenizer" in expert_checkpoint["hyper_parameters"]:
-            del expert_checkpoint["hyper_parameters"]["tokenizer"]
-
-        expert_info_data = expert_checkpoint.get("expert_info", {})
-
-        # fix bug in checkpoints
-        if "tokenizer" in expert_checkpoint["hyper_parameters"]:
-            expert_checkpoint["hyper_parameters"].pop("tokenizer")
-
-        if not expert_info_data.get("expert_config", None):
-            expert_info_data["expert_config"] = expert_checkpoint["hyper_parameters"]
-        else:
-            if "tokenizer" in expert_info_data["expert_config"]:
-                expert_info_data["expert_config"].pop("tokenizer")
-
-        if not expert_info_data.get("expert_name", None):
-            expert_info_data["expert_name"] = expert_checkpoint["hyper_parameters"][
-                "expert_name"
-            ]
-        if not expert_info_data.get("expert_task_name", None):
-            expert_info_data["expert_task_name"] = expert_checkpoint[
-                "hyper_parameters"
-            ]["finetune_task_name"]
-
-        # back-compatibility, we removed this
-        expert_info_data.pop("expert_embeddings", None)
-        expert_info_data.pop("expert_scores", None)
-
-        expert_weights = expert_checkpoint["state_dict"]
-        expert_weights = {
-            k.replace("model.", "", 1): v for k, v in expert_weights.items()
-        }
-        expert = Expert.fromdict(
-            {
-                "expert_info": expert_info_data,
-                "expert_weights": expert_weights,
-            }
-        )
-    else:
-        expert = Expert.fromdict(expert_checkpoint)
-
-    # override expert name
-    if expert_name is not None:
-        expert.name = expert_name
-    return expert
-
-
-if __name__ == "__main__":
-    # Example usage:
-    s = """
-    security_studies -> B;
-    B -> linear(sordonia/llama2-13b-platypus:0.5, sordonia/expert_llama2_13b_security_studies:3);
-    C -> linear(B:0.5);
-    default -> C
-    """
-    s = """
-    Variables:
-    - if a weight starts with $ it is considered as a variale
-    - variables will be stored in lInearNodes under the name of the linear connection (e.g. "linear(a:5,b:$weight)" ) + the index of the varable in the connections, e.g. "linear(a:5,b:$weight)[1]" since $weight is the second variable in the connection
-    - a graph with variables cannot be instantiated without passing the values for the variables to the instantiate method
-
-    security_studies -> linear(sordonia/expert_llama2_13b_security_studies:5,sordonia/llama2-13b-platypus:$weight);
-    security_studies2 -> linear(sordonia/expert_llama2_13b_security_studies:1);
-    security_studies3 -> linear(sordonia/expert_llama2_13b_security_studies:$weight_blabla);
-    """
-
-    graph = ModuleGraph.from_string(s)
-    print(graph)
-    print(graph.roots)
-    print(graph.leaves)
-    print(graph.dumps())
-    vars = graph.get_variables()
-    print(vars)
-    print(
-        graph.dumps(
-            **{
-                "linear(sordonia/expert_llama2_13b_security_studies:5,sordonia/llama2-13b-platypus:$0)[1]": 0,
-                "linear(sordonia/expert_llama2_13b_security_studies:$0)[0]": 1,
-            }
-        )
-    )
-    print(graph.dumps(**{v: i for i, v in enumerate(vars)}))
-    print(graph.create_modules(**{v: 1 for v in vars}).keys())

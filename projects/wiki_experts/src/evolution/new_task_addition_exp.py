@@ -12,7 +12,7 @@ from tempfile import TemporaryDirectory
 from pytorch_lightning import seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
+from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 
 from projects.wiki_experts.src.evolution.sequential_evolution import *
 from projects.wiki_experts.src.evolution.utils import (
@@ -29,7 +29,7 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     get_expert_library,
 )
 
-from mttl.models.modifiers.expert_containers.module_graph import Expert
+from mttl.models.modifiers.expert_containers.expert import Expert
 
 from projects.wiki_experts.src.evolution.config import (
     EvolExpertConfig,

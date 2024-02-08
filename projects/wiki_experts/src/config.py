@@ -37,7 +37,6 @@ class ExpertConfig(Config):
         self.routing = "subject"
         self.mmlu_test_split = "test"
         self.load_module = None
-        self.module_graph = None
         self.micro_batch_size = None
         self.validation_portion = 0.03
 
@@ -82,8 +81,9 @@ class ExpertConfig(Config):
         self.es_metric = "loss"
         self.n_ng_iterations = 30  # number of iterations for LoraHub
 
-    def post_init(self, silent=False):
+        self.phi_2_align_heads = False
 
+    def post_init(self, silent=False):
         self._load_deprecated_configs(silent)
 
         if self.micro_batch_size is None:

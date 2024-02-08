@@ -14,17 +14,17 @@ from mttl.utils import logger
 from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
 from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
 from mttl.models.modifiers.expert_containers.selectors import *
-from mttl.models.modifiers.expert_containers.module_graph import Expert
+from mttl.models.modifiers.expert_containers.expert import Expert
 
 
 class ExpertContainer:
     __supports_configs__ = []
 
-    def __init__(self, config, task_id_container, layer, selector=None):
+    def __init__(self, config, info_container, layer, selector=None):
         self.config = config
         self.layer = layer
-        self.task_id_container = task_id_container
-        self.selector = selector or TaskNameSelector(task_id_container)
+        self.info_container = info_container
+        self.selector = selector or TaskNameSelector(info_container)
 
         self.experts: dict = None
         self.expert_infos = {}
@@ -109,9 +109,9 @@ class ExpertContainer:
 class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
     __supports_configs__ = [LoRAConfig]
 
-    def __init__(self, config, task_id_container, layer, selector=None):
+    def __init__(self, config, info_container, layer, selector=None):
         MergeableAdapter.__init__(self)
-        super().__init__(config, task_id_container, layer, selector)
+        super().__init__(config, info_container, layer, selector)
 
         if not isinstance(self.layer, nn.Linear):
             raise ValueError(
@@ -291,11 +291,11 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
     in memory in a single parameter.
     """
 
-    __supports_configs__ = [LoRAConfig]
+    __supports_configs__ = [SkilledLoRAConfig, LoRAConfig]
 
-    def __init__(self, config, task_id_container, layer, selector=None):
+    def __init__(self, config, info_container, layer, selector=None):
         MergeableAdapter.__init__(self)
-        super().__init__(config, task_id_container, layer, selector)
+        super().__init__(config, info_container, layer, selector)
 
         if not isinstance(self.layer, nn.Linear):
             raise ValueError(
@@ -312,7 +312,9 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             lora_dropout=config.lora_dropout,
             lora_init_b_random=config.lora_init_b_random,
             lora_rank=config.lora_rank,
+            n_splits=config.n_splits,
             n_skills=0,
+            phi_2_align_heads=config.phi_2_align_heads,
         )
         self.experts = SkilledLoRA(dummy_config, layer)
 
@@ -416,12 +418,12 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
 
     __supports_configs__ = [KVAdapterConfig]
 
-    def __init__(self, config, task_id_container, layer, selector=None):
+    def __init__(self, config, info_container, layer, selector=None):
         super().__init__(
             config,
-            task_id_container,
+            info_container,
             layer,
-            selector or KVTaskNameSelector(task_id_container),
+            selector or KVTaskNameSelector(info_container),
         )
 
         # Check if layer is an attention layer :
