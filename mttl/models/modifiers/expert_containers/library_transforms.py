@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Any
-from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
 from mttl.models.modifiers.expert_containers.module_graph import Expert
 from mttl.utils import logger
 from mttl.models.modifiers.modify_model import get_modifier_type
@@ -47,7 +47,7 @@ class SVDEmbeddingTransform(LibraryTransform):
 
     def transform(self, library, upload_to_hf=True, force=False):
         if type(library) == str:
-            library = HFExpertLibrary(library)
+            library = get_expert_library(library)
 
         # try to fetch auxiliary data
         output = library.get_auxiliary_data(data_type=self.config.name)
@@ -133,7 +133,7 @@ class WeightedLinearMerge(LibraryTransform):
     @torch.no_grad()
     def transform(self, library) -> Expert:
         if type(library) == str:
-            library = HFExpertLibrary(library)
+            library = get_expert_library(library)
 
         expert_names = list(library.keys())
         experts = [library[name] for name in expert_names]
@@ -199,7 +199,7 @@ class TiesMerge(LibraryTransform):
     @torch.no_grad()
     def transform(self, library) -> Expert:
         if type(library) == str:
-            library = HFExpertLibrary(library)
+            library = get_expert_library(library)
 
         expert_names = list(library.keys())
         experts = [library[name] for name in expert_names]
@@ -354,7 +354,7 @@ class HiddenStateComputer(LibraryTransform):
         from projects.wiki_experts.src.expert_model import MultiExpertModel
 
         if type(library) == str:
-            library = HFExpertLibrary(library)
+            library = get_expert_library(library)
 
         args_in_name = [
             "name",

@@ -2,6 +2,8 @@ from transformers import AutoModelForCausalLM
 import os
 import torch
 
+from mttl.utils import remote_login
+
 
 def eval_mmlu(
     config,
@@ -23,10 +25,8 @@ if __name__ == "__main__":
 
     sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
     from config import RoutingConfig
-    from huggingface_hub import login
 
-    if "HF_TOKEN" in os.environ:
-        login(token=os.environ["HF_TOKEN"])
+    remote_login()
 
     config = RoutingConfig.parse(extra_kwargs={"eval_superni": False})
 

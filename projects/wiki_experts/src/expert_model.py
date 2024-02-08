@@ -14,7 +14,7 @@ from mttl.models.modifiers.expert_containers.expert_containers import (
 )
 from mttl.models.modifiers.expert_containers.expert_library import (
     ExpertLibrary,
-    HFExpertLibrary,
+    get_expert_library,
 )
 import copy
 
@@ -382,7 +382,8 @@ class MoETrainer(MultiExpertModel):
         super().__init__(**kwargs)
 
         # 8 experts
-        if not self.hparams.hf_lib_id:
+        # TODO: Is this pushed to hub? Is it backward compatible? hf_lib_id -> library_id
+        if not self.hparams.library_id:
             for i in range(self.hparams.moe_num_experts):
                 self.add_empty_expert(
                     f"e{i}",
@@ -397,20 +398,14 @@ class MoETrainer(MultiExpertModel):
                 )
             self.moe_num_experts = kwargs["moe_num_experts"]
         else:
-            library = kwargs.get(
-                "expert_library", HFExpertLibrary(self.hparams.hf_lib_id)
-            )
+            library = get_expert_library(self.hparams.library_id)
+            for i, expert in enumerate(sorted(list(library.keys()))):
+                self.add_expert_instance(library[expert], expert_name=f"e{i}")
+            self.moe_num_experts = i + 1
             if self.training_config.router_selector == "clown_router":
-                # add clown router support directly from library
-                for i, expert in enumerate(sorted(list(library.keys()))):
-                    self.add_expert_instance(library[expert])
                 from projects.wiki_experts.eval_library import patch_prototypes
 
                 patch_prototypes(self, library, self.training_config)
-            else:
-                for i, expert in enumerate(sorted(list(library.keys()))):
-                    self.add_expert_instance(library[expert], expert_name=f"e{i}")
-            self.moe_num_experts = i + 1
 
     def training_step(self, batch, _):
         loss = self.forward(batch)
