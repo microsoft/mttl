@@ -70,9 +70,7 @@ def test_classifier_routing():
 def test_expert_model_generate():
 
     config = ExpertConfig()
-    # config.num_labels = 246
     config.model = "EleutherAI/gpt-neo-125m"
-    # config.module_graph = "adversarial_qa_dbert_answer_the_following_q -> linear(zhan1993/gpt-neo_adversarial_qa_dbert_answer_the_following_q:0);"
     finetune_task_name = "adversarial_qa_dbert_answer_the_following_q"
     data_module = FlanModule(
         FlanConfig(
@@ -88,7 +86,6 @@ def test_expert_model_generate():
     module = MultiExpertModel(
         **vars(config), device_map="cpu", tokenizer=data_module.tokenizer
     )
-    # module.load_from_graph_string(config.module_graph)
     module.load_expert(
         expert_path="zhan1993/gpt-neo_adversarial_qa_dbert_answer_the_following_q",
         expert_name="adversarial_qa_dbert_answer_the_following_q",
