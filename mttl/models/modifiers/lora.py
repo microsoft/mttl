@@ -196,18 +196,6 @@ class SkilledLoRAConfig(LoRAConfig):
     phi_2_align_heads: bool = False
 
 
-class ScaleGradient(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, input, scalar):
-        ctx.scalar = scalar
-        return input
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return grad_output * ctx.scalar, None
-
-
-@register_modifier("skilled_lora", config_cls=SkilledLoRAConfig)
 class SkilledLoRA(LoRA):
     def __init__(
         self,
@@ -345,8 +333,6 @@ class SkilledLoRA(LoRA):
         *   : [[a, d, f]]     [[0.1, 0.2, 0.7],
                                [0.3, 0.4, 0.3]]
         """
-        scale_gradient = os.environ.get("LORA_SCALE_GRADIENT", False)
-
         if merge_after:
             raise NotImplementedError("`merge_after` is not implemented for now.")
 
@@ -408,10 +394,6 @@ class SkilledLoRA(LoRA):
                 # combine n_splits, and d_split into a single dimension
                 A, B = A.flatten(0, 1), B.flatten(1, 2)
 
-                if scale_gradient:
-                    A = ScaleGradient.apply(A, 1 / torch.max(weights))
-                    B = ScaleGradient.apply(B, 1 / torch.max(weights))
-
                 # scaling is a float (only 1 skilled lora)
                 adapter_out = torch.matmul(torch.matmul(input_lora, A), B) * scaling
             elif weights.ndim == 2:
@@ -423,14 +405,6 @@ class SkilledLoRA(LoRA):
 
                 # combine n_splits, and d_split into a single dimension
                 A, B = A.flatten(1, 2), B.flatten(2, 3)
-
-                if scale_gradient:
-                    A = ScaleGradient.apply(
-                        A, 1 / torch.max(weights, dim=1)[0][:, None, None]
-                    )
-                    B = ScaleGradient.apply(
-                        B, 1 / torch.max(weights, dim=1)[0][:, None, None]
-                    )
 
                 if input_lora.ndim == 2:
                     partial_out = torch.einsum("bd,bdr->br", (input_lora, A))
@@ -459,14 +433,6 @@ class SkilledLoRA(LoRA):
                 # combine n_splits, and d_split into a single dimension
                 A, B = A.flatten(1, 2), B.flatten(2, 3)
 
-                if scale_gradient:
-                    A = ScaleGradient.apply(
-                        A, 1 / torch.max(weights, dim=1)[0][:, None, None]
-                    )
-                    B = ScaleGradient.apply(
-                        B, 1 / torch.max(weights, dim=1)[0][:, None, None]
-                    )
-
                 if input_lora.ndim == 2:
                     partial_out = torch.einsum("bd,bdr->br", (input_lora, A))
                     adapter_out = torch.einsum("br,brd->bd", (partial_out, B))
@@ -490,14 +456,6 @@ class SkilledLoRA(LoRA):
 
             A = torch.einsum("bs,bsdr->bdr", (weights, skilled_loras_a))
             B = torch.einsum("bs,bsrd->brd", (weights, skilled_loras_b))
-
-            if scale_gradient:
-                A = ScaleGradient.apply(
-                    A, 1 / torch.max(weights, dim=1)[0][:, None, None, None]
-                )
-                B = ScaleGradient.apply(
-                    B, 1 / torch.max(weights, dim=1)[0][:, None, None, None]
-                )
 
             # (n_examples, out_features)
             if input_lora.ndim == 2:
