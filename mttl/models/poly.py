@@ -23,14 +23,12 @@ class SkilledModel:
 
         for method in methods:
             print("Registering method: ", method)
-            setattr(object, method, MethodType(
-                getattr(SkilledModel, method), object))
+            setattr(object, method, MethodType(getattr(SkilledModel, method), object))
         return object
 
     @staticmethod
     def switch_selector_to_average(object):
-        """Switches PolytroponSelector to AverageSelector.
-        """
+        """Switches PolytroponSelector to AverageSelector."""
         for name, module in object.named_modules():
             for name, inner_mod in module.named_children():
                 if isinstance(inner_mod, PolytroponSelector):
@@ -43,8 +41,7 @@ class SkilledModel:
                     setattr(
                         module,
                         name,
-                        AverageSelector(inner_mod.n_skills,
-                                        inner_mod.n_splits),
+                        AverageSelector(inner_mod.n_skills, inner_mod.n_splits),
                     )
 
     @staticmethod
@@ -69,11 +66,9 @@ class SkilledModel:
 
     @staticmethod
     def resize_module_logits(object, n_tasks):
-        """Resizes the vector routing, in case of fine-tuning.
-        """
+        """Resizes the vector routing, in case of fine-tuning."""
         for name, selector in object.get_selectors().items():
-            print("Resizing module_logits of selector",
-                  name, "with", n_tasks, "tasks.")
+            print("Resizing module_logits of selector", name, "with", n_tasks, "tasks.")
             selector.resize_module_logits(n_tasks)
 
 
@@ -137,9 +132,10 @@ class MoESelector(Selector):
         probs = F.softmax(module_logits, dim=-1)
 
         top_probs, top_indices = probs.topk(
-            self.topk, dim=-1)  # 2 active skills per task
-        top_k_probs = top_probs[:, :self.topk]
-        top_k_indices = top_indices[:, :self.topk]
+            self.topk, dim=-1
+        )  # 2 active skills per task
+        top_k_probs = top_probs[:, : self.topk]
+        top_k_indices = top_indices[:, : self.topk]
         top_k_probs = top_k_probs / top_k_probs.sum(dim=1, keepdim=True)
 
         zeros = torch.zeros_like(probs, requires_grad=True)
@@ -190,8 +186,9 @@ class PolytroponSelector(Selector):
                 module_logits = torch.sigmoid(module_logits)
                 module_logits_disc = torch.round(module_logits)
                 # straight through estimator
-                module_logits = module_logits + \
-                    (module_logits_disc - module_logits).detach()
+                module_logits = (
+                    module_logits + (module_logits_disc - module_logits).detach()
+                )
             else:
                 module_logits = torch.sigmoid(module_logits)
 
@@ -200,14 +197,15 @@ class PolytroponSelector(Selector):
 
             if self.poly_use_shared_skill:
                 # last skill is always active whatever the task that has been selected
-                module_logits = torch.cat((
-                    module_logits[:, :, :-1], module_logits[:,
-                                                            :, -1:] * 0.0 + 1.0
-                ), dim=-1)
+                module_logits = torch.cat(
+                    (module_logits[:, :, :-1], module_logits[:, :, -1:] * 0.0 + 1.0),
+                    dim=-1,
+                )
 
             if self.poly_average_correction:
-                module_weights = module_logits * \
-                    (np.sqrt(self.n_splits) / np.sqrt(self.n_skills))
+                module_weights = module_logits * (
+                    np.sqrt(self.n_splits) / np.sqrt(self.n_skills)
+                )
             else:
                 module_weights = module_logits / (
                     module_logits.sum(dim=-1, keepdim=True) + EPS
@@ -222,14 +220,12 @@ class AverageSelector(Selector):
         self.n_splits = n_splits
         self.n_skills = n_skills
         self.register_buffer(
-            "module_logits", torch.empty(
-                n_splits, n_skills).fill_(1.0 / n_skills)
+            "module_logits", torch.empty(n_splits, n_skills).fill_(1.0 / n_skills)
         )
 
     def forward(self, routing_infos):
         bs = routing_infos.task_ids.size(0)
-        module_logits = self.module_logits.view(
-            1, self.n_splits, self.n_skills)
+        module_logits = self.module_logits.view(1, self.n_splits, self.n_skills)
         return module_logits.expand(bs, -1, -1)
 
 
@@ -253,28 +249,23 @@ class ClusterSelector(Selector):
         self.temperature = config.poly_selector_cluster_temp
 
         # just to get the device and the working dtype
-        self.dummy_parameter = nn.Parameter(
-            torch.zeros(1), requires_grad=False)
+        self.dummy_parameter = nn.Parameter(torch.zeros(1), requires_grad=False)
 
     def forward(self, routing_infos):
         # this should return a bs x n_clusters tensor that sums to 1
         if self.soft:
-            distances = self.cluster_result.get_distances_batch(
-                routing_infos.hashes)
+            distances = self.cluster_result.get_distances_batch(routing_infos.hashes)
             distances = torch.tensor(
                 distances,
                 device=self.dummy_parameter.device,
             )
-            routing = F.softmax(-distances / self.temperature,
-                                dim=-1).unsqueeze(1)
+            routing = F.softmax(-distances / self.temperature, dim=-1).unsqueeze(1)
         else:
             cluster_ids = torch.tensor(
-                [self.cluster_result.get_cluster(h)
-                 for h in routing_infos.hashes],
+                [self.cluster_result.get_cluster(h) for h in routing_infos.hashes],
                 device=self.dummy_parameter.device,
             )
-            routing = F.one_hot(
-                cluster_ids, num_classes=self.n_skills).unsqueeze(1)
+            routing = F.one_hot(cluster_ids, num_classes=self.n_skills).unsqueeze(1)
         return routing.to(dtype=self.dummy_parameter.dtype)
 
 
@@ -295,7 +286,7 @@ class PolyLoRATensor(PolytroponAdapter):
         self.task_id_ptr = task_id_ptr
         self.training_steps = 0.0
 
-        self.order = config.order
+        self.order = self.split
         self.tensor_rank = self.n_skills
         if selector is None:
             self.selector = get_selector(config)
@@ -320,12 +311,8 @@ class PolyLoRATensor(PolytroponAdapter):
         #     )
         # )
 
-        self.embedding_dim_leaf_a = math.ceil(
-            (self.in_features) ** (1 / self.order)
-        )
-        self.embedding_dim_leaf_b = math.ceil(
-            (self.out_features) ** (1 / self.order)
-        )
+        self.embedding_dim_leaf_a = math.ceil((self.in_features) ** (1 / self.order))
+        self.embedding_dim_leaf_b = math.ceil((self.out_features) ** (1 / self.order))
 
         self.weight_leafs_a = nn.Parameter(
             self.weight.new_empty(
@@ -346,11 +333,13 @@ class PolyLoRATensor(PolytroponAdapter):
         )
         # What if I just use one layer normalization
         self.layerone_normalization_a = nn.LayerNorm(
-            normalized_shape=[self.rank, self.embedding_dim_leaf_a**2])
+            normalized_shape=[self.rank, self.embedding_dim_leaf_a**2]
+        )
         # self.layertwo_normalization_a = nn.LayerNorm(
         #     normalized_shape=[self.rank, self.embedding_dim_leaf_a**2])
         self.layerone_normalization_b = nn.LayerNorm(
-            normalized_shape=[self.rank, self.embedding_dim_leaf_b**2])
+            normalized_shape=[self.rank, self.embedding_dim_leaf_b**2]
+        )
         # self.layertwo_normalization_b = nn.LayerNorm(
         #     normalized_shape=[self.rank, self.embedding_dim_leaf_b**2])
         self.reset_parameters()
@@ -366,13 +355,11 @@ class PolyLoRATensor(PolytroponAdapter):
         if self.kaiming_init:
             for skill in range(self.n_skills):
                 for split in range(self.n_splits):
-                    param = torch.empty(
-                        (self.rank, self.in_features // self.n_splits))
+                    param = torch.empty((self.rank, self.in_features // self.n_splits))
                     torch.nn.init.kaiming_uniform_(param, a=math.sqrt(5))
                     self.lora_a.data[split, skill, :, :] = param.T
         else:
-            gain = nn.init.calculate_gain(
-                nonlinearity="leaky_relu", param=math.sqrt(5))
+            gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
             std = gain / math.sqrt(self.in_features)
 
             with torch.no_grad():
@@ -387,38 +374,39 @@ class PolyLoRATensor(PolytroponAdapter):
         #         self.weight_leafs_b.uniform_(-std, std)
         # else:
         #     torch.nn.init.zeros_(self.weight_leafs_b)
+
     def tensor_product_construct(self, weight_leafs, embedding_dim, flag="up"):
         if self.order == 2:
             w = weight_leafs
             w01 = w[0, :, :, :, None] * w[1, :, :, None, :]
             # print(w[:,:,:,:].size())
-            w01 = w01.view(self.tensor_rank,  self.rank, -1)
+            w01 = w01.view(self.tensor_rank, self.rank, -1)
             if flag == "up":
                 w01 = self.layerone_normalization_a(w01)
             elif flag == "down":
                 w01 = self.layerone_normalization_b(w01)
             # print(w01.size())
-            return w01[:, :, : embedding_dim]
+            return w01[:, :, :embedding_dim]
         if self.order == 4:
             w = weight_leafs
             w01 = w[0, :, :, :, None] * w[1, :, :, None, :]
             # print(w[:,:,:,:].size())
-            w01 = w01.view(self.tensor_rank,  self.rank, -1)
+            w01 = w01.view(self.tensor_rank, self.rank, -1)
             if flag == "up":
                 w01 = self.layerone_normalization_a(w01)
             elif flag == "down":
                 w01 = self.layerone_normalization_b(w01)
             # print(w01.size())
-            w23 = (w[2, :, :, :, None] * w[3, :, :, None, :])
-            w23 = w23.view(self.tensor_rank,  self.rank, -1)
+            w23 = w[2, :, :, :, None] * w[3, :, :, None, :]
+            w23 = w23.view(self.tensor_rank, self.rank, -1)
             if flag == "up":
                 w23 = self.layerone_normalization_a(w23)
             elif flag == "down":
                 w23 = self.layerone_normalization_b(w23)
 
-            w0123 = (w01[:, :, :, None] * w23[:, :, None, :])
-            w0123 = w0123.view(self.tensor_rank,  self.rank, -1)
-            return w0123[:, :, : embedding_dim]
+            w0123 = w01[:, :, :, None] * w23[:, :, None, :]
+            w0123 = w0123.view(self.tensor_rank, self.rank, -1)
+            return w0123[:, :, :embedding_dim]
 
     def forward(self, input):
         if self.training:
@@ -432,15 +420,16 @@ class PolyLoRATensor(PolytroponAdapter):
         if repeat:
             self.routing_infos.repeat_interleave(repeat)
 
-        mixing_weights = self.selector(
-            self.routing_infos).to(dtype=input.dtype)
+        mixing_weights = self.selector(self.routing_infos).to(dtype=input.dtype)
         # the number of rank equals to the rank
         bs, n_splits, n_skills = mixing_weights.size()
 
         self.lora_a = self.tensor_product_construct(
-            self.weight_leafs_a, self.in_features, flag= "up")  # [tensor rank, rank, D]
+            self.weight_leafs_a, self.in_features, flag="up"
+        )  # [tensor rank, rank, D]
         self.lora_b = self.tensor_product_construct(
-            self.weight_leafs_b, self.out_features, flag = "down")
+            self.weight_leafs_b, self.out_features, flag="down"
+        )
         self.lora_a = self.lora_a.transpose(2, 1).unsqueeze(0)
         self.lora_b = self.lora_b.unsqueeze(0)
 
@@ -486,13 +475,9 @@ class PolyLoRATensorOrder(PolytroponAdapter):
         else:
             self.selector = selector
 
-        self.embedding_dim_leaf_a = math.ceil(
-            (self.in_features) ** (1 / self.order)
-        )
+        self.embedding_dim_leaf_a = math.ceil((self.in_features) ** (1 / self.order))
 
-        self.embedding_dim_leaf_b = math.ceil(
-            (self.out_features) ** (1 / self.order)
-        )
+        self.embedding_dim_leaf_b = math.ceil((self.out_features) ** (1 / self.order))
 
         # self.embedding_dim_leaf = math.ceil(
         #     (self.out_features) ** (1 / self.order)
@@ -517,13 +502,17 @@ class PolyLoRATensorOrder(PolytroponAdapter):
         )
 
         self.layerone_normalization_a = nn.LayerNorm(
-            normalized_shape=[self.rank, self.embedding_dim_leaf_a**2])
+            normalized_shape=[self.rank, self.embedding_dim_leaf_a**2]
+        )
         self.layertwo_normalization_a = nn.LayerNorm(
-            normalized_shape=[self.rank, self.embedding_dim_leaf_a**2])
+            normalized_shape=[self.rank, self.embedding_dim_leaf_a**2]
+        )
         self.layerone_normalization_b = nn.LayerNorm(
-            normalized_shape=[self.rank, self.embedding_dim_leaf_b**2])
+            normalized_shape=[self.rank, self.embedding_dim_leaf_b**2]
+        )
         self.layertwo_normalization_b = nn.LayerNorm(
-            normalized_shape=[self.rank, self.embedding_dim_leaf_b**2])
+            normalized_shape=[self.rank, self.embedding_dim_leaf_b**2]
+        )
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -531,18 +520,16 @@ class PolyLoRATensorOrder(PolytroponAdapter):
 
         if self.kaiming_init:
             for skill in range(self.n_skills):
-                for split in range(self.n_splits):
-                    param = torch.empty(
-                        (self.rank, self.in_features // self.n_splits))
+                for split in range(self.order):
+                    param = torch.empty((self.rank, self.in_features // self.order))
                     torch.nn.init.kaiming_uniform_(param, a=math.sqrt(5))
                     self.lora_a.data[split, skill, :, :] = param.T
         else:
-            gain = nn.init.calculate_gain(
-                nonlinearity="leaky_relu", param=math.sqrt(5))
+            gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
             std = gain / math.sqrt(self.in_features)
 
             with torch.no_grad():
-                #self.weight_leafs_a.uniform_(-std, std)
+                # self.weight_leafs_a.uniform_(-std, std)
                 torch.nn.init.xavier_uniform_(self.weight_leafs_a)
 
         # ensure that initially, adding the adapter does not change the output
@@ -550,7 +537,7 @@ class PolyLoRATensorOrder(PolytroponAdapter):
             with torch.no_grad():
                 self.weight_leafs_b.uniform_(-std, std)
         else:
-            #torch.nn.init.zeros_(self.weight_leafs_b)
+            # torch.nn.init.zeros_(self.weight_leafs_b)
             torch.nn.init.xavier_uniform_(self.weight_leafs_b)
 
     def tensor_product_construct(self, tensor_parameters, embedding_dim, flag):
@@ -567,8 +554,8 @@ class PolyLoRATensorOrder(PolytroponAdapter):
                 w01 = self.layerone_normalization_a(w01)
             elif flag == "down":
                 w01 = self.layerone_normalization_b(w01)
-            w = w01[:, :, : embedding_dim]
-            #w = self.layerone_normalization(w)
+            w = w01[:, :, :embedding_dim]
+            # w = self.layerone_normalization(w)
             return w
         elif self.order == 4:
             w = tensor_parameters
@@ -583,7 +570,7 @@ class PolyLoRATensorOrder(PolytroponAdapter):
                 w01 = self.layerone_normalization_a(w01)
             elif flag == "down":
                 w01 = self.layerone_normalization_b(w01)
-            #w01 = self.layerone_normalization(w01)
+            # w01 = self.layerone_normalization(w01)
 
             w23 = torch.einsum("bri,brj->brij", w[:, 2], w[:, 3])
             w23 = w23.view(batch_size, self.rank, -1)
@@ -593,12 +580,12 @@ class PolyLoRATensorOrder(PolytroponAdapter):
             elif flag == "down":
                 w23 = self.layertwo_normalization_b(w23)
 
-            #w23 = self.layertwo_normalization(w23)
+            # w23 = self.layertwo_normalization(w23)
             # print(w23.size())
-            w0123 = (w01[:, :, :, None] * w23[:, :, None, :])
+            w0123 = w01[:, :, :, None] * w23[:, :, None, :]
             w0123 = w0123.view(batch_size, self.rank, -1)
-            #w0123 = nn.LayerNorm(w0123.shape[-2:]).cuda()(w0123)
-            return w0123[:, :, : embedding_dim]
+            # w0123 = nn.LayerNorm(w0123.shape[-2:]).cuda()(w0123)
+            return w0123[:, :, :embedding_dim]
         elif self.order == 8:
             w = tensor_parameters
             batch_size = w.size()[0]
@@ -607,7 +594,7 @@ class PolyLoRATensorOrder(PolytroponAdapter):
 
             w23 = torch.einsum("bri,brj->brij", w[:, 2], w[:, 3])
             w23 = w23.view(batch_size, self.rank, -1)
-            
+
             w45 = torch.einsum("bri,brj->brij", w[:, 4], w[:, 5])
             w45 = w45.view(batch_size, self.rank, -1)
             w67 = torch.einsum("bri,brj->brij", w[:, 7], w[:, 8])
@@ -618,7 +605,8 @@ class PolyLoRATensorOrder(PolytroponAdapter):
             w4567 = w4567.view(batch_size, self.rank, -1)
             w01234567 = w0123[:, :, :, None] * w4567[:, :, None, :]
             w01234567 = w01234567.view(batch_size, self.rank, -1)
-            return w01234567[:, :, : embedding_dim]
+            return w01234567[:, :, :embedding_dim]
+
     def forward(self, input):
         if self.training:
             self.training_steps += 1
@@ -631,26 +619,22 @@ class PolyLoRATensorOrder(PolytroponAdapter):
         if repeat:
             self.routing_infos.repeat_interleave(repeat)
 
-        mixing_weights = self.selector(
-            self.routing_infos).to(dtype=input.dtype)
+        mixing_weights = self.selector(self.routing_infos).to(dtype=input.dtype)
         # the number of rank equals to the rank
         bs, n_splits, n_skills = mixing_weights.size()
 
         # A is    order, tensor_rank, leaf
         # mixing_weights [batch_size, order, tensor_rank]
         # self.weight_leafs_a [order, tensor_rank, rank,leaf_embedding_size]
-        A = torch.einsum("bos,osrl->borl",
-                         (mixing_weights, self.weight_leafs_a))
-        B = torch.einsum("bos,osrl->borl",
-                         (mixing_weights, self.weight_leafs_b))
+        A = torch.einsum("bos,osrl->borl", (mixing_weights, self.weight_leafs_a))
+        B = torch.einsum("bos,osrl->borl", (mixing_weights, self.weight_leafs_b))
 
         A = self.tensor_product_construct(A, self.in_features, "up")  # [brd]
         A = A.transpose(2, 1)  # [bdr]
-        B = self.tensor_product_construct(
-            B, self.out_features, "down")  # [brd]
+        B = self.tensor_product_construct(B, self.out_features, "down")  # [brd]
 
         adapter_out = input.bmm(A).bmm(B) / self.rank
-        #print("self.weight_leafs_b", self.weight_leafs_b)
+        # print("self.weight_leafs_b", self.weight_leafs_b)
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
@@ -704,13 +688,11 @@ class PolyLoRALinear(PolytroponAdapter):
         if self.kaiming_init:
             for skill in range(self.n_skills):
                 for split in range(self.n_splits):
-                    param = torch.empty(
-                        (self.rank, self.in_features // self.n_splits))
+                    param = torch.empty((self.rank, self.in_features // self.n_splits))
                     torch.nn.init.kaiming_uniform_(param, a=math.sqrt(5))
                     self.lora_a.data[split, skill, :, :] = param.T
         else:
-            gain = nn.init.calculate_gain(
-                nonlinearity="leaky_relu", param=math.sqrt(5))
+            gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
             std = gain / math.sqrt(self.in_features)
 
             with torch.no_grad():
@@ -735,8 +717,7 @@ class PolyLoRALinear(PolytroponAdapter):
         if repeat:
             self.routing_infos.repeat_interleave(repeat)
 
-        mixing_weights = self.selector(
-            self.routing_infos).to(dtype=input.dtype)
+        mixing_weights = self.selector(self.routing_infos).to(dtype=input.dtype)
         bs, n_splits, n_skills = mixing_weights.size()
 
         # A is    n_splits, n_skills, D // n_splits, rank
@@ -772,9 +753,7 @@ class PolyIA3Tensor(PolytroponAdapter):
         self.embedding_size = linear_layer.out_features
         self.order = config.order
         self.tensor_rank = self.n_skills
-        self.embedding_dim_leaf = math.ceil(
-            (self.embedding_size) ** (1 / self.order)
-        )
+        self.embedding_dim_leaf = math.ceil((self.embedding_size) ** (1 / self.order))
         print("leaf_dim", self.embedding_dim_leaf)
         self.weight_leafs = nn.Parameter(
             torch.ones(
@@ -796,10 +775,10 @@ class PolyIA3Tensor(PolytroponAdapter):
             w = weight_leafs
             w01 = w[0, :, :, :, None] * w[1, :, :, None, :]
             # print(w[:,:,:,:].size())
-            w01 = w01.view(self.tensor_rank,  1, -1)
+            w01 = w01.view(self.tensor_rank, 1, -1)
             # w01 = self.layerone_normalization(w01)
             # print(w01.size())
-            return w01[:, :, : embedding_dim]
+            return w01[:, :, :embedding_dim]
         if self.order == 4:
             w = weight_leafs
             w01 = w[0, :, :, :, None] * w[1, :, :, None, :]
@@ -807,13 +786,13 @@ class PolyIA3Tensor(PolytroponAdapter):
             w01 = w01.view(self.tensor_rank, 1, -1)
             # w01 = self.layerone_normalization(w01)
             # print(w01.size())
-            w23 = (w[2, :, :, :, None] * w[3, :, :, None, :])
-            w23 = w23.view(self.tensor_rank,  1, -1)
+            w23 = w[2, :, :, :, None] * w[3, :, :, None, :]
+            w23 = w23.view(self.tensor_rank, 1, -1)
             # w23 = self.layertwo_normalization(w23)
 
-            w0123 = (w01[:, :, :, None] * w23[:, :, None, :])
-            w0123 = w0123.view(self.tensor_rank,  1, -1)
-            return w0123[:, :, : embedding_dim]
+            w0123 = w01[:, :, :, None] * w23[:, :, None, :]
+            w0123 = w0123.view(self.tensor_rank, 1, -1)
+            return w0123[:, :, :embedding_dim]
 
     def forward(self, input):
         task_id = self.routing_infos.task_ids
@@ -828,8 +807,7 @@ class PolyIA3Tensor(PolytroponAdapter):
         mixing_weights = self.selector(self.routing_infos)
 
         # construct the weight: tensor_rank, 1, embedding_size
-        weight = self.tensor_product_construct(
-            self.weight_leafs, self.embedding_size)
+        weight = self.tensor_product_construct(self.weight_leafs, self.embedding_size)
 
         A = torch.einsum("bqs,sqd->bqd", (mixing_weights, weight))
         A = A.reshape(input.size(0), 1, -1)
@@ -837,9 +815,9 @@ class PolyIA3Tensor(PolytroponAdapter):
 
 
 class PolyIA3TensorOrder(PolytroponAdapter):
-    """PolyIA3 
+    """PolyIA3
 
-    The rank is the number of skills and the splits is order of tensor. 
+    The rank is the number of skills and the splits is order of tensor.
 
     Args:
         PolytroponAdapter (_type_): _description_
@@ -862,9 +840,7 @@ class PolyIA3TensorOrder(PolytroponAdapter):
         self.embedding_size = linear_layer.out_features
         self.order = self.n_splits
         self.tensor_rank = self.n_skills
-        self.embedding_dim_leaf = math.ceil(
-            (self.embedding_size) ** (1 / self.order)
-        )
+        self.embedding_dim_leaf = math.ceil((self.embedding_size) ** (1 / self.order))
 
         self.weight_leafs = nn.Parameter(
             torch.ones(
@@ -888,11 +864,11 @@ class PolyIA3TensorOrder(PolytroponAdapter):
         if self.order == 2:
             w = tensor_parameters
             batch_size = w.size()[0]
-            w01 = torch.einsum("bri,brj->brij", w[:, 0], w[:, 1])            
+            w01 = torch.einsum("bri,brj->brij", w[:, 0], w[:, 1])
             # w01 = nn.LayerNorm(w01.shape[-2:]).cuda()(w01)
             w01 = w01.view(batch_size, 1, -1)
-            w = w01[:, :, : embedding_dim]
-            #w = self.layerone_normalization(w)
+            w = w01[:, :, :embedding_dim]
+            # w = self.layerone_normalization(w)
             return w
         if self.order == 4:
             w = tensor_parameters
@@ -902,18 +878,19 @@ class PolyIA3TensorOrder(PolytroponAdapter):
             # print(w[:,:,:,:].size())
             # w01 = nn.LayerNorm(w01.shape[-2:]).cuda()(w01)
             w01 = w01.view(batch_size, 1, -1)
-            #w01 = self.layerone_normalization(w01)
+            # w01 = self.layerone_normalization(w01)
 
             w23 = torch.einsum("bri,brj->brij", w[:, 2], w[:, 3])
             w23 = w23.view(batch_size, 1, -1)
             # w23 = nn.LayerNorm(w23.shape[-2:]).cuda()(w23)
-            #w23 = self.layertwo_normalization(w23)
+            # w23 = self.layertwo_normalization(w23)
             # print(w23.size())
-            w0123 = (w01[:, :, :, None] * w23[:, :, None, :])
+            w0123 = w01[:, :, :, None] * w23[:, :, None, :]
             w0123 = w0123.view(batch_size, 1, -1)
             # w0123 = nn.LayerNorm(w0123.shape[-2:]).cuda()(w0123)
 
-            return w0123[:, :, : embedding_dim]
+            return w0123[:, :, :embedding_dim]
+
     def forward(self, input):
         task_id = self.routing_infos.task_ids
 
@@ -925,8 +902,7 @@ class PolyIA3TensorOrder(PolytroponAdapter):
 
         # bs, order, rank
         mixing_weights = self.selector(self.routing_infos)
-        A = torch.einsum("bor,ored->boed",
-                         (mixing_weights, self.weight_leafs))
+        A = torch.einsum("bor,ored->boed", (mixing_weights, self.weight_leafs))
 
         # construct the weight: tensor_rank, 1, embedding_size
         aggregation = self.tensor_product_construct(A, self.embedding_size)
@@ -993,29 +969,29 @@ class PolyIA3Linear(PolytroponAdapter):
 def modify_with_poly(transformer, config, PolyLayer):
 
     # How to "bin" different levels of selectors ?
-    def _extract_identifier(string, match_on='coder'):
-        """ Returns a unique identifier for the "chunk" of layers sharing the 
+    def _extract_identifier(string, match_on="coder"):
+        """Returns a unique identifier for the "chunk" of layers sharing the
         same underlying selector
         # e.g. 'block' : 'encoder.block.0.layer.0.SelfAttention' -> 'encoder.block.0'
         """
         pattern_map = {
-            'coarsegrained': None,
-            'finegrained': None,
-            'layerwise': 'layer',
-            'blockwise': 'block',
-            'coderwise': 'coder'
+            "coarsegrained": None,
+            "finegrained": None,
+            "layerwise": "layer",
+            "blockwise": "block",
+            "coderwise": "coder",
         }
         assert match_on in pattern_map.keys()
 
-        if match_on == 'finegrained':
+        if match_on == "finegrained":
             return string
-        if match_on == 'coarsegrained':
-            return ''
+        if match_on == "coarsegrained":
+            return ""
 
         match_on = pattern_map[match_on]
-        left_idx = string.find(f'{match_on}.') + len(match_on) + 1
-        right_idx = string[left_idx:].find('.')
-        return string[:left_idx + right_idx]
+        left_idx = string.find(f"{match_on}.") + len(match_on) + 1
+        right_idx = string[left_idx:].find(".")
+        return string[: left_idx + right_idx]
 
     selectors = {}
     total_layers = 0
@@ -1029,7 +1005,8 @@ def modify_with_poly(transformer, config, PolyLayer):
                     ), f"LoRA can only be applied to torch.nn.Linear, but {layer} is {type(layer)}."
 
                     identifier = _extract_identifier(
-                        f'{m_name}.{c_name}', config.poly_granularity)
+                        f"{m_name}.{c_name}", config.poly_granularity
+                    )
                     if identifier not in selectors.keys():
                         selectors[identifier] = get_selector(config)
                     selector = selectors[identifier]
@@ -1046,8 +1023,7 @@ def modify_with_poly(transformer, config, PolyLayer):
                         ),
                     )
 
-    print(
-        f'created {len(selectors)} for a total of {total_layers} adapted layers')
+    print(f"created {len(selectors)} for a total of {total_layers} adapted layers")
     return SkilledModel.register_functions(transformer)
 
 
@@ -1065,7 +1041,7 @@ def modify_with_poly_ia3(transformer, config):
 
 def modify_with_poly_lora(transformer, config):
     return modify_with_poly(transformer, config, PolyLoRALinear)
-  
+
 
 def modify_with_tensorpoly_lora(transformer, config):
     return modify_with_poly(transformer, config, PolyLoRATensor)
