@@ -110,14 +110,13 @@ def load_expert_from_checkpoint(checkpoint):
 
 
 def prepare_expert_lib(args: ExpertConfig, lib_location) -> LocalExpertLibrary:
-    library = LocalExpertLibrary.create_from_remote(
-        HFExpertLibrary(args.hf_lib_id), destination=lib_location
+    exclude_selection = (
+        args.remove_experts.split(",") if args.remove_experts is not None else None
     )
-    if args.remove_experts is not None:
-        remove_experts = args.remove_experts.split(",")
-        for expert_name in remove_experts:
-            logger.info(f"Removing expert {expert_name}")
-            library.remove_expert(expert_name, soft_delete=False)
+    library = LocalExpertLibrary.create_from_remote(
+        HFExpertLibrary(args.hf_lib_id, exclude_selection=exclude_selection),
+        destination=lib_location,
+    )
     return library
 
 
@@ -227,7 +226,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
         ),
         expert.expert_weights,
     )
-    return expert, None
+    return expert
 
 
 @register_finetune_func("nevergrad")
@@ -278,7 +277,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
         ),
         expert.expert_weights,
     )
-    return expert, None
+    return expert
 
 
 @register_finetune_func("lib_mu")
@@ -636,9 +635,9 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
         enable_checkpointing=False,
         log_every_n_steps=args.gradient_accumulation_steps,
         accumulate_grad_batches=args.gradient_accumulation_steps,
-        precision=int(args.precision)
-        if args.precision in ["16", "32"]
-        else args.precision,
+        precision=(
+            int(args.precision) if args.precision in ["16", "32"] else args.precision
+        ),
         val_check_interval=val_check_interval,
     )
 

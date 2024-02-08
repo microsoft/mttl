@@ -53,15 +53,6 @@ class ExpertConfig(Config):
         self.moe_ent_free_bits = 0.0
         self.moe_top_k = -1
 
-        self.expand_val_set_w_downstream = False
-
-        self.eval_mmlu_callbacks_every = 0
-        self.eval_test_set_callback_every = 0
-        self.eval_rougeL_callback_every = 0
-        self.test_sets_callbacks = []
-
-        self.use_custom_valid_callback = False  # if True use custom callback to early stop on eval loss instead of lightning callback
-
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
 
@@ -74,8 +65,6 @@ class ExpertConfig(Config):
 
         self.eval_metric = "loss"
         self.use_vllm = False
-        self.reset_lr = False
-        self.reset_optim = False
 
         # for finetuning a library
         self.hf_repo_query = (
@@ -85,11 +74,9 @@ class ExpertConfig(Config):
         self.finetune_regime = None  # polylib_full, lib_mu, polylib_selector
 
         self.tasksets_path = None
-        self.library_to_expert_transform = None
         self.eval_before_training = True
         self.remove_experts = None
         self.create_transfer_matrix = False
-        self.rouge_every_opt_step = 0
         self.es_metric = "loss"
         self.n_ng_iterations = 30  # number of iterations for LoraHub
 
