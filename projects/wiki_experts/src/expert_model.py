@@ -14,7 +14,7 @@ from mttl.models.modifiers.expert_containers.expert_containers import (
 )
 from mttl.models.modifiers.expert_containers.expert_library import (
     ExpertLibrary,
-    HFExpertLibrary,
+    get_expert_library,
 )
 import copy
 

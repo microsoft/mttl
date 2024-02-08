@@ -4,16 +4,18 @@ import ast
 import argparse
 from string import Template
 from typing import Dict
-from mttl.utils import logger
+from mttl.utils import logger, setup_logging
 
 
 class Config:
     def __init__(self, filenames=None, kwargs=None, raise_error=True, silent=False):
         # Stores personalization of the config file in a dict (json serializable)
+
         self._updated_kwargs = {}
         self.filenames = filenames
         self._set_defaults()
 
+        overwrite_logs = []
         if filenames:
             for filename in filenames.split("+"):
                 if not os.path.exists(filename):
@@ -24,7 +26,7 @@ class Config:
                 if not os.path.exists(filename) and ".json" not in filename:
                     filename = filename + ".json"
 
-                self.update_kwargs(
+                overwrite_logs += self.update_kwargs(
                     json.load(open(filename)),
                     eval=False,
                     raise_error=raise_error,
@@ -32,11 +34,24 @@ class Config:
                 )
 
         if kwargs:
-            self.update_kwargs(kwargs, raise_error=raise_error, silent=silent)
+            overwrite_logs += self.update_kwargs(kwargs, raise_error=raise_error, silent=silent)
 
-        self.post_init()
+        # setup logging to the output dir
+        try:
+            setup_logging(self.output_dir)
+        except Exception as e:
+            if raise_error:
+                raise ValueError("Error setting up logging") from e
+            elif not silent:
+                logger.warning(f"Error setting up logging to {self.output_dir}")
 
-    def post_init(self):
+        # log the overwrites
+        for log in overwrite_logs:
+            logger.warning(log)
+
+        self.post_init(silent=silent)
+
+    def post_init(self, silent=False):
         pass
 
     @classmethod
@@ -56,6 +71,7 @@ class Config:
         return key not in self._updated_kwargs
 
     def update_kwargs(self, kwargs, eval=True, raise_error=True, silent=False):
+        overwrites_log = []
         for k, v in kwargs.items():
             if eval:
                 try:
@@ -69,7 +85,7 @@ class Config:
                 raise ValueError(f"{k} is not in the config")
 
             if eval and not silent:
-                logger.warn("Overwriting {} to {}".format(k, v))
+                overwrites_log.append(f"Overwriting {k} to {v}")
 
             if type(v) == str and "$" in v:
                 # this raises an error if the env. var does not exist
@@ -77,6 +93,7 @@ class Config:
 
             setattr(self, k, v)
             self._updated_kwargs[k] = v
+        return overwrites_log
 
     def __getitem__(self, item):
         return getattr(self, item, None)
