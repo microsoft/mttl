@@ -1,16 +1,12 @@
 import os
 import sys
-from huggingface_hub import login
 from pytorch_lightning import seed_everything
-from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
-from mttl.models.modifiers.expert_containers.expert import Expert, ExpertInfo
-from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.datamodule.mmlu_data_module import MMLUDataConfig
 from mttl.evaluators import MMLUEvaluator
-from mttl.utils import setup_logging, logger
+from mttl.utils import remote_login, setup_logging, logger
 
 # register models
 from projects.wiki_experts.src.expert_model import (
@@ -27,9 +23,7 @@ def run_eval(args):
 
     logger.info("Args: {}".format(args.to_json()))
 
-    if args.hf_token_hub:
-        login(token=args.hf_token_hub)
-
+    remote_login(args.remote_token)
     # select dataloader
     configuration = os.environ.get("MMLU_CONFIG", None)
     logger.info("MMLU Configuration: {}".format(configuration))

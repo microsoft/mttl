@@ -30,7 +30,7 @@ def tmp_exp_config(tmp_path):
     class SimpleConfig(ExpertConfig):
         def _set_defaults(self):
             super()._set_defaults()
-            self.hf_lib_id = None
+            self.library_id = None
             self.model_modifier = "lora"
             self.modify_layers = "c_fc|c_proj|k_proj|v_proj|q_proj|out_proj"
             self.modify_modules = ".*"

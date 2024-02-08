@@ -5,10 +5,7 @@ import glob
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.datamodule.mbpp_datamodule import MBPPDataConfig, MBPPDataModule
-from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
-
-from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
 from mttl.callbacks import LiveCheckpointCallback
 
 from mttl.models.monitors import get_monitors
@@ -16,13 +13,13 @@ from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
 
 
 import torch
-from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
 
 from projects.wiki_experts.utils import get_datamodule
 from mttl.callbacks import NanoMMLUCallback, RougeCallback
 from mttl.utils import (
     get_pl_loggers,
+    remote_login,
     setup_logging,
     logger,
 )
@@ -33,7 +30,6 @@ from projects.wiki_experts.src.evolution.transfer_matrix import (
     TransferMatrixConfig,
     run_eval as produce_transfer_matrix,
 )
-from mttl.models.modifiers.expert_containers.expert_library import retry
 
 
 def create_transfer_matrix(args, checkpoint):
@@ -63,9 +59,7 @@ def run_multitask(args: ExpertConfig):
     setup_logging(args.output_dir)
     logger.info("Args: {}".format(args.to_json()))
 
-    if args.hf_token_hub:
-        login(token=args.hf_token_hub)
-
+    remote_login(args.remote_token)
     loggers = get_pl_loggers(args)
     # select dataloader
     model_class = ExpertTrainer
@@ -169,8 +163,8 @@ def run_multitask(args: ExpertConfig):
         module.load_state_dict(torch.load(checkpoint)["state_dict"])
         trainer.test(module, dm)
 
-        if args.hf_lib_id and checkpoint:
-            library = HFExpertLibrary(args.hf_lib_id, create=True)
+        if args.library_id and checkpoint:
+            library = get_expert_library(args.library_id, create=True)
             library.add_expert_from_ckpt(checkpoint)
 
         if args.hf_repo_id and checkpoint:

@@ -6,7 +6,7 @@ import sys
 from termcolor import colored, cprint
 from typing import List
 
-from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
 from mttl.evaluators.base import StoppingCriteriaSub, StoppingCriteriaList
 
 
@@ -127,7 +127,7 @@ def main():
                 module = parts[0].strip()
                 library = parts[2].strip()
                 model.delete_expert_container()
-                expert = HFExpertLibrary(library)[module]
+                expert = get_expert_library(library)[module]
                 model.add_expert_instance(expert, "default")
                 continue
 

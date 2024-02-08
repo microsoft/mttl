@@ -14,7 +14,7 @@ from mttl.models.modifiers.expert_containers.expert_containers import (
 )
 from mttl.models.modifiers.expert_containers.expert_library import (
     ExpertLibrary,
-    HFExpertLibrary,
+    get_expert_library,
 )
 import copy
 
@@ -398,31 +398,28 @@ class MoETrainer(MultiExpertModel):
         kwargs["top_k"] = kwargs["moe_top_k"]
         kwargs["emb_dim"] = kwargs["moe_emb_dim"]
         kwargs["rkhs_dim"] = kwargs["moe_rkhs_dim"]
-        library = kwargs.pop("expert_library", None)
+
         super().__init__(**kwargs)
 
-        # 8 experts
-        if library is None:
-            if not self.hparams.hf_lib_id:
-                for i in range(self.hparams.moe_num_experts):
-                    # Adding a Skilled LoRA with 1 skill.
-                    exp_config = SkilledLoRAConfig(
-                        n_skills=1,
-                        modify_layers=self.hparams.modify_layers,
-                        modify_modules=self.hparams.modify_modules,
-                        lora_alpha=self.hparams.lora_alpha,
-                        lora_dropout=self.hparams.lora_dropout,
-                        lora_rank=self.hparams.lora_rank,
-                        lora_init_b_random=True,
-                        n_splits=self.hparams.n_splits,
-                        phi_2_align_heads=self.hparams.phi_2_align_heads,
-                    )
-                    self.add_empty_expert(f"e{i}", exp_config)
-                self.moe_num_experts = kwargs["moe_num_experts"]
-            else:
-                library = HFExpertLibrary(self.hparams.hf_lib_id)
-
-        if library is not None:
+        # TODO: Is this pushed to hub? Is it backward compatible? hf_lib_id -> library_id
+        if not self.hparams.library_id:
+            for i in range(self.hparams.moe_num_experts):
+                # Adding a Skilled LoRA with 1 skill.
+                exp_config = SkilledLoRAConfig(
+                    n_skills=1,
+                    modify_layers=self.hparams.modify_layers,
+                    modify_modules=self.hparams.modify_modules,
+                    lora_alpha=self.hparams.lora_alpha,
+                    lora_dropout=self.hparams.lora_dropout,
+                    lora_rank=self.hparams.lora_rank,
+                    lora_init_b_random=True,
+                    n_splits=self.hparams.n_splits,
+                    phi_2_align_heads=self.hparams.phi_2_align_heads,
+                )
+                self.add_empty_expert(f"e{i}", exp_config)
+            self.moe_num_experts = kwargs["moe_num_experts"]
+        else:
+            library = get_expert_library(self.hparams.library_id)
             for i, expert in enumerate(sorted(list(library.keys()))):
                 self.add_expert_instance(library[expert], expert_name=f"e{i}")
             self.moe_num_experts = i + 1

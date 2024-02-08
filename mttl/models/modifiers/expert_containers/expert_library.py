@@ -1,21 +1,22 @@
+from abc import ABC, abstractmethod
+import datetime
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
+from fnmatch import fnmatch
 import glob
 import io
-import re
-import json
+import logging
 import sys
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 import torch
 import os
 import time
-import requests
-import numpy as np
+import asyncio
 
+import numpy as np
 
 from huggingface_hub import (
     hf_hub_download,
-    login,
     CommitOperationAdd,
     CommitOperationDelete,
     CommitOperationCopy,
@@ -30,6 +31,14 @@ from huggingface_hub.utils._errors import RepositoryNotFoundError
 
 from huggingface_hub import HfApi
 from mttl.utils import logger
+from azure.storage.blob import BlobServiceClient
+from azure.storage.blob.aio import BlobServiceClient as AsyncBlobServiceClient
+from azure.core.exceptions import (
+    ResourceExistsError,
+    ResourceNotFoundError,
+)
+
+from mttl.utils import logger, remote_login
 from mttl.models.modifiers.expert_containers.expert import (
     Expert,
     load_expert,
@@ -87,28 +96,53 @@ class MetadataEntry(ExpertInfo):
         return data
 
 
-class BackendEngine:
+def retry(max_retries=10, wait_seconds=60):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            for attempt in range(1, max_retries + 1):
+                try:
+                    result = func(*args, **kwargs)
+                    return result
+                except Exception as e:  # requests.exceptions.HTTPError as e:
+                    print(e, type(e), "retrying...")
+                    if attempt < max_retries:
+                        print(f"Waiting {wait_seconds} seconds before retrying...")
+                        time.sleep(wait_seconds)
+            raise RuntimeError(
+                f"Function {func.__name__} failed after {max_retries} attempts."
+            )
+
+
+class BackendEngine(ABC):
+    @abstractmethod
     def snapshot_download(self, repo_id, allow_patterns=None):
         raise NotImplementedError
 
+    @abstractmethod
     def create_repo(self, repo_id, repo_type, exist_ok, private=True):
         raise NotImplementedError
 
+    @abstractmethod
     def create_commit(self, repo_id, operations, commit_message):
         raise NotImplementedError
 
+    @abstractmethod
     def preupload_lfs_files(self, repo_id, additions):
         raise NotImplementedError
 
+    @abstractmethod
     def hf_hub_download(self, repo_id, filename):
         raise NotImplementedError
 
-    def login(self, token):
+    @abstractmethod
+    def login(self, token: Optional[str] = None):
         raise NotImplementedError
 
+    @abstractmethod
     def repo_info(self, repo_id):
         raise NotImplementedError
 
+    @abstractmethod
     def list_repo_files(self, repo_id):
         raise NotImplementedError
 
@@ -157,11 +191,306 @@ class HuggingfaceHubEngine(BackendEngine):
     def repo_info(self, repo_id):
         return HfApi().repo_info(repo_id)
 
-    def login(self, token):
-        return login(token=token)
+    def login(self, token: Optional[str] = None):
+        remote_login(token=token)
 
     def list_repo_files(self, repo_id):
         return HfApi().list_repo_files(repo_id)
+
+
+class BlobStorageEngine(BackendEngine):
+    def __init__(self, token: Optional[str] = None, cache_dir: Optional[str] = None):
+        """Initialize the blob storage engine. The cache directory can be
+        provided as an argument or through the environment variable BLOB_CACHE_DIR.
+        If no cache directory is provided, the default cache directory ~/.cache/mttl is used.
+        You can provide a SAS URL as an argument when login or set the environment variable BLOB_SAS_URL.
+
+        IMPORTANT: Some special characters such as underscore "_" are not allowed in the repo_id.
+        Please use dashes "-" instead. For more information on the naming recommendation, see:
+        https://learn.microsoft.com/en-us/rest/api/storageservices/naming-and-referencing-containers--blobs--and-metadata
+        """
+        super().__init__()
+        self._token = token
+        self.cache_dir = self._get_cache_dir(cache_dir)
+        logging.getLogger("azure").setLevel(
+            logging.WARNING
+        )  # Quiet down the azure logging
+
+    @staticmethod
+    def _get_cache_dir(chache_dir: Optional[str] = None):
+        """If cache_dir is not provided, get it from envvar BLOB_CACHE_DIR.
+        Use the default cache directory ~/.cache/mttl if not provided."""
+        if chache_dir is not None:
+            return chache_dir
+        if "BLOB_CACHE_DIR" in os.environ:
+            cache_dir = os.environ["BLOB_CACHE_DIR"]
+        else:
+            cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "mttl")
+        return cache_dir
+
+    @property
+    def token(self):
+        if self._token is None:
+            self.login()
+        return self._token
+
+    def login(self, token: Optional[str] = None):
+        """Set the SAS token to use for authentication."""
+        if token is None:
+            token = os.environ.get("BLOB_SAS_URL", None)
+        if token is None:
+            raise ValueError(
+                "No token provided. Please provide a token when initializing "
+                "the engine or set the BLOB_SAS_URL environment variable."
+            )
+        self._token = token
+
+    def _get_local_filepath(self, repo_id, filename):
+        return os.path.join(self.cache_dir, repo_id, filename)
+
+    def snapshot_download(
+        self, repo_id, allow_patterns: Optional[Union[List[str], str]] = None
+    ):
+        """Downloads the entire repository, or a subset of files if allow_patterns is provided.
+        If allow_patterns is provided, paths must match at least one pattern from the allow_patterns.
+
+        Downloads are made concurrently to speed-up the process.
+        """
+        repo_files = self.list_repo_files(repo_id)
+
+        if isinstance(allow_patterns, str):
+            allow_patterns = [allow_patterns]
+
+        if allow_patterns is None:
+            filtered_files = repo_files
+        else:
+            filtered_files = [
+                repo_file
+                for repo_file in repo_files
+                if any(fnmatch(repo_file, r) for r in allow_patterns)
+            ]
+
+        local_filenames = asyncio.run(
+            self.async_download_blobs(repo_id, filtered_files)
+        )
+        return os.path.join(self.cache_dir, repo_id)
+
+    def create_repo(self, repo_id, repo_type=None, exist_ok=True, private=True):
+        """Creates a new repository. repo_type and private are ignored for blob storage."""
+        try:
+            BlobServiceClient(self.token).create_container(name=repo_id)
+        except ResourceExistsError as error:
+            error_message = "A container with this name already exists"
+            if exist_ok:
+                print(error_message)
+            else:
+                raise ValueError(error_message) from error
+
+    def delete_repo(self, repo_id):
+        """Deletes a repository."""
+        container_client = BlobServiceClient(self.token).get_container_client(
+            container=repo_id
+        )
+        try:
+            container_client.delete_container()
+        except ResourceNotFoundError:
+            print(f"Container {repo_id} not found.")
+
+    def create_commit(self, repo_id, operations, commit_message="", async_mode=False):
+        asyncio.run(
+            self.async_create_commit(repo_id, operations, async_mode=async_mode)
+        )
+
+    async def async_create_commit(self, repo_id, operations, async_mode=False):
+        tasks = []
+        for op in operations:
+            if isinstance(op, CommitOperationAdd):
+                tasks.append(
+                    self._async_upload_blob(
+                        repo_id=repo_id,
+                        filename=op.path_in_repo,
+                        buffer=op.path_or_fileobj,
+                        overwrite=True,
+                    )
+                )
+            elif isinstance(op, CommitOperationCopy):
+                tasks.append(
+                    self._async_copy_blob(
+                        source_repo_id=repo_id,
+                        source_filename=op.src_path_in_repo,
+                        destination_repo_id=repo_id,
+                        destination_filename=op.path_in_repo,
+                        overwrite=True,
+                    )
+                )
+            elif isinstance(op, CommitOperationDelete):
+                tasks.append(
+                    self._async_delete_blob(
+                        repo_id=repo_id,
+                        filename=op.path_in_repo,
+                    )
+                )
+        if async_mode:
+            await asyncio.gather(*tasks)
+        else:
+            for task in tasks:
+                await task
+
+    def preupload_lfs_files(self, repo_id, additions):
+        # for blob storage, these operations are done in create_commit
+        pass
+
+    def hf_hub_download(self, repo_id, filename):
+        local_filename = asyncio.run(self.async_download_blobs(repo_id, filename))
+        return local_filename
+
+    def repo_info(self, repo_id):
+        class RepoInfo:
+            pass
+
+        container_client = BlobServiceClient(self.token).get_container_client(repo_id)
+        container_properties = container_client.get_container_properties()
+        repo_info = RepoInfo()
+        repo_info.lastModified = container_properties.last_modified.strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+        return repo_info
+
+    def list_repo_files(self, repo_id):
+        """List all files in a repository. The files might not be downloaded locally."""
+        try:
+            container_client = BlobServiceClient(self.token).get_container_client(
+                repo_id
+            )
+            return [b.name for b in container_client.list_blobs()]
+        except ResourceNotFoundError as error:
+            raise ValueError(f"Repository {repo_id} not found") from error
+
+    async def async_upload_blobs(
+        self,
+        repo_id: str,
+        filenames: Union[List[str], str],
+        buffers=None,
+        overwrite=False,
+    ):
+        is_str = isinstance(filenames, str)
+        if is_str:
+            filenames = [filenames]
+        if buffers is None:
+            buffers = [None] * len(filenames)
+        else:
+            if len(buffers) != len(filenames):
+                raise ValueError("Filenames and buffers must have the same length.")
+        tasks = [
+            self._async_upload_blob(repo_id, filename, buffer, overwrite)
+            for filename, buffer in zip(filenames, buffers)
+        ]
+        await asyncio.gather(*tasks)
+        return filenames[0] if is_str else filenames
+
+    async def _async_upload_blob(self, repo_id, filename, buffer=None, overwrite=False):
+        async with AsyncBlobServiceClient(self.token) as blob_service_client:
+            blob_client = blob_service_client.get_blob_client(
+                container=repo_id, blob=filename
+            )
+            if buffer is not None:
+                await blob_client.upload_blob(buffer, overwrite=overwrite)
+            else:
+                local_cache = self._get_local_filepath(repo_id, filename)
+                with open(file=local_cache, mode="rb") as blob_file:
+                    await blob_client.upload_blob(blob_file, overwrite=overwrite)
+
+    async def async_download_blobs(
+        self, repo_id: str, filesnames: Union[List[str], str]
+    ) -> str:
+        is_str = isinstance(filesnames, str)
+        if is_str:
+            filesnames = [filesnames]
+        tasks = [
+            self._async_download_blob(repo_id, filename) for filename in filesnames
+        ]
+        local_filenames = await asyncio.gather(*tasks)
+        return local_filenames[0] if is_str else local_filenames
+
+    async def _async_download_blob(self, repo_id, filename):
+        async with AsyncBlobServiceClient(self.token) as blob_service_client:
+            blob_client = blob_service_client.get_blob_client(
+                container=repo_id, blob=filename
+            )
+            local_filename = self._get_local_filepath(repo_id, filename)
+            os.makedirs(os.path.dirname(local_filename), exist_ok=True)
+            with open(file=local_filename, mode="wb") as blob_file:
+                download_stream = await blob_client.download_blob()
+                data = await download_stream.readall()
+                blob_file.write(data)
+            return local_filename
+
+    async def async_copy_blobs(
+        self,
+        source_repo_ids,
+        source_filenames,
+        destination_repo_ids,
+        destination_filenames,
+        overwrite=True,
+    ):
+        inputs = [
+            source_repo_ids,
+            source_filenames,
+            destination_repo_ids,
+            destination_filenames,
+        ]
+        # if any input is a string, convert it to a list
+        inputs = [[i] if isinstance(i, str) else i for i in inputs]
+
+        # Check that all lists have the same length
+        if not all(len(i) == len(inputs[0]) for i in inputs):
+            raise ValueError("All lists must have the same length.")
+
+        tasks = [
+            self._async_copy_blob(
+                source_repo_id,
+                source_filename,
+                destination_repo_id,
+                destination_filename,
+                overwrite=overwrite,
+            )
+            for source_repo_id, source_filename, destination_repo_id, destination_filename in zip(
+                inputs[0], inputs[1], inputs[2], inputs[3]
+            )
+        ]
+        await asyncio.gather(*tasks)
+
+    async def _async_copy_blob(
+        self,
+        source_repo_id,
+        source_filename,
+        destination_repo_id,
+        destination_filename,
+        overwrite=True,
+    ):
+        async with AsyncBlobServiceClient(self.token) as blob_service_client:
+            source_blob_client = blob_service_client.get_blob_client(
+                container=source_repo_id, blob=source_filename
+            )
+            destination_blob_client = blob_service_client.get_blob_client(
+                container=destination_repo_id, blob=destination_filename
+            )
+            await destination_blob_client.upload_blob_from_url(
+                source_url=source_blob_client.url, overwrite=overwrite
+            )
+
+    async def async_delete_blobs(self, repo_id: str, filesnames: Union[List[str], str]):
+        if isinstance(filesnames, str):
+            filesnames = [filesnames]
+        tasks = [self._async_delete_blob(repo_id, filename) for filename in filesnames]
+        await asyncio.gather(*tasks)
+
+    async def _async_delete_blob(self, repo_id, filename):
+        async with AsyncBlobServiceClient(self.token) as blob_service_client:
+            blob_client = blob_service_client.get_blob_client(
+                container=repo_id, blob=filename
+            )
+            await blob_client.delete_blob()
 
 
 class LocalFSEngine(BackendEngine):
@@ -192,12 +521,10 @@ class LocalFSEngine(BackendEngine):
     def hf_hub_download(self, repo_id, filename):
         return os.path.join(repo_id, filename)
 
-    def login(self, token):
+    def login(self, token: Optional[str] = None):
         pass
 
     def repo_info(self, repo_id):
-        import datetime
-
         # return the current time into string format
         class RepoInfo:
             pass
@@ -216,7 +543,7 @@ class ExpertLibrary:
     def __init__(
         self,
         repo_id,
-        hf_token_hub=None,
+        token=None,
         model_name=None,
         selection=None,
         exclude_selection=None,
@@ -240,8 +567,7 @@ class ExpertLibrary:
         if self.selection and self.exclude_selection:
             raise ValueError("Cannot use both selection and exclude_selection.")
 
-        if "HF_TOKEN" in os.environ or hf_token_hub:
-            self.login(token=os.environ.get("HF_TOKEN", hf_token_hub))
+        self.login(token=token)
 
         try:
             if create:
@@ -254,7 +580,7 @@ class ExpertLibrary:
             sys.exit(1)
 
         self._build_lib()
-        logger.info("Loaded %s experts from huggingface hub", len(self.data))
+        logger.info("Loaded %s experts from remote storage", len(self.data))
 
     @property
     def sliced(self):
@@ -659,7 +985,7 @@ class ExpertLibrary:
             return
         logger.info(f"Committing {len(self._pending_operations)} operations...")
         if self._pending_pre_uploads:
-            preupload_lfs_files(self.repo_id, additions=self._pending_pre_uploads)
+            self.preupload_lfs_files(self.repo_id, additions=self._pending_pre_uploads)
         self.create_commit(
             self.repo_id,
             operations=self._pending_operations,
@@ -741,83 +1067,16 @@ class ExpertLibrary:
             if metadatum.expert_task_name == task
         ]
 
-
-class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
-    def add_expert(
-        self, expert_dump: Expert, expert_name: str = None, force: bool = False
-    ):
-        expert_name = expert_name or expert_dump.expert_info.expert_name
-        if "/" in expert_name:
-            # create sub-folders if necessary
-            path = expert_name.split("/")
-            os.makedirs(os.path.join(self.repo_id, *path[:-1]), exist_ok=True)
-        return super().add_expert(expert_dump, expert_name=expert_name, force=force)
-
-    def update_from_remote(self, remote_lib: Union["HFExpertLibrary", str]):
-        """
-        Update the expert library with experts from a remote library.
-
-        Args:
-            remote_lib (Union[HFExpertLibrary, str]): The remote library to update from. It can be either an instance of `HFExpertLibrary` or a string representing the path to the remote library.
-
-        """
-        if isinstance(remote_lib, str):
-            remote_lib = HFExpertLibrary(remote_lib)
-        for name, expert in remote_lib.items():
-            if expert not in self and not expert.expert_info.expert_deleted:
-                self.add_expert(expert)
-            if expert.expert_info.expert_deleted:
-                self.remove_expert(expert.name, soft_delete=True)
-
-    @classmethod
-    def create_from_remote(cls, remote_lib: ExpertLibrary, destination):
-        new_lib = LocalExpertLibrary(repo_id=destination)
-        for name, expert in remote_lib.items():
-            if expert not in new_lib and not expert.expert_info.expert_deleted:
-                new_lib.add_expert(expert)
-        return new_lib
-
-    @classmethod
-    def from_expert_dict(cls, expert_dict: Dict[str, Expert], destination):
-        """
-        Create a new LocalExpertLibrary object from a dictionary of experts. Useful e.g. when I want to create a library from new experts that are created dynamically.
-
-        Args:
-            expert_dict (Dict[str, Expert]): A dictionary containing expert names as keys and Expert objects as values.
-            destination: path where the local library will be stored
-
-        Returns:
-            LocalExpertLibrary: A new LocalExpertLibrary object containing the experts from the dictionary.
-        """
-        new_lib = LocalExpertLibrary(repo_id=destination)
-        for name, expert in expert_dict.items():
-            if expert not in new_lib:
-                new_lib.add_expert(expert)
-        return new_lib
-
-    def clone(self, destination):
-        """
-        Clone the library into a new repository.
-        """
-        destination = os.path.join(destination, self.repo_id)
-        new_lib = LocalExpertLibrary(repo_id=destination, create=True)
-        for name, expert in self.items():
-            if expert not in new_lib:
-                new_lib.add_expert(expert)
-        return new_lib
-
-
-class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
     @classmethod
     def from_local(
         cls,
-        local_lib: LocalExpertLibrary,
+        local_lib: "LocalExpertLibrary",
         repo_id,
         force=False,
         upload_aux_data=False,
         only_tasks=None,
     ):
-        remote_lib = HFExpertLibrary(repo_id=repo_id, create=True)
+        remote_lib = cls(repo_id=repo_id, create=True)
 
         only_tasks = only_tasks or local_lib.tasks
         with remote_lib.batched_commit():
@@ -858,6 +1117,68 @@ class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
                         continue
 
         return remote_lib
+
+
+class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
+    def add_expert(
+        self, expert_dump: Expert, expert_name: str = None, force: bool = False
+    ):
+        expert_name = expert_name or expert_dump.expert_info.expert_name
+        if "/" in expert_name:
+            # create sub-folders if necessary
+            path = expert_name.split("/")
+            os.makedirs(os.path.join(self.repo_id, *path[:-1]), exist_ok=True)
+        return super().add_expert(expert_dump, expert_name=expert_name, force=force)
+
+    def update_from_remote(self, remote_lib: Union["HFExpertLibrary", str]):
+        """
+        Update the expert library with experts from a remote library.
+
+        Args:
+            remote_lib (Union[HFExpertLibrary, str]): The remote library to update from. It can be either an instance of `HFExpertLibrary` or a string representing the path to the remote library.
+
+        """
+        if isinstance(remote_lib, str):
+            remote_lib = get_expert_library(remote_lib)
+        for name, expert in remote_lib.items():
+            if expert not in self and not expert.expert_info.expert_deleted:
+                self.add_expert(expert)
+            if expert.expert_info.expert_deleted:
+                self.remove_expert(expert.name, soft_delete=True)
+
+    @classmethod
+    def create_from_remote(cls, remote_lib: ExpertLibrary, destination):
+        new_lib = LocalExpertLibrary(repo_id=destination)
+        for name, expert in remote_lib.items():
+            if expert not in new_lib and not expert.expert_info.expert_deleted:
+                new_lib.add_expert(expert)
+        return new_lib
+
+    @classmethod
+    def from_expert_dict(cls, expert_dict: Dict[str, Expert], destination):
+        """
+        Create a new LocalExpertLibrary object from a dictionary of experts. Useful e.g. when I want to create a library from new experts that are created dynamically.
+
+        Args:
+            expert_dict (Dict[str, Expert]): A dictionary containing expert names as keys and Expert objects as values.
+            destination: path where the local library will be stored
+
+        Returns:
+            LocalExpertLibrary: A new LocalExpertLibrary object containing the experts from the dictionary.
+        """
+        new_lib = LocalExpertLibrary(repo_id=destination)
+        for name, expert in expert_dict.items():
+            if expert not in new_lib:
+                new_lib.add_expert(expert)
+        return new_lib
+
+
+class BlobExpertLibrary(ExpertLibrary, BlobStorageEngine):
+    pass
+
+
+class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
+    pass
 
 
 class VirtualLocalLibrary(LocalExpertLibrary):
@@ -918,3 +1239,49 @@ def get_best_expert_for_task(library: HFExpertLibrary, task, hash) -> Expert:
             best_expert = metadata
     assert best_expert is not None
     return library[best_expert.expert_name]
+
+
+def get_expert_library(
+    repo_id,
+    token: str = None,
+    model_name=None,
+    selection=None,
+    exclude_selection=None,
+    create=False,
+    ignore_sliced=False,
+    expert_library_type: str = None,
+):
+    """Select the appropriate expert library based on the following order of priority:
+    1. If expert_library_type is provided, uses that type.
+    2. If repo_id is a directory that exists on the local file system, uses LocalExpertLibrary.
+    3. If token is provided and contains "blob.core.windows.net", uses BlobExpertLibrary.
+    4. If token is not provided, but the BLOB_SAS_URL envvar is set, uses BlobExpertLibrary.
+    5. Otherwise, uses HFExpertLibrary.
+    """
+
+    available_libraries = {
+        "local": LocalExpertLibrary,
+        "blob_storage": BlobExpertLibrary,
+        "huggingface_hub": HFExpertLibrary,
+    }
+    if expert_library_type is None:
+        if os.path.isdir(repo_id):
+            expert_library_type = "local"
+        elif len(repo_id.split("/")) == 2:
+            expert_library_type = "huggingface_hub"
+        else:
+            expert_library_type = "blob_storage"
+    try:
+        expert_lib_class = available_libraries[expert_library_type]
+        expert_lib = expert_lib_class(
+            repo_id=repo_id,
+            token=token,
+            model_name=model_name,
+            selection=selection,
+            exclude_selection=exclude_selection,
+            create=create,
+            ignore_sliced=ignore_sliced,
+        )
+    except KeyError:
+        raise ValueError(f"Unknown expert library type {expert_library_type}.")
+    return expert_lib

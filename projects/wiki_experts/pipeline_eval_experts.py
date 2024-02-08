@@ -3,17 +3,16 @@ import os
 import sys
 
 import prettytable
-from huggingface_hub import login
 from pytorch_lightning import seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.models.modifiers.expert_containers.expert_library import (
-    HFExpertLibrary,
     LocalExpertLibrary,
+    get_expert_library,
 )
-from mttl.utils import setup_logging, logger
+from mttl.utils import remote_login, setup_logging, logger
 from projects.wiki_experts.src.expert_model import (
     MultiExpertModel,
     MultiExpertModelRanker,
@@ -30,26 +29,24 @@ def run_eval(args):
 
     logger.info("Args: {}".format(args.to_json()))
 
-    if args.hf_token_hub:
-        login(token=args.hf_token_hub)
-
+    remote_login(args.remote_token)
     # load module
     if args.ranker_model is not None:
         module = MultiExpertModelRanker(**vars(args))
     else:
         module = MultiExpertModel(**vars(args))
 
-    if args.hf_lib_id:
-        if os.path.exists(args.hf_lib_id):
+    if args.library_id:
+        if os.path.exists(args.library_id):
             # it's a local library
             library = LocalExpertLibrary("/tmp/experts", create=True)
 
-            for file in glob.glob(os.path.join(args.hf_lib_id, "*")):
+            for file in glob.glob(os.path.join(args.library_id, "*")):
                 library.add_expert_from_ckpt(file, force=True)
         else:
-            library = HFExpertLibrary(args.hf_lib_id)
+            library = get_expert_library(args.library_id)
 
-        logger.info("Loaded library: {}".format(args.hf_lib_id))
+        logger.info("Loaded library: {}".format(args.library_id))
     else:
         library = None
 
@@ -57,7 +54,7 @@ def run_eval(args):
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:
             module.load_expert(**expert_kwargs, expert_library=library)
-    if args.hf_lib_id is not None:
+    elif args.library_id is not None:
         module.add_experts_from_library(library)
     module.to("cuda")
 
