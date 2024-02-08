@@ -608,46 +608,77 @@ class SVDInputExtractor(LibraryTransform):
                 )
                 W = (A @ B).T  # out_features, in_features
 
-                if self.config.top_k < 1.0:
-                    th = torch.quantile(torch.abs(W), 1.0 - self.config.top_k)
-                    W = torch.where(torch.abs(W) > th, W, torch.zeros_like(W))
-
                 if self.config.ab_only:
+                    """
                     eig_input = W.T @ W  # in_features, in_features
+                    test_out = torch.linalg.eig(eig_input)
+                    eigvector = test_out.eigenvectors.real
+                    largest, smallest = eigvector[:, 0], eigvector[:, -1]
+
+                    # Now, with SVD
+                    U, S, V = torch.linalg.svd(W)
+                    svd_largest = V[0]
+                    assert torch.allclose(svd_largest, largest, atol=1e-4) or torch.allclose(svd_largest, -1 * largest, atol=1e-4), breakpoint()
+                    """
+
+                    # Now, the efficient way
+                    # Compute SVD of A
+                    U_A, Sigma_A, V_A = torch.svd(A)
+
+                    # Compute SVD of B.T (transpose of B)
+                    U_B, Sigma_B, V_B = torch.svd(B.T)
+
+                    # Compute product matrix C = Sigma_A * (V_A.T @ V_B) * Sigma_B
+                    # Since V_A and V_B are orthogonal, their product is also an orthogonal matrix
+                    C = Sigma_A.diag_embed() @ V_A.t() @ V_B @ Sigma_B.diag_embed()
+
+                    # Compute SVD of the product matrix C
+                    U_C, Sigma_C, V_C = torch.svd(C)
+
+                    # Construct the final SVD components of W
+                    U_W = U_A @ U_C
+                    eff_largest = U_W[:, 0]
+                    eff_eigval = Sigma_C[0] ** 2
+
+                    # assert torch.allclose(eff_largest, largest, atol=1e-4) or torch.allclose(eff_largest, -1 * largest, atol=1e-4), breakpoint()
+                    # assert torch.allclose(eff_eigval, test_out.eigenvalues.real[0]), breakpoint()
+
+                    top_vector = eff_largest
+                    top_value = eff_eigval
+
+                    bottom_vector = U_W[:, -1]
+
                 else:
                     base_W = base_model.model.state_dict()[f"{param_name}.weight"]
                     W_AB = base_W + W
                     eig_input = W_AB.T @ W_AB
+                    out = torch.linalg.eig(eig_input)
+                    eigvector = out.eigenvectors
+                    largest, smallest = eigvector[:, 0], eigvector[:, -1]
 
-                out = torch.linalg.eig(eig_input)
-                eigvector = out.eigenvectors
-                img_eig_vals = eigvector.imag.abs().mean().item()
-                if img_eig_vals > 1e-2:
-                    logger.warning(
-                        f"Found {img_eig_vals} imaginary eigenvalues, this is likely due to numerical instability"
-                    )
+                    img_eig_vals = eigvector.imag.abs().mean().item()
+                    if img_eig_vals > 1e-2:
+                        logger.warning(
+                            f"Found {img_eig_vals} imaginary eigenvalues, this is likely due to numerical instability"
+                        )
 
-                largest, smallest = eigvector[:, 0], eigvector[:, -1]
-                assert torch.norm(eig_input @ largest.real.unsqueeze(-1)) >= torch.norm(
-                    eig_input @ smallest.real.unsqueeze(-1)
-                ), breakpoint()
+                    top_vector = largest.real
+                    top_value = out.eigenvalues.real[0]
+                    bottom_vector = smallest.real
 
-                empirical_eigvalue = (eig_input @ largest.real.unsqueeze(-1)).squeeze(
-                    -1
-                ) / largest.real
-                max_, min_ = (
-                    empirical_eigvalue.max(),
-                    empirical_eigvalue.min(),
-                )
-                ratio_diff = (max_ - min_).abs().mean().item()
-                if ratio_diff > 1e-1:
-                    logger.warning(
-                        f"Found {ratio_diff} max variation of A * v_eig / v, this is likely due to numerical instability"
-                    )
+                # Check that top vector is indeed an eigenvector
+                WTW = W.T @ W
+                ratio = WTW @ top_vector / (top_vector * top_value)
+                torch.allclose(ratio, torch.ones_like(ratio), atol=1e-3)
+
+                # Check that top vector is indeed the top eigenvector
+                assert (WTW @ top_vector).pow(2).sum() > (WTW @ bottom_vector).pow(
+                    2
+                ).sum()
 
                 # Save eigenvector and eigvenvalue
-                vectors[expert_name][param_name] = largest.real.cpu().numpy()
-                eigvals[expert_name][param_name] = out.eigenvalues.real[0].item()
+                vectors[expert_name][param_name] = top_vector.real.cpu().numpy()
+                eigvals[expert_name][param_name] = top_value.item()
 
             # Upload to HF 1 expert at a time
             if self.config.upload_to_hf:
