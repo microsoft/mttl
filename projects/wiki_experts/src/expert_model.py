@@ -52,7 +52,7 @@ def push_expert_to_hub(
     if use_last is True, then uses the last checkpoint `last.ckpt` instead
     of the one with lowest validation loss.
     """
-    from mttl.models.modifiers.expert_containers.module_graph import load_expert
+    from mttl.models.modifiers.expert_containers.expert import load_expert
     from mttl.utils import get_checkpoint_path
 
     expert = load_expert(get_checkpoint_path(ckpt_path, use_last=use_last))
@@ -256,7 +256,7 @@ class MultiExpertModel(ExpertTrainer):
         is_default: bool = False,
         expert_library: ExpertLibrary = None,
     ):
-        from mttl.models.modifiers.expert_containers.module_graph import load_expert
+        from mttl.models.modifiers.expert_containers.expert import load_expert
 
         expert = load_expert(
             expert_path,

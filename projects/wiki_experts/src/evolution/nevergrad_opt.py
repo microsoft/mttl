@@ -23,8 +23,7 @@ from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from projects.wiki_experts.src.evolution.config import EvolExpertConfig as ExpertConfig
 import wandb
 
-# from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
-ModuleGraph = None
+from mttl.models.modifiers.expert_containers.expert import ModuleGraph
 
 
 def mmlu_get_loss(
