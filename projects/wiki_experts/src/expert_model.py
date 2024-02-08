@@ -256,7 +256,7 @@ class MultiExpertModel(ExpertTrainer):
         is_default: bool = False,
         expert_library: ExpertLibrary = None,
     ):
-        from mttl.models.modifiers.expert_containers.module_graph import load_expert
+        from mttl.models.modifiers.expert_containers.expert import load_expert
 
         expert = load_expert(
             expert_path,
