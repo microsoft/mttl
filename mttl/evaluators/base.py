@@ -468,8 +468,8 @@ def setup_evaluators(
         "humaneval",
         "mbpp",
         "boolq",
-        "arc_easy",
-        "arc-easy" "arc-challenge" "arc_challenge",
+        "arc-easy",
+        "arc-challenge",
         "piqa",
         "hellaswag",
         "winogrande",
@@ -559,7 +559,7 @@ def setup_evaluators(
                 **common_kwargs,
                 arc_type="ARC-Easy",
             )
-            evaluators["arc_easy"] = ArcEvaluator(
+            evaluators["arc-easy"] = ArcEvaluator(
                 config, generation_kwargs=generation_kwargs
             )
         elif task in ["arc-challenge", "ai2_arc_ARC_Challenge_1_0_0", "arc_challenge"]:
@@ -567,7 +567,7 @@ def setup_evaluators(
                 **common_kwargs,
                 arc_type="ARC-Challenge",
             )
-            evaluators["arc_challenge"] = ArcEvaluator(
+            evaluators["arc-challenge"] = ArcEvaluator(
                 config, generation_kwargs=generation_kwargs
             )
         elif task in ["piqa", "piqa_1_0_0"]:
