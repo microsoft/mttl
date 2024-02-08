@@ -425,7 +425,7 @@ class MoETrainer(MultiExpertModel):
             self.moe_num_experts = i + 1
 
     def training_step(self, batch, _):
-        loss = self.forward(batch)
+        loss = super().training_step(batch, _)
         total_loss = loss.clone()
 
         if (

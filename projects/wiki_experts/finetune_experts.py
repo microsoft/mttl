@@ -110,14 +110,13 @@ def load_expert_from_checkpoint(checkpoint):
 
 
 def prepare_expert_lib(args: ExpertConfig, lib_location) -> LocalExpertLibrary:
-    library = LocalExpertLibrary.create_from_remote(
-        HFExpertLibrary(args.hf_lib_id), destination=lib_location
+    exclude_selection = (
+        args.remove_experts.split(",") if args.remove_experts is not None else None
     )
-    if args.remove_experts is not None:
-        remove_experts = args.remove_experts.split(",")
-        for expert_name in remove_experts:
-            logger.info(f"Removing expert {expert_name}")
-            library.remove_expert(expert_name, soft_delete=False)
+    library = LocalExpertLibrary.create_from_remote(
+        HFExpertLibrary(args.hf_lib_id, exclude_selection=exclude_selection),
+        destination=lib_location,
+    )
     return library
 
 
@@ -227,7 +226,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
         ),
         expert.expert_weights,
     )
-    return expert, None
+    return expert
 
 
 @register_finetune_func("nevergrad")
@@ -278,7 +277,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
         ),
         expert.expert_weights,
     )
-    return expert, None
+    return expert
 
 
 @register_finetune_func("lib_mu")
@@ -526,7 +525,7 @@ def run_multitask(args: ExpertConfig):
         if args.create_transfer_matrix:
             create_transfer_matrix(args, checkpoint)
 
-    elif args.hf_lib_id is not None:
+    else:
         # fine-tuning with expert library
         assert args.finetune_regime in FINETUNE_FUNCTIONS
         expert = FINETUNE_FUNCTIONS[args.finetune_regime](args, dm)
@@ -534,8 +533,6 @@ def run_multitask(args: ExpertConfig):
         if args.create_transfer_matrix or "nevergrad" in args.finetune_regime:
             create_transfer_matrix(args, expert)
         shutil.rmtree(f"/tmp/{args.hf_lib_id}", ignore_errors=True)
-    else:
-        raise ValueError("please specify a library, or a checkpoint")
 
 
 @register_finetune_func("poly_from_scratch")
@@ -544,12 +541,13 @@ def finetune_polylib_full(args: ExpertConfig, dm):
     Trains poly from scratch, fine- or coarsegrained
     """
 
-    assert (
-        "module_logits" in args.trainable_param_names
-        or "selector" in args.trainable_param_names
-    )
+    if (
+        "module_logits" not in args.trainable_param_names
+        and "selector" in args.trainable_param_names
+    ):
+        args.trainable_param_names += "|.*module_logits.*|.*selector.*"
+    assert args.hf_lib_id is None
     args.router_selector = "poly_router"
-    assert args.router_selector is not None
     module = MoETrainer(**vars(args), device_map="auto")
     module.to("cuda")
     return train_module(args, module, dm)
@@ -637,9 +635,9 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
         enable_checkpointing=False,
         log_every_n_steps=args.gradient_accumulation_steps,
         accumulate_grad_batches=args.gradient_accumulation_steps,
-        precision=int(args.precision)
-        if args.precision in ["16", "32"]
-        else args.precision,
+        precision=(
+            int(args.precision) if args.precision in ["16", "32"] else args.precision
+        ),
         val_check_interval=val_check_interval,
     )
 
