@@ -15,7 +15,6 @@ from typing import Union, Callable, List, Dict
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators.base import compute_task_aggregation
 
-from huggingface_hub import login
 from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.utils import logger, setup_logging
 from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
