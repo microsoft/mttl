@@ -511,14 +511,14 @@ if __name__ == "__main__":
     C -> linear(B:0.5);
     default -> C
     """
-    s = """    
+    s = """
     Variables:
     - if a weight starts with $ it is considered as a variale
     - variables will be stored in lInearNodes under the name of the linear connection (e.g. "linear(a:5,b:$weight)" ) + the index of the varable in the connections, e.g. "linear(a:5,b:$weight)[1]" since $weight is the second variable in the connection
     - a graph with variables cannot be instantiated without passing the values for the variables to the instantiate method
-    
+
     security_studies -> linear(sordonia/expert_llama2_13b_security_studies:5,sordonia/llama2-13b-platypus:$weight);
-    security_studies2 -> linear(sordonia/expert_llama2_13b_security_studies:1);    
+    security_studies2 -> linear(sordonia/expert_llama2_13b_security_studies:1);
     security_studies3 -> linear(sordonia/expert_llama2_13b_security_studies:$weight_blabla);
     """
 

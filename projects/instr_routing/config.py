@@ -38,7 +38,7 @@ class RoutingConfig(Config):
         self.router_shared_weights = True  # share weights between teacher and student
 
         self.fast_dev_run = False
-        self.hf_token_hub = None
+        self.remote_token = None
         self.validation_portion = 0.03
 
         self.eval_superni = False
@@ -74,7 +74,7 @@ class RoutingConfig(Config):
         self.soft_prompt_hidden_dim = None
         self.soft_prompt_learn_kv = False
 
-    def post_init(self):
+    def post_init(self, silent=False):
         if self.eval_mmlu and "MMLU_DATA_DIR" not in os.environ:
             raise ValueError("MMLU_DATA_DIR not set in env but eval_mmlu = True.")
 
