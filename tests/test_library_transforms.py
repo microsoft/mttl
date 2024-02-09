@@ -32,7 +32,7 @@ def test_svd_input_contructor():
 
     protos = transform.transform(library)
     sums = []
-    for task_name in protos.keys():
+    for task_name in sorted(protos.keys()):
         task_sum = 0.0
         for key in protos[task_name].keys():
             task_sum += protos[task_name][key].sum().item()
