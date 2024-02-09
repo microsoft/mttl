@@ -389,7 +389,7 @@ class MoETrainer(MultiExpertModel):
                     f"e{i}",
                     LoRAConfig(
                         modify_layers=self.hparams.modify_layers,
-                        modify_modulea=self.hparams.modify_modules,
+                        modify_modules=self.hparams.modify_modules,
                         lora_alpha=self.hparams.lora_alpha,
                         lora_dropout=self.hparams.lora_dropout,
                         lora_rank=self.hparams.lora_rank,
