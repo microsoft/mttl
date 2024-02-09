@@ -198,7 +198,11 @@ def run_multitask(args: ExpertConfig):
     if os.environ.get("WANDB_API_KEY"):
         import wandb
 
-        wandb.init(project="0shot_routing", config=args.asdict())
+        wandb.init(
+            project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
+            config=args.asdict(),
+            name=os.environ.get("AMLT_JOB_NAME", None),
+        )
         wandb.log({f"downstream/{k}": v for k, v in scores.items()})
 
         if len(routing_stats) > 0:
