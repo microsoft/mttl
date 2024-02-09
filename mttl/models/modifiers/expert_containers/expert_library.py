@@ -1269,6 +1269,7 @@ def get_expert_library(
     create=False,
     ignore_sliced=False,
     expert_library_type: str = None,
+    make_local_copy: bool = False,
 ):
     """Select the appropriate expert library based on the following order of priority:
     1. If expert_library_type is provided, uses that type.
@@ -1291,8 +1292,8 @@ def get_expert_library(
         else:
             expert_library_type = "blob_storage"
     try:
-        # if type is local but repo_id points to hf, create local lib from hf
-        if expert_library_type == "local" and len(repo_id.split("/")) == 2:
+        # to be safe, we make a local copy of a library from huggingface hub
+        if expert_library_type == "huggingface_hub" and make_local_copy:
             destination = os.environ.get(
                 "HF_LIB_CACHE", os.path.expanduser("~/.cache/huggingface/libraries")
             )
