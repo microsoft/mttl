@@ -21,6 +21,7 @@ from mttl.models.modifiers.expert_containers.selectors import (
     PolySelectorDirect,
     MOERKHSSelector,
     SelectorView,
+    ClownSelector,
 )
 from mttl.models.modifiers.lora import LoRA
 
@@ -57,6 +58,24 @@ def dummy_batch():
     attn_mask[torch.arange(bs), seq_len] = 1
     attn_mask = 1 - attn_mask.cumsum(dim=-1)
     batch["attention_mask"] = attn_mask
+    return batch
+
+
+@pytest.fixture
+def bigger_dummy_batch():
+    torch.manual_seed(0)
+    bs = 5
+    max_seq_len = 10
+    batch = {
+        "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
+        "labels": torch.randint(10, 400, (bs, max_seq_len)),
+    }
+    seq_len = torch.randint(0, max_seq_len, (bs,))
+    attn_mask = torch.zeros(bs, max_seq_len, dtype=torch.int32)
+    attn_mask[torch.arange(bs), seq_len] = 1
+    attn_mask = 1 - attn_mask.cumsum(dim=-1)
+    batch["attention_mask"] = attn_mask
+    batch["task_names"] = ["dummy_task"] * bs
     return batch
 
 
@@ -163,12 +182,12 @@ class TestMultiExpertModel:
             **vars(config),
         )
         module.load_from_module_dict(module_dict, action="route")
-        bs, max_seq_len = 10, 100
 
         assert isinstance(
             module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
         )
 
+        bs, max_seq_len = 10, 100
         batch = {
             "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
             "labels": torch.randint(10, 400, (bs, max_seq_len)),
@@ -390,3 +409,57 @@ class TestMultiExpertModel:
         assert isinstance(spy.spy_return, BatchSequenceModulesAndWeightsSelectorOutput)
         assert spy.spy_return.modules.shape == (2, 3, 2)
         assert spy.spy_return.weights.shape == (2, 3, 2)
+
+    def test_expert_selector_with_moe_clown_routing_soft_coalesced(
+        self, mocker, tmp_exp_config, bigger_dummy_batch, monkeypatch
+    ):
+        monkeypatch.setenv("COALESCED_LORA_CONTAINER", "1")
+
+        seed_everything(0)
+        config: ExpertConfig = tmp_exp_config
+        config.router_selector = "clown_router"
+        config.router_granularity = "finegrained"
+        config.router_temp = 0.1
+
+        module = MoETrainer(
+            tokenizer=None,
+            expert_info={},
+            **vars(config),
+        )
+
+        container = module.model.transformer.h[0].attn.attention.k_proj
+        assert isinstance(container, CoalescedLoRAExpertContainer)
+        assert isinstance(container.selector, ClownSelector)
+        assert container.selector.config.moe_top_k == -1
+        assert container.selector.config.router_temp == 0.1
+
+        # Test Base Llama model
+        spy = mocker.spy(container.selector, "forward")
+
+        # Prototypes not initialized
+        with pytest.raises(ValueError):
+            output = module(bigger_dummy_batch)
+
+        # Initialize the prototypes
+        def init_proto(fill_value=0.0, random=False):
+            for sub_mod in module.modules():
+                if isinstance(sub_mod, ClownSelector):
+                    print("overwriting")
+                    protos = torch.full(
+                        (len(sub_mod.expert_names), sub_mod.input_dim), fill_value
+                    )
+                    if random:
+                        protos = torch.rand_like(protos)
+                    sub_mod.overwrite_prototypes(protos)
+
+        init_proto(1.0)
+        output = module(bigger_dummy_batch)
+        entropy_uniform = container.selector.info_container["dummy_task"]["ent_uniform"]
+        actual_entropy = container.selector.info_container["dummy_task"]["ent_routing"]
+        assert np.allclose(entropy_uniform, actual_entropy, atol=0.1)
+
+        init_proto(random=True)
+        output = module(bigger_dummy_batch)
+        entropy_uniform = container.selector.info_container["dummy_task"]["ent_uniform"]
+        actual_entropy = container.selector.info_container["dummy_task"]["ent_routing"]
+        assert actual_entropy < entropy_uniform
