@@ -30,34 +30,20 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     HiddenStateComputerConfig,
     TiesMerge,
     TiesMergeConfig,
-    ExpertProjector,
-    ExpertProjectorConfig,
-    SVDEmbeddingTransform,
-    SVDEmbeddingTransformConfig,
     SVDInputExtractor,
     SVDInputExtractorConfig,
 )
 
 
 def get_hidden_states(library, args):
-    if "phi" in library.repo_id:
-        centroid_name = "dataset_centroids"
-    else:
-        centroid_name = "dataset_centroids_2"
-
     if args.delta_scale:
         cfg = HiddenStateComputerConfig(
-            name=centroid_name,
             max_samples_per_task=args.max_samples_per_task,
             track=args.track,
             pool=args.pool,
-            upload_to_hf=True,
-            # compute_delta=False,
             use_base_model_only=True,
         )
         base = HiddenStateComputer(cfg).transform(library, default_args=args)
-        # cfg.compute_delta = True
-        # delta = HiddenStateComputer(cfg).transform(library, default_args=args)
         cfg.use_base_model_only = False
         expert = HiddenStateComputer(cfg).transform(library, default_args=args)
         output = {
@@ -70,12 +56,10 @@ def get_hidden_states(library, args):
         }
     else:
         cfg = HiddenStateComputerConfig(
-            name=centroid_name,
             use_base_model_only=args.use_base_model_only,
             max_samples_per_task=args.max_samples_per_task,
             track=args.track,
             pool=args.pool,
-            upload_to_hf=True,
         )
         output = HiddenStateComputer(cfg).transform(library)
 
@@ -83,17 +67,15 @@ def get_hidden_states(library, args):
 
 
 def get_svd_embeddings(library, args):
-    cfg = SVDInputExtractorConfig(
-        top_k=args.transform_sparsity, recompute=False, scale=args.scale_prototypes
-    )
+    cfg = SVDInputExtractorConfig(scale=args.scale_prototypes)
     svd_input_extractor = SVDInputExtractor(cfg)
     return svd_input_extractor.transform(library)
 
 
-def patch_prototypes(module, library, args):
-    if args.proto_init == "svd":
+def patch_prototypes(module, library, args, proto_inits=None):
+    if not proto_inits and args.proto_init == "svd":
         proto_inits = get_svd_embeddings(library, args)
-    elif args.proto_init == "hidden":
+    elif not proto_inits and args.proto_init == "hidden":
         proto_inits = get_hidden_states(library, args)
 
     for mod in module.modules():
@@ -108,15 +90,6 @@ def patch_prototypes(module, library, args):
                 key = sorted(valid_layer_names)[0]
                 prototypes += [proto_inits[expert_name][key]]
 
-                if args.use_similarity_scaling:
-                    # get params too
-                    expert = library[expert_name]
-                    expert_params = [
-                        expert.expert_weights[k] for k in valid_layer_names
-                    ]
-                    expert_params = torch.cat([p.flatten() for p in expert_params])
-                    params += [expert_params]
-
             logger.info(
                 f"setting prototypes for selector at {mod.layer_name} with hidden states from {key}"
             )
@@ -125,16 +98,6 @@ def patch_prototypes(module, library, args):
                 # prototypes are not normalized, we will at least make their norm smaller than 1
                 max_norm = torch.norm(prototypes, dim=1, p=2).max()
                 prototypes = prototypes / max_norm
-
-            if args.use_similarity_scaling:
-                params = torch.stack(params)
-                sim = F.cosine_similarity(
-                    params.unsqueeze(0), params.unsqueeze(1), dim=-1
-                )
-                sim = (sim - sim.min()) / (sim.max() - sim.min())
-                prototypes = torch.einsum(
-                    "BC,CD->BD", sim.type_as(prototypes), prototypes
-                )
 
             mod.overwrite_prototypes(prototypes)
 
@@ -172,7 +135,6 @@ def run_multitask(args: ExpertConfig):
             tasks = []
             for i in range(10):
                 tasks += [getattr(task_cluster_flan, f"c{i}_2e")]
-            n_tasks = sum([len(t) for t in tasks])
             weights = {}
             for task_subset in tasks:
                 for task in task_subset:
