@@ -1291,16 +1291,29 @@ def get_expert_library(
         else:
             expert_library_type = "blob_storage"
     try:
-        expert_lib_class = available_libraries[expert_library_type]
-        expert_lib = expert_lib_class(
-            repo_id=repo_id,
-            token=token,
-            model_name=model_name,
-            selection=selection,
-            exclude_selection=exclude_selection,
-            create=create,
-            ignore_sliced=ignore_sliced,
-        )
+        # if type is local but repo_id points to hf, create local lib from hf
+        if expert_library_type == "local" and len(repo_id.split("/")) == 2:
+            destination = os.environ.get(
+                "HF_LIB_CACHE", os.path.expanduser("~/.cache/huggingface/libraries")
+            )
+            destination += repo_id
+            os.makedirs(destination, exist_ok=True)
+            expert_lib = LocalExpertLibrary.create_from_remote(
+                remote_lib=HFExpertLibrary(repo_id=repo_id),
+                destination=destination,
+            )
+
+        else:
+            expert_lib_class = available_libraries[expert_library_type]
+            expert_lib = expert_lib_class(
+                repo_id=repo_id,
+                token=token,
+                model_name=model_name,
+                selection=selection,
+                exclude_selection=exclude_selection,
+                create=create,
+                ignore_sliced=ignore_sliced,
+            )
     except KeyError:
         raise ValueError(f"Unknown expert library type {expert_library_type}.")
     return expert_lib
