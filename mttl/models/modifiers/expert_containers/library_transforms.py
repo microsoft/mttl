@@ -279,12 +279,11 @@ class HiddenStateComputerConfig:
     )
     model: str = None  # If `use_base_model_only`, can pass a specific model to compute embeddings with
     max_samples_per_task: int = 10
-    upload_to_hf: bool = False
-    name: str = "dataset_centroids_2"
+    upload_to_hf: bool = True
     recompute: bool = False
     track: str = "each_layer"  # last layer, or each layer
     pool: str = "last"  # last, or mean
-    compute_delta: str = False
+    save_name: str = None
 
 
 class HiddenStateComputer(LibraryTransform):
@@ -356,46 +355,29 @@ class HiddenStateComputer(LibraryTransform):
         if type(library) == str:
             library = get_expert_library(library)
 
-        args_in_name = [
-            "name",
-            "model",
-            "use_base_model_only",
-            "max_samples_per_task",
-            "track",
-            "pool",
-        ]
-        save_name = "-".join(
-            [
-                "" if x is None else str(x)
-                for x in [getattr(self.config, k) for k in args_in_name]
+        save_name = self.config.save_name
+        if save_name is None:
+            args_in_name = [
+                "model",
+                "use_base_model_only",
+                "max_samples_per_task",
+                "track",
+                "pool",
             ]
-        )
+            save_name = "data_centroids-" + "-".join(
+                [
+                    "" if x is None else str(x)
+                    for x in [getattr(self.config, k) for k in args_in_name]
+                ]
+            )
 
-        if self.config.compute_delta:
-            save_name += "-delta"
-
+        # old name : 'dataset_centroids--False-100-each_layer-last'
         print("save_name", save_name)
 
-        # try to fetch auxiliary data
-        # support for old version
-        old_version = True
-        output = library.get_auxiliary_data(data_type=save_name)
-        if len(output) == 0:
-            output = library.get_auxiliary_data(data_type=save_name + ".bin")
-            old_version = False
-
+        output = library.get_auxiliary_data(data_type=save_name + ".bin")
         if len(output) == len(library) and not self.config.recompute:
             logger.info("Found {} precomputed centroids".format(len(output)))
             # format the output to be dict[expert_name][layer_name] = embedding
-            if old_version:
-                output = {
-                    expert_name: {
-                        k: v
-                        for k, v in expert_data[self.config.name][save_name].items()
-                    }
-                    for expert_name, expert_data in output.items()
-                }
-
             return output
 
         logger.info("Computing centroids for {} experts".format(len(library)))
@@ -409,22 +391,12 @@ class HiddenStateComputer(LibraryTransform):
             if self.config.use_base_model_only and self.config.model is not None:
                 training_config.model = self.config.model
 
-            if self.config.compute_delta:
-                model = MultiExpertModel(**vars(training_config)).to("cuda")
-                expert_model = MultiExpertModel(**vars(training_config)).to("cuda")
-                expert_model.add_expert_instance(expert, is_default=True)
-            else:
-                model = MultiExpertModel(**vars(training_config)).to("cuda")
+            model = MultiExpertModel(**vars(training_config)).to("cuda")
 
             if not self.config.use_base_model_only:
                 model.add_expert_instance(expert, is_default=True)
 
             self._track_hidden_states(model, keys=expert.expert_weights.keys())
-            if self.config.compute_delta:
-                self._track_hidden_states(
-                    expert_model, keys=expert.expert_weights.keys()
-                )
-
             training_config.dataset = expert.expert_info.dataset
             training_config.subsample_train = self.config.max_samples_per_task
             if expert.expert_info.expert_task_name:
@@ -452,30 +424,16 @@ class HiddenStateComputer(LibraryTransform):
 
                 if isinstance(model, EfficientCheckpointModule):
                     model.forward(batch, reduction="none")
-                    if self.config.compute_delta:
-                        expert_model.forward(batch, reduction="none")
                 else:
                     model.forward(
                         input_ids=batch["input_ids"],
                         attention_mask=batch["attention_mask"],
                     )
-                    if self.config.compute_delta:
-                        expert_model.forward(
-                            input_ids=batch["input_ids"],
-                            attention_mask=batch["attention_mask"],
-                        )
 
                 bs = batch["input_ids"].size(0)
                 bs_idx = torch.arange(bs, device=device)
                 last_token_idx = batch["attention_mask"].sum(1) - 1
                 hidden_states = self._retrieve_hidden_states(model)
-
-                if self.config.compute_delta:
-                    expert_hidden_states = self._retrieve_hidden_states(expert_model)
-                    hidden_states = {
-                        k: expert_hidden_states[k] - hidden_states[k]
-                        for k in hidden_states.keys()
-                    }
 
                 for layer, hidden_state in hidden_states.items():
                     assert hidden_state.ndim == 3
@@ -522,8 +480,7 @@ class HiddenStateComputer(LibraryTransform):
 
 @dataclass
 class SVDInputExtractorConfig:
-    name: str = "svd_input_extractor"
-    top_k: float = 1.0
+    save_name: str = None
     upload_to_hf: bool = True
     recompute: bool = False
     ab_only: bool = True
@@ -554,19 +511,20 @@ class SVDInputExtractor(LibraryTransform):
     @torch.no_grad()
     def transform(self, library) -> Expert:
         if isinstance(library, str):
-            library = HFExpertLibrary(library)
+            library = get_expert_library(library)
 
-        args_in_name = [
-            "name",
-            "top_k",
-            "ab_only",
-        ]
-        save_name = "-".join(
-            [
-                "" if x is None else str(x)
-                for x in [getattr(self.config, k) for k in args_in_name]
+        save_name = self.config.save_name
+        if save_name is None:
+            args_in_name = [
+                "ab_only",
             ]
-        )
+            save_name = "svd_input_centroids-" + "-".join(
+                [
+                    "" if x is None else str(x)
+                    for x in [getattr(self.config, k) for k in args_in_name]
+                ]
+            )
+        # old_save_name = 'svd_input_extractor-1.0-True'
 
         # try to fetch auxiliary data
         vectors = library.get_auxiliary_data(data_type=save_name + "_vectors.bin")
@@ -609,18 +567,6 @@ class SVDInputExtractor(LibraryTransform):
                 W = (A @ B).T  # out_features, in_features
 
                 if self.config.ab_only:
-                    """
-                    eig_input = W.T @ W  # in_features, in_features
-                    test_out = torch.linalg.eig(eig_input)
-                    eigvector = test_out.eigenvectors.real
-                    largest, smallest = eigvector[:, 0], eigvector[:, -1]
-
-                    # Now, with SVD
-                    U, S, V = torch.linalg.svd(W)
-                    svd_largest = V[0]
-                    assert torch.allclose(svd_largest, largest, atol=1e-4) or torch.allclose(svd_largest, -1 * largest, atol=1e-4), breakpoint()
-                    """
-
                     # Now, the efficient way
                     # Compute SVD of A
                     U_A, Sigma_A, V_A = torch.svd(A)
@@ -637,15 +583,8 @@ class SVDInputExtractor(LibraryTransform):
 
                     # Construct the final SVD components of W
                     U_W = U_A @ U_C
-                    eff_largest = U_W[:, 0]
-                    eff_eigval = Sigma_C[0] ** 2
-
-                    # assert torch.allclose(eff_largest, largest, atol=1e-4) or torch.allclose(eff_largest, -1 * largest, atol=1e-4), breakpoint()
-                    # assert torch.allclose(eff_eigval, test_out.eigenvalues.real[0]), breakpoint()
-
-                    top_vector = eff_largest
-                    top_value = eff_eigval
-
+                    top_vector = U_W[:, 0]
+                    top_value = Sigma_C[0] ** 2
                     bottom_vector = U_W[:, -1]
 
                 else:
@@ -680,17 +619,19 @@ class SVDInputExtractor(LibraryTransform):
                 vectors[expert_name][param_name] = top_vector.real.cpu().numpy()
                 eigvals[expert_name][param_name] = top_value.item()
 
-            # Upload to HF 1 expert at a time
-            if self.config.upload_to_hf:
-                logger.info(f"Uploading SVD centroids to HF for expert {expert_name}")
-                # add embeddings to the library
-                with library.batched_commit():
-                    for name, data in [
+        if self.config.upload_to_hf:
+            # add embeddings to the library
+            with library.batched_commit():
+                for expert_name in library.keys():
+                    logger.info(
+                        f"Uploading SVD centroids to HF for expert {expert_name}"
+                    )
+                    for data_name, data in [
                         ("vectors", vectors),
                         ("eigvals", eigvals),
                     ]:
                         library.add_embedding_dict(
-                            dump_name=save_name + "_" + name,
+                            dump_name=save_name + "_" + data_name,
                             expert_name=expert_name,
                             data=data[expert_name],
                             force=True,  # make sure we overwrite
@@ -768,10 +709,10 @@ class ExpertProjector(LibraryTransform):
     @torch.no_grad()
     def transform(self, expert_library, cluster_library) -> Expert:
         if isinstance(expert_library, str):
-            expert_library = HFExpertLibrary(expert_library)
+            expert_library = get_expert_library(expert_library)
 
         if isinstance(cluster_library, str):
-            cluster_library = HFExpertLibrary(cluster_library)
+            cluster_library = get_expert_library(cluster_library)
 
         output = {}
         for cluster_name, cluster_exp in cluster_library.items():
@@ -792,26 +733,6 @@ class ExpertProjector(LibraryTransform):
 
 
 @dataclass
-class ClusteringConfig:
-    n_clusters: int = 10
-
-
-class LibraryClusterer(LibraryTransform):
-    """
-    Given a library of experts, cluster them and return the clusters
-    """
-
-    def __init__(self, config: ClusteringConfig = None):
-        super().__init__(config or ClusteringConfig())
-
-    def transform(self, library) -> Expert:
-        if isinstance(library, str):
-            library = HFExpertLibrary(library)
-
-        raise NotImplementedError()
-
-
-@dataclass
 class CrossExpertNormComputerConfig:
     pass
 
@@ -827,7 +748,7 @@ class CrossExpertNormComputer(HiddenStateComputer):
     @torch.no_grad()
     def transform(self, library, default_args=None) -> Expert:
         if isinstance(library, str):
-            library = HFExpertLibrary(library)
+            library = get_expert_library(library)
 
         expert_names = list(library.keys())
         an_expert = library[expert_names[0]]
