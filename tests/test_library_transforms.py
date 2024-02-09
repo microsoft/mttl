@@ -2,6 +2,7 @@
 import copy
 import torch
 import pytest
+import numpy as np
 from collections import OrderedDict
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 from mttl.models.modifiers.expert_containers.library_transforms import (
@@ -9,9 +10,35 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     TiesMergeConfig,
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
-    DatasetCentroidComputer,
-    PrototypeComputerConfig,
+    SVDInputExtractor,
+    HiddenStateComputer,
+    SVDInputExtractorConfig,
+    HiddenStateComputerConfig,
 )
+
+
+def test_svd_input_contructor():
+    import logging
+    from mttl.utils import logger
+
+    logger.setLevel(logging.DEBUG)
+
+    library = HFExpertLibrary("sordonia/test-library")
+
+    cfg = SVDInputExtractorConfig(
+        upload_to_hf=False, recompute=True, ab_only=True, scale=False
+    )
+    transform = SVDInputExtractor(cfg)
+
+    protos = transform.transform(library)
+    sums = []
+    for task_name in protos.keys():
+        task_sum = 0.0
+        for key in protos[task_name].keys():
+            task_sum += protos[task_name][key].sum().item()
+        sums.append(task_sum)
+
+    assert np.allclose(sums, [2728.4163, 2284.9968])
 
 
 def test_weighted_merge():
