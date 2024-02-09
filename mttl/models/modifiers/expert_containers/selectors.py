@@ -484,10 +484,6 @@ class ClownSelector(Selector):
                 -1, input.shape[1], -1
             )
 
-        # max_prob = routing_weights.max(dim=-1, keepdim=True)[0]
-        # min_prob = routing_weights.min(dim=-1, keepdim=True)[0]
-        # print('max prob mean, min prob mean', max_prob.mean().item(), min_prob.mean().item())
-
         # uniform routing entropy
         ent_routing = -1 * (routing_weights * torch.log(routing_weights + 1e-6)).sum(-1)
         if sq == 1:
@@ -505,6 +501,7 @@ class ClownSelector(Selector):
             "min_p": min_p.item(),
         }
 
+        # Keep running statistics of routing
         task = self.info_container["routing_infos"].task_names[0]
         task_container = self.info_container.get(task, {})
         count = task_container.get("routing_count", 0)
@@ -517,6 +514,7 @@ class ClownSelector(Selector):
         self.info_container[task] = task_container
 
         if self.config.moe_top_k > 0:
+            # TODO: mask and renormalize the routing_weights, so that it's still differentiable
             _, selected_experts = torch.topk(
                 routing_weights, self.config.moe_top_k, dim=-1
             )
