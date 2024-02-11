@@ -466,7 +466,8 @@ class PolyLoRATensorOrder(PolytroponAdapter):
         self.task_id_ptr = task_id_ptr
         self.training_steps = 0.0
 
-        # In this case, the order is exactly the number of splits.
+        # In this case, the order is exactly the number of splits. Note that we cann't use
+        # the config.order here, because polytropon selection use the n_splits as its'weight.
         self.order = self.n_splits
 
         self.tensor_rank = self.n_skills
