@@ -286,7 +286,7 @@ class PolyLoRATensor(PolytroponAdapter):
         self.task_id_ptr = task_id_ptr
         self.training_steps = 0.0
 
-        self.order = self.split
+        self.order = self.n_splits
         self.tensor_rank = self.n_skills
         if selector is None:
             self.selector = get_selector(config)
