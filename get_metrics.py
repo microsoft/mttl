@@ -211,11 +211,10 @@ def main(files, dataset, latex, hps, nt):
                         mean_per_task.iloc[i]["perf"], std_per_task.iloc[i]["perf"]
                     )
                 )
-
-        for task_name, str in ress.items():
+        for task_name, s in ress.items():
             print(
                 "\\textsc{{{}}} & ".format(task_name.replace("_", " ")),
-                " & ".join(str),
+                " & ".join(s),
                 "\\\\",
             )
     else:
@@ -244,13 +243,20 @@ def main(files, dataset, latex, hps, nt):
                         "perf": task_wise_res["perf"].mean(),
                     }
                 )
-
             overall.append({"model": m, "val": val, "val_std": val_std, "test": test, "test_std": test_std})
 
             if "zs_perf" in filtered_results.columns:
                 zs_mean = filtered_results["zs_perf"].mean()
                 overall[-1].update({"zs": zs_mean})
-
+        
+        df_show = pandas.DataFrame(per_task)
+        result_latex = []
+        for task_name in ["rte","cb","anli-r1","anli-r2","anli-r3","copa","h-swag","storycloze","wsc","winogrande","wic"]:
+            v = df_show[df_show["task"] == task_name]['perf'].values[0]
+            result_latex.append(str(round(v,1)))
+        # keep one point after decimal
+        result_latex.append(str(round(overall[0]['test'],1)))
+        print(" & ".join(result_latex))
         pd.set_option('display.max_colwidth', None)
         print(pandas.DataFrame(per_task).pivot(index='model', columns='task', values='perf'))
         print(pandas.DataFrame(overall).sort_values("test", ascending=True))
