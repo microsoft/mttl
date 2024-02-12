@@ -3,8 +3,7 @@ from typing import Any
 from mttl.models.modifiers.expert_containers.expert_library import (
     get_expert_library,
     ExpertLibrary,
-)
-from mttl.models.modifiers.expert_containers.module_graph import Expert
+from mttl.models.modifiers.expert_containers.expert import Expert
 from mttl.utils import logger
 from mttl.models.modifiers.modify_model import get_modifier_type
 from mttl.models.utils import model_loader_helper

@@ -1,5 +1,5 @@
 {
-    "num_train_epochs": 3,
+    "num_train_epochs": 5,
     "load_in_8bit": 0,
     "weight_decay": 0.00,
     "learning_rate": 0.0003,

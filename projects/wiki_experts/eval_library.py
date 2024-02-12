@@ -4,7 +4,7 @@ import json
 from copy import deepcopy
 
 from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
-from mttl.models.modifiers.expert_containers.module_graph import Expert
+from mttl.models.modifiers.expert_containers.expert import Expert
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 

@@ -37,7 +37,6 @@ class ExpertConfig(Config):
         self.routing = "subject"
         self.mmlu_test_split = "test"
         self.load_module = None
-        self.module_graph = None
         self.micro_batch_size = None
         self.validation_portion = 0.03
 
@@ -55,15 +54,6 @@ class ExpertConfig(Config):
         self.moe_ent_free_bits = 0.0
         self.moe_top_k = -1
 
-        self.expand_val_set_w_downstream = False
-
-        self.eval_mmlu_callbacks_every = 0
-        self.eval_test_set_callback_every = 0
-        self.eval_rougeL_callback_every = 0
-        self.test_sets_callbacks = []
-
-        self.use_custom_valid_callback = False  # if True use custom callback to early stop on eval loss instead of lightning callback
-
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
 
@@ -76,15 +66,25 @@ class ExpertConfig(Config):
 
         self.eval_metric = "loss"
         self.use_vllm = False
-        self.reset_lr = False
-        self.reset_optim = False
 
-        self.create_transfer_matrix = False
+        # for finetuning a library
+        self.hf_repo_query = (
+            None  # for retrieval, we take query expert from this library
+        )
+        self.sk = 5  # number of experts to retrieve from a library
+        self.finetune_regime = None  # polylib_full, lib_mu, polylib_selector
+
         self.tasksets_path = None
+        self.eval_before_training = True
+        self.remove_experts = None
+        self.create_transfer_matrix = False
+        self.es_metric = "loss"
+        self.n_ng_iterations = 30  # number of iterations for LoraHub
 
         # for MBC
         self.k = 10  # number of clusters
         self.local_libs_path = "/tmp/hf_libs/"
+        self.phi_2_align_heads = False
 
     def post_init(self, silent=False):
         self._load_deprecated_configs(silent)
@@ -113,6 +113,7 @@ class ExpertConfig(Config):
             tasks = self.finetune_task_name.split(
                 "+"
             )  # use "+" for assign multiple task set vars to be found in task_sequences
+
             task_sets = None
             if self.tasksets_path is not None:
                 task_sets = json.load(open(self.tasksets_path))
