@@ -82,8 +82,7 @@ class ExpertConfig(Config):
         self.n_ng_iterations = 30  # number of iterations for LoraHub
 
         # for MBC
-        self.k = 10  # number of clusters
-        self.local_libs_path = "/tmp/hf_libs/"
+        self.mbc_num_clusters = 10  # number of clusters
         self.phi_2_align_heads = False
 
     def post_init(self, silent=False):
