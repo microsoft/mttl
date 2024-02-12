@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import torch
+import copy
 from copy import deepcopy
 import torch.nn.functional as F
 
@@ -9,6 +10,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
 from mttl.models.modifiers.expert_containers.module_graph import Expert
 from mttl.models.modifiers.expert_containers.selectors import ClownSelector
+from mttl.models.modifiers.lora import LoRAConfig
 
 
 from pytorch_lightning import seed_everything
@@ -147,6 +149,19 @@ def run_multitask(args: ExpertConfig):
         ).transform(library)
         module = MultiExpertModel(**vars(expert.training_config)).to("cuda")
         module.add_expert_instance(expert, is_default=True)
+    elif args.merge_or_route == "uniform_lora_after_op":
+        # Here we merge the LoRa experts after the outer product
+        # we cannot really do it with the lib transform, cause this would require storing large matrices in memory
+        # Instead we do it with a uniform selector
+        for k, expert in library.items():
+            expert.expert_config.try_merge_after_op = True
+        expert_names = list(library.keys())
+        expert = copy.deepcopy(library[expert_names[0]])
+        assert type(expert.expert_info.expert_config) == LoRAConfig
+        config = expert.training_config
+        config.router_selector = "uniform"
+        module = MultiExpertModel(**vars(config)).to("cuda")
+        module.add_experts_from_library(library)
     elif args.merge_or_route == "ties":
         cfg = TiesMergeConfig(top_k=args.transform_sparsity)
         ties_expert = TiesMerge(cfg).transform(library)
@@ -185,7 +200,7 @@ def run_multitask(args: ExpertConfig):
         )
         scores = runner.run(module)
 
-    # try to fetch routing statistifs
+    # try to fetch routing statistics
     routing_stats = {}
     for task_name in module.model.task_id_container.keys():
         if task_name == "routing_infos":

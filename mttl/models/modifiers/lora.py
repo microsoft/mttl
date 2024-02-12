@@ -19,6 +19,7 @@ class LoRAConfig(ModifierConfig):
     lora_alpha: float = 16.0
     lora_dropout: float = 0.0
     lora_init_b_random: bool = False
+    try_merge_after_op: bool = False
 
 
 @register_modifier("lora", config_cls=LoRAConfig)
@@ -330,8 +331,6 @@ class SkilledLoRA(LoRA):
         *   : [[a, d, f]]     [[0.1, 0.2, 0.7],
                                [0.3, 0.4, 0.3]]
         """
-        if merge_after:
-            raise NotImplementedError("`merge_after` is not implemented for now.")
 
         if len(set([lora.layer for lora in skilled_loras])) > 1:
             raise ValueError("Cannot parallelize loras applied to different layers.")
@@ -381,22 +380,40 @@ class SkilledLoRA(LoRA):
             scaling = scaling.squeeze(0)
 
             if weights.ndim == 1:
-                A = torch.einsum("s,sdr->dr", (weights, skilled_loras_a))
-                B = torch.einsum("s,srd->rd", (weights, skilled_loras_b))
+                if merge_after:
+                    W = torch.matmul(skilled_loras_a, skilled_loras_b)
+                    W = torch.einsum("s,sdr->dr", (weights, W))
 
-                # scaling is a float (only 1 skilled lora)
-                adapter_out = torch.matmul(torch.matmul(input_lora, A), B) * scaling
+                    adapter_out = torch.matmul(input_lora, W) * scaling
+                    del W
+                else:
+                    A = torch.einsum("s,sdr->dr", (weights, skilled_loras_a))
+                    B = torch.einsum("s,srd->rd", (weights, skilled_loras_b))
+
+                    # scaling is a float (only 1 skilled lora)
+                    adapter_out = torch.matmul(torch.matmul(input_lora, A), B) * scaling
             elif weights.ndim == 2:
                 # we are in the case in which we have a single skilled lora applied with different weights
-                A = torch.einsum("bs,sdr->bdr", (weights, skilled_loras_a))
-                B = torch.einsum("bs,srd->brd", (weights, skilled_loras_b))
+                if merge_after:
+                    W = torch.matmul(skilled_loras_a, skilled_loras_b)
+                    W = torch.einsum("bs,sdr->bdr", (weights, W))
 
-                if input_lora.ndim == 2:
-                    partial_out = torch.einsum("bd,bdr->br", (input_lora, A))
-                    adapter_out = torch.einsum("br,brd->bd", (partial_out, B))
-                    adapter_out = adapter_out * scaling
+                    if input_lora.ndim == 2:
+                        adapter_out = torch.einsum("bd,bdr->br", (input_lora, W))
+                        adapter_out = adapter_out * scaling
+                    else:
+                        adapter_out = torch.bmm(input_lora, W) * scaling
+                    del W
                 else:
-                    adapter_out = torch.bmm(torch.bmm(input_lora, A), B) * scaling
+                    A = torch.einsum("bs,sdr->bdr", (weights, skilled_loras_a))
+                    B = torch.einsum("bs,srd->brd", (weights, skilled_loras_b))
+
+                    if input_lora.ndim == 2:
+                        partial_out = torch.einsum("bd,bdr->br", (input_lora, A))
+                        adapter_out = torch.einsum("br,brd->bd", (partial_out, B))
+                        adapter_out = adapter_out * scaling
+                    else:
+                        adapter_out = torch.bmm(torch.bmm(input_lora, A), B) * scaling
         elif n_skills == 1:
             # this is basically standard lora forward, we are here by accident
             # !!!warning!!!! this ignores the weights
@@ -404,19 +421,33 @@ class SkilledLoRA(LoRA):
                 input, [sk_lora.to_loras()[0] for sk_lora in skilled_loras]
             )
         else:
-            A = torch.einsum("bs,bsdr->bdr", (weights, skilled_loras_a))
-            B = torch.einsum("bs,bsrd->brd", (weights, skilled_loras_b))
+            if merge_after:
+                W = torch.matmul(
+                    skilled_loras_a, skilled_loras_b
+                )  # (batch, n_skills, in_features, out_features)
+                W = torch.einsum("bs, bsdk->bdk", (weights, W))
 
-            # (n_examples, out_features)
-            if input_lora.ndim == 2:
-                partial_out = torch.einsum("bd,bdr->br", (input_lora, A))
-                adapter_out = torch.einsum("br,brd->bd", (partial_out, B))
-                adapter_out = adapter_out * scaling[:, None]
-            # (n_examples, seq_len, out_features)
+                if input_lora.ndim == 2:
+                    adapter_out = torch.einsum("bd,bdk->bk", (input_lora, W))
+                    adapter_out = adapter_out * scaling[:, None]
+                else:
+                    adapter_out = torch.einsum("bsd,bsdk->bdk", (input_lora, W))
+                    adapter_out = adapter_out * scaling[:, None, None]
+
             else:
-                partial_out = torch.einsum("bsd,bdr->bsr", (input_lora, A))
-                adapter_out = torch.einsum("bsr,brd->bsd", (partial_out, B))
-                adapter_out = adapter_out * scaling[:, None, None]
+                A = torch.einsum("bs,bsdr->bdr", (weights, skilled_loras_a))
+                B = torch.einsum("bs,bsrd->brd", (weights, skilled_loras_b))
+
+                # (n_examples, out_features)
+                if input_lora.ndim == 2:
+                    partial_out = torch.einsum("bd,bdr->br", (input_lora, A))
+                    adapter_out = torch.einsum("br,brd->bd", (partial_out, B))
+                    adapter_out = adapter_out * scaling[:, None]
+                # (n_examples, seq_len, out_features)
+                else:
+                    partial_out = torch.einsum("bsd,bdr->bsr", (input_lora, A))
+                    adapter_out = torch.einsum("bsr,brd->bsd", (partial_out, B))
+                    adapter_out = adapter_out * scaling[:, None, None]
 
         layer_out = skilled_loras[0].layer(input)
         return layer_out + adapter_out.to(dtype=layer_out.dtype)
