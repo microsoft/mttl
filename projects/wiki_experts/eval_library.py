@@ -7,8 +7,8 @@ import torch.nn.functional as F
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
-from mttl.models.modifiers.expert_containers.module_graph import Expert
 from mttl.models.modifiers.expert_containers.selectors import ClownSelector
+from mttl.models.modifiers.expert_containers.expert import Expert
 
 
 from pytorch_lightning import seed_everything

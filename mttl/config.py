@@ -34,7 +34,9 @@ class Config:
                 )
 
         if kwargs:
-            overwrite_logs += self.update_kwargs(kwargs, raise_error=raise_error, silent=silent)
+            overwrite_logs += self.update_kwargs(
+                kwargs, raise_error=raise_error, silent=silent
+            )
 
         # setup logging to the output dir
         try:
@@ -215,7 +217,7 @@ class Config:
 
         # Filtering configs, useful for flan flat, etc.
         self.include_template_type = "zs_noopt"
-        self.include_task_source = "P3,Flan2021"
+        self.include_task_source = "P3,Flan2021,CoT"
         self.remove_phi_eval_tasks = False
 
         # Training config
@@ -245,7 +247,7 @@ class Config:
         self.num_tasks_per_batch = None
         self.save_every = None
         self.eval_every = None
-        self.eval_every_n_epoch = None
+        self.eval_every_n_epoch = 1
         self.debug = False
         self.seed = 42
 
@@ -294,6 +296,7 @@ class Config:
         # n-skills for router-based methods
         self.n_skills = 8
         self.n_tasks = None
+        self.task_names = None
 
         # which modules to modify and which layers for adapters
         self.modify_modules = None

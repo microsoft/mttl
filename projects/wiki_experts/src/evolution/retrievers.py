@@ -1,4 +1,4 @@
-from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
+from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 from mttl.models.modifiers.expert_containers.library_transforms import LibraryTransform
 from projects.wiki_experts.src.evolution.config import (
     EvolExpertConfig,
@@ -190,7 +190,7 @@ class SVDEmbeddingRetriever(Retriever):
 
         logger.info(
             "Retrieved experts: {} with metric {}".format(
-                list(resulting_library.keys()), "LoraSimilarity"
+                list(resulting_library.keys()), "SVDEmbeddingRetriever"
             )
         )
         logger.disabled = False

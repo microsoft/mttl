@@ -3,7 +3,7 @@ import torch
 from mttl.datamodule.utils import get_tokenizer_with_args
 from mttl.models.modifiers.expert_containers import add_expert_to_transformer
 from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
-from mttl.models.modifiers.expert_containers.module_graph import Expert, ExpertInfo
+from mttl.models.modifiers.expert_containers.expert import Expert, ExpertInfo
 
 
 @pytest.mark.parametrize("padding_side", ["left", "right"])
