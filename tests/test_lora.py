@@ -8,6 +8,7 @@ from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.lora import (
     LoRAConfig,
     LoRA,
+    LoRAView,
     SkilledLoRAConfig,
     SkilledLoRAView,
     SkilledLoRA,
@@ -155,6 +156,23 @@ def test_skilled_lora_parallel_merge_with_weights():
     assert output[0, 0].item() == 2.25
     assert output[1, 0].item() == 4.0
     assert output.shape == (2, 2)
+
+    lora_a = torch.randn(1, config.lora_rank)
+    lora_b = torch.ones(config.lora_rank, 2)
+    l1 = LoRAView(config, layer, lora_a, lora_b)
+
+    lora_a = torch.randn(1, config.lora_rank)
+    lora_b = torch.ones(config.lora_rank, 2)
+    l2 = LoRAView(config, layer, lora_a, lora_b)
+
+    input = torch.ones(2, 3, 1)
+    output = LoRA.parallel_linear_forward(input, [l1, l2])
+
+    weights = torch.tensor([[1.0, 0.0], [0.0, 1.0]])
+    output_sk = SkilledLoRAView.parallel_linear_weighted_forward(
+        input, [SkilledLoRAView.from_loras([l1, l2])], weights
+    )
+    assert torch.allclose(output, output_sk)
 
 
 def test_skilled_lora_view():

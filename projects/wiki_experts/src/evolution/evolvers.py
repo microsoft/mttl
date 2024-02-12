@@ -21,7 +21,7 @@ from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from projects.wiki_experts.src.evolution.train_router import train_module
 from projects.wiki_experts.src.evolution.evaluators import Evaluator
-from mttl.models.modifiers.expert_containers.module_graph import Expert
+from mttl.models.modifiers.expert_containers.expert import Expert
 
 from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
 from mttl.utils import setup_logging, logger

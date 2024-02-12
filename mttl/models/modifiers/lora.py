@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import os
 from typing import List
 import numpy as np
 import torch
@@ -152,11 +153,12 @@ class LoRA(MergeableAdapter, ModifyMixin):
         if len(set([lora.layer for lora in loras])) > 1:
             raise ValueError("Cannot parallelize loras applied to different layers.")
 
-        # (n_examples, in_features, rank)
+        # (batch, in_features, rank)
         lora_a = torch.stack([lora.lora_a for lora in loras], dim=0)
-        # (n_examples, rank, out_features)
+        # (batch, rank, out_features)
         lora_b = torch.stack([lora.lora_b for lora in loras], dim=0)
-        # (n_examples,)
+
+        # (batch,)
         scaling = torch.cat(
             [torch.FloatTensor([lora.scaling]) for lora in loras], dim=0
         ).to(device=lora_a.device, dtype=lora_a.dtype)
@@ -192,8 +194,10 @@ class LoRA(MergeableAdapter, ModifyMixin):
 class SkilledLoRAConfig(LoRAConfig):
     n_skills: int = 1
     n_splits: int = 1
+    phi_2_align_heads: bool = False
 
 
+@register_modifier("skilled_lora", config_cls=SkilledLoRAConfig)
 class SkilledLoRA(LoRA):
     def __init__(
         self,
@@ -215,7 +219,7 @@ class SkilledLoRA(LoRA):
                 self.lora_a.data,
                 lora.lora_a.data.reshape(
                     1, self.n_splits, self.in_features // self.n_splits, self.rank
-                ),
+                ).to(device=self.lora_a.device, dtype=self.lora_a.dtype),
             ],
             dim=0,
         )
@@ -224,7 +228,7 @@ class SkilledLoRA(LoRA):
                 self.lora_b.data,
                 lora.lora_b.data.reshape(
                     1, self.rank, self.n_splits, self.out_features // self.n_splits
-                ),
+                ).to(device=self.lora_a.device, dtype=self.lora_a.dtype),
             ],
             dim=0,
         )
@@ -355,23 +359,25 @@ class SkilledLoRA(LoRA):
         if type(weights) == list:
             weights = torch.stack(weights, dim=0).to(device)
 
-        assert skilled_loras_a.shape[2] == 1, "Only 1 split is supported for now."
-        assert skilled_loras_b.shape[3] == 1, "Only 1 split is supported for now."
-        skilled_loras_a = skilled_loras_a.squeeze(2)
-        skilled_loras_b = skilled_loras_b.squeeze(3)
+        # assert skilled_loras_a.shape[2] == 1, "Only 1 split is supported for now."
+        # assert skilled_loras_b.shape[3] == 1, "Only 1 split is supported for now."
+        # skilled_loras_a = skilled_loras_a.squeeze(2)
+        # skilled_loras_b = skilled_loras_b.squeeze(3)
 
-        # up-type the input for lora computation
-        input_lora = input.to(dtype=skilled_loras[0].lora_a.dtype)
-        weights = weights.to(dtype=skilled_loras[0].lora_a.dtype)
+        # (n_examples, seq_len, out_features)
+        layer_out = skilled_loras[0].layer(input)
+        phi_2_align_heads = skilled_loras[0].config.phi_2_align_heads
 
-        # apply some dropout
+        input_lora = input.to(skilled_loras[0].lora_a.dtype)
         input_lora = skilled_loras[0].dropout_layer(input_lora)
+        weights = weights.to(dtype=skilled_loras[0].lora_a.dtype)
 
         # (n_examples,)
         scaling = torch.cat(
             [torch.FloatTensor([lora.scaling]) for lora in skilled_loras], dim=0
         ).to(device=device, dtype=skilled_loras[0].lora_a.dtype)
 
+        # make all ops in float32
         if num_skilled_loras == 1:
             # no batch, skilled lora is shared across all examples, remove batch dimension
             skilled_loras_a = skilled_loras_a.squeeze(0)
@@ -380,23 +386,38 @@ class SkilledLoRA(LoRA):
             scaling = scaling.squeeze(0)
 
             if weights.ndim == 1:
+                assert not phi_2_align_heads
+                # skilled_loras_a is skills x split x d x r
+                # skilled_loras_b is skills x r x split x d
                 if merge_after:
+                    skilled_loras_a, skilled_loras_b = skilled_loras_a.flatten(
+                        1, 2
+                    ), skilled_loras_b.flatten(2, 3)
                     W = torch.matmul(skilled_loras_a, skilled_loras_b)
                     W = torch.einsum("s,sdr->dr", (weights, W))
 
                     adapter_out = torch.matmul(input_lora, W) * scaling
                     del W
                 else:
-                    A = torch.einsum("s,sdr->dr", (weights, skilled_loras_a))
-                    B = torch.einsum("s,srd->rd", (weights, skilled_loras_b))
+                    A = torch.einsum("s,sqdr->qdr", (weights, skilled_loras_a))
+                    B = torch.einsum("s,srqd->rqd", (weights, skilled_loras_b))
+
+                    # combine n_splits, and d_split into a single dimension
+                    A, B = A.flatten(0, 1), B.flatten(1, 2)
 
                     # scaling is a float (only 1 skilled lora)
                     adapter_out = torch.matmul(torch.matmul(input_lora, A), B) * scaling
             elif weights.ndim == 2:
+                assert not phi_2_align_heads
                 # we are in the case in which we have a single skilled lora applied with different weights
                 if merge_after:
+                    # skilled_loras_a is skills x split x d x r
+                    # skilled_loras_b is skills x r x split x d
+                    skilled_loras_a, skilled_loras_b = skilled_loras_a.flatten(
+                        1, 2
+                    ), skilled_loras_b.flatten(2, 3)
                     W = torch.matmul(skilled_loras_a, skilled_loras_b)
-                    W = torch.einsum("bs,sdr->bdr", (weights, W))
+                    W = torch.einsum("bs,sqdo->bqdo", (weights, W))
 
                     if input_lora.ndim == 2:
                         adapter_out = torch.einsum("bd,bdr->br", (input_lora, W))
@@ -405,15 +426,54 @@ class SkilledLoRA(LoRA):
                         adapter_out = torch.bmm(input_lora, W) * scaling
                     del W
                 else:
-                    A = torch.einsum("bs,sdr->bdr", (weights, skilled_loras_a))
-                    B = torch.einsum("bs,srd->brd", (weights, skilled_loras_b))
+                    A = torch.einsum("bs,sqdr->bqdr", (weights, skilled_loras_a))
+                    B = torch.einsum("bs,srqd->brqd", (weights, skilled_loras_b))
+
+                    # combine n_splits, and d_split into a single dimension
+                    A, B = A.flatten(1, 2), B.flatten(2, 3)
 
                     if input_lora.ndim == 2:
                         partial_out = torch.einsum("bd,bdr->br", (input_lora, A))
                         adapter_out = torch.einsum("br,brd->bd", (partial_out, B))
                         adapter_out = adapter_out * scaling
-                    else:
+                    elif input_lora.ndim == 3:
                         adapter_out = torch.bmm(torch.bmm(input_lora, A), B) * scaling
+                    else:
+                        raise NotImplementedError(
+                            "Only 2D and 3D inputs are supported."
+                        )
+            elif weights.ndim == 3:
+                if merge_after:
+                    raise ValueError("Merge after is not supported for 3D weights.")
+                else:
+                    # we are in the case in which we have a single skilled lora applied with different weights
+                    A = torch.einsum("bqs,sqdr->bqdr", (weights, skilled_loras_a))
+                    B = torch.einsum("bqs,srqd->brqd", (weights, skilled_loras_b))
+
+                    if (
+                        phi_2_align_heads and B.size(-1) // A.size(-2) == 3
+                    ):  # last only true for Wqkv weight
+                        # phi_2 formats the B as  "... (three h d) -> ... three h d"
+                        # We want to make sure that the `h` here aligns with n_splits, or `q` index
+                        bs, rank, n_splits, d_split = B.shape
+                        # (h, 3 * d) -> (h, 3, d)
+                        B = B.view(bs, rank, n_splits, 3, d_split // 3)
+                        # (bs, r, h, 3, d) -> (bs, r, 3, h, d) -> ... (bs, r, 3 * h * d)
+                        B = B.transpose(2, 3).reshape(bs, rank, n_splits, d_split)
+
+                    # combine n_splits, and d_split into a single dimension
+                    A, B = A.flatten(1, 2), B.flatten(2, 3)
+
+                    if input_lora.ndim == 2:
+                        partial_out = torch.einsum("bd,bdr->br", (input_lora, A))
+                        adapter_out = torch.einsum("br,brd->bd", (partial_out, B))
+                        adapter_out = adapter_out * scaling
+                    elif input_lora.ndim == 3:
+                        adapter_out = torch.bmm(torch.bmm(input_lora, A), B) * scaling
+                    else:
+                        raise NotImplementedError(
+                            "Only 2D and 3D inputs are supported."
+                        )
         elif n_skills == 1:
             # this is basically standard lora forward, we are here by accident
             # !!!warning!!!! this ignores the weights
@@ -421,6 +481,11 @@ class SkilledLoRA(LoRA):
                 input, [sk_lora.to_loras()[0] for sk_lora in skilled_loras]
             )
         else:
+            assert skilled_loras_a.shape[2] == 1, "Only 1 split is supported for now."
+            assert skilled_loras_b.shape[3] == 1, "Only 1 split is supported for now."
+
+            skilled_loras_a = skilled_loras_a.squeeze(2)
+            skilled_loras_b = skilled_loras_b.squeeze(3)
             if merge_after:
                 W = torch.matmul(
                     skilled_loras_a, skilled_loras_b
@@ -449,8 +514,8 @@ class SkilledLoRA(LoRA):
                     adapter_out = torch.einsum("bsr,brd->bsd", (partial_out, B))
                     adapter_out = adapter_out * scaling[:, None, None]
 
-        layer_out = skilled_loras[0].layer(input)
-        return layer_out + adapter_out.to(dtype=layer_out.dtype)
+        # adapter out is float32
+        return layer_out + adapter_out.to(dtype=input.dtype)
 
 
 class LoRAView(LoRA):

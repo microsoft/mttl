@@ -14,17 +14,17 @@ from mttl.utils import logger
 from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
 from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
 from mttl.models.modifiers.expert_containers.selectors import *
-from mttl.models.modifiers.expert_containers.module_graph import Expert
+from mttl.models.modifiers.expert_containers.expert import Expert
 
 
 class ExpertContainer:
     __supports_configs__ = []
 
-    def __init__(self, config, task_id_container, layer, selector=None):
+    def __init__(self, config, info_container, layer, selector=None):
         self.config = config
         self.layer = layer
-        self.task_id_container = task_id_container
-        self.selector = selector or TaskNameSelector(task_id_container)
+        self.info_container = info_container
+        self.selector = selector or TaskNameSelector(info_container)
 
         self.experts: dict = None
         self.expert_infos = {}
@@ -109,9 +109,9 @@ class ExpertContainer:
 class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
     __supports_configs__ = [LoRAConfig]
 
-    def __init__(self, config, task_id_container, layer, selector=None):
+    def __init__(self, config, info_container, layer, selector=None):
         MergeableAdapter.__init__(self)
-        super().__init__(config, task_id_container, layer, selector)
+        super().__init__(config, info_container, layer, selector)
 
         if not isinstance(self.layer, nn.Linear):
             raise ValueError(
@@ -294,11 +294,11 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
     in memory in a single parameter.
     """
 
-    __supports_configs__ = [LoRAConfig]
+    __supports_configs__ = [SkilledLoRAConfig, LoRAConfig]
 
-    def __init__(self, config, task_id_container, layer, selector=None):
+    def __init__(self, config, info_container, layer, selector=None):
         MergeableAdapter.__init__(self)
-        super().__init__(config, task_id_container, layer, selector)
+        super().__init__(config, info_container, layer, selector)
 
         if not isinstance(self.layer, nn.Linear):
             raise ValueError(
@@ -315,7 +315,9 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             lora_dropout=config.lora_dropout,
             lora_init_b_random=config.lora_init_b_random,
             lora_rank=config.lora_rank,
+            n_splits=config.n_splits,
             n_skills=0,
+            phi_2_align_heads=config.phi_2_align_heads,
         )
         self.experts = SkilledLoRA(dummy_config, layer)
 
@@ -339,9 +341,30 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
 
     def route(self, input, selection, **kwargs):
         if isinstance(selection, ModulesAndWeightsSelectorOutput):
-            raise NotImplementedError()
+            module_output = SkilledLoRA.parallel_linear_weighted_forward(
+                input, [self.experts], [selection.weights]
+            )
+            return module_output
         elif isinstance(selection, ModulesSelectorOutput):
-            raise NotImplementedError()
+            indices = torch.LongTensor(
+                [
+                    self.expert_names.index(module)
+                    if module in self.expert_names
+                    else self.expert_names.index(self.default_expert_name)
+                    for module in selection.modules
+                ]
+            ).unsqueeze(1)
+            weights = (
+                torch.zeros(
+                    (len(selection.modules), self.experts.n_skills),
+                )
+                .scatter_add(1, indices, torch.ones((len(selection.modules), 1)))
+                .to(device=self.experts.lora_a.device, dtype=torch.float32)
+            )
+            module_output = SkilledLoRA.parallel_linear_weighted_forward(
+                input, [self.experts], [weights]
+            )
+            return module_output
         elif isinstance(
             selection, BatchSequenceModulesAndWeightsSelectorOutput
         ) or isinstance(selection, BatchModulesAndWeightsSelectorOutput):
@@ -384,7 +407,8 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
         if len(self.experts) > 0:
             selection = self.selector(input, container=self, **kwargs)
             return self.route(input, selection, **kwargs)
-        return self.layer(input)
+        else:
+            return self.layer(input)
 
 
 class KVExpertContainer(KVAdapter, ExpertContainer):
@@ -397,12 +421,12 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
 
     __supports_configs__ = [KVAdapterConfig]
 
-    def __init__(self, config, task_id_container, layer, selector=None):
+    def __init__(self, config, info_container, layer, selector=None):
         super().__init__(
             config,
-            task_id_container,
+            info_container,
             layer,
-            selector or KVTaskNameSelector(task_id_container),
+            selector or KVTaskNameSelector(info_container),
         )
 
         # Check if layer is an attention layer :

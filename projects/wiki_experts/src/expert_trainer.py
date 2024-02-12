@@ -8,12 +8,11 @@ from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.routing import RoutingInfo
 from transformers import AutoModelForCausalLM
 
-from mttl.models.modifiers.expert_containers.module_graph import ExpertInfo
+from mttl.models.modifiers.expert_containers.expert import ExpertInfo
 from mttl.models.utils import (
     EfficientCheckpointModule,
     prepare_model_for_kbit_training,
 )
-from mttl.models.modifiers.expert_containers.module_graph import Expert
 from projects.wiki_experts.src.config import ExpertConfig
 from mttl.models.modifiers.expert_containers.selectors import SelectorConfig
 
@@ -69,7 +68,30 @@ class ExpertTrainer(EfficientCheckpointModule):
         self._log_pref = kwargs.get("logging_prefix", "")
 
     def set_routing_infos(self, batch, generate=False):
-        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
+        self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
+
+    def forward_unlikelihood(self, batch, reduction="mean"):
+        # compute lm losses for all the options
+        loss = self.forward(batch, reduction="none")
+
+        num = 0
+        lm_loss, mc_loss = [], []
+        for i, num_options in enumerate(batch["num_options"]):
+            loss_slice = loss[num : num + num_options]
+            lm_loss.append(loss_slice[batch["labels_index"][i]])
+            mc_loss.append(
+                -torch.nn.functional.log_softmax(-loss_slice, dim=0)[
+                    batch["labels_index"][i]
+                ]
+            )
+            num += num_options
+
+        lm_loss = torch.stack(lm_loss)
+        mc_loss = torch.stack(mc_loss)
+        if reduction == "mean":
+            lm_loss = lm_loss.mean()
+            mc_loss = mc_loss.mean()
+        return lm_loss, mc_loss
 
     def forward(self, batch, reduction="mean"):
         input_ids, labels = batch["input_ids"], batch["labels"]
@@ -107,8 +129,15 @@ class ExpertTrainer(EfficientCheckpointModule):
         return loss
 
     def training_step(self, batch, _):
-        loss = self.forward(batch)
-        total_loss = loss
+        if "num_options" in batch:
+            loss, mc_loss = self.forward_unlikelihood(batch)
+            self.log(
+                f"{self._log_pref}train/mc_loss", loss, on_step=True, prog_bar=True
+            )
+            total_loss = loss + mc_loss
+        else:
+            loss = self.forward(batch)
+            total_loss = loss
 
         self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
         self.log(
@@ -132,7 +161,10 @@ class ExpertTrainer(EfficientCheckpointModule):
         self.log_loss(split="test")
 
     def test_step(self, batch, batch_idx):
-        loss = self.forward(batch, reduction="none")
+        if "num_options" in batch:
+            loss, _ = self.forward_unlikelihood(batch, reduction="none")
+        else:
+            loss = self.forward(batch, reduction="none")
         mean_loss = loss.sum() / loss.shape[0]
         self._inference_outputs += [(loss.detach().cpu(),)]
         return mean_loss
@@ -142,8 +174,10 @@ class ExpertTrainer(EfficientCheckpointModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss = self.forward(batch, reduction="none")
-
+        if "num_options" in batch:
+            loss, _ = self.forward_unlikelihood(batch, reduction="none")
+        else:
+            loss = self.forward(batch, reduction="none")
         mean_loss = loss.sum() / loss.shape[0]
         self._inference_outputs += [(loss.detach().cpu(),)]
         return mean_loss

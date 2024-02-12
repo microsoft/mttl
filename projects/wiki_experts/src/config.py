@@ -36,7 +36,6 @@ class ExpertConfig(Config):
         self.routing = "subject"
         self.mmlu_test_split = "test"
         self.load_module = None
-        self.module_graph = None
         self.micro_batch_size = None
         self.validation_portion = 0.03
 
@@ -54,15 +53,6 @@ class ExpertConfig(Config):
         self.moe_ent_free_bits = 0.0
         self.moe_top_k = -1
 
-        self.expand_val_set_w_downstream = False
-
-        self.eval_mmlu_callbacks_every = 0
-        self.eval_test_set_callback_every = 0
-        self.eval_rougeL_callback_every = 0
-        self.test_sets_callbacks = []
-
-        self.use_custom_valid_callback = False  # if True use custom callback to early stop on eval loss instead of lightning callback
-
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
 
@@ -75,8 +65,6 @@ class ExpertConfig(Config):
 
         self.eval_metric = "loss"
         self.use_vllm = False
-        self.reset_lr = False
-        self.reset_optim = False
 
         # for finetuning a library
         self.hf_repo_query = (
@@ -110,6 +98,13 @@ class ExpertConfig(Config):
         # Eval Library
         self.merge_or_route = None  # "uniform", "ties", "clown"
 
+        self.tasksets_path = None
+        self.remove_experts = None
+        self.create_transfer_matrix = False
+        self.es_metric = "loss"
+        self.n_ng_iterations = 30  # number of iterations for LoraHub
+        self.phi_2_align_heads = False
+        
     def post_init(self, silent=False):
         self._load_deprecated_configs(silent)
 
@@ -137,6 +132,11 @@ class ExpertConfig(Config):
             tasks = self.finetune_task_name.split(
                 "+"
             )  # use "+" for assign multiple task set vars to be found in task_sequences
+
+            task_sets = None
+            if self.tasksets_path is not None:
+                task_sets = json.load(open(self.tasksets_path))
+                
             for task_name in tasks:
                 if task_name in mttl.datamodule.task_sequences.__dict__:
                     task_names.extend(

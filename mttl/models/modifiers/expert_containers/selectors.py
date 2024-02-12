@@ -6,7 +6,9 @@ import math
 import numpy as np
 from torch import nn
 import torch.nn.functional as F
-from mttl.models.modifiers.routing import RoutingMixin
+
+# from mttl.models.modifiers.routing import RoutingMixin
+from mttl.utils import logger
 
 
 SELECTORS_NAME_TO_KLASS = {}
@@ -165,10 +167,9 @@ def forward_with_cache(func):
     return wrapper
 
 
-class Selector(RoutingMixin, nn.Module):
+class Selector(nn.Module):
     def __init__(self, info_container, config=None, **kwargs):
         nn.Module.__init__(self)
-        RoutingMixin.__init__(self, info_container)
 
         self.config = config
         self.expert_names = []
@@ -177,6 +178,7 @@ class Selector(RoutingMixin, nn.Module):
         self.total_calls_per_forward = 0
         self._calls_counter = 0
         self.layer_name = kwargs.get("layer_name", None)
+        self.info_container = info_container
 
     @property
     def clear_cache(self):
@@ -206,6 +208,14 @@ class Selector(RoutingMixin, nn.Module):
     @property
     def name(self):
         return f"{self.__layer_name__}"
+
+    @property
+    def n_experts(self):
+        return len(self.expert_names)
+
+    @property
+    def routing_infos(self):
+        return self.info_container.get("routing_infos", None)
 
     @abstractmethod
     def add_expert(self, expert_name: str, **kwargs):
@@ -237,24 +247,75 @@ class SelectorView:
 
 @dataclass
 class PolySelectorConfig(SelectorConfig):
+    n_splits: int = 1
+    task_names: List[str] = None
     pass
 
 
 @register_multi_expert_selector("poly_router", PolySelectorConfig)
 class PolySelector(Selector):
     """
-      eval_every=10_000
     Implements routing at a per-layer or per-model level
     """
 
-    def __init__(self, info_container, **kwargs) -> None:
-        super().__init__(info_container)
+    avg_selector_warned: bool = False
 
-        self.module_logits = nn.Parameter(torch.empty(1).uniform_(-1e-3, 1e-3))
+    def __init__(self, info_container, **kwargs) -> None:
+        super().__init__(info_container, **kwargs)
+
+        self.n_tasks = len(self.config.task_names) if self.config.task_names else 0
+
+        # We add an extra task for the default (average) expert if not found
+        self.module_logits = nn.Parameter(
+            torch.empty(self.n_tasks + 1, self.config.n_splits).uniform_(-1e-3, 1e-3)
+        )
 
     def _get_weights(self):
-        module_logits = torch.sigmoid(self.module_logits)
+        # Poly used for finetuning a single task
+        if self.n_tasks == 0:
+            task_ids = [0]
+        else:
+            # Poly for pretraining with multiple tasks
+            if hasattr(self.info_container["routing_infos"], "task_ids_from_name"):
+                task_ids = self.info_container["routing_infos"].task_ids_from_name
+            else:
+                task_ids = [
+                    self.config.task_names.index(t)
+                    if t in self.config.task_names
+                    else self.n_tasks
+                    for t in self.info_container["routing_infos"].task_names
+                ]
+                task_ids = torch.LongTensor(task_ids).to(self.module_logits.device)
+                self.info_container["routing_infos"].task_ids_from_name = task_ids
+            if task_ids.max() < self.n_tasks:
+                if PolySelector.avg_selector_warned:
+                    logger.warning(
+                        f"Task ids were found. Reverting to default task-based routing"
+                    )
+
+                PolySelector.avg_selector_warned = False
+            else:
+                if not PolySelector.avg_selector_warned:
+                    not_found_tasks = set(
+                        [
+                            t
+                            for t in self.info_container["routing_infos"].task_names
+                            if t not in self.config.task_names
+                        ]
+                    )
+                    logger.warning(
+                        f"Tasks {not_found_tasks} not in taining tasks. Defaulting to average selector."
+                    )
+                    PolySelector.avg_selector_warned = True
+
+                assert not self.training, "Unknown tasks during training"
+
+        module_logits = torch.sigmoid(self.module_logits[task_ids])
         module_weights = module_logits / (module_logits.sum(dim=-1, keepdim=True) + EPS)
+
+        module_weights = module_weights.view(
+            module_weights.size(0), self.config.n_splits, self.n_experts
+        )
         return module_weights
 
     @forward_with_cache
@@ -263,27 +324,6 @@ class PolySelector(Selector):
         modules = self.expert_names
         return ModulesAndWeightsSelectorOutput(modules, weights)
 
-    def get_merged_weights(self, container, **selector_kwargs) -> Dict:
-        """Return the merged weights for the experts in the container."""
-        if selector_kwargs.get("weights", None) is None:
-            weights = self.get_routing_weights()
-
-        merged_weights = {}
-        for name, expert in container.experts.items():
-            assert name in weights, f"Weight for expert {name} is not given"
-            expert_state_dict = expert.state_dict()
-            weight = weights[name]
-
-            for k, v in expert_state_dict.items():
-                if not "lora" in k:
-                    continue
-                value = weight * v
-                if k in merged_weights:
-                    merged_weights[k] += value
-                else:
-                    merged_weights[k] = value
-        return merged_weights
-
     def get_routing_weights(self):
         return {
             k: v.detach().item() for k, v in zip(self.expert_names, self._get_weights())
@@ -291,9 +331,12 @@ class PolySelector(Selector):
 
     def add_expert(self, expert_name: str, **kwargs):
         self.expert_names.append(expert_name)
-        self.module_logits.data = torch.empty(len(self.expert_names)).uniform_(
-            -1e-3, 1e-3
-        )
+        self.module_logits.data = torch.empty(
+            self.n_tasks + 1, self.config.n_splits * len(self.expert_names)
+        ).uniform_(-1e-3, 1e-3)
+
+        # Last expert is exactly uniform
+        self.module_logits.data[-1] = 0.0
 
 
 @dataclass
@@ -679,7 +722,12 @@ class ZeroPerTokenSelector(Selector):
 
 
 @dataclass
-class PolySelectorDirectConfig(SelectorConfig):
+class PolySelectorDirectConfig(PolySelectorConfig):
+    pass
+
+
+@dataclass
+class PolySelectorDirectConfigUniform(PolySelectorConfig):
     pass
 
 
@@ -691,7 +739,7 @@ class PolySelectorDirectConfigUniform(SelectorConfig):
 @register_multi_expert_selector("poly_router_dir", PolySelectorDirectConfig)
 class PolySelectorDirect(PolySelector):
     def __init__(self, info_container, **kwargs) -> None:
-        super().__init__(info_container)
+        super().__init__(info_container, **kwargs)
 
         self.module_logits_dict = nn.ParameterDict()
 
@@ -872,10 +920,6 @@ class KVSelector(Selector):
     @property
     def name(self):
         return f"{self.__layer_name__}"
-
-    @property
-    def n_experts(self):
-        return len(self.expert_names)
 
 
 @dataclass

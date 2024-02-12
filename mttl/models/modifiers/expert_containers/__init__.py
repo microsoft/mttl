@@ -7,7 +7,7 @@ from mttl.models.modifiers.expert_containers.selectors import (
 )
 from mttl.models.modifiers.expert_containers.expert_containers import *
 from mttl.utils import logger
-from mttl.models.modifiers.expert_containers.module_graph import Expert
+from mttl.models.modifiers.expert_containers.expert import Expert
 
 
 def _extract_identifier(string, match_on="finegrained"):
@@ -35,6 +35,12 @@ def get_container_class(modifier: str):
         if os.environ.get("COALESCED_LORA_CONTAINER", "False") == "1":
             return CoalescedLoRAExpertContainer
         return LoRAExpertContainer
+    elif modifier == "skilled_lora":
+        if not os.environ.get("COALESCED_LORA_CONTAINER", "False") == "1":
+            logger.warning(
+                "COALESCED_LORA_CONTAINER is not set to 1, but still using it for SkilledLoRA"
+            )
+        return CoalescedLoRAExpertContainer
     elif modifier == "kv_adapter":
         return KVExpertContainer
     else:
@@ -111,8 +117,8 @@ def add_expert_to_transformer(
     )
 
     # create a shared container for the task id
-    if not hasattr(transformer, "task_id_container"):
-        transformer.task_id_container = {}
+    if not hasattr(transformer, "info_container"):
+        transformer.info_container = {}
     if not hasattr(transformer, "selectors"):
         transformer.selectors = {}
 
@@ -152,7 +158,7 @@ def add_expert_to_transformer(
                                 # Special case when you have a decoder layer in an enc-dec model
                                 selector = get_selector(
                                     routing_config,
-                                    info_container=transformer.task_id_container,
+                                    info_container=transformer.info_container,
                                     layer=layer,
                                     training_config=training_config,
                                     layer_name=layer_name,
@@ -172,7 +178,7 @@ def add_expert_to_transformer(
                         CONTAINER_CLASS = get_container_class(model_modifier)
                         expert_container = CONTAINER_CLASS(
                             expert_config,
-                            transformer.task_id_container,
+                            transformer.info_container,
                             layer,
                             selector,
                         )

@@ -29,6 +29,8 @@ from huggingface_hub import (
 from functools import total_ordering
 from huggingface_hub.utils._errors import RepositoryNotFoundError
 
+from huggingface_hub import HfApi
+from mttl.utils import logger
 from azure.storage.blob import BlobServiceClient
 from azure.storage.blob.aio import BlobServiceClient as AsyncBlobServiceClient
 from azure.core.exceptions import (
@@ -37,7 +39,7 @@ from azure.core.exceptions import (
 )
 
 from mttl.utils import logger, remote_login
-from mttl.models.modifiers.expert_containers.module_graph import (
+from mttl.models.modifiers.expert_containers.expert import (
     Expert,
     load_expert,
     ExpertInfo,
