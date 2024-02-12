@@ -19,7 +19,6 @@ class LoRAConfig(ModifierConfig):
     lora_alpha: float = 16.0
     lora_dropout: float = 0.0
     lora_init_b_random: bool = False
-    try_merge_after_op: bool = False
 
 
 @register_modifier("lora", config_cls=LoRAConfig)
@@ -192,6 +191,7 @@ class LoRA(MergeableAdapter, ModifyMixin):
 class SkilledLoRAConfig(LoRAConfig):
     n_skills: int = 1
     n_splits: int = 1
+    try_merge_after_op: bool = False
 
 
 class SkilledLoRA(LoRA):
@@ -425,13 +425,13 @@ class SkilledLoRA(LoRA):
                 W = torch.matmul(
                     skilled_loras_a, skilled_loras_b
                 )  # (batch, n_skills, in_features, out_features)
-                W = torch.einsum("bs, bsdk->bdk", (weights, W))
+                W = torch.einsum("bs, bsdo->bdo", (weights, W))
 
                 if input_lora.ndim == 2:
-                    adapter_out = torch.einsum("bd,bdk->bk", (input_lora, W))
+                    adapter_out = torch.einsum("bd,bdo->bo", (input_lora, W))
                     adapter_out = adapter_out * scaling[:, None]
                 else:
-                    adapter_out = torch.einsum("bsd,bsdk->bdk", (input_lora, W))
+                    adapter_out = torch.einsum("bsd,bdo->bso", (input_lora, W))
                     adapter_out = adapter_out * scaling[:, None, None]
 
             else:
