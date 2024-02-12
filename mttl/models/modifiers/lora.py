@@ -19,6 +19,7 @@ class LoRAConfig(ModifierConfig):
     lora_alpha: float = 16.0
     lora_dropout: float = 0.0
     lora_init_b_random: bool = False
+    try_merge_after_op: bool = False
 
 
 @register_modifier("lora", config_cls=LoRAConfig)
@@ -191,7 +192,6 @@ class LoRA(MergeableAdapter, ModifyMixin):
 class SkilledLoRAConfig(LoRAConfig):
     n_skills: int = 1
     n_splits: int = 1
-    try_merge_after_op: bool = False
 
 
 class SkilledLoRA(LoRA):
