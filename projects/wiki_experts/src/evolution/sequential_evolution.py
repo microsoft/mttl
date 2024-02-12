@@ -40,7 +40,7 @@ from projects.wiki_experts.src.evolution.evaluators import (
 )
 
 
-from mttl.models.modifiers.expert_containers.module_graph import Expert
+from mttl.models.modifiers.expert_containers.expert import Expert
 
 from projects.wiki_experts.src.evolution.config import (
     EvolExpertConfig,

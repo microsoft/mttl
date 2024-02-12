@@ -29,6 +29,8 @@ from huggingface_hub import (
 from functools import total_ordering
 from huggingface_hub.utils._errors import RepositoryNotFoundError
 
+from huggingface_hub import HfApi
+from mttl.utils import logger
 from azure.storage.blob import BlobServiceClient
 from azure.storage.blob.aio import BlobServiceClient as AsyncBlobServiceClient
 from azure.core.exceptions import (
@@ -37,7 +39,7 @@ from azure.core.exceptions import (
 )
 
 from mttl.utils import logger, remote_login
-from mttl.models.modifiers.expert_containers.module_graph import (
+from mttl.models.modifiers.expert_containers.expert import (
     Expert,
     load_expert,
     ExpertInfo,
@@ -110,9 +112,12 @@ def retry(max_retries=10, wait_seconds=60):
                 f"Function {func.__name__} failed after {max_retries} attempts."
             )
 
+        return wrapper
+
+    return decorator
+
 
 class BackendEngine(ABC):
-
     @abstractmethod
     def snapshot_download(self, repo_id, allow_patterns=None):
         raise NotImplementedError
@@ -144,6 +149,7 @@ class BackendEngine(ABC):
     @abstractmethod
     def list_repo_files(self, repo_id):
         raise NotImplementedError
+
 
 class HuggingfaceHubEngine(BackendEngine):
     def snapshot_download(self, repo_id, allow_patterns=None):
@@ -176,8 +182,7 @@ class HuggingfaceHubEngine(BackendEngine):
 
 
 class BlobStorageEngine(BackendEngine):
-
-    def __init__(self, token:Optional[str] = None, cache_dir:Optional[str] = None):
+    def __init__(self, token: Optional[str] = None, cache_dir: Optional[str] = None):
         """Initialize the blob storage engine. The cache directory can be
         provided as an argument or through the environment variable BLOB_CACHE_DIR.
         If no cache directory is provided, the default cache directory ~/.cache/mttl is used.
@@ -190,7 +195,9 @@ class BlobStorageEngine(BackendEngine):
         super().__init__()
         self._token = token
         self.cache_dir = self._get_cache_dir(cache_dir)
-        logging.getLogger('azure').setLevel(logging.WARNING)  # Quiet down the azure logging
+        logging.getLogger("azure").setLevel(
+            logging.WARNING
+        )  # Quiet down the azure logging
 
     @staticmethod
     def _get_cache_dir(chache_dir: Optional[str] = None):
@@ -224,7 +231,9 @@ class BlobStorageEngine(BackendEngine):
     def _get_local_filepath(self, repo_id, filename):
         return os.path.join(self.cache_dir, repo_id, filename)
 
-    def snapshot_download(self, repo_id, allow_patterns: Optional[Union[List[str], str]] = None):
+    def snapshot_download(
+        self, repo_id, allow_patterns: Optional[Union[List[str], str]] = None
+    ):
         """Downloads the entire repository, or a subset of files if allow_patterns is provided.
         If allow_patterns is provided, paths must match at least one pattern from the allow_patterns.
 
@@ -250,11 +259,11 @@ class BlobStorageEngine(BackendEngine):
         return os.path.join(self.cache_dir, repo_id)
 
     def create_repo(self, repo_id, repo_type=None, exist_ok=True, private=True):
-        """ Creates a new repository. repo_type and private are ignored for blob storage."""
+        """Creates a new repository. repo_type and private are ignored for blob storage."""
         try:
             BlobServiceClient(self.token).create_container(name=repo_id)
         except ResourceExistsError as error:
-            error_message = 'A container with this name already exists'
+            error_message = "A container with this name already exists"
             if exist_ok:
                 print(error_message)
             else:
@@ -271,31 +280,39 @@ class BlobStorageEngine(BackendEngine):
             print(f"Container {repo_id} not found.")
 
     def create_commit(self, repo_id, operations, commit_message="", async_mode=False):
-        asyncio.run(self.async_create_commit(repo_id, operations, async_mode=async_mode))
+        asyncio.run(
+            self.async_create_commit(repo_id, operations, async_mode=async_mode)
+        )
 
     async def async_create_commit(self, repo_id, operations, async_mode=False):
         tasks = []
         for op in operations:
             if isinstance(op, CommitOperationAdd):
-                tasks.append(self._async_upload_blob(
-                    repo_id=repo_id,
-                    filename=op.path_in_repo,
-                    buffer=op.path_or_fileobj,
-                    overwrite=True,
-                ))
+                tasks.append(
+                    self._async_upload_blob(
+                        repo_id=repo_id,
+                        filename=op.path_in_repo,
+                        buffer=op.path_or_fileobj,
+                        overwrite=True,
+                    )
+                )
             elif isinstance(op, CommitOperationCopy):
-                tasks.append(self._async_copy_blob(
-                    source_repo_id=repo_id,
-                    source_filename=op.src_path_in_repo,
-                    destination_repo_id=repo_id,
-                    destination_filename=op.path_in_repo,
-                    overwrite=True,
-                ))
+                tasks.append(
+                    self._async_copy_blob(
+                        source_repo_id=repo_id,
+                        source_filename=op.src_path_in_repo,
+                        destination_repo_id=repo_id,
+                        destination_filename=op.path_in_repo,
+                        overwrite=True,
+                    )
+                )
             elif isinstance(op, CommitOperationDelete):
-                tasks.append(self._async_delete_blob(
-                    repo_id=repo_id,
-                    filename=op.path_in_repo,
-                ))
+                tasks.append(
+                    self._async_delete_blob(
+                        repo_id=repo_id,
+                        filename=op.path_in_repo,
+                    )
+                )
         if async_mode:
             await asyncio.gather(*tasks)
         else:
@@ -313,21 +330,32 @@ class BlobStorageEngine(BackendEngine):
     def repo_info(self, repo_id):
         class RepoInfo:
             pass
+
         container_client = BlobServiceClient(self.token).get_container_client(repo_id)
         container_properties = container_client.get_container_properties()
         repo_info = RepoInfo()
-        repo_info.lastModified = container_properties.last_modified.strftime("%Y-%m-%d %H:%M:%S")
+        repo_info.lastModified = container_properties.last_modified.strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
         return repo_info
 
     def list_repo_files(self, repo_id):
         """List all files in a repository. The files might not be downloaded locally."""
         try:
-            container_client = BlobServiceClient(self.token).get_container_client(repo_id)
+            container_client = BlobServiceClient(self.token).get_container_client(
+                repo_id
+            )
             return [b.name for b in container_client.list_blobs()]
         except ResourceNotFoundError as error:
             raise ValueError(f"Repository {repo_id} not found") from error
 
-    async def async_upload_blobs(self, repo_id: str, filenames: Union[List[str], str], buffers=None, overwrite=False):
+    async def async_upload_blobs(
+        self,
+        repo_id: str,
+        filenames: Union[List[str], str],
+        buffers=None,
+        overwrite=False,
+    ):
         is_str = isinstance(filenames, str)
         if is_str:
             filenames = [filenames]
@@ -345,7 +373,9 @@ class BlobStorageEngine(BackendEngine):
 
     async def _async_upload_blob(self, repo_id, filename, buffer=None, overwrite=False):
         async with AsyncBlobServiceClient(self.token) as blob_service_client:
-            blob_client = blob_service_client.get_blob_client(container=repo_id, blob=filename)
+            blob_client = blob_service_client.get_blob_client(
+                container=repo_id, blob=filename
+            )
             if buffer is not None:
                 await blob_client.upload_blob(buffer, overwrite=overwrite)
             else:
@@ -353,20 +383,23 @@ class BlobStorageEngine(BackendEngine):
                 with open(file=local_cache, mode="rb") as blob_file:
                     await blob_client.upload_blob(blob_file, overwrite=overwrite)
 
-    async def async_download_blobs(self, repo_id: str, filesnames: Union[List[str], str]) -> str:
+    async def async_download_blobs(
+        self, repo_id: str, filesnames: Union[List[str], str]
+    ) -> str:
         is_str = isinstance(filesnames, str)
         if is_str:
             filesnames = [filesnames]
         tasks = [
-            self._async_download_blob(repo_id, filename)
-            for filename in filesnames
+            self._async_download_blob(repo_id, filename) for filename in filesnames
         ]
         local_filenames = await asyncio.gather(*tasks)
         return local_filenames[0] if is_str else local_filenames
 
     async def _async_download_blob(self, repo_id, filename):
         async with AsyncBlobServiceClient(self.token) as blob_service_client:
-            blob_client = blob_service_client.get_blob_client(container=repo_id, blob=filename)
+            blob_client = blob_service_client.get_blob_client(
+                container=repo_id, blob=filename
+            )
             local_filename = self._get_local_filepath(repo_id, filename)
             os.makedirs(os.path.dirname(local_filename), exist_ok=True)
             with open(file=local_filename, mode="wb") as blob_file:
@@ -375,8 +408,20 @@ class BlobStorageEngine(BackendEngine):
                 blob_file.write(data)
             return local_filename
 
-    async def async_copy_blobs(self, source_repo_ids, source_filenames, destination_repo_ids, destination_filenames, overwrite=True):
-        inputs = [source_repo_ids, source_filenames, destination_repo_ids, destination_filenames]
+    async def async_copy_blobs(
+        self,
+        source_repo_ids,
+        source_filenames,
+        destination_repo_ids,
+        destination_filenames,
+        overwrite=True,
+    ):
+        inputs = [
+            source_repo_ids,
+            source_filenames,
+            destination_repo_ids,
+            destination_filenames,
+        ]
         # if any input is a string, convert it to a list
         inputs = [[i] if isinstance(i, str) else i for i in inputs]
 
@@ -390,31 +435,44 @@ class BlobStorageEngine(BackendEngine):
                 source_filename,
                 destination_repo_id,
                 destination_filename,
-                overwrite=overwrite
+                overwrite=overwrite,
             )
-            for source_repo_id, source_filename, destination_repo_id, destination_filename
-            in zip(inputs[0], inputs[1], inputs[2], inputs[3])
+            for source_repo_id, source_filename, destination_repo_id, destination_filename in zip(
+                inputs[0], inputs[1], inputs[2], inputs[3]
+            )
         ]
         await asyncio.gather(*tasks)
 
-    async def _async_copy_blob(self, source_repo_id, source_filename, destination_repo_id, destination_filename, overwrite=True):
+    async def _async_copy_blob(
+        self,
+        source_repo_id,
+        source_filename,
+        destination_repo_id,
+        destination_filename,
+        overwrite=True,
+    ):
         async with AsyncBlobServiceClient(self.token) as blob_service_client:
-            source_blob_client = blob_service_client.get_blob_client(container=source_repo_id, blob=source_filename)
-            destination_blob_client = blob_service_client.get_blob_client(container=destination_repo_id, blob=destination_filename)
-            await destination_blob_client.upload_blob_from_url(source_url=source_blob_client.url, overwrite=overwrite)
+            source_blob_client = blob_service_client.get_blob_client(
+                container=source_repo_id, blob=source_filename
+            )
+            destination_blob_client = blob_service_client.get_blob_client(
+                container=destination_repo_id, blob=destination_filename
+            )
+            await destination_blob_client.upload_blob_from_url(
+                source_url=source_blob_client.url, overwrite=overwrite
+            )
 
     async def async_delete_blobs(self, repo_id: str, filesnames: Union[List[str], str]):
         if isinstance(filesnames, str):
             filesnames = [filesnames]
-        tasks = [
-            self._async_delete_blob(repo_id, filename)
-            for filename in filesnames
-        ]
+        tasks = [self._async_delete_blob(repo_id, filename) for filename in filesnames]
         await asyncio.gather(*tasks)
 
     async def _async_delete_blob(self, repo_id, filename):
         async with AsyncBlobServiceClient(self.token) as blob_service_client:
-            blob_client = blob_service_client.get_blob_client(container=repo_id, blob=filename)
+            blob_client = blob_service_client.get_blob_client(
+                container=repo_id, blob=filename
+            )
             await blob_client.delete_blob()
 
 
@@ -1101,8 +1159,32 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
 class BlobExpertLibrary(ExpertLibrary, BlobStorageEngine):
     pass
 
+
 class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
     pass
+
+
+class VirtualLocalLibrary(LocalExpertLibrary):
+    """
+    A virtual library is not stored on disk, but only in memory. Useful for temporary library objects used during runtime.
+    """
+
+    def _upload_metadata(self, metadata):
+        pass
+
+    def _upload_weights(self, expert_name, expert_dump):
+        pass
+
+    def _update_readme(self):
+        pass
+
+    @classmethod
+    def from_local(cls, local_lib: LocalExpertLibrary):
+        new_lib = VirtualLocalLibrary(repo_id=local_lib.repo_id)
+        for name, expert in local_lib.items():
+            if expert not in new_lib:
+                new_lib.add_expert(expert)
+        return new_lib
 
 
 def get_best_expert_for_score(library: HFExpertLibrary, hash) -> Expert:
@@ -1143,14 +1225,14 @@ def get_best_expert_for_task(library: HFExpertLibrary, task, hash) -> Expert:
 
 
 def get_expert_library(
-        repo_id,
-        token: str = None,
-        model_name=None,
-        selection=None,
-        exclude_selection=None,
-        create=False,
-        ignore_sliced=False,
-        expert_library_type: str = None,
+    repo_id,
+    token: str = None,
+    model_name=None,
+    selection=None,
+    exclude_selection=None,
+    create=False,
+    ignore_sliced=False,
+    expert_library_type: str = None,
 ):
     """Select the appropriate expert library based on the following order of priority:
     1. If expert_library_type is provided, uses that type.

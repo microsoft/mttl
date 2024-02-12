@@ -2,7 +2,7 @@ import os
 import sys
 from pytorch_lightning import seed_everything
 from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
-from mttl.models.modifiers.expert_containers.module_graph import Expert, ExpertInfo
+from mttl.models.modifiers.expert_containers.expert import Expert, ExpertInfo
 from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -124,8 +124,6 @@ def run_eval(args):
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:
             module.load_expert(**expert_kwargs, expert_library=library)
-    elif args.module_graph is not None:
-        module.load_from_graph_string(args.module_graph, expert_library=library)
 
     if args.mmlu_use_hard_prompt:
         config = HardPromptConfig(
