@@ -35,4 +35,4 @@ promptsource @ git+https://github.com/bigscience-workshop/promptsource@7dab96a3e
 pytest-mock
 azure-storage-blob
 azure-identity
-sklearn
+scikit-learn
