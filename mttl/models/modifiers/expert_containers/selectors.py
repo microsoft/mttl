@@ -554,6 +554,109 @@ class ZeroPerTokenSelector(Selector):
 
 
 @dataclass
+class PhatgooseSelectorConfig(SelectorConfig):
+    top_k: int = -1
+
+
+class SigmoidGate(nn.Module):
+    def __init__(self, input_dim, output_dim=1, **kwargs):
+        super().__init__()
+        self.v = nn.Parameter(torch.zeros(output_dim, input_dim))
+
+    def forward(self, x):
+        return torch.sigmoid(F.linear(x, self.v))
+
+
+class Router(nn.Module):
+    def __init__(
+        self, gates: nn.ModuleList[SigmoidGate], hard=False, t=1, top_k=2, **kwargs
+    ):
+        super().__init__()
+        self.hard = hard
+        self.temperature = t
+        self.expert_embeddings = torch.stack(
+            [g.v.T for g in gates]
+        )  # (n_experts, input_dim)
+        # standardize the expert embeddings
+        self.expert_embeddings = (
+            self.expert_embeddings / self.expert_embeddings.norm(dim=1, keepdim=True)
+            + 1e-6
+        )
+
+    def forward(self, x):
+        # x: (batch_size, s, d)
+        # expert_embeddings: (n_experts, d)
+        # standardize the input
+        x = x / x.norm(dim=-1, keepdim=True) + 1e-6  # (batch_size, s, d)
+        # cosine similarity of each token with each expert
+        sim = torch.einsum(
+            "bsd,ed->bse", x, self.expert_embeddings
+        )  # (batch_size, s, n_experts)
+        if self.hard:
+            return torch.topk(sim, self.top_k, dim=-1)
+        else:
+            return F.softmax(sim / self.temperature, dim=-1)
+
+
+@register_multi_expert_selector("phatgoose_selector", PhatgooseSelectorConfig)
+class PhatgooseSelector(Selector):
+    def __init__(
+        self, info_container, config: PhatgooseSelectorConfig, **kwargs
+    ) -> None:
+        super().__init__(info_container, config)
+
+        if "layer" not in kwargs:
+            raise ValueError(
+                "PhatgooseSelector requires a layer to be passed in kwargs to infer the input dimension."
+            )
+
+        self.top_k = config.top_k
+        self.input_dim = kwargs["layer"].weight.data.shape[-1]
+
+        self.gates = nn.ParameterDict()
+        self.router = None
+
+        self.taskname2expert = (
+            {}
+        )  # several task can point to the same selector, e.g. if we train on cluster experts
+        self.default_expert_name = None
+
+    @forward_with_cache
+    def forward(self, input, **kwargs) -> BatchSequenceModulesAndWeightsSelectorOutput:
+        if len(self.gates) == 1:
+            # selectors for tasks are trained independently
+            # all samples go through the same selector
+            scores = self.gates[self.default_expert_name](input)
+            return BatchSequenceModulesAndWeightsSelectorOutput(
+                torch.zeros_like(scores, dtype=torch.int8), scores
+            )
+        else:
+            # the inference procedure: we ave multiple gates
+            # parallel forward + top-k selection
+            assert len(self.gates) == len(self.expert_names)
+            scores = self.router(input)
+            return BatchSequenceModulesAndWeightsSelectorOutput(
+                torch.zeros_like(scores, dtype=torch.int8), scores
+            )
+
+    def add_expert(self, expert_name: str, **kwargs):
+        self.expert_names.append(expert_name)
+        expert_info = kwargs["expert_info"]
+        expert_tasks = expert_info.expert_task_name.split(",")
+        self.default_expert_name = expert_name
+        for task in expert_tasks:
+            if task not in self.taskname2expert:
+                self.taskname2expert[task] = expert_name
+
+        self.gates[expert_name] = SigmoidGate(self.input_dim)
+
+        if len(self.gates) > 1:
+            self.router = Router(
+                self.gates.values(), hard=self.top_k > 0, top_k=self.top_k
+            )
+
+
+@dataclass
 class PolySelectorDirectConfig(PolySelectorConfig):
     pass
 
