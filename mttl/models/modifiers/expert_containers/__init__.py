@@ -181,7 +181,11 @@ def add_expert_to_transformer(
                             transformer.info_container,
                             layer,
                             selector,
-                            try_merge_after_op=routing_config.try_merge_after_op,
+                            try_merge_after_op=(
+                                routing_config.try_merge_after_op
+                                if routing_config
+                                else False
+                            ),
                         )
                         expert_container.__layer_name__ = layer_name
                         setattr(
