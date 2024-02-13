@@ -417,7 +417,7 @@ class SkilledLoRA(LoRA):
                         1, 2
                     ), skilled_loras_b.flatten(2, 3)
                     W = torch.matmul(skilled_loras_a, skilled_loras_b)
-                    W = torch.einsum("bs,sqdo->bqdo", (weights, W))
+                    W = torch.einsum("bs,sdo->bdo", (weights, W))
 
                     if input_lora.ndim == 2:
                         adapter_out = torch.einsum("bd,bdr->br", (input_lora, W))

@@ -34,6 +34,7 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     SVDInputExtractor,
     SVDInputExtractorConfig,
 )
+from mttl.models.modifiers.expert_containers.expert_containers import ExpertContainer
 
 
 def get_hidden_states(library, args):
@@ -166,7 +167,7 @@ def run_multitask(args: ExpertConfig):
         ties_expert = TiesMerge(cfg).transform(library)
         module = MultiExpertModel(**vars(ties_expert.training_config)).to("cuda")
         module.add_expert_instance(ties_expert, is_default=True)
-    elif args.merge_or_route == "clown":
+    elif args.merge_or_route in ["clown", "clown_lora_after_op"]:
         an_expert = library[next(iter(library.keys()))]
         args_copy = deepcopy(an_expert.training_config)
         args_copy.router_selector = "clown_router"
@@ -181,6 +182,10 @@ def run_multitask(args: ExpertConfig):
         module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
         patch_prototypes(module, library, args)
+        if args.merge_or_route == "clown_lora_after_op":
+            for m in module.modules():
+                if isinstance(m, ExpertContainer):
+                    m.config.try_merge_after_op = True
         module = module.to("cuda")
 
     if args.pipeline_eval_tasks == "all":
