@@ -595,39 +595,3 @@ class SkilledLoRAView(SkilledLoRA):
             lora_b=torch.stack([lora.lora_b for lora in loras], dim=0).unsqueeze(2),
         )
         return skilled_lora
-
-
-class SkilledLoRA_MergeLoraAfterOP(SkilledLoRA):
-    def __init__(
-        self,
-        config,
-        layer,
-    ):
-        super().__init__(config, layer)
-        self.merge_after_op = config.merge_after_op
-
-    def forward_linear_(self, input, weights):
-        if not self.merge_after_op:
-            return super().forward_linear_(input, weights)
-
-        layer_out = self.layer(input)
-
-        # uptype
-        input_lora = input.to(self.lora_a.dtype)
-
-        # some dropout
-        input_lora = self.dropout_layer(input_lora)
-
-        bs, _, _ = weights.size()
-        adapter_out = torch.einsum(
-            "bsd,qkdr->bsqkr", (input_lora, self.lora_a)
-        )  # bs seq x n_splits x n_skills x rank
-        adapter_out = torch.einsum(
-            "bsqkr,qkrd->bsqkd", (adapter_out, self.lora_b)
-        )  # bs x seq x n_splits x n_skills x D
-        adapter_out = torch.einsum(
-            "bsqkd,bqk->bsd", (adapter_out, weights)
-        )  # bs x seq x n_splits x D
-        adapter_out *= self.scaling
-
-        return layer_out + adapter_out.to(input.dtype)
