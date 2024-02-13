@@ -726,7 +726,9 @@ class ZeroPerTokenSelector(Selector):
 @dataclass
 class PhatgooseSelectorConfig(SelectorConfig):
     moe_top_k: int = 2  # negative number means we take all
-    router_temp: float = 1.0
+    router_temp: float = (
+        -1
+    )  # negative value means we use the default \sqrt(d) temp, where n is the input dimension.
 
 
 class SigmoidGate(nn.Module):
@@ -740,7 +742,7 @@ class SigmoidGate(nn.Module):
 
 class Router(nn.Module):
     def __init__(
-        self, gates: nn.ModuleList, hard=False, t=1, top_k=2, device="cuda", **kwargs
+        self, gates: nn.ModuleList, hard=False, t=-1, top_k=2, device="cuda", **kwargs
     ):
         super().__init__()
         self.hard = hard
@@ -764,10 +766,13 @@ class Router(nn.Module):
         sim = torch.einsum(
             "bsd,ed->bse", x, self.expert_embeddings
         )  # (batch_size, seq, n_experts)
+        temp = self.temperature if self.temperature > 0 else np.sqrt(x.shape[-1])
+
         if self.hard:
-            return torch.topk(sim, self.moe_top_k, dim=-1)
+            modules = torch.topk(sim, self.moe_top_k, dim=-1)
+            return modules[1], F.softmax(modules[0] / temp, dim=-1)
         else:
-            return F.softmax(sim / self.temperature, dim=-1)
+            return None, F.softmax(sim / temp, dim=-1)
 
 
 @register_multi_expert_selector("phatgoose_selector", PhatgooseSelectorConfig)
@@ -811,11 +816,9 @@ class PhatgooseSelector(Selector):
             # the inference procedure: we ave multiple gates
             # parallel forward + top-k selection
             assert len(self.gates) == len(self.expert_names)
-            scores = self.router(input)
-            if self.top_k > 0:
-                raise NotImplementedError("Top-k routing not implemented yet.")
+            modules, scores = self.router(input)
             return BatchSequenceModulesAndWeightsSelectorOutput(
-                modules=None, weights=scores
+                modules=modules, weights=scores
             )
 
     def add_expert(self, expert_name: str, **kwargs):
