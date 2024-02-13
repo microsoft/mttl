@@ -206,7 +206,10 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                 [self.get(module) for module in selection.modules]
             )
             return SkilledLoRA.parallel_linear_weighted_forward(
-                input, [skilled_lora], [selection.weights]
+                input,
+                [skilled_lora],
+                [selection.weights],
+                merge_after=self.config.try_merge_after_op,
             )
         elif isinstance(selection, ModulesSelectorOutput):
             return LoRA.parallel_linear_forward(
