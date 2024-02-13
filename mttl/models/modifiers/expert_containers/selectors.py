@@ -467,6 +467,11 @@ class ClownSelector(Selector):
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchSequenceModulesAndWeightsSelectorOutput:
         # do routing business on fp32
+        temp = (
+            self.config.router_temp
+            if self.config.router_temp > 0
+            else np.sqrt(input.shape[-1])
+        )
         if self.prototypes.size(0) != len(self.expert_names):
             raise ValueError("Prototypes not initialized correctly.")
 
@@ -484,9 +489,7 @@ class ClownSelector(Selector):
             if self.config.proto_init == "svd":
                 router_logits = router_logits.abs()
 
-            routing_weights = F.softmax(
-                router_logits / self.config.router_temp, dim=-1, dtype=torch.float
-            )
+            routing_weights = F.softmax(router_logits / temp, dim=-1, dtype=torch.float)
         else:
             attn_mask = self.info_container["routing_infos"].attention_mask
             if sq == attn_mask.size(1):
@@ -521,9 +524,7 @@ class ClownSelector(Selector):
             router_logits = F.linear(router_input, self.prototypes)
             if self.config.proto_init == "svd":
                 router_logits = router_logits.abs()
-            routing_weights = F.softmax(
-                router_logits / self.config.router_temp, dim=-1, dtype=torch.float
-            )
+            routing_weights = F.softmax(router_logits / temp, dim=-1, dtype=torch.float)
 
         if routing_weights.ndim == 2:
             routing_weights = routing_weights.unsqueeze(1).expand(
