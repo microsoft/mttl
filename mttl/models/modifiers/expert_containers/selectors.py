@@ -739,7 +739,7 @@ class SigmoidGate(nn.Module):
         self.v = nn.Parameter(torch.zeros(output_dim, input_dim))
 
     def forward(self, x):
-        return torch.sigmoid(F.linear(x, self.v))
+        return torch.sigmoid(F.linear(x, self.v, bias=None))
 
 
 class Router(nn.Module):
@@ -758,17 +758,20 @@ class Router(nn.Module):
             self.expert_embeddings - self.expert_embeddings.mean(dim=-1, keepdim=True)
         ) / (self.expert_embeddings.std(dim=-1, keepdim=True) + 1e-6)
 
-    def forward(self, x):
+    def forward(self, input):
         # x: (batch_size, seq, d)
         # expert_embeddings: (n_experts, d)
         # standardize the input
-        x = (x - x.mean(dim=-1, keepdim=True)) / (x.std(dim=-1, keepdim=True) + 1e-6)
-        self.expert_embeddings = self.expert_embeddings.to(x.dtype)
+        input = (input - input.mean(dim=-1, keepdim=True)) / (
+            input.std(dim=-1, keepdim=True) + 1e-6
+        )
+        # perform routing business in fp32 as in Clown
+        input = input.to(self.expert_embeddings.dtype)
         # cosine similarity of each token with each expert
         sim = torch.einsum(
-            "bsd,ed->bse", x, self.expert_embeddings
+            "bsd,ed->bse", input, self.expert_embeddings
         )  # (batch_size, seq, n_experts)
-        temp = self.temperature if self.temperature > 0 else np.sqrt(x.shape[-1])
+        temp = self.temperature if self.temperature > 0 else np.sqrt(input.shape[-1])
 
         if self.hard:
             weights, module_indices = torch.topk(sim, self.moe_top_k, dim=-1)
