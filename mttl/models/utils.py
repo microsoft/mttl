@@ -458,5 +458,6 @@ def model_loader_helper(model_name, device_map="auto", load_in_8bit=False):
             model_name,
             device_map=device_map,
             load_in_8bit=load_in_8bit,
+            trust_remote_code=True,
         )
     return model_object

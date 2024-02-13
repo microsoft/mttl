@@ -1,0 +1,1 @@
+python run_mbc_clustering.py -k model=EleutherAI/gpt-neo-1.3B hf_lib_id=ostapeno/library-gptneo_1B_flan_5ep_underparam
