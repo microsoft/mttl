@@ -189,7 +189,6 @@ def run_multitask(args: ExpertConfig):
         module = module.to("cuda")
     elif args.merge_or_route == "phatgoose":
         # phatgoose dfoes merging after by default
-        # but it seem to be to memory expensive here
         for k, expert in library.items():
             expert.expert_config.try_merge_after_op = True
         an_expert = library[next(iter(library.keys()))]
