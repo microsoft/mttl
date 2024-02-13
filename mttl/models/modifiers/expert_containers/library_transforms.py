@@ -317,7 +317,8 @@ class HiddenStateComputer(LibraryTransform):
 
     def _track_hidden_states(self, model, keys=None):
         model.container = {}
-
+        if model.model is None:
+            raise ValueError("Model must have a model attribute")
         if self.config.track == "last_layer":
             # Add a hook to the last layer
             def fetch_input(module, input, output):
@@ -372,7 +373,7 @@ class HiddenStateComputer(LibraryTransform):
             )
 
         # old name : 'dataset_centroids--False-100-each_layer-last'
-        print("save_name", save_name)
+        logger.info("save_name", save_name)
 
         output = library.get_auxiliary_data(data_type=save_name + ".bin")
         if len(output) == len(library) and not self.config.recompute:
