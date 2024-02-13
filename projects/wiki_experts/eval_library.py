@@ -2,13 +2,14 @@ import os
 import sys
 import json
 import torch
+import copy
 from copy import deepcopy
 import torch.nn.functional as F
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
 from mttl.models.modifiers.expert_containers.selectors import ClownSelector
-from mttl.models.modifiers.expert_containers.expert import Expert
+from mttl.models.modifiers.lora import LoRAConfig
 
 
 from pytorch_lightning import seed_everything
@@ -33,6 +34,7 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     SVDInputExtractor,
     SVDInputExtractorConfig,
 )
+from mttl.models.modifiers.expert_containers.expert_containers import ExpertContainer
 
 
 def get_hidden_states(library, args):
@@ -147,12 +149,25 @@ def run_multitask(args: ExpertConfig):
         ).transform(library)
         module = MultiExpertModel(**vars(expert.training_config)).to("cuda")
         module.add_expert_instance(expert, is_default=True)
+    elif args.merge_or_route == "uniform_lora_after_op":
+        # Here we merge the LoRa experts after the outer product
+        # we cannot really do it with the lib transform, cause this would require storing large matrices in memory
+        # Instead we do it with a uniform selector
+        for k, expert in library.items():
+            expert.expert_config.try_merge_after_op = True
+        expert_names = list(library.keys())
+        expert = copy.deepcopy(library[expert_names[0]])
+        assert type(expert.expert_info.expert_config) == LoRAConfig
+        config = expert.training_config
+        config.router_selector = "uniform"
+        module = MultiExpertModel(**vars(config)).to("cuda")
+        module.add_experts_from_library(library)
     elif args.merge_or_route == "ties":
         cfg = TiesMergeConfig(top_k=args.transform_sparsity)
         ties_expert = TiesMerge(cfg).transform(library)
         module = MultiExpertModel(**vars(ties_expert.training_config)).to("cuda")
         module.add_expert_instance(ties_expert, is_default=True)
-    elif args.merge_or_route == "clown":
+    elif args.merge_or_route in ["clown", "clown_lora_after_op"]:
         an_expert = library[next(iter(library.keys()))]
         args_copy = deepcopy(an_expert.training_config)
         args_copy.router_selector = "clown_router"
@@ -167,6 +182,10 @@ def run_multitask(args: ExpertConfig):
         module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
         patch_prototypes(module, library, args)
+        if args.merge_or_route == "clown_lora_after_op":
+            for m in module.modules():
+                if isinstance(m, ExpertContainer):
+                    m.config.try_merge_after_op = True
         module = module.to("cuda")
     elif args.merge_or_route == "phatgoose":
         an_expert = library[next(iter(library.keys()))]
@@ -195,7 +214,7 @@ def run_multitask(args: ExpertConfig):
         )
         scores = runner.run(module)
 
-    # try to fetch routing statistifs
+    # try to fetch routing statistics
     routing_stats = {}
     for task_name in module.model.task_id_container.keys():
         if task_name == "routing_infos":
