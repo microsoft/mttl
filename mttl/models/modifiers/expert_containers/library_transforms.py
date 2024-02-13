@@ -1,11 +1,17 @@
 from dataclasses import dataclass
 from typing import Any
-from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
+from mttl.models.modifiers.expert_containers.expert_library import (
+    get_expert_library,
+    ExpertLibrary,
+)
 from mttl.models.modifiers.expert_containers.expert import Expert
 from mttl.utils import logger
 from mttl.models.modifiers.modify_model import get_modifier_type
 from mttl.models.utils import model_loader_helper
 from typing import Optional
+from sklearn.cluster import KMeans
+from collections import defaultdict
+from sklearn.metrics.pairwise import cosine_similarity
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
 
 import copy
@@ -368,3 +374,70 @@ class DatasetCentroidComputer(LibraryTransform):
                         force=True,  # make sure we overwrite
                     )
         return output
+
+
+@dataclass
+class MBClusteringTransformConfig(SVDEmbeddingTransformConfig):
+    random_state: int = 42
+    recompute_embeddings: bool = False  # if 'True', recompute the SVD embeddings
+    k: int = 10
+
+
+class MBCWithCosSimTransform(LibraryTransform):
+    """
+    Computes clusters based on the embedding similarity of the experts.
+    The input to KMeans is the cosine similarity matrix between the experts' embeddings.
+    """
+
+    def __init__(self, config: MBClusteringTransformConfig = None):
+        super().__init__(config or MBClusteringTransformConfig())
+
+    def transform(
+        self, library: ExpertLibrary, default_args=None
+    ) -> dict[str, list[str]]:
+        def get_svd_embedding(lib: ExpertLibrary, expert_name: str):
+            try:
+                embeddings = lib.get_auxiliary_data(
+                    data_type="embeddings", expert_name=expert_name
+                )
+            except ValueError:
+                return None
+            return embeddings["svd"]["embeddings"]
+
+        def create_embeddings():
+            svd_embedder = SVDEmbeddingTransform(
+                self.config,
+                random_state=self.config.random_state,
+            )
+            embeddings, svd = svd_embedder.transform(
+                library, upload_to_hf=True, force=True
+            )
+            del svd_embedder
+            return embeddings, svd
+
+        embeds = library.get_auxiliary_data("embeddings")
+        if len(embeds) != len(library) or self.config.recompute_embeddings:
+            logger.info("Recomputing embeddings")
+            create_embeddings()
+
+        # module to embedding
+        module2embed = {}
+        for name in library.keys():
+            module2embed[name] = get_svd_embedding(library, name)
+
+        # Extract the embeddings as a numpy array
+        embeddings = np.array(list(module2embed.values()))
+        cosine_sim_matrix = cosine_similarity(embeddings, embeddings)
+        kmeans = KMeans(
+            n_clusters=self.config.k,
+            init="k-means++",
+            n_init=10,
+            random_state=self.config.random_state,
+        )
+        kmeans.fit(cosine_sim_matrix)
+        cluster_labels = kmeans.labels_
+        clusters = defaultdict(list)
+        # Print the cluster labels for each embedding
+        for key, label in zip(module2embed.keys(), cluster_labels):
+            clusters[label].append(key)
+        return clusters
