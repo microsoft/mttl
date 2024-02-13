@@ -3,6 +3,7 @@ from typing import Dict, List, Union
 from pyparsing import abstractmethod
 import torch
 import math
+import numpy as np
 from torch import nn
 import torch.nn.functional as F
 
@@ -176,6 +177,7 @@ class Selector(nn.Module):
         self.forward_cache = None
         self.total_calls_per_forward = 0
         self._calls_counter = 0
+        self.layer_name = kwargs.get("layer_name", None)
         self.info_container = info_container
 
     @property
@@ -421,6 +423,172 @@ class MOERKHSSelector(Selector):
 
 
 @dataclass
+class ClownRouterConfig(SelectorConfig):
+    router_granularity: str = "finegrained"
+    router_temp: float = 1.0
+    moe_top_k: int = -1
+    clown_mode: str = "window"  # "last", "mean", "per_token", "window"
+    router_window_size: int = 3
+    proto_init: str = "hidden"
+    normalize_router_input: bool = True
+
+
+@register_multi_expert_selector("clown_router", ClownRouterConfig)
+class ClownSelector(Selector):
+    def __init__(self, info_container, config, **kwargs) -> None:
+        super().__init__(info_container, config, **kwargs)
+
+        if "layer" not in kwargs:
+            raise ValueError(
+                "Selector requires a layer to be passed in kwargs to infer the input dimension."
+            )
+
+        layer = kwargs["layer"]
+        self.output_dim, self.input_dim = layer.weight.data.shape
+
+        self.prototypes = nn.Parameter(
+            torch.empty((0, self.input_dim), device=layer.weight.device)
+        )
+
+        if config.clown_mode == "window":
+            # Build conv kernel to compute mean over window
+            router_window_size = self.config.router_window_size
+            avg_1d_conv_kernel = (
+                torch.ones(1, 1, router_window_size) / router_window_size
+            )
+            self.register_buffer("avg_1d_conv_kernel", avg_1d_conv_kernel)
+
+    def overwrite_prototypes(self, prototypes):
+        self.prototypes.data = prototypes.type_as(self.prototypes)
+
+    @forward_with_cache
+    def forward(self, input, **kwargs) -> BatchSequenceModulesAndWeightsSelectorOutput:
+        # do routing business on fp32
+        if self.prototypes.size(0) != len(self.expert_names):
+            raise ValueError("Prototypes not initialized correctly.")
+
+        input = input.to(dtype=self.prototypes.dtype)
+
+        if self.config.normalize_router_input:
+            input /= input.norm(dim=-1, p=2, keepdim=True).clamp(min=EPS)
+
+        input_ids = self.info_container["routing_infos"].input_ids
+        attn_mask = self.info_container["routing_infos"].attention_mask
+        bs, sq, D = input.shape
+
+        if self.config.clown_mode == "per_token":
+            router_logits = F.linear(input, self.prototypes)
+            if self.config.proto_init == "svd":
+                router_logits = router_logits.abs()
+
+            routing_weights = F.softmax(
+                router_logits / self.config.router_temp, dim=-1, dtype=torch.float
+            )
+        else:
+            attn_mask = self.info_container["routing_infos"].attention_mask
+            if sq == attn_mask.size(1):
+                if self.config.clown_mode == "mean":
+                    # teacher force mode. router input is the mean over valid tokens
+                    router_input = (input * attn_mask.unsqueeze(-1)).sum(dim=1) / (
+                        attn_mask.sum(dim=1, keepdim=True) + EPS
+                    )
+                elif self.config.clown_mode == "last":
+                    last_idx = attn_mask.sum(1) - 1
+                    router_input = input[torch.arange(bs), last_idx]
+                elif self.config.clown_mode == "window":
+                    flat_input = input.transpose(1, 2).reshape(bs * D, 1, sq)
+                    left_pad_input = torch.cat(
+                        (
+                            flat_input[:, :, [0]].expand(
+                                -1, -1, self.config.router_window_size - 1
+                            ),
+                            flat_input,
+                        ),
+                        dim=-1,
+                    )
+                    conv_out = F.conv1d(left_pad_input, self.avg_1d_conv_kernel).view(
+                        bs, D, sq
+                    )
+                    router_input = conv_out.transpose(1, 2)
+            else:
+                assert sq == 1
+                # we are in generation mode
+                router_input = input.squeeze(1)
+
+            router_logits = F.linear(router_input, self.prototypes)
+            if self.config.proto_init == "svd":
+                router_logits = router_logits.abs()
+            routing_weights = F.softmax(
+                router_logits / self.config.router_temp, dim=-1, dtype=torch.float
+            )
+
+        if routing_weights.ndim == 2:
+            routing_weights = routing_weights.unsqueeze(1).expand(
+                -1, input.shape[1], -1
+            )
+
+        # uniform routing entropy
+        ent_routing = -1 * (routing_weights * torch.log(routing_weights + 1e-6)).sum(-1)
+        if sq == 1:
+            ent_routing = ent_routing.sum()
+            valid_ps = routing_weights
+        else:
+            ent_routing = (ent_routing * attn_mask).sum() / attn_mask.sum()
+            valid_ps = routing_weights[attn_mask == 1]
+
+        max_p, min_p = valid_ps.max(), valid_ps.min()
+        to_store = {
+            "ent_uniform": np.log(len(self.expert_names)),
+            "ent_routing": ent_routing.item(),
+            "max_p": max_p.item(),
+            "min_p": min_p.item(),
+        }
+
+        # Keep running statistics of routing
+        task = self.info_container["routing_infos"].task_names[0]
+        task_container = self.info_container.get(task, {})
+        count = task_container.get("routing_count", 0)
+
+        for name, value in to_store.items():
+            old_value = task_container.get(name, 0)
+            task_container[name] = (old_value * count + value) / (count + 1)
+
+        task_container["routing_count"] = count + 1
+        self.info_container[task] = task_container
+
+        if self.config.moe_top_k > 0:
+            # TODO: mask and renormalize the routing_weights, so that it's still differentiable
+            _, selected_experts = torch.topk(
+                routing_weights, self.config.moe_top_k, dim=-1
+            )
+
+            routing_weights = torch.zeros_like(routing_weights)
+            value = (
+                torch.ones(
+                    size=(1,),
+                    device=routing_weights.device,
+                    dtype=routing_weights.dtype,
+                )
+                / self.config.moe_top_k
+            )
+            value = value.expand_as(selected_experts)
+            routing_weights.scatter_(dim=-1, index=selected_experts, src=value)
+
+        return BatchSequenceModulesAndWeightsSelectorOutput(
+            modules=None, weights=routing_weights
+        )
+
+    def get_merged_weights(self, container, **selector_kwargs) -> Dict:
+        raise ValueError("Not supported for ClownSelector.")
+
+    def get_routing_weights(self):
+        raise ValueError("Not supported for ClownSelector.")
+
+    def add_expert(self, expert_name: str, **kwargs):
+        self.expert_names.append(expert_name)
+
+
+@dataclass
 class ZeroSelectorConfig(SelectorConfig):
     top_k: int = -1
 
@@ -663,6 +831,11 @@ class PolySelectorDirectConfig(PolySelectorConfig):
 
 @dataclass
 class PolySelectorDirectConfigUniform(PolySelectorConfig):
+    pass
+
+
+@dataclass
+class PolySelectorDirectConfigUniform(SelectorConfig):
     pass
 
 

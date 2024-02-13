@@ -7,6 +7,7 @@ from mttl.models.modifiers.modify_model import get_modifier_type
 from mttl.models.utils import model_loader_helper
 from typing import Optional
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
+from mttl.models.modifiers.lora import LoRAConfig
 
 import copy
 import torch
@@ -14,6 +15,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 import numpy as np
 import sklearn.decomposition
+from collections import defaultdict
 
 
 class LibraryTransform:
@@ -31,6 +33,7 @@ class SVDEmbeddingTransformConfig:
     name: str = "svd"
     n_components: int = 64
     sparsity_threshold: float = 0.8
+    recompute: bool = False
 
 
 class SVDEmbeddingTransform(LibraryTransform):
@@ -46,6 +49,21 @@ class SVDEmbeddingTransform(LibraryTransform):
         if type(library) == str:
             library = get_expert_library(library)
 
+        # try to fetch auxiliary data
+        output = library.get_auxiliary_data(data_type=self.config.name)
+        if len(output) > 0 and not self.config.recompute:
+            logger.info("Found {} precomputed SVD Embeddings".format(len(output)))
+            return (
+                np.stack(
+                    [
+                        output[expert_name][self.config.name][self.config.name]
+                        for expert_name in library.keys()
+                    ]
+                ),
+                None,
+            )
+
+        logger.info("Computing SVD Embeddings for {} experts".format(len(library)))
         svd = sklearn.decomposition.TruncatedSVD(
             n_components=self.config.n_components,
             algorithm="randomized",
@@ -56,28 +74,28 @@ class SVDEmbeddingTransform(LibraryTransform):
             tol=0.0,
         )
 
-        names = []
-        array = []
+        array, names = [], []
         for name in tqdm(list(library.keys())):
-            dump = library[name]
-            flat = []
-            for _, p in dump.expert_weights.items():
-                flat.append(p.flatten().cpu())
-            array.append(torch.concatenate(flat, 0).numpy())
-            names.append(name)
+            expert = library[name]
+            array += [
+                torch.nn.utils.parameters_to_vector(
+                    [p for p in expert.expert_weights.values()]
+                )
+            ]
+            names += [name]
+        array = torch.stack(array).cpu().numpy()
 
-        array = np.array(array)
-        for i, _ in enumerate(array):
-            if self.config.sparsity_threshold > 0.0:
-                for thr in [0.0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1]:
-                    ar_copy = array[i].copy()
-                    ar_copy[np.abs(ar_copy) <= thr] = 0.0
-                    ratio = float((ar_copy == 0.0).sum()) / ar_copy.size
-
-                    if ratio >= self.config.sparsity_threshold:
-                        logger.info("Found sparsity threshold: {}".format(thr))
-                        break
-                array[i] = ar_copy
+        # Use quantiles to fit the exact threshold
+        thr = np.quantile(np.abs(array), self.config.sparsity_threshold, axis=1)
+        array[np.abs(array) <= thr.reshape(-1, 1)] = 0.0
+        logger.info("Sparsity threshold: {}".format(str([f"{x:.4f}" for x in thr])))
+        assert (
+            np.abs(
+                (array == 0).sum(axis=1) / np.prod(array.shape[1])
+                - self.config.sparsity_threshold
+            ).max()
+            < 1e-4
+        )
 
         experts_embeddings = svd.fit_transform(array)
         experts_embeddings = (
@@ -85,14 +103,16 @@ class SVDEmbeddingTransform(LibraryTransform):
         )
 
         if upload_to_hf:
+            logger.info("Uploading SVD Embeddings to HF")
             # add embeddings to the library
             with library.batched_commit():
                 for i, name in enumerate(names):
-                    library.add_embeddings(
-                        name,
-                        self.config.__dict__,
-                        experts_embeddings[i],
-                        force=force,
+                    library.add_auxiliary_data(
+                        data_type=self.config.name,
+                        expert_name=name,
+                        config=self.config.__dict__,
+                        data=experts_embeddings[i],
+                        force=True,  # make sure we overwrite
                     )
         return experts_embeddings, svd
 
@@ -163,6 +183,7 @@ class WeightedLinearMerge(LibraryTransform):
 @dataclass
 class TiesMergeConfig:
     top_k: float = 0.2
+    only_sparsify: bool = False
 
 
 class TiesMerge(LibraryTransform):
@@ -220,18 +241,22 @@ class TiesMerge(LibraryTransform):
             keep_mask = expert_weights.abs() >= TH
             expert_weights = expert_weights * keep_mask
 
-            # sign majority vote
-            sign_per_dim = expert_weights.sign().sum(0, keepdim=True).sign()
-            sign_per_dim = expert_weights.sum(0, keepdim=True).sign()
+            if self.config.only_sparsify:
+                final_param = expert_weights.mean(0)
+                used += keep_mask.sum().item()
+            else:
+                # sign majority vote
+                sign_per_dim = expert_weights.sign().sum(0, keepdim=True).sign()
+                sign_per_dim = expert_weights.sum(0, keepdim=True).sign()
 
-            # keep only weights whose sign agree with the majority
-            use_for_avg = expert_weights.sign() == sign_per_dim
+                # keep only weights whose sign agree with the majority
+                use_for_avg = expert_weights.sign() == sign_per_dim
 
-            deno = use_for_avg.sum(0).clamp(min=1.0)
-            sum_param = (expert_weights * use_for_avg).sum(0)
-            final_param = sum_param / deno
+                deno = use_for_avg.sum(0).clamp(min=1.0)
+                sum_param = (expert_weights * use_for_avg).sum(0)
+                final_param = sum_param / deno
+                used += (use_for_avg & (sign_per_dim != 0.0)).sum().item()
 
-            used += (use_for_avg & (sign_per_dim != 0.0)).sum().item()
             kept += (expert_weights.abs() > TH).sum()
             total += expert_weights.numel()
 
@@ -248,30 +273,78 @@ class TiesMerge(LibraryTransform):
 
 
 @dataclass
-class PrototypeComputerConfig:
+class HiddenStateComputerConfig:
     use_base_model_only: bool = (
         False  # This computes sentence embeddings without the adapter
     )
     model: str = None  # If `use_base_model_only`, can pass a specific model to compute embeddings with
-    max_samples_per_task: int = 100
-    upload_to_hf: bool = False
-    name: str = "dataset_centroids"
+    max_samples_per_task: int = 10
+    upload_to_hf: bool = True
     recompute: bool = False
+    track: str = "each_layer"  # last layer, or each layer
+    pool: str = "last"  # last, or mean
+    save_name: str = None
 
 
-class DatasetCentroidComputer(LibraryTransform):
+class HiddenStateComputer(LibraryTransform):
     """
     Encodes a dataset and computes the average embedding
     """
 
-    def __init__(self, config: PrototypeComputerConfig = None):
-        super().__init__(config or PrototypeComputerConfig())
+    def __init__(self, config: HiddenStateComputerConfig = None):
+        super().__init__(config or HiddenStateComputerConfig())
 
     def _fill_missing_args(self, args, default_args):
         # TODO: put in library utils
         for k, v in vars(default_args).items():
             if not hasattr(args, k):
                 setattr(args, k, v)
+
+    def _get_parent_from_name(self, model, name):
+        parts = name.split(".")
+        for part in parts:
+            if part.isdigit():
+                new_model = model[int(part)]
+            else:
+                new_model = getattr(model, part, None)
+
+            if new_model is None:
+                return model
+
+            model = new_model
+
+        return model
+
+    def _track_hidden_states(self, model, keys=None):
+        model.container = {}
+
+        if self.config.track == "last_layer":
+            # Add a hook to the last layer
+            def fetch_input(module, input, output):
+                model.container["last_layer"] = input[0].detach()
+
+            model.model.get_output_embeddings().register_forward_hook(fetch_input)
+        elif self.config.track == "each_layer":
+            # add a hook for all the layers that an expert modifies
+            def build_hook(name):
+                def retrieve_input(module, input, output):
+                    model.container[name] = input[0].detach()
+
+                return retrieve_input
+
+            for key in keys:
+                module = self._get_parent_from_name(model.model, key)
+                module.register_forward_hook(build_hook(key))
+        else:
+            raise NotImplementedError()
+
+    def _retrieve_hidden_states(self, model):
+        keys = list(model.container.keys())
+        values = [model.container[k] for k in keys]
+        for key in keys:
+            del model.container[key]
+
+        return {k: v for k, v in zip(keys, values)}
 
     @torch.no_grad()
     def transform(self, library, default_args=None) -> Expert:
@@ -282,10 +355,29 @@ class DatasetCentroidComputer(LibraryTransform):
         if type(library) == str:
             library = get_expert_library(library)
 
-        # try to fetch auxiliary data
-        output = library.get_auxiliary_data(data_type=self.config.name)
+        save_name = self.config.save_name
+        if save_name is None:
+            args_in_name = [
+                "model",
+                "use_base_model_only",
+                "max_samples_per_task",
+                "track",
+                "pool",
+            ]
+            save_name = "data_centroids-" + "-".join(
+                [
+                    "" if x is None else str(x)
+                    for x in [getattr(self.config, k) for k in args_in_name]
+                ]
+            )
+
+        # old name : 'dataset_centroids--False-100-each_layer-last'
+        print("save_name", save_name)
+
+        output = library.get_auxiliary_data(data_type=save_name + ".bin")
         if len(output) == len(library) and not self.config.recompute:
             logger.info("Found {} precomputed centroids".format(len(output)))
+            # format the output to be dict[expert_name][layer_name] = embedding
             return output
 
         logger.info("Computing centroids for {} experts".format(len(library)))
@@ -296,7 +388,7 @@ class DatasetCentroidComputer(LibraryTransform):
             if default_args is not None:
                 self._fill_missing_args(training_config, default_args)
 
-            if self.config.use_base_model_only and self.config.model_name is not None:
+            if self.config.use_base_model_only and self.config.model is not None:
                 training_config.model = self.config.model
 
             model = MultiExpertModel(**vars(training_config)).to("cuda")
@@ -304,67 +396,462 @@ class DatasetCentroidComputer(LibraryTransform):
             if not self.config.use_base_model_only:
                 model.add_expert_instance(expert, is_default=True)
 
-            train_tasks = expert.expert_info.expert_task_name.split(",")
+            self._track_hidden_states(model, keys=expert.expert_weights.keys())
+            training_config.dataset = expert.expert_info.dataset
+            training_config.subsample_train = self.config.max_samples_per_task
+            if expert.expert_info.expert_task_name:
+                train_tasks = expert.expert_info.expert_task_name.split(",")
+                training_config.finetune_task_name = ",".join(train_tasks)
+                training_config.subsample_train *= len(train_tasks)
+            else:
+                train_tasks = None
 
-            centroid, count = 0, 0
-            for t_id, train_task in enumerate(train_tasks):
-                # get datamodule
-                training_config.subsample_train = self.config.max_samples_per_task
-                training_config.dataset = expert.expert_info.dataset
-                training_config.finetune_task_name = train_task
-                training_config.train_batch_size = (
-                    default_args.predict_batch_size if default_args is not None else 4
-                )
+            training_config.train_batch_size = (
+                default_args.predict_batch_size if default_args is not None else 4
+            )
 
-                dm = get_datamodule(training_config)
-                dataloader = dm.train_dataloader()
+            # get datamodule
+            dm = get_datamodule(training_config)
+            dataloader = dm.train_dataloader()
 
-                pbar = tqdm(enumerate(dataloader), total=len(dataloader))
-                device = next(model.parameters()).device
+            centroid, count = defaultdict(lambda: 0.0), 0
 
-                container = {}
+            pbar = tqdm(enumerate(dataloader), total=len(dataloader))
+            device = next(model.parameters()).device
 
-                def fetch_pre_logit_output(module, input, output):
-                    container["hidden_states"] = input[0].detach()
+            for num_batch, batch in pbar:
+                batch = transfer_batch_to_device(batch, device)
 
-                model.model.get_output_embeddings().register_forward_hook(
-                    fetch_pre_logit_output
-                )
+                if isinstance(model, EfficientCheckpointModule):
+                    model.forward(batch, reduction="none")
+                else:
+                    model.forward(
+                        input_ids=batch["input_ids"],
+                        attention_mask=batch["attention_mask"],
+                    )
 
-                for num_batch, batch in pbar:
-                    batch = transfer_batch_to_device(batch, device)
+                bs = batch["input_ids"].size(0)
+                bs_idx = torch.arange(bs, device=device)
+                last_token_idx = batch["attention_mask"].sum(1) - 1
+                hidden_states = self._retrieve_hidden_states(model)
 
-                    if isinstance(model, EfficientCheckpointModule):
-                        model.forward(batch, reduction="none")
+                for layer, hidden_state in hidden_states.items():
+                    assert hidden_state.ndim == 3
+
+                    if self.config.pool == "last":
+                        centroid[layer] += hidden_state[bs_idx, last_token_idx].sum(0)
+                    elif self.config.pool == "mean":
+                        deno = batch["attention_mask"].sum(1, keepdim=True)
+                        centroid[layer] += (
+                            (hidden_state * batch["attention_mask"].unsqueeze(-1)).sum(
+                                1
+                            )
+                            / deno
+                        ).sum(0)
                     else:
-                        model.forward(
-                            input_ids=batch["input_ids"],
-                            attention_mask=batch["attention_mask"],
-                        )
+                        raise NotImplementedError()
 
-                    bs = batch["input_ids"].size(0)
-                    hidden_states = container["hidden_states"]
-                    last_token_state = hidden_states[
-                        torch.arange(bs, device=device),
-                        batch["attention_mask"].sum(1) - 1,
-                    ]
-                    centroid += last_token_state.sum(0)
-                    count += bs
+                count += bs
 
             # average over all batches
-            centroid /= count
-            output[expert_name] = F.normalize(centroid, p=2, dim=-1).cpu()
+            for layer in centroid.keys():
+                centroid[layer] /= count
+                centroid[layer] = F.normalize(centroid[layer], p=2, dim=-1).cpu()
+
+            # convert to regular dict
+            centroids = {k: v for k, v in centroid.items()}
+            output[expert_name] = centroids
 
         if self.config.upload_to_hf:
             logger.info("Uploading centroids to HF")
+
             # add embeddings to the library
             with library.batched_commit():
-                for i, expert_name in enumerate(output.keys()):
-                    library.add_auxiliary_data(
-                        data_type=self.config.name,
+                for expert_name, data in output.items():
+                    library.add_embedding_dict(
+                        dump_name=save_name,
                         expert_name=expert_name,
-                        config=self.config.__dict__,
-                        data=output[expert_name],
+                        data=data,
                         force=True,  # make sure we overwrite
                     )
+
         return output
+
+
+@dataclass
+class SVDInputExtractorConfig:
+    save_name: str = None
+    upload_to_hf: bool = True
+    recompute: bool = False
+    ab_only: bool = True
+    scale: bool = False  # If True, scale by eigenvalue
+
+
+class SVDInputExtractor(LibraryTransform):
+    """
+    Given a library of experts, extract the input direction most affected by the linear transforms
+    """
+
+    def __init__(self, config: SVDInputExtractorConfig = None):
+        super().__init__(config or SVDInputExtractorConfig())
+
+    def _maybe_scale(self, vectors, eigvals):
+        """Post Processing of the retrieved outputs,
+        scales the output by the eigenvalue if needed"""
+        output = {}
+        for expert_name, expert_data in vectors.items():
+            output[expert_name] = {}
+            for layer_name, vector in expert_data.items():
+                if self.config.scale:
+                    vector = vector * eigvals[expert_name][layer_name]
+                output[expert_name][layer_name] = torch.from_numpy(vector)
+
+        return output
+
+    @torch.no_grad()
+    def transform(self, library) -> Expert:
+        if isinstance(library, str):
+            library = get_expert_library(library)
+
+        save_name = self.config.save_name
+        if save_name is None:
+            args_in_name = [
+                "ab_only",
+            ]
+            save_name = "svd_input_centroids-" + "-".join(
+                [
+                    "" if x is None else str(x)
+                    for x in [getattr(self.config, k) for k in args_in_name]
+                ]
+            )
+        # old_save_name = 'svd_input_extractor-1.0-True'
+
+        # try to fetch auxiliary data
+        vectors = library.get_auxiliary_data(data_type=save_name + "_vectors.bin")
+        eigvals = library.get_auxiliary_data(data_type=save_name + "_eigvals.bin")
+
+        if len(vectors) == len(eigvals) == len(library) and not self.config.recompute:
+            logger.info("Found {} precomputed centroids".format(len(vectors)))
+
+            return self._maybe_scale(vectors, eigvals)
+
+        base_model = None
+        vectors, eigvals = {}, {}
+        for expert_name, expert in library.items():
+            logger.info(f"Computing SVD for expert {expert_name}")
+            vectors[expert_name] = {}
+            eigvals[expert_name] = {}
+
+            if not self.config.ab_only and base_model is None:
+                training_config = expert.training_config
+                training_config.model_modifier = None
+                from projects.wiki_experts.src.expert_model import MultiExpertModel
+
+                base_model = MultiExpertModel(**vars(training_config))
+
+            state_dict_keys = sorted(
+                list(
+                    set(
+                        ".".join(k.split(".")[:-1])
+                        for k in expert.expert_weights.keys()
+                    )
+                )
+            )
+
+            for param_name in state_dict_keys:
+                logger.info(f"\tComputing SVD for parameter {param_name}")
+                A, B = (
+                    expert.expert_weights[f"{param_name}.lora_a"],
+                    expert.expert_weights[f"{param_name}.lora_b"],
+                )
+                W = (A @ B).T  # out_features, in_features
+
+                if self.config.ab_only:
+                    # Now, the efficient way
+                    # Compute SVD of A
+                    U_A, Sigma_A, V_A = torch.svd(A)
+
+                    # Compute SVD of B.T (transpose of B)
+                    U_B, Sigma_B, V_B = torch.svd(B.T)
+
+                    # Compute product matrix C = Sigma_A * (V_A.T @ V_B) * Sigma_B
+                    # Since V_A and V_B are orthogonal, their product is also an orthogonal matrix
+                    C = Sigma_A.diag_embed() @ V_A.t() @ V_B @ Sigma_B.diag_embed()
+
+                    # Compute SVD of the product matrix C
+                    U_C, Sigma_C, V_C = torch.svd(C)
+
+                    # Construct the final SVD components of W
+                    U_W = U_A @ U_C
+                    top_vector = U_W[:, 0]
+                    top_value = Sigma_C[0] ** 2
+                    bottom_vector = U_W[:, -1]
+
+                else:
+                    base_W = base_model.model.state_dict()[f"{param_name}.weight"]
+                    W_AB = base_W + W
+                    eig_input = W_AB.T @ W_AB
+                    out = torch.linalg.eig(eig_input)
+                    eigvector = out.eigenvectors
+                    largest, smallest = eigvector[:, 0], eigvector[:, -1]
+
+                    img_eig_vals = eigvector.imag.abs().mean().item()
+                    if img_eig_vals > 1e-2:
+                        logger.warning(
+                            f"Found {img_eig_vals} imaginary eigenvalues, this is likely due to numerical instability"
+                        )
+
+                    top_vector = largest.real
+                    top_value = out.eigenvalues.real[0]
+                    bottom_vector = smallest.real
+
+                # Check that top vector is indeed an eigenvector
+                WTW = W.T @ W
+                ratio = WTW @ top_vector / (top_vector * top_value)
+                torch.allclose(ratio, torch.ones_like(ratio), atol=1e-3)
+
+                # Check that top vector is indeed the top eigenvector
+                assert (WTW @ top_vector).pow(2).sum() > (WTW @ bottom_vector).pow(
+                    2
+                ).sum()
+
+                # Save eigenvector and eigvenvalue
+                vectors[expert_name][param_name] = top_vector.real.cpu().numpy()
+                eigvals[expert_name][param_name] = top_value.item()
+
+        if self.config.upload_to_hf:
+            # add embeddings to the library
+            with library.batched_commit():
+                for expert_name in library.keys():
+                    logger.info(
+                        f"Uploading SVD centroids to HF for expert {expert_name}"
+                    )
+                    for data_name, data in [
+                        ("vectors", vectors),
+                        ("eigvals", eigvals),
+                    ]:
+                        library.add_embedding_dict(
+                            dump_name=save_name + "_" + data_name,
+                            expert_name=expert_name,
+                            data=data[expert_name],
+                            force=True,  # make sure we overwrite
+                        )
+
+        return self._maybe_scale(vectors, eigvals)
+
+
+@dataclass
+class ExpertProjectorConfig:
+    name: str = "expert_projector"
+    granularity: str = "finegrained"  # whether to use the same coefficients for all parameters or per `nn.Parameter` instance
+    project_over_all_experts: bool = (
+        False  # whether to project over all experts or just the ones in the cluster
+    )
+
+
+class ExpertProjector(LibraryTransform):
+    """
+    Given a library of clustered experts, project each one onto the basis generated
+    by the individual experts of each cluster.
+    """
+
+    def __init__(self, config: ExpertProjectorConfig = None):
+        super().__init__(config or ExpertProjectorConfig())
+
+    def _project(self, source_expert, expert_basis, granularity="coarsegrained"):
+        source_sd = source_expert.expert_weights
+        state_dict_keys = list(source_sd.keys())
+
+        assert set(state_dict_keys) == set(
+            expert_basis[0].expert_weights.keys()
+        ), breakpoint()
+
+        if granularity == "coarsegrained":
+            # build a n_experts x D matrix of concatenated parameters
+            basis_vectors = []
+            for expert in expert_basis:
+                basis_vectors += [
+                    torch.nn.utils.parameters_to_vector(
+                        list(expert.expert_weights[k] for k in state_dict_keys)
+                    )
+                ]
+            basis_vector = torch.stack(basis_vectors)
+            project_vector = torch.nn.utils.parameters_to_vector(
+                list(source_sd[k] for k in state_dict_keys)
+            )
+
+            # Treat as a min-squares problem
+            global_alpha = torch.linalg.lstsq(
+                basis_vector.T, project_vector.view(-1, 1)
+            ).solution
+        else:
+            assert granularity == "finegrained"
+
+        projected_expert = copy.deepcopy(source_expert)
+        for key in state_dict_keys:
+            basis_vector = torch.stack(
+                [expert.expert_weights[key].flatten() for expert in expert_basis]
+            )
+
+            if granularity == "coarsegrained":
+                alpha = global_alpha
+            else:
+                alpha = torch.linalg.lstsq(
+                    basis_vector.T, source_sd[key].view(-1, 1)
+                ).solution
+
+            # project the source expert onto the basis
+            projected = (basis_vector.T @ alpha).view(source_sd[key].shape)
+            projected_expert.expert_weights[key].data.copy_(projected)
+
+        return projected_expert
+
+    @torch.no_grad()
+    def transform(self, expert_library, cluster_library) -> Expert:
+        if isinstance(expert_library, str):
+            expert_library = get_expert_library(expert_library)
+
+        if isinstance(cluster_library, str):
+            cluster_library = get_expert_library(cluster_library)
+
+        output = {}
+        for cluster_name, cluster_exp in cluster_library.items():
+            logger.info(f"processing cluster {cluster_name}")
+            if self.config.project_over_all_experts:
+                task_experts = [
+                    expert_library[expert_name] for expert_name in expert_library.keys()
+                ]
+            else:
+                tasks = cluster_exp.expert_info.expert_task_name.split(",")
+                task_experts = [expert_library[expert_name] for expert_name in tasks]
+            projected_expert = self._project(
+                cluster_exp, task_experts, granularity=self.config.granularity
+            )
+            output[cluster_name] = projected_expert
+
+        return output
+
+
+@dataclass
+class CrossExpertNormComputerConfig:
+    pass
+
+
+class CrossExpertNormComputer(HiddenStateComputer):
+    """
+    Given a library of experts, compute the norm of ABx for both in-dist and ood experts
+    """
+
+    def __init__(self, config: CrossExpertNormComputerConfig = None):
+        super().__init__(config or CrossExpertNormComputerConfig())
+
+    @torch.no_grad()
+    def transform(self, library, default_args=None) -> Expert:
+        if isinstance(library, str):
+            library = get_expert_library(library)
+
+        expert_names = list(library.keys())
+        an_expert = library[expert_names[0]]
+        training_config = an_expert.training_config
+
+        # overwrite required args
+        training_config.hf_lib_id = library.repo_id
+        training_config.router_selector = "task_selector"
+        if default_args is not None:
+            self._fill_missing_args(training_config, default_args)
+
+        training_config.train_batch_size = (
+            default_args.predict_batch_size if default_args is not None else 4
+        )
+        training_config.finetune_task_name = ",".join(
+            [
+                library[exp_name].training_config.finetune_task_name
+                for exp_name in library.keys()
+            ]
+        )
+
+        from projects.wiki_experts.train_experts_main import get_datamodule
+        from projects.wiki_experts.src.expert_model import MoETrainer
+        from mttl.models.modifiers.expert_containers import ExpertContainer
+
+        model = MoETrainer(**vars(training_config)).to("cuda")
+
+        # build a hook to forward across other (ood) experts
+        def build_hook(layer_name, container, task_id_container):
+            def retrieve_input(module, input, output):
+                task_names = task_id_container["routing_infos"].task_names
+                attn_mask = task_id_container["routing_infos"].attention_mask
+                container[layer_name] = input[0].detach()
+
+                # output (bs, seq_len, D) is the correctly routed outpu
+                # let's generate the outputs for random task routing
+
+                not_picked = np.array(
+                    list(set(module.selector.expert_names) - set(task_names))
+                )
+                random_tasks = np.random.choice(
+                    not_picked,
+                    size=len(task_names),
+                    replace=not_picked.size < len(task_names),
+                )
+
+                # Redo ExpertContainer forward
+                selector_out = module.selector(input[0])
+                selector_out.modules = random_tasks.tolist()
+                random_out = module.route(input[0], selector_out)
+
+                norm_correct = (output * attn_mask.unsqueeze(-1)).pow(2).sum(
+                    -1
+                ).sqrt().sum() / attn_mask.sum()
+                norm_wrong = (random_out * attn_mask.unsqueeze(-1)).pow(2).sum(
+                    -1
+                ).sqrt().sum() / attn_mask.sum()
+
+                container[layer_name] = (norm_correct, norm_wrong)
+
+                return output
+
+            return retrieve_input
+
+        hooks = []
+        container = {}
+        for module_name, module in model.named_modules():
+            if isinstance(module, ExpertContainer):
+                hook = build_hook(module_name, container, model.model.task_id_container)
+                module.register_forward_hook(hook)
+                hooks += [hook]
+
+        logger.info(f"set {len(hooks)} hooks")
+        training_config.subsample_train = 2_000
+        dm = get_datamodule(training_config)
+        dataloader = dm.train_dataloader()
+
+        pbar = tqdm(enumerate(dataloader), total=len(dataloader))
+        device = next(model.parameters()).device
+
+        total_avg_diff, total_rel_diff = [], []
+        for num_batch, batch in pbar:
+            batch = transfer_batch_to_device(batch, device)
+
+            if isinstance(model, EfficientCheckpointModule):
+                model.forward(batch, reduction="none")
+            else:
+                model.forward(
+                    input_ids=batch["input_ids"],
+                    attention_mask=batch["attention_mask"],
+                )
+
+            avg_diff, rel_diff = 0, 0
+            for layer, (correct, wrong) in container.items():
+                avg_diff += (correct - wrong).item()
+                rel_diff += (correct / wrong).item()
+
+            avg_diff /= len(container)
+            rel_diff /= len(container)
+
+            total_avg_diff += [avg_diff]
+            total_rel_diff += [rel_diff]
+
+            print(
+                f"avg_diff: {avg_diff / len(container)}, rel_diff: {rel_diff / len(container)}"
+            )

@@ -161,6 +161,7 @@ def add_expert_to_transformer(
                                     info_container=transformer.info_container,
                                     layer=layer,
                                     training_config=training_config,
+                                    layer_name=layer_name,
                                 )
                                 selector.__layer_name__ = identifier + ".selector"
                                 transformer.selectors[identifier] = selector

@@ -893,8 +893,44 @@ class ExpertLibrary:
         operations.append(addition_a)
 
         if self._in_transaction:
+            self._pending_pre_uploads.extend(operations)
             self._pending_operations.extend(operations)
         else:
+            self.preupload_lfs_files(self.repo_id, additions=operations)
+            self.create_commit(
+                self.repo_id,
+                operations=operations,
+                commit_message=f"Update library with embedding for {expert_name}.",
+            )
+            logger.info(f"Embedding for {expert_name} uploaded successfully.")
+
+    def add_embedding_dict(
+        self,
+        dump_name: str,
+        expert_name: str,
+        data: np.ndarray,
+        force: bool = False,
+    ):
+        if expert_name not in self.data:
+            raise ValueError(f"Expert {expert_name} not found in repository.")
+
+        operations = []
+        aux_file = f"{expert_name}.{dump_name}.bin"
+
+        buffer = io.BytesIO()
+        torch.save(data, buffer)
+        buffer.flush()
+
+        addition_a = CommitOperationAdd(
+            path_in_repo=f"{aux_file}", path_or_fileobj=buffer
+        )
+        operations.append(addition_a)
+
+        if self._in_transaction:
+            self._pending_pre_uploads.extend(operations)
+            self._pending_operations.extend(operations)
+        else:
+            self.preupload_lfs_files(self.repo_id, additions=operations)
             self.create_commit(
                 self.repo_id,
                 operations=operations,
@@ -967,6 +1003,7 @@ class ExpertLibrary:
             self._in_transaction = False
             return
         logger.info(f"Committing {len(self._pending_operations)} operations...")
+
         if self._pending_pre_uploads:
             self.preupload_lfs_files(self.repo_id, additions=self._pending_pre_uploads)
         self.create_commit(
@@ -974,6 +1011,7 @@ class ExpertLibrary:
             operations=self._pending_operations,
             commit_message="Update library with new ops.",
         )
+
         # exit transaction and clear pending operations
         self._in_transaction = False
         self._pending_pre_uploads.clear()
@@ -1233,6 +1271,7 @@ def get_expert_library(
     create=False,
     ignore_sliced=False,
     expert_library_type: str = None,
+    make_local_copy: bool = False,
 ):
     """Select the appropriate expert library based on the following order of priority:
     1. If expert_library_type is provided, uses that type.
@@ -1255,16 +1294,29 @@ def get_expert_library(
         else:
             expert_library_type = "blob_storage"
     try:
-        expert_lib_class = available_libraries[expert_library_type]
-        expert_lib = expert_lib_class(
-            repo_id=repo_id,
-            token=token,
-            model_name=model_name,
-            selection=selection,
-            exclude_selection=exclude_selection,
-            create=create,
-            ignore_sliced=ignore_sliced,
-        )
+        # to be safe, we make a local copy of a library from huggingface hub
+        if expert_library_type == "huggingface_hub" and make_local_copy:
+            destination = os.environ.get(
+                "HF_LIB_CACHE", os.path.expanduser("~/.cache/huggingface/libraries")
+            )
+            destination += repo_id
+            os.makedirs(destination, exist_ok=True)
+            expert_lib = LocalExpertLibrary.create_from_remote(
+                remote_lib=HFExpertLibrary(repo_id=repo_id),
+                destination=destination,
+            )
+
+        else:
+            expert_lib_class = available_libraries[expert_library_type]
+            expert_lib = expert_lib_class(
+                repo_id=repo_id,
+                token=token,
+                model_name=model_name,
+                selection=selection,
+                exclude_selection=exclude_selection,
+                create=create,
+                ignore_sliced=ignore_sliced,
+            )
     except KeyError:
         raise ValueError(f"Unknown expert library type {expert_library_type}.")
     return expert_lib
