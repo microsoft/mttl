@@ -51,6 +51,7 @@ def get_selector(routing_config: "SelectorConfig", info_container: Dict, **kwarg
 class SelectorConfig:
     # the granularity of the selector (which layers use the same selectors)
     router_granularity: str = "*"
+    try_merge_after_op: bool = False
 
     def __eq__(self, other):
         # compare all the attributes
