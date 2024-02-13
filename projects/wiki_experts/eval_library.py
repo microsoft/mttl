@@ -177,7 +177,7 @@ def run_multitask(args: ExpertConfig):
         args_copy.clown_mode = args.clown_mode
         args_copy.proto_init = args.proto_init
         args_copy.normalize_router_input = args.normalize_router_input
-        args_copy.try_merge_after_op = True
+        args_copy.try_merge_after_op = args.merge_or_route == "clown_lora_after_op"
         module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
         patch_prototypes(module, library, args)
