@@ -6,7 +6,7 @@ import glob
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
-from mttl.callbacks import LiveCheckpointCallback
+from mttl.callbacks import LiveCheckpointCallback,LiveLibraryCheckpointCallback
 
 from mttl.models.monitors import get_monitors
 from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
@@ -77,17 +77,25 @@ def run_multitask(args: ExpertConfig):
         monitor = "val/loss"
         mode = "min"
 
-    checkpoint_callback = LiveCheckpointCallback(
-        dirpath=args.output_dir,
-        monitor=monitor,
-        save_last=True,
-        mode=mode,
-        save_each_epoch=args.save_each_epoch,
-        library_name=args.library_name,
-        hf_token_hub=args.hf_token_hub,
-        cluster_name=args.cluster_name,
-    )
-    callbacks.append(checkpoint_callback)
+    if args.save_each_epoch:
+        checkpoint_callback = LiveLibraryCheckpointCallback(
+            dirpath=args.output_dir,
+            monitor=monitor,
+            mode=mode,
+            save_last=True,
+            save_each_epoch=args.save_each_epoch,
+            library_name=args.library_name,
+            hf_token_hub=args.hf_token_hub,
+            cluster_name=args.cluster_name,
+        )
+    else:   
+        checkpoint_callback = LiveCheckpointCallback(
+            dirpath=args.output_dir,
+            monitor=monitor,
+            save_last=True,
+            mode=mode
+        )
+        callbacks.append(checkpoint_callback)
 
     if args.eval_rouge_flag:
         rouge = RougeCallback(

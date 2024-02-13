@@ -11,7 +11,7 @@ from torch.optim import Optimizer
 from mttl.utils import logger
 from mttl.models.utils import transfer_batch_to_device
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
-from mttl.models.modifiers.expert_containers.module_graph import load_expert
+from mttl.models.modifiers.expert_containers.expert import load_expert
 import huggingface_hub
 
 DEBUG = False
@@ -27,10 +27,6 @@ class LiveCheckpointCallback(pl.Callback):
         mode="min",
         save_last=True,
         save_weights_only=True,
-        save_each_epoch=False,
-        library_name="library_debug",
-        hf_token_hub=None,
-        cluster_name="cluster_1",
     ):
         if not monitor and not save_last:
             raise ValueError(
@@ -46,35 +42,6 @@ class LiveCheckpointCallback(pl.Callback):
         self._last_step = -1
         self._last_value = None
         self.save_weights_only = save_weights_only
-        self.save_each_epoch = save_each_epoch
-        self.library_name = library_name
-        self.cluster_name = cluster_name
-
-        self.hf_token_hub = hf_token_hub
-        if self.hf_token_hub is not None:
-            huggingface_hub.login(token=hf_token_hub)
-
-    def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        # save each checkpoint after each epoch
-        if self.save_each_epoch:
-            self.save_model_path = os.path.join(
-                f"{self.dirpath}", f"epoch_{trainer.current_epoch}.ckpt"
-            )
-            trainer.save_checkpoint(
-                self.save_model_path, weights_only=self.save_weights_only
-            )
-
-        if self.hf_token_hub is not None:
-            # create the library
-            library_name = f"{self.library_name}-epoch_{trainer.current_epoch}"
-            library_dest = HFExpertLibrary(library_name, create=True)
-            with library_dest.batched_commit():
-                expert = load_expert(self.save_model_path)
-                expert_name = self.cluster_name
-                expert.expert_info.expert_name = expert_name
-                if expert.name not in library_dest:
-                    library_dest.add_expert(expert)
-
     def on_train_end(self, trainer, pl_module):
         """Saves the last checkpoint."""
         if self.save_last:
@@ -142,7 +109,60 @@ class LiveCheckpointCallback(pl.Callback):
                 self._save_best(trainer, last_value)
                 self._last_value = last_value
 
+class LiveLibraryCheckpointCallback(LiveCheckpointCallback):
+    def __init__(
+        self,
+        dirpath,
+        monitor=None,
+        mode="min",
+        save_last=True,
+        save_weights_only=True,
+        save_each_epoch=False,
+        library_name="library_debug",
+        hf_token_hub=None,
+        cluster_name="cluster_1",
+    ):
+        if not monitor and not save_last:
+            raise ValueError(
+                "Must specify a monitor metric to track if save_last is False."
+            )
 
+        self.dirpath = dirpath
+        self.monitor = monitor
+        self.mode = mode
+        self.best_model_path = None
+        self.last_model_path = None
+        self.save_last = save_last
+        self._last_step = -1
+        self._last_value = None
+        self.save_weights_only = save_weights_only
+        self.save_each_epoch = save_each_epoch
+        self.library_name = library_name
+        self.cluster_name = cluster_name
+
+        self.hf_token_hub = hf_token_hub
+        if self.hf_token_hub is not None:
+            huggingface_hub.login(token=hf_token_hub)
+    def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        # save each checkpoint after each epoch
+        if self.save_each_epoch:
+            self.save_model_path = os.path.join(
+                f"{self.dirpath}", f"epoch_{trainer.current_epoch}.ckpt"
+            )
+            trainer.save_checkpoint(
+                self.save_model_path, weights_only=self.save_weights_only
+            )
+
+        if self.hf_token_hub is not None:
+            # create the library
+            library_name = f"{self.library_name}-epoch_{trainer.current_epoch}"
+            library_dest = HFExpertLibrary(library_name, create=True)
+            with library_dest.batched_commit():
+                expert = load_expert(self.save_model_path)
+                expert_name = self.cluster_name
+                expert.expert_info.expert_name = expert_name
+                if expert.name not in library_dest:
+                    library_dest.add_expert(expert)
 class LossCallback(cb.Callback):
     def __init__(
         self,
