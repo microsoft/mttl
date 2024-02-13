@@ -188,6 +188,8 @@ def run_multitask(args: ExpertConfig):
                     m.config.try_merge_after_op = True
         module = module.to("cuda")
     elif args.merge_or_route == "phatgoose":
+        for k, expert in library.items():
+            expert.expert_config.try_merge_after_op = True
         an_expert = library[next(iter(library.keys()))]
         args_copy = deepcopy(an_expert.training_config)
         args_copy.router_selector = "phatgoose_selector"

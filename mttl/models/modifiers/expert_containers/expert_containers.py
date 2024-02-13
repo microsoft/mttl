@@ -245,7 +245,10 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                 # inverse_indices  = [[1, 3], [2, 0]]
                 # inverse_weights  = [[0, 0.2, 0, 0.8], [0.1, 0, 0.9, 0.]]
                 inverse_weights = torch.zeros(
-                    weights.shape[0], len(unique_indices), device=weights.device
+                    weights.shape[0],
+                    len(unique_indices),
+                    device=weights.device,
+                    dtype=weights.dtype,
                 )
                 inverse_weights = torch.scatter_add(
                     inverse_weights, 1, inverse_indices, weights

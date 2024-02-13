@@ -769,8 +769,8 @@ class Router(nn.Module):
         temp = self.temperature if self.temperature > 0 else np.sqrt(x.shape[-1])
 
         if self.hard:
-            modules = torch.topk(sim, self.moe_top_k, dim=-1)
-            return modules[1], F.softmax(modules[0] / temp, dim=-1)
+            weights, module_indices = torch.topk(sim, self.moe_top_k, dim=-1)
+            return module_indices, F.softmax(weights / temp, dim=-1)
         else:
             return None, F.softmax(sim / temp, dim=-1)
 
