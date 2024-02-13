@@ -280,9 +280,11 @@ class PolySelector(Selector):
                 task_ids = self.info_container["routing_infos"].task_ids_from_name
             else:
                 task_ids = [
-                    self.config.task_names.index(t)
-                    if t in self.config.task_names
-                    else self.n_tasks
+                    (
+                        self.config.task_names.index(t)
+                        if t in self.config.task_names
+                        else self.n_tasks
+                    )
                     for t in self.info_container["routing_infos"].task_names
                 ]
                 task_ids = torch.LongTensor(task_ids).to(self.module_logits.device)
@@ -723,7 +725,8 @@ class ZeroPerTokenSelector(Selector):
 
 @dataclass
 class PhatgooseSelectorConfig(SelectorConfig):
-    top_k: int = -1
+    moe_top_k: int = 2  # negative number means we take all
+    router_temp: float = 1.0
 
 
 class SigmoidGate(nn.Module):
@@ -737,37 +740,42 @@ class SigmoidGate(nn.Module):
 
 class Router(nn.Module):
     def __init__(
-        self, gates: nn.ModuleList[SigmoidGate], hard=False, t=1, top_k=2, **kwargs
+        self, gates: nn.ModuleList, hard=False, t=1, top_k=2, device="cuda", **kwargs
     ):
         super().__init__()
         self.hard = hard
+        self.moe_top_k = top_k
         self.temperature = t
-        self.expert_embeddings = torch.stack(
-            [g.v.T for g in gates]
+        self.expert_embeddings = torch.stack([g.v.T.squeeze() for g in gates]).to(
+            device
         )  # (n_experts, input_dim)
-        # standardize the expert embeddings
+        # standardize the expert embeddings: sub mean and divide by std
         self.expert_embeddings = (
-            self.expert_embeddings / self.expert_embeddings.norm(dim=1, keepdim=True)
-            + 1e-6
-        )
+            self.expert_embeddings - self.expert_embeddings.mean(dim=-1, keepdim=True)
+        ) / (self.expert_embeddings.std(dim=-1, keepdim=True) + 1e-6)
 
     def forward(self, x):
-        # x: (batch_size, s, d)
+        # x: (batch_size, seq, d)
         # expert_embeddings: (n_experts, d)
         # standardize the input
-        x = x / x.norm(dim=-1, keepdim=True) + 1e-6  # (batch_size, s, d)
+        x = (x - x.mean(dim=-1, keepdim=True)) / (x.std(dim=-1, keepdim=True) + 1e-6)
+        self.expert_embeddings = self.expert_embeddings.to(x.dtype)
         # cosine similarity of each token with each expert
         sim = torch.einsum(
             "bsd,ed->bse", x, self.expert_embeddings
-        )  # (batch_size, s, n_experts)
+        )  # (batch_size, seq, n_experts)
         if self.hard:
-            return torch.topk(sim, self.top_k, dim=-1)
+            return torch.topk(sim, self.moe_top_k, dim=-1)
         else:
             return F.softmax(sim / self.temperature, dim=-1)
 
 
 @register_multi_expert_selector("phatgoose_selector", PhatgooseSelectorConfig)
 class PhatgooseSelector(Selector):
+    """
+    Selector from https://arxiv.org/abs/2402.05859
+    """
+
     def __init__(
         self, info_container, config: PhatgooseSelectorConfig, **kwargs
     ) -> None:
@@ -778,8 +786,9 @@ class PhatgooseSelector(Selector):
                 "PhatgooseSelector requires a layer to be passed in kwargs to infer the input dimension."
             )
 
-        self.top_k = config.top_k
+        self.top_k = config.moe_top_k
         self.input_dim = kwargs["layer"].weight.data.shape[-1]
+        self.device = kwargs["layer"].weight.device
 
         self.gates = nn.ParameterDict()
         self.router = None
@@ -803,8 +812,10 @@ class PhatgooseSelector(Selector):
             # parallel forward + top-k selection
             assert len(self.gates) == len(self.expert_names)
             scores = self.router(input)
+            if self.top_k > 0:
+                raise NotImplementedError("Top-k routing not implemented yet.")
             return BatchSequenceModulesAndWeightsSelectorOutput(
-                torch.zeros_like(scores, dtype=torch.int8), scores
+                modules=None, weights=scores
             )
 
     def add_expert(self, expert_name: str, **kwargs):
@@ -820,7 +831,11 @@ class PhatgooseSelector(Selector):
 
         if len(self.gates) > 1:
             self.router = Router(
-                self.gates.values(), hard=self.top_k > 0, top_k=self.top_k
+                self.gates.values(),
+                hard=self.top_k > 0,
+                t=self.config.router_temp,
+                top_k=self.top_k,
+                device=self.device,
             )
 
 

@@ -168,6 +168,16 @@ def run_multitask(args: ExpertConfig):
         module.load_from_module_dict(library)
         patch_prototypes(module, library, args)
         module = module.to("cuda")
+    elif args.merge_or_route == "phatgoose":
+        an_expert = library[next(iter(library.keys()))]
+        args_copy = deepcopy(an_expert.training_config)
+        args_copy.router_selector = "phatgoose_selector"
+        args_copy.router_temp = args.router_temp
+        args_copy.moe_top_k = args.moe_top_k
+
+        module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
+        module.load_from_module_dict(library)
+        module = module.to("cuda")
 
     if args.pipeline_eval_tasks == "all":
         args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
