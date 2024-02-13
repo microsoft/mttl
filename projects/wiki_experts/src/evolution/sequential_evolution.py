@@ -134,7 +134,7 @@ def setup(args: EvolExpertConfig):
 
     os.makedirs(local_lib_location, exist_ok=True)
     print("Local lib location", local_lib_location)
-    expert_lib = LocalExpertLibrary.create_from_remote(
+    expert_lib = LocalExpertLibrary.from_expert_library(
         get_expert_library(args.hf_repo_id), local_lib_location
     )
     expert_lib.ignore_sliced = True
@@ -677,7 +677,7 @@ def main(args: EvolExpertConfig):
         # send updates to remote
         if args.upload_lib_to_hub:
             try:
-                remote_lib = HFExpertLibrary.from_local(
+                remote_lib = HFExpertLibrary.from_expert_library(
                     expert_lib,
                     to_repo_id,
                     force=True,
