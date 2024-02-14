@@ -131,6 +131,16 @@ def test_skilled_lora_parallel_merge_with_weights():
     assert output[0, 0, 0].item() == 2.5
     assert output.shape == (2, 3, 2)
 
+    output = SkilledLoRA.parallel_linear_weighted_forward(
+        input,
+        [ada1],
+        [torch.tensor([0.5, 0.5]), torch.tensor([0.0, 1.0])],
+        merge_after=True,
+    )
+    assert output[0, 0, 0].item() == 2.5
+    assert output[1, 0, 0].item() == 4.0
+    assert output.shape == (2, 3, 2)
+
     output = SkilledLoRA.parallel_linear_forward(
         input, [ada1, ada2], [torch.tensor([0.5, 0.5]), torch.tensor([0.0, 1.0])]
     )
