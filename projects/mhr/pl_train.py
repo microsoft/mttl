@@ -1,48 +1,62 @@
 import os
+import torch
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from mttl.online_eval import NIOnlineZeroShot, T0OnlineZeroShot
 from mttl.callbacks import ProgressCallback
-from mttl.datamodule.ni_data_module import NIPretrainDataModule
-from mttl.datamodule.xfit_data_module import XFitPretrainDataModule
+from mttl.datamodule.ni_original_data_module import NIOriginalDataModule
 from mttl.datamodule.t0_data_module import T0PretrainDataModule
 from mttl.models.encoder_decoder import EncoderDecoder
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.models.monitors import get_monitors
-from mttl.utils import get_mlf_logger
+from mttl.utils import logger, setup_logging, get_training_strategy
 from mttl.config import Config
 
+torch.set_float32_matmul_precision("high")
 
 def run_multitask(args):
     seed_everything(args.seed, workers=True)
+    setup_logging(args.output_dir)
+
+    print('arguments')
+    print(vars(args))
 
     # select dataloader
-    if args.dataset == "xfit":
+    if args.dataset == "ni":
         model_class = EncoderDecoder
-        dm = XFitPretrainDataModule(args)
-    elif args.dataset == "ni":
-        model_class = EncoderDecoder
-        dm = NIPretrainDataModule(args)
+        dm = NIOriginalDataModule(args)
     elif args.dataset == "t0":
         model_class = T0EncoderDecoder
         dm = T0PretrainDataModule(args)
     else:
         raise NotImplementedError()
 
-    args.n_tasks = len(dm.task2id)
+    args.n_tasks = len(dm.task_to_id)
 
-    if args.checkpoint is not None:
-        from mttl.utils import get_checkpoint_path
-
-        checkpoint_path = get_checkpoint_path(args.checkpoint)
+    if args.checkpoint or args.load_from_hf:
+        if args.checkpoint:
+            from mttl.utils import get_checkpoint_path
+            checkpoint_path = get_checkpoint_path(
+                args.checkpoint, use_last=args.finetune_use_last_checkpoint
+            )
+        else:
+            from mttl.utils import get_mhr_hf_checkpoint
+            checkpoint_path = get_mhr_hf_checkpoint(args)
 
         kwargs = vars(args)
         kwargs.pop("checkpoint")
         module = model_class.load_from_checkpoint(
             checkpoint_path, **kwargs, tokenizer=dm.tokenizer
         )
+        print('multitask pretrain : loaded model.')
+    
+        # allocate new module logits for the new task
+        if args.model_modifier and "poly" in args.model_modifier:
+            if args.switch_to_avg_modules:
+                print('switching to average selector.')
+                module.model.switch_selector_to_average(**{'config': args})
     else:
         module = model_class(**vars(args), tokenizer=dm.tokenizer)
 
@@ -58,10 +72,6 @@ def run_multitask(args):
     else:
         wandb_logger = None
 
-    mlf_logger = get_mlf_logger()
-    if mlf_logger:
-        loggers.append(mlf_logger)
-
     loggers.append(pl.loggers.CSVLogger(save_dir=args.output_dir, name="csv_metrics"))
 
     kwargs = {"val_check_interval": args.eval_every * args.gradient_accumulation_steps} if args.eval_every else {}
@@ -73,7 +83,7 @@ def run_multitask(args):
     monitor = "val/loss"
     mode = "min"
 
-    if args.dataset in ["ni", "xfit"]:
+    if args.dataset in ["ni"]:
         if args.early_stop_on_zero_shot and not args.ni_online_eval:
             raise NotImplementedError("Specify online zero-shot if early stopping on zero shot.")
 
@@ -114,19 +124,18 @@ def run_multitask(args):
         max_steps=args.total_steps + 1 if args.total_steps != -1 else -1,
         gradient_clip_val=args.max_grad_norm,
         log_every_n_steps=50,
-        strategy=args.compute_strategy if args.compute_strategy else "auto",
+        strategy=get_training_strategy(args.compute_strategy),
         callbacks=callbacks,
         accumulate_grad_batches=args.gradient_accumulation_steps,
-        precision=int(args.precision)
-        if args.precision in ["16", "32"]
-        else args.precision,
+        precision=args.precision,
         **kwargs,
     )
 
     trainer.fit(module, dm)
 
     try:
-        trainer.validate(module, dm)
+        if args.validate_after_training:
+            trainer.validate(module, dm)
     except:
         pass
 

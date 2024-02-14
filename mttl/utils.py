@@ -1,7 +1,8 @@
+from collections import defaultdict
 import glob
 import json
 import logging
-
+import os
 import numpy as np
 import torch
 import torch.nn as nn
@@ -11,10 +12,55 @@ from typing import Dict
 import hashlib
 from pytorch_lightning.utilities.rank_zero import rank_zero_info
 from torch.autograd.function import Function
+from huggingface_hub import hf_hub_download
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("mttl")
 
+
+def get_training_strategy(training_strategy):
+    """Avoids using DDP when only a single GPU is available"""
+    if (
+        torch.cuda.is_available()
+        and torch.cuda.device_count() == 1
+        and training_strategy != "cpu"
+    ):
+        from pytorch_lightning.strategies import SingleDeviceStrategy
+
+        training_strategy = SingleDeviceStrategy(device=torch.device("cuda:0"))
+        logger.warn("owerwriting default training stragegy to SingleDeviceStrategy")
+    elif training_strategy is None:
+        training_strategy = "auto"
+
+    return training_strategy
+
+def get_mhr_hf_checkpoint(args):
+    if isinstance(args.load_from_hf, str):
+        hf_path = args.load_from_hf
+    else:
+        n_skills, n_splits, modifier = args.n_skills, args.n_splits, args.model_modifier
+        prefix = {"lora": "lora", "ia3": "ia3", "poly": "poly"}[modifier]
+        adapter = prefix
+        if n_skills > 1:
+            assert prefix == "poly"
+            adapter = 'lora'
+            prefix = "mhr" if n_splits > 1 else "poly"
+            prefix += f'-S{n_splits}-K{n_skills}'
+        if modifier in ['mhr', 'poly', 'lora']:
+            prefix += f'-rank{args.lora_rank}'
+        model = {
+            "google/t5-xl-lm-adapt": "t5-3b-lm",
+            "google/t5-xxl-lm-adapt": "t5-11b-lm",
+            "bigscience/T0": "t0-11b",
+            "bigscience/T0_3B": "t0-3b",
+        }[args.model]
+
+        # TODO: expand if we add more pretraining datasets 
+        hf_path = f"t0-dataset/{model}/{adapter}/{prefix}"
+
+    ckpt_path = hf_hub_download(repo_id='pclucas14/multi-head-routing', filename=hf_path)
+
+    return ckpt_path
 
 def hash_example(example):
     return hashlib.md5(example.encode("utf-8")).hexdigest()
@@ -34,16 +80,14 @@ def label_smoothed_nll_loss(
     """From fairseq"""
     if target.dim() == lprobs.dim() - 1:
         target = target.unsqueeze(-1)
+
+    pad_mask = target.eq(ignore_index)
+    # because otherwise we gather -100 :-(
+    target.masked_fill_(pad_mask, 0)
     nll_loss = -lprobs.gather(dim=-1, index=target)
     smooth_loss = -lprobs.sum(dim=-1, keepdim=True)
-
-    if ignore_index is not None:
-        pad_mask = target.eq(ignore_index)
-        nll_loss.masked_fill_(pad_mask, 0.0)
-        smooth_loss.masked_fill_(pad_mask, 0.0)
-    else:
-        nll_loss = nll_loss.squeeze(-1)
-        smooth_loss = smooth_loss.squeeze(-1)
+    nll_loss.masked_fill_(pad_mask, 0.0)
+    smooth_loss.masked_fill_(pad_mask, 0.0)
 
     if reduction == "mean":
         nll_loss = nll_loss.sum()
@@ -121,14 +165,55 @@ def get_example_to_ids(filename):
     return package
 
 
-def average_dicts(list_of_dicts):
-    out = list_of_dicts[0]
-    for item in list_of_dicts[1:]:
-        assert len(item) == len(out)
-        for k, v in item.items():
-            out[k] += v
+class Averager:
+    def __init__(self, weight: float = 1):
+        self.weight = weight
+        self.total = {}
 
-    return {k: v / len(list_of_dicts) for (k, v) in out.items()}
+    def update(self, stats):
+        for key, value in stats.items():
+            if key not in self.total:
+                self.total[key] = value
+            else:
+                self.total[key] = self.total[key] * self.weight + value * (
+                    1 - self.weight
+                )
+        return self.total
+
+
+def agg_dicts(list_of_dicts, agg="mean", tag=False):
+    """Aggregate a list of dicts by taking the aggregate of each key.
+
+    Could be "min", "max", or "mean".
+    """
+    out = {}
+    for curr_dict in list_of_dicts:
+        for k, v in curr_dict.items():
+            if tag:
+                k = f"{agg}_{k}"
+            if k not in out:
+                # clone the variable so that we don't modify the original
+                out[k] = v.clone() if isinstance(v, torch.Tensor) else v
+            else:
+                if agg == "min":
+                    # take minimum between tensors
+                    out[k] = (
+                        torch.minimum(out[k], v)
+                        if isinstance(v, torch.Tensor)
+                        else min(out[k], v)
+                    )
+                elif agg == "max":
+                    out[k] = (
+                        torch.maximum(out[k], v)
+                        if isinstance(v, torch.Tensor)
+                        else max(out[k], v)
+                    )
+                else:
+                    out[k] += v
+    if agg == "mean":
+        for k, v in out.items():
+            out[k] = v / len(list_of_dicts)
+    return out
 
 
 class CustomModelCheckpoint(pl.callbacks.ModelCheckpoint):
@@ -234,9 +319,11 @@ def get_checkpoint_path(path, step=None, use_last=False):
 
     if use_last:
         # search for last.ckpt
-        match = [m for m in match if 'last.ckpt' in m]
+        match = [m for m in match if "last.ckpt" in m]
         if len(match) != 1:
-            raise ValueError("last.ckpt not found or found multiple (?) in the list of checkpoints!")
+            raise ValueError(
+                "last.ckpt not found or found multiple (?) in the list of checkpoints!"
+            )
         return match[0]
 
     if len(match) > 1:
@@ -276,7 +363,10 @@ def get_checkpoint_path(path, step=None, use_last=False):
                 )
                 path = match[idx]
         elif len(match) == 0:
-            raise FileNotFoundError(f"{path} had no `.ckpt` nor `.pt` files")
+            match = glob.glob(f"{path}/*finish.pt", recursive=True)
+            if len(match) == 0:
+                raise FileNotFoundError(f"{path} had no `.ckpt` nor `.pt` files")
+            path = match[0]
         else:
             path = match[0]
     else:
@@ -284,6 +374,58 @@ def get_checkpoint_path(path, step=None, use_last=False):
 
     print("Found checkpoint", path)
     return path
+
+
+def setup_logging(log_dir: str = None):
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)s --> %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        level=logging.INFO,
+    )
+    logger.setLevel(logging.INFO)
+    logging.getLogger("openai").setLevel(logging.WARNING)
+
+    if log_dir:
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        logger.addHandler(logging.FileHandler(os.path.join(log_dir, "log.txt")))
+        logger.info(
+            "New experiment, log will be at %s",
+            os.path.join(log_dir, "log.txt"),
+        )
+
+
+def convert_to_new_checkpoint(old_ckpt):
+    to_delete = [
+        "lora_scaling_rank",
+        "mixed_task_batches",
+        "patch_modules",
+        "mem_efficient",
+        "validate_avg_selector",
+        "adapter_soup_max_domains",
+        "path_to_task_centroids",
+        "path_id_to_task",
+    ]
+
+    map_to = {
+        "lora_randb_init": "lora_init_b_random",
+        "lora_modules": "modify_modules",
+        "lora_layers": "modify_layers",
+        "poly_selector": "router_selector",
+        "poly_granularity": "router_granularity",
+    }
+
+    for key in to_delete:
+        del old_ckpt[key]
+
+    for key in map_to:
+        old_ckpt[map_to[key]] = old_ckpt[key]
+        del old_ckpt[key]
+
+    if old_ckpt["model_modifier"].startswith("poly"):
+        old_ckpt["model_modifier"] = "poly"
+
+    return old_ckpt
 
 
 class MemEfficientLoRA(Function):
@@ -303,7 +445,6 @@ class MemEfficientLoRA(Function):
 
     @staticmethod
     def backward(ctx, O_grad):
-
         bs, L, O = O_grad.size()
 
         input, A, B, skills = ctx.saved_tensors

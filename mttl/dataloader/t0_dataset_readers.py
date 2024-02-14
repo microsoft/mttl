@@ -60,9 +60,9 @@ NUM_SHOTS_CONFIG = {
 
 
 class T0DatasetConfig:
-    def __init__(self, dataset, train_dir, output_dir, use_t0_templates_as_tasks, seed):
+    def __init__(self, dataset, data_dir, output_dir, use_t0_templates_as_tasks, seed):
         self.dataset = dataset
-        self.train_dir = train_dir
+        self.data_dir = data_dir
         self.num_shot = NUM_SHOTS_CONFIG.get(dataset, 32)
         self.few_shot_random_seed = seed
         self.train_template_idx = -1
@@ -80,7 +80,7 @@ class T0DatasetConfig:
     def from_args(cls, args):
         config = T0DatasetConfig(
             args.finetune_task_name,
-            args.train_dir,
+            args.data_dir,
             args.output_dir,
             args.use_t0_templates_as_tasks,
             args.seed,
@@ -175,14 +175,14 @@ class BaseDatasetReader(object):
             )[split]
         else:
             orig_data = load_dataset(
-                *self.dataset_stash, split=split, cache_dir=self.config.train_dir
+                *self.dataset_stash, split=split, cache_dir=self.config.data_dir
             )
         return orig_data
 
     def read_few_shot_dataset(self):
         file_dir = pkg_resources.resource_filename(
             __name__,
-            f"{self.config.train_dir}/few_shot/{self.config.dataset}/{self.config.num_shot}_shot",
+            f"{self.config.data_dir}/few_shot/{self.config.dataset}/{self.config.num_shot}_shot",
         )
         file_path = os.path.join(
             file_dir, f"{self.config.few_shot_random_seed}_seed.jsonl"
@@ -243,7 +243,7 @@ class StoryClozeReader(BaseDatasetReader):
                 *dataset_stash,
                 split=split,
                 data_dir=os.environ.get(
-                "STORYCLOZE_DIR", self.config.train_dir
+                "STORYCLOZE_DIR", self.config.data_dir
                 ),
             )
         orig_data = [example for example in orig_data]
@@ -559,7 +559,7 @@ class T0MixtureReader(object):
                 dataset_name,
                 subset_name,
                 split=split_num,
-                cache_dir=self.config.train_dir,
+                cache_dir=self.config.data_dir,
             )
             ds.dataset_name = dataset_name
             ds.subset_name = subset_name
@@ -571,7 +571,7 @@ class T0MixtureReader(object):
 class RaftTemplate(object):
     def __init__(self, config, answer_choices):
         with open(
-            os.path.join(config.train_dir, "raft_prompt_construction_settings.jsonl")
+            os.path.join(config.data_dir, "raft_prompt_construction_settings.jsonl")
         ) as f:
             data = [json.loads(line) for line in f]
             FIELD_ORDERING = data[0]

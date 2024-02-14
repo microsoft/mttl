@@ -1,0 +1,12 @@
+{
+    "lora_init_b_random": false,
+    "lora_rank": 1,
+    "n_skills": 1,
+    "lora_init_scale": 0.01,
+    "lora_warmup": false,
+    "modify_modules": ".*SelfAttention|.*EncDecAttention|.*DenseReluDense",
+    "model_modifier": "lora",
+    "modify_layers": "q|k|v|o|wi_1.*|wi_0.*|wo",
+    "trainable_param_names": ".*lora_[ab].*",
+    "adapters_learning_rate": 0.001
+}

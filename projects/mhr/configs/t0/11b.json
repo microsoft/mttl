@@ -1,0 +1,7 @@
+{
+    "model": "bigscience/T0",
+    "precision": "bf16",
+    "train_batch_size": 2,
+    "predict_batch_size": 3,
+    "gradient_accumulation_steps": 8
+}

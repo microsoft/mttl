@@ -167,11 +167,15 @@ def main(files, dataset, latex, hps, tasks, nt):
                 zero_shot = data.loc[data["step"] == 0]["test/acc_0shot"].dropna().values * 100
                 data = data.loc[data["step"] != 0]
 
-                # take val/acc for both as they are equal up to some random sampling of prompts
-                test_scores = data["val/acc"].dropna().values * 100
-                val_scores = data["val/acc"].dropna().values * 100
+                is_zs = 'val/acc' not in data.columns
+                if is_zs:
+                    test_scores = val_scores = zero_shot
+                else:
+                    # take val/acc for both as they are equal up to some random sampling of prompts
+                    test_scores = data["val/acc"].dropna().values * 100
+                    val_scores = data["val/acc"].dropna().values * 100
 
-                if len(test_scores) != 3:
+                if len(test_scores) != 3 and not is_zs:
                     skipped.append(task_name)
                     continue
 
@@ -199,6 +203,8 @@ def main(files, dataset, latex, hps, tasks, nt):
     print([len(t) for t in tasks])
     all_tasks = set(tasks[0])
 
+    if is_zs:
+        print('ZERO SHOT PERF')
     for task in tasks:
         all_tasks = all_tasks.intersection(set(task))
     all_tasks = sorted(list(all_tasks))
@@ -244,7 +250,7 @@ def main(files, dataset, latex, hps, tasks, nt):
         for m, r in zip(models, res):
             filtered_results = r.loc[r["task_name"].isin(all_tasks)]
             # median across tasks
-            agg_seed_mean = filtered_results.groupby(["trial"]).agg("mean")
+            agg_seed_mean = filtered_results.groupby(["task_name"]).agg("median")
             agg_seed_std = agg_seed_mean.agg("std")
 
             # mean of medians across seeds

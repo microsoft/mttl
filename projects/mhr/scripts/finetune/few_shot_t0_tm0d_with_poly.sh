@@ -7,5 +7,5 @@ do
     checkpoint=${CHECKPOINT_DIR} \
     output_dir=${OUTPUT_DIR}/${dataset} \
     -k model_modifier=poly_lora \
-    -k poly_selector=poly
+    -k router_selector=poly
 done
