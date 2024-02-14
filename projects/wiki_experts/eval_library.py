@@ -226,7 +226,7 @@ def run_multitask(args: ExpertConfig):
 
         wandb.init(
             project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
-            config=args.asdict(),
+            config=dict(module.hparams),
             name=os.environ.get("AMLT_JOB_NAME", None),
         )
         wandb.log({f"downstream/{k}": v for k, v in scores.items()})

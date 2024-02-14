@@ -29,7 +29,9 @@ from mttl.datamodule.mt_seq_to_seq_module import (
 )
 
 
-def get_datamodule(args, for_generation=False, dataset_override=None):
+def get_datamodule(
+    args, for_generation=False, dataset_override=None, subsample_per_task=False
+):
     # refactor all the common arguments below into a dict common kwargs
     dataset = args.dataset if not dataset_override else dataset_override
 
@@ -50,6 +52,7 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         "subsample_train": args.subsample_train,
         "subsample_dev": args.subsample_dev,
         "subsample_test": args.subsample_test,
+        "subsample_per_task": subsample_per_task,
     }
     if dataset in [
         "arc-easy",

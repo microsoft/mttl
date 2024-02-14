@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Any
 from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
 from mttl.models.modifiers.expert_containers.expert import Expert
+from mttl.models.modifiers.expert_containers.expert_containers import ExpertContainer
 from mttl.utils import logger
 from mttl.models.modifiers.modify_model import get_modifier_type
 from mttl.models.utils import model_loader_helper
@@ -477,6 +478,143 @@ class HiddenStateComputer(LibraryTransform):
                     )
 
         return output
+
+
+@dataclass
+class PhatgooseConfig:
+    n_steps: int = 500
+    upload_to_hf: bool = True
+    recompute: bool = False
+    save_name: str = None
+    learning_rate: float = 3e-3
+    max_samples_per_task: int = 1000
+
+
+class PhatgooseTransform(HiddenStateComputer):
+    def __init__(self, config: PhatgooseConfig = None):
+        super().__init__(config or PhatgooseConfig())
+
+    @torch.no_grad()
+    def transform(self, library, expert_names: list, default_args=None):
+        # TODO: remove project import
+        from projects.wiki_experts.train_experts_main import get_datamodule
+        from projects.wiki_experts.src.expert_model import MultiExpertModel
+        from mttl.models.modifiers.expert_containers.utils import train_module
+
+        outputs = {}
+        expert_names = expert_names or list(library.keys())
+        for expert_name in expert_names:
+            logger.info(f"Computing centroids for expert {expert_name}")
+            expert: Expert = library[expert_name]
+            save_name = self.config.save_name
+            if save_name is None:
+                args_in_name = ["n_steps", "learning_rate"]
+                save_name = "goose_emb-" + "-".join(
+                    [
+                        "" if x is None else str(x)
+                        for x in [getattr(self.config, k) for k in args_in_name]
+                    ]
+                )
+                save_name = expert.expert_info.expert_name + "-" + save_name
+            logger.info("save_name", save_name)
+
+            if type(library) == str:
+                library = get_expert_library(library)
+            output = library.get_auxiliary_data(data_type=save_name + ".bin")
+            if not self.config.recompute and expert_name in output:
+                logger.info("Found {} precomputed centroids".format(len(output)))
+                # format is dict[layer_name] = embedding, layer_name ends with selector.{task_name}.v
+                outputs[expert_name] = output[expert_name]
+                continue
+
+            output = {}
+
+            training_config = expert.training_config
+            training_config.router_selector = "phatgoose_selector"
+            training_config.trainable_param_names = ".*selector.*"
+            model = MultiExpertModel(**vars(training_config)).to("cuda")
+            model.add_expert_instance(expert, is_default=True)
+            # for checksum
+            p_sum_before = sum(
+                p.sum()
+                for n, p in model.named_parameters()
+                if "selector" not in n
+                and "norm" not in n
+                and "ln" not in n
+                and "layer_norm" not in n
+            )
+            p_sum_sel_before = sum(
+                p.sum() for n, p in model.named_parameters() if "selector" in n
+            )
+
+            training_config.dataset = expert.expert_info.dataset
+            training_config.subsample_train = self.config.max_samples_per_task
+            if expert.expert_info.expert_task_name:
+                train_tasks = expert.expert_info.expert_task_name.split(",")
+                training_config.finetune_task_name = ",".join(train_tasks)
+            else:
+                train_tasks = None
+
+            if default_args is not None:
+                self._fill_missing_args(training_config, default_args)
+                training_config.include_task_source = default_args.include_task_source
+                training_config.output_dir = default_args.output_dir
+            # get datamodule
+            dm = get_datamodule(training_config, subsample_per_task=True)
+            # create a trained and yolo
+            training_config.eval_every = -1
+            training_config.total_steps = self.config.n_steps
+            training_config.learning_rate = self.config.learning_rate
+            model = train_module(training_config, model, dm)
+            p_sum_after = sum(
+                p.sum()
+                for n, p in model.named_parameters()
+                if ".selector" not in n
+                and ".norm" not in n
+                and ".ln." not in n
+                and "layer_norm" not in n
+            )
+            # TODO
+            # Not sure why, but p_sum_after is not the same as p_sum_before, even though trainable params only include selector
+            print(p_sum_before, p_sum_after)
+
+            p_sum_sel_after = sum(
+                p.sum() for n, p in model.named_parameters() if "selector" in n
+            )
+            # assert (
+            #     p_sum_before == p_sum_after
+            # ), "Model parameters other than selector have changed after training"
+            assert (
+                p_sum_sel_before != p_sum_sel_after
+            ), "Selector parameters have not changed after training"
+
+            # extract prototypes
+            prototypes = {}
+            for name, module in model.named_modules():
+                if isinstance(module, ExpertContainer) and hasattr(
+                    module.selector, "get_prototypes"
+                ):
+                    # expand dict
+                    prototypes_module = {}
+                    for k, v in module.selector.get_prototypes().items():
+                        prototypes_module[f"{name}.selector.{k}.v"] = v
+                    prototypes = {**prototypes, **prototypes_module}
+
+            output[expert_name] = prototypes
+            if self.config.upload_to_hf:
+                logger.info("Uploading centroids to HF")
+
+                # add embeddings to the library
+                with library.batched_commit():
+                    for expert_name, data in output.items():
+                        library.add_embedding_dict(
+                            dump_name=save_name,
+                            expert_name=expert_name,
+                            data=data,
+                            force=True,  # make sure we overwrite
+                        )
+            outputs[expert_name] = output
+        return outputs
 
 
 @dataclass
