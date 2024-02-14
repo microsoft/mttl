@@ -158,7 +158,7 @@ def run_multitask(args: ExpertConfig):
         assert type(expert.expert_info.expert_config) == LoRAConfig
         config = expert.training_config
         config.router_selector = "uniform"
-        config.try_merge_after_op = True
+        config.lora_merge_after = True
         module = MultiExpertModel(**vars(config)).to("cuda")
         module.add_experts_from_library(library)
     elif args.merge_or_route == "ties":
@@ -177,7 +177,7 @@ def run_multitask(args: ExpertConfig):
         args_copy.clown_mode = args.clown_mode
         args_copy.proto_init = args.proto_init
         args_copy.normalize_router_input = args.normalize_router_input
-        args_copy.try_merge_after_op = args.merge_or_route == "clown_lora_after_op"
+        args_copy.lora_merge_after = args.merge_or_route == "clown_lora_after_op"
         module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
         patch_prototypes(module, library, args)
@@ -191,7 +191,7 @@ def run_multitask(args: ExpertConfig):
         an_expert = library[next(iter(library.keys()))]
         args_copy = deepcopy(an_expert.training_config)
         # phatgoose does merging after by default
-        args_copy.try_merge_after_op = True
+        args_copy.lora_merge_after = True
         args_copy.router_selector = "phatgoose_selector"
         args_copy.router_temp = args.router_temp
         args_copy.moe_top_k = args.moe_top_k

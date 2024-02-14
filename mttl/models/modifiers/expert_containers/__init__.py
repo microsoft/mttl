@@ -181,8 +181,8 @@ def add_expert_to_transformer(
                             transformer.info_container,
                             layer,
                             selector,
-                            try_merge_after_op=(
-                                routing_config.try_merge_after_op
+                            lora_merge_after=(
+                                routing_config.lora_merge_after
                                 if routing_config
                                 else False
                             ),

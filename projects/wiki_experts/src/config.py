@@ -103,7 +103,7 @@ class ExpertConfig(Config):
         self.es_metric = "loss"
         self.n_ng_iterations = 30  # number of iterations for LoraHub
         self.phi_2_align_heads = False
-        self.try_merge_after_op = False  # if True, tried to merge after the outer product, currently only applicable to LoRA
+        self.lora_merge_after = False  # if True, tried to merge after the outer product, currently only applicable to LoRA
 
     def post_init(self, silent=False):
         self._load_deprecated_configs(silent)

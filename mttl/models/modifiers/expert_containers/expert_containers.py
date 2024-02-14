@@ -117,11 +117,11 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         info_container,
         layer,
         selector=None,
-        try_merge_after_op=False,
+        lora_merge_after=False,
     ):
         MergeableAdapter.__init__(self)
         super().__init__(config, info_container, layer, selector)
-        self.try_merge_after_op = try_merge_after_op
+        self.lora_merge_after = lora_merge_after
 
         if not isinstance(self.layer, nn.Linear):
             raise ValueError(
@@ -219,7 +219,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                 input,
                 [skilled_lora],
                 [selection.weights],
-                merge_after=self.try_merge_after_op,
+                merge_after=self.lora_merge_after,
             )
         elif isinstance(selection, ModulesSelectorOutput):
             return LoRA.parallel_linear_forward(
@@ -268,7 +268,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                     input.view(-1, input.size(-1)),
                     skilled_loras,
                     inverse_weights,
-                    merge_after=self.try_merge_after_op,
+                    merge_after=self.lora_merge_after,
                 )
             else:
                 # we have no indices, so we just use a linear combination of all the experts
@@ -294,7 +294,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                     input.view(-1, input.size(-1)),
                     skilled_loras,
                     [weights],
-                    merge_after=self.try_merge_after_op,
+                    merge_after=self.lora_merge_after,
                 )
             return module_output.view(input.shape[0], input.shape[1], -1)
 
