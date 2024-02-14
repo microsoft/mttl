@@ -417,15 +417,16 @@ class SkilledLoRA(LoRA):
                     ), skilled_loras_b.flatten(2, 3)
                     W = torch.matmul(
                         skilled_loras_a, skilled_loras_b
-                    )  # (skills, d_in, d_out)
-                    W = torch.einsum("bs,sdo->bdo", (weights, W))
-
+                    )  # (skills, in_features, out_features)
                     if input_lora.ndim == 2:
-                        adapter_out = torch.einsum("bd,bdr->br", (input_lora, W))
+                        adapter_out = torch.einsum("bd,sdo->bso", (input_lora, W))
                         adapter_out = adapter_out * scaling
                     else:
                         adapter_out = torch.bmm(input_lora, W) * scaling
                     del W
+                    # same as doing output merging, which is more efficient
+                    adapter_out = torch.einsum("bs,bso->bo", (weights, adapter_out))
+
                 else:
                     A = torch.einsum("bs,sqdr->bqdr", (weights, skilled_loras_a))
                     B = torch.einsum("bs,srqd->brqd", (weights, skilled_loras_b))
