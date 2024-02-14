@@ -52,7 +52,6 @@ class SelectorConfig:
     # the granularity of the selector (which layers use the same selectors)
     router_granularity: str = "*"
     try_merge_after_op: bool = False
-    merge_after_token_split: int = 2  # if 2 and per-toekn routing, we do merging seperately for the first and second half of the tokens
 
     def __eq__(self, other):
         # compare all the attributes
