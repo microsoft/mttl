@@ -29,7 +29,7 @@ def main(args: ExpertConfig):
     )
     destination += args.hf_lib_id
     os.makedirs(destination, exist_ok=True)
-    library = LocalExpertLibrary.create_from_remote(library, destination=destination)
+    library = LocalExpertLibrary.from_expert_library(library, repo_id=destination)
 
     cfg = MBClusteringTransformConfig(
         k=args.mbc_num_clusters,
