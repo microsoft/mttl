@@ -157,6 +157,17 @@ def test_skilled_lora_parallel_merge_with_weights():
     assert output[1, 0].item() == 4.0
     assert output.shape == (2, 2)
 
+    input = torch.ones(2, 1)
+    output = SkilledLoRA.parallel_linear_weighted_forward(
+        input,
+        [ada1],
+        [torch.tensor([0.5, 0.5]), torch.tensor([0.0, 1.0])],
+        merge_after=True,
+    )
+    assert output[0, 0].item() == 2.5
+    assert output[1, 0].item() == 4.0
+    assert output.shape == (2, 2)
+
     lora_a = torch.randn(1, config.lora_rank)
     lora_b = torch.ones(config.lora_rank, 2)
     l1 = LoRAView(config, layer, lora_a, lora_b)
