@@ -482,7 +482,7 @@ class HiddenStateComputer(LibraryTransform):
 
 @dataclass
 class PhatgooseConfig:
-    n_steps: int = 500
+    n_steps: int = 200
     upload_to_hf: bool = True
     recompute: bool = False
     save_name: str = None
@@ -520,11 +520,15 @@ class PhatgooseTransform(HiddenStateComputer):
 
             if type(library) == str:
                 library = get_expert_library(library)
-            output = library.get_auxiliary_data(data_type=save_name + ".bin")
-            if not self.config.recompute and len(output) > 0:
-                logger.info("Found {} precomputed centroids".format(len(output)))
+            loaded_output = library.get_auxiliary_data(data_type=f"{save_name}.bin")
+            if not self.config.recompute and len(loaded_output) > 0:
+                logger.info("Found {} precomputed centroids".format(len(loaded_output)))
                 # format is dict[layer_name] = embedding, layer_name ends with selector.{task_name}.v
-                outputs[expert_name] = output
+                outputs[expert_name] = (
+                    loaded_output
+                    if not expert_name in loaded_output
+                    else loaded_output[expert_name]
+                )
                 continue
 
             training_config = expert.training_config

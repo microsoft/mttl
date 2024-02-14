@@ -127,7 +127,7 @@ def run_multitask(args: ExpertConfig):
     library = get_expert_library(
         repo_id=args.library_id,
         exclude_selection=exclude_phi_tasks,
-        make_local_copy=True,
+        make_local_copy=False,
     )
 
     if args.merge_or_route in ["uniform", "weighted"]:
@@ -183,6 +183,11 @@ def run_multitask(args: ExpertConfig):
         patch_prototypes(module, library, args)
         module = module.to("cuda")
     elif args.merge_or_route == "phatgoose":
+        from mttl.models.modifiers.expert_containers.library_transforms import (
+            PhatgooseTransform,
+            PhatgooseConfig,
+        )
+
         an_expert = library[next(iter(library.keys()))]
         args_copy = deepcopy(an_expert.training_config)
         # phatgoose does merging after by default
@@ -192,6 +197,15 @@ def run_multitask(args: ExpertConfig):
         args_copy.moe_top_k = args.moe_top_k
         module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
+
+        phagoose_transform = PhatgooseTransform(PhatgooseConfig(recompute=False))
+        prototypes = phagoose_transform.transform(
+            library, expert_names=None, default_args=args
+        )
+        # load prototypes into the router
+        for mod in module.modules():
+            if isinstance(mod, ExpertContainer):
+                mod.selector.set_prototypes(prototypes)
         module = module.to("cuda")
 
     if args.pipeline_eval_tasks == "all":

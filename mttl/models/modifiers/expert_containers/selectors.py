@@ -803,14 +803,30 @@ class PhatgooseSelector(Selector):
 
         self.gates = nn.ParameterDict()
         self.router = None
-
-        self.taskname2expert = (
-            {}
-        )  # several task can point to the same selector, e.g. if we train on cluster experts
+        self.layer = kwargs["layer"]
         self.default_expert_name = None
 
     def get_prototypes(self):
         return {k: gate.v.detach().cpu().numpy() for k, gate in self.gates.items()}
+
+    def set_prototypes(self, prototypes):
+        """
+        Sets prototypes for the gates and re-initializes the router with the new gates
+        Input:
+            - prototypes: a dictionary with expert names as keys mapped to another dict with layer names as keys and values as the prototypes
+        """
+        for task_name, gates in prototypes.items():
+            gate_v = gates[f"model.{self.__layer_name__}.{task_name}.v"]
+            assert self.gates[task_name].v.shape == gate_v.shape
+            self.gates[task_name].v.data = torch.tensor(gate_v).to(self.device)
+
+        self.router = Router(
+            self.gates.values(),
+            hard=self.top_k > 0,
+            t=self.config.router_temp,
+            top_k=self.top_k,
+            device=self.device,
+        )
 
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchSequenceModulesAndWeightsSelectorOutput:
@@ -833,11 +849,7 @@ class PhatgooseSelector(Selector):
     def add_expert(self, expert_name: str, **kwargs):
         self.expert_names.append(expert_name)
         expert_info = kwargs["expert_info"]
-        expert_tasks = expert_info.expert_task_name.split(",")
         self.default_expert_name = expert_name
-        for task in expert_tasks:
-            if task not in self.taskname2expert:
-                self.taskname2expert[task] = expert_name
 
         self.gates[expert_name] = SigmoidGate(self.input_dim)
 
