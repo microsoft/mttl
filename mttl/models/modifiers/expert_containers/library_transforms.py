@@ -515,24 +515,22 @@ class PhatgooseTransform(HiddenStateComputer):
                         for x in [getattr(self.config, k) for k in args_in_name]
                     ]
                 )
-                save_name = expert.expert_info.expert_name + "-" + save_name
+
             logger.info("save_name", save_name)
 
             if type(library) == str:
                 library = get_expert_library(library)
             output = library.get_auxiliary_data(data_type=save_name + ".bin")
-            if not self.config.recompute and expert_name in output:
+            if not self.config.recompute and len(output) > 0:
                 logger.info("Found {} precomputed centroids".format(len(output)))
                 # format is dict[layer_name] = embedding, layer_name ends with selector.{task_name}.v
-                outputs[expert_name] = output[expert_name]
+                outputs[expert_name] = output
                 continue
-
-            output = {}
 
             training_config = expert.training_config
             training_config.router_selector = "phatgoose_selector"
             training_config.trainable_param_names = ".*selector.*"
-            training_config.logging_prefix = expert_name
+            training_config.logging_prefix = expert_name + "/"
             model = MultiExpertModel(**vars(training_config)).to("cuda")
             model.add_expert_instance(expert, is_default=True)
             # for checksum
@@ -566,6 +564,8 @@ class PhatgooseTransform(HiddenStateComputer):
             training_config.eval_every = -1
             training_config.total_steps = self.config.n_steps
             training_config.learning_rate = self.config.learning_rate
+            training_config.warmup_steps = 0
+            training_config.warmup_proportion = 0.0
             model = train_module(training_config, model, dm)
             p_sum_after = sum(
                 p.sum()
@@ -601,20 +601,19 @@ class PhatgooseTransform(HiddenStateComputer):
                         prototypes_module[f"{name}.selector.{k}.v"] = v
                     prototypes = {**prototypes, **prototypes_module}
 
-            output[expert_name] = prototypes
+            outputs[expert_name] = prototypes
+
             if self.config.upload_to_hf:
                 logger.info("Uploading centroids to HF")
-
                 # add embeddings to the library
                 with library.batched_commit():
-                    for expert_name, data in output.items():
+                    for expert_name, data in outputs.items():
                         library.add_embedding_dict(
                             dump_name=save_name,
                             expert_name=expert_name,
                             data=data,
                             force=True,  # make sure we overwrite
                         )
-            outputs[expert_name] = output
         return outputs
 
 
