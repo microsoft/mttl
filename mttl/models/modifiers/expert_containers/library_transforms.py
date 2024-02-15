@@ -516,7 +516,7 @@ class PhatgooseTransform(HiddenStateComputer):
                     ]
                 )
 
-            logger.info("save_name", save_name)
+            logger.info(f"save_name: {save_name}")
 
             if type(library) == str:
                 library = get_expert_library(library)
