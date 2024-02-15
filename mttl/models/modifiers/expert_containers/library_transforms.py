@@ -374,7 +374,7 @@ class HiddenStateComputer(LibraryTransform):
             )
 
         # old name : 'dataset_centroids--False-100-each_layer-last'
-        logger.info("save_name", save_name)
+        logger.info(f"save_name: {save_name}")
 
         output = library.get_auxiliary_data(data_type=save_name + ".bin")
         if len(output) == len(library) and not self.config.recompute:
