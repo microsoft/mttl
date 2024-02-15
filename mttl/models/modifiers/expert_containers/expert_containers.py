@@ -24,9 +24,7 @@ class ExpertContainer:
         self.config = config
         self.layer = layer
         self.info_container = info_container
-        self.selector = selector or TaskNameSelector(
-            info_container, layer_name=self.layer_name
-        )
+        self.selector = selector or TaskNameSelector(info_container)
 
         self.experts: dict = None
         self.expert_infos = {}

@@ -206,8 +206,7 @@ class TestMultiExpertModel:
         # check the get_router_weights function
         routing_weights = module.get_router_weights()
         assert (
-            "mod1" in routing_weights["shared.selector"]
-            and "mod2" in routing_weights["shared.selector"]
+            "mod1" in routing_weights["shared"] and "mod2" in routing_weights["shared"]
         )
 
         assert isinstance(
@@ -464,3 +463,7 @@ class TestMultiExpertModel:
         entropy_uniform = container.selector.info_container["dummy_task"]["ent_uniform"]
         actual_entropy = container.selector.info_container["dummy_task"]["ent_routing"]
         assert actual_entropy < entropy_uniform
+
+
+if __name__ == "__main__":
+    pytest.main([__file__])
