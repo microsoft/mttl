@@ -51,6 +51,7 @@ def get_selector(routing_config: "SelectorConfig", info_container: Dict, **kwarg
 class SelectorConfig:
     # the granularity of the selector (which layers use the same selectors)
     router_granularity: str = "*"
+    lora_merge_after: bool = False
 
     def __eq__(self, other):
         # compare all the attributes
@@ -280,9 +281,11 @@ class PolySelector(Selector):
                 task_ids = self.info_container["routing_infos"].task_ids_from_name
             else:
                 task_ids = [
-                    self.config.task_names.index(t)
-                    if t in self.config.task_names
-                    else self.n_tasks
+                    (
+                        self.config.task_names.index(t)
+                        if t in self.config.task_names
+                        else self.n_tasks
+                    )
                     for t in self.info_container["routing_infos"].task_names
                 ]
                 task_ids = torch.LongTensor(task_ids).to(self.module_logits.device)
@@ -464,6 +467,11 @@ class ClownSelector(Selector):
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchSequenceModulesAndWeightsSelectorOutput:
         # do routing business on fp32
+        temp = (
+            self.config.router_temp
+            if self.config.router_temp > 0
+            else np.sqrt(input.shape[-1])
+        )
         if self.prototypes.size(0) != len(self.expert_names):
             raise ValueError("Prototypes not initialized correctly.")
 
@@ -481,9 +489,7 @@ class ClownSelector(Selector):
             if self.config.proto_init == "svd":
                 router_logits = router_logits.abs()
 
-            routing_weights = F.softmax(
-                router_logits / self.config.router_temp, dim=-1, dtype=torch.float
-            )
+            routing_weights = F.softmax(router_logits / temp, dim=-1, dtype=torch.float)
         else:
             attn_mask = self.info_container["routing_infos"].attention_mask
             if sq == attn_mask.size(1):
@@ -518,9 +524,7 @@ class ClownSelector(Selector):
             router_logits = F.linear(router_input, self.prototypes)
             if self.config.proto_init == "svd":
                 router_logits = router_logits.abs()
-            routing_weights = F.softmax(
-                router_logits / self.config.router_temp, dim=-1, dtype=torch.float
-            )
+            routing_weights = F.softmax(router_logits / temp, dim=-1, dtype=torch.float)
 
         if routing_weights.ndim == 2:
             routing_weights = routing_weights.unsqueeze(1).expand(
@@ -719,6 +723,143 @@ class ZeroPerTokenSelector(Selector):
 
     def get_routing_weights(self):
         raise ValueError("Not supported for MOESelector.")
+
+
+@dataclass
+class PhatgooseSelectorConfig(SelectorConfig):
+    moe_top_k: int = 2  # negative number means we take all
+    router_temp: float = (
+        -1
+    )  # negative value means we use the default \sqrt(d) temp, where n is the input dimension.
+
+
+class SigmoidGate(nn.Module):
+    def __init__(self, input_dim, output_dim=1, **kwargs):
+        super().__init__()
+        self.v = nn.Parameter(torch.zeros(output_dim, input_dim))
+
+    def forward(self, x):
+        return torch.sigmoid(F.linear(x, self.v, bias=None))
+
+
+class Router(nn.Module):
+    def __init__(
+        self, gates: nn.ModuleList, hard=False, t=-1, top_k=2, device="cuda", **kwargs
+    ):
+        super().__init__()
+        self.hard = hard
+        self.moe_top_k = top_k
+        self.temperature = t
+        self.expert_embeddings = torch.stack([g.v.T.squeeze() for g in gates]).to(
+            device
+        )  # (n_experts, input_dim)
+        # standardize the expert embeddings: sub mean and divide by std
+        self.expert_embeddings = (
+            self.expert_embeddings - self.expert_embeddings.mean(dim=-1, keepdim=True)
+        ) / (self.expert_embeddings.std(dim=-1, keepdim=True) + 1e-6)
+
+    def forward(self, input):
+        # x: (batch_size, seq, d)
+        # expert_embeddings: (n_experts, d)
+        # standardize the input
+        input = (input - input.mean(dim=-1, keepdim=True)) / (
+            input.std(dim=-1, keepdim=True) + 1e-6
+        )
+        # perform routing business in fp32 as in Clown
+        input = input.to(self.expert_embeddings.dtype)
+        # cosine similarity of each token with each expert
+        sim = torch.einsum(
+            "bsd,ed->bse", input, self.expert_embeddings
+        )  # (batch_size, seq, n_experts)
+        temp = self.temperature if self.temperature > 0 else np.sqrt(input.shape[-1])
+
+        if self.hard:
+            weights, module_indices = torch.topk(sim, self.moe_top_k, dim=-1)
+            return module_indices, F.softmax(weights / temp, dim=-1)
+        else:
+            return None, F.softmax(sim / temp, dim=-1)
+
+
+@register_multi_expert_selector("phatgoose_selector", PhatgooseSelectorConfig)
+class PhatgooseSelector(Selector):
+    """
+    Selector from https://arxiv.org/abs/2402.05859
+    """
+
+    def __init__(
+        self, info_container, config: PhatgooseSelectorConfig, **kwargs
+    ) -> None:
+        super().__init__(info_container, config)
+
+        if "layer" not in kwargs:
+            raise ValueError(
+                "PhatgooseSelector requires a layer to be passed in kwargs to infer the input dimension."
+            )
+
+        self.top_k = config.moe_top_k
+        self.input_dim = kwargs["layer"].weight.data.shape[-1]
+        self.device = kwargs["layer"].weight.device
+
+        self.gates = nn.ParameterDict()
+        self.router = None
+        self.layer = kwargs["layer"]
+        self.default_expert_name = None
+
+    def get_prototypes(self):
+        return {k: gate.v.detach().cpu().numpy() for k, gate in self.gates.items()}
+
+    def set_prototypes(self, prototypes):
+        """
+        Sets prototypes for the gates and re-initializes the router with the new gates
+        Input:
+            - prototypes: a dictionary with expert names as keys mapped to another dict with layer names as keys and values as the prototypes
+        """
+        for task_name, gates in prototypes.items():
+            gate_v = gates[f"model.{self.__layer_name__}.{task_name}.v"]
+            assert self.gates[task_name].v.shape == gate_v.shape
+            self.gates[task_name].v.data = torch.tensor(gate_v).to(self.device)
+
+        self.router = Router(
+            self.gates.values(),
+            hard=self.top_k > 0,
+            t=self.config.router_temp,
+            top_k=self.top_k,
+            device=self.device,
+        )
+
+    @forward_with_cache
+    def forward(self, input, **kwargs) -> BatchSequenceModulesAndWeightsSelectorOutput:
+        if len(self.gates) == 1:
+            # selectors for tasks are trained independently
+            # all samples go through the same selector
+            scores = self.gates[self.default_expert_name](input)
+            return BatchSequenceModulesAndWeightsSelectorOutput(
+                torch.zeros_like(scores, dtype=torch.int8), scores
+            )
+        else:
+            # the inference procedure: we ave multiple gates
+            # parallel forward + top-k selection
+            assert len(self.gates) == len(self.expert_names)
+            modules, scores = self.router(input)
+            return BatchSequenceModulesAndWeightsSelectorOutput(
+                modules=modules, weights=scores
+            )
+
+    def add_expert(self, expert_name: str, **kwargs):
+        self.expert_names.append(expert_name)
+        expert_info = kwargs["expert_info"]
+        self.default_expert_name = expert_name
+
+        self.gates[expert_name] = SigmoidGate(self.input_dim)
+
+        if len(self.gates) > 1:
+            self.router = Router(
+                self.gates.values(),
+                hard=self.top_k > 0,
+                t=self.config.router_temp,
+                top_k=self.top_k,
+                device=self.device,
+            )
 
 
 @dataclass

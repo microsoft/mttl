@@ -1301,10 +1301,12 @@ def get_expert_library(
             )
             destination += repo_id
             os.makedirs(destination, exist_ok=True)
+            remote = HFExpertLibrary(repo_id=repo_id)
             expert_lib = LocalExpertLibrary.create_from_remote(
-                remote_lib=HFExpertLibrary(repo_id=repo_id),
+                remote_lib=remote,
                 destination=destination,
             )
+            expert_lib.update_from_remote(remote)
 
         else:
             expert_lib_class = available_libraries[expert_library_type]

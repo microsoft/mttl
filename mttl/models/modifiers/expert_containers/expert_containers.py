@@ -109,9 +109,17 @@ class ExpertContainer:
 class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
     __supports_configs__ = [LoRAConfig]
 
-    def __init__(self, config, info_container, layer, selector=None):
+    def __init__(
+        self,
+        config: LoRAConfig,
+        info_container,
+        layer,
+        selector=None,
+        lora_merge_after=False,
+    ):
         MergeableAdapter.__init__(self)
         super().__init__(config, info_container, layer, selector)
+        self.lora_merge_after = lora_merge_after
 
         if not isinstance(self.layer, nn.Linear):
             raise ValueError(
@@ -209,7 +217,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                 input,
                 [skilled_lora],
                 [selection.weights],
-                merge_after=self.config.try_merge_after_op,
+                merge_after=self.lora_merge_after,
             )
         elif isinstance(selection, ModulesSelectorOutput):
             return LoRA.parallel_linear_forward(
@@ -245,7 +253,10 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                 # inverse_indices  = [[1, 3], [2, 0]]
                 # inverse_weights  = [[0, 0.2, 0, 0.8], [0.1, 0, 0.9, 0.]]
                 inverse_weights = torch.zeros(
-                    weights.shape[0], len(unique_indices), device=weights.device
+                    weights.shape[0],
+                    len(unique_indices),
+                    device=weights.device,
+                    dtype=weights.dtype,
                 )
                 inverse_weights = torch.scatter_add(
                     inverse_weights, 1, inverse_indices, weights
@@ -255,7 +266,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                     input.view(-1, input.size(-1)),
                     skilled_loras,
                     inverse_weights,
-                    merge_after=self.config.try_merge_after_op,
+                    merge_after=self.lora_merge_after,
                 )
             else:
                 # we have no indices, so we just use a linear combination of all the experts
@@ -281,7 +292,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                     input.view(-1, input.size(-1)),
                     skilled_loras,
                     [weights],
-                    merge_after=self.config.try_merge_after_op,
+                    merge_after=self.lora_merge_after,
                 )
             return module_output.view(input.shape[0], input.shape[1], -1)
 
@@ -299,7 +310,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
 
     __supports_configs__ = [SkilledLoRAConfig, LoRAConfig]
 
-    def __init__(self, config, info_container, layer, selector=None):
+    def __init__(self, config, info_container, layer, selector=None, **kwargs):
         MergeableAdapter.__init__(self)
         super().__init__(config, info_container, layer, selector)
 
@@ -351,9 +362,11 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
         elif isinstance(selection, ModulesSelectorOutput):
             indices = torch.LongTensor(
                 [
-                    self.expert_names.index(module)
-                    if module in self.expert_names
-                    else self.expert_names.index(self.default_expert_name)
+                    (
+                        self.expert_names.index(module)
+                        if module in self.expert_names
+                        else self.expert_names.index(self.default_expert_name)
+                    )
                     for module in selection.modules
                 ]
             ).unsqueeze(1)
@@ -379,12 +392,14 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                 ), "Tensor expected, return indices of selected experts!"
                 weights = torch.zeros(
                     (
-                        selection.weights.shape[0],
-                        selection.weights.shape[1],
-                        self.experts.n_skills,
-                    )
-                    if selection.weights.ndim == 3
-                    else (selection.weights.shape[0], self.experts.n_skills),
+                        (
+                            selection.weights.shape[0],
+                            selection.weights.shape[1],
+                            self.experts.n_skills,
+                        )
+                        if selection.weights.ndim == 3
+                        else (selection.weights.shape[0], self.experts.n_skills)
+                    ),
                     device=selection.weights.device,
                 ).scatter_add(
                     selection.weights.ndim - 1, selection.modules, selection.weights
@@ -424,7 +439,7 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
 
     __supports_configs__ = [KVAdapterConfig]
 
-    def __init__(self, config, info_container, layer, selector=None):
+    def __init__(self, config, info_container, layer, selector=None, **kwargs):
         super().__init__(
             config,
             info_container,

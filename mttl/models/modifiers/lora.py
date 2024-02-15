@@ -20,7 +20,6 @@ class LoRAConfig(ModifierConfig):
     lora_alpha: float = 16.0
     lora_dropout: float = 0.0
     lora_init_b_random: bool = False
-    try_merge_after_op: bool = False
 
 
 @register_modifier("lora", config_cls=LoRAConfig)
@@ -390,14 +389,17 @@ class SkilledLoRA(LoRA):
                 # skilled_loras_a is skills x split x d x r
                 # skilled_loras_b is skills x r x split x d
                 if merge_after:
-                    skilled_loras_a, skilled_loras_b = skilled_loras_a.flatten(
-                        1, 2
-                    ), skilled_loras_b.flatten(2, 3)
-                    W = torch.matmul(skilled_loras_a, skilled_loras_b)
-                    W = torch.einsum("s,sdr->dr", (weights, W))
-
-                    adapter_out = torch.matmul(input_lora, W) * scaling
-                    del W
+                    A, B = skilled_loras_a.flatten(1, 2), skilled_loras_b.flatten(2, 3)
+                    # A skills x d x r
+                    # B skills x r x d
+                    # partial_out = torch.einsum("bd,sdr->bsr", (input_lora, A))
+                    # adapter_out = torch.einsum("bsr,srd->sbd", (partial_out, B))
+                    # adapter_out = torch.einsum("s,sbo->bo", (weights, adapter_out)) * scaling
+                    # should be the same as:
+                    adapter_out = torch.matmul(torch.matmul(input_lora, A), B)
+                    adapter_out = (
+                        torch.einsum("s,sbo->bo", (weights, adapter_out)) * scaling
+                    )
                 else:
                     A = torch.einsum("s,sqdr->qdr", (weights, skilled_loras_a))
                     B = torch.einsum("s,srqd->rqd", (weights, skilled_loras_b))
@@ -413,18 +415,22 @@ class SkilledLoRA(LoRA):
                 if merge_after:
                     # skilled_loras_a is skills x split x d x r
                     # skilled_loras_b is skills x r x split x d
-                    skilled_loras_a, skilled_loras_b = skilled_loras_a.flatten(
-                        1, 2
-                    ), skilled_loras_b.flatten(2, 3)
-                    W = torch.matmul(skilled_loras_a, skilled_loras_b)
-                    W = torch.einsum("bs,sdo->bdo", (weights, W))
-
+                    A, B = skilled_loras_a.flatten(1, 2), skilled_loras_b.flatten(2, 3)
+                    # A skills x d x r
+                    # B skills x r x d
                     if input_lora.ndim == 2:
-                        adapter_out = torch.einsum("bd,bdr->br", (input_lora, W))
-                        adapter_out = adapter_out * scaling
-                    else:
-                        adapter_out = torch.bmm(input_lora, W) * scaling
-                    del W
+                        adapter_out = torch.matmul(torch.matmul(input_lora, A), B)
+                        adapter_out = (
+                            torch.einsum("bs,sbo->bo", (weights, adapter_out)) * scaling
+                        )
+                    elif input_lora.ndim == 3:
+                        partial_out = torch.einsum("bkd,sdr->sbkr", (input_lora, A))
+                        adapter_out = torch.einsum("sbkr,srd->sbkd", (partial_out, B))
+                        adapter_out = (
+                            torch.einsum("bs,sbkd->bkd", (weights, adapter_out))
+                            * scaling
+                        )
+
                 else:
                     A = torch.einsum("bs,sqdr->bqdr", (weights, skilled_loras_a))
                     B = torch.einsum("bs,srqd->brqd", (weights, skilled_loras_b))
@@ -483,21 +489,32 @@ class SkilledLoRA(LoRA):
         else:
             assert skilled_loras_a.shape[2] == 1, "Only 1 split is supported for now."
             assert skilled_loras_b.shape[3] == 1, "Only 1 split is supported for now."
-
             skilled_loras_a = skilled_loras_a.squeeze(2)
             skilled_loras_b = skilled_loras_b.squeeze(3)
+            # skilled_loras_a is batch x skills x d x r
+            # skilled_loras_b is batch x skills x r x d
             if merge_after:
-                W = torch.matmul(
-                    skilled_loras_a, skilled_loras_b
-                )  # (batch, n_skills, in_features, out_features)
-                W = torch.einsum("bs, bsdo->bdo", (weights, W))
-
                 if input_lora.ndim == 2:
-                    adapter_out = torch.einsum("bd,bdo->bo", (input_lora, W))
+                    partial_out = torch.einsum(
+                        "bd,bsdr->sbr", (input_lora, skilled_loras_a)
+                    )
+                    adapter_out = torch.einsum(
+                        "sbr,bsro->sbo", (partial_out, skilled_loras_b)
+                    )
+                    adapter_out = torch.einsum("bs,sbo->bo", (weights, adapter_out))
                     adapter_out = adapter_out * scaling[:, None]
-                else:
-                    adapter_out = torch.einsum("bsd,bdo->bso", (input_lora, W))
+
+                elif input_lora.ndim == 3:
+                    partial_out = torch.einsum(
+                        "bkd,bsdr->sbkr", (input_lora, skilled_loras_a)
+                    )
+                    adapter_out = torch.einsum(
+                        "sbkr,bsrd->sbkd", (partial_out, skilled_loras_b)
+                    )
+                    adapter_out = torch.einsum("bs,sbko->bko", (weights, adapter_out))
                     adapter_out = adapter_out * scaling[:, None, None]
+                else:
+                    raise NotImplementedError("Only 2D and 3D inputs are supported.")
 
             else:
                 A = torch.einsum("bs,bsdr->bdr", (weights, skilled_loras_a))

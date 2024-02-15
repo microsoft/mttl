@@ -127,7 +127,7 @@ def run_multitask(args: ExpertConfig):
     library = get_expert_library(
         repo_id=args.library_id,
         exclude_selection=exclude_phi_tasks,
-        make_local_copy=True,
+        make_local_copy=False,
     )
 
     if args.merge_or_route in ["uniform", "weighted"]:
@@ -153,13 +153,12 @@ def run_multitask(args: ExpertConfig):
         # Here we merge the LoRa experts after the outer product
         # we cannot really do it with the lib transform, cause this would require storing large matrices in memory
         # Instead we do it with a uniform selector
-        for k, expert in library.items():
-            expert.expert_config.try_merge_after_op = True
         expert_names = list(library.keys())
         expert = copy.deepcopy(library[expert_names[0]])
         assert type(expert.expert_info.expert_config) == LoRAConfig
         config = expert.training_config
         config.router_selector = "uniform"
+        config.lora_merge_after = True
         module = MultiExpertModel(**vars(config)).to("cuda")
         module.add_experts_from_library(library)
     elif args.merge_or_route == "ties":
@@ -178,14 +177,35 @@ def run_multitask(args: ExpertConfig):
         args_copy.clown_mode = args.clown_mode
         args_copy.proto_init = args.proto_init
         args_copy.normalize_router_input = args.normalize_router_input
-
+        args_copy.lora_merge_after = args.merge_or_route == "clown_lora_after_op"
         module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
         patch_prototypes(module, library, args)
-        if args.merge_or_route == "clown_lora_after_op":
-            for m in module.modules():
-                if isinstance(m, ExpertContainer):
-                    m.config.try_merge_after_op = True
+        module = module.to("cuda")
+    elif args.merge_or_route == "phatgoose":
+        from mttl.models.modifiers.expert_containers.library_transforms import (
+            PhatgooseTransform,
+            PhatgooseConfig,
+        )
+
+        an_expert = library[next(iter(library.keys()))]
+        args_copy = deepcopy(an_expert.training_config)
+        # phatgoose does merging after by default
+        args_copy.lora_merge_after = True
+        args_copy.router_selector = "phatgoose_selector"
+        args_copy.router_temp = args.router_temp
+        args_copy.moe_top_k = args.moe_top_k
+        module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
+        module.load_from_module_dict(library)
+
+        phagoose_transform = PhatgooseTransform(PhatgooseConfig(recompute=False))
+        prototypes = phagoose_transform.transform(
+            library, expert_names=None, default_args=args
+        )
+        # load prototypes into the router
+        for mod in module.modules():
+            if isinstance(mod, ExpertContainer):
+                mod.selector.set_prototypes(prototypes)
         module = module.to("cuda")
 
     if args.pipeline_eval_tasks == "all":
@@ -197,7 +217,7 @@ def run_multitask(args: ExpertConfig):
             model_family=module.hparams.model_family,
             max_input_length=module.hparams.max_input_length,
             max_output_length=module.hparams.max_output_length,
-            predict_batch_size=4,
+            predict_batch_size=args.predict_batch_size,
             truncation_side=module.hparams.truncation_side,
             tasks=args.pipeline_eval_tasks,
             output_path=os.path.join(args.output_dir, "DOWNSTREAM"),
@@ -206,20 +226,21 @@ def run_multitask(args: ExpertConfig):
 
     # try to fetch routing statistics
     routing_stats = {}
-    for task_name in module.model.task_id_container.keys():
-        if task_name == "routing_infos":
-            continue
+    if hasattr(module.model, "task_id_container"):
+        for task_name in module.model.task_id_container.keys():
+            if task_name == "routing_infos":
+                continue
 
-        task_dict = module.model.task_id_container[task_name]
-        for k, v in task_dict.items():
-            routing_stats[f"{task_name}/{k}"] = v
+            task_dict = module.model.task_id_container[task_name]
+            for k, v in task_dict.items():
+                routing_stats[f"{task_name}/{k}"] = v
 
     if os.environ.get("WANDB_API_KEY"):
         import wandb
 
         wandb.init(
             project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
-            config=args.asdict(),
+            config=dict(module.hparams),
             name=os.environ.get("AMLT_JOB_NAME", None),
         )
         wandb.log({f"downstream/{k}": v for k, v in scores.items()})

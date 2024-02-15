@@ -97,14 +97,14 @@ class ExpertConfig(Config):
 
         # Eval Library
         self.merge_or_route = None  # "uniform", "ties", "clown"
-
         self.tasksets_path = None
         self.remove_experts = None
         self.create_transfer_matrix = False
         self.es_metric = "loss"
         self.n_ng_iterations = 30  # number of iterations for LoraHub
         self.phi_2_align_heads = False
-        
+        self.lora_merge_after = False  # if True, tried to merge after the outer product, currently only applicable to LoRA
+
     def post_init(self, silent=False):
         self._load_deprecated_configs(silent)
 
@@ -136,7 +136,7 @@ class ExpertConfig(Config):
             task_sets = None
             if self.tasksets_path is not None:
                 task_sets = json.load(open(self.tasksets_path))
-                
+
             for task_name in tasks:
                 if task_name in mttl.datamodule.task_sequences.__dict__:
                     task_names.extend(

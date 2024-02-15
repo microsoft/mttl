@@ -163,7 +163,7 @@ def add_expert_to_transformer(
                                     training_config=training_config,
                                     layer_name=layer_name,
                                 )
-                                selector.__layer_name__ = identifier + ".selector"
+                                selector.__layer_name__ = layer_name + ".selector"
                                 transformer.selectors[identifier] = selector
                                 # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
                                 selector.total_calls_per_forward += 1
@@ -181,6 +181,11 @@ def add_expert_to_transformer(
                             transformer.info_container,
                             layer,
                             selector,
+                            lora_merge_after=(
+                                routing_config.lora_merge_after
+                                if routing_config
+                                else False
+                            ),
                         )
                         expert_container.__layer_name__ = layer_name
                         setattr(
