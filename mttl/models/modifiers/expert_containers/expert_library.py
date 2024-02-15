@@ -25,6 +25,7 @@ from huggingface_hub import (
     preupload_lfs_files,
     create_repo,
     HfApi,
+    whoami,
 )
 from functools import total_ordering
 from huggingface_hub.utils._errors import RepositoryNotFoundError
@@ -1291,6 +1292,12 @@ def get_expert_library(
             expert_library_type = "local"
         elif len(repo_id.split("/")) == 2:
             expert_library_type = "huggingface_hub"
+            user = repo_id.split("/")[0]
+            if user != whoami()["name"]:
+                logger.info(
+                    f"Using huggingface_hub library from user {user}. Making local copy."
+                )
+                make_local_copy = True
         else:
             expert_library_type = "blob_storage"
     try:
