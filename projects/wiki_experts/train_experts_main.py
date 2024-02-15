@@ -95,7 +95,7 @@ def run_multitask(args: ExpertConfig):
             save_last=True,
             mode=mode
         )
-        callbacks.append(checkpoint_callback)
+    callbacks.append(checkpoint_callback)
 
     if args.eval_rouge_flag:
         rouge = RougeCallback(
