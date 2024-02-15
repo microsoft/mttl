@@ -12,6 +12,7 @@ import torch
 import os
 import time
 import asyncio
+from pathlib import Path
 
 import numpy as np
 
@@ -24,6 +25,7 @@ from huggingface_hub import (
     snapshot_download,
     preupload_lfs_files,
     create_repo,
+    delete_repo,
     HfApi,
 )
 from functools import total_ordering
@@ -127,6 +129,10 @@ class BackendEngine(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def delete_repo(self, repo_id, repo_type=None):
+        raise NotImplementedError
+
+    @abstractmethod
     def create_commit(self, repo_id, operations, commit_message):
         raise NotImplementedError
 
@@ -159,6 +165,9 @@ class HuggingfaceHubEngine(BackendEngine):
         return create_repo(
             repo_id, repo_type=repo_type, exist_ok=exist_ok, private=private
         )
+
+    def delete_repo(self, repo_id, repo_type=None):
+        delete_repo(repo_id=repo_id, repo_type=repo_type)
 
     def create_commit(self, repo_id, operations, commit_message):
         return create_commit(
@@ -193,23 +202,25 @@ class BlobStorageEngine(BackendEngine):
         https://learn.microsoft.com/en-us/rest/api/storageservices/naming-and-referencing-containers--blobs--and-metadata
         """
         super().__init__()
-        self._token = token
-        self.cache_dir = self._get_cache_dir(cache_dir)
-        logging.getLogger("azure").setLevel(
-            logging.WARNING
-        )  # Quiet down the azure logging
+
+        logging.getLogger('azure').setLevel(logging.WARNING)  # Quiet down the azure logging
+
+        self._token: str = token
+        self.cache_dir: Path = self._get_cache_dir(cache_dir)
+        # Quiet down the azure logging
+        logging.getLogger("azure").setLevel(logging.WARNING)
 
     @staticmethod
-    def _get_cache_dir(chache_dir: Optional[str] = None):
+    def _get_cache_dir(chache_dir: Optional[str] = None) -> Path:
         """If cache_dir is not provided, get it from envvar BLOB_CACHE_DIR.
         Use the default cache directory ~/.cache/mttl if not provided."""
         if chache_dir is not None:
-            return chache_dir
+            return Path(chache_dir)
         if "BLOB_CACHE_DIR" in os.environ:
             cache_dir = os.environ["BLOB_CACHE_DIR"]
         else:
-            cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "mttl")
-        return cache_dir
+            cache_dir = Path.home() / ".cache" / "mttl"
+        return Path(cache_dir)
 
     @property
     def token(self):
@@ -228,12 +239,31 @@ class BlobStorageEngine(BackendEngine):
             )
         self._token = token
 
-    def _get_local_filepath(self, repo_id, filename):
-        return os.path.join(self.cache_dir, repo_id, filename)
+    def _last_modified(self, repo_id: str) -> datetime.datetime:
+        """Get the last modified date of a repository."""
+        try:
+            container_client = BlobServiceClient(self.token).get_container_client(repo_id)
+            return container_client.get_container_properties().last_modified
+        except ResourceNotFoundError as error:
+            raise ValueError(f"Repository {repo_id} not found") from error
+
+    def get_repository_cache_dir(self, repo_id: str) -> Path:
+        """Get the cache directory for a repository. If it doesn't exist, create it.
+        The directory is based on the last modified date, a snapshot of the repository.
+        """
+        last_modified = self._last_modified(repo_id)
+        repo_cache_dir = self.cache_dir / repo_id / last_modified.isoformat()
+        os.makedirs(repo_cache_dir, exist_ok=True)
+        return repo_cache_dir
+
+    def _get_local_filepath(self, repo_id, filename) -> Path:
+        repo_cache_dir = self.get_repository_cache_dir(repo_id)
+        return repo_cache_dir / filename
 
     def snapshot_download(
         self, repo_id, allow_patterns: Optional[Union[List[str], str]] = None
-    ):
+    ) -> str:
+
         """Downloads the entire repository, or a subset of files if allow_patterns is provided.
         If allow_patterns is provided, paths must match at least one pattern from the allow_patterns.
 
@@ -256,7 +286,7 @@ class BlobStorageEngine(BackendEngine):
         local_filenames = asyncio.run(
             self.async_download_blobs(repo_id, filtered_files)
         )
-        return os.path.join(self.cache_dir, repo_id)
+        return str(self.get_repository_cache_dir(repo_id))
 
     def create_repo(self, repo_id, repo_type=None, exist_ok=True, private=True):
         """Creates a new repository. repo_type and private are ignored for blob storage."""
@@ -265,11 +295,11 @@ class BlobStorageEngine(BackendEngine):
         except ResourceExistsError as error:
             error_message = "A container with this name already exists"
             if exist_ok:
-                print(error_message)
+                logger.warning(error_message)
             else:
                 raise ValueError(error_message) from error
 
-    def delete_repo(self, repo_id):
+    def delete_repo(self, repo_id, repo_type=None):
         """Deletes a repository."""
         container_client = BlobServiceClient(self.token).get_container_client(
             container=repo_id
@@ -325,16 +355,14 @@ class BlobStorageEngine(BackendEngine):
 
     def hf_hub_download(self, repo_id, filename):
         local_filename = asyncio.run(self.async_download_blobs(repo_id, filename))
-        return local_filename
+        return str(local_filename)
 
     def repo_info(self, repo_id):
         class RepoInfo:
             pass
 
-        container_client = BlobServiceClient(self.token).get_container_client(repo_id)
-        container_properties = container_client.get_container_properties()
         repo_info = RepoInfo()
-        repo_info.lastModified = container_properties.last_modified.strftime(
+        repo_info.lastModified = self._last_modified(repo_id).strftime(
             "%Y-%m-%d %H:%M:%S"
         )
         return repo_info
@@ -483,6 +511,10 @@ class LocalFSEngine(BackendEngine):
     def create_repo(self, repo_id, repo_type, exist_ok, private=True):
         os.makedirs(repo_id, exist_ok=exist_ok)
 
+    def delete_repo(self, repo_id, repo_type=None):
+        import shutil
+        shutil.rmtree(repo_id)
+
     def create_commit(self, repo_id, operations, commit_message):
         for op in operations:
             if type(op) == CommitOperationAdd:
@@ -624,7 +656,7 @@ class ExpertLibrary:
         torch.save(expert_dump.expert_weights, buffer)
         buffer.flush()
 
-        logger.info("Uploading expert to huggingface hub...")
+        logger.info(f"Uploading expert to {self.repo_id}...")
         addition = CommitOperationAdd(
             path_in_repo=f"{expert_name}.ckpt", path_or_fileobj=buffer
         )
@@ -1051,58 +1083,100 @@ class ExpertLibrary:
         ]
 
     @classmethod
-    def from_local(
+    def from_expert_library(
         cls,
-        local_lib: "LocalExpertLibrary",
+        expert_lib: "ExpertLibrary",
         repo_id,
         force=False,
         upload_aux_data=False,
         only_tasks=None,
     ):
-        remote_lib = cls(repo_id=repo_id, create=True)
+        new_lib = cls(repo_id=repo_id, create=True)
 
-        only_tasks = only_tasks or local_lib.tasks
-        with remote_lib.batched_commit():
-            for name, expert in local_lib.items():
-                if expert.name not in remote_lib:
-                    remote_lib.add_expert(expert, name, force=force)
+        only_tasks = only_tasks or expert_lib.tasks
+        with new_lib.batched_commit():
+            for name, expert in expert_lib.items():
+                if expert.name not in new_lib:
+                    new_lib.add_expert(expert, name, force=force)
 
-        # delete experts that are in remote_lib but were deleted from the local_lib
-        with remote_lib.batched_commit():
-            for name, metadatum in list(remote_lib.data.items()):
+        # if the new_lib already exists, delete experts that
+        # are in this lib but were deleted from the expert_lib
+        with new_lib.batched_commit():
+            for name, metadatum in list(new_lib.data.items()):
                 if (
-                    name not in local_lib.keys()
+                    name not in expert_lib.keys()
                     and metadatum.expert_task_name in only_tasks
                 ):
-                    remote_lib.remove_expert(name, soft_delete=True)
+                    new_lib.remove_expert(name, soft_delete=True)
 
         # also update the scores
         if upload_aux_data:
-            scores = local_lib.get_auxiliary_data(data_type="scores")
+            scores = expert_lib.get_auxiliary_data(data_type="scores")
             for expert_name, expert_scores in scores.items():
                 for score in expert_scores.values():
                     try:
-                        remote_lib.add_score(expert_name, Score(**score))
+                        new_lib.add_score(expert_name, Score(**score))
                     except ValueError as e:
                         logger.error(e)
                         continue
 
             # TODO: upload the embeddings
-            embeddings = local_lib.get_auxiliary_data(data_type="embeddings")
+            embeddings = expert_lib.get_auxiliary_data(data_type="embeddings")
             for expert_name, expert_embeddings in embeddings.items():
                 for embedding in expert_embeddings.values():
                     try:
-                        remote_lib.add_embeddings(
+                        new_lib.add_embeddings(
                             expert_name, embedding["config"], embedding["embeddings"]
                         )
                     except ValueError as e:
                         logger.error(e)
                         continue
+        return new_lib
 
-        return remote_lib
+    def update_from_expert_library(self, expert_library: Union["ExpertLibrary", str]):
+        """
+        Update the expert library with experts from an existing ExpertLibrary.
+
+        Args:
+            expert_library (Union[ExpertLibrary, str]): The ExpertLibrary to update from.
+            It can be either an instance of `ExpertLibrary` or a string representing the expert library.
+        """
+        if isinstance(expert_library, str):
+            expert_library = get_expert_library(expert_library)
+        for name, expert in expert_library.items():
+            if expert not in self and not expert.expert_info.expert_deleted:
+                self.add_expert(expert)
+            if expert.expert_info.expert_deleted:
+                self.remove_expert(expert.name, soft_delete=True)
+
+    @classmethod
+    def from_expert_dict(
+        cls,
+        expert_dict: Dict[str, Expert],
+        destination: str,
+        expert_library_type: Union["ExpertLibrary", str] = None,
+    ):
+        """
+        Create a new ExpertLibrary object from a dictionary of experts.
+        Useful e.g. when I want to create a library from new experts that are created dynamically.
+
+        Args:
+            expert_dict (Dict[str, Expert]): A dictionary containing expert names as keys and Expert objects as values.
+            destination (str): path where the library will be stored.
+
+        Returns:
+            ExpertLibrary: A new ExpertLibrary object containing the experts from the dictionary.
+        """
+        new_lib = get_expert_library(repo_id=destination, expert_library_type=expert_library_type or cls)
+        for name, expert in expert_dict.items():
+            if expert not in new_lib:
+                new_lib.add_expert(expert)
+        return new_lib
 
 
 class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
+    """A local library stored on disk."""
+
     def add_expert(
         self, expert_dump: Expert, expert_name: str = None, force: bool = False
     ):
@@ -1113,60 +1187,21 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
             os.makedirs(os.path.join(self.repo_id, *path[:-1]), exist_ok=True)
         return super().add_expert(expert_dump, expert_name=expert_name, force=force)
 
-    def update_from_remote(self, remote_lib: Union["HFExpertLibrary", str]):
-        """
-        Update the expert library with experts from a remote library.
-
-        Args:
-            remote_lib (Union[HFExpertLibrary, str]): The remote library to update from. It can be either an instance of `HFExpertLibrary` or a string representing the path to the remote library.
-
-        """
-        if isinstance(remote_lib, str):
-            remote_lib = get_expert_library(remote_lib)
-        for name, expert in remote_lib.items():
-            if expert not in self and not expert.expert_info.expert_deleted:
-                self.add_expert(expert)
-            if expert.expert_info.expert_deleted:
-                self.remove_expert(expert.name, soft_delete=True)
-
-    @classmethod
-    def create_from_remote(cls, remote_lib: ExpertLibrary, destination):
-        new_lib = LocalExpertLibrary(repo_id=destination)
-        for name, expert in remote_lib.items():
-            if expert not in new_lib and not expert.expert_info.expert_deleted:
-                new_lib.add_expert(expert)
-        return new_lib
-
-    @classmethod
-    def from_expert_dict(cls, expert_dict: Dict[str, Expert], destination):
-        """
-        Create a new LocalExpertLibrary object from a dictionary of experts. Useful e.g. when I want to create a library from new experts that are created dynamically.
-
-        Args:
-            expert_dict (Dict[str, Expert]): A dictionary containing expert names as keys and Expert objects as values.
-            destination: path where the local library will be stored
-
-        Returns:
-            LocalExpertLibrary: A new LocalExpertLibrary object containing the experts from the dictionary.
-        """
-        new_lib = LocalExpertLibrary(repo_id=destination)
-        for name, expert in expert_dict.items():
-            if expert not in new_lib:
-                new_lib.add_expert(expert)
-        return new_lib
-
 
 class BlobExpertLibrary(ExpertLibrary, BlobStorageEngine):
+    """Library stored in Azure Blob Storage."""
     pass
 
 
 class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
+    """Library stored in Hugging Face Hub."""
     pass
 
 
-class VirtualLocalLibrary(LocalExpertLibrary):
+class VirtualLocalLibrary(ExpertLibrary, LocalFSEngine):
     """
-    A virtual library is not stored on disk, but only in memory. Useful for temporary library objects used during runtime.
+    A virtual library is not stored on disk, but only in memory.
+    Useful for temporary library objects used during runtime.
     """
 
     def _upload_metadata(self, metadata):
@@ -1177,14 +1212,6 @@ class VirtualLocalLibrary(LocalExpertLibrary):
 
     def _update_readme(self):
         pass
-
-    @classmethod
-    def from_local(cls, local_lib: LocalExpertLibrary):
-        new_lib = VirtualLocalLibrary(repo_id=local_lib.repo_id)
-        for name, expert in local_lib.items():
-            if expert not in new_lib:
-                new_lib.add_expert(expert)
-        return new_lib
 
 
 def get_best_expert_for_score(library: HFExpertLibrary, hash) -> Expert:
@@ -1232,39 +1259,46 @@ def get_expert_library(
     exclude_selection=None,
     create=False,
     ignore_sliced=False,
-    expert_library_type: str = None,
+    expert_library_type: Union[ExpertLibrary, str] = None,
+
 ):
     """Select the appropriate expert library based on the following order of priority:
-    1. If expert_library_type is provided, uses that type.
+    1. If expert_library_type is provided, and is a proper subclass of ExpertLibrary, uses it.
     2. If repo_id is a directory that exists on the local file system, uses LocalExpertLibrary.
     3. If token is provided and contains "blob.core.windows.net", uses BlobExpertLibrary.
     4. If token is not provided, but the BLOB_SAS_URL envvar is set, uses BlobExpertLibrary.
     5. Otherwise, uses HFExpertLibrary.
     """
-
-    available_libraries = {
-        "local": LocalExpertLibrary,
-        "blob_storage": BlobExpertLibrary,
-        "huggingface_hub": HFExpertLibrary,
-    }
-    if expert_library_type is None:
-        if os.path.isdir(repo_id):
-            expert_library_type = "local"
-        elif len(repo_id.split("/")) == 2:
-            expert_library_type = "huggingface_hub"
-        else:
-            expert_library_type = "blob_storage"
-    try:
-        expert_lib_class = available_libraries[expert_library_type]
-        expert_lib = expert_lib_class(
-            repo_id=repo_id,
-            token=token,
-            model_name=model_name,
-            selection=selection,
-            exclude_selection=exclude_selection,
-            create=create,
-            ignore_sliced=ignore_sliced,
-        )
-    except KeyError:
-        raise ValueError(f"Unknown expert library type {expert_library_type}.")
+    if (  # if expert_library_type is a proper subclass of ExpertLibrary, use it
+        isinstance(expert_library_type, type)
+        and issubclass(expert_library_type, ExpertLibrary)
+        and expert_library_type is not ExpertLibrary
+    ):
+        expert_lib_class = expert_library_type
+    else:  # otherwise, select the appropriate expert library based on its str representation
+        available_libraries = {
+            "local": LocalExpertLibrary,
+            "blob_storage": BlobExpertLibrary,
+            "huggingface_hub": HFExpertLibrary,
+        }
+        if expert_library_type is None:
+            if os.path.isdir(repo_id):
+                expert_library_type = "local"
+            elif len(repo_id.split("/")) == 2:
+                expert_library_type = "huggingface_hub"
+            else:
+                expert_library_type = "blob_storage"
+        try:
+            expert_lib_class = available_libraries[expert_library_type]
+        except KeyError:
+            raise ValueError(f"Unknown expert library type {expert_library_type}.")
+    expert_lib = expert_lib_class(
+        repo_id=repo_id,
+        token=token,
+        model_name=model_name,
+        selection=selection,
+        exclude_selection=exclude_selection,
+        create=create,
+        ignore_sliced=ignore_sliced,
+    )
     return expert_lib

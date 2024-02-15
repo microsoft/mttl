@@ -83,7 +83,7 @@ def setup(args: EvolExpertConfig):
 
         remote_login(token=args.remote_token)
 
-        expert_lib = LocalExpertLibrary.create_from_remote(
+        expert_lib = LocalExpertLibrary.from_expert_library(
             get_expert_library(args.hf_repo_id), local_lib_location
         )
         expert_lib.ignore_sliced = True

@@ -24,7 +24,7 @@ def test_mbc_clustering(tmp_path):
     k = 2
 
     # creating local lib just because "sordonia/test-library" seem to have outdated embeddings where the key name is "embedding" and not "embeddings"
-    library = LocalExpertLibrary.create_from_remote(library, destination=tmp_path)
+    library = LocalExpertLibrary.from_expert_library(library, repo_id=tmp_path)
 
     cfg = MBClusteringTransformConfig(
         k=k, random_state=42, sparsity_threshold=0.1, recompute_embeddings=True
@@ -79,7 +79,7 @@ def test_ties_merge():
     names = list(library.keys())
     experts = list([library[name] for name in names])
 
-    """ Copy Pasta of the original implementation 
+    """ Copy Pasta of the original implementation
     https://github.com/prateeky2806/ties-merging/blob/main/src/ties_minimal.ipynb
     """
 

@@ -26,11 +26,11 @@ hf_repo_id = "ostapeno/library-stablelm_flan_5ep"
 local_lib_location = f"/tmp/{hf_repo_id}"
 if os.path.exists(local_lib_location):
     expert_lib = LocalExpertLibrary(local_lib_location)
-    expert_lib.update_from_remote(hf_repo_id)
+    expert_lib.update_from_expert_library(hf_repo_id)
 else:
     expert_lib = get_expert_library(hf_repo_id)
     os.makedirs(local_lib_location, exist_ok=True)
-    expert_lib: LocalExpertLibrary = LocalExpertLibrary.create_from_remote(
+    expert_lib: LocalExpertLibrary = LocalExpertLibrary.from_expert_library(
         expert_lib, local_lib_location
     )
 ##########################################################################################

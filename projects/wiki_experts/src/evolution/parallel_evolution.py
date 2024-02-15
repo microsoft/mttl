@@ -86,7 +86,7 @@ def setup(args: EvolExpertConfig):
 
     remote_lib = get_expert_library(args.hf_repo_id)
     os.makedirs(local_lib_location, exist_ok=True)
-    expert_lib = LocalExpertLibrary.create_from_remote(
+    expert_lib = LocalExpertLibrary.from_expert_library(
         remote_lib, destination=local_lib_location
     )
 
@@ -126,7 +126,7 @@ def main(args: EvolExpertConfig):
 
     for task in tasks:
         # pull updates from remote
-        expert_lib.update_from_remote(args.to_repo_id)
+        expert_lib.update_from_expert_library(args.to_repo_id)
         # recalculate embeddings just in case (its fast)
         svd_embedder = SVDEmbeddingTransform(
             SVDEmbeddingTransformConfig(sparsity_threshold=0.5)
@@ -143,7 +143,7 @@ def main(args: EvolExpertConfig):
         lib_cynced = False
         try:
             # save the expert lib, send updates to remote
-            remote_lib = HFExpertLibrary.from_local(
+            remote_lib = HFExpertLibrary.from_expert_library(
                 expert_lib,
                 args.to_repo_id,
                 force=True,
@@ -164,7 +164,7 @@ def main(args: EvolExpertConfig):
 
         @retry(max_retries=20, wait_seconds=60 * 10)
         def retry_sync():
-            remote_lib = HFExpertLibrary.from_local(
+            remote_lib = HFExpertLibrary.from_expert_library(
                 expert_lib,
                 args.to_repo_id,
                 force=True,

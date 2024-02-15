@@ -113,9 +113,9 @@ def prepare_expert_lib(args: ExpertConfig, lib_location) -> LocalExpertLibrary:
     exclude_selection = (
         args.remove_experts.split(",") if args.remove_experts is not None else None
     )
-    library = LocalExpertLibrary.create_from_remote(
+    library = LocalExpertLibrary.from_expert_library(
         HFExpertLibrary(args.hf_lib_id, exclude_selection=exclude_selection),
-        destination=lib_location,
+        repo_id=lib_location,
     )
     return library
 
