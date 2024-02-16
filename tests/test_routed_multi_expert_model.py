@@ -206,7 +206,8 @@ class TestMultiExpertModel:
         # check the get_router_weights function
         routing_weights = module.get_router_weights()
         assert (
-            "mod1" in routing_weights["shared"] and "mod2" in routing_weights["shared"]
+            "mod1" in routing_weights["shared.selector"]
+            and "mod2" in routing_weights["shared.selector"]
         )
 
         assert isinstance(
