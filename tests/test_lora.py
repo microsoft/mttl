@@ -67,7 +67,7 @@ def test_skilled_lora_parallel_merge_with_weights():
     layer.weight.requires_grad = False
     layer.weight.fill_(0.0)
 
-    config = SkilledLoRAConfig(n_skills=2, n_splits=1, lora_alpha=1, lora_rank=3)
+    config = SkilledLoRAConfig(n_skills=2, n_splits=1, lora_alpha=1, lora_rank=1)
 
     lora_a = torch.randn(2, 1, 1, config.lora_rank)
     lora_b = torch.ones(2, config.lora_rank, 1, 2)
