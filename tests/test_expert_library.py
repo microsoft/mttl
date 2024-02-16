@@ -4,15 +4,22 @@ import os
 import pytest
 import asyncio
 import uuid
-from mttl.models.modifiers.expert_containers.expert_library import (
-    BlobStorageEngine,
-    HFExpertLibrary,
-)
 
+import torch
 from huggingface_hub import (
     CommitOperationAdd,
     CommitOperationDelete,
     CommitOperationCopy,
+)
+
+from mttl.models.modifiers.expert_containers.expert_library import (
+    BlobExpertLibrary,
+    LocalExpertLibrary,
+    BlobStorageEngine,
+    VirtualLocalLibrary,
+    LocalFSEngine,
+    HFExpertLibrary,
+    get_expert_library,
 )
 
 
@@ -113,7 +120,7 @@ def test_add_auxiliary_data(mocker, tmp_path):
     )
 
     # read the stored embeddings
-    library = LocalExpertLibrary.create_from_remote(
+    library = LocalExpertLibrary.from_expert_library(
         HFExpertLibrary("sordonia/test-library"), tmp_path
     )
 
@@ -140,7 +147,7 @@ def build_local_files():
         for i in range(1, num_files + 1):
             blob_file_name = f"blob_data_{i}.txt"
             filenames.append(blob_file_name)
-            local_data_path = str(local_path / blob_file_name)
+            local_data_path = local_path / blob_file_name
             with open(local_data_path, "wb") as my_blob:
                 my_blob.write(f"Blob data {i}".encode())
         return filenames
@@ -154,9 +161,9 @@ def repo_id():
 def setup_repo():
     """Create a repository and delete it once the test is done"""
     engine_repo_refs = []
-    def _create_repo(engine, repo_id):
+    def _create_repo(engine, repo_id, repo_type="models", exist_ok=True):
         engine_repo_refs.append((engine, repo_id))
-        engine.create_repo(repo_id)
+        engine.create_repo(repo_id, repo_type=repo_type, exist_ok=exist_ok)
         files = engine.list_repo_files(repo_id)
         assert not files
     yield _create_repo
@@ -180,8 +187,7 @@ def test_async_upload_and_delete_blobs(tmp_path, build_local_files, setup_repo, 
     setup_repo(engine, repo_id)
 
     # Write two temp files to upload
-    local_path = tmp_path / repo_id
-    local_path.mkdir()
+    local_path = engine.get_repository_cache_dir(repo_id)
     filenames = build_local_files(local_path, 2)
     _ = asyncio.run(engine.async_upload_blobs(repo_id, filenames))
     files = engine.list_repo_files(repo_id)
@@ -199,8 +205,7 @@ def test_snapshot_download(tmp_path, build_local_files, setup_repo, repo_id):
     setup_repo(engine, repo_id)
 
     # Upload two temp files to download
-    local_path = tmp_path / repo_id
-    local_path.mkdir()
+    local_path = engine.get_repository_cache_dir(repo_id)
     filenames = build_local_files(local_path, 2)
     _ = asyncio.run(engine.async_upload_blobs(repo_id, filenames))
 
@@ -235,8 +240,7 @@ def test_snapshot_download_filtered(tmp_path, setup_repo, repo_id, allow_pattern
     setup_repo(engine, repo_id)
 
     # Upload two temp files to download
-    local_path = tmp_path / repo_id
-    local_path.mkdir()
+    local_path = engine.get_repository_cache_dir(repo_id)
     filenames = [
         "blob_data_1.txt",
         "blob_data_2.txt",
@@ -266,8 +270,7 @@ def test_hf_hub_download(tmp_path, build_local_files, setup_repo, repo_id):
     engine = BlobStorageEngine(token=token, cache_dir=tmp_path)
     setup_repo(engine, repo_id)
 
-    local_path = tmp_path / repo_id
-    local_path.mkdir()
+    local_path = engine.get_repository_cache_dir(repo_id)
     filenames = build_local_files(local_path, 2)
     _ = asyncio.run(engine.async_upload_blobs(repo_id, filenames))
 
@@ -294,8 +297,7 @@ def test_create_commit_sync(tmp_path, build_local_files, setup_repo, repo_id):
     engine = BlobStorageEngine(token=token, cache_dir=tmp_path)
     setup_repo(engine, repo_id)
 
-    local_path = tmp_path / repo_id
-    local_path.mkdir()
+    local_path = engine.get_repository_cache_dir(repo_id)
     filenames = build_local_files(local_path, 4)
     f1, f2, f3, f4 = filenames
     f5 = "blob_data_5.txt"
@@ -331,8 +333,7 @@ def test_create_commit_async(tmp_path, build_local_files, setup_repo, repo_id):
     engine = BlobStorageEngine(token=token, cache_dir=tmp_path)
     setup_repo(engine, repo_id)
 
-    local_path = tmp_path / repo_id
-    local_path.mkdir()
+    local_path = engine.get_repository_cache_dir(repo_id)
     filenames = build_local_files(local_path, 4)
     f1, f2, f3, f4 = filenames
 
@@ -356,3 +357,140 @@ def test_create_commit_async(tmp_path, build_local_files, setup_repo, repo_id):
 
     engine.create_commit(repo_id, ops, "Delete files async", async_mode=True)
     assert not engine.list_repo_files(repo_id)
+
+
+@pytest.fixture
+def build_meta_ckpt():
+    def _build_meta_ckpt(local_path, num_files):
+        readme = "README.md"
+        readme_filepath = local_path / readme
+        readme_filepath.touch()
+        filenames = [readme]
+        for i in range(1, num_files + 1):
+            expert_name = f"expert_{i}"
+            metadata = f"{expert_name}.meta"
+            ckpt = f"{expert_name}.ckpt"
+            filenames.extend([metadata, ckpt])
+
+            local_meta_path = local_path / metadata
+            metadata_data = {
+                "expert_name": expert_name,
+                "expert_deleted": False,
+                "model_name": f"model_{i}",
+                "training_config": {
+                    "model": f"model_{i}",
+                },
+            }
+            torch.save(metadata_data, local_meta_path)
+
+            ckpt_filepath = local_path / ckpt
+            dummy_state = {'state_dict': {}}
+            torch.save(dummy_state, ckpt_filepath)
+
+        return filenames
+    return _build_meta_ckpt
+
+
+@pytest.mark.skipif(token is None, reason="Requires access to Azure Blob Storage")
+def test_copy_library_blob_to_blob(tmp_path, build_meta_ckpt, setup_repo, repo_id):
+    # Create a library with two experts
+    engine = BlobStorageEngine(token=token, cache_dir=tmp_path)
+    setup_repo(engine, repo_id)
+    local_path = engine.get_repository_cache_dir(repo_id)
+    filenames = build_meta_ckpt(local_path, 2)
+    _ = asyncio.run(engine.async_upload_blobs(repo_id, filenames))
+
+    # Get the expert library
+    library = get_expert_library(repo_id)
+
+    # Create a new library from the first one
+    new_repo_id = str(uuid.uuid4())
+    try:  # Clean up the new repo if the test fails
+        new_lib = BlobExpertLibrary.from_expert_library(library, new_repo_id)
+        assert set(new_lib.list_repo_files(new_repo_id)) == set(library.list_repo_files(repo_id))
+    finally:
+        BlobExpertLibrary(new_repo_id).delete_repo(new_repo_id)
+
+
+@pytest.mark.skipif(token is None, reason="Requires access to Azure Blob Storage")
+def test_copy_library_blob_to_local(tmp_path, build_meta_ckpt, setup_repo, repo_id):
+    # Create a library with two experts
+    engine = BlobStorageEngine(token=token, cache_dir=tmp_path)
+    setup_repo(engine, repo_id)
+    local_path = engine.get_repository_cache_dir(repo_id)
+    filenames = build_meta_ckpt(local_path, 2)
+    _ = asyncio.run(engine.async_upload_blobs(repo_id, filenames))
+
+    # Get the expert library
+    library = get_expert_library(repo_id)
+
+    # Create a new library from the first one
+    new_repo_id = tmp_path / "new_repo"
+    new_repo_id.mkdir()
+    new_lib = LocalExpertLibrary.from_expert_library(library, new_repo_id)
+    # drop the path and keep the filenames
+    local_files = {f.split('/')[-1] for f in new_lib.list_repo_files(new_repo_id)}
+    assert local_files == set(library.list_repo_files(repo_id))
+
+
+def test_copy_library_local_to_local(tmp_path, build_meta_ckpt, setup_repo, repo_id):
+    # Create a library with two experts
+    local_path = repo_id = tmp_path / "base_repo"
+    repo_id.mkdir()
+    engine = LocalFSEngine()
+    setup_repo(engine, repo_id)
+    filenames = build_meta_ckpt(local_path, 2)
+
+    # Get the expert library
+    library = get_expert_library(repo_id)
+
+    # Create a new library from the first one
+    new_repo_id = tmp_path / "new_repo"
+    new_repo_id.mkdir()
+    new_lib = LocalExpertLibrary.from_expert_library(library, new_repo_id)
+    # drop the path and keep the filenames
+    base_files = {f.split('/')[-1] for f in library.list_repo_files(repo_id)}
+    new_files = {f.split('/')[-1] for f in new_lib.list_repo_files(new_repo_id)}
+    assert base_files == new_files
+
+
+def test_virtual_library_is_in_memory(tmp_path, build_meta_ckpt, setup_repo, repo_id):
+    # Create a library with two experts
+    local_path = repo_id = tmp_path / "base_repo"
+    repo_id.mkdir()
+    engine = LocalFSEngine()
+    setup_repo(engine, repo_id)
+    filenames = build_meta_ckpt(local_path, 2)
+    # Get the expert library
+    local_library = get_expert_library(repo_id)
+
+    # Create a new library from the first one
+    virtual_repo_id = tmp_path / "virtual_repo"
+    virtual_repo_id.mkdir()
+    virtual_lib = VirtualLocalLibrary.from_expert_library(
+        local_library, local_library.repo_id
+    )
+    assert set(virtual_lib.data.keys()) == {"expert_1", "expert_2"}
+
+    virtual_lib.remove_expert("expert_2")
+    assert set(virtual_lib.data.keys()) == {"expert_1"}
+
+    # check that the original library is not affected
+    base_files = {
+        f.split('/')[-1]
+        for f in local_library.list_repo_files(repo_id)
+    }
+    assert base_files == {
+        "README.md",
+        "expert_1.meta",
+        "expert_1.ckpt",
+        "expert_2.meta",
+        "expert_2.ckpt",
+    }
+    assert set(os.listdir(repo_id)) == {
+        "README.md",
+        "expert_1.meta",
+        "expert_1.ckpt",
+        "expert_2.meta",
+        "expert_2.ckpt",
+    }

@@ -127,7 +127,6 @@ def run_multitask(args: ExpertConfig):
     library = get_expert_library(
         repo_id=args.library_id,
         exclude_selection=exclude_phi_tasks,
-        make_local_copy=False,
     )
 
     if args.merge_or_route in ["uniform", "weighted"]:

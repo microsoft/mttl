@@ -102,6 +102,9 @@ class ExpertConfig(Config):
         self.create_transfer_matrix = False
         self.es_metric = "loss"
         self.n_ng_iterations = 30  # number of iterations for LoraHub
+
+        # for MBC
+        self.mbc_num_clusters = 10  # number of clusters
         self.phi_2_align_heads = False
         self.lora_merge_after = False  # if True, tried to merge after the outer product, currently only applicable to LoRA
 

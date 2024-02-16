@@ -4,16 +4,19 @@ import torch
 import pytest
 import numpy as np
 from collections import OrderedDict
-from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.models.modifiers.expert_containers.expert_library import (
+    HFExpertLibrary,
+    LocalExpertLibrary,
+)
 from mttl.models.modifiers.expert_containers.library_transforms import (
     TiesMerge,
     TiesMergeConfig,
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
+    MBClusteringTransformConfig,
+    MBCWithCosSimTransform,
     SVDInputExtractor,
-    HiddenStateComputer,
     SVDInputExtractorConfig,
-    HiddenStateComputerConfig,
 )
 
 
@@ -39,6 +42,22 @@ def test_svd_input_contructor():
         sums.append(task_sum)
 
     assert np.allclose(sums, [2728.4163, 2284.9968])
+
+
+def test_mbc_clustering(tmp_path):
+    library = HFExpertLibrary("sordonia/test-library")
+    k = 2
+
+    # creating local lib just because "sordonia/test-library" seem to have outdated embeddings where the key name is "embedding" and not "embeddings"
+    library = LocalExpertLibrary.from_expert_library(library, repo_id=tmp_path)
+
+    cfg = MBClusteringTransformConfig(
+        k=k, random_state=42, sparsity_threshold=0.1, recompute_embeddings=True
+    )
+    transform = MBCWithCosSimTransform(cfg)
+    clusters = transform.transform(library)
+
+    assert len(clusters) == k
 
 
 def test_weighted_merge():
@@ -85,7 +104,7 @@ def test_ties_merge():
     names = list(library.keys())
     experts = list([library[name] for name in names])
 
-    """ Copy Pasta of the original implementation 
+    """ Copy Pasta of the original implementation
     https://github.com/prateeky2806/ties-merging/blob/main/src/ties_minimal.ipynb
     """
 
@@ -224,3 +243,7 @@ def test_ties_merge():
     for param_name, expected_param in ref_ties_ckpt.items():
         value = ties_exp.expert_weights[param_name]
         assert torch.allclose(expected_param, value)
+
+
+if __name__ == "__main__":
+    pytest.main([__file__])

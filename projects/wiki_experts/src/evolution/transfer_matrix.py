@@ -244,8 +244,8 @@ def run_eval(args: EvolExpertConfig, debug=None):
         destination = args.output_dir + "/library/"
         os.makedirs(destination, exist_ok=True)
         hf_repo_id, expert_name = resolve_hf_repo_id(args.hf_repo_id)
-        expert_lib: LocalExpertLibrary = LocalExpertLibrary.create_from_remote(
-            get_expert_library(repo_id=hf_repo_id), destination=destination
+        expert_lib: LocalExpertLibrary = LocalExpertLibrary.from_expert_library(
+            get_expert_library(repo_id=hf_repo_id), repo_id=destination
         )
         if expert_name is not None:
             for name in list(expert_lib.keys()):

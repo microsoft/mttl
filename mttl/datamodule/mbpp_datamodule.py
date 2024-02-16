@@ -3,7 +3,7 @@ from datasets import load_dataset
 from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from dataclasses import dataclass
 import os
-
+import numpy
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 
 
@@ -110,3 +110,60 @@ class MBPPDataModule(DefaultDataModule):
         self.train_dataset = train_dataset
         self.dev_dataset = valid_dataset
         self.test_dataset = test_dataset
+
+
+def code_exercises_template(example):
+    """Format the MBPP dataset into source and target."""
+    example["task_source"] = "code-ex"
+    example["task_name"] = "code-ex"
+    # we cannot use the code as target because it is not formatted correctly for completion
+    example["source"] = example["problem"]
+    example["code_prefix"] = example["source"]
+    example["target"] = example["solution"]
+    return example
+
+
+@dataclass
+class CodeExDataConfig(DatasetConfig):
+    pass
+
+
+class CodeExDataModule(DefaultDataModule):
+    def setup_dataset(self):
+        n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
+
+        dataset = load_dataset("jinaai/code_exercises")
+        dataset = dataset["train"].select(range(10000))
+
+        def create_split(rng, _):
+            return {"split": rng.choice(["train", "valid"], p=[0.9, 0.1])}
+
+        dataset = dataset.map(
+            partial(create_split, numpy.random.RandomState(42)),
+            num_proc=n_proc,
+            desc="Creating split column.",
+        )
+
+        dataset = dataset.map(
+            code_exercises_template,
+            num_proc=n_proc,
+        )
+
+        self.train_dataset = dataset.filter(
+            lambda x: x["split"] == "train",
+            num_proc=n_proc,
+            desc="Creating train set",
+        )
+        self.dev_dataset = dataset.filter(
+            lambda x: x["split"] in ["validation", "valid"],
+            num_proc=n_proc,
+            desc="Creating valid set",
+        )
+        self.test_dataset = dataset.filter(
+            lambda x: x["split"] == "test",
+            num_proc=n_proc,
+            desc="Creating test set",
+        )
+
+        if len(self.test_dataset) == 0:
+            self.test_dataset = self.dev_dataset
