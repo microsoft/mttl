@@ -178,7 +178,6 @@ class Selector(nn.Module):
         self.forward_cache = None
         self.total_calls_per_forward = 0
         self._calls_counter = 0
-        self.layer_name = kwargs.get("layer_name", None)
         self.info_container = info_container
 
     @property
@@ -221,6 +220,11 @@ class Selector(nn.Module):
     @abstractmethod
     def add_expert(self, expert_name: str, **kwargs):
         pass
+
+    @property
+    def layer_name(self):
+        # dependency injection
+        return self.__layer_name__
 
 
 class SelectorView:

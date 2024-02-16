@@ -163,7 +163,12 @@ def add_expert_to_transformer(
                                     training_config=training_config,
                                     layer_name=layer_name,
                                 )
-                                selector.__layer_name__ = layer_name + ".selector"
+                                if routing_config.router_granularity == "finegrained":
+                                    selector.__layer_name__ = layer_name + ".selector"
+                                else:
+                                    # selector is not assigned to a specific layer
+                                    selector.__layer_name__ = identifier + ".selector"
+
                                 transformer.selectors[identifier] = selector
                                 # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
                                 selector.total_calls_per_forward += 1
