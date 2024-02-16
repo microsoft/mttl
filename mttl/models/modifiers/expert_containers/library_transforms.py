@@ -1028,7 +1028,7 @@ class MBCWithCosSimTransform(LibraryTransform):
         def get_svd_embedding(lib: ExpertLibrary, expert_name: str):
             try:
                 embeddings = lib.get_auxiliary_data(
-                    data_type="svd", expert_name=expert_name
+                    data_type="embeddings", expert_name=expert_name
                 )
             except ValueError:
                 return None
