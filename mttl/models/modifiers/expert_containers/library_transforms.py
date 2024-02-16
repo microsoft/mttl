@@ -563,7 +563,7 @@ class PhatgooseTransform(HiddenStateComputer):
                 training_config.include_task_source = default_args.include_task_source
                 training_config.output_dir = default_args.output_dir
             # get datamodule
-            dm = get_datamodule(training_config, subsample_per_task=True)
+            dm = get_datamodule(training_config)
             # create a trained and yolo
             training_config.eval_every = -1
             training_config.total_steps = self.config.n_steps

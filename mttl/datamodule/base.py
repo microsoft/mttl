@@ -34,7 +34,7 @@ class DatasetConfig:
     subsample_train: int = None
     subsample_dev: int = None
     subsample_test: int = None
-    subsample_per_task: bool = False
+    subsample_per_task: bool = True
     subsample: int = -1
 
 
