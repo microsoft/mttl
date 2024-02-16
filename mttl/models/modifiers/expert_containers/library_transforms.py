@@ -1006,6 +1006,7 @@ class CrossExpertNormComputer(HiddenStateComputer):
             )
 
 
+@dataclass
 class MBClusteringTransformConfig(SVDEmbeddingTransformConfig):
     random_state: int = 42
     recompute_embeddings: bool = False  # if 'True', recompute the SVD embeddings
@@ -1027,11 +1028,11 @@ class MBCWithCosSimTransform(LibraryTransform):
         def get_svd_embedding(lib: ExpertLibrary, expert_name: str):
             try:
                 embeddings = lib.get_auxiliary_data(
-                    data_type="embeddings", expert_name=expert_name
+                    data_type="svd", expert_name=expert_name
                 )
             except ValueError:
                 return None
-            return embeddings["svd"]["embeddings"]
+            return embeddings["svd"]["svd"]
 
         def create_embeddings():
             svd_embedder = SVDEmbeddingTransform(
