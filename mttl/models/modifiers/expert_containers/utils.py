@@ -76,5 +76,4 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
     checkpoint = (
         checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
     )
-    module.load_state_dict(torch.load(checkpoint)["state_dict"])
-    return module
+    return checkpoint

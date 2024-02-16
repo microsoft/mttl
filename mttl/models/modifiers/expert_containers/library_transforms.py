@@ -570,31 +570,61 @@ class PhatgooseTransform(HiddenStateComputer):
                 training_config.output_dir = default_args.output_dir
             # get datamodule
             dm = get_datamodule(training_config)
-            # create a trained and yolo
             training_config.eval_every = -1
             training_config.total_steps = self.config.n_steps
             training_config.learning_rate = self.config.learning_rate
             training_config.warmup_steps = 0
             training_config.warmup_proportion = 0.0
-            model = train_module(training_config, model, dm)
+            checkpoint = train_module(training_config, model, dm)
+
+            model_after = MultiExpertModel(**vars(training_config)).to("cuda")
+            model_after.add_expert_instance(expert, is_default=True)
+            model_after.load_state_dict(torch.load(checkpoint)["state_dict"])
+
             p_sum_after = sum(
                 p.sum()
-                for n, p in model.named_parameters()
+                for n, p in model_after.named_parameters()
                 if ".selector" not in n
                 and ".norm" not in n
                 and ".ln." not in n
                 and "layer_norm" not in n
             )
-            # TODO
-            # Not sure why, but p_sum_after is not the same as p_sum_before, even though trainable params only include selector
-            print(p_sum_before, p_sum_after)
+            assert (
+                p_sum_before == p_sum_after,
+                "Model parameters other than selector have changed after training",
+            )
+
+            model_before = MultiExpertModel(**vars(training_config)).to("cuda")
+            model_before.add_expert_instance(expert, is_default=True)
+
+            for (n1, module_before), (n2, module_after) in zip(
+                model_before.named_modules(), model.named_modules()
+            ):
+                if ".selector" not in n1:
+                    p_count_before = sum(
+                        p.sum()
+                        for n, p in module_before.named_parameters()
+                        if ".selector" not in n
+                        and ".norm" not in n
+                        and ".ln." not in n
+                        and "layer_norm" not in n
+                    )
+                    p_count_after = sum(
+                        p.sum()
+                        for n, p in module_after.named_parameters()
+                        if ".selector" not in n
+                        and ".norm" not in n
+                        and ".ln." not in n
+                        and "layer_norm" not in n
+                    )
+                    if not p_count_before == p_count_after:
+                        print(p_count_before, p_count_after)
+                        print(n1, n2)
+                        print("\n\n\n")
 
             p_sum_sel_after = sum(
                 p.sum() for n, p in model.named_parameters() if "selector" in n
             )
-            # assert (
-            #     p_sum_before == p_sum_after
-            # ), "Model parameters other than selector have changed after training"
             assert (
                 p_sum_sel_before != p_sum_sel_after
             ), "Selector parameters have not changed after training"
