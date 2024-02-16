@@ -42,6 +42,7 @@ class LiveCheckpointCallback(pl.Callback):
         self._last_step = -1
         self._last_value = None
         self.save_weights_only = save_weights_only
+
     def on_train_end(self, trainer, pl_module):
         """Saves the last checkpoint."""
         if self.save_last:
@@ -109,6 +110,7 @@ class LiveCheckpointCallback(pl.Callback):
                 self._save_best(trainer, last_value)
                 self._last_value = last_value
 
+
 class LiveLibraryCheckpointCallback(LiveCheckpointCallback):
     def __init__(
         self,
@@ -143,6 +145,7 @@ class LiveLibraryCheckpointCallback(LiveCheckpointCallback):
         self.hf_token_hub = hf_token_hub
         if self.hf_token_hub is not None:
             huggingface_hub.login(token=hf_token_hub)
+
     def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         # save each checkpoint after each epoch
         if self.save_each_epoch:
@@ -163,6 +166,8 @@ class LiveLibraryCheckpointCallback(LiveCheckpointCallback):
                 expert.expert_info.expert_name = expert_name
                 if expert.name not in library_dest:
                     library_dest.add_expert(expert)
+
+
 class LossCallback(cb.Callback):
     def __init__(
         self,
@@ -453,9 +458,11 @@ class MMLUCallback(cb.Callback):
             mmlu_data_config = MMLUDataConfig(
                 model=pl_module.hparams.model,
                 predict_batch_size=pl_module.hparams.predict_batch_size,
-                max_input_length=pl_module.hparams.max_input_length
-                if self.max_input_length is None
-                else self.max_input_length,
+                max_input_length=(
+                    pl_module.hparams.max_input_length
+                    if self.max_input_length is None
+                    else self.max_input_length
+                ),
                 max_output_length=pl_module.hparams.max_input_length,  # not necessary
                 model_family=pl_module.hparams.model_family,
                 finetune_task_name=pl_module.hparams.finetune_task_name,

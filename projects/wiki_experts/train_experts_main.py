@@ -6,7 +6,7 @@ import glob
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
-from mttl.callbacks import LiveCheckpointCallback,LiveLibraryCheckpointCallback
+from mttl.callbacks import LiveCheckpointCallback, LiveLibraryCheckpointCallback
 
 from mttl.models.monitors import get_monitors
 from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
@@ -85,15 +85,12 @@ def run_multitask(args: ExpertConfig):
             save_last=True,
             save_each_epoch=args.save_each_epoch,
             library_name=args.library_name,
-            hf_token_hub=args.hf_token_hub,
+            hf_token_hub=os.environ.get("HF_TOKEN", None),
             cluster_name=args.cluster_name,
         )
-    else:   
+    else:
         checkpoint_callback = LiveCheckpointCallback(
-            dirpath=args.output_dir,
-            monitor=monitor,
-            save_last=True,
-            mode=mode
+            dirpath=args.output_dir, monitor=monitor, save_last=True, mode=mode
         )
     callbacks.append(checkpoint_callback)
 
@@ -154,9 +151,9 @@ def run_multitask(args: ExpertConfig):
         enable_checkpointing=False,
         log_every_n_steps=args.gradient_accumulation_steps,
         accumulate_grad_batches=args.gradient_accumulation_steps,
-        precision=int(args.precision)
-        if args.precision in ["16", "32"]
-        else args.precision,
+        precision=(
+            int(args.precision) if args.precision in ["16", "32"] else args.precision
+        ),
         val_check_interval=val_check_interval,
     )
 
