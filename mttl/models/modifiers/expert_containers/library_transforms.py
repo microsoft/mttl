@@ -115,7 +115,7 @@ class SVDEmbeddingTransform(LibraryTransform):
             with library.batched_commit():
                 for i, name in enumerate(names):
                     library.add_auxiliary_data(
-                        data_type=self.config.name,
+                        data_type="embeddings",
                         expert_name=name,
                         config=self.config.__dict__,
                         data=experts_embeddings[i],
@@ -1032,7 +1032,7 @@ class MBCWithCosSimTransform(LibraryTransform):
                 )
             except ValueError:
                 return None
-            return embeddings["svd"]["svd"]
+            return embeddings["svd"]["embeddings"]
 
         def create_embeddings():
             svd_embedder = SVDEmbeddingTransform(
