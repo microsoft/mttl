@@ -72,7 +72,6 @@ class ExpertConfig(Config):
         )
         self.sk = 5  # number of experts to retrieve from a library
         self.finetune_regime = None  # polylib_full, lib_mu, polylib_selector
-        self.library_to_expert_transform = None
         self.eval_before_training = True
 
         # hidden state computation transform
