@@ -114,7 +114,7 @@ class MultiExpertModel(ExpertTrainer):
     def get_router_weights(self):
         weights = {}
         for _, selector in self.selectors.items():
-            weights[selector.name] = selector.get_routing_weights()
+            weights[selector.layer_name] = selector.get_routing_weights()
         return weights
 
     def delete_expert_container(self):

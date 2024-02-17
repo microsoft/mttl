@@ -34,7 +34,6 @@ def register_multi_expert_selector(name, config_cls):
         SELECTORS_NAME_TO_KLASS[name] = fn
         SELECTORS_CONFIG_TO_NAME[config_cls] = name
         SELECTORS_NAME_TO_CONFIG[name] = config_cls
-        fn.__layer_name__ = name
         return fn
 
     return _thunk
@@ -206,8 +205,13 @@ class Selector(nn.Module):
         return {}
 
     @property
-    def name(self):
-        return f"{self.__layer_name__}"
+    def layer_name(self):
+        if not hasattr(self, "__layer_name__"):
+            raise ValueError(
+                "Layer name not available, dependency injection not done properly?"
+            )
+
+        return self.__layer_name__
 
     @property
     def n_experts(self):
@@ -220,11 +224,6 @@ class Selector(nn.Module):
     @abstractmethod
     def add_expert(self, expert_name: str, **kwargs):
         pass
-
-    @property
-    def layer_name(self):
-        # dependency injection
-        return self.__layer_name__
 
 
 class SelectorView:
@@ -1061,10 +1060,6 @@ class KVSelector(Selector):
     @abstractmethod
     def get_gate(self, adapter_weights):
         pass
-
-    @property
-    def name(self):
-        return f"{self.__layer_name__}"
 
 
 @dataclass
