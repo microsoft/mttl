@@ -37,7 +37,7 @@ def test_arrow():
 
     logger.setLevel(logging.DEBUG)
 
-    library = HFExpertLibrary("sordonia/test-library")
+    library = HFExpertLibrary("sordonia/new-test-library")
 
     cfg = ArrowConfig(ab_only=True, scale=False)
     transform = ArrowTransform(cfg)
@@ -54,14 +54,8 @@ def test_arrow():
 
 
 def test_mbc_clustering(tmp_path):
-    library = HFExpertLibrary("sordonia/test-library")
+    library = HFExpertLibrary("sordonia/new-test-library")
     k = 2
-
-    # creating local lib just because "sordonia/test-library" seem to have outdated embeddings where the key name is "embedding" and not "embeddings"
-    library = LocalExpertLibrary.from_expert_library(
-        library,
-        repo_id=tmp_path,
-    )
     cfg = MBClusteringTransformConfig(
         k=k,
         random_state=42,
@@ -73,7 +67,7 @@ def test_mbc_clustering(tmp_path):
 
 
 def test_weighted_merge():
-    library = HFExpertLibrary("sordonia/test-library")
+    library = HFExpertLibrary("sordonia/new-test-library")
 
     transform = WeightedLinearMerge()
     exp = transform.transform(library)
@@ -111,8 +105,8 @@ def test_ties_merge():
 
     logger.setLevel(logging.DEBUG)
 
-    TOP_K = 0.2
-    library = HFExpertLibrary("sordonia/test-library")
+    top_k = 0.2
+    library = HFExpertLibrary("sordonia/new-test-library")
     names = list(library.keys())
     experts = list([library[name] for name in names])
 
@@ -237,7 +231,7 @@ def test_ties_merge():
     # return merged flat task vector
     merged_tv, TH = ties_merging(
         tv_flat_checks,
-        reset_thresh=TOP_K,
+        reset_thresh=top_k,
         merge_func="dis-mean",
     )
 
@@ -246,7 +240,7 @@ def test_ties_merge():
     )
 
     # Compare ref implementation to ours
-    cfg = TiesMergeConfig(top_k=TOP_K)
+    cfg = TiesMergeConfig(top_k=top_k)
     transform = TiesMerge(cfg)
     ties_exp = transform.transform(library)
 

@@ -24,7 +24,7 @@ from mttl.models.modifiers.expert_containers.expert_library import (
 
 
 def test_expert_lib(mocker):
-    library = HFExpertLibrary("sordonia/test-library")
+    library = HFExpertLibrary("sordonia/new-test-library")
     assert len(library) == 2
     assert not library._sliced
 
@@ -50,13 +50,13 @@ def test_expert_lib(mocker):
     assert len(library) == 3
 
     library = HFExpertLibrary(
-        "sordonia/test-library", model_name="EleutherAI/other-model"
+        "sordonia/new-test-library", model_name="EleutherAI/other-model"
     )
     assert len(library) == 0
     assert library._sliced
 
     library = HFExpertLibrary(
-        "sordonia/test-library", exclude_selection=["abstract_algebra"]
+        "sordonia/new-test-library", exclude_selection=["abstract_algebra"]
     )
 
     assert len(library) == 1
@@ -70,7 +70,7 @@ def test_soft_delete(mocker):
     from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 
     # read the stored embeddings
-    library = HFExpertLibrary("sordonia/test-library", create=False)
+    library = HFExpertLibrary("sordonia/new-test-library", create=False)
     assert len(library.data) == 2
 
     key = list(library.keys())[0]
@@ -93,12 +93,11 @@ def test_compute_embeddings():
         SVDEmbeddingTransformConfig,
     )
 
-    # TODO: both work, decide which one to use
-    library = HFExpertLibrary("sordonia/test-library")
-    # library = get_expert_library("test-library")  # requires BLOB_SAS_URL env var
+    library = HFExpertLibrary("sordonia/new-test-library")
     embeddings, svd = SVDEmbeddingTransform(
         SVDEmbeddingTransformConfig(n_components=2)
     ).transform(library=library, persist=False)
+
     assert embeddings.shape[1] == 2
 
 
@@ -106,11 +105,11 @@ def test_read_embeddings():
     from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 
     # read the stored embeddings
-    embeddings = HFExpertLibrary("sordonia/test-library").get_auxiliary_data(
+    embeddings = HFExpertLibrary("sordonia/new-test-library").get_auxiliary_data(
         "embeddings"
     )
     assert "abstract_algebra" in embeddings
-    assert embeddings["abstract_algebra"]["svd"]["embedding"].shape[1] == 2
+    assert embeddings["abstract_algebra"].shape[0] == 2
 
 
 def test_add_auxiliary_data(mocker, tmp_path):
@@ -119,9 +118,8 @@ def test_add_auxiliary_data(mocker, tmp_path):
         LocalExpertLibrary,
     )
 
-    # read the stored embeddings
     library = LocalExpertLibrary.from_expert_library(
-        HFExpertLibrary("sordonia/test-library"), tmp_path
+        HFExpertLibrary("sordonia/new-test-library"), tmp_path
     )
 
     library.add_auxiliary_data(
@@ -131,10 +129,13 @@ def test_add_auxiliary_data(mocker, tmp_path):
         data={"test": 1},
     )
     assert (
-        library.get_auxiliary_data("test", expert_name="abstract_algebra")[
-            "test_expert"
-        ]["test"]["test"]
-        == 1
+        library.get_auxiliary_data("test", expert_name="abstract_algebra")["test"] == 1
+    )
+    assert (
+        library.get_auxiliary_data(
+            "test", expert_name="abstract_algebra", return_config=True
+        )[0]["name"]
+        == "test_expert"
     )
 
 
