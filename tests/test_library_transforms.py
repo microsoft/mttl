@@ -6,7 +6,6 @@ import numpy as np
 from collections import OrderedDict
 from mttl.models.modifiers.expert_containers.expert_library import (
     HFExpertLibrary,
-    LocalExpertLibrary,
 )
 from mttl.models.modifiers.expert_containers.library_transforms import (
     TiesMerge,
