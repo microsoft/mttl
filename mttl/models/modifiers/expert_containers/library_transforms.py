@@ -2,25 +2,26 @@ from abc import abstractmethod
 import abc
 from dataclasses import dataclass
 import dataclasses
-from mttl.models.modifiers.expert_containers.expert_library import (
-    get_expert_library,
-    ExpertLibrary,
-)
-from mttl.models.modifiers.expert_containers.expert import Expert
-from mttl.models.modifiers.expert_containers.expert_containers import ExpertContainer
-from mttl.utils import logger
-from sklearn.cluster import KMeans
-from collections import defaultdict
-from sklearn.metrics.pairwise import cosine_similarity
-from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
-
 import copy
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 import numpy as np
 import sklearn.decomposition
+from sklearn.cluster import KMeans
+from sklearn.metrics.pairwise import cosine_similarity
 from collections import defaultdict
+from collections import defaultdict
+
+from mttl.models.modifiers.expert_containers.expert import Expert
+from mttl.models.modifiers.expert_containers.expert_containers import ExpertContainer
+from mttl.models.modifiers.expert_containers.expert_library import (
+    get_expert_library,
+    ExpertLibrary,
+)
+from mttl.utils import logger
+from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
+from mttl.datamodule.base import get_datamodule
 
 
 class LibraryTransform(abc.ABC):
@@ -390,7 +391,6 @@ class HiddenStateComputer(LibraryTransform):
         self, library: ExpertLibrary, persist=False, recompute=False, default_args=None
     ) -> Expert:
         # TODO: remove project import
-        from projects.wiki_experts.train_experts_main import get_datamodule
         from projects.wiki_experts.src.expert_model import MultiExpertModel
 
         if type(library) == str:
@@ -522,7 +522,6 @@ class PhatgooseTransform(HiddenStateComputer):
         default_args=None,
     ):
         # TODO: remove project import
-        from projects.wiki_experts.train_experts_main import get_datamodule
         from projects.wiki_experts.src.expert_model import MultiExpertModel
         from mttl.models.modifiers.expert_containers.utils import train_module
 
@@ -948,7 +947,6 @@ class CrossExpertNormComputer(HiddenStateComputer):
             ]
         )
 
-        from projects.wiki_experts.train_experts_main import get_datamodule
         from projects.wiki_experts.src.expert_model import MoETrainer
         from mttl.models.modifiers.expert_containers import ExpertContainer
 
