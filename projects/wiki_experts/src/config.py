@@ -108,8 +108,6 @@ class ExpertConfig(Config):
         self.lora_merge_after = False  # if True, tried to merge after the outer product, currently only applicable to LoRA
 
     def post_init(self, silent=False):
-        self._load_deprecated_configs(silent)
-
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size
 
