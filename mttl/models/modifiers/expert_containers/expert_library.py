@@ -814,6 +814,55 @@ class ExpertLibrary:
                         auxiliary_data[f"{key}"] = payload
         return auxiliary_data
 
+    def remove_auxiliary_data(
+        self,
+        data_type: str = None,
+        expert_name: str = None,
+    ):
+        """Remove auxiliary data from the repository."""
+        if self.sliced:
+            raise ValueError("Cannot remove auxiliary data from sliced library.")
+
+        # all aux data ends with .bin
+        list_of_files = [
+            f for f in self.list_repo_files(self.repo_id) if f.endswith(".bin")
+        ]
+        files_to_remove = []
+
+        if (
+            expert_name
+            and data_type
+            and f"{expert_name}.{data_type}.bin" not in list_of_files
+        ):
+            raise ValueError(
+                f"Auxiliary data of type {data_type} for expert {expert_name} not found in repository."
+            )
+
+        if expert_name is None and data_type is None:
+            # remove all auxiliary data from the library
+            files_to_remove = list_of_files
+        elif expert_name is not None and data_type is None:
+            files_to_remove = [
+                f for f in list_of_files if f.startswith(f"{expert_name}.")
+            ]
+        else:
+            files_to_remove = [f"{expert_name}.{data_type}.bin"]
+
+        deletion_ops = []
+        for file in files_to_remove:
+            deletion = CommitOperationDelete(path_in_repo=file)
+            deletion_ops.append(deletion)
+
+        if self._in_transaction:
+            self._pending_operations.extend(deletion_ops)
+        else:
+            self.create_commit(
+                self.repo_id,
+                operations=deletion_ops,
+                commit_message=f"Deleting auxiliary data from the library.",
+            )
+            logger.info(f"Deletion of {files_to_remove} successful.")
+
     def unremove_expert(self, expert_name: str):
         """Restore a previously soft-deleted expert."""
         if self.sliced:
