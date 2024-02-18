@@ -768,24 +768,50 @@ class ExpertLibrary:
 
     def get_auxiliary_data(
         self,
-        data_type: str = "embeddings",
+        data_type: str,
         expert_name: str = None,
+        return_config: bool = False,
     ) -> List[Any]:
-        path = self.snapshot_download(self.repo_id, allow_patterns=f"*.{data_type}")
+        """Get auxiliary data from the repository.
+
+        Args:
+            data_type (str): data type (basically the filename in the lib repo)
+            expert_name (str, optional): expert name to fetch auxiliary data for. If None, fetches for every expert.
+            return_config (bool, optional): if True, returns {"config": config, "data": data}, else it returns only the raw data.
+
+        Raises:
+            ValueError: _description_
+
+        Returns:
+            List[Any]: _description_
+        """
+        # all auxiliary data should have "bin" extension
+        path = self.snapshot_download(self.repo_id, allow_patterns=f"*.{data_type}.bin")
 
         if expert_name:
-            filename = os.path.join(path, f"{expert_name}.{data_type}")
+            filename = os.path.join(path, f"{expert_name}.{data_type}.bin")
             if not os.path.isfile(filename):
                 raise ValueError(
                     f"Data of type {data_type} for expert {expert_name} not found in repository. Did you compute it?"
                 )
-            return torch.load(filename)
+            payload = torch.load(filename)
+            if return_config and "config" in payload:
+                return payload["config"], payload["data"]
+            if "data" in payload:
+                return payload["data"]
+            return payload
         else:
             auxiliary_data = {}
             for key in self.keys():
-                filename = os.path.join(path, f"{key}.{data_type}")
+                filename = os.path.join(path, f"{key}.{data_type}.bin")
                 if os.path.isfile(filename):
-                    auxiliary_data[f"{key}"] = torch.load(filename)
+                    payload = torch.load(filename)
+                    if return_config and "config" in payload:
+                        auxiliary_data[f"{key}"] = payload["config"], payload["data"]
+                    elif "data" in payload:
+                        auxiliary_data[f"{key}"] = payload["data"]
+                    else:
+                        auxiliary_data[f"{key}"] = payload
         return auxiliary_data
 
     def unremove_expert(self, expert_name: str):
@@ -853,7 +879,7 @@ class ExpertLibrary:
             raise ValueError(f"Expert {expert_name} not found in repository.")
 
         operations = []
-        scores_file = f"{expert_name}.scores"
+        scores_file = f"{expert_name}.scores.bin"
 
         scores = self.list_repo_files(self.repo_id)
         if scores_file in scores:
@@ -893,35 +919,28 @@ class ExpertLibrary:
         data_type: str,
         expert_name: str,
         config: Dict,
-        data: np.ndarray,
+        data: Any,
         force: bool = False,
     ):
         if expert_name not in self.data:
             raise ValueError(f"Expert {expert_name} not found in repository.")
 
-        if "name" not in config:
-            raise ValueError(f"{data_type} config must contain a name.")
-
         operations = []
-        aux_file = f"{expert_name}.{data_type}"
+        aux_file = f"{expert_name}.{data_type}.bin"
 
         aux_data = self.list_repo_files(self.repo_id)
-        if aux_file in aux_data:
-            path = self.hf_hub_download(self.repo_id, filename=aux_file)
-            aux_data = torch.load(path, map_location="cpu")
-        else:
-            aux_data = {}
-        if config["name"] in aux_data and not force:
+        if aux_file in aux_data and not force:
             raise ValueError(
-                f"Data of type {data_type} for expert {expert_name} already exists in repository."
+                f"Data of type {data_type} for expert {expert_name} already exists in repository. Set `force=True` to overwrite."
             )
-        aux_data[config["name"]] = {
-            data_type: data,
+
+        payload = {
+            "data": data,
             "config": config,
         }
 
         buffer = io.BytesIO()
-        torch.save(aux_data, buffer)
+        torch.save(payload, buffer)
         buffer.flush()
 
         addition_a = CommitOperationAdd(
@@ -937,43 +956,11 @@ class ExpertLibrary:
             self.create_commit(
                 self.repo_id,
                 operations=operations,
-                commit_message=f"Update library with embedding for {expert_name}.",
+                commit_message=f"Upload auxiliary data {data_type} for {expert_name}.",
             )
-            logger.info(f"Embedding for {expert_name} uploaded successfully.")
-
-    def add_embedding_dict(
-        self,
-        dump_name: str,
-        expert_name: str,
-        data: np.ndarray,
-        force: bool = False,
-    ):
-        if expert_name not in self.data:
-            raise ValueError(f"Expert {expert_name} not found in repository.")
-
-        operations = []
-        aux_file = f"{expert_name}.{dump_name}.bin"
-
-        buffer = io.BytesIO()
-        torch.save(data, buffer)
-        buffer.flush()
-
-        addition_a = CommitOperationAdd(
-            path_in_repo=f"{aux_file}", path_or_fileobj=buffer
-        )
-        operations.append(addition_a)
-
-        if self._in_transaction:
-            self._pending_pre_uploads.extend(operations)
-            self._pending_operations.extend(operations)
-        else:
-            self.preupload_lfs_files(self.repo_id, additions=operations)
-            self.create_commit(
-                self.repo_id,
-                operations=operations,
-                commit_message=f"Update library with embedding for {expert_name}.",
+            logger.info(
+                f"Auxiliary data {data_type} for {expert_name} uploaded successfully."
             )
-            logger.info(f"Embedding for {expert_name} uploaded successfully.")
 
     def add_embeddings(
         self,
