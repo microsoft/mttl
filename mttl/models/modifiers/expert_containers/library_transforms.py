@@ -65,7 +65,7 @@ class LibraryTransformConfig:
             return self.name
         else:
             # form auto name based on the arguments of the config
-            save_name = self.__class__.__name__ + f"-{param_hash(self)}"
+            save_name = self.__class__.__name__.lower() + f"-{param_hash(self)}"
             return save_name
 
 

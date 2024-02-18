@@ -20,6 +20,17 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
 )
 
 
+def test_config():
+    cfg = ArrowConfig(ab_only=True, scale=False)
+    assert cfg.save_name == "arrowconfig--7686410507725439752"
+
+    cfg2 = ArrowConfig(ab_only=True, scale=True)
+    assert cfg2.save_name != cfg.save_name
+
+    cfg3 = ArrowConfig(ab_only=True, scale=False)
+    assert cfg3.save_name == cfg.save_name
+
+
 def test_arrow():
     import logging
     from mttl.utils import logger
