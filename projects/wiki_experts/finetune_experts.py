@@ -69,8 +69,8 @@ FINETUNE_FUNCTIONS: dict[str, Callable] = {}
 
 
 @retry(max_retries=5, wait_seconds=60)
-def svd_transform_with_retry(svd_embedder, expert_lib, upload_to_hf=True, force=True):
-    return svd_embedder.transform(expert_lib, upload_to_hf=upload_to_hf, force=force)
+def svd_transform_with_retry(svd_embedder, expert_lib, persist=True, force=True):
+    return svd_embedder.transform(expert_lib, persist=persist, force=force)
 
 
 def register_finetune_func(name):
@@ -114,7 +114,7 @@ def prepare_expert_lib(args: ExpertConfig, lib_location) -> LocalExpertLibrary:
         args.remove_experts.split(",") if args.remove_experts is not None else None
     )
     library = LocalExpertLibrary.from_expert_library(
-        HFExpertLibrary(args.hf_lib_id, exclude_selection=exclude_selection),
+        HFExpertLibrary(args.library_id, exclude_selection=exclude_selection),
         repo_id=lib_location,
     )
     return library
@@ -122,7 +122,7 @@ def prepare_expert_lib(args: ExpertConfig, lib_location) -> LocalExpertLibrary:
 
 def create_mean_expert(args: ExpertConfig, library: ExpertLibrary = None) -> Expert:
     if library is None:
-        library = args.hf_lib_id
+        library = args.library_id
 
     return WeightedLinearMerge(WeightedLinearMergeConfig()).transform(library)
 
@@ -132,7 +132,7 @@ def retrieve(args: ExpertConfig, task, k, retrieve_with="random"):
         k = args.sk
         retriever = RandomRetriever(args, sk=k)
 
-        lib_location = f"/tmp/{args.hf_lib_id}"
+        lib_location = f"/tmp/{args.library_id}"
         os.makedirs(lib_location, exist_ok=True)
         library = prepare_expert_lib(args, lib_location)
         library: VirtualLocalLibrary = retriever.transform(
@@ -147,7 +147,7 @@ def retrieve(args: ExpertConfig, task, k, retrieve_with="random"):
 
         retriever = SVDEmbeddingRetriever(args, sk=k)
 
-        lib_location = f"/tmp/{args.hf_lib_id}"
+        lib_location = f"/tmp/{args.library_id}"
         os.makedirs(lib_location, exist_ok=True)
         library = prepare_expert_lib(args, lib_location)
         if query_expert in library:
@@ -155,19 +155,19 @@ def retrieve(args: ExpertConfig, task, k, retrieve_with="random"):
         library.add_expert(query_expert)
         ###########################################################################
         # redo SVD with the query expert included
-        if "neo" in args.hf_lib_id:
+        if "neo" in args.library_id:
             sparsity_threshold = 0.5
-        elif "phi" in args.hf_lib_id:
+        elif "phi" in args.library_id:
             sparsity_threshold = 0.5
         else:
-            raise ValueError("'Neo' nor 'phi' in hf_lib_id,sparsity_threshold not set")
+            raise ValueError("'Neo' nor 'phi' in library_id,sparsity_threshold not set")
 
         logger.info(f"!!!!!!! Using sparsity threshold {sparsity_threshold}")
         svd_embedder = SVDEmbeddingTransform(
             SVDEmbeddingTransformConfig(sparsity_threshold=sparsity_threshold),
             random_state=42,
         )
-        svd_transform_with_retry(svd_embedder, library, upload_to_hf=True, force=True)
+        svd_transform_with_retry(svd_embedder, library, persist=True, force=True)
         ###########################################################################
         library: VirtualLocalLibrary = retriever.transform(
             library, current_task=args.finetune_task_name, task_expert=query_expert
@@ -244,7 +244,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
     from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
     from mttl.evaluators.rouge_evaluator import RougeEvaluator
 
-    lib_location = f"/tmp/{args.hf_lib_id}"
+    lib_location = f"/tmp/{args.library_id}"
     os.makedirs(lib_location, exist_ok=True)
     expert_lib = prepare_expert_lib(args, lib_location)
 
@@ -481,7 +481,7 @@ def finetune_joint(args: ExpertConfig, dm):
     """
     from projects.wiki_experts.src.evolution.transfer_matrix import resolve_hf_repo_id
 
-    hf_repo_id, expert_name = resolve_hf_repo_id(args.hf_lib_id)
+    hf_repo_id, expert_name = resolve_hf_repo_id(args.library_id)
     library = HFExpertLibrary(hf_repo_id)
     expert: Expert = library[expert_name]
     pretrain_args = expert.training_config
@@ -532,7 +532,7 @@ def run_multitask(args: ExpertConfig):
 
         if args.create_transfer_matrix or "nevergrad" in args.finetune_regime:
             create_transfer_matrix(args, expert)
-        shutil.rmtree(f"/tmp/{args.hf_lib_id}", ignore_errors=True)
+        shutil.rmtree(f"/tmp/{args.library_id}", ignore_errors=True)
 
 
 @register_finetune_func("poly_from_scratch")
@@ -546,7 +546,7 @@ def finetune_polylib_full(args: ExpertConfig, dm):
         and "selector" in args.trainable_param_names
     ):
         args.trainable_param_names += "|.*module_logits.*|.*selector.*"
-    assert args.hf_lib_id is None
+    assert args.library_id is None
     args.router_selector = "poly_router"
     module = MoETrainer(**vars(args), device_map="auto")
     module.to("cuda")

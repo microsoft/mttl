@@ -15,8 +15,8 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     WeightedLinearMergeConfig,
     MBClusteringTransformConfig,
     MBCWithCosSimTransform,
-    SVDInputExtractor,
-    SVDInputExtractorConfig,
+    ArrowTransform,
+    ArrowConfig,
 )
 
 
@@ -28,12 +28,10 @@ def test_svd_input_contructor():
 
     library = HFExpertLibrary("sordonia/test-library")
 
-    cfg = SVDInputExtractorConfig(
-        upload_to_hf=False, recompute=True, ab_only=True, scale=False
-    )
-    transform = SVDInputExtractor(cfg)
+    cfg = ArrowConfig(ab_only=True, scale=False)
+    transform = ArrowTransform(cfg)
 
-    protos = transform.transform(library)
+    protos = transform.transform(library, persist=False, recompute=True)
     sums = []
     for task_name in sorted(protos.keys()):
         task_sum = 0.0
@@ -55,10 +53,12 @@ def test_mbc_clustering(tmp_path):
     )
 
     cfg = MBClusteringTransformConfig(
-        k=k, random_state=42, sparsity_threshold=0.1, recompute_embeddings=True
+        k=k,
+        random_state=42,
+        sparsity_threshold=0.1,
     )
     transform = MBCWithCosSimTransform(cfg)
-    clusters = transform.transform(library)
+    clusters = transform.transform(library, persist=False, recompute=True)
 
     assert len(clusters) == k
 

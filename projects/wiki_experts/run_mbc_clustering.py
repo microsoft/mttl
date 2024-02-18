@@ -1,18 +1,10 @@
 import os
 import json
-import shutil
-from collections import OrderedDict
 from mttl.models.modifiers.expert_containers.expert_library import (
     HFExpertLibrary,
     LocalExpertLibrary,
 )
 from mttl.models.modifiers.expert_containers.library_transforms import (
-    TiesMerge,
-    TiesMergeConfig,
-    WeightedLinearMerge,
-    WeightedLinearMergeConfig,
-    DatasetCentroidComputer,
-    PrototypeComputerConfig,
     MBClusteringTransformConfig,
     MBCWithCosSimTransform,
 )
@@ -21,13 +13,13 @@ from projects.wiki_experts.src.config import ExpertConfig
 
 
 def main(args: ExpertConfig):
-    library = HFExpertLibrary(args.hf_lib_id)
+    library = HFExpertLibrary(args.library_id)
 
     # making local copy of remote lib
     destination = os.environ.get(
         "HF_LIB_CACHE", os.path.expanduser("~/.cache/huggingface/libraries")
     )
-    destination += args.hf_lib_id
+    destination += args.library_id
     os.makedirs(destination, exist_ok=True)
     library = LocalExpertLibrary.from_expert_library(library, repo_id=destination)
 
@@ -41,7 +33,7 @@ def main(args: ExpertConfig):
     clusters = transform.transform(library)
 
     output_json_file = (
-        f"{os.path.dirname(os.path.realpath(__file__))}/task_sets/{args.hf_lib_id}/"
+        f"{os.path.dirname(os.path.realpath(__file__))}/task_sets/{args.library_id}/"
     )
     os.makedirs(output_json_file, exist_ok=True)
     filename = f"{args.mbc_num_clusters}MBC.json"
