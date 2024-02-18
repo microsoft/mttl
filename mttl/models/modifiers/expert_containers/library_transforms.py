@@ -1061,6 +1061,7 @@ class MBCWithCosSimTransform(LibraryTransform):
     def transform(
         self,
         library: ExpertLibrary,
+        persist: bool = False,
         recompute: bool = False,
     ) -> dict[str, list[str]]:
         svd_config = SVDEmbeddingTransformConfig(
@@ -1083,7 +1084,7 @@ class MBCWithCosSimTransform(LibraryTransform):
                 svd_config,
                 random_state=self.config.random_state,
             )
-            embeddings, svd = svd_embedder.transform(library, persist=True)
+            embeddings, svd = svd_embedder.transform(library, persist=persist)
             del svd_embedder
             return embeddings, svd
 
