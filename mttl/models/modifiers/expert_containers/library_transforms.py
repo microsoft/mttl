@@ -1,3 +1,5 @@
+from abc import abstractmethod
+import abc
 from dataclasses import dataclass
 import dataclasses
 from mttl.models.modifiers.expert_containers.expert_library import (
@@ -21,14 +23,17 @@ import sklearn.decomposition
 from collections import defaultdict
 
 
-class LibraryTransform:
+class LibraryTransform(abc.ABC):
     """Defines a transformation of a library of experts."""
 
     def __init__(self, config):
         self.config = config
 
-    def transform(library):
-        raise NotImplementedError()
+    @abstractmethod
+    def transform(
+        self, library: ExpertLibrary, persist: bool = False, recompute: bool = False
+    ):
+        pass
 
 
 def _hash_field(val):
@@ -79,7 +84,7 @@ class SVDEmbeddingTransform(LibraryTransform):
         super().__init__(config)
         self.random_state = random_state
 
-    def transform(self, library, persist=True, recompute=False, force=False):
+    def transform(self, library, persist=True, recompute=False):
         if type(library) == str:
             library = get_expert_library(library)
 
@@ -94,7 +99,9 @@ class SVDEmbeddingTransform(LibraryTransform):
                 None,
             )
 
-        logger.info("Computing SVD Embeddings for {} experts".format(len(library)))
+        logger.info("Computing SVD Embeddings for %s experts", len(library))
+        logger.info("Saving to: %s", self.config.save_name)
+
         svd = sklearn.decomposition.TruncatedSVD(
             n_components=self.config.n_components,
             algorithm="randomized",
@@ -119,6 +126,7 @@ class SVDEmbeddingTransform(LibraryTransform):
         # Use quantiles to fit the exact threshold
         thr = np.quantile(np.abs(array), self.config.sparsity_threshold, axis=1)
         array[np.abs(array) <= thr.reshape(-1, 1)] = 0.0
+
         logger.info("Sparsity threshold: {}".format(str([f"{x:.4f}" for x in thr])))
         assert (
             np.abs(
@@ -134,7 +142,8 @@ class SVDEmbeddingTransform(LibraryTransform):
         )
 
         if persist:
-            logger.info("Uploading embeddings to the library.")
+            logger.info("Uploading SVD embeddings to the library.")
+
             # add embeddings to the library
             with library.batched_commit():
                 for i, name in enumerate(names):
@@ -1066,7 +1075,7 @@ class MBCWithCosSimTransform(LibraryTransform):
                 svd_config,
                 random_state=self.config.random_state,
             )
-            embeddings, svd = svd_embedder.transform(library, persist=True, force=True)
+            embeddings, svd = svd_embedder.transform(library, persist=True)
             del svd_embedder
             return embeddings, svd
 
