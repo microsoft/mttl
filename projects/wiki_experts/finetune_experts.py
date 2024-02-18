@@ -1,10 +1,9 @@
 import os
 import sys
-import pytorch_lightning as pl
-import glob
-
-import copy
 import shutil
+import torch
+from huggingface_hub import login
+from pytorch_lightning import Trainer, seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -15,16 +14,8 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     VirtualLocalLibrary,
     retry,
 )
-
 from mttl.callbacks import LiveCheckpointCallback
-
 from mttl.models.monitors import get_monitors
-from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
-from projects.wiki_experts.src.expert_model import (
-    MoETrainer,
-    MultiExpertModel,
-    RoutedMultiExpertModel,
-)
 from mttl.models.modifiers.expert_containers.expert import (
     load_expert,
     Expert,
@@ -34,19 +25,8 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
 )
-
-from projects.wiki_experts.src.evolution.retrievers import (
-    RandomRetriever,
-    SVDEmbeddingRetriever,
-)
-
-
-import torch
-from huggingface_hub import login
-from pytorch_lightning import Trainer, seed_everything
-
-from projects.wiki_experts.utils import get_datamodule
-from mttl.callbacks import NanoMMLUCallback, RougeCallback
+from mttl.models.modifiers.base import ModifierConfig
+from mttl.callbacks import RougeCallback
 from mttl.utils import (
     get_checkpoint_path,
     get_pl_loggers,
@@ -58,11 +38,21 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     SVDEmbeddingTransformConfig,
 )
 from typing import Callable
+
+from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
+from projects.wiki_experts.src.expert_model import (
+    MoETrainer,
+    MultiExpertModel,
+    RoutedMultiExpertModel,
+)
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.train_experts_main import create_transfer_matrix
-from projects.wiki_experts.src.callbacks import RougeLCallback
-from mttl.models.modifiers.base import ModifierConfig
+from projects.wiki_experts.utils import get_datamodule
+from projects.wiki_experts.src.evolution.retrievers import (
+    RandomRetriever,
+    SVDEmbeddingRetriever,
+)
 
 
 FINETUNE_FUNCTIONS: dict[str, Callable] = {}
