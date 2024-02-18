@@ -22,7 +22,7 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
 
 def test_config():
     cfg = ArrowConfig(ab_only=True, scale=False)
-    assert cfg.save_name == "arrowconfig--7686410507725439752"
+    assert cfg.save_name == "arrowconfig-4e6d15f51147b500281ab22ab4b51037"
 
     cfg2 = ArrowConfig(ab_only=True, scale=True)
     assert cfg2.save_name != cfg.save_name

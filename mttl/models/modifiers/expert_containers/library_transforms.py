@@ -39,7 +39,9 @@ class LibraryTransform(abc.ABC):
 
 def _hash_field(val):
     # from facebookresearch / ReAgent
-    if isinstance(val, list):
+    if val is None:
+        return ""
+    elif isinstance(val, list):
         return tuple(val)
     elif isinstance(val, dict):
         return tuple(sorted(val.items()))
@@ -49,7 +51,15 @@ def _hash_field(val):
 
 def param_hash(p):
     # from facebookresearch / ReAgent
-    return hash(tuple(_hash_field(getattr(p, f.name)) for f in dataclasses.fields(p)))
+    import hashlib
+
+    m = hashlib.md5()
+    m.update(
+        str(
+            tuple(_hash_field(getattr(p, f.name)) for f in dataclasses.fields(p))
+        ).encode()
+    )
+    return m.hexdigest()
 
 
 @dataclass
