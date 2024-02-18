@@ -20,7 +20,7 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
 )
 
 
-def test_svd_input_contructor():
+def test_arrow():
     import logging
     from mttl.utils import logger
 
