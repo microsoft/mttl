@@ -58,7 +58,7 @@ def test_mbc_clustering(tmp_path):
         sparsity_threshold=0.1,
     )
     transform = MBCWithCosSimTransform(cfg)
-    clusters = transform.transform(library, persist=False, recompute=True)
+    clusters = transform.transform(library, recompute=True)
 
     assert len(clusters) == k
 
