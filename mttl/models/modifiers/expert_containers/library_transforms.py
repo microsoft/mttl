@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import dataclasses
 from mttl.models.modifiers.expert_containers.expert_library import (
     get_expert_library,
     ExpertLibrary,
@@ -30,6 +31,21 @@ class LibraryTransform:
         raise NotImplementedError()
 
 
+def _hash_field(val):
+    # from facebookresearch / ReAgent
+    if isinstance(val, list):
+        return tuple(val)
+    elif isinstance(val, dict):
+        return tuple(sorted(val.items()))
+    else:
+        return val
+
+
+def param_hash(p):
+    # from facebookresearch / ReAgent
+    return hash(tuple(_hash_field(getattr(p, f.name)) for f in dataclasses.fields(p)))
+
+
 @dataclass
 class LibraryTransformConfig:
     name: str = None
@@ -44,16 +60,7 @@ class LibraryTransformConfig:
             return self.name
         else:
             # form auto name based on the arguments of the config
-            save_name = (
-                str(self.__class__).lower()
-                + "-"
-                + "_".join(
-                    [
-                        f"{k}-{v}" if v is None else str(v)
-                        for k, v in self.__dataclass_fields__.items()
-                    ]
-                )
-            )
+            save_name = self.__class__.__name__ + f"-{param_hash(self)}"
             return save_name
 
 

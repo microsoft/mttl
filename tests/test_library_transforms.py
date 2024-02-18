@@ -51,7 +51,6 @@ def test_mbc_clustering(tmp_path):
         library,
         repo_id=tmp_path,
     )
-
     cfg = MBClusteringTransformConfig(
         k=k,
         random_state=42,
@@ -59,7 +58,6 @@ def test_mbc_clustering(tmp_path):
     )
     transform = MBCWithCosSimTransform(cfg)
     clusters = transform.transform(library, recompute=True)
-
     assert len(clusters) == k
 
 
