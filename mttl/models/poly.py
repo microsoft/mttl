@@ -279,6 +279,7 @@ class PolyLoRATensor(PolytroponAdapter):
         self.out_features = linear_layer.out_features
         self.use_warmup = config.lora_warmup
         self.rank = config.lora_rank
+        self.order = config.order
         self.weight = linear_layer.weight
         self.bias = linear_layer.bias
         self.kaiming_init = config.lora_kaiming_init
@@ -286,7 +287,7 @@ class PolyLoRATensor(PolytroponAdapter):
         self.task_id_ptr = task_id_ptr
         self.training_steps = 0.0
 
-        self.order = self.n_splits
+        self.order = self.order
         self.tensor_rank = self.n_skills
         if selector is None:
             self.selector = get_selector(config)
