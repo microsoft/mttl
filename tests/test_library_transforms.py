@@ -52,6 +52,21 @@ def test_arrow():
     assert np.allclose(sums, [2728.4163, 2284.9968])
 
 
+def test_compute_svd_embeddings():
+    from mttl.models.modifiers.expert_containers.library_transforms import (
+        SVDEmbeddingTransform,
+        SVDEmbeddingTransformConfig,
+    )
+
+    library = HFExpertLibrary("sordonia/new-test-library")
+    embeddings, svd = SVDEmbeddingTransform(
+        SVDEmbeddingTransformConfig(n_components=2)
+    ).transform(library=library, persist=False)
+
+    assert len(embeddings) == 2
+    assert embeddings["abstract_algebra"].shape[0] == 2
+
+
 def test_mbc_clustering(tmp_path):
     library = HFExpertLibrary("sordonia/new-test-library")
     k = 2
