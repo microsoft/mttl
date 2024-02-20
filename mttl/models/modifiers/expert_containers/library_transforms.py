@@ -165,7 +165,7 @@ class SVDEmbeddingTransform(LibraryTransform):
                         data=experts_embeddings[i],
                         force=True,  # make sure we overwrite
                     )
-        return experts_embeddings, svd
+        return dict(zip(names, experts_embeddings)), svd
 
 
 @dataclass
@@ -1070,15 +1070,6 @@ class MBCWithCosSimTransform(LibraryTransform):
             sparsity_threshold=self.config.sparsity_threshold,
         )
 
-        def get_svd_embedding(lib: ExpertLibrary, expert_name: str):
-            try:
-                embeddings = lib.get_auxiliary_data(
-                    data_type=svd_config.save_name, expert_name=expert_name
-                )
-            except ValueError:
-                return None
-            return embeddings
-
         def create_embeddings():
             svd_embedder = SVDEmbeddingTransform(
                 svd_config,
@@ -1092,16 +1083,14 @@ class MBCWithCosSimTransform(LibraryTransform):
 
         if len(embeddings) != len(library) or recompute:
             logger.info("Recomputing embeddings for clustering.")
-            create_embeddings()
-
-        # module to embedding
-        module2embed = {}
-        for name in library.keys():
-            module2embed[name] = get_svd_embedding(library, name)
+            embeddings, _ = create_embeddings()
 
         # Extract the embeddings as a numpy array
-        embeddings = np.array(list(module2embed.values()))
-        cosine_sim_matrix = cosine_similarity(embeddings, embeddings)
+        expert_names, embeddings = zip(*sorted(embeddings.items()))
+
+        embeddings_array = np.stack(embeddings)
+        cosine_sim_matrix = cosine_similarity(embeddings_array, embeddings_array)
+
         kmeans = KMeans(
             n_clusters=self.config.k,
             init="k-means++",
@@ -1111,6 +1100,7 @@ class MBCWithCosSimTransform(LibraryTransform):
         kmeans.fit(cosine_sim_matrix)
         cluster_labels = kmeans.labels_
         clusters = defaultdict(list)
-        for key, label in zip(module2embed.keys(), cluster_labels):
+
+        for key, label in zip(expert_names, cluster_labels):
             clusters[label].append(key)
         return clusters
