@@ -1,7 +1,7 @@
 import copy
 from functools import partial
 import re
-from tempfile import TemporaryDirectory
+from torch import nn
 import threading
 from typing import Any, Dict, List
 import numpy as np
@@ -9,6 +9,7 @@ import torch
 import tqdm
 
 from transformers import PreTrainedModel
+from mttl.models.expert_trainer import ExpertTrainer
 from mttl.models.llama_patch import replace_attn_with_flash_attn
 from mttl.models.modifiers.expert_containers import add_expert_to_transformer
 from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
@@ -23,7 +24,7 @@ from mttl.models.modifiers.expert_containers.expert_containers import (
 from mttl.models.modifiers.expert_containers.selectors import Selector, SelectorConfig
 
 
-class MultiExpertModel:
+class MultiExpertModel(nn.Module):
     """Wrapper for a HF model that allows loading and managing multiple experts."""
 
     def __init__(
@@ -137,7 +138,7 @@ class MultiExpertModel:
         self,
         expert_name,
         expert_config=None,
-    ):
+    ) -> Expert:
         """Adds a new empty expert to the model."""
         new_expert = Expert(
             expert_info=ExpertInfo(
@@ -146,8 +147,9 @@ class MultiExpertModel:
             ),
         )
 
-        self.add_expert_instance(new_expert)
+        new_expert = self.add_expert_instance(new_expert)
         logger.info("Added empty expert: {}".format(expert_name))
+        return new_expert
 
     def load_expert(
         self,
@@ -193,7 +195,7 @@ class MultiExpertModel:
             expert_instance.name = expert_name
 
         with self.lock:
-            self.model = add_expert_to_transformer(
+            expert = add_expert_to_transformer(
                 self.model,
                 expert_instance,
                 action=action,
@@ -202,10 +204,9 @@ class MultiExpertModel:
             )
             if action != "merge":
                 self.experts_names.append(expert_instance.name)
+        return expert
 
     def load_from_library(self, library, subsample_library_experts=0):
-        import copy
-
         keys = list(library.keys())
         if self.hparams.subsample_library_experts > 0:
             keys = np.random.permutation(keys)[:subsample_library_experts]

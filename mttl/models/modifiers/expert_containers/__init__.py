@@ -64,11 +64,14 @@ def filter_expert_weights(layer_name, expert_weights):
     else:
         weights = expert_weights
 
-    return {
+    weights = {
         k.replace(layer_name + ".", ""): v
         for k, v in weights.items()
         if k.startswith(layer_name)
     }
+    if not weights:
+        return None
+    return weights
 
 
 def add_expert_library_to_transformer(
@@ -189,7 +192,7 @@ def add_expert_to_transformer(
     action: str = "route",
     is_default: bool = False,
     routing_config: SelectorConfig = None,
-):
+) -> Expert:
     """
     Routine to add an expert to the transformer architecture.
 
@@ -276,4 +279,4 @@ def add_expert_to_transformer(
         )
 
     logger.debug("Patched layers: %s", added_layers)
-    return transformer
+    return expert

@@ -11,6 +11,7 @@ from projects.wiki_experts.src.expert_model import (
     RoutedMultiExpertModel,
 )
 
+from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 from mttl.models.modifiers.expert_containers import (
     LoRAExpertContainer,
@@ -23,6 +24,7 @@ from mttl.models.modifiers.expert_containers.selectors import (
     SelectorView,
     ClownSelector,
 )
+from mttl.models.expert_model import MultiExpertModel
 from mttl.models.modifiers.lora import LoRA
 
 
@@ -82,15 +84,10 @@ def bigger_dummy_batch():
 
 class TestMultiExpertModel:
     def create_dummy_expert(self, config: ExpertConfig, exp_name) -> Expert:
-        exp_trainer = ExpertTrainer(
-            tokenizer=None,
-            **vars(config),
+        model = MultiExpertModel(config.model, device_map="cpu")
+        expert = model.add_empty_expert(
+            exp_name, ModifierConfig.from_training_config(config)
         )
-        dir = f"{config.output_dir}/{exp_name}"
-        os.makedirs(dir, exist_ok=True)
-        checkpoint = exp_trainer.save_pretrained(dir)
-        expert = load_expert(checkpoint, exp_name)
-        expert.expert_info.expert_name = exp_name
         return expert
 
     def test_add_expert_with_action_merge(self, tmp_exp_config):

@@ -167,11 +167,18 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         if expert_weights is not None:
             expert_module.load_lora_weights(expert_weights)
 
+        # fill the expert weights upon adding the expert
+        if expert.expert_weights is None:
+            expert.expert_weights = {}
+
+        for k, v in expert_module.state_dict().items():
+            if (self.layer_name + "." + k) not in expert.expert_weights:
+                expert.expert_weights[self.layer_name + "." + k] = v
+
         if action == "merge":
             # weight is merged with layer so we can discard it now
             expert_module.merge_with_layer()
             self.merged_expert_names.append(expert.name)
-
         else:
             if is_default:
                 self.default_expert_name = expert.name
