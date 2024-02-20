@@ -87,7 +87,7 @@ def setup(args: EvolExpertConfig):
     remote_lib = get_expert_library(args.hf_repo_id)
     os.makedirs(local_lib_location, exist_ok=True)
     expert_lib = LocalExpertLibrary.from_expert_library(
-        remote_lib, destination=local_lib_location
+        remote_lib, repo_id=local_lib_location
     )
 
     expert_lib.ignore_sliced = True
@@ -131,7 +131,7 @@ def main(args: EvolExpertConfig):
         svd_embedder = SVDEmbeddingTransform(
             SVDEmbeddingTransformConfig(sparsity_threshold=0.5)
         )
-        svd_embedder.transform(expert_lib, upload_to_hf=True)
+        svd_embedder.transform(expert_lib, persist=True)
 
         print("Evolving on task", task)
         log_row: Dict = active_task_iteration(

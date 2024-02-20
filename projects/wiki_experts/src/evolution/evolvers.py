@@ -1,40 +1,28 @@
 import os
 import sys
 import copy
-import torch
-import wandb
 import re
-import numpy as np
-import seaborn as sns
-from dataclasses import replace
 from functools import partial
-from matplotlib import pyplot as plt
-from tempfile import TemporaryDirectory
-from pytorch_lightning import seed_everything
+from typing import Callable
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
-from projects.wiki_experts.utils import get_datamodule
-from projects.wiki_experts.src.evolution.utils import get_loss, get_task_expert
-
-from projects.wiki_experts.src.expert_trainer import ExpertTrainer
-from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
-from projects.wiki_experts.src.evolution.train_router import train_module
-from projects.wiki_experts.src.evolution.evaluators import Evaluator
+from mttl.datamodule.base import get_datamodule
 from mttl.models.modifiers.expert_containers.expert import Expert
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
+from mttl.utils import logger
 
-from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
-from mttl.utils import setup_logging, logger
+from projects.wiki_experts.src.evolution.utils import get_loss, get_task_expert
+from projects.wiki_experts.src.expert_trainer import ExpertTrainer
+from projects.wiki_experts.src.evolution.train_router import train_module
 from projects.wiki_experts.src.expert_model import (
-    MoETrainer,
     MultiExpertModel,
     RoutedMultiExpertModel,
 )
-from typing import Callable, Dict, Any
-
+from projects.wiki_experts.src.evolution.evaluators import Evaluator
+from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
 from projects.wiki_experts.src.evolution.config import (
     EvolExpertConfig,
-    increase_version,
 )
 
 EVOL_FUNCTIONS: dict[str, Callable] = {}

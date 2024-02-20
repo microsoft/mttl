@@ -27,6 +27,7 @@ from huggingface_hub import (
     create_repo,
     delete_repo,
     HfApi,
+    whoami,
 )
 from functools import total_ordering
 from huggingface_hub.utils._errors import RepositoryNotFoundError
@@ -203,7 +204,9 @@ class BlobStorageEngine(BackendEngine):
         """
         super().__init__()
 
-        logging.getLogger('azure').setLevel(logging.WARNING)  # Quiet down the azure logging
+        logging.getLogger("azure").setLevel(
+            logging.WARNING
+        )  # Quiet down the azure logging
 
         self._token: str = token
         self.cache_dir: Path = self._get_cache_dir(cache_dir)
@@ -242,7 +245,9 @@ class BlobStorageEngine(BackendEngine):
     def _last_modified(self, repo_id: str) -> datetime.datetime:
         """Get the last modified date of a repository."""
         try:
-            container_client = BlobServiceClient(self.token).get_container_client(repo_id)
+            container_client = BlobServiceClient(self.token).get_container_client(
+                repo_id
+            )
             return container_client.get_container_properties().last_modified
         except ResourceNotFoundError as error:
             raise ValueError(f"Repository {repo_id} not found") from error
@@ -263,7 +268,6 @@ class BlobStorageEngine(BackendEngine):
     def snapshot_download(
         self, repo_id, allow_patterns: Optional[Union[List[str], str]] = None
     ) -> str:
-
         """Downloads the entire repository, or a subset of files if allow_patterns is provided.
         If allow_patterns is provided, paths must match at least one pattern from the allow_patterns.
 
@@ -513,6 +517,7 @@ class LocalFSEngine(BackendEngine):
 
     def delete_repo(self, repo_id, repo_type=None):
         import shutil
+
         shutil.rmtree(repo_id)
 
     def create_commit(self, repo_id, operations, commit_message):
@@ -634,11 +639,11 @@ class ExpertLibrary:
             self.data[key] = metadatum
 
         if self.selection:
-            logger.warn("Only including experts in selection: %s", self.selection)
+            logger.warning("Only including experts in selection: %s", self.selection)
             self._sliced = True
             self.data = {k: v for k, v in self.data.items() if k in self.selection}
         elif self.exclude_selection:
-            logger.warn("Excluding experts in selection: %s", self.exclude_selection)
+            logger.warning("Excluding experts in selection: %s", self.exclude_selection)
             self._sliced = True
             self.data = {
                 k: v for k, v in self.data.items() if k not in self.exclude_selection
@@ -763,25 +768,100 @@ class ExpertLibrary:
 
     def get_auxiliary_data(
         self,
-        data_type: str = "embeddings",
+        data_type: str,
         expert_name: str = None,
+        return_config: bool = False,
     ) -> List[Any]:
-        path = self.snapshot_download(self.repo_id, allow_patterns=f"*.{data_type}")
+        """Get auxiliary data from the repository.
+
+        Args:
+            data_type (str): data type (basically the filename in the lib repo)
+            expert_name (str, optional): expert name to fetch auxiliary data for. If None, fetches for every expert.
+            return_config (bool, optional): if True, returns {"config": config, "data": data}, else it returns only the raw data.
+
+        Raises:
+            ValueError: _description_
+
+        Returns:
+            List[Any]: _description_
+        """
+        # all auxiliary data should have "bin" extension
+        path = self.snapshot_download(self.repo_id, allow_patterns=f"*.{data_type}.bin")
 
         if expert_name:
-            filename = os.path.join(path, f"{expert_name}.{data_type}")
+            filename = os.path.join(path, f"{expert_name}.{data_type}.bin")
             if not os.path.isfile(filename):
                 raise ValueError(
                     f"Data of type {data_type} for expert {expert_name} not found in repository. Did you compute it?"
                 )
-            return torch.load(filename)
+            payload = torch.load(filename)
+            if return_config and "config" in payload:
+                return payload["config"], payload["data"]
+            if "data" in payload:
+                return payload["data"]
+            return payload
         else:
             auxiliary_data = {}
             for key in self.keys():
-                filename = os.path.join(path, f"{key}.{data_type}")
+                filename = os.path.join(path, f"{key}.{data_type}.bin")
                 if os.path.isfile(filename):
-                    auxiliary_data[f"{key}"] = torch.load(filename)
+                    payload = torch.load(filename)
+                    if return_config and "config" in payload:
+                        auxiliary_data[f"{key}"] = payload["config"], payload["data"]
+                    elif "data" in payload:
+                        auxiliary_data[f"{key}"] = payload["data"]
+                    else:
+                        auxiliary_data[f"{key}"] = payload
         return auxiliary_data
+
+    def remove_auxiliary_data(
+        self,
+        data_type: str = None,
+        expert_name: str = None,
+    ):
+        """Remove auxiliary data from the repository."""
+        if self.sliced:
+            raise ValueError("Cannot remove auxiliary data from sliced library.")
+
+        # all aux data ends with .bin
+        list_of_files = [
+            f for f in self.list_repo_files(self.repo_id) if f.endswith(".bin")
+        ]
+        files_to_remove = []
+
+        if (
+            expert_name
+            and data_type
+            and f"{expert_name}.{data_type}.bin" not in list_of_files
+        ):
+            raise ValueError(
+                f"Auxiliary data of type {data_type} for expert {expert_name} not found in repository."
+            )
+
+        if expert_name is None and data_type is None:
+            # remove all auxiliary data from the library
+            files_to_remove = list_of_files
+        elif expert_name is not None and data_type is None:
+            files_to_remove = [
+                f for f in list_of_files if f.startswith(f"{expert_name}.")
+            ]
+        else:
+            files_to_remove = [f"{expert_name}.{data_type}.bin"]
+
+        deletion_ops = []
+        for file in files_to_remove:
+            deletion = CommitOperationDelete(path_in_repo=file)
+            deletion_ops.append(deletion)
+
+        if self._in_transaction:
+            self._pending_operations.extend(deletion_ops)
+        else:
+            self.create_commit(
+                self.repo_id,
+                operations=deletion_ops,
+                commit_message=f"Deleting auxiliary data from the library.",
+            )
+            logger.info(f"Deletion of {files_to_remove} successful.")
 
     def unremove_expert(self, expert_name: str):
         """Restore a previously soft-deleted expert."""
@@ -848,7 +928,7 @@ class ExpertLibrary:
             raise ValueError(f"Expert {expert_name} not found in repository.")
 
         operations = []
-        scores_file = f"{expert_name}.scores"
+        scores_file = f"{expert_name}.scores.bin"
 
         scores = self.list_repo_files(self.repo_id)
         if scores_file in scores:
@@ -888,35 +968,28 @@ class ExpertLibrary:
         data_type: str,
         expert_name: str,
         config: Dict,
-        data: np.ndarray,
+        data: Any,
         force: bool = False,
     ):
         if expert_name not in self.data:
             raise ValueError(f"Expert {expert_name} not found in repository.")
 
-        if "name" not in config:
-            raise ValueError(f"{data_type} config must contain a name.")
-
         operations = []
-        aux_file = f"{expert_name}.{data_type}"
+        aux_file = f"{expert_name}.{data_type}.bin"
 
         aux_data = self.list_repo_files(self.repo_id)
-        if aux_file in aux_data:
-            path = self.hf_hub_download(self.repo_id, filename=aux_file)
-            aux_data = torch.load(path, map_location="cpu")
-        else:
-            aux_data = {}
-        if config["name"] in aux_data and not force:
+        if aux_file in aux_data and not force:
             raise ValueError(
-                f"Data of type {data_type} for expert {expert_name} already exists in repository."
+                f"Data of type {data_type} for expert {expert_name} already exists in repository. Set `force=True` to overwrite."
             )
-        aux_data[config["name"]] = {
-            data_type: data,
+
+        payload = {
+            "data": data,
             "config": config,
         }
 
         buffer = io.BytesIO()
-        torch.save(aux_data, buffer)
+        torch.save(payload, buffer)
         buffer.flush()
 
         addition_a = CommitOperationAdd(
@@ -925,14 +998,18 @@ class ExpertLibrary:
         operations.append(addition_a)
 
         if self._in_transaction:
+            self._pending_pre_uploads.extend(operations)
             self._pending_operations.extend(operations)
         else:
+            self.preupload_lfs_files(self.repo_id, additions=operations)
             self.create_commit(
                 self.repo_id,
                 operations=operations,
-                commit_message=f"Update library with embedding for {expert_name}.",
+                commit_message=f"Upload auxiliary data {data_type} for {expert_name}.",
             )
-            logger.info(f"Embedding for {expert_name} uploaded successfully.")
+            logger.info(
+                f"Auxiliary data {data_type} for {expert_name} uploaded successfully."
+            )
 
     def add_embeddings(
         self,
@@ -999,6 +1076,7 @@ class ExpertLibrary:
             self._in_transaction = False
             return
         logger.info(f"Committing {len(self._pending_operations)} operations...")
+
         if self._pending_pre_uploads:
             self.preupload_lfs_files(self.repo_id, additions=self._pending_pre_uploads)
         self.create_commit(
@@ -1006,6 +1084,7 @@ class ExpertLibrary:
             operations=self._pending_operations,
             commit_message="Update library with new ops.",
         )
+
         # exit transaction and clear pending operations
         self._in_transaction = False
         self._pending_pre_uploads.clear()
@@ -1167,7 +1246,9 @@ class ExpertLibrary:
         Returns:
             ExpertLibrary: A new ExpertLibrary object containing the experts from the dictionary.
         """
-        new_lib = get_expert_library(repo_id=destination, expert_library_type=expert_library_type or cls)
+        new_lib = get_expert_library(
+            repo_id=destination, expert_library_type=expert_library_type or cls
+        )
         for name, expert in expert_dict.items():
             if expert not in new_lib:
                 new_lib.add_expert(expert)
@@ -1190,11 +1271,13 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
 
 class BlobExpertLibrary(ExpertLibrary, BlobStorageEngine):
     """Library stored in Azure Blob Storage."""
+
     pass
 
 
 class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
     """Library stored in Hugging Face Hub."""
+
     pass
 
 
@@ -1260,7 +1343,6 @@ def get_expert_library(
     create=False,
     ignore_sliced=False,
     expert_library_type: Union[ExpertLibrary, str] = None,
-
 ):
     """Select the appropriate expert library based on the following order of priority:
     1. If expert_library_type is provided, and is a proper subclass of ExpertLibrary, uses it.
@@ -1288,10 +1370,12 @@ def get_expert_library(
                 expert_library_type = "huggingface_hub"
             else:
                 expert_library_type = "blob_storage"
+
         try:
             expert_lib_class = available_libraries[expert_library_type]
         except KeyError:
             raise ValueError(f"Unknown expert library type {expert_library_type}.")
+
     expert_lib = expert_lib_class(
         repo_id=repo_id,
         token=token,
@@ -1301,4 +1385,5 @@ def get_expert_library(
         create=create,
         ignore_sliced=ignore_sliced,
     )
+
     return expert_lib

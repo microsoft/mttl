@@ -1,4 +1,5 @@
 # Project related stuff
+*.yaml
 amlt/
 dataloader/*_data/processed/
 amlt*/

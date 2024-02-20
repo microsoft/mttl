@@ -1,7 +1,7 @@
+import json
 import os
 import torch
 
-import json
 from mttl.config import Config
 import mttl.datamodule.task_sequences
 import mttl.datamodule.task_cluster_flan
@@ -15,11 +15,10 @@ class ExpertConfig(Config):
         self.load_in_8bit = False
         self.wandb_project = None
         self.tensorboard = False
-        self.hf_token_hub = None  # deprecated in favor of remote_token
+
         self.remote_token = None
-        self.hf_lib_id = None  # deprecated in favor of library_id
         self.library_id = None
-        self.hf_repo_id = None  # TODO: deprecate in favor of repository_id
+
         self.do_train = True
 
         # just a lame flag to 0 out all adapter weights
@@ -73,9 +72,31 @@ class ExpertConfig(Config):
         )
         self.sk = 5  # number of experts to retrieve from a library
         self.finetune_regime = None  # polylib_full, lib_mu, polylib_selector
-
-        self.tasksets_path = None
         self.eval_before_training = True
+
+        # hidden state computation transform
+        self.use_base_model_only = False
+        self.max_samples_per_task = 100
+        self.track = "each_layer"
+        self.pool = "last"
+        self.delta_scale = None  # how much to extrapolate the shift in the expert's prototype direction
+        self.use_similarity_scaling = (
+            False  # whether to scale the centroids as a function of LoRA similarity
+        )
+        self.transform_sparsity = 1.0
+
+        # Clown Router
+        self.router_temp = 1.0
+        self.notes = None
+        self.proto_init = "hidden"  # also "svd"
+        self.scale_prototypes = False  # clown routing with SVD
+        self.router_window_size = 3
+        self.clown_mode = "per_token"
+        self.normalize_router_input = False
+
+        # Eval Library
+        self.merge_or_route = None  # "uniform", "ties", "clown"
+        self.tasksets_path = None
         self.remove_experts = None
         self.create_transfer_matrix = False
         self.es_metric = "loss"
@@ -84,10 +105,9 @@ class ExpertConfig(Config):
         # for MBC
         self.mbc_num_clusters = 10  # number of clusters
         self.phi_2_align_heads = False
+        self.lora_merge_after = False  # if True, tried to merge after the outer product, currently only applicable to LoRA
 
     def post_init(self, silent=False):
-        self._load_deprecated_configs(silent)
-
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size
 
@@ -118,41 +138,14 @@ class ExpertConfig(Config):
                 task_sets = json.load(open(self.tasksets_path))
 
             for task_name in tasks:
-                if task_sets is not None and task_name in task_sets:
-                    task_names.extend(task_sets[task_name])
-                else:
-                    if task_name in mttl.datamodule.task_sequences.__dict__:
-                        task_names.extend(
-                            getattr(mttl.datamodule.task_sequences, task_name)
-                        )
-                    elif task_name in mttl.datamodule.task_cluster_flan.__dict__:
-                        task_names.extend(
-                            getattr(mttl.datamodule.task_cluster_flan, task_name)
-                        )
-                    else:
-                        task_names.extend([task_name])
-            self.finetune_task_name = ",".join(task_names)
-
-    def _load_deprecated_configs(self, silent=False):
-        """Load deprecated config keys and issue warnings."""
-        key_map = {
-            "hf_token_hub": "remote_token",
-            "hf_lib_id": "library_id",
-        }
-        for old_key, new_key in key_map.items():
-            old_key_value = getattr(self, old_key, None)
-            if old_key_value is not None:
-                if not silent:
-                    logger.warn(
-                        f"The `{old_key}` config is deprecated. "
-                        f"Please use `{new_key}` instead."
+                if task_name in mttl.datamodule.task_sequences.__dict__:
+                    task_names.extend(
+                        getattr(mttl.datamodule.task_sequences.__dict__, task_name)
                     )
-                    if getattr(self, new_key, None) is None:
-                        # Overwriting hf_lib_id to test
-                        logger.warn(f"Overwriting {new_key} to {old_key_value}")
-                    else:
-                        logger.warn(
-                            f"The `{new_key}` key is already set. "
-                            f"Ignoring `{old_key}`."
-                        )
-                setattr(self, new_key, old_key_value)
+                elif task_name in mttl.datamodule.task_cluster_flan.__dict__:
+                    task_names.extend(
+                        getattr(mttl.datamodule.task_cluster_flan, task_name)
+                    )
+                else:
+                    task_names.extend([task_name])
+            self.finetune_task_name = ",".join(task_names)
