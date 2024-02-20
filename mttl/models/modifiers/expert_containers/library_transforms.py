@@ -1,46 +1,89 @@
+from abc import abstractmethod
+import abc
 from dataclasses import dataclass
-from typing import Any
-from mttl.models.modifiers.expert_containers.expert_library import (
-    get_expert_library,
-    ExpertLibrary,
-)
-from mttl.models.modifiers.expert_containers.expert import Expert
-from mttl.models.modifiers.expert_containers.expert_containers import ExpertContainer
-from mttl.utils import logger
-from mttl.models.modifiers.modify_model import get_modifier_type
-from mttl.models.utils import model_loader_helper
-from typing import Optional
-from sklearn.cluster import KMeans
-from collections import defaultdict
-from sklearn.metrics.pairwise import cosine_similarity
-from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
-from mttl.models.modifiers.lora import LoRAConfig
-
+import dataclasses
 import copy
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 import numpy as np
 import sklearn.decomposition
+from sklearn.cluster import KMeans
+from sklearn.metrics.pairwise import cosine_similarity
+from collections import defaultdict
 from collections import defaultdict
 
+from mttl.models.modifiers.expert_containers.expert import Expert
+from mttl.models.modifiers.expert_containers.expert_containers import ExpertContainer
+from mttl.models.modifiers.expert_containers.expert_library import (
+    get_expert_library,
+    ExpertLibrary,
+)
+from mttl.utils import logger
+from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
+from mttl.datamodule.base import get_datamodule
 
-class LibraryTransform:
+
+class LibraryTransform(abc.ABC):
     """Defines a transformation of a library of experts."""
 
     def __init__(self, config):
         self.config = config
 
-    def transform(library):
-        raise NotImplementedError()
+    @abstractmethod
+    def transform(
+        self, library: ExpertLibrary, persist: bool = False, recompute: bool = False
+    ):
+        pass
+
+
+def _hash_field(val):
+    # from facebookresearch / ReAgent
+    if val is None:
+        return ""
+    elif isinstance(val, list):
+        return tuple(val)
+    elif isinstance(val, dict):
+        return tuple(sorted(val.items()))
+    else:
+        return val
+
+
+def param_hash(p):
+    # from facebookresearch / ReAgent
+    import hashlib
+
+    m = hashlib.md5()
+    m.update(
+        str(
+            tuple(_hash_field(getattr(p, f.name)) for f in dataclasses.fields(p))
+        ).encode()
+    )
+    return m.hexdigest()
 
 
 @dataclass
-class SVDEmbeddingTransformConfig:
-    name: str = "svd"
+class LibraryTransformConfig:
+    name: str = None
+
+    @property
+    def save_name(self):
+        """
+        Returns name of the cached data to use when persisting the library.
+        If not set, it will be automatically generated.
+        """
+        if self.name:
+            return self.name
+        else:
+            # form auto name based on the arguments of the config
+            save_name = self.__class__.__name__.lower() + f"-{param_hash(self)}"
+            return save_name
+
+
+@dataclass
+class SVDEmbeddingTransformConfig(LibraryTransformConfig):
     n_components: int = 64
     sparsity_threshold: float = 0.8
-    recompute: bool = False
 
 
 class SVDEmbeddingTransform(LibraryTransform):
@@ -52,25 +95,24 @@ class SVDEmbeddingTransform(LibraryTransform):
         super().__init__(config)
         self.random_state = random_state
 
-    def transform(self, library, upload_to_hf=True, force=False):
+    def transform(self, library, persist=True, recompute=False):
         if type(library) == str:
             library = get_expert_library(library)
 
         # try to fetch auxiliary data
-        output = library.get_auxiliary_data(data_type=self.config.name)
-        if len(output) > 0 and not self.config.recompute:
+        output = library.get_auxiliary_data(data_type=self.config.save_name)
+
+        if len(output) > 0 and not recompute:
             logger.info("Found {} precomputed SVD Embeddings".format(len(output)))
+
             return (
-                np.stack(
-                    [
-                        output[expert_name][self.config.name][self.config.name]
-                        for expert_name in library.keys()
-                    ]
-                ),
+                np.stack([output[expert_name] for expert_name in library.keys()]),
                 None,
             )
 
-        logger.info("Computing SVD Embeddings for {} experts".format(len(library)))
+        logger.info("Computing SVD Embeddings for %s experts", len(library))
+        logger.info("Saving to: %s", self.config.save_name)
+
         svd = sklearn.decomposition.TruncatedSVD(
             n_components=self.config.n_components,
             algorithm="randomized",
@@ -95,6 +137,7 @@ class SVDEmbeddingTransform(LibraryTransform):
         # Use quantiles to fit the exact threshold
         thr = np.quantile(np.abs(array), self.config.sparsity_threshold, axis=1)
         array[np.abs(array) <= thr.reshape(-1, 1)] = 0.0
+
         logger.info("Sparsity threshold: {}".format(str([f"{x:.4f}" for x in thr])))
         assert (
             np.abs(
@@ -109,23 +152,24 @@ class SVDEmbeddingTransform(LibraryTransform):
             experts_embeddings / np.linalg.norm(experts_embeddings, 2, axis=1)[:, None]
         )
 
-        if upload_to_hf:
-            logger.info("Uploading SVD Embeddings to HF")
+        if persist:
+            logger.info("Uploading SVD embeddings to the library.")
+
             # add embeddings to the library
             with library.batched_commit():
                 for i, name in enumerate(names):
                     library.add_auxiliary_data(
-                        data_type="embeddings",
+                        data_type=self.config.save_name,
                         expert_name=name,
                         config=self.config.__dict__,
                         data=experts_embeddings[i],
                         force=True,  # make sure we overwrite
                     )
-        return experts_embeddings, svd
+        return dict(zip(names, experts_embeddings)), svd
 
 
 @dataclass
-class WeightedLinearMergeConfig:
+class WeightedLinearMergeConfig(LibraryTransformConfig):
     weights: dict = None
 
 
@@ -188,7 +232,7 @@ class WeightedLinearMerge(LibraryTransform):
 
 
 @dataclass
-class TiesMergeConfig:
+class TiesMergeConfig(LibraryTransformConfig):
     top_k: float = 0.2
     only_sparsify: bool = False
 
@@ -280,17 +324,15 @@ class TiesMerge(LibraryTransform):
 
 
 @dataclass
-class HiddenStateComputerConfig:
+class HiddenStateComputerConfig(LibraryTransformConfig):
+    save_name: str = None
     use_base_model_only: bool = (
         False  # This computes sentence embeddings without the adapter
     )
     model: str = None  # If `use_base_model_only`, can pass a specific model to compute embeddings with
     max_samples_per_task: int = 10
-    upload_to_hf: bool = True
-    recompute: bool = False
     track: str = "each_layer"  # last layer, or each layer
     pool: str = "last"  # last, or mean
-    save_name: str = None
 
 
 class HiddenStateComputer(LibraryTransform):
@@ -355,43 +397,27 @@ class HiddenStateComputer(LibraryTransform):
         return {k: v for k, v in zip(keys, values)}
 
     @torch.no_grad()
-    def transform(self, library, default_args=None) -> Expert:
+    def transform(
+        self, library: ExpertLibrary, persist=False, recompute=False, default_args=None
+    ) -> Expert:
         # TODO: remove project import
-        from projects.wiki_experts.train_experts_main import get_datamodule
         from projects.wiki_experts.src.expert_model import MultiExpertModel
 
         if type(library) == str:
             library = get_expert_library(library)
 
-        save_name = self.config.save_name
-        if save_name is None:
-            args_in_name = [
-                "model",
-                "use_base_model_only",
-                "max_samples_per_task",
-                "track",
-                "pool",
-            ]
-            save_name = "data_centroids-" + "-".join(
-                [
-                    "" if x is None else str(x)
-                    for x in [getattr(self.config, k) for k in args_in_name]
-                ]
-            )
+        logger.info(f"Hidden state computer dumps to: {self.config.save_name}")
 
-        # old name : 'dataset_centroids--False-100-each_layer-last'
-        logger.info(f"save_name: {save_name}")
+        output = library.get_auxiliary_data(data_type=self.config.save_name)
 
-        output = library.get_auxiliary_data(data_type=save_name + ".bin")
-        if len(output) == len(library) and not self.config.recompute:
+        if len(output) == len(library) and not recompute:
             logger.info("Found {} precomputed centroids".format(len(output)))
-            # format the output to be dict[expert_name][layer_name] = embedding
             return output
 
         logger.info("Computing centroids for {} experts".format(len(library)))
         output = {}
 
-        for e_id, (expert_name, expert) in enumerate(library.items()):
+        for _, (expert_name, expert) in enumerate(library.items()):
             training_config = expert.training_config
             if default_args is not None:
                 self._fill_missing_args(training_config, default_args)
@@ -427,7 +453,7 @@ class HiddenStateComputer(LibraryTransform):
             pbar = tqdm(enumerate(dataloader), total=len(dataloader))
             device = next(model.parameters()).device
 
-            for num_batch, batch in pbar:
+            for _, batch in pbar:
                 batch = transfer_batch_to_device(batch, device)
 
                 if isinstance(model, EfficientCheckpointModule):
@@ -470,27 +496,23 @@ class HiddenStateComputer(LibraryTransform):
             centroids = {k: v for k, v in centroid.items()}
             output[expert_name] = centroids
 
-        if self.config.upload_to_hf:
-            logger.info("Uploading centroids to HF")
-
+        if persist:
             # add embeddings to the library
             with library.batched_commit():
                 for expert_name, data in output.items():
-                    library.add_embedding_dict(
-                        dump_name=save_name,
+                    library.add_auxiliary_data(
+                        data_type=self.config.save_name,
                         expert_name=expert_name,
+                        config=self.config.__dict__,
                         data=data,
                         force=True,  # make sure we overwrite
                     )
-
         return output
 
 
 @dataclass
 class PhatgooseConfig:
     n_steps: int = 200
-    upload_to_hf: bool = True
-    recompute: bool = False
     save_name: str = None
     learning_rate: float = 3e-3
     max_samples_per_task: int = 1000
@@ -501,9 +523,15 @@ class PhatgooseTransform(HiddenStateComputer):
         super().__init__(config or PhatgooseConfig())
 
     @torch.no_grad()
-    def transform(self, library, expert_names: list, default_args=None):
+    def transform(
+        self,
+        library,
+        persist: bool = True,
+        recompute: bool = False,
+        expert_names: list = None,
+        default_args=None,
+    ):
         # TODO: remove project import
-        from projects.wiki_experts.train_experts_main import get_datamodule
         from projects.wiki_experts.src.expert_model import MultiExpertModel
         from mttl.models.modifiers.expert_containers.utils import train_module
 
@@ -512,22 +540,13 @@ class PhatgooseTransform(HiddenStateComputer):
         for expert_name in expert_names:
             logger.info(f"Computing centroids for expert {expert_name}")
             expert: Expert = library[expert_name]
-            save_name = self.config.save_name
-            if save_name is None:
-                args_in_name = ["n_steps", "learning_rate"]
-                save_name = "goose_emb-" + "-".join(
-                    [
-                        "" if x is None else str(x)
-                        for x in [getattr(self.config, k) for k in args_in_name]
-                    ]
-                )
-
-            logger.info(f"save_name: {save_name}")
 
             if type(library) == str:
                 library = get_expert_library(library)
-            loaded_output = library.get_auxiliary_data(data_type=f"{save_name}.bin")
-            if not self.config.recompute and len(loaded_output) > 0:
+
+            loaded_output = library.get_auxiliary_data(data_type=self.config.save_name)
+
+            if not recompute and len(loaded_output) > 0:
                 logger.info("Found {} precomputed centroids".format(len(loaded_output)))
                 # format is dict[layer_name] = embedding, layer_name ends with selector.{task_name}.v
                 outputs[expert_name] = (
@@ -543,6 +562,7 @@ class PhatgooseTransform(HiddenStateComputer):
             training_config.logging_prefix = expert_name + "/"
             model = MultiExpertModel(**vars(training_config)).to("cuda")
             model.add_expert_instance(expert, is_default=True)
+
             # for checksum
             p_sum_before = sum(
                 p.sum()
@@ -568,6 +588,7 @@ class PhatgooseTransform(HiddenStateComputer):
                 self._fill_missing_args(training_config, default_args)
                 training_config.include_task_source = default_args.include_task_source
                 training_config.output_dir = default_args.output_dir
+
             # get datamodule
             dm = get_datamodule(training_config)
             training_config.eval_every = -1
@@ -643,14 +664,13 @@ class PhatgooseTransform(HiddenStateComputer):
 
             outputs[expert_name] = prototypes
 
-            if self.config.upload_to_hf:
-                logger.info("Uploading centroids to HF")
-                # add embeddings to the library
+            if persist:
                 with library.batched_commit():
                     for expert_name, data in outputs.items():
-                        library.add_embedding_dict(
-                            dump_name=save_name,
+                        library.add_auxiliary_data(
+                            data_type=self.config.save_name,
                             expert_name=expert_name,
+                            config=self.config.__dict__,
                             data=data,
                             force=True,  # make sure we overwrite
                         )
@@ -658,21 +678,18 @@ class PhatgooseTransform(HiddenStateComputer):
 
 
 @dataclass
-class SVDInputExtractorConfig:
-    save_name: str = None
-    upload_to_hf: bool = True
-    recompute: bool = False
+class ArrowConfig(LibraryTransformConfig):
     ab_only: bool = True
     scale: bool = False  # If True, scale by eigenvalue
 
 
-class SVDInputExtractor(LibraryTransform):
+class ArrowTransform(LibraryTransform):
     """
     Given a library of experts, extract the input direction most affected by the linear transforms
     """
 
-    def __init__(self, config: SVDInputExtractorConfig = None):
-        super().__init__(config or SVDInputExtractorConfig())
+    def __init__(self, config: ArrowConfig = None):
+        super().__init__(config or ArrowConfig())
 
     def _maybe_scale(self, vectors, eigvals):
         """Post Processing of the retrieved outputs,
@@ -688,28 +705,19 @@ class SVDInputExtractor(LibraryTransform):
         return output
 
     @torch.no_grad()
-    def transform(self, library) -> Expert:
+    def transform(self, library, persist=True, recompute=False) -> Expert:
         if isinstance(library, str):
             library = get_expert_library(library)
 
-        save_name = self.config.save_name
-        if save_name is None:
-            args_in_name = [
-                "ab_only",
-            ]
-            save_name = "svd_input_centroids-" + "-".join(
-                [
-                    "" if x is None else str(x)
-                    for x in [getattr(self.config, k) for k in args_in_name]
-                ]
-            )
-        # old_save_name = 'svd_input_extractor-1.0-True'
-
         # try to fetch auxiliary data
-        vectors = library.get_auxiliary_data(data_type=save_name + "_vectors.bin")
-        eigvals = library.get_auxiliary_data(data_type=save_name + "_eigvals.bin")
+        vectors = library.get_auxiliary_data(
+            data_type=self.config.save_name + "_vectors"
+        )
+        eigvals = library.get_auxiliary_data(
+            data_type=self.config.save_name + "_eigvals"
+        )
 
-        if len(vectors) == len(eigvals) == len(library) and not self.config.recompute:
+        if len(vectors) == len(eigvals) == len(library) and not recompute:
             logger.info("Found {} precomputed centroids".format(len(vectors)))
 
             return self._maybe_scale(vectors, eigvals)
@@ -798,30 +806,29 @@ class SVDInputExtractor(LibraryTransform):
                 vectors[expert_name][param_name] = top_vector.real.cpu().numpy()
                 eigvals[expert_name][param_name] = top_value.item()
 
-        if self.config.upload_to_hf:
+        if persist:
             # add embeddings to the library
             with library.batched_commit():
                 for expert_name in library.keys():
                     logger.info(
-                        f"Uploading SVD centroids to HF for expert {expert_name}"
+                        f"Uploading centroids to the library for expert {expert_name}"
                     )
                     for data_name, data in [
                         ("vectors", vectors),
                         ("eigvals", eigvals),
                     ]:
-                        library.add_embedding_dict(
-                            dump_name=save_name + "_" + data_name,
+                        library.add_auxiliary_data(
+                            data_type=self.config.save_name + "_" + data_name,
                             expert_name=expert_name,
+                            config=self.config.__dict__,
                             data=data[expert_name],
                             force=True,  # make sure we overwrite
                         )
-
         return self._maybe_scale(vectors, eigvals)
 
 
 @dataclass
 class ExpertProjectorConfig:
-    name: str = "expert_projector"
     granularity: str = "finegrained"  # whether to use the same coefficients for all parameters or per `nn.Parameter` instance
     project_over_all_experts: bool = (
         False  # whether to project over all experts or just the ones in the cluster
@@ -934,8 +941,9 @@ class CrossExpertNormComputer(HiddenStateComputer):
         training_config = an_expert.training_config
 
         # overwrite required args
-        training_config.hf_lib_id = library.repo_id
+        training_config.library_id = library.repo_id
         training_config.router_selector = "task_selector"
+
         if default_args is not None:
             self._fill_missing_args(training_config, default_args)
 
@@ -949,7 +957,6 @@ class CrossExpertNormComputer(HiddenStateComputer):
             ]
         )
 
-        from projects.wiki_experts.train_experts_main import get_datamodule
         from projects.wiki_experts.src.expert_model import MoETrainer
         from mttl.models.modifiers.expert_containers import ExpertContainer
 
@@ -1039,7 +1046,6 @@ class CrossExpertNormComputer(HiddenStateComputer):
 @dataclass
 class MBClusteringTransformConfig(SVDEmbeddingTransformConfig):
     random_state: int = 42
-    recompute_embeddings: bool = False  # if 'True', recompute the SVD embeddings
     k: int = 10
 
 
@@ -1053,41 +1059,38 @@ class MBCWithCosSimTransform(LibraryTransform):
         super().__init__(config or MBClusteringTransformConfig())
 
     def transform(
-        self, library: ExpertLibrary, default_args=None
+        self,
+        library: ExpertLibrary,
+        persist: bool = False,
+        recompute: bool = False,
     ) -> dict[str, list[str]]:
-        def get_svd_embedding(lib: ExpertLibrary, expert_name: str):
-            try:
-                embeddings = lib.get_auxiliary_data(
-                    data_type="embeddings", expert_name=expert_name
-                )
-            except ValueError:
-                return None
-            return embeddings["svd"]["embeddings"]
+        svd_config = SVDEmbeddingTransformConfig(
+            name=self.config.name,
+            n_components=self.config.n_components,
+            sparsity_threshold=self.config.sparsity_threshold,
+        )
 
         def create_embeddings():
             svd_embedder = SVDEmbeddingTransform(
-                self.config,
+                svd_config,
                 random_state=self.config.random_state,
             )
-            embeddings, svd = svd_embedder.transform(
-                library, upload_to_hf=True, force=True
-            )
+            embeddings, svd = svd_embedder.transform(library, persist=persist)
             del svd_embedder
             return embeddings, svd
 
-        embeds = library.get_auxiliary_data("embeddings")
-        if len(embeds) != len(library) or self.config.recompute_embeddings:
-            logger.info("Recomputing embeddings")
-            create_embeddings()
+        embeddings = library.get_auxiliary_data(svd_config.save_name)
 
-        # module to embedding
-        module2embed = {}
-        for name in library.keys():
-            module2embed[name] = get_svd_embedding(library, name)
+        if len(embeddings) != len(library) or recompute:
+            logger.info("Recomputing embeddings for clustering.")
+            embeddings, _ = create_embeddings()
 
         # Extract the embeddings as a numpy array
-        embeddings = np.array(list(module2embed.values()))
-        cosine_sim_matrix = cosine_similarity(embeddings, embeddings)
+        expert_names, embeddings = zip(*sorted(embeddings.items()))
+
+        embeddings_array = np.stack(embeddings)
+        cosine_sim_matrix = cosine_similarity(embeddings_array, embeddings_array)
+
         kmeans = KMeans(
             n_clusters=self.config.k,
             init="k-means++",
@@ -1097,7 +1100,7 @@ class MBCWithCosSimTransform(LibraryTransform):
         kmeans.fit(cosine_sim_matrix)
         cluster_labels = kmeans.labels_
         clusters = defaultdict(list)
-        # Print the cluster labels for each embedding
-        for key, label in zip(module2embed.keys(), cluster_labels):
+
+        for key, label in zip(expert_names, cluster_labels):
             clusters[label].append(key)
         return clusters

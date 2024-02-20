@@ -401,7 +401,6 @@ class MoETrainer(MultiExpertModel):
 
         super().__init__(**kwargs)
 
-        # TODO: Is this pushed to hub? Is it backward compatible? hf_lib_id -> library_id
         if not self.hparams.library_id:
             for i in range(self.hparams.moe_num_experts):
                 # Adding a Skilled LoRA with 1 skill.

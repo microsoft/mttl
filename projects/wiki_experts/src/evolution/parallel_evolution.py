@@ -131,7 +131,7 @@ def main(args: EvolExpertConfig):
         svd_embedder = SVDEmbeddingTransform(
             SVDEmbeddingTransformConfig(sparsity_threshold=0.5)
         )
-        svd_embedder.transform(expert_lib, upload_to_hf=True)
+        svd_embedder.transform(expert_lib, persist=True)
 
         print("Evolving on task", task)
         log_row: Dict = active_task_iteration(
