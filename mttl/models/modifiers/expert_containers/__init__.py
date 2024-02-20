@@ -6,6 +6,7 @@ from mttl.models.modifiers.expert_containers.selectors import (
     get_selector,
 )
 from mttl.models.modifiers.expert_containers.expert_containers import *
+from mttl.models.modifiers.modify_model import CONFIGS_TO_MODIFIERS
 from mttl.utils import logger
 from mttl.models.modifiers.expert_containers.expert import Expert
 
@@ -16,7 +17,7 @@ def _extract_identifier(string, match_on="finegrained"):
 
     e.g. 'block' : 'encoder.block.0.layer.0.SelfAttention' -> 'encoder.block.0'
     """
-    if match_on == "finegrained":
+    if match_on == "finegrained" or match_on == "*":
         return string
     if match_on == "coarsegrained":
         return "shared"
@@ -91,13 +92,103 @@ def add_expert_library_to_transformer(
         )
 
 
+def replace_selector_for_container(
+    transformer,
+    modifier_type: str,
+    selector_config: SelectorConfig,
+    selector_weights: dict = None,
+    force_replace: bool = False,
+):
+    """
+    Assigns a selector to the expert containers in the transformer model.
+    """
+    from mttl.models.modifiers.modify_model import get_modifier_type
+
+    expert_containers = []
+    for _, module in dict(transformer.named_modules()).items():
+        for _, layer in dict(module.named_children()).items():
+            if isinstance(layer, ExpertContainer):
+                # check if the container holds the same modifier type, e.g. LoRAConfig --> "lora"
+                container_modifier = get_modifier_type(layer.__supports_configs__[0])
+                # selector does not apply to this container
+                if not container_modifier == modifier_type:
+                    continue
+                else:
+                    expert_containers.append(layer)
+
+    if not expert_containers:
+        raise ValueError(
+            f"No expert containers found for modifier type: {modifier_type}. Cannot assign a selector! Load some experts beforehand."
+        )
+
+    # stores the selectors per container type
+    if not hasattr(transformer, "selectors"):
+        transformer.selectors = {}
+
+    if not modifier_type in transformer.selectors:
+        transformer.selectors[modifier_type] = {}
+
+    if force_replace:
+        for container in expert_containers:
+            container.selector = None
+        transformer.selectors[modifier_type] = {}
+
+    n_selectors = 0
+    n_selectors_views = 0
+    for container in expert_containers:
+        if (
+            container.selector is not None
+            and container.selector.config == selector_config
+        ):
+            # selector already exists and has the same config
+            continue
+
+        identifier = _extract_identifier(
+            container.layer_name, selector_config.router_granularity
+        )
+
+        # we create a new selector if it doesn't exist for this identifier, or
+        # if we are replacing a previous one of a different type
+        create_new_selector = (
+            identifier not in transformer.selectors[modifier_type]
+            or transformer.selectors[modifier_type].get(identifier).config
+            != selector_config
+        )
+        if create_new_selector:
+            # Special case when you have a decoder layer in an enc-dec model
+            selector = get_selector(
+                selector_config,
+                info_container=transformer.info_container,
+                layer=layer,
+            )
+            selector.__layer_name__ = identifier + ".selector"
+            transformer.selectors[modifier_type][identifier] = selector
+
+            # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
+            selector.total_calls_per_forward += 1
+            n_selectors += 1
+        else:
+            selector: Selector = transformer.selectors[modifier_type][identifier]
+            # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
+            selector.total_calls_per_forward += 1
+            selector = selector.create_view()
+            n_selectors_views += 1
+
+        # inject new, freshly created selector
+        container.selector = selector
+
+    if selector_weights is not None:
+        raise NotImplementedError()
+
+    return n_selectors, n_selectors_views
+
+
 def add_expert_to_transformer(
     transformer,
     expert: Expert,
     action: str = "route",
     is_default: bool = False,
     routing_config: SelectorConfig = None,
-    training_config: Config = None,
 ):
     """
     Routine to add an expert to the transformer architecture.
@@ -115,12 +206,6 @@ def add_expert_to_transformer(
     from mttl.models.modifiers.expert_containers.hard_prompts_container import (
         add_hard_prompt_to_transformer,
     )
-
-    # create a shared container for the task id
-    if not hasattr(transformer, "info_container"):
-        transformer.info_container = {}
-    if not hasattr(transformer, "selectors"):
-        transformer.selectors = {}
 
     model_modifier = get_modifier_type(expert_config)
 
@@ -144,43 +229,12 @@ def add_expert_to_transformer(
                     layer_name = f"{m_name}.{c_name}"
 
                     if not isinstance(layer, ExpertContainer):
-                        selector = None
-
-                        if routing_config is not None:
-                            identifier = _extract_identifier(
-                                layer_name, routing_config.router_granularity
-                            )
-
-                            create_new_selector = (
-                                identifier not in transformer.selectors
-                            )
-                            if create_new_selector:
-                                # Special case when you have a decoder layer in an enc-dec model
-                                selector = get_selector(
-                                    routing_config,
-                                    info_container=transformer.info_container,
-                                    layer=layer,
-                                    training_config=training_config,
-                                )
-                                selector.__layer_name__ = identifier + ".selector"
-                                transformer.selectors[identifier] = selector
-
-                                # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
-                                selector.total_calls_per_forward += 1
-                                n_selectors += 1
-                            else:
-                                selector: Selector = transformer.selectors[identifier]
-                                # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
-                                selector.total_calls_per_forward += 1
-                                selector = selector.create_view()
-                                n_selectors_views += 1
-
                         CONTAINER_CLASS = get_container_class(model_modifier)
                         expert_container = CONTAINER_CLASS(
                             expert_config,
                             transformer.info_container,
                             layer,
-                            selector,
+                            selector=None,
                             lora_merge_after=(
                                 routing_config.lora_merge_after
                                 if routing_config
@@ -203,13 +257,23 @@ def add_expert_to_transformer(
                         is_default=is_default,
                     )
 
-    if routing_config is not None and not transformer.selectors:
-        raise ValueError(
-            "No selectors were created but a routing config was specified. Check your routing_config and model architecture."
+    if routing_config is not None:
+        replace_selector_for_container(
+            transformer,
+            model_modifier,
+            routing_config,
         )
 
-    logger.info(
-        "Added expert %s, with %s selectors", expert.name, len(transformer.selectors)
-    )
+        if not transformer.selectors[model_modifier]:
+            raise ValueError(
+                "No selectors were created but a routing config was specified. Check your routing_config and model architecture."
+            )
+
+        logger.info(
+            "Added expert %s, with %s selectors",
+            expert.name,
+            len(transformer.selectors[model_modifier]),
+        )
+
     logger.debug("Patched layers: %s", added_layers)
     return transformer

@@ -236,6 +236,10 @@ class SelectorView:
     def __init__(self, selector_instance):
         self.selector_instance = selector_instance
 
+    @property
+    def config(self):
+        return self.selector_instance.config
+
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 

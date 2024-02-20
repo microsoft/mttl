@@ -1,7 +1,7 @@
 from pyparsing import abstractmethod
 import torch
 from torch import nn
-from typing import List
+from typing import List, Union
 from mttl.config import Config
 from mttl.models.modifiers.base import (
     ModifierConfig,
@@ -13,7 +13,6 @@ from mttl.models.modifiers.base import (
 from mttl.utils import logger
 from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
 from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
-from mttl.models.modifiers.expert_containers.selectors import *
 from mttl.models.modifiers.expert_containers.expert import Expert
 
 
@@ -21,6 +20,8 @@ class ExpertContainer:
     __supports_configs__ = []
 
     def __init__(self, config, info_container, layer, selector=None):
+        from mttl.models.modifiers.expert_containers.selectors import TaskNameSelector
+
         self.config = config
         self.layer = layer
         self.info_container = info_container
@@ -75,6 +76,8 @@ class ExpertContainer:
 
     @property
     def layer_name(self):
+        if not hasattr(self, "__layer_name__"):
+            raise ValueError("Dependency injection for layer name has not been done.")
         return self.__layer_name__
 
     @abstractmethod
