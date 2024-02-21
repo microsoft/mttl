@@ -758,19 +758,18 @@ class Router(nn.Module):
             device
         )  # (n_experts, input_dim)
         # standardize the expert embeddings: sub mean and divide by std
-        self.expert_embeddings = (
-            self.expert_embeddings - self.expert_embeddings.mean(dim=-1, keepdim=True)
-        ) / (self.expert_embeddings.std(dim=-1, keepdim=True) + 1e-6)
+        self.standardizer = nn.LayerNorm(
+            self.expert_embeddings.shape[1], elementwise_affine=False
+        )
+        self.expert_embeddings = self.standardizer(self.expert_embeddings)
 
     def forward(self, input):
         # x: (batch_size, seq, d)
         # expert_embeddings: (n_experts, d)
-        # standardize the input
-        input = (input - input.mean(dim=-1, keepdim=True)) / (
-            input.std(dim=-1, keepdim=True) + 1e-6
-        )
         # perform routing business in fp32 as in Clown
         input = input.to(self.expert_embeddings.dtype)
+        # standardize the input
+        input = self.standardizer(input)
         # cosine similarity of each token with each expert
         sim = torch.einsum(
             "bsd,ed->bse", input, self.expert_embeddings
