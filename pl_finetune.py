@@ -221,8 +221,8 @@ def finetune(args, use_mlf=True, do_zs=True):
     results = fit_and_test(zero_shot=do_zs)
 
     # remove all eventual checkpoints
-    os.system(f'find tmp/ -name "*.ckpt" -type f -delete')
-    os.system(f'find tmp/ -name "*.pt" -type f -delete')
+    # os.system(f'find tmp/ -name "*.ckpt" -type f -delete')
+    # os.system(f'find tmp/ -name "*.pt" -type f -delete')
     return results
 
 
