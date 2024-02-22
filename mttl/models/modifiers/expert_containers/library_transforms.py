@@ -560,6 +560,7 @@ class PhatgooseTransform(HiddenStateComputer):
             training_config.router_selector = "phatgoose_selector"
             training_config.trainable_param_names = ".*selector.*"
             training_config.logging_prefix = expert_name + "/"
+            training_config.weight_decay = 0.0
             model = MultiExpertModel(**vars(training_config)).to("cuda")
             model.add_expert_instance(expert, is_default=True)
 
