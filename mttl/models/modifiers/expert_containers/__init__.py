@@ -2,6 +2,7 @@ import re
 from mttl.config import Config
 from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from mttl.models.modifiers.expert_containers.selectors import (
+    Selector,
     SelectorConfig,
     get_selector,
 )
@@ -162,13 +163,14 @@ def replace_selector_for_container(
             selector = get_selector(
                 selector_config,
                 info_container=transformer.info_container,
-                layer=layer,
+                layer=container.layer,
             )
             selector.__layer_name__ = identifier + ".selector"
             transformer.selectors[modifier_type][identifier] = selector
 
             # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
             selector.total_calls_per_forward += 1
+            container.selector = selector
             n_selectors += 1
         else:
             selector: Selector = transformer.selectors[modifier_type][identifier]
@@ -176,9 +178,11 @@ def replace_selector_for_container(
             selector.total_calls_per_forward += 1
             selector = selector.create_view()
             n_selectors_views += 1
-
-        # inject new, freshly created selector
-        container.selector = selector
+            # inject new, freshly created selector
+            container._modules.pop(
+                "selector"
+            )  # SelectorView is not a module, assigning directly makes pytorch complain
+            container.selector = selector
 
     if selector_weights is not None:
         raise NotImplementedError()
@@ -221,7 +225,6 @@ def add_expert_to_transformer(
         )
 
     total_layers = 0
-    n_selectors, n_selectors_views = 0, 0
     added_layers = []
 
     for m_name, module in dict(transformer.named_modules()).items():
