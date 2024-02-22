@@ -42,9 +42,13 @@ class ExpertContainer:
         del self.selector
         self._modules.pop("selector", None)
         # propagate experts to the selector
-        for expert_name, expert_info in self.expert_infos.items():
-            selector.add_expert(expert_name, expert_info=expert_info)
         self.selector = selector
+        for expert_name, expert_info in self.expert_infos.items():
+            self.add_expert_to_selector(expert_name, expert_info=expert_info)
+
+    def add_expert_to_selector(self, expert_name: str, **kwargs):
+        self.selector.add_expert(expert_name, **kwargs)
+        self.selector.default_expert_name = self.default_expert_name
 
     def _add_expert(self, expert_name, expert_info, expert_module):
         self.expert_infos[expert_name] = expert_info
@@ -97,10 +101,6 @@ class ExpertContainer:
     @abstractmethod
     def forward(self, input, **kwargs):
         pass
-
-    def add_expert_to_selector(self, expert_name: str, **kwargs):
-        self.selector.add_expert(expert_name, **kwargs)
-        self.selector.default_expert_name = self.default_expert_name
 
     def get(self, key: Union[int, str]):
         if type(key) == int:

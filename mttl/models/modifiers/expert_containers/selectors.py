@@ -890,7 +890,6 @@ class PolySelectorDirect(PolySelector):
         super().__init__(info_container, **kwargs)
 
         self.module_logits_dict = nn.ParameterDict()
-
         self.training_config = kwargs["training_config"]
         self.init_gap = [-1e-3, 1e-3]
 
@@ -911,9 +910,7 @@ class PolySelectorDirect(PolySelector):
         expert_task_name -- task name expert is pecialized at
         self.config.finetune_task_name -- name of the task the model is currently trained on
 
-        If we eocounter a module for the current task, we init it with one hot, otherwise with uniform.
-
-
+        If we encounter a module for the current task, we init it with one hot, otherwise with uniform.
         """
         main_m = 1
 

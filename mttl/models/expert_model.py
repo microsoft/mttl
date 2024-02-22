@@ -1,75 +1,284 @@
-import copy
 from functools import partial
+import math
 import re
-from torch import nn
 import threading
-from typing import Any, Dict, List
+from typing import Dict, List
 import numpy as np
 import torch
 import tqdm
+from mttl.models.modifiers.expert_containers.library_transforms import (
+    ArrowConfig,
+    HiddenStateComputerConfig,
+)
+from mttl.models.modifiers.lora import SkilledLoRAConfig
 
-from transformers import PreTrainedModel
-from mttl.models.expert_trainer import ExpertTrainer
-from mttl.models.llama_patch import replace_attn_with_flash_attn
+from mttl.models.utils import model_loader_helper
 from mttl.models.modifiers.expert_containers import add_expert_to_transformer
-from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
+from mttl.models.modifiers.expert_containers.expert_library import (
+    ExpertLibrary,
+    get_expert_library,
+)
 from mttl.models.modifiers.routing import RoutingInfo
-from mttl.models.utils import prepare_model_for_kbit_training
 from mttl.utils import logger
 from mttl.models.modifiers.expert_containers.expert import Expert, ExpertInfo
 from mttl.models.modifiers.expert_containers.expert_containers import (
     ExpertContainer,
-    LoRAExpertContainer,
 )
 from mttl.models.modifiers.expert_containers.selectors import Selector, SelectorConfig
 
 
-class MultiExpertModel(nn.Module):
-    """Wrapper for a HF model that allows loading and managing multiple experts."""
+import torch
+from collections import defaultdict
+from torch.optim.optimizer import Optimizer
 
-    def __init__(
-        self,
-        model=None,
-        model_object=None,
-        load_in_8bit=False,
-        device_map="auto",
-        routing_config=None,
-    ):
-        if model is None and model_object is None:
-            raise ValueError("Either model or model_object must be provided.")
+from mttl.models.llama_patch import replace_attn_with_flash_attn
+from mttl.models.modifiers import modify_transformer
+from mttl.models.modifiers.base import ModifierConfig
 
-        self.model: PreTrainedModel = None
-        if model_object is not None:
-            self.model = model_object
-        else:
-            from mttl.models.utils import model_loader_helper
+from mttl.models.modifiers.expert_containers.expert import ExpertInfo
+from mttl.models.modifiers.expert_containers.selectors import SelectorConfig
+from mttl.models.modifiers.routing import RoutingInfo
+from mttl.models.utils import (
+    EfficientCheckpointModule,
+    model_loader_helper,
+    prepare_model_for_kbit_training,
+)
 
-            self.model = model_loader_helper(
-                model,
-                load_in_8bit=load_in_8bit,
-                device_map=device_map,
+
+torch.set_float32_matmul_precision("high")
+
+
+class ExpertModel(EfficientCheckpointModule):
+    def __init__(self, **config_kwargs):
+        super().__init__(**config_kwargs)
+
+        from projects.wiki_experts.src.config import ExpertConfig
+
+        self.tokenizer = config_kwargs.pop("tokenizer", None)
+        self.model_name = config_kwargs.pop("model", None)
+        self.load_in_8bit = config_kwargs.get("load_in_8bit", False)
+        self.device_map = config_kwargs.get("device_map", None)
+        model_object = config_kwargs.pop("model_object", None)
+
+        # log hyperparameters
+        self.save_hyperparameters(config_kwargs)
+
+        if model_object is None:
+            model_object = model_loader_helper(
+                self.model_name,
+                load_in_8bit=self.load_in_8bit,
+                device_map=self.device_map,
             )
 
-        if load_in_8bit:
-            self.model = prepare_model_for_kbit_training(self.model)
+        if self.load_in_8bit:
+            model_object = prepare_model_for_kbit_training(model_object)
 
+        self.accumulate_metrics_batch = defaultdict(list)
+
+        # rebuild the training config, a bit cumbersome, but that's life
+        self.training_config = ExpertConfig.fromdict(config_kwargs)
+        self.training_config.vocab_size = (
+            model_object.get_input_embeddings().num_embeddings
+        )
+        # init the transformer just with the modifier config, this avoids
+        # passing the whole training config to the modify_transformer func
+        self.modifier_config = ModifierConfig.from_training_config(self.training_config)
+        self.selector_config = SelectorConfig.from_training_config(self.training_config)
+
+        self.model = modify_transformer(model_object, self.modifier_config)
+        self.model.info_container = {}
+
+        # replace w flash attn!
         replace_attn_with_flash_attn(self.model)
 
-        # patch model to contain info about routing
-        self.model.info_container = {}
-        self.model.selectors = {}
+        self.best_val_result = None
+        self._inference_outputs = []
+        self._log_pref = config_kwargs.get("logging_prefix", "")
+
+    def forward(self, batch, reduction="mean"):
+        input_ids = batch["input_ids"]
+        labels = batch["labels"]
+
+        self.set_routing_infos(batch)
+
+        outputs = self.model.forward(input_ids, attention_mask=batch["attention_mask"])
+
+        # calculate loss, could also be done inside of the model
+        bs = input_ids.size(0)
+        logits = outputs.logits
+        vocab_size = logits.size(-1)
+        labels = labels.squeeze(-1)
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+
+        # Flatten the tokens
+        loss_fct = torch.nn.CrossEntropyLoss(reduction=reduction)
+        shift_logits = shift_logits.view(-1, vocab_size)
+        shift_labels = shift_labels.view(-1)
+
+        # Enable model parallelism
+        shift_labels = shift_labels.to(shift_logits.device)
+        loss = loss_fct(shift_logits, shift_labels)
+
+        # reshape back
+        if reduction == "none":
+            loss = loss.view((bs, -1))
+            # mean only non-zero
+            non_zero_loss = (loss != 0).sum(dim=-1)
+            non_zero_loss[non_zero_loss == 0] = 1
+            loss = loss.sum(dim=-1) / non_zero_loss
+
+        del outputs, shift_logits, shift_labels
+        return loss
+
+    def compute_unlikelihood_loss(self, batch, reduction="mean"):
+        # compute lm losses for all the options
+        loss = self.forward(batch, reduction="none")
+
+        num = 0
+        lm_loss, mc_loss = [], []
+        for i, num_options in enumerate(batch["num_options"]):
+            loss_slice = loss[num : num + num_options]
+            lm_loss.append(loss_slice[batch["labels_index"][i]])
+            mc_loss.append(
+                -torch.nn.functional.log_softmax(-loss_slice, dim=0)[
+                    batch["labels_index"][i]
+                ]
+            )
+            num += num_options
+
+        lm_loss = torch.stack(lm_loss)
+        mc_loss = torch.stack(mc_loss)
+        if reduction == "mean":
+            lm_loss = lm_loss.mean()
+            mc_loss = mc_loss.mean()
+        return lm_loss, mc_loss
+
+    def training_step(self, batch, _):
+        if "num_options" in batch:
+            loss, mc_loss = self.compute_unlikelihood_loss(batch)
+            self.log(
+                f"{self._log_pref}train/mc_loss", loss, on_step=True, prog_bar=True
+            )
+            total_loss = loss + mc_loss
+        else:
+            loss = self.forward(batch)
+            total_loss = loss
+
+        self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
+        self.log(
+            f"{self._log_pref}train/total_loss", total_loss, on_step=True, prog_bar=True
+        )
+
+        for i, pg in enumerate(self.optimizers().optimizer.param_groups):
+            self.log(f"train/lr_{i}", pg["lr"])
+        return total_loss
+
+    def on_validation_epoch_start(self) -> None:
+        self._inference_outputs.clear()
+
+    def on_test_epoch_start(self) -> None:
+        self._inference_outputs.clear()
+
+    def on_validation_epoch_end(self) -> None:
+        self.log_loss(split="val")
+
+    def on_test_epoch_end(self) -> None:
+        self.log_loss(split="test")
+
+    def test_step(self, batch, batch_idx):
+        if "num_options" in batch:
+            loss, _ = self.compute_unlikelihood_loss(batch, reduction="none")
+        else:
+            loss = self.forward(batch, reduction="none")
+        mean_loss = loss.sum() / loss.shape[0]
+        self._inference_outputs += [(loss.detach().cpu(),)]
+        return mean_loss
+
+    def get_loss_for_all(self, batch, batch_idx):
+        loss = self.forward(batch, reduction="none")
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        if "num_options" in batch:
+            loss, _ = self.compute_unlikelihood_loss(batch, reduction="none")
+        else:
+            loss = self.forward(batch, reduction="none")
+        mean_loss = loss.sum() / loss.shape[0]
+        self._inference_outputs += [(loss.detach().cpu(),)]
+        return mean_loss
+
+    def log_loss(self, split="val"):
+        outputs = self._inference_outputs
+        losses = torch.cat([out[0] for out in outputs], 0)
+        self._inference_outputs.clear()
+        self.log(
+            f"{self._log_pref}{split}/loss", losses.mean(), on_epoch=True, prog_bar=True
+        )
+
+        # log also the best val/loss sofar
+        if split == "val":
+            if self.best_val_result is None:
+                self.best_val_result = losses.mean()
+            else:
+                if losses.mean() < self.best_val_result:
+                    self.best_val_result = losses.mean()
+                    self.log(
+                        f"{self._log_pref}{split}/best_loss",
+                        losses.mean(),
+                        on_epoch=True,
+                        prog_bar=True,
+                    )
+
+    def set_routing_infos(self, batch, generate=False):
+        self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
+
+    @property
+    def generation_config(self):
+        return self.model.generation_config
+
+    def generate(
+        self,
+        batch,
+        **kwargs,
+    ):
+        self.set_routing_infos(batch, generate=True)
+
+        generations = self.model.generate(
+            inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
+        )
+        return generations
+
+    def on_save_checkpoint(self, ckpt):
+        super().on_save_checkpoint(ckpt)
+
+        # inject expert info in the expert checkpoint
+        expert_info = ExpertInfo(
+            expert_name=self.hparams.expert_name,
+            expert_task_name=self.hparams.finetune_task_name,
+            expert_config=self.modifier_config,
+            training_config=self.training_config,
+        )
+        ckpt["expert_info"] = expert_info.asdict()
+
+    def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
+        return super().on_before_optimizer_step(optimizer)
+
+
+class MultiExpertModel(ExpertModel):
+    """Adds all functions and properties for a multi-expert model."""
+
+    def __init__(self, **config_kwargs):
+        config_kwargs["model_modifier"] = None
+        super().__init__(**config_kwargs)
 
         self.experts_names = []
-        self.routing_config = routing_config
-        self.lock = threading.Lock()
 
-    def deepcopy(self):
-        lock = self.lock
-        self.lock = None
-        _copy = copy.deepcopy(self)
-        _copy.lock = lock
-        self.lock = lock
-        return _copy
+    @property
+    def lock(self):
+        if not hasattr(self, "_lock"):
+            self._lock = threading.Lock()
+        return self._lock
 
     @property
     def experts_containers(self) -> List[ExpertContainer]:
@@ -132,7 +341,12 @@ class MultiExpertModel(nn.Module):
                     is_default=module_name == "default",
                 )
             elif isinstance(destination, Expert):
-                self.add_expert_instance(destination, module_name, action=action)
+                self.add_expert_instance(
+                    destination,
+                    module_name,
+                    action=action,
+                    is_default=module_name == "default",
+                )
 
     def add_empty_expert(
         self,
@@ -200,7 +414,8 @@ class MultiExpertModel(nn.Module):
                 expert_instance,
                 action=action,
                 is_default=expert_instance.name == "default" or is_default,
-                routing_config=self.routing_config,
+                routing_config=self.selector_config,
+                training_config=self.training_config,
             )
             if action != "merge":
                 self.experts_names.append(expert_instance.name)
@@ -279,75 +494,106 @@ class MultiExpertModel(nn.Module):
     def set_routing_infos(self, batch, generate=False):
         self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
 
-    def forward(self, batch):
-        input_ids, labels = batch["input_ids"], batch["labels"]
 
-        self.set_routing_infos(batch)
+class MoEModel(MultiExpertModel):
+    def __init__(self, **kwargs):
+        kwargs["top_k"] = kwargs["moe_top_k"]
+        kwargs["emb_dim"] = kwargs["moe_emb_dim"]
+        kwargs["rkhs_dim"] = kwargs["moe_rkhs_dim"]
 
-        return self.model.forward(input_ids, attention_mask=batch["attention_mask"])
+        super().__init__(**kwargs)
 
-    def generate(
-        self,
-        batch,
-        **kwargs,
-    ):
-        self.set_routing_infos(batch, generate=True)
+        if not self.hparams.library_id:
+            for i in range(self.hparams.moe_num_experts):
+                # Adding a Skilled LoRA with 1 skill.
+                exp_config = SkilledLoRAConfig(
+                    n_skills=1,
+                    modify_layers=self.hparams.modify_layers,
+                    modify_modules=self.hparams.modify_modules,
+                    lora_alpha=self.hparams.lora_alpha,
+                    lora_dropout=self.hparams.lora_dropout,
+                    lora_rank=self.hparams.lora_rank,
+                    lora_init_b_random=True,
+                    n_splits=self.hparams.n_splits,
+                    phi_2_align_heads=self.hparams.phi_2_align_heads,
+                )
+                self.add_empty_expert(f"e{i}", exp_config)
+            self.moe_num_experts = kwargs["moe_num_experts"]
+        else:
+            library = get_expert_library(self.hparams.library_id)
+            for i, expert in enumerate(sorted(list(library.keys()))):
+                self.add_expert_instance(library[expert], expert_name=f"e{i}")
 
-        generations = self.model.generate(
-            inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
-        )
-        return generations
+            self.moe_num_experts = i + 1
+            if isinstance(
+                self.routing_config, (ArrowConfig, HiddenStateComputerConfig)
+            ):
+                from projects.wiki_experts.eval_library import patch_prototypes
 
+                patch_prototypes(self, library, self.routing_config)
 
-def to_expert(
-    model: MultiExpertModel,
-    training_config: Any,
-    expert_name: str = None,
-    finetune_task_name: str = None,
-    weights: dict = None,
-    with_global_names=True,
-) -> Expert:
-    """
-    Converts the current expert model into an instance of the Expert class.
+    def training_step(self, batch, _):
+        loss = super().training_step(batch, _)
+        total_loss = loss.clone()
 
-    Args:
-        weights (dict, optional): A dictionary of weights to merge the experts. If not provided, the router's weights will be used.
-        with_global_names (bool, optional): Whether to include global names in the merged weights. Defaults to True.
+        if (
+            "routing_gates" in self.model.info_container
+            and self.model.info_container["routing_gates"]
+        ):
+            num = 0.0
+            entropy_of_avg = 0.0
+            entropy_of_route = 0.0
 
-    Returns:
-        Expert: An instance of the Expert class.
+            for values in self.model.info_container["routing_gates"]:
+                # compute MI loss
+                values = values.to(torch.float32)
+                values = values.view(-1, values.shape[-1])
+                probs = torch.softmax(values, -1)
+                entropy_of_avg += -(
+                    probs.mean(0) * torch.log(probs.mean(0) + 1e-6)
+                ).sum(-1)
+                entropy_of_route += -(probs * torch.log(probs + 1e-6)).sum(-1).mean(0)
+                num += 1.0
 
-    Raises:
-        None
+            entropy_of_avg = entropy_of_avg / num
+            entropy_of_route = entropy_of_route / num
+            mi_loss = -entropy_of_avg + entropy_of_route
 
-    Example:
-        model = ExpertModel()
-        expert = model.to_expert(weights={'expert1': 0.5, 'expert2': 0.5}, with_global_names=True)
-    """
-
-    expert_weights = {}
-    for container in model.experts_containers:
-        assert isinstance(container, LoRAExpertContainer)
-
-        if hasattr(container, "get_merged_weights"):
-            expert_config, _weights = container.get_merged_weights(
-                with_global_names=with_global_names, weights=weights
+            self.log(
+                f"{self._log_pref}train/entropy_of_route",
+                entropy_of_route,
+                on_step=True,
+                prog_bar=True,
             )
-            expert_weights.update(_weights)
+            self.log(
+                f"{self._log_pref}train/entropy_of_avg",
+                entropy_of_avg,
+                on_step=True,
+                prog_bar=True,
+            )
+            self.log(
+                f"{self._log_pref}train/mi_loss",
+                mi_loss,
+                on_step=True,
+                prog_bar=True,
+            )
 
-    if len(expert_weights) == 0:
-        return None
+            if self.hparams.moe_ent_reg > 0.0:
+                total_loss += self.hparams.moe_ent_reg * mi_loss
 
-    expert_info = ExpertInfo(
-        expert_name=expert_name,
-        expert_task_name=finetune_task_name or expert_name,
-        training_config=training_config,
-        expert_config=expert_config,
-    )
-    return Expert(expert_info=expert_info, expert_weights=expert_weights)
+            elif self.hparams.moe_ent_free_bits > 0.0:
+                normalized_entropy = entropy_of_route / math.log(self.moe_num_experts)
+                total_loss += (
+                    (1.0 - normalized_entropy) >= self.hparams.moe_ent_free_bits
+                ) * -entropy_of_route
 
+            self.model.info_container["routing_gates"].clear()
 
-def replace_container_with_expert(
-    model: MultiExpertModel, expert_name, get_expert_instance=True
-):
-    raise NotImplementedError()
+        self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
+        self.log(
+            f"{self._log_pref}train/total_loss", total_loss, on_step=True, prog_bar=True
+        )
+
+        for i, pg in enumerate(self.optimizers().optimizer.param_groups):
+            self.log(f"train/lr_{i}", pg["lr"])
+        return total_loss

@@ -102,6 +102,7 @@ def create_selector_for_container(
     container,
     modifier_type: str,
     selector_config: SelectorConfig,
+    training_config: Config = None,
 ) -> Selector:
     if container.selector is not None and container.selector.config == selector_config:
         # selector already exists and has the same config
@@ -124,6 +125,7 @@ def create_selector_for_container(
             selector_config,
             info_container=transformer.info_container,
             layer=container.layer,
+            training_config=training_config,
         )
         selector.__layer_name__ = identifier + ".selector"
         transformer.selectors[modifier_type][identifier] = selector
@@ -142,6 +144,7 @@ def replace_selector_for_container(
     transformer,
     modifier_type: str,
     selector_config: SelectorConfig,
+    training_config: Config = None,
     selector_weights: dict = None,
     force_replace: bool = False,
 ):
@@ -187,6 +190,7 @@ def replace_selector_for_container(
             container,
             modifier_type,
             selector_config,
+            training_config,
         )
         if selector is None:
             continue
@@ -207,6 +211,7 @@ def add_expert_to_transformer(
     action: str = "route",
     is_default: bool = False,
     routing_config: SelectorConfig = None,
+    training_config: Config = None,
 ) -> Expert:
     """
     Routine to add an expert to the transformer architecture.
@@ -278,6 +283,7 @@ def add_expert_to_transformer(
             transformer,
             model_modifier,
             routing_config,
+            training_config,
         )
 
         if not transformer.selectors[model_modifier]:
