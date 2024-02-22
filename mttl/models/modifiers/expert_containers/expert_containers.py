@@ -9,6 +9,12 @@ from mttl.models.modifiers.base import (
     ModifierConfig,
     ModifyMixin,
 )
+from mttl.models.modifiers.expert_containers.selectors import (
+    BatchModulesAndWeightsSelectorOutput,
+    BatchSequenceModulesAndWeightsSelectorOutput,
+    ModulesAndWeightsSelectorOutput,
+    ModulesSelectorOutput,
+)
 
 from mttl.utils import logger
 from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
@@ -31,6 +37,14 @@ class ExpertContainer:
         self.expert_infos = {}
         self.expert_names = []
         self.default_expert_name = None
+
+    def assign_selector(self, selector):
+        del self.selector
+        self._modules.pop("selector", None)
+        # propagate experts to the selector
+        for expert_name, expert_info in self.expert_infos.items():
+            selector.add_expert(expert_name, expert_info=expert_info)
+        self.selector = selector
 
     def _add_expert(self, expert_name, expert_info, expert_module):
         self.expert_infos[expert_name] = expert_info
@@ -172,7 +186,9 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
             expert.expert_weights = {}
 
         for k, v in expert_module.state_dict().items():
-            if (self.layer_name + "." + k) not in expert.expert_weights:
+            if (self.layer_name + "." + k) not in expert.expert_weights and (
+                "lora_a" in k or "lora_b" in k
+            ):
                 expert.expert_weights[self.layer_name + "." + k] = v
 
         if action == "merge":
