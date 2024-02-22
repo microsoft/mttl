@@ -17,7 +17,7 @@ def _extract_identifier(string, match_on="finegrained"):
     e.g. 'block' : 'encoder.block.0.layer.0.SelfAttention' -> 'encoder.block.0'
     """
     if match_on == "finegrained":
-        return string.replace(".", "_")
+        return string
     if match_on == "coarsegrained":
         return "shared"
     pos = string.find(f"{match_on}")
@@ -161,15 +161,10 @@ def add_expert_to_transformer(
                                     info_container=transformer.info_container,
                                     layer=layer,
                                     training_config=training_config,
-                                    layer_name=layer_name,
                                 )
-                                if routing_config.router_granularity == "finegrained":
-                                    selector.__layer_name__ = layer_name + ".selector"
-                                else:
-                                    # selector is not assigned to a specific layer
-                                    selector.__layer_name__ = identifier + ".selector"
-
+                                selector.__layer_name__ = identifier + ".selector"
                                 transformer.selectors[identifier] = selector
+
                                 # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
                                 selector.total_calls_per_forward += 1
                                 n_selectors += 1

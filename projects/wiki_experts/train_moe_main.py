@@ -1,29 +1,13 @@
 import os
 import sys
-import pytorch_lightning as pl
-from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
-
-from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
-from mttl.callbacks import LiveCheckpointCallback
-
-from mttl.models.monitors import get_monitors
-from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
-from projects.wiki_experts.src.expert_model import MoETrainer
-
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
-
 import torch
 from pytorch_lightning import Trainer, seed_everything
 
-from mttl.datamodule.mt_seq_to_seq_module import (
-    FlanConfig,
-    FlanModule,
-    FlatMultiTaskConfig,
-    FlatMultiTaskModule,
-)
-
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
+from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
+from mttl.callbacks import LiveCheckpointCallback
+from mttl.models.monitors import get_monitors
 from mttl.callbacks import NanoMMLUCallback, RougeCallback
 from mttl.utils import (
     get_pl_loggers,
@@ -31,8 +15,10 @@ from mttl.utils import (
     setup_logging,
     logger,
 )
+from mttl.datamodule.base import get_datamodule
 
-from projects.wiki_experts.train_experts_main import get_datamodule
+from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
+from projects.wiki_experts.src.expert_model import MoETrainer
 from projects.wiki_experts.src.config import ExpertConfig
 
 

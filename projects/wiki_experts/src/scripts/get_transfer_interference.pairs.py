@@ -47,7 +47,7 @@ def create_embeddings():
         SVDEmbeddingTransformConfig(sparsity_threshold=sparsity_threshold),
         random_state=42,
     )
-    svd_embedder.transform(expert_lib, upload_to_hf=True, force=True)
+    svd_embedder.transform(expert_lib, persist=True, force=True)
     del svd_embedder
 
 

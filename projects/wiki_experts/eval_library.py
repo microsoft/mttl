@@ -31,8 +31,8 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     HiddenStateComputerConfig,
     TiesMerge,
     TiesMergeConfig,
-    SVDInputExtractor,
-    SVDInputExtractorConfig,
+    ArrowTransform,
+    ArrowConfig,
 )
 from mttl.models.modifiers.expert_containers.expert_containers import ExpertContainer
 
@@ -69,9 +69,8 @@ def get_hidden_states(library, args):
 
 
 def get_svd_embeddings(library, args):
-    cfg = SVDInputExtractorConfig(scale=args.scale_prototypes)
-    svd_input_extractor = SVDInputExtractor(cfg)
-    return svd_input_extractor.transform(library)
+    cfg = ArrowConfig(scale=args.scale_prototypes)
+    return ArrowTransform(cfg).transform(library)
 
 
 def patch_prototypes(module, library, args, proto_inits=None):

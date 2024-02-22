@@ -6,7 +6,6 @@ import numpy as np
 from collections import OrderedDict
 from mttl.models.modifiers.expert_containers.expert_library import (
     HFExpertLibrary,
-    LocalExpertLibrary,
 )
 from mttl.models.modifiers.expert_containers.library_transforms import (
     TiesMerge,
@@ -15,25 +14,34 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     WeightedLinearMergeConfig,
     MBClusteringTransformConfig,
     MBCWithCosSimTransform,
-    SVDInputExtractor,
-    SVDInputExtractorConfig,
+    ArrowTransform,
+    ArrowConfig,
 )
 
 
-def test_svd_input_contructor():
+def test_config():
+    cfg = ArrowConfig(ab_only=True, scale=False)
+    assert cfg.save_name == "arrowconfig-4e6d15f51147b500281ab22ab4b51037"
+
+    cfg2 = ArrowConfig(ab_only=True, scale=True)
+    assert cfg2.save_name != cfg.save_name
+
+    cfg3 = ArrowConfig(ab_only=True, scale=False)
+    assert cfg3.save_name == cfg.save_name
+
+
+def test_arrow():
     import logging
     from mttl.utils import logger
 
     logger.setLevel(logging.DEBUG)
 
-    library = HFExpertLibrary("sordonia/test-library")
+    library = HFExpertLibrary("sordonia/new-test-library")
 
-    cfg = SVDInputExtractorConfig(
-        upload_to_hf=False, recompute=True, ab_only=True, scale=False
-    )
-    transform = SVDInputExtractor(cfg)
+    cfg = ArrowConfig(ab_only=True, scale=False)
+    transform = ArrowTransform(cfg)
 
-    protos = transform.transform(library)
+    protos = transform.transform(library, persist=False, recompute=True)
     sums = []
     for task_name in sorted(protos.keys()):
         task_sum = 0.0
@@ -44,27 +52,36 @@ def test_svd_input_contructor():
     assert np.allclose(sums, [2728.4163, 2284.9968])
 
 
-def test_mbc_clustering(tmp_path):
-    library = HFExpertLibrary("sordonia/test-library")
-    k = 2
-
-    # creating local lib just because "sordonia/test-library" seem to have outdated embeddings where the key name is "embedding" and not "embeddings"
-    library = LocalExpertLibrary.from_expert_library(
-        library,
-        repo_id=tmp_path,
+def test_compute_svd_embeddings():
+    from mttl.models.modifiers.expert_containers.library_transforms import (
+        SVDEmbeddingTransform,
+        SVDEmbeddingTransformConfig,
     )
 
+    library = HFExpertLibrary("sordonia/new-test-library")
+    embeddings, svd = SVDEmbeddingTransform(
+        SVDEmbeddingTransformConfig(n_components=2)
+    ).transform(library=library, persist=False)
+
+    assert len(embeddings) == 2
+    assert embeddings["abstract_algebra"].shape[0] == 2
+
+
+def test_mbc_clustering(tmp_path):
+    library = HFExpertLibrary("sordonia/new-test-library")
+    k = 2
     cfg = MBClusteringTransformConfig(
-        k=k, random_state=42, sparsity_threshold=0.1, recompute_embeddings=True
+        k=k,
+        random_state=42,
+        sparsity_threshold=0.1,
     )
     transform = MBCWithCosSimTransform(cfg)
-    clusters = transform.transform(library)
-
+    clusters = transform.transform(library, recompute=True)
     assert len(clusters) == k
 
 
 def test_weighted_merge():
-    library = HFExpertLibrary("sordonia/test-library")
+    library = HFExpertLibrary("sordonia/new-test-library")
 
     transform = WeightedLinearMerge()
     exp = transform.transform(library)
@@ -102,8 +119,8 @@ def test_ties_merge():
 
     logger.setLevel(logging.DEBUG)
 
-    TOP_K = 0.2
-    library = HFExpertLibrary("sordonia/test-library")
+    top_k = 0.2
+    library = HFExpertLibrary("sordonia/new-test-library")
     names = list(library.keys())
     experts = list([library[name] for name in names])
 
@@ -228,7 +245,7 @@ def test_ties_merge():
     # return merged flat task vector
     merged_tv, TH = ties_merging(
         tv_flat_checks,
-        reset_thresh=TOP_K,
+        reset_thresh=top_k,
         merge_func="dis-mean",
     )
 
@@ -237,7 +254,7 @@ def test_ties_merge():
     )
 
     # Compare ref implementation to ours
-    cfg = TiesMergeConfig(top_k=TOP_K)
+    cfg = TiesMergeConfig(top_k=top_k)
     transform = TiesMerge(cfg)
     ties_exp = transform.transform(library)
 

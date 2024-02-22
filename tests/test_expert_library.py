@@ -24,7 +24,7 @@ from mttl.models.modifiers.expert_containers.expert_library import (
 
 
 def test_expert_lib(mocker):
-    library = HFExpertLibrary("sordonia/test-library")
+    library = HFExpertLibrary("sordonia/new-test-library")
     assert len(library) == 2
     assert not library._sliced
 
@@ -50,13 +50,13 @@ def test_expert_lib(mocker):
     assert len(library) == 3
 
     library = HFExpertLibrary(
-        "sordonia/test-library", model_name="EleutherAI/other-model"
+        "sordonia/new-test-library", model_name="EleutherAI/other-model"
     )
     assert len(library) == 0
     assert library._sliced
 
     library = HFExpertLibrary(
-        "sordonia/test-library", exclude_selection=["abstract_algebra"]
+        "sordonia/new-test-library", exclude_selection=["abstract_algebra"]
     )
 
     assert len(library) == 1
@@ -70,7 +70,7 @@ def test_soft_delete(mocker):
     from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 
     # read the stored embeddings
-    library = HFExpertLibrary("sordonia/test-library", create=False)
+    library = HFExpertLibrary("sordonia/new-test-library", create=False)
     assert len(library.data) == 2
 
     key = list(library.keys())[0]
@@ -87,30 +87,15 @@ def test_soft_delete(mocker):
     assert len(library.data) == 2
 
 
-def test_compute_embeddings():
-    from mttl.models.modifiers.expert_containers.library_transforms import (
-        SVDEmbeddingTransform,
-        SVDEmbeddingTransformConfig,
-    )
-
-    # TODO: both work, decide which one to use
-    library = HFExpertLibrary("sordonia/test-library")
-    # library = get_expert_library("test-library")  # requires BLOB_SAS_URL env var
-    embeddings, svd = SVDEmbeddingTransform(
-        SVDEmbeddingTransformConfig(n_components=2)
-    ).transform(library=library, upload_to_hf=False)
-    assert embeddings.shape[1] == 2
-
-
 def test_read_embeddings():
     from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 
     # read the stored embeddings
-    embeddings = HFExpertLibrary("sordonia/test-library").get_auxiliary_data(
+    embeddings = HFExpertLibrary("sordonia/new-test-library").get_auxiliary_data(
         "embeddings"
     )
     assert "abstract_algebra" in embeddings
-    assert embeddings["abstract_algebra"]["svd"]["embedding"].shape[1] == 2
+    assert embeddings["abstract_algebra"].shape[0] == 2
 
 
 def test_add_auxiliary_data(mocker, tmp_path):
@@ -119,9 +104,8 @@ def test_add_auxiliary_data(mocker, tmp_path):
         LocalExpertLibrary,
     )
 
-    # read the stored embeddings
     library = LocalExpertLibrary.from_expert_library(
-        HFExpertLibrary("sordonia/test-library"), tmp_path
+        HFExpertLibrary("sordonia/new-test-library"), tmp_path
     )
 
     library.add_auxiliary_data(
@@ -131,14 +115,18 @@ def test_add_auxiliary_data(mocker, tmp_path):
         data={"test": 1},
     )
     assert (
-        library.get_auxiliary_data("test", expert_name="abstract_algebra")[
-            "test_expert"
-        ]["test"]["test"]
-        == 1
+        library.get_auxiliary_data("test", expert_name="abstract_algebra")["test"] == 1
+    )
+    assert (
+        library.get_auxiliary_data(
+            "test", expert_name="abstract_algebra", return_config=True
+        )[0]["name"]
+        == "test_expert"
     )
 
 
 token = os.getenv("BLOB_SAS_URL")
+
 
 @pytest.fixture
 def build_local_files():
@@ -151,21 +139,26 @@ def build_local_files():
             with open(local_data_path, "wb") as my_blob:
                 my_blob.write(f"Blob data {i}".encode())
         return filenames
+
     return _build_files
+
 
 @pytest.fixture
 def repo_id():
     return str(uuid.uuid4())
 
+
 @pytest.fixture
 def setup_repo():
     """Create a repository and delete it once the test is done"""
     engine_repo_refs = []
+
     def _create_repo(engine, repo_id, repo_type="models", exist_ok=True):
         engine_repo_refs.append((engine, repo_id))
         engine.create_repo(repo_id, repo_type=repo_type, exist_ok=exist_ok)
         files = engine.list_repo_files(repo_id)
         assert not files
+
     yield _create_repo
     [e.delete_repo(r) for e, r in engine_repo_refs]
 
@@ -182,7 +175,9 @@ def test_create_and_delete_repo(tmp_path, repo_id):
 
 
 @pytest.mark.skipif(token is None, reason="Requires access to Azure Blob Storage")
-def test_async_upload_and_delete_blobs(tmp_path, build_local_files, setup_repo, repo_id):
+def test_async_upload_and_delete_blobs(
+    tmp_path, build_local_files, setup_repo, repo_id
+):
     engine = BlobStorageEngine(token=token, cache_dir=tmp_path)
     setup_repo(engine, repo_id)
 
@@ -192,7 +187,6 @@ def test_async_upload_and_delete_blobs(tmp_path, build_local_files, setup_repo, 
     _ = asyncio.run(engine.async_upload_blobs(repo_id, filenames))
     files = engine.list_repo_files(repo_id)
     assert set(files) == {"blob_data_1.txt", "blob_data_2.txt"}
-
 
     asyncio.run(engine.async_delete_blobs(repo_id, filenames))
     files = engine.list_repo_files(repo_id)
@@ -218,24 +212,34 @@ def test_snapshot_download(tmp_path, build_local_files, setup_repo, repo_id):
     blob_data_path = engine.snapshot_download(repo_id)
 
     assert blob_data_path == str(local_path)
-    assert set(os.listdir(blob_data_path)) == {
-        f"blob_data_1.txt",
-        f"blob_data_2.txt"
-    }
+    assert set(os.listdir(blob_data_path)) == {f"blob_data_1.txt", f"blob_data_2.txt"}
 
 
 @pytest.mark.skipif(token is None, reason="Requires access to Azure Blob Storage")
-@pytest.mark.parametrize("allow_patterns,expected_files", [
-    (["blob_data_1.txt"], ["blob_data_1.txt"]),
-    (["*.txt"], ["blob_data_1.txt", "blob_data_2.txt"]),
-    ("*.txt", ["blob_data_1.txt", "blob_data_2.txt"]),  # str is also allowed
-    (["blob_data_1.*"], ["blob_data_1.txt", "blob_data_1.json"]),
-    (["*1.txt", "*2.json"], ["blob_data_1.txt", "blob_data_2.json"]),
-    (None, ["blob_data_1.txt", "blob_data_2.txt", "blob_data_1.json", "blob_data_2.json"]),
-    ([], []),
-    ("", []),
-])
-def test_snapshot_download_filtered(tmp_path, setup_repo, repo_id, allow_patterns, expected_files):
+@pytest.mark.parametrize(
+    "allow_patterns,expected_files",
+    [
+        (["blob_data_1.txt"], ["blob_data_1.txt"]),
+        (["*.txt"], ["blob_data_1.txt", "blob_data_2.txt"]),
+        ("*.txt", ["blob_data_1.txt", "blob_data_2.txt"]),  # str is also allowed
+        (["blob_data_1.*"], ["blob_data_1.txt", "blob_data_1.json"]),
+        (["*1.txt", "*2.json"], ["blob_data_1.txt", "blob_data_2.json"]),
+        (
+            None,
+            [
+                "blob_data_1.txt",
+                "blob_data_2.txt",
+                "blob_data_1.json",
+                "blob_data_2.json",
+            ],
+        ),
+        ([], []),
+        ("", []),
+    ],
+)
+def test_snapshot_download_filtered(
+    tmp_path, setup_repo, repo_id, allow_patterns, expected_files
+):
     engine = BlobStorageEngine(token=token, cache_dir=tmp_path)
     setup_repo(engine, repo_id)
 
@@ -384,10 +388,11 @@ def build_meta_ckpt():
             torch.save(metadata_data, local_meta_path)
 
             ckpt_filepath = local_path / ckpt
-            dummy_state = {'state_dict': {}}
+            dummy_state = {"state_dict": {}}
             torch.save(dummy_state, ckpt_filepath)
 
         return filenames
+
     return _build_meta_ckpt
 
 
@@ -407,7 +412,9 @@ def test_copy_library_blob_to_blob(tmp_path, build_meta_ckpt, setup_repo, repo_i
     new_repo_id = str(uuid.uuid4())
     try:  # Clean up the new repo if the test fails
         new_lib = BlobExpertLibrary.from_expert_library(library, new_repo_id)
-        assert set(new_lib.list_repo_files(new_repo_id)) == set(library.list_repo_files(repo_id))
+        assert set(new_lib.list_repo_files(new_repo_id)) == set(
+            library.list_repo_files(repo_id)
+        )
     finally:
         BlobExpertLibrary(new_repo_id).delete_repo(new_repo_id)
 
@@ -429,7 +436,7 @@ def test_copy_library_blob_to_local(tmp_path, build_meta_ckpt, setup_repo, repo_
     new_repo_id.mkdir()
     new_lib = LocalExpertLibrary.from_expert_library(library, new_repo_id)
     # drop the path and keep the filenames
-    local_files = {f.split('/')[-1] for f in new_lib.list_repo_files(new_repo_id)}
+    local_files = {f.split("/")[-1] for f in new_lib.list_repo_files(new_repo_id)}
     assert local_files == set(library.list_repo_files(repo_id))
 
 
@@ -449,8 +456,8 @@ def test_copy_library_local_to_local(tmp_path, build_meta_ckpt, setup_repo, repo
     new_repo_id.mkdir()
     new_lib = LocalExpertLibrary.from_expert_library(library, new_repo_id)
     # drop the path and keep the filenames
-    base_files = {f.split('/')[-1] for f in library.list_repo_files(repo_id)}
-    new_files = {f.split('/')[-1] for f in new_lib.list_repo_files(new_repo_id)}
+    base_files = {f.split("/")[-1] for f in library.list_repo_files(repo_id)}
+    new_files = {f.split("/")[-1] for f in new_lib.list_repo_files(new_repo_id)}
     assert base_files == new_files
 
 
@@ -476,10 +483,7 @@ def test_virtual_library_is_in_memory(tmp_path, build_meta_ckpt, setup_repo, rep
     assert set(virtual_lib.data.keys()) == {"expert_1"}
 
     # check that the original library is not affected
-    base_files = {
-        f.split('/')[-1]
-        for f in local_library.list_repo_files(repo_id)
-    }
+    base_files = {f.split("/")[-1] for f in local_library.list_repo_files(repo_id)}
     assert base_files == {
         "README.md",
         "expert_1.meta",
