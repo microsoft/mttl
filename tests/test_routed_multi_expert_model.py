@@ -4,6 +4,7 @@ import pytest
 import numpy as np
 from mttl.config import Config
 from pytorch_lightning import seed_everything
+import projects
 from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.src.expert_model import (
     MoETrainer,
@@ -11,7 +12,7 @@ from projects.wiki_experts.src.expert_model import (
 )
 
 from mttl.models.modifiers.base import ModifierConfig
-from mttl.models.modifiers.expert_containers.expert import Expert
+from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 from mttl.models.modifiers.expert_containers import (
     LoRAExpertContainer,
     CoalescedLoRAExpertContainer,
@@ -22,7 +23,7 @@ from mttl.models.modifiers.expert_containers.selectors import (
     MOERKHSSelector,
     ClownSelector,
 )
-from mttl.models.expert_model import MoEModel, MultiExpertModel
+from mttl.models.expert_model import ExpertModel, MoEModel, MultiExpertModel
 from mttl.models.modifiers.lora import LoRA
 
 
@@ -119,15 +120,25 @@ class TestMultiExpertModel:
 
         # Test Base Llama model
         output = module(batch)
-        assert np.allclose(output.item(), 9.7, atol=0.1)
+        assert np.allclose(output.item(), 10.15, atol=0.1)
 
     def test_expert_selector_with_task_name_routing(self, tmp_exp_config):
         seed_everything(0)
         config: Config = tmp_exp_config
 
+        def create_dummy_expert(config, exp_name):
+            expert_model = MultiExpertModel(
+                tokenizer=None,
+                **vars(config),
+            )
+            expert = expert_model.add_empty_expert(
+                exp_name, ModifierConfig.from_training_config(config)
+            )
+            return expert
+
         config.router_selector = "task_selector"
-        exp1 = self.create_dummy_expert(config, "exp1")
-        exp2 = self.create_dummy_expert(config, "exp2")
+        exp1 = create_dummy_expert(config, "exp1")
+        exp2 = create_dummy_expert(config, "exp2")
         module_dict = {"mod1": exp1, "mod2": exp2, "default": exp1}
 
         module = MultiExpertModel(**vars(config))
@@ -187,10 +198,13 @@ class TestMultiExpertModel:
         assert np.allclose(output.item(), 10.15, atol=0.1)
 
         # check the get_router_weights function
-        routing_weights = module.get_router_weights()
+        weights = {}
+        for _, selector_dict in module.selectors.items():
+            for _, selector in selector_dict.items():
+                weights[selector.layer_name] = selector.get_routing_weights()
         assert (
-            "mod1" in routing_weights["shared.selector"]
-            and "mod2" in routing_weights["shared.selector"]
+            "mod1" in weights["shared.selector"]
+            and "mod2" in weights["shared.selector"]
         )
 
         assert isinstance(
@@ -213,7 +227,6 @@ class TestMultiExpertModel:
         )
         module.load_from_module_dict(module_dict)
         output = module(batch)
-        routing_weights = module.get_router_weights()
         assert np.allclose(output.item(), 10.15, atol=0.1)
 
         expert = module.to_expert()

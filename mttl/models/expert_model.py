@@ -6,13 +6,14 @@ from typing import Dict, List
 import numpy as np
 import torch
 import tqdm
+from transformers import PreTrainedModel
+
 from mttl.models.modifiers.expert_containers.library_transforms import (
     ArrowConfig,
     HiddenStateComputerConfig,
 )
 from mttl.models.modifiers.lora import SkilledLoRAConfig
 
-from mttl.models.utils import model_loader_helper
 from mttl.models.modifiers.expert_containers import add_expert_to_transformer
 from mttl.models.modifiers.expert_containers.expert_library import (
     ExpertLibrary,
@@ -40,60 +41,61 @@ from mttl.models.modifiers.expert_containers.selectors import SelectorConfig
 from mttl.models.modifiers.routing import RoutingInfo
 from mttl.models.utils import (
     EfficientCheckpointModule,
-    model_loader_helper,
     prepare_model_for_kbit_training,
 )
+from projects.wiki_experts.src.config import ExpertConfig
 
 
 torch.set_float32_matmul_precision("high")
 
 
 class ExpertModel(EfficientCheckpointModule):
-    def __init__(self, **config_kwargs):
-        super().__init__(**config_kwargs)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
-        from projects.wiki_experts.src.config import ExpertConfig
-
-        self.tokenizer = config_kwargs.pop("tokenizer", None)
-        self.model_name = config_kwargs.pop("model", None)
-        self.load_in_8bit = config_kwargs.get("load_in_8bit", False)
-        self.device_map = config_kwargs.get("device_map", None)
-        model_object = config_kwargs.pop("model_object", None)
+        self.tokenizer = kwargs.pop("tokenizer", None)
+        model_object = kwargs.pop("model_object", None)
 
         # log hyperparameters
-        self.save_hyperparameters(config_kwargs)
+        self.save_hyperparameters(kwargs)
+
+        self.load_in_8bit = kwargs.get("load_in_8bit", False)
+        self.model: PreTrainedModel = None
+        self.accumulate_metrics_batch = defaultdict(list)
 
         if model_object is None:
+            from mttl.models.utils import model_loader_helper
+
             model_object = model_loader_helper(
-                self.model_name,
+                self.hparams.model,
                 load_in_8bit=self.load_in_8bit,
-                device_map=self.device_map,
+                device_map=getattr(self.hparams, "device_map", "cpu"),
             )
 
         if self.load_in_8bit:
             model_object = prepare_model_for_kbit_training(model_object)
 
-        self.accumulate_metrics_batch = defaultdict(list)
-
         # rebuild the training config, a bit cumbersome, but that's life
-        self.training_config = ExpertConfig.fromdict(config_kwargs)
+        self.training_config = ExpertConfig.fromdict(kwargs)
         self.training_config.vocab_size = (
             model_object.get_input_embeddings().num_embeddings
         )
+
         # init the transformer just with the modifier config, this avoids
         # passing the whole training config to the modify_transformer func
         self.modifier_config = ModifierConfig.from_training_config(self.training_config)
+        # config about the routing
         self.selector_config = SelectorConfig.from_training_config(self.training_config)
 
         self.model = modify_transformer(model_object, self.modifier_config)
-        self.model.info_container = {}
 
         # replace w flash attn!
         replace_attn_with_flash_attn(self.model)
 
+        self.test_results = []
         self.best_val_result = None
         self._inference_outputs = []
-        self._log_pref = config_kwargs.get("logging_prefix", "")
+        self._log_pref = kwargs.get("logging_prefix", "")
 
     def forward(self, batch, reduction="mean"):
         input_ids = batch["input_ids"]
@@ -292,12 +294,6 @@ class MultiExpertModel(ExpertModel):
     @property
     def selectors(self) -> Dict[str, Selector]:
         return self.model.selectors
-
-    def get_router_weights(self):
-        weights = {}
-        for _, selector in self.selectors.items():
-            weights[selector.layer_name] = selector.get_routing_weights()
-        return weights
 
     def delete_expert_container(self):
         """
