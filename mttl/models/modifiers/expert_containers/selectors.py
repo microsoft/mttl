@@ -806,6 +806,7 @@ class PhatgooseSelector(Selector):
         self.router = None
         self.layer = kwargs["layer"]
         self.default_expert_name = None
+        self.routing_gates = []  # for loing purposes
 
     def get_prototypes(self):
         return {k: gate.v.detach().cpu().numpy() for k, gate in self.gates.items()}
@@ -835,6 +836,10 @@ class PhatgooseSelector(Selector):
             # selectors for tasks are trained independently
             # all samples go through the same selector
             scores = self.gates[self.default_expert_name](input)
+            # log the scores
+            container = kwargs.get("container", None)
+            if container is not None:
+                self.routing_gates.append(scores.detach().cpu().float())
             return BatchSequenceModulesAndWeightsSelectorOutput(
                 torch.zeros_like(scores, dtype=torch.int8), scores
             )

@@ -107,6 +107,10 @@ class ExpertConfig(Config):
         self.phi_2_align_heads = False
         self.lora_merge_after = False  # if True, tried to merge after the outer product, currently only applicable to LoRA
 
+        # phatgoose
+        self.n_steps_pg = 2000
+        self.learning_rate_pg = 0.01
+
     def post_init(self, silent=False):
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size
