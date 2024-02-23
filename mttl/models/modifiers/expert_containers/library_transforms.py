@@ -540,11 +540,14 @@ class PhatgooseTransform(HiddenStateComputer):
 
             if type(library) == str:
                 library = get_expert_library(library)
-            loaded_output = library.get_auxiliary_data(
-                data_type=self.config.save_name + "_" + expert_name
-            )
+            loaded_output = library.get_auxiliary_data(data_type=self.config.save_name)
 
-            if not recompute and len(loaded_output) > 0:
+            if (
+                not recompute
+                and len(loaded_output) > 0
+                and expert_name
+                in loaded_output  # cause loaded_output loads all experts
+            ):
                 logger.info("Found {} precomputed centroids".format(len(loaded_output)))
                 # format is dict[layer_name] = embedding, layer_name ends with selector.{task_name}.v
                 outputs[expert_name] = (
