@@ -1,15 +1,9 @@
-import os
 import torch
 import pytest
 import numpy as np
 from mttl.config import Config
 from pytorch_lightning import seed_everything
-import projects
-from projects.wiki_experts.src.config import ExpertConfig
-from projects.wiki_experts.src.expert_model import (
-    MoETrainer,
-    RoutedMultiExpertModel,
-)
+from mttl.models.expert_config import ExpertConfig
 
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
@@ -220,9 +214,7 @@ class TestMultiExpertModel:
 
         # change router_granularity to finegrained
         config.router_granularity = "finegrained"
-        module = RoutedMultiExpertModel(
-            tokenizer=None,
-            expert_info={},
+        module = MultiExpertModel(
             **vars(config),
         )
         module.load_from_module_dict(module_dict)
@@ -288,9 +280,7 @@ class TestMultiExpertModel:
         config.router_granularity = "mixer"
         # mixer not found
         with pytest.raises(ValueError):
-            module = MoETrainer(
-                tokenizer=None,
-                expert_info={},
+            module = MoEModel(
                 **vars(config),
             )
 

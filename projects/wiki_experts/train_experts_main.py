@@ -5,6 +5,8 @@ from pytorch_lightning import Trainer, seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
+from mttl.models.expert_model import ExpertModel
+from mttl.models.expert_config import ExpertConfig
 from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
 from mttl.callbacks import LiveCheckpointCallback
 from mttl.models.monitors import get_monitors
@@ -18,8 +20,6 @@ from mttl.utils import (
 )
 
 from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
-from projects.wiki_experts.src.expert_trainer import ExpertTrainer
-from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.src.evolution.transfer_matrix import (
     TransferMatrixConfig,
     run_eval as produce_transfer_matrix,
@@ -56,7 +56,7 @@ def run_multitask(args: ExpertConfig):
     remote_login(args.remote_token)
     loggers = get_pl_loggers(args)
     # select dataloader
-    model_class = ExpertTrainer
+    model_class = ExpertModel
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
 

@@ -1,27 +1,20 @@
 import os
 import sys
-import json
 import torch
 import copy
 from copy import deepcopy
-import torch.nn.functional as F
+from pytorch_lightning import seed_everything
+import json
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
+
 from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
 from mttl.models.modifiers.expert_containers.selectors import ClownSelector
 from mttl.models.modifiers.lora import LoRAConfig
 
-
-from pytorch_lightning import seed_everything
-import json
-
 from mttl.utils import logger, remote_login, setup_logging
-
-from projects.wiki_experts.src.expert_model import (
-    MultiExpertModel,
-    RoutedMultiExpertModel,
-)
-from projects.wiki_experts.src.config import ExpertConfig
+from mttl.models.expert_model import MultiExpertModel, RoutedMultiExpertModel
+from mttl.models.expert_config import ExpertConfig
 
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.models.modifiers.expert_containers.library_transforms import (

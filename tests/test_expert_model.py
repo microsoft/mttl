@@ -9,7 +9,7 @@ from mttl.models.modifiers.expert_containers.selectors import (
 
 
 def test_expert_model():
-    model = MultiExpertModel("EleutherAI/gpt-neo-125m", device_map="cpu")
+    model = MultiExpertModel(model="EleutherAI/gpt-neo-125m", device_map="cpu")
     model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
     model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
     assert len(model.selectors) == 0

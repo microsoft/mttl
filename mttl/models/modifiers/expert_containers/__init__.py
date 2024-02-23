@@ -232,6 +232,9 @@ def add_expert_to_transformer(
 
     model_modifier = get_modifier_type(expert_config)
 
+    if not hasattr(transformer, "info_container"):
+        transformer.info_container = {}
+
     if model_modifier == "hard_prompt":
         return add_hard_prompt_to_transformer(
             transformer,

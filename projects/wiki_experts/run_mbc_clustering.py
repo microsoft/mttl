@@ -9,7 +9,7 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     MBCWithCosSimTransform,
 )
 from mttl.utils import logger
-from projects.wiki_experts.src.config import ExpertConfig
+from mttl.models.expert_config import ExpertConfig
 
 
 def main(args: ExpertConfig):

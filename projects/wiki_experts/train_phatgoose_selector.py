@@ -5,7 +5,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
 from pytorch_lightning import seed_everything
-from projects.wiki_experts.src.config import ExpertConfig
+from mttl.models.expert_config import ExpertConfig
 
 
 def parse_libname(libname):

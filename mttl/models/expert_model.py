@@ -24,6 +24,7 @@ from mttl.utils import logger
 from mttl.models.modifiers.expert_containers.expert import Expert, ExpertInfo
 from mttl.models.modifiers.expert_containers.expert_containers import (
     ExpertContainer,
+    LoRAExpertContainer,
 )
 from mttl.models.modifiers.expert_containers.selectors import Selector, SelectorConfig
 
@@ -43,7 +44,8 @@ from mttl.models.utils import (
     EfficientCheckpointModule,
     prepare_model_for_kbit_training,
 )
-from projects.wiki_experts.src.config import ExpertConfig
+from mttl.models.expert_config import ExpertConfig
+from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRankerHelper
 
 
 torch.set_float32_matmul_precision("high")
@@ -487,6 +489,43 @@ class MultiExpertModel(ExpertModel):
             )
         return embeddings
 
+    def to_expert(self, weights: dict = None, with_global_names=True) -> Expert:
+        """
+        Converts the current expert model into an instance of the Expert class.
+
+        Args:
+            weights (dict, optional): A dictionary of weights to merge the experts. If not provided, the router's weights will be used.
+            with_global_names (bool, optional): Whether to include global names in the merged weights. Defaults to True.
+
+        Returns:
+            Expert: An instance of the Expert class.
+
+        Raises:
+            None
+
+        Example:
+            model = ExpertModel()
+            expert = model.to_expert(weights={'expert1': 0.5, 'expert2': 0.5}, with_global_names=True)
+        """
+
+        expert_weights = {}
+        for container in self.experts_containers:
+            assert isinstance(container, LoRAExpertContainer)
+
+            if hasattr(container, "get_merged_weights"):
+                expert_config, _weights = container.get_merged_weights(
+                    with_global_names=with_global_names, weights=weights
+                )
+                expert_weights.update(_weights)
+
+        expert_info = ExpertInfo(
+            expert_name=self.hparams.finetune_task_name,
+            expert_task_name=self.hparams.finetune_task_name,
+            training_config=self.training_config,
+            expert_config=expert_config,
+        )
+        return Expert(expert_info=expert_info, expert_weights=expert_weights)
+
     def set_routing_infos(self, batch, generate=False):
         self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
 
@@ -593,3 +632,35 @@ class MoEModel(MultiExpertModel):
         for i, pg in enumerate(self.optimizers().optimizer.param_groups):
             self.log(f"train/lr_{i}", pg["lr"])
         return total_loss
+
+
+class MultiExpertModelRanker(MultiExpertModel):
+    def __init__(self, **kwargs):
+        kwargs["router_selector"] = "info_selector"
+        super().__init__(**kwargs)
+
+        self.expert_ranker = AdapterRankerHelper.get_ranker_instance(
+            ranker_model=kwargs["ranker_model"],
+            ranker_path=kwargs["ranker_path"],
+        )
+
+    def set_routing_infos(self, batch, generate=False):
+        self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
+
+        self.expert_ranker.set_available_tasks(self.experts_names)
+        mod_names, mod_weights = self.expert_ranker.predict_batch(
+            batch,
+            n=self.hparams.ranker_top_k,
+        )
+
+        # fill in the weights for the routing selector, for now just take the first one
+        # mod_names = [['mod1', 'mod2'], ['mod3', 'mod4']]
+        # mod_wgths = [[0.5, 0.5], [0.3, 0.7]]
+        # mod_names = [['default', 'mod1']]
+        # mod_wgths = [[0.7, 0.3]]
+        self.model.info_container["routing_infos"].routing_modules = mod_names
+        self.model.info_container["routing_infos"].routing_weights = mod_weights
+
+        # infos
+        logger.info(f"Most similar: {str(mod_names)}")
+        logger.info(f"Most similar weights: {str(mod_weights)}")

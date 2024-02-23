@@ -147,7 +147,7 @@ def evolve_nevergrad(
     model_optimal.load_from_graph_string(
         best_graph_string, "route", expert_library=expert_lib
     )
-    expert = model_optimal.replace_container_with_expert("new_task")
+    expert = model_optimal.get_expert_instance("new_task")
     expert.expert_weights = {
         k: v
         for k, v in expert.expert_weights.items()
