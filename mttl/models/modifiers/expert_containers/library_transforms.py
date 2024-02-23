@@ -325,7 +325,6 @@ class TiesMerge(LibraryTransform):
 
 @dataclass
 class HiddenStateComputerConfig(LibraryTransformConfig):
-    save_name: str = None
     use_base_model_only: bool = (
         False  # This computes sentence embeddings without the adapter
     )
@@ -511,11 +510,9 @@ class HiddenStateComputer(LibraryTransform):
 
 
 @dataclass
-class PhatgooseConfig:
-    n_steps: int = 200
-    save_name: str = None
+class PhatgooseConfig(LibraryTransformConfig):
+    n_steps: int = 1000
     learning_rate: float = 3e-3
-    max_samples_per_task: int = 1000
 
 
 class PhatgooseTransform(HiddenStateComputer):
@@ -543,10 +540,14 @@ class PhatgooseTransform(HiddenStateComputer):
 
             if type(library) == str:
                 library = get_expert_library(library)
-
             loaded_output = library.get_auxiliary_data(data_type=self.config.save_name)
 
-            if not recompute and len(loaded_output) > 0:
+            if (
+                not recompute
+                and len(loaded_output) > 0
+                and expert_name
+                in loaded_output  # cause loaded_output loads all experts
+            ):
                 logger.info("Found {} precomputed centroids".format(len(loaded_output)))
                 # format is dict[layer_name] = embedding, layer_name ends with selector.{task_name}.v
                 outputs[expert_name] = (
@@ -578,7 +579,6 @@ class PhatgooseTransform(HiddenStateComputer):
             )
 
             training_config.dataset = expert.expert_info.dataset
-            training_config.subsample_train = self.config.max_samples_per_task
             if expert.expert_info.expert_task_name:
                 train_tasks = expert.expert_info.expert_task_name.split(",")
                 training_config.finetune_task_name = ",".join(train_tasks)
@@ -589,6 +589,7 @@ class PhatgooseTransform(HiddenStateComputer):
                 self._fill_missing_args(training_config, default_args)
                 training_config.include_task_source = default_args.include_task_source
                 training_config.output_dir = default_args.output_dir
+                training_config.wandb_project = default_args.wandb_project
 
             # get datamodule
             dm = get_datamodule(training_config)
@@ -611,38 +612,10 @@ class PhatgooseTransform(HiddenStateComputer):
                 and ".ln." not in n
                 and "layer_norm" not in n
             )
-            assert (
-                p_sum_before == p_sum_after,
-                "Model parameters other than selector have changed after training",
-            )
+            assert p_sum_before == p_sum_after
 
             model_before = MultiExpertModel(**vars(training_config)).to("cuda")
             model_before.add_expert_instance(expert, is_default=True)
-
-            for (n1, module_before), (n2, module_after) in zip(
-                model_before.named_modules(), model.named_modules()
-            ):
-                if ".selector" not in n1:
-                    p_count_before = sum(
-                        p.sum()
-                        for n, p in module_before.named_parameters()
-                        if ".selector" not in n
-                        and ".norm" not in n
-                        and ".ln." not in n
-                        and "layer_norm" not in n
-                    )
-                    p_count_after = sum(
-                        p.sum()
-                        for n, p in module_after.named_parameters()
-                        if ".selector" not in n
-                        and ".norm" not in n
-                        and ".ln." not in n
-                        and "layer_norm" not in n
-                    )
-                    if not p_count_before == p_count_after:
-                        print(p_count_before, p_count_after)
-                        print(n1, n2)
-                        print("\n\n\n")
 
             p_sum_sel_after = sum(
                 p.sum() for n, p in model.named_parameters() if "selector" in n
