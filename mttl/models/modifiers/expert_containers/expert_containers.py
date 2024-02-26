@@ -98,6 +98,9 @@ class ExpertContainer:
             raise ValueError("Dependency injection for layer name has not been done.")
         return self.__layer_name__
 
+    def _get_expert_weights(self, expert_name):
+        return self.experts[expert_name].state_dict()
+
     @abstractmethod
     def forward(self, input, **kwargs):
         pass
@@ -115,6 +118,24 @@ class ExpertContainer:
                 )
             return self.experts[self.default_expert_name]
         return self.experts[key]
+
+    def get_merged_params(self, with_global_names=True, **merger_kwargs):
+        """
+        Merges experts to one expert according to selector weights.
+        """
+        merged_params = {}
+        merging_weights = self.selector.get_merging_weights(
+            **merger_kwargs
+        )  # expert_name: weight
+        for exp_name, merging_weight in merging_weights.items():
+            for k, parameter in self._get_expert_weights(exp_name).items():
+                key = k if not with_global_names else self.layer_name + "." + k
+                if k not in merged_params:
+                    merged_params[key] = parameter * merging_weight
+                else:
+                    merged_params[key] += parameter * merging_weight
+
+        return merged_params
 
     def __getitem__(self, key):
         return self.experts[key]
@@ -201,17 +222,6 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
 
             self._add_expert(expert.name, expert.expert_info, expert_module)
 
-    def get_merged_weights(self, with_global_names=True, **merger_kwargs):
-        """
-        Merges experts to one expert according to weights, if weights are not given, it uses the selector to get the weights.
-        Does not merge the layer.
-        """
-        weights_ = {}
-        for k, v in self.selector.get_merged_weights(self, **merger_kwargs).items():
-            key = k if not with_global_names else self.layer_name + "." + k
-            weights_[key] = v
-        return self.config, weights_
-
     def merge_with_layer(self):
         if not len(self.experts):
             return
@@ -221,6 +231,13 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
 
         self.merged_expert_names.extend(self.experts)
         self.experts.clear()
+
+    def _get_expert_weights(self, expert_name):
+        return {
+            n: w
+            for n, w in self.experts[expert_name].state_dict().items()
+            if "lora" in n
+        }
 
     def route(self, input, selection, **kwargs):
         """Depending on the selection output, we and merge differently."""
