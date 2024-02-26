@@ -504,50 +504,54 @@ class MultiExpertModel(ExpertModel):
             )
         return embeddings
 
-    def replace_container_with_expert(self, expert_name):
-        """
-        Replaces the expert container with the expert with the given name.
-        """
-        if len(self.experts_names) == 0:
-            return
-
-        expert = None
-        for _, module in self.model.named_modules():
-            for c_name, child in dict(module.named_children()).items():
-                if isinstance(child, ExpertContainer) and len(child.experts) > 0:
-                    setattr(module, c_name, child.experts[expert_name])
-                    if expert is None:
-                        expert = child.experts[expert_name]
-
-        # make sure hparams reflect the loaded expert
-        if expert:
-            self.hparams.update(expert.config.__dict__)
-        if get_expert_instance:
-            td = TemporaryDirectory()
-            expert_checkpoint = MultiExpertModel.save_pretrained(self, td.name)
-            expert: Expert = load_expert(expert_checkpoint)
-            # remove the temporary directory
-            os.remove(expert_checkpoint)
-            return expert
-        return
-
     def get_expert_instance(self, expert_name):
-        """TODO
-
-        Ensure expert_name is unique across different types of adapters experts
-        Go through all the containers in the model to find the expert with the given name (use experts_containers)
-        Implement get_expert in the container and call it
         """
-        raise NotImplementedError()
-
-    def get_merged_expert(
-        self, modifier_type: str = "lora", with_global_names=True
-    ) -> Expert:
-        """
-        Converts the current expert model into an instance of the Expert class.
+        Retrieves an instance of the specified expert from the model.
 
         Args:
-            weights (dict, optional): A dictionary of weights to merge the experts. If not provided, the router's weights will be used.
+            expert_name (str): The name of the expert to retrieve.
+            silent (bool, optional): If True, suppresses the ValueError exception when the expert is not found.
+                Defaults to True.
+
+        Returns:
+            expert: An instance of the specified expert.
+
+        Raises:
+            AssertionError: If the expert name is not found in the model, if no expert containers are found,
+                or if the expert names are not unique.
+            ValueError: If the expert is not found in the model and silent is False.
+        """
+        assert (
+            expert_name in self.experts_names
+        ), f"Expert {expert_name} not found in the model."
+        assert (
+            len(self.experts_containers) > 0
+        ), "No expert containers found in the model."
+        assert len(set(self.experts_names)) == len(
+            self.experts_names
+        ), "Expert names are not unique."
+
+        expert_params = {}
+        for container in self.experts_containers:
+            if expert_name in container.expert_infos:
+                expert_info = container.expert_infos[expert_name]
+                expert_weights = container._get_expert_weights(expert_name)
+                expert_weights = {
+                    f"{container.layer_name}.{k}": v for k, v in expert_weights.items()
+                }
+                expert_params.update(expert_weights)
+
+        retrieved_expert = Expert(expert_info=expert_info, expert_weights=expert_params)
+
+        return retrieved_expert
+
+    def get_merged_expert(
+        self, modifier_type: str = "lora", with_global_names=True, **kwargs
+    ) -> Expert:
+        """
+        Converts the current expert model into an instance of the Expert class by merging the experts in the containers using weights from the corresponding selectors.
+
+        Args:
             with_global_names (bool, optional): Whether to include global names in the merged weights. Defaults to True.
 
         Returns:
@@ -560,24 +564,36 @@ class MultiExpertModel(ExpertModel):
             model = ExpertModel()
             expert = model.to_expert(weights={'expert1': 0.5, 'expert2': 0.5}, with_global_names=True)
         """
+        from mttl.models.modifiers.modify_model import get_modifier_type
 
-        expert_weights = {}
+        expert_params = {}
+        assert (
+            modifier_type in self.selectors
+        ), f"Modifie type {modifier_type} not in model."
         for container in self.experts_containers:
-            assert isinstance(container, LoRAExpertContainer)
-
-            if hasattr(container, "get_merged_weights"):
-                expert_config, _weights = container.get_merged_weights(
-                    with_global_names=with_global_names, weights=weights
+            if not get_modifier_type(container.config) == modifier_type:
+                logger.info(
+                    f"Skipping container {container.layer_name} with modifier type {get_modifier_type(container.config)}"
                 )
-                expert_weights.update(_weights)
+                continue
+
+            params = container.get_merged_params(
+                with_global_names=with_global_names, **kwargs
+            )
+            expert_params.update(params)
+            expert_config = container.config
+        if len(expert_params) == 0:
+            raise ValueError(
+                "No experts to merge found. Make sure the 'modifier_type' is correct."
+            )
 
         expert_info = ExpertInfo(
-            expert_name=self.hparams.finetune_task_name,
-            expert_task_name=self.hparams.finetune_task_name,
+            expert_name=self.training_config.finetune_task_name,
+            expert_task_name=self.training_config.finetune_task_name,
             training_config=self.training_config,
             expert_config=expert_config,
         )
-        return Expert(expert_info=expert_info, expert_weights=expert_weights)
+        return Expert(expert_info=expert_info, expert_weights=expert_params)
 
     def set_routing_infos(self, batch, generate=False):
         self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
