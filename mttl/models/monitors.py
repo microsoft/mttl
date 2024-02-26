@@ -8,7 +8,6 @@ from typing import Any
 
 import pytorch_lightning as pl
 import matplotlib.pyplot as plt
-from torch.distributions import Categorical
 from pytorch_lightning import Callback
 
 from mttl.utils import agg_dicts, Averager

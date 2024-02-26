@@ -3,9 +3,11 @@ from typing import Dict, List, Union
 from pyparsing import abstractmethod
 import torch
 import math
+import wandb
 import numpy as np
 from torch import nn
 import torch.nn.functional as F
+from torch.distributions import Bernoulli, Categorical
 
 # from mttl.models.modifiers.routing import RoutingMixin
 from mttl.utils import logger
@@ -806,7 +808,8 @@ class PhatgooseSelector(Selector):
         self.router = None
         self.layer = kwargs["layer"]
         self.default_expert_name = None
-        self.routing_gates = []  # for loing purposes
+        self.routing_gates = []  # for logging purposes at training time
+        self.log_routing_stats = False
 
     def get_prototypes(self):
         return {k: gate.v.detach().cpu().numpy() for k, gate in self.gates.items()}
@@ -844,10 +847,37 @@ class PhatgooseSelector(Selector):
                 torch.zeros_like(scores, dtype=torch.int8), scores
             )
         else:
-            # the inference procedure: we ave multiple gates
+            # the inference procedure: we have multiple gates
             # parallel forward + top-k selection
             assert len(self.gates) == len(self.expert_names)
             modules, scores = self.router(input)
+            routings = torch.zeros(
+                (input.shape[0], input.shape[1], len(self.expert_names)),
+                dtype=torch.float,
+                device=self.device,
+            )
+
+            if self.log_routing_stats:
+                # for logging purposes: we transform it into tokens x experts
+                _modules = modules.view(-1, self.router.moe_top_k)
+                _routings = routings.view(-1, len(self.expert_names))
+                _scores = scores.view(-1, self.router.moe_top_k)
+                _routings = _routings.scatter(1, _modules, _scores)
+                # calculate entropy and MI over the toekns dimention and log
+                layer_routing_dist = _routings
+                dims = layer_routing_dist.shape[1]
+                layer_routing_mean = layer_routing_dist.mean(0)
+                h_mean = Categorical(probs=layer_routing_mean).entropy() / math.log(
+                    dims
+                )
+                mean_h = Categorical(
+                    probs=layer_routing_dist
+                ).entropy().mean() / math.log(dims)
+                mi = h_mean - mean_h
+                logger.info(f"Layer {self.__layer_name__} MI: {mi}, mean_H: {mean_h}")
+                # TODO: figure out a way of how to actually log it to somewhere
+                # at first glance there is no collapse here, i.e. MI is low and entropy is not too low.
+
             return BatchSequenceModulesAndWeightsSelectorOutput(
                 modules=modules, weights=scores
             )
