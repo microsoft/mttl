@@ -924,6 +924,9 @@ class PolySelectorDirect(PolySelector):
         )
         return weights
 
+    def get_merging_weights(self, **selector_kwargs) -> Dict:
+        return self.get_routing_weights(**selector_kwargs)
+
     def get_routing_weights(self):
         return {k: v.detach().item() for k, v in self.module_logits_dict.items()}
 

@@ -221,10 +221,8 @@ class TestMultiExpertModel:
         output = module(batch)
         assert np.allclose(output.item(), 10.15, atol=0.1)
 
-        expert = module.to_expert()
+        expert = module.get_merged_expert()
         assert isinstance(expert, Expert)
-        module.replace_container_with_expert("mod1")
-        assert isinstance(module.model.transformer.h[0].attn.attention.k_proj, LoRA)
 
     def test_expert_selector_with_moe_routing_soft(
         self, mocker, tmp_exp_config, dummy_batch

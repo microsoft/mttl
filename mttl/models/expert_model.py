@@ -504,33 +504,6 @@ class MultiExpertModel(ExpertModel):
             )
         return embeddings
 
-    # def replace_container_with_expert(self, expert_name):
-    #     """
-    #     Replaces the expert container with the expert with the given name.
-    #     """
-    #     if len(self.experts_names) == 0:
-    #         return
-
-    #     expert = None
-    #     for _, module in self.model.named_modules():
-    #         for c_name, child in dict(module.named_children()).items():
-    #             if isinstance(child, ExpertContainer) and len(child.experts) > 0:
-    #                 setattr(module, c_name, child.experts[expert_name])
-    #                 if expert is None:
-    #                     expert = child.experts[expert_name]
-
-    #     # make sure hparams reflect the loaded expert
-    #     if expert:
-    #         self.hparams.update(expert.config.__dict__)
-    #     if get_expert_instance:
-    #         td = TemporaryDirectory()
-    #         expert_checkpoint = MultiExpertModel.save_pretrained(self, td.name)
-    #         expert: Expert = load_expert(expert_checkpoint)
-    #         # remove the temporary directory
-    #         os.remove(expert_checkpoint)
-    #         return expert
-    #     return
-
     def get_expert_instance(self, expert_name, silent=True):
         """
         Retrieves an instance of the specified expert from the model.
