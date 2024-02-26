@@ -504,7 +504,7 @@ class MultiExpertModel(ExpertModel):
             )
         return embeddings
 
-    def get_expert_instance(self, expert_name, silent=True):
+    def get_expert_instance(self, expert_name):
         """
         Retrieves an instance of the specified expert from the model.
 
