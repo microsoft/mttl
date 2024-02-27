@@ -37,6 +37,9 @@ class DownstreamEvalCallback(cb.Callback):
     def on_validation_epoch_start(
         self, trainer: Trainer, pl_module: ExpertTrainer
     ) -> None:
+        if trainer.global_step == 0 and not self.args.eval_before_training:
+            return
+
         if self.args.eval_every_n_epoch is None or (
             self.args.eval_every_n_epoch
             and trainer.current_epoch % self.args.eval_every_n_epoch != 0
@@ -61,62 +64,6 @@ class DownstreamEvalCallback(cb.Callback):
                 on_epoch=True,
                 prog_bar=True,
             )
-
-
-class OptimResetCallback(cb.Callback):
-    def __init__(self, reset_optim=False, reset_lr=False) -> None:
-        """
-        Callback class to reset optimizer and learning rate during training.
-
-        I run some experiments using it, but didnt see any improvement. I not not 100% sure this does waht it is supposed to. pllightning is a bit tricky when it comes to reseting the optimizer.
-
-        Args:
-            reset_optim (bool, optional): Whether to reset the optimizer. Defaults to False.
-            reset_lr (bool, optional): Whether to reset the learning rate. Defaults to False.
-        """
-        super().__init__()
-        self.reset_optim = reset_optim
-        self.reset_lr = reset_lr
-
-    def on_train_epoch_start(
-        self, trainer: Trainer, pl_module: LightningModule
-    ) -> None:
-        """
-        Method called at the start of each training epoch.
-
-        Args:
-            trainer (Trainer): The PyTorch Lightning Trainer object.
-            pl_module (LightningModule): The PyTorch Lightning module being trained.
-        """
-        if self.reset_optim and self.reset_lr:
-            new = pl_module.configure_optimizers()
-            trainer.strategy.optimizers = [new["optimizer"]]
-            trainer.strategy.lr_scheduler_configs = [
-                LRSchedulerConfig(**new["lr_scheduler"])
-            ]
-            trainer.strategy.lr_scheduler_configs[0].__class__
-
-        elif self.reset_lr and not self.reset_optim:
-            optimizer_states = [opt.state_dict() for opt in trainer.optimizers]
-            new = pl_module.configure_optimizers()
-            trainer.strategy.optimizers = [new["optimizer"]]
-            trainer.strategy.lr_scheduler_configs = [
-                LRSchedulerConfig(**new["lr_scheduler"])
-            ]
-            lr = trainer.strategy.lr_scheduler_configs[0].scheduler._last_lr[0]
-            for opt, state in zip(trainer.strategy.optimizers, optimizer_states):
-                opt.load_state_dict(state)
-            for opt in trainer.strategy.optimizers:
-                opt.param_groups[0]["lr"] = lr
-
-        elif self.reset_optim and not self.reset_lr:
-            current_lr = trainer.optimizers[0].param_groups[0]["lr"]
-            new = pl_module.configure_optimizers()
-            trainer.strategy.optimizers = [new["optimizer"]]
-            for opt in trainer.strategy.optimizers:
-                opt.param_groups[0]["lr"] = current_lr
-
-        return super().on_train_epoch_start(trainer, pl_module)
 
 
 class RougeCallbackTestPerEpoch(cb.Callback):
@@ -181,6 +128,7 @@ class RougeLCallback(cb.Callback):
         name="rougeL",
         eval_every_opt_step=1,
         checkpoint_oracle=False,
+        split="val",
     ):
         self.name = name
         self.output_dir = output_dir
@@ -192,6 +140,7 @@ class RougeLCallback(cb.Callback):
         self.do_checkpoint = checkpoint_oracle
         self._checkpoint_now = False
         self._prev_checkpoint = None
+        self.split = split
         self.evaluator = RougeEvaluator(datamodule)
 
     @property
@@ -251,7 +200,7 @@ class RougeLCallback(cb.Callback):
         self._checkpoint_now = False
 
     def test(self, pl_module: LightningModule):
-        rougeL = self.evaluator.evaluate(pl_module, verbose=False)
+        rougeL = self.evaluator.evaluate(pl_module, split=self.split, verbose=False)
         return rougeL
 
     def log_metrics(self, metrics, pl_module: pl.LightningModule, on_step=True):

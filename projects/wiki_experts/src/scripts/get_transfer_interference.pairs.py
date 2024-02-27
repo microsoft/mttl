@@ -4,42 +4,38 @@ import seaborn as sns
 from dataclasses import replace
 from functools import partial
 from matplotlib import pyplot as plt
-from huggingface_hub import login
 from tempfile import TemporaryDirectory
 from pytorch_lightning import seed_everything
-from huggingface_hub import create_repo, login, HfApi
 from mttl.models.modifiers.expert_containers.expert_library import (
     LocalExpertLibrary,
-    HFExpertLibrary,
+    get_expert_library,
 )
 from mttl.models.modifiers.expert_containers.library_transforms import (
     SVDEmbeddingTransform,
     SVDEmbeddingTransformConfig,
 )
-import os
-from huggingface_hub import login, HfApi, logout
-import numpy as np
+from mttl.utils import remote_login
 from projects.wiki_experts.src.evolution.utils import get_svd_embedding
 
-hf_api_key = os.environ["HF_TOKEN"]
-login(token=hf_api_key)
-user = HfApi(token=hf_api_key).whoami()
+remote_login()
 
 # hf_repo_id="oostapeno/flan-lib-neo-1B-20phi"
-hf_repo_id = "ostapeno/library-gptneo_1B_flan_2ep"
+# hf_repo_id = "ostapeno/library-gptneo_1B_flan_2ep"
+hf_repo_id = "ostapeno/library-stablelm_flan_5ep"
 
 local_lib_location = f"/tmp/{hf_repo_id}"
 if os.path.exists(local_lib_location):
     expert_lib = LocalExpertLibrary(local_lib_location)
-    expert_lib.update_from_remote(hf_repo_id)
+    expert_lib.update_from_expert_library(hf_repo_id)
 else:
-    expert_lib = HFExpertLibrary(hf_repo_id)
+    expert_lib = get_expert_library(hf_repo_id)
     os.makedirs(local_lib_location, exist_ok=True)
-    expert_lib: LocalExpertLibrary = LocalExpertLibrary.create_from_remote(
+    expert_lib: LocalExpertLibrary = LocalExpertLibrary.from_expert_library(
         expert_lib, local_lib_location
     )
 ##########################################################################################
 
+sparsity_threshold = 0.1
 if "neo" in hf_repo_id:
     sparsity_threshold = 0.7
 elif "phi" in hf_repo_id:
@@ -51,7 +47,7 @@ def create_embeddings():
         SVDEmbeddingTransformConfig(sparsity_threshold=sparsity_threshold),
         random_state=42,
     )
-    svd_embedder.transform(expert_lib, upload_to_hf=True, force=True)
+    svd_embedder.transform(expert_lib, persist=True, force=True)
     del svd_embedder
 
 
@@ -96,7 +92,7 @@ for i in range(similarity_table.shape[0]):
             pairs[pair] = similarity_table[i, j]
 pairs = [(i, j, v) for (i, j), v in pairs.items()]
 pairs = sorted(pairs, key=lambda x: x[2], reverse=True)
-
+# plots is a list of pairs of tasks and their similarity
 n_pairs = 50
 tasks = list(embeddings.keys())
 # Extract the third element from each tuple

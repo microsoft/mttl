@@ -56,8 +56,8 @@ class EvolExpertConfig(ExpertConfig):
 
         self.transfer_matrix_split = "test"
 
-    def post_init(self):
-        super().post_init()
+    def post_init(self, silent=False):
+        super().post_init(silent=silent)
         if isinstance(self.finetune_task_name, str):
             self.finetune_task_name = self.finetune_task_name.split(",")
 

@@ -1,9 +1,25 @@
 import os
 import sys
+from mttl.datamodule.hellaswag_data_module import (
+    HellaswagDataConfig,
+    HellaswagMultiChoiceDataModule,
+)
+
+from mttl.datamodule.openbookqa_data_module import (
+    OpenbookQADataConfig,
+    OpenbookQAMultiChoiceDataModule,
+)
+from mttl.datamodule.piqa_data_module import PiqaDataConfig, PiqaMultiChoiceDataModule
+from mttl.datamodule.superglue_data_module import BoolQDataModule, SuperGLUEDataConfig
+from mttl.datamodule.winogrande_data_module import (
+    WinograndeDataConfig,
+    WinograndeMultiChoiceDataModule,
+)
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
+from mttl.datamodule.arc_data_module import ArcDataConfig, ArcMultiChoiceDataModule
 from mttl.datamodule.codex_data_module import CodexDataConfig, CodexDataModule
 from mttl.datamodule.mt_seq_to_seq_module import (
     FlanConfig,
@@ -35,10 +51,57 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         "subsample_dev": args.subsample_dev,
         "subsample_test": args.subsample_test,
     }
-    if "flan" in dataset:
+    if dataset in [
+        "arc-easy",
+        "arc-challenge",
+        "arc_easy",
+        "arc_challenge",
+        "openbookqa",
+        "boolq",
+        "piqa",
+        "winogrande",
+        "hellaswag",
+    ]:
+        dataset_to_klass_map = {
+            "arc-easy": (
+                ArcDataConfig(**common_kwargs, arc_type="ARC-Easy"),
+                ArcMultiChoiceDataModule,
+            ),
+            "arc_easy": (
+                ArcDataConfig(**common_kwargs, arc_type="ARC-Easy"),
+                ArcMultiChoiceDataModule,
+            ),
+            "arc-challenge": (
+                ArcDataConfig(**common_kwargs, arc_type="ARC-Challenge"),
+                ArcMultiChoiceDataModule,
+            ),
+            "arc_challenge": (
+                ArcDataConfig(**common_kwargs, arc_type="ARC-Challenge"),
+                ArcMultiChoiceDataModule,
+            ),
+            "openbookqa": (
+                OpenbookQADataConfig(**common_kwargs),
+                OpenbookQAMultiChoiceDataModule,
+            ),
+            "boolq": (SuperGLUEDataConfig(**common_kwargs), BoolQDataModule),
+            "piqa": (PiqaDataConfig(**common_kwargs), PiqaMultiChoiceDataModule),
+            "winogrande": (
+                WinograndeDataConfig(**common_kwargs),
+                WinograndeMultiChoiceDataModule,
+            ),
+            "hellaswag": (
+                HellaswagDataConfig(**common_kwargs),
+                HellaswagMultiChoiceDataModule,
+            ),
+        }
+        assert not for_generation
+        config = dataset_to_klass_map[dataset][0]
+        dm = dataset_to_klass_map[dataset][1](config)
+    elif "flan" in dataset:
         config = FlanConfig(
             **common_kwargs,
             remove_phi_eval_tasks=args.remove_phi_eval_tasks,
+            include_task_source=args.include_task_source,
         )
         dm = FlanModule(config, for_generation=for_generation)
     elif "flat" in dataset:

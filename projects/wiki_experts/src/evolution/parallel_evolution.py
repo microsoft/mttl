@@ -19,16 +19,17 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     HFExpertLibrary,
     ExpertLibrary,
     Score,
+    get_expert_library,
 )
 
 from projects.wiki_experts.src.evolution.config import (
     EvolExpertConfig,
     increase_version,
 )
-from mttl.utils import setup_logging, logger
+from mttl.utils import remote_login, setup_logging, logger
 from projects.wiki_experts.src.evolution.experiment_state import ExperimentState
 from projects.wiki_experts.src.evolution.sequential_evolution import *
-from huggingface_hub import create_repo, login, HfApi
+from huggingface_hub import create_repo, HfApi
 from mttl.models.modifiers.expert_containers.library_transforms import (
     SVDEmbeddingTransform,
     SVDEmbeddingTransformConfig,
@@ -64,9 +65,9 @@ def setup(args: EvolExpertConfig):
     setup_logging(args.output_dir)
     args.n_active_iterations = 1
     global wandb_logger, ai
-    token = os.environ.get("HF_TOKEN", args.hf_token_hub)
+    token = os.environ.get("HF_TOKEN", args.remote_token)
 
-    login(token=token)
+    remote_login(token=token)
     user_name = HfApi().whoami(token=token)["name"]
     ai = find_ai(args.hf_repo_id)
     if args.to_repo_id is None:
@@ -83,10 +84,10 @@ def setup(args: EvolExpertConfig):
         temp_dir = TemporaryDirectory(dir=args.output_dir + "/")
         local_lib_location = temp_dir.name
 
-    remote_lib = HFExpertLibrary(args.hf_repo_id)
+    remote_lib = get_expert_library(args.hf_repo_id)
     os.makedirs(local_lib_location, exist_ok=True)
-    expert_lib = LocalExpertLibrary.create_from_remote(
-        remote_lib, destination=local_lib_location
+    expert_lib = LocalExpertLibrary.from_expert_library(
+        remote_lib, repo_id=local_lib_location
     )
 
     expert_lib.ignore_sliced = True
@@ -125,12 +126,12 @@ def main(args: EvolExpertConfig):
 
     for task in tasks:
         # pull updates from remote
-        expert_lib.update_from_remote(args.to_repo_id)
+        expert_lib.update_from_expert_library(args.to_repo_id)
         # recalculate embeddings just in case (its fast)
         svd_embedder = SVDEmbeddingTransform(
             SVDEmbeddingTransformConfig(sparsity_threshold=0.5)
         )
-        svd_embedder.transform(expert_lib, upload_to_hf=True)
+        svd_embedder.transform(expert_lib, persist=True)
 
         print("Evolving on task", task)
         log_row: Dict = active_task_iteration(
@@ -142,7 +143,7 @@ def main(args: EvolExpertConfig):
         lib_cynced = False
         try:
             # save the expert lib, send updates to remote
-            remote_lib = HFExpertLibrary.from_local(
+            remote_lib = HFExpertLibrary.from_expert_library(
                 expert_lib,
                 args.to_repo_id,
                 force=True,
@@ -163,7 +164,7 @@ def main(args: EvolExpertConfig):
 
         @retry(max_retries=20, wait_seconds=60 * 10)
         def retry_sync():
-            remote_lib = HFExpertLibrary.from_local(
+            remote_lib = HFExpertLibrary.from_expert_library(
                 expert_lib,
                 args.to_repo_id,
                 force=True,

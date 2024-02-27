@@ -13,9 +13,8 @@ from mttl.callbacks import LossCallback
 from abc import ABC, abstractmethod, abstractproperty
 from mttl.datamodule.base import DefaultDataModule
 from mttl.evaluators import RougeEvaluator
-from mttl.datamodule.base import AutoDataModule
+from mttl.datamodule.base import get_datamodule
 from projects.wiki_experts.src.evolution.config import EvolExpertConfig
-from projects.wiki_experts.utils import get_datamodule
 
 
 class EvalCallback(ABC):
@@ -85,6 +84,7 @@ def prepare_evaluator(
     args_copy.finetune_task_name = tasks
     args_copy.validation_portion = 0.0
     dm = get_datamodule(args_copy, for_generation=for_generation)
+
     if split is not None:
         evaluator = EVAL_CLASS(
             datamodule=dm,

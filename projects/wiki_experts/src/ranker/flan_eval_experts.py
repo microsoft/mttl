@@ -2,7 +2,7 @@ import os
 import sys
 from pytorch_lightning import seed_everything
 from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
-from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from mttl.utils import setup_logging, logger
@@ -90,14 +90,12 @@ def run_eval(args):
         tokenizer=data_module.tokenizer,
     )
     if args.expert_library_path:
-        library = HFExpertLibrary(args.expert_library_path)
+        library = get_expert_library(args.expert_library_path)
         module.load_from_library(library)
     elif args.load_module is not None:
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:
             module.load_expert(**expert_kwargs)
-    elif args.module_graph is not None:
-        module.load_from_graph_string(args.module_graph)
 
     module.to("cuda")
     # evaluate all the category

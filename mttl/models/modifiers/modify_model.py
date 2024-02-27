@@ -34,7 +34,7 @@ def modify_transformer(
     from mttl.utils import logger
 
     # create a shared container for the task id
-    transformer.task_id_container = {}
+    transformer.info_container = {}
     # create a shared container for the possible routers
     transformer.selectors = {}
 

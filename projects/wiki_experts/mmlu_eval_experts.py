@@ -1,16 +1,15 @@
 import os
 import sys
-from huggingface_hub import login
 from pytorch_lightning import seed_everything
-from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
-from mttl.models.modifiers.expert_containers.module_graph import Expert, ExpertInfo
+from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
+from mttl.models.modifiers.expert_containers.expert import Expert, ExpertInfo
 from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.datamodule.mmlu_data_module import MMLUDataConfig
 from mttl.evaluators import MMLUEvaluator
-from mttl.utils import setup_logging, logger
+from mttl.utils import remote_login, setup_logging, logger
 
 # register models
 from projects.wiki_experts.src.expert_model import (
@@ -78,9 +77,7 @@ def run_eval(args):
 
     logger.info("Args: {}".format(args.to_json()))
 
-    if args.hf_token_hub:
-        login(token=args.hf_token_hub)
-
+    remote_login(args.remote_token)
     # select dataloader
     configuration = os.environ.get("MMLU_CONFIG", None)
     logger.info("MMLU Configuration: {}".format(configuration))
@@ -118,8 +115,8 @@ def run_eval(args):
     else:
         module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
 
-    if args.hf_lib_id:
-        library = HFExpertLibrary(args.hf_lib_id)
+    if args.library_id:
+        library = get_expert_library(args.library_id)
     else:
         library = None
 
@@ -127,8 +124,6 @@ def run_eval(args):
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:
             module.load_expert(**expert_kwargs, expert_library=library)
-    elif args.module_graph is not None:
-        module.load_from_graph_string(args.module_graph, expert_library=library)
 
     if args.mmlu_use_hard_prompt:
         config = HardPromptConfig(

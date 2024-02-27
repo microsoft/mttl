@@ -14,11 +14,11 @@ from mttl.models.modifiers.expert_containers.expert_containers import (
 )
 from mttl.models.modifiers.expert_containers.expert_library import (
     ExpertLibrary,
-    HFExpertLibrary,
+    get_expert_library,
 )
 import copy
 
-from mttl.models.modifiers.lora import LoRAConfig
+from mttl.models.modifiers.lora import LoRAConfig, SkilledLoRAConfig
 from mttl.models.modifiers.routing import RoutingInfo
 from mttl.utils import logger
 from mttl.models.modifiers.expert_containers import ExpertContainer
@@ -30,9 +30,9 @@ from mttl.models.modifiers.expert_containers import (
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRankerHelper
 
-from mttl.models.modifiers.expert_containers.module_graph import Expert, ExpertInfo
-from mttl.models.modifiers.expert_containers.module_graph import (
-    ModuleGraph,
+from mttl.models.modifiers.expert_containers.expert import (
+    Expert,
+    ExpertInfo,
     load_expert,
 )
 
@@ -52,7 +52,7 @@ def push_expert_to_hub(
     if use_last is True, then uses the last checkpoint `last.ckpt` instead
     of the one with lowest validation loss.
     """
-    from mttl.models.modifiers.expert_containers.module_graph import load_expert
+    from mttl.models.modifiers.expert_containers.expert import load_expert
     from mttl.utils import get_checkpoint_path
 
     expert = load_expert(get_checkpoint_path(ckpt_path, use_last=use_last))
@@ -114,21 +114,8 @@ class MultiExpertModel(ExpertTrainer):
     def get_router_weights(self):
         weights = {}
         for _, selector in self.selectors.items():
-            weights[selector.name] = selector.get_routing_weights()
+            weights[selector.layer_name] = selector.get_routing_weights()
         return weights
-
-    def load_from_graph(self, graph: ModuleGraph, action="route", **kwargs):
-        for name, module in graph.create_modules(
-            base_hparams=self.hparams, **kwargs
-        ).items():
-            print("Loading module: {}".format(module.name))
-            # loading from graph gets the name of the root node
-            self.add_expert_instance(
-                module,
-                action=action,
-                expert_name=name,
-                is_default=name == "default",
-            )
 
     def delete_expert_container(self):
         """
@@ -241,12 +228,6 @@ class MultiExpertModel(ExpertTrainer):
             if action != "merge":
                 self.experts_names.append(expert_instance.name)
 
-    def load_from_graph_string(self, s, action="route", expert_library=None):
-        from mttl.models.modifiers.expert_containers.module_graph import ModuleGraph
-
-        graph = ModuleGraph.from_string(s, expert_library=expert_library)
-        self.load_from_graph(graph, action=action)
-
     def load_from_library(self, library, subsample_library_experts=0):
         import copy
 
@@ -275,7 +256,7 @@ class MultiExpertModel(ExpertTrainer):
         is_default: bool = False,
         expert_library: ExpertLibrary = None,
     ):
-        from mttl.models.modifiers.expert_containers.module_graph import load_expert
+        from mttl.models.modifiers.expert_containers.expert import load_expert
 
         expert = load_expert(
             expert_path,
@@ -339,11 +320,50 @@ class MultiExpertModel(ExpertTrainer):
     def forward(self, batch, reduction="mean"):
         return super().forward(batch, reduction)
 
+    def to_expert(self, weights: dict = None, with_global_names=True) -> Expert:
+        """
+        Converts the current expert model into an instance of the Expert class.
+
+        Args:
+            weights (dict, optional): A dictionary of weights to merge the experts. If not provided, the router's weights will be used.
+            with_global_names (bool, optional): Whether to include global names in the merged weights. Defaults to True.
+
+        Returns:
+            Expert: An instance of the Expert class.
+
+        Raises:
+            None
+
+        Example:
+            model = ExpertModel()
+            expert = model.to_expert(weights={'expert1': 0.5, 'expert2': 0.5}, with_global_names=True)
+        """
+
+        expert_weights = {}
+        for container in self.experts_containers:
+            assert isinstance(container, LoRAExpertContainer)
+
+            if hasattr(container, "get_merged_weights"):
+                expert_config, _weights = container.get_merged_weights(
+                    with_global_names=with_global_names, weights=weights
+                )
+                expert_weights.update(_weights)
+
+        if len(expert_weights) == 0:
+            return None
+
+        expert_info = ExpertInfo(
+            expert_name=self.hparams.finetune_task_name,
+            expert_task_name=self.hparams.finetune_task_name,
+            training_config=self.training_config,
+            expert_config=expert_config,
+        )
+        return Expert(expert_info=expert_info, expert_weights=expert_weights)
+
 
 class MultiExpertModelRanker(MultiExpertModel):
     def __init__(self, **kwargs):
         kwargs["router_selector"] = "info_selector"
-
         super().__init__(**kwargs)
 
         self.expert_ranker = AdapterRankerHelper.get_ranker_instance(
@@ -352,7 +372,7 @@ class MultiExpertModelRanker(MultiExpertModel):
         )
 
     def set_routing_infos(self, batch, generate=False):
-        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
+        self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
 
         self.expert_ranker.set_available_tasks(self.experts_names)
         mod_names, mod_weights = self.expert_ranker.predict_batch(
@@ -365,8 +385,8 @@ class MultiExpertModelRanker(MultiExpertModel):
         # mod_wgths = [[0.5, 0.5], [0.3, 0.7]]
         # mod_names = [['default', 'mod1']]
         # mod_wgths = [[0.7, 0.3]]
-        self.model.task_id_container["routing_infos"].routing_modules = mod_names
-        self.model.task_id_container["routing_infos"].routing_weights = mod_weights
+        self.model.info_container["routing_infos"].routing_modules = mod_names
+        self.model.info_container["routing_infos"].routing_weights = mod_weights
 
         # infos
         logger.info(f"Most similar: {str(mod_names)}")
@@ -381,37 +401,45 @@ class MoETrainer(MultiExpertModel):
 
         super().__init__(**kwargs)
 
-        # 8 experts
-        if not self.hparams.hf_lib_id:
+        if not self.hparams.library_id:
             for i in range(self.hparams.moe_num_experts):
-                self.add_empty_expert(
-                    f"e{i}",
-                    LoRAConfig(
-                        modify_layers=self.hparams.modify_layers,
-                        modify_modules=self.hparams.modify_modules,
-                        lora_alpha=self.hparams.lora_alpha,
-                        lora_dropout=self.hparams.lora_dropout,
-                        lora_rank=self.hparams.lora_rank,
-                        lora_init_b_random=True,
-                    ),
+                # Adding a Skilled LoRA with 1 skill.
+                exp_config = SkilledLoRAConfig(
+                    n_skills=1,
+                    modify_layers=self.hparams.modify_layers,
+                    modify_modules=self.hparams.modify_modules,
+                    lora_alpha=self.hparams.lora_alpha,
+                    lora_dropout=self.hparams.lora_dropout,
+                    lora_rank=self.hparams.lora_rank,
+                    lora_init_b_random=True,
+                    n_splits=self.hparams.n_splits,
+                    phi_2_align_heads=self.hparams.phi_2_align_heads,
                 )
+                self.add_empty_expert(f"e{i}", exp_config)
             self.moe_num_experts = kwargs["moe_num_experts"]
         else:
-            library = HFExpertLibrary(self.hparams.hf_lib_id)
+            library = get_expert_library(self.hparams.library_id)
             for i, expert in enumerate(sorted(list(library.keys()))):
                 self.add_expert_instance(library[expert], expert_name=f"e{i}")
             self.moe_num_experts = i + 1
+            if self.training_config.router_selector == "clown_router":
+                from projects.wiki_experts.eval_library import patch_prototypes
+
+                patch_prototypes(self, library, self.training_config)
 
     def training_step(self, batch, _):
-        loss = self.forward(batch)
+        loss = super().training_step(batch, _)
         total_loss = loss.clone()
 
-        if self.model.task_id_container["routing_gates"]:
+        if (
+            "routing_gates" in self.model.info_container
+            and self.model.info_container["routing_gates"]
+        ):
             num = 0.0
             entropy_of_avg = 0.0
             entropy_of_route = 0.0
 
-            for values in self.model.task_id_container["routing_gates"]:
+            for values in self.model.info_container["routing_gates"]:
                 # compute MI loss
                 values = values.to(torch.float32)
                 values = values.view(-1, values.shape[-1])
@@ -454,7 +482,7 @@ class MoETrainer(MultiExpertModel):
                     (1.0 - normalized_entropy) >= self.hparams.moe_ent_free_bits
                 ) * -entropy_of_route
 
-            self.model.task_id_container["routing_gates"].clear()
+            self.model.info_container["routing_gates"].clear()
 
         self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
         self.log(
@@ -468,6 +496,7 @@ class MoETrainer(MultiExpertModel):
 
 class RoutedMultiExpertModel(MultiExpertModel):
     """
+    TODO: This is depreciated. Use MultiExpertModel instead.
     Class that allows to route to different experts with a learned router from mttl.models.modifiers.experts.Router.
     """
 
