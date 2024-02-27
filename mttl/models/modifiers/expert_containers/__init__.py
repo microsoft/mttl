@@ -17,7 +17,7 @@ def _extract_identifier(string, match_on="finegrained"):
     e.g. 'block' : 'encoder.block.0.layer.0.SelfAttention' -> 'encoder.block.0'
     """
     if match_on == "finegrained":
-        return string.replace(".", "_")
+        return string
     if match_on == "coarsegrained":
         return "shared"
     pos = string.find(f"{match_on}")
@@ -164,6 +164,7 @@ def add_expert_to_transformer(
                                 )
                                 selector.__layer_name__ = identifier + ".selector"
                                 transformer.selectors[identifier] = selector
+
                                 # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
                                 selector.total_calls_per_forward += 1
                                 n_selectors += 1
@@ -180,6 +181,11 @@ def add_expert_to_transformer(
                             transformer.info_container,
                             layer,
                             selector,
+                            lora_merge_after=(
+                                routing_config.lora_merge_after
+                                if routing_config
+                                else False
+                            ),
                         )
                         expert_container.__layer_name__ = layer_name
                         setattr(

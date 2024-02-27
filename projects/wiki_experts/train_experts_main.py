@@ -1,21 +1,14 @@
 import os
 import sys
-import pytorch_lightning as pl
-import glob
+import torch
+from pytorch_lightning import Trainer, seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
 from mttl.callbacks import LiveCheckpointCallback, LiveLibraryCheckpointCallback
-
 from mttl.models.monitors import get_monitors
-from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
-
-
-import torch
-from pytorch_lightning import Trainer, seed_everything
-
-from projects.wiki_experts.utils import get_datamodule
+from mttl.datamodule.base import get_datamodule
 from mttl.callbacks import NanoMMLUCallback, RougeCallback
 from mttl.utils import (
     get_pl_loggers,
@@ -24,6 +17,7 @@ from mttl.utils import (
     logger,
 )
 
+from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.config import ExpertConfig
 from projects.wiki_experts.src.evolution.transfer_matrix import (

@@ -114,7 +114,7 @@ class MultiExpertModel(ExpertTrainer):
     def get_router_weights(self):
         weights = {}
         for _, selector in self.selectors.items():
-            weights[selector.name] = selector.get_routing_weights()
+            weights[selector.layer_name] = selector.get_routing_weights()
         return weights
 
     def delete_expert_container(self):
@@ -401,7 +401,6 @@ class MoETrainer(MultiExpertModel):
 
         super().__init__(**kwargs)
 
-        # TODO: Is this pushed to hub? Is it backward compatible? hf_lib_id -> library_id
         if not self.hparams.library_id:
             for i in range(self.hparams.moe_num_experts):
                 # Adding a Skilled LoRA with 1 skill.
@@ -423,6 +422,10 @@ class MoETrainer(MultiExpertModel):
             for i, expert in enumerate(sorted(list(library.keys()))):
                 self.add_expert_instance(library[expert], expert_name=f"e{i}")
             self.moe_num_experts = i + 1
+            if self.training_config.router_selector == "clown_router":
+                from projects.wiki_experts.eval_library import patch_prototypes
+
+                patch_prototypes(self, library, self.training_config)
 
     def training_step(self, batch, _):
         loss = super().training_step(batch, _)

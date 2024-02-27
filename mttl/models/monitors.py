@@ -8,11 +8,11 @@ from typing import Any
 
 import pytorch_lightning as pl
 import matplotlib.pyplot as plt
-from torch.distributions import Categorical
 from pytorch_lightning import Callback
 
 from mttl.utils import agg_dicts, Averager
 from mttl.models.modifiers.routing import RoutingSelector
+from mttl.models.modifiers.expert_containers.selectors import Selector
 
 try:
     import wandb
@@ -31,6 +31,9 @@ def get_monitors(config):
         )
     ):
         monitors += [PolytroponLog()]
+
+    else:
+        monitors += [SelectorLog(config)]
 
     return monitors
 
@@ -99,7 +102,7 @@ class SelectorRoutingsLog(Callback):
     def __init__(self, args):
         self.averager = Averager(0.5)
         self.acc_routings = {}
-        self.log_per_layer = args.selector_log_per_layer
+        self.log_per_layer = True
 
     def aggregate_and_maybe_log(self, trainer, pl_module, current_step, split) -> None:
         # get routing attributes of all layers
@@ -194,6 +197,49 @@ class SelectorRoutingsLog(Callback):
         dataloader_idx: int = 0,
     ) -> None:
         self.aggregate_and_maybe_log(trainer, pl_module, batch_idx, split="val")
+
+
+class SelectorLog(SelectorRoutingsLog):
+    def __init__(self, args):
+        super().__init__(args)
+        self.plot_every = 10
+
+    def aggregate_and_maybe_log(self, trainer, pl_module, current_step, split) -> None:
+        # get routing attributes of all layers
+        if current_step % self.plot_every != 0:
+            return
+        all_routing_gates = []
+        for name, module in pl_module.named_modules():
+            if isinstance(module, Selector) and hasattr(module, "routing_gates"):
+                if isinstance(module.routing_gates, list):
+                    gates = np.mean([torch.mean(gate) for gate in module.routing_gates])
+                    all_routing_gates.append(gates.item())
+                    module.routing_gates = []
+                else:
+                    continue
+        if len(all_routing_gates) > 0:
+            # log and empty routing_gates
+            # we log averaged gates across samples and layers
+            if wandb.run is not None:
+                wandb_logger = [
+                    lgr
+                    for lgr in pl_module.loggers
+                    if isinstance(lgr, pl.loggers.wandb.WandbLogger)
+                ][0]
+                prefix = (
+                    f"{pl_module._log_pref}" if hasattr(pl_module, "_log_pref") else ""
+                )
+                wandb_logger.log_metrics(
+                    {f"{prefix}{split}/routing_gates": np.mean(all_routing_gates)}
+                )
+                if self.log_per_layer:
+                    plt.clf()
+                    _ = plt.plot(range(len(all_routing_gates)), all_routing_gates)
+                    wandb_logger.log_image(
+                        f"{prefix}{split}/routing_gates_per_layer",
+                        [wandb.Image(plt)],
+                        step=pl_module.global_step,
+                    )
 
 
 class SelectorMetricsLog(Callback):

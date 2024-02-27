@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from collections import defaultdict
 from torch import nn
+from torch.optim.optimizer import Optimizer
 from mttl.models.llama_patch import replace_attn_with_flash_attn
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.base import ModifierConfig
@@ -231,3 +232,6 @@ class ExpertTrainer(EfficientCheckpointModule):
             training_config=self.training_config,
         )
         ckpt["expert_info"] = expert_info.asdict()
+
+    def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
+        return super().on_before_optimizer_step(optimizer)
