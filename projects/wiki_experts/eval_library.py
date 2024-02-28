@@ -3,6 +3,7 @@ import sys
 import json
 import torch
 import copy
+import wandb
 from copy import deepcopy
 import torch.nn.functional as F
 
@@ -35,6 +36,13 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     ArrowConfig,
 )
 from mttl.models.modifiers.expert_containers.expert_containers import ExpertContainer
+from projects.wiki_experts.src.evolution.transfer_matrix import (
+    TransferMatrixConfig,
+    run_eval as produce_transfer_matrix,
+)
+from mttl.datamodule.base import get_datamodule
+from mttl.evaluators.rouge_evaluator import RougeEvaluator
+from projects.wiki_experts.src.evolution.utils import TableLogger
 
 
 def get_hidden_states(library, args):
@@ -84,9 +92,10 @@ def patch_prototypes(module, library, args, proto_inits=None):
             prototypes = []
             params = []
             for expert_name in mod.expert_names:
+                patched_layer_name = mod.layer_name.replace(".selector", "")
                 layer_names = proto_inits[expert_name].keys()
                 valid_layer_names = [
-                    k for k in layer_names if k.startswith(mod.layer_name)
+                    k for k in layer_names if k.startswith(patched_layer_name)
                 ]
                 key = sorted(valid_layer_names)[0]
                 prototypes += [proto_inits[expert_name][key]]
@@ -101,6 +110,32 @@ def patch_prototypes(module, library, args, proto_inits=None):
                 prototypes = prototypes / max_norm
 
             mod.overwrite_prototypes(prototypes)
+
+
+def eval_in_distribution(module, args: ExpertConfig, tasks):
+    args.include_task_source = "*"
+    transfer_table = TableLogger()
+    wandb.init(
+        project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
+        config=dict(module.hparams),
+        name=os.environ.get("AMLT_JOB_NAME", None),
+    )
+    for task in tasks:
+        args.finetune_task_name = task
+        args.predict_batch_size = 16
+        dm = get_datamodule(args, for_generation=True)
+        evaluator = RougeEvaluator(
+            datamodule=dm,
+        )
+        rouge = evaluator.evaluate(
+            module,
+            split="test",
+            verbose=False,
+        )
+        wandb.log({f"test/rougeL_{task}": rouge})
+        transfer_table.log({"task": task, "rougeL": rouge})
+    transfer_table.log_table_wandb()
+    wandb.log({"mean_rougeL": transfer_table.df["rougeL"].mean()})
 
 
 def run_multitask(args: ExpertConfig):
@@ -209,48 +244,61 @@ def run_multitask(args: ExpertConfig):
             if isinstance(mod, ExpertContainer):
                 mod.selector.set_prototypes(prototypes)
         module = module.to("cuda")
+    elif args.merge_or_route == "oracle":
+        # TaskNameSelector
+        an_expert = library[next(iter(library.keys()))]
+        args_copy: ExpertConfig = deepcopy(an_expert.training_config)
+        args_copy.output_dir = args.output_dir
+        args_copy.router_selector = "task_selector"
+        module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
+        module.load_from_module_dict(library)
 
-    if args.pipeline_eval_tasks == "all":
-        args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
+    if args.pipeline_eval_tasks == "in_distribution":
+        tasks = [expert.expert_task_name for expert in library.data.values()]
+        scores = eval_in_distribution(module, args_copy, tasks)
+        return
+    else:
+        if args.pipeline_eval_tasks == "all":
+            args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
 
-    with torch.no_grad():
-        runner: EvaluatorRunner = setup_evaluators(
-            model_type=module.hparams.model,
-            model_family=module.hparams.model_family,
-            max_input_length=module.hparams.max_input_length,
-            max_output_length=module.hparams.max_output_length,
-            predict_batch_size=args.predict_batch_size,
-            truncation_side=module.hparams.truncation_side,
-            tasks=args.pipeline_eval_tasks,
-            output_path=os.path.join(args.output_dir, "DOWNSTREAM"),
-        )
-        scores = runner.run(module)
+        with torch.no_grad():
+            runner: EvaluatorRunner = setup_evaluators(
+                model_type=module.hparams.model,
+                model_family=module.hparams.model_family,
+                max_input_length=module.hparams.max_input_length,
+                max_output_length=module.hparams.max_output_length,
+                predict_batch_size=args.predict_batch_size,
+                truncation_side=module.hparams.truncation_side,
+                tasks=args.pipeline_eval_tasks,
+                output_path=os.path.join(args.output_dir, "DOWNSTREAM"),
+            )
+            scores = runner.run(module)
 
-    # try to fetch routing statistics
-    routing_stats = {}
-    if hasattr(module.model, "task_id_container"):
-        for task_name in module.model.task_id_container.keys():
-            if task_name == "routing_infos":
-                continue
+        # try to fetch routing statistics
+        routing_stats = {}
+        if hasattr(module.model, "task_id_container"):
+            for task_name in module.model.task_id_container.keys():
+                if task_name == "routing_infos":
+                    continue
 
-            task_dict = module.model.task_id_container[task_name]
-            for k, v in task_dict.items():
-                routing_stats[f"{task_name}/{k}"] = v
+                task_dict = module.model.task_id_container[task_name]
+                for k, v in task_dict.items():
+                    routing_stats[f"{task_name}/{k}"] = v
 
-    if os.environ.get("WANDB_API_KEY"):
-        import wandb
+        if os.environ.get("WANDB_API_KEY"):
+            import wandb
 
-        wandb.init(
-            project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
-            config=dict(module.hparams),
-            name=os.environ.get("AMLT_JOB_NAME", None),
-        )
-        wandb.log({f"downstream/{k}": v for k, v in scores.items()})
+            wandb.init(
+                project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
+                config=dict(module.hparams),
+                name=os.environ.get("AMLT_JOB_NAME", None),
+            )
+            wandb.log({f"downstream/{k}": v for k, v in scores.items()})
 
-        if len(routing_stats) > 0:
-            wandb.log(routing_stats)
+            if len(routing_stats) > 0:
+                wandb.log(routing_stats)
 
-        wandb.finish()
+            wandb.finish()
 
 
 if __name__ == "__main__":

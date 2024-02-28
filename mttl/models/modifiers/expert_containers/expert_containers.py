@@ -35,6 +35,13 @@ class ExpertContainer:
         self.expert_infos[expert_name] = expert_info
         self.expert_names.append(expert_name)
         self.experts[expert_name] = expert_module
+        if not expert_name == expert_info.expert_task_name and isinstance(
+            self.selector, TaskNameSelector
+        ):
+            for t in expert_info.expert_task_name.split(","):
+                self.experts[t] = expert_module
+                self.add_expert_to_selector(t, expert_info=expert_info)
+
         self.add_expert_to_selector(expert_name, expert_info=expert_info)
 
     def _check_config(self, expert_config: Union[Config, ModifierConfig]):

@@ -392,9 +392,7 @@ class EvaluatorRunner:
                 task_output_path = None
 
             scores[name] = self.evaluators[name].evaluate(
-                module,
-                verbose=verbose,
-                output_path=task_output_path,
+                module, verbose=verbose, output_path=task_output_path, split="test"
             )
 
             if self.output_path:
