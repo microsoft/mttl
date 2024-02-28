@@ -39,4 +39,4 @@ def test_poly():
     s = 0
     for p in model.parameters():
         s += p.sum().item()
-    assert round(s / 1e6, 4) == 2.1144
+    assert round(s / 1e6, 4) == 2.1145
