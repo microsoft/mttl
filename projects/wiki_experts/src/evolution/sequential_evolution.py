@@ -24,7 +24,7 @@ from projects.wiki_experts.src.evolution.utils import (
     remove_outdated_experts_from_library,
 )
 
-from projects.wiki_experts.src.expert_trainer import ExpertTrainer
+from mttl.models.expert_model import ExpertModel as ExpertTrainer
 from mttl.models.modifiers.expert_containers.expert_library import (
     LocalExpertLibrary,
     HFExpertLibrary,
