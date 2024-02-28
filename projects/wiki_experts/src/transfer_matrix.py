@@ -1,6 +1,5 @@
 import os
 import sys
-import copy
 import wandb
 import numpy as np
 import pandas as pd
@@ -19,19 +18,18 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     get_expert_library,
 )
 
-from projects.wiki_experts.src.evolution.config import EvolExpertConfig
-from projects.wiki_experts.src.evolution.utils import (
-    log_wandb,
+from mttl.models.expert_config import ExpertConfig
+from projects.wiki_experts.src.utils.utils import (
     init_wandb_logger,
     TableLogger,
     remove_outdated_experts_from_library,
 )
 
-from projects.wiki_experts.src.evolution.evaluators import Evaluator, prepare_evaluator
+from projects.wiki_experts.src.utils.evaluators import Evaluator, prepare_evaluator
 from mttl.utils import remote_login, setup_logging, logger
 
 # register models
-from projects.wiki_experts.src.expert_model import MultiExpertModel
+from mttl.models.expert_model import ExpertModel
 from mttl.vllm_engines.engines import free_memory
 from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 
@@ -42,17 +40,18 @@ if DEBUG:
     print("!!!!!!!!!!!!!!!!!!!!!! DEBUG MODE")
 
 
-class TransferMatrixConfig(EvolExpertConfig):
+class TransferMatrixConfig(ExpertConfig):
     def _set_defaults(self):
         super()._set_defaults()
         self.only_diagonal = False
         self.eval_base = True
+        self.transfer_matrix_split = "test"
 
 
 def eval_expert_on_task(
     task,
-    module_constructor: Union[Callable, MultiExpertModel],
-    expert,
+    module_constructor: Union[Callable, ExpertModel],
+    expert: Expert,
     evaluator_train=None,
     evaluator_valid=None,
     evaluator_test=None,
@@ -62,24 +61,24 @@ def eval_expert_on_task(
     logger.info(f"Evaluating perf for {task}")
 
     if expert is not None:
-        model_copy = (
-            module_constructor.deepcopy()
-            if isinstance(module_constructor, MultiExpertModel)
+        model_copy: ExpertModel = (
+            module_constructor
+            if isinstance(module_constructor, ExpertModel)
             else module_constructor()
         )
-        if isinstance(expert, str):
-            model_copy.load_from_module_dict({task: expert}, action="route")
-        elif isinstance(expert, Expert):
-            model_copy.add_expert_instance(expert, task, action="route")
-        else:
-            raise ValueError(f"Checkpoint type {type(expert)} not supported")
-        model_copy.replace_container_with_expert(task, get_expert_instance=False)
+        assert all(
+            [
+                key in model_copy.model.state_dict()
+                for key in expert.expert_weights.keys()
+            ]
+        )
+        model_copy.model.load_state_dict(expert.expert_weights, strict=False)
         module = model_copy
 
     if module is None:
         module = (
             module_constructor
-            if isinstance(module_constructor, MultiExpertModel)
+            if isinstance(module_constructor, ExpertModel)
             else module_constructor()
         )
 
@@ -103,8 +102,8 @@ def eval_expert_on_task(
 
 def eval_all_experts_on_task(
     task_eval_on,
-    module_constructor: Union[Callable, MultiExpertModel],
-    expert_lib: dict,
+    module_constructor: Union[Callable, ExpertModel],
+    expert_lib,
     evaluator: Evaluator = None,
     only_diagonal=False,
 ):
@@ -147,9 +146,8 @@ def produce_transfer_matrix(
         evaluator: Evaluator = prepare_evaluator(
             args, args.dataset, tasks=task_eval_on, split=args.transfer_matrix_split
         )
-        module = MultiExpertModel(
+        module = ExpertModel(
             **vars(args),
-            tokenizer=evaluator.datamodule.tokenizer,
             device_map="cpu",
         )
 
@@ -198,7 +196,7 @@ def resolve_hf_repo_id(hf_repo_id):
         return hf_repo_id, None
 
 
-def run_eval(args: EvolExpertConfig, debug=None):
+def run_eval(args: TransferMatrixConfig, debug=None):
     """
     Create transfer matrix.
     """
@@ -217,33 +215,33 @@ def run_eval(args: EvolExpertConfig, debug=None):
     print("###### Tasks", args.finetune_task_name)
     # can work with other library types as well, but need to implement clone and filter_with_tasks
 
-    if args.hf_repo_id is None:
+    if args.library_id is None:
         # empty lib, eval only base model
         temp_dir = TemporaryDirectory(dir=args.output_dir + "/")
         destination = temp_dir.name
         expert_lib = LocalExpertLibrary(repo_id=destination)
-    elif isinstance(args.hf_repo_id, Expert):
-        expert: Expert = args.hf_repo_id
+    elif isinstance(args.library_id, Expert):
+        expert: Expert = args.library_id
         expert.expert_info.expert_name = "joint"
         expert.expert_info.expert_task_name = "joint"
         temp_dir = TemporaryDirectory(dir=args.output_dir + "/")
         destination = temp_dir.name
         expert_lib = LocalExpertLibrary(repo_id=destination)
         expert_lib.add_expert(expert)
-    elif os.path.isfile(args.hf_repo_id):
+    elif os.path.isfile(args.library_id):
         # testing a single model
-        expert = load_expert(args.hf_repo_id)
+        expert = load_expert(args.library_id)
         expert.expert_info.expert_name = "joint"
         expert.expert_info.expert_task_name = "joint"
         temp_dir = TemporaryDirectory(dir=args.output_dir + "/")
         destination = temp_dir.name
         expert_lib = LocalExpertLibrary.from_expert_dict(
-            {args.hf_repo_id: expert}, destination=destination
+            {args.library_id: expert}, destination=destination
         )
     else:
         destination = args.output_dir + "/library/"
         os.makedirs(destination, exist_ok=True)
-        hf_repo_id, expert_name = resolve_hf_repo_id(args.hf_repo_id)
+        hf_repo_id, expert_name = resolve_hf_repo_id(args.library_id)
         expert_lib: LocalExpertLibrary = LocalExpertLibrary.from_expert_library(
             get_expert_library(repo_id=hf_repo_id), repo_id=destination
         )

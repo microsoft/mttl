@@ -12,7 +12,7 @@ import pytorch_lightning as pl
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
 from mttl.utils import setup_logging, logger
-from projects.wiki_experts.src.evolution.evaluators import (
+from projects.wiki_experts.src.utils.evaluators import (
     TestLossEvaluator,
     ExtendedMMLUEvaluator,
     Evaluator,
@@ -25,7 +25,7 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     get_best_expert_for_score,
     get_best_expert_for_task,
 )
-from projects.wiki_experts.src.evolution.config import find_version
+from projects.wiki_experts.src._evolution.config import find_version
 from mttl.models.modifiers.expert_containers.expert import Expert
 
 

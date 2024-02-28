@@ -20,7 +20,7 @@ from mttl.utils import (
 )
 
 from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
-from projects.wiki_experts.src.evolution.transfer_matrix import (
+from projects.wiki_experts.src.transfer_matrix import (
     TransferMatrixConfig,
     run_eval as produce_transfer_matrix,
 )
@@ -161,10 +161,6 @@ def run_multitask(args: ExpertConfig):
             library = get_expert_library(args.library_id, create=True)
             library.add_expert_from_ckpt(checkpoint)
 
-        if args.hf_repo_id and checkpoint:
-            from projects.wiki_experts.src.expert_model import push_expert_to_hub
-
-            push_expert_to_hub(checkpoint, args.hf_repo_id, auto_search=False)
         if args.create_transfer_matrix:
             create_transfer_matrix(args, checkpoint)
 
