@@ -89,6 +89,7 @@ def patch_prototypes(module, library, args, proto_inits=None):
 
     for mod in module.modules():
         if isinstance(mod, ClownSelector):
+            patched_layer_name = mod.layer_name.replace(".selector", "")
             prototypes = []
             params = []
             for expert_name in mod.expert_names:
