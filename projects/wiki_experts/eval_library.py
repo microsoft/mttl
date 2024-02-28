@@ -118,6 +118,7 @@ def run_multitask(args: ExpertConfig):
 
     library = get_expert_library(
         repo_id=args.library_id,
+        token=args.remote_token,
         exclude_selection=exclude_phi_tasks,
     )
 
@@ -186,13 +187,16 @@ def run_multitask(args: ExpertConfig):
         args_copy.router_selector = "phatgoose_selector"
         args_copy.router_temp = args.router_temp
         args_copy.moe_top_k = args.moe_top_k
+
+        phagoose_transform = PhatgooseTransform(
+            PhatgooseConfig(
+                n_steps=args.n_steps_pg, learning_rate=args.learning_rate_pg
+            )
+        )
+        prototypes = phagoose_transform.transform(library, default_args=args)
+
         module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
-
-        phagoose_transform = PhatgooseTransform(PhatgooseConfig(recompute=False))
-        prototypes = phagoose_transform.transform(
-            library, expert_names=None, default_args=args
-        )
         # load prototypes into the router
         for mod in module.modules():
             if isinstance(mod, ExpertContainer):

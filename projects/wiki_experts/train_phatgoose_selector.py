@@ -26,10 +26,10 @@ def train_with_transform(args: ExpertConfig):
     library_id, expert_names = parse_libname(args.library_id)
     library = get_expert_library(library_id, create=False)
     phagoose_transform = PhatgooseTransform(
-        PhatgooseConfig(recompute=True, n_steps=200)
+        PhatgooseConfig(n_steps=args.n_steps_pg, learning_rate=args.learning_rate_pg)
     )
     embeddings = phagoose_transform.transform(
-        library, expert_names=expert_names, default_args=args
+        library, expert_names=expert_names, default_args=args, recompute=True
     )
     print(len(embeddings))
 

@@ -3,10 +3,12 @@ from typing import Dict, List, Union
 from pyparsing import abstractmethod
 import torch
 import math
+import wandb
 import numpy as np
 from torch import nn
 import torch.nn.functional as F
 from mttl.models.modifiers.routing import RoutingInfo
+from torch.distributions import Bernoulli, Categorical
 
 # from mttl.models.modifiers.routing import RoutingMixin
 from mttl.utils import logger
@@ -779,19 +781,18 @@ class Router(nn.Module):
             device
         )  # (n_experts, input_dim)
         # standardize the expert embeddings: sub mean and divide by std
-        self.expert_embeddings = (
-            self.expert_embeddings - self.expert_embeddings.mean(dim=-1, keepdim=True)
-        ) / (self.expert_embeddings.std(dim=-1, keepdim=True) + 1e-6)
+        self.standardizer = nn.LayerNorm(
+            self.expert_embeddings.shape[1], elementwise_affine=False
+        )
+        self.expert_embeddings = self.standardizer(self.expert_embeddings)
 
     def forward(self, input):
         # x: (batch_size, seq, d)
         # expert_embeddings: (n_experts, d)
-        # standardize the input
-        input = (input - input.mean(dim=-1, keepdim=True)) / (
-            input.std(dim=-1, keepdim=True) + 1e-6
-        )
         # perform routing business in fp32 as in Clown
         input = input.to(self.expert_embeddings.dtype)
+        # standardize the input
+        input = self.standardizer(input)
         # cosine similarity of each token with each expert
         sim = torch.einsum(
             "bsd,ed->bse", input, self.expert_embeddings
@@ -829,6 +830,8 @@ class PhatgooseSelector(Selector):
         self.router = None
         self.layer = kwargs["layer"]
         self.default_expert_name = None
+        self.routing_gates = []  # for logging purposes at training time
+        self.log_routing_stats = False
 
     def get_prototypes(self):
         return {k: gate.v.detach().cpu().numpy() for k, gate in self.gates.items()}
@@ -858,14 +861,45 @@ class PhatgooseSelector(Selector):
             # selectors for tasks are trained independently
             # all samples go through the same selector
             scores = self.gates[self.default_expert_name](input)
+            # log the scores
+            container = kwargs.get("container", None)
+            if container is not None:
+                self.routing_gates.append(scores.detach().cpu().float())
             return BatchSequenceModulesAndWeightsSelectorOutput(
                 torch.zeros_like(scores, dtype=torch.int8), scores
             )
         else:
-            # the inference procedure: we ave multiple gates
+            # the inference procedure: we have multiple gates
             # parallel forward + top-k selection
             assert len(self.gates) == len(self.expert_names)
             modules, scores = self.router(input)
+            routings = torch.zeros(
+                (input.shape[0], input.shape[1], len(self.expert_names)),
+                dtype=torch.float,
+                device=self.device,
+            )
+
+            if self.log_routing_stats:
+                # for logging purposes: we transform it into tokens x experts
+                _modules = modules.view(-1, self.router.moe_top_k)
+                _routings = routings.view(-1, len(self.expert_names))
+                _scores = scores.view(-1, self.router.moe_top_k)
+                _routings = _routings.scatter(1, _modules, _scores)
+                # calculate entropy and MI over the toekns dimention and log
+                layer_routing_dist = _routings
+                dims = layer_routing_dist.shape[1]
+                layer_routing_mean = layer_routing_dist.mean(0)
+                h_mean = Categorical(probs=layer_routing_mean).entropy() / math.log(
+                    dims
+                )
+                mean_h = Categorical(
+                    probs=layer_routing_dist
+                ).entropy().mean() / math.log(dims)
+                mi = h_mean - mean_h
+                logger.info(f"Layer {self.__layer_name__} MI: {mi}, mean_H: {mean_h}")
+                # TODO: figure out a way of how to actually log it to somewhere
+                # at first glance there is no collapse here, i.e. MI is low and entropy is not too low.
+
             return BatchSequenceModulesAndWeightsSelectorOutput(
                 modules=modules, weights=scores
             )

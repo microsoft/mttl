@@ -37,3 +37,4 @@ pytest-mock
 azure-storage-blob
 azure-identity
 scikit-learn
+nltk

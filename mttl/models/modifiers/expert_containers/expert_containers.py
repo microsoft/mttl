@@ -341,7 +341,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
 
     def forward(self, input, **kwargs):
         if len(self.experts) > 0:
-            selection = self.selector(input, **kwargs)
+            selection = self.selector(input, container=self, **kwargs)
             return self.route(input, selection, **kwargs)
         return self.layer(input)
 
