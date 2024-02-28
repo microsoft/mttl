@@ -81,12 +81,13 @@ def patch_prototypes(module, library, args, proto_inits=None):
 
     for mod in module.modules():
         if isinstance(mod, ClownSelector):
+            patched_layer_name = mod.layer_name.replace(".selector", "")
             prototypes = []
             params = []
             for expert_name in mod.expert_names:
                 layer_names = proto_inits[expert_name].keys()
                 valid_layer_names = [
-                    k for k in layer_names if k.startswith(mod.layer_name)
+                    k for k in layer_names if k.startswith(patched_layer_name)
                 ]
                 key = sorted(valid_layer_names)[0]
                 prototypes += [proto_inits[expert_name][key]]
