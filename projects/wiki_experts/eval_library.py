@@ -13,7 +13,7 @@ from mttl.models.modifiers.expert_containers.selectors import ClownSelector
 from mttl.models.modifiers.lora import LoRAConfig
 
 from mttl.utils import logger, remote_login, setup_logging
-from mttl.models.expert_model import MultiExpertModel, RoutedMultiExpertModel
+from mttl.models.expert_model import MultiExpertModel
 from mttl.models.expert_config import ExpertConfig
 
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
@@ -171,7 +171,7 @@ def run_multitask(args: ExpertConfig):
         args_copy.proto_init = args.proto_init
         args_copy.normalize_router_input = args.normalize_router_input
         args_copy.lora_merge_after = args.merge_or_route == "clown_lora_after_op"
-        module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
+        module = MultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
         patch_prototypes(module, library, args)
         module = module.to("cuda")
@@ -196,7 +196,7 @@ def run_multitask(args: ExpertConfig):
         )
         prototypes = phagoose_transform.transform(library, default_args=args)
 
-        module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
+        module = MultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
         # load prototypes into the router
         for mod in module.modules():
