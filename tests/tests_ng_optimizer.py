@@ -72,7 +72,7 @@ def test_NGRoutingOptimizer(tmp_path):
     assert isinstance(result[0], np.ndarray)
 
     # assert that the second element of the result is a string
-    assert isinstance(result[1], str)
+    assert isinstance(result[1], dict)
 
 
 if __name__ == "__main__":

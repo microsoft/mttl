@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod, abstractproperty
 from mttl.datamodule.base import DefaultDataModule
 from mttl.evaluators import RougeEvaluator
 from mttl.datamodule.base import get_datamodule
-from projects.wiki_experts.src._evolution.config import EvolExpertConfig
+from mttl.models.expert_config import ExpertConfig
 
 
 class EvalCallback(ABC):
@@ -59,7 +59,7 @@ class MMLUEvalCallback(MMLUEvaluator, EvalCallback):
 
 
 def prepare_evaluator(
-    args: EvolExpertConfig,
+    args: ExpertConfig,
     dataset,
     tasks,
     split=None,

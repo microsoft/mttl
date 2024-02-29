@@ -14,7 +14,6 @@ from typing import Union, Callable, List, Dict
 
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators.base import compute_task_aggregation
-from mttl.models.expert_model import MultiExpertModel
 from mttl.models.expert_model import ExpertModel
 from mttl.utils import logger
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
@@ -28,7 +27,7 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
 
 
 def mmlu_get_loss(
-    model: MultiExpertModel,
+    model: ExpertModel,
     tokenizer,
     dataloader: DataLoader,
     use_vllm=True,
@@ -109,7 +108,7 @@ class NGRoutingOptimizer:
         self.log = log
         self.regularizer_factor = regularizer_factor
         self.task_name = task_name
-        self.model: MultiExpertModel = model
+        self.model: ExpertModel = model
         self.K = len(expert_lib)
         # vars ordered in the same order as data in expert_lib
         init = [0] * self.K
@@ -133,7 +132,7 @@ class NGRoutingOptimizer:
     def optimize(
         self,
     ):
-        def get_score(weights, basemodel: MultiExpertModel, get_loss, get_regular):
+        def get_score(weights, basemodel: ExpertModel, get_loss, get_regular):
             config = WeightedLinearMergeConfig(
                 {exp_name: w for exp_name, w in zip(self.library.keys(), weights)}
             )

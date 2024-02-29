@@ -199,5 +199,5 @@ def load_expert(
 
     # override expert name
     if expert_name is not None:
-        expert.expert_info.expert_name = expert_name
+        expert.name = expert_name
     return expert
