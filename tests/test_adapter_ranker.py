@@ -36,7 +36,10 @@ def test_clip_routing():
     prediction_experts = module.expert_ranker.predict_batch(batch)
     assert len(prediction_experts) == 2
     assert isinstance(module.expert_ranker, CLIPRanker)
-    assert prediction_experts[0][0] == "race_high_Select_the_best_answer_generate_span_"
+    assert (
+        prediction_experts[0][0][0]
+        == "race_high_Write_a_multi_choice_question_for_the_following_article"
+    )
 
 
 def test_classifier_routing():
