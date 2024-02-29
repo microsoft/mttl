@@ -123,7 +123,7 @@ class KATERanker(AdapterRanker):
 
     def train(self):
         self.dataset = (
-            load_dataset(self.dataset_name)["train"].shuffle().select(range(1_000))
+            load_dataset(self.dataset_name)["train"].shuffle().select(range(1_000_000))
         )
         self.train_features = self.embedder.encode(
             self.dataset["source"],
