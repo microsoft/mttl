@@ -1,4 +1,4 @@
-from projects.wiki_experts.src.config import ExpertConfig
+from mttl.models.expert_config import ExpertConfig
 
 
 class RankerConfig(ExpertConfig):

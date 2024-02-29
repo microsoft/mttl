@@ -24,6 +24,10 @@ def register_modifier(name, config_cls=None):
 
 def get_modifier_type(config, model_modifier=None):
     model_modifier = model_modifier or getattr(config, "model_modifier", None)
+    try:
+        model_modifier = model_modifier or CONFIGS_TO_MODIFIERS.get(config, None)
+    except:
+        pass
     model_modifier = model_modifier or CONFIGS_TO_MODIFIERS.get(type(config), None)
     return model_modifier
 

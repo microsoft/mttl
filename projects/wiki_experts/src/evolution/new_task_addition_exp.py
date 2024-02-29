@@ -22,7 +22,7 @@ from projects.wiki_experts.src.evolution.utils import (
     remove_outdated_experts_from_library,
 )
 
-from projects.wiki_experts.src.expert_trainer import ExpertTrainer
+from mttl.models.expert_model import MultiExpertModel, ExpertModel as ExpertTrainer
 from mttl.models.modifiers.expert_containers.expert_library import (
     LocalExpertLibrary,
     ExpertLibrary,
@@ -37,7 +37,6 @@ from projects.wiki_experts.src.evolution.config import (
 )
 from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
 from mttl.utils import remote_login, setup_logging, logger
-from projects.wiki_experts.src.expert_model import MultiExpertModel
 from projects.wiki_experts.src.evolution.experiment_state import ExperimentState
 from mttl.vllm_engines.engines import free_memory
 

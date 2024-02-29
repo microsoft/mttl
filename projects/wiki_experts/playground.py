@@ -3,7 +3,6 @@ import readline
 import os
 import glob
 import sys
-from termcolor import colored, cprint
 from typing import List
 
 from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
@@ -87,8 +86,8 @@ class ConversationNoTemplate(Conversation):
 
 
 def main():
-    from projects.wiki_experts.src.config import ExpertConfig
-    from projects.wiki_experts.src.expert_model import MultiExpertModel
+    from mttl.models.expert_config import ExpertConfig
+    from mttl.models.expert_model import MultiExpertModel
     from mttl.datamodule.utils import get_tokenizer_with_args
     from mttl.utils import setup_logging
     import torch

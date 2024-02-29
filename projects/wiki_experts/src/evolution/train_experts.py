@@ -2,14 +2,13 @@ import os
 import sys
 import json
 import pytorch_lightning as pl
-
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
-
 import torch
 from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 import json
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.datamodule.mt_seq_to_seq_module import (
     FlanConfig,
@@ -18,9 +17,6 @@ from mttl.datamodule.mt_seq_to_seq_module import (
     FlatMultiTaskModule,
 )
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
-
-from mttl.callbacks import RougeCallback
 from mttl.datamodule.oasst1_module import OA1Config, OA1Module
 from mttl.datamodule.facts_lm_module import FactsLMConfig, FactsLMDataModule
 from mttl.datamodule.platypus_module import (
@@ -30,8 +26,8 @@ from mttl.datamodule.platypus_module import (
 )
 from mttl.utils import get_mlf_logger, setup_logging, logger
 
-from projects.wiki_experts.src.expert_trainer import ExpertTrainer
-from projects.wiki_experts.src.config import ExpertConfig
+from mttl.models.expert_model import ExpertModel as ExpertTrainer
+from mttl.models.expert_config import ExpertConfig
 from projects.wiki_experts.src.callbacks import (
     RougeCallbackTestPerEpoch,
     OptimResetCallback,

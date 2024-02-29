@@ -1,10 +1,9 @@
 import os
 import sys
 
-from collections import defaultdict
-
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-from projects.wiki_experts.src.config import ExpertConfig
+
+from mttl.models.expert_config import ExpertConfig
 import re
 
 
