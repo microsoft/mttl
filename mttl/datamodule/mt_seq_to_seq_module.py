@@ -189,6 +189,8 @@ class FlatMultiTaskModule(DefaultDataModule):
             num_proc=n_proc,
             desc="Creating test set",
         )
+        if len(self.test_dataset) == 0:
+            self.test_dataset = self.dev_dataset
 
 
 @dataclass
