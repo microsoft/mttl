@@ -112,8 +112,6 @@ class ExpertConfig(Config):
         self.learning_rate_pg = 0.01
 
         self.save_each_epoch = False
-        self.library_name = "library_debug"
-        self.cluster_name = "cluster_1"
 
     def post_init(self, silent=False):
         if self.micro_batch_size is None:
