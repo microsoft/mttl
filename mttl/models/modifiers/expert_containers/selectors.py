@@ -9,6 +9,8 @@ from torch import nn
 import torch.nn.functional as F
 from mttl.models.modifiers.routing import RoutingInfo
 from torch.distributions import Bernoulli, Categorical
+from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRankerHelper
+
 
 # from mttl.models.modifiers.routing import RoutingMixin
 from mttl.utils import logger
@@ -266,6 +268,42 @@ class PolySelectorConfig(SelectorConfig):
     n_splits: int = 1
     task_names: List[str] = None
     pass
+
+
+@dataclass
+class TaskPredictorSelectorConfig(SelectorConfig):
+    ranker_path: str = None
+    ranker_model: str = None
+    top_k: int = 1
+
+
+@register_multi_expert_selector("task_predictor_selector", TaskPredictorSelectorConfig)
+class TaskPredictorSelector(Selector):
+    def __init__(self, info_container, config, **kwargs) -> None:
+        super().__init__(info_container, config)
+
+        self.top_k = config.top_k
+
+        # get the routing model
+        self.expert_ranker = AdapterRankerHelper.get_ranker_instance(
+            ranker_model=config.ranker_model,
+            ranker_path=config.ranker_path,
+        )
+
+    def forward(self, **kwargs) -> BatchModulesAndWeightsSelectorOutput:
+        # get the sources_texts
+        if hasattr(self.info_container["routing_infos"], "sources_texts"):
+            sources_texts = self.info_container["routing_infos"].sources_texts
+            modules, weights = self.expert_ranker.predict_task(
+                sources_texts, n=self.top_k
+            )
+            return BatchModulesAndWeightsSelectorOutput(modules, weights)
+
+    def get_merging_weights(self, **selector_kwargs) -> Dict:
+        return {k: 1.0 for k in self.expert_names}
+
+    def add_expert(self, expert_name: str, **kwargs):
+        self.expert_names.append(expert_name)
 
 
 @register_multi_expert_selector("poly_router", PolySelectorConfig)
