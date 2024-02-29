@@ -1,20 +1,15 @@
 import os
 import sys
 import wandb
-import numpy as np
-import pandas as pd
 import seaborn as sns
-from torch import nn
 from typing import Dict, Union, Callable
 from matplotlib import pyplot as plt
-from tempfile import TemporaryDirectory
 from pytorch_lightning import seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
 from mttl.models.modifiers.expert_containers.expert_library import (
     ExpertLibrary,
-    LocalExpertLibrary,
     get_expert_library,
 )
 
@@ -22,7 +17,6 @@ from mttl.models.expert_config import ExpertConfig
 from projects.wiki_experts.src.utils.utils import (
     init_wandb_logger,
     TableLogger,
-    remove_outdated_experts_from_library,
 )
 
 from projects.wiki_experts.src.utils.evaluators import Evaluator, prepare_evaluator
@@ -126,7 +120,6 @@ def produce_transfer_matrix(
     args: TransferMatrixConfig,
     expert_lib: ExpertLibrary,
     tasks: list,
-    subsample=-1,
     module=None,
 ):
     """
@@ -171,34 +164,12 @@ def produce_transfer_matrix(
         transfer_table.df.to_csv(os.path.join(args.output_dir, "transfer_matrix.csv"))
 
     transfer_table.means()
-    transfer_table.log_table_wandb()
-
-    transfer_matrix = transfer_table.df
-    if wandb.run is not None:
-        try:
-            _size = 1 * len(transfer_matrix.columns)
-            plt.figure(figsize=(_size, _size))
-            transfer_matrix = transfer_matrix.set_index("eval_task")
-            ax = sns.heatmap(transfer_matrix, annot=True, linewidth=0.5)
-            ax.figure.tight_layout()
-            wandb.log({"transfer_matrix_heatmap": wandb.Image(ax.get_figure())})
-        except Exception as e:
-            print(e)
-    plt.clf()
-    return transfer_matrix
-
-
-def resolve_hf_repo_id(hf_repo_id):
-    parts = hf_repo_id.split("/")
-    if len(parts) == 3:
-        return "/".join(parts[:-1]), parts[-1]
-    else:
-        return hf_repo_id, None
+    return transfer_table
 
 
 def run_eval(args: TransferMatrixConfig, debug=None):
     """
-    Create transfer matrix.
+    Given a library_id, create transfer matrix: each expert is evaluated on each other expert's dataset.
     """
     seed_everything(args.seed, workers=True)
     setup_logging(args.output_dir)
@@ -206,64 +177,34 @@ def run_eval(args: TransferMatrixConfig, debug=None):
     if debug is not None:
         DEBUG = debug
 
-    # if not DEBUG:
     if wandb.run is None:
         init_wandb_logger(args)
 
     remote_login(token=args.remote_token)
 
     print("###### Tasks", args.finetune_task_name)
-    # can work with other library types as well, but need to implement clone and filter_with_tasks
+    expert_lib = get_expert_library(repo_id=args.library_id, token=args.remote_token)
 
-    if args.library_id is None:
-        # empty lib, eval only base model
-        temp_dir = TemporaryDirectory(dir=args.output_dir + "/")
-        destination = temp_dir.name
-        expert_lib = LocalExpertLibrary(repo_id=destination)
-    elif isinstance(args.library_id, Expert):
-        expert: Expert = args.library_id
-        expert.expert_info.expert_name = "joint"
-        expert.expert_info.expert_task_name = "joint"
-        temp_dir = TemporaryDirectory(dir=args.output_dir + "/")
-        destination = temp_dir.name
-        expert_lib = LocalExpertLibrary(repo_id=destination)
-        expert_lib.add_expert(expert)
-    elif os.path.isfile(args.library_id):
-        # testing a single model
-        expert = load_expert(args.library_id)
-        expert.expert_info.expert_name = "joint"
-        expert.expert_info.expert_task_name = "joint"
-        temp_dir = TemporaryDirectory(dir=args.output_dir + "/")
-        destination = temp_dir.name
-        expert_lib = LocalExpertLibrary.from_expert_dict(
-            {args.library_id: expert}, destination=destination
-        )
-    else:
-        destination = args.output_dir + "/library/"
-        os.makedirs(destination, exist_ok=True)
-        hf_repo_id, expert_name = resolve_hf_repo_id(args.library_id)
-        expert_lib: LocalExpertLibrary = LocalExpertLibrary.from_expert_library(
-            get_expert_library(repo_id=hf_repo_id), repo_id=destination
-        )
-        if expert_name is not None:
-            for name in list(expert_lib.keys()):
-                if name != expert_name:
-                    expert_lib.remove_expert(name)
-
-        remove_outdated_experts_from_library(expert_lib)
-
-    transfer_matrix: pd.DataFrame = produce_transfer_matrix(
+    transfer_table: TableLogger = produce_transfer_matrix(
         args, expert_lib, tasks=args.finetune_task_name
     )
+
+    transfer_table.log_table_wandb()
+    transfer_matrix = transfer_table.df
+    transfer_matrix = transfer_matrix.set_index("eval_task")
+    if wandb.run is not None:
+        try:
+            _size = 1 * len(transfer_matrix.columns)
+            plt.figure(figsize=(_size, _size))
+            ax = sns.heatmap(transfer_matrix, annot=True, linewidth=0.5)
+            ax.figure.tight_layout()
+            wandb.log({"transfer_matrix_heatmap": wandb.Image(ax.get_figure())})
+        except Exception as e:
+            print(e)
+    plt.clf()
     print("Transfer matrix", transfer_matrix)
     transfer_matrix.to_csv(os.path.join(args.output_dir, "transfer_matrix.csv"))
-
-    if os.path.isdir(destination):
-        # remove nonempty dir
-        try:
-            os.system("rm -rf %s" % destination)
-        except:
-            pass
+    return transfer_matrix
 
 
 if __name__ == "__main__":

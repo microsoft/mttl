@@ -46,7 +46,7 @@ from mttl.models.expert_model import MultiExpertModel
 from mttl.models.expert_config import ExpertConfig
 from projects.wiki_experts.train_experts_main import create_transfer_matrix
 from projects.wiki_experts.utils import get_datamodule
-from projects.wiki_experts.src._evolution.retrievers import (
+from projects.wiki_experts.src.retrievers import (
     RandomRetriever,
     SVDEmbeddingRetriever,
 )
@@ -457,7 +457,14 @@ def finetune_joint(args: ExpertConfig, dm):
     """
     Finetunes a pretrained shared model
     """
-    from projects.wiki_experts.src.transfer_matrix import resolve_hf_repo_id
+
+    # TODO: move this to utils for reuse
+    def resolve_hf_repo_id(hf_repo_id):
+        parts = hf_repo_id.split("/")
+        if len(parts) == 3:
+            return "/".join(parts[:-1]), parts[-1]
+        else:
+            return hf_repo_id, None
 
     hf_repo_id, expert_name = resolve_hf_repo_id(args.library_id)
     library = HFExpertLibrary(hf_repo_id)

@@ -25,7 +25,6 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     get_best_expert_for_score,
     get_best_expert_for_task,
 )
-from projects.wiki_experts.src._evolution.config import find_version
 from mttl.models.modifiers.expert_containers.expert import Expert
 
 
@@ -78,20 +77,6 @@ def save_new_module(output_dir, module, task_name, postfix=""):
     ckpt_path = module_copy.save_pretrained(dest)
     del module_copy
     return ckpt_path
-
-
-def remove_outdated_experts_from_library(library: HFExpertLibrary):
-    for task in library.tasks:
-        experts = library.get_experts_for_task(task)
-        if len(experts) <= 1:
-            continue
-        version = [find_version(metadatum.expert_name) for metadatum in experts]
-        arg_max = np.argmax(version)
-        for i, metadatum in enumerate(experts):
-            if isinstance(metadatum.expert_task_name, list):
-                library.remove_expert(metadatum.expert_name, soft_delete=True)
-            if i != arg_max:
-                library.remove_expert(metadatum.expert_name, soft_delete=True)
 
 
 def get_svd_embedding(lib, expert_name: str):
