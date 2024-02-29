@@ -21,22 +21,6 @@ def is_phi2_eval_task(task):
     return task in eval_tasks
 
 
-def sample_from_each_task(dataset, num_samples=100):
-    from datasets import concatenate_datasets
-
-    sampled_data = {}
-    for task_name in set(dataset["task_name"]):
-        task_data = dataset.filter(lambda example: example["task_name"] == task_name)
-        sampled_data[task_name] = task_data.select(  # do not suffle
-            range(
-                min(len(task_data), num_samples)
-            )  # if dataset < num_samples, select all examples
-        )
-    flattened_dataset = concatenate_datasets(list(sampled_data.values()))
-
-    return flattened_dataset
-
-
 def augment_few_shot_task(
     dataset,
     num_samples=None,
@@ -91,12 +75,14 @@ def augment_few_shot_task(
             "source": prompt,
             "target": dataset[index]["target"],
             "task_name": dataset[index]["task_name"],
-            "task_source": "few_shot_{}".format(dataset[index]["task_source"])
-            if modify_task_source
-            else dataset[index]["task_source"],
-            "split": dataset[index]["split"]
-            if "split" in dataset.column_names
-            else None,
+            "task_source": (
+                "few_shot_{}".format(dataset[index]["task_source"])
+                if modify_task_source
+                else dataset[index]["task_source"]
+            ),
+            "split": (
+                dataset[index]["split"] if "split" in dataset.column_names else None
+            ),
         }
 
     augmented_dataset = dataset.map(map_to_few_shot, with_indices=True, num_proc=16)
@@ -203,65 +189,6 @@ class FlatMultiTaskModule(DefaultDataModule):
             num_proc=n_proc,
             desc="Creating test set",
         )
-        if len(self.test_dataset) == 0:
-            self.test_dataset = self.dev_dataset
-
-
-class HeldOutFlatMultiTaskModule(DefaultDataModule):
-    def setup_dataset(self):
-        self.dataset = load_dataset(self.config.dataset)
-        n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
-        if "split" not in self.dataset.column_names["train"]:
-            raise ValueError(
-                "Dataset must have a 'split' column, try removing the dataset manually from the cache."
-            )
-        (
-            self._task_names,
-            self._task_to_id,
-            train_dataset,
-            _,
-            _,
-        ) = maybe_filter_hf_dataset_by_task(
-            self.dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
-        )
-
-        if self.config.source_template is not None:
-            # apply source template if specified
-            train_dataset = train_dataset.map(
-                partial(apply_source_template, self.config.source_template),
-                num_proc=n_proc,
-            )
-
-        if self.config.augment_few_shot > 0:
-            train_dataset_aug = augment_few_shot(
-                train_dataset,
-                self.config.augment_few_shot,
-                tokenizer=self.tokenizer,
-                max_input_length=self.config.max_input_length,
-            )
-            train_dataset_aug = train_dataset_aug.shuffle()
-            train_dataset = train_dataset_aug.select(range(len(train_dataset)))
-
-        self.train_dataset = train_dataset.filter(
-            lambda x: x["split"] == "train",
-            num_proc=n_proc,
-            desc="Creating train set",
-        )
-        self.dev_dataset = train_dataset.filter(
-            lambda x: x["split"] in ["validation", "valid"],
-            num_proc=n_proc,
-            desc="Creating valid set",
-        )
-        self.test_dataset = train_dataset.filter(
-            lambda x: x["split"] == "test",
-            num_proc=n_proc,
-            desc="Creating test set",
-        )
-        self.dev_dataset = sample_from_each_task(self.dev_dataset)
-        if len(self.test_dataset) == 0:
-            self.test_dataset = self.dev_dataset
-        else:
-            self.test_dataset = sample_from_each_task(self.test_dataset)
 
 
 @dataclass

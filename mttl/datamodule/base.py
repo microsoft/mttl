@@ -368,6 +368,7 @@ def subsample_dst(dataset, subsample: int, rng: torch.Generator = None):
 
 class DefaultDataModule(LightningDataModule):
     def train_dataloader(self, subsample=None):
+        subsample = subsample or self.config.subsample
         train_dataset = self.train_dataset
         if subsample and subsample > 0:
             train_dataset = subsample_dst(train_dataset, subsample)
@@ -383,6 +384,7 @@ class DefaultDataModule(LightningDataModule):
         )
 
     def val_dataloader(self, subsample=None, shuffle=False):
+        subsample = subsample or self.config.subsample
         dev_dataset = self.dev_dataset
         if subsample and subsample > 0:
             dev_dataset = subsample_dst(dev_dataset, subsample)

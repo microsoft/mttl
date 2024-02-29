@@ -40,11 +40,6 @@ def maybe_filter_hf_dataset_by_task(
                 num_proc=n_proc,
                 desc="Filtering task names",
             )
-            if len(train_dataset) == 0:
-                logger.info(
-                    "No training examples for the provided task names, setting train_dataset to None."
-                )
-                train_dataset = dataset["train"]
         if "validation" in dataset:
             dev_dataset = dataset["validation"].filter(
                 lambda x: x[task_field] in task_names,

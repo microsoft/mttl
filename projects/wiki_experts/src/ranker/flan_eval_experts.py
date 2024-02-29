@@ -1,24 +1,16 @@
 import os
 import sys
 from pytorch_lightning import seed_everything
-from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from mttl.utils import setup_logging, logger
 
 # register models
-from projects.wiki_experts.src.expert_model import (
-    MultiExpertModelRanker,
-    MultiExpertModel,
-)
+from projects.wiki_experts.src.expert_model import MultiExpertModelRanker
 from projects.wiki_experts.src.config import ExpertConfig
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
-from mttl.evaluators.loss_evaluator import LossEvaluator
-from mttl.datamodule.mt_seq_to_seq_module import (
-    HeldOutFlatMultiTaskModule,
-    FlatMultiTaskConfig,
-)
 
 
 def parse_experts_to_load(experts_to_load):
@@ -71,59 +63,6 @@ def parse_experts_to_load(experts_to_load):
     return kwargs
 
 
-def run_loss_eval(args):
-    seed_everything(args.seed, workers=True)
-
-    # get directory of the current file
-    setup_logging(args.output_dir)
-    filtering_experts = os.environ.get("FILTERING_EXPERTS", None)
-    if filtering_experts is not None:
-        filtering_experts = filtering_experts.split(",")
-
-    logger.info("Args: {}".format(args.to_json()))
-
-    # add FlanEvaluator
-
-    data_module = HeldOutFlatMultiTaskModule(
-        FlatMultiTaskConfig(
-            dataset=args.dataset,
-            model=args.model,
-            finetune_task_name=args.finetune_task_name,
-            predict_batch_size=args.predict_batch_size,
-        ),
-        for_generation=False,
-    )
-
-    evaluator = LossEvaluator(data_module)
-    # load module
-    if args.ranker_model:
-        module = MultiExpertModelRanker(
-            **vars(args),
-            tokenizer=data_module.tokenizer,
-        )
-    else:
-        module = MultiExpertModel(
-            **vars(args),
-            tokenizer=data_module.tokenizer,
-        )
-    if args.hf_lib_id:
-        library = HFExpertLibrary(args.hf_lib_id)
-
-        module.add_experts_from_library(library, filtering_experts=filtering_experts)
-    elif args.load_module is not None:
-        kwargs = parse_experts_to_load(args.load_module)
-        for expert_kwargs in kwargs:
-            module.load_expert(**expert_kwargs)
-    elif args.module_graph is not None:
-        module.load_from_graph_string(args.module_graph)
-
-    module.to("cuda")
-    # evaluate all the category
-    loss = evaluator.get_loss(module, split="val", verbose=False, subsample=-1)
-    logger.info("Flan loss: {}".format(loss))
-    del module
-
-
 def run_eval(args):
     seed_everything(args.seed, workers=True)
 
@@ -137,8 +76,8 @@ def run_eval(args):
 
     # add FlanEvaluator
 
-    data_module = HeldOutFlatMultiTaskModule(
-        FlatMultiTaskConfig(
+    data_module = FlanModule(
+        FlanConfig(
             dataset=args.dataset,
             model=args.model,
             finetune_task_name=args.finetune_task_name,
@@ -171,5 +110,4 @@ def run_eval(args):
 
 if __name__ == "__main__":
     args = ExpertConfig.parse()
-    # run_eval(args)
-    run_loss_eval(args)
+    run_eval(args)

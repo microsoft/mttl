@@ -121,11 +121,10 @@ class KATERanker(AdapterRanker):
         self.dataset_name = kwargs.get("dataset_name")
         self.embedder = SentenceTransformer("all-mpnet-base-v2")
 
-    def train(self, dataset):
-        # self.dataset = (
-        #     load_dataset(self.dataset_name)["train"].shuffle().select(range(1_000))
-        # )
-        self.dataset = dataset.select(range(1_000_000))
+    def train(self):
+        self.dataset = (
+            load_dataset(self.dataset_name)["train"].shuffle().select(range(1_000))
+        )
         self.train_features = self.embedder.encode(
             self.dataset["source"],
             show_progress_bar=True,

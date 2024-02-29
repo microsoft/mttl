@@ -388,9 +388,6 @@ class MultiExpertModelRanker(MultiExpertModel):
         )
         self.routing = kwargs["routing"]
         self.hparams.router_selector = "info_selector"
-        self.fout = open(
-            os.path.join(self.hparams.output_dir, "analyse_predict_expert.txt"), "w"
-        )
 
         if isinstance(self.expert_ranker, ClusterPredictor):
             self.expert_ranker.init_clusters(kwargs["hf_lib_id"])
@@ -419,23 +416,6 @@ class MultiExpertModelRanker(MultiExpertModel):
         self.model.info_container["routing_infos"].routing_modules = mod_names
         self.model.info_container["routing_infos"].routing_weights = mod_weights
 
-        for e, task_name in enumerate(batch["task_names"]):
-            # if mod_names[e][0] in self.experts_names:
-            #     logger.info(
-            #         "task_name:{}.... predict experts: {}".format(
-            #             task_name,
-            #             mod_names[e][0],
-            #         )
-            #     )
-            # else:
-            #     logger.info(
-            #         "task_name:{}.... used experts: {}".format(
-            #             task_name,
-            #             "default",
-            #         )
-            #     )
-            self.fout.write(task_name + "\t" + mod_names[e][0] + "\n")
-        self.fout.flush()
         logger.info(f"routing:{self.routing} Most similar: {str(mod_names)}")
         logger.info(f"routing:{self.routing} Most similar weights: {str(mod_weights)}")
 

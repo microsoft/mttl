@@ -322,24 +322,6 @@ class CLIPTripletRanker(CLIPRanker):
         positive_expert_embeddings = self.expert_projection(positive_expert_features)
         negative_expert_embeddings = self.expert_projection(negative_expert_features)
 
-        # self.score_positive = self.get_ConsineSimilarity(
-        #     text_embeddings, positive_expert_embeddings
-        # )
-        # self.score_negative = self.get_ConsineSimilarity(
-        #     text_embeddings, negative_expert_embeddings
-        # )
-
-        # # calculate the loss
-        # loss = torch.max(
-        #     torch.tensor(0.0).to(device),
-        #     torch.subtract(
-        #         torch.tensor(0.1).to(device),
-        #         torch.subtract(self.score_positive, self.score_negative),
-        #     ),
-        # )
-
-        # loss = torch.mean(loss)
-
         # l2 normalize the embeddings
         text_embeddings = F.normalize(text_embeddings, dim=-1)
         positive_expert_embeddings = F.normalize(positive_expert_embeddings, dim=-1)
