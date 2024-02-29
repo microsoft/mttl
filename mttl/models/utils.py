@@ -27,17 +27,11 @@ def convert_and_push_to_hub(
     expert,
     repo_id,
 ) -> None:
-    """Searches into local path for the checkpoint with lowest validation loss,
-    then uploads that.
-
-    if use_last is True, then uses the last checkpoint `last.ckpt` instead
-    of the one with lowest validation loss.
-    """
     import huggingface_hub
     import io
 
     with io.BytesIO() as buffer:
-        torch.save(expert.dumps(), buffer)
+        torch.save(expert.asdict(), buffer)
 
         huggingface_hub.create_repo(repo_id, repo_type="model", exist_ok=True)
         huggingface_hub.upload_file(
@@ -460,5 +454,6 @@ def model_loader_helper(model_name, device_map="auto", load_in_8bit=False):
             model_name,
             device_map=device_map,
             load_in_8bit=load_in_8bit,
+            trust_remote_code=True,
         )
     return model_object

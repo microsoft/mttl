@@ -78,7 +78,7 @@ class RouterWrapper:
                     setattr(
                         module,
                         name,
-                        AverageSelector(**kwargs),
+                        AverageSelector(inner_mod.config, **kwargs),
                     )
                     success = True
         return success
@@ -133,7 +133,7 @@ class AverageSelector(RoutingSelector):
         )
 
     def forward(self, routing_infos, **kwargs):
-        bs = routing_infos.task_ids.size(0)
+        bs = routing_infos.input_ids.size(0)
         module_logits = self.module_logits.view(1, self.n_splits, self.n_skills)
         return module_logits.expand(bs, -1, -1)
 
@@ -154,6 +154,7 @@ class RoutingInfo:
     example_ids: List[int] = None
     labels: torch.Tensor = None
     input_ids: torch.Tensor = None
+    attention_mask: torch.Tensor = None
     task_weights: torch.nn.ParameterDict = None
     aux_losses: Dict = field(default_factory=dict)
 
@@ -170,6 +171,7 @@ class RoutingInfo:
             input_ids=batch.get("input_ids", None),
             example_ids=batch.get("example_ids", None),
             labels=batch.get("labels", None),
+            attention_mask=batch.get("attention_mask", None),
             **kwargs,
         )
         return ri
@@ -277,7 +279,7 @@ def modify_with_routing(cls, transformer, config, optional_wrapper=None):
 
                     wrapper = cls(
                         config,
-                        transformer.task_id_container,
+                        transformer.info_container,
                         layer,
                         selector=selector,
                     )

@@ -23,7 +23,7 @@ def _pre_process_text(text: str) -> str:
 class HellaswagMultiChoiceDataModule(MultiChoiceDataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
-        dataset = load_dataset("hellaswag", name="default")["validation"]
+        dataset = load_dataset("hellaswag", name="default")
 
         # convert task_id to task_name and labels
         def map_example(example):
@@ -41,14 +41,14 @@ class HellaswagMultiChoiceDataModule(MultiChoiceDataModule):
             example["label_index"] = int(example["label"])
             return example
 
-        dataset = dataset.map(
-            map_example,
-            num_proc=n_proc,
-        )
-
         self._task_to_id = {}
         self._task_names = []
 
-        self.train_dataset = None
-        self.dev_dataset = dataset
-        self.test_dataset = dataset
+        self.train_dataset = dataset["train"].map(
+            map_example,
+            num_proc=n_proc,
+        )
+        self.dev_dataset = self.test_dataset = dataset["validation"].map(
+            map_example,
+            num_proc=n_proc,
+        )

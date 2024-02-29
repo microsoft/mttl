@@ -149,10 +149,21 @@ class FlatMultiTaskModule(DefaultDataModule):
     def setup_dataset(self):
         self.dataset = load_dataset(self.config.dataset)
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
+
         if "split" not in self.dataset.column_names["train"]:
-            raise ValueError(
-                "Dataset must have a 'split' column, try removing the dataset manually from the cache."
+            logger.warn(
+                "Dataset *should* have a 'split' column, try removing the dataset manually from the cache! Creating a new 'split' column."
             )
+
+            def create_split(rng, _):
+                return {"split": rng.choice(["train", "validation"], p=[0.9, 0.1])}
+
+            self.dataset = self.dataset.map(
+                partial(create_split, numpy.random.RandomState(42)),
+                num_proc=n_proc,
+                desc="Creating split column.",
+            )
+
         (
             self._task_names,
             self._task_to_id,

@@ -2,6 +2,7 @@ from transformers import AutoModelForCausalLM
 import sys
 import os
 from copy import deepcopy
+from mttl.utils import remote_login
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from projects.instr_routing.finetune_llama import RoutingConfig
@@ -48,9 +49,7 @@ def eval_ni(
 
 
 if __name__ == "__main__":
-    from huggingface_hub import login
-
-    login(token=os.environ["HF_TOKEN"])
+    remote_login()
     config = RoutingConfig.parse(extra_kwargs={"eval_superni": True})
     config.model = "meta-llama/Llama-2-13b-hf"
     config.load_in_8bit = True

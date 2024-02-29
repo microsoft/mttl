@@ -7,7 +7,6 @@ import pandas as pd
 import seaborn as sns
 from torch import nn
 from typing import Dict, Union, Callable
-from huggingface_hub import login
 from matplotlib import pyplot as plt
 from tempfile import TemporaryDirectory
 from pytorch_lightning import seed_everything
@@ -16,13 +15,10 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
 from mttl.models.modifiers.expert_containers.expert_library import (
     ExpertLibrary,
-    HFExpertLibrary,
     LocalExpertLibrary,
+    get_expert_library,
 )
 
-# from projects.wiki_experts.src.evolution.evolving_expert_library import (
-#     EvolvingHFExpertLibrary,
-# )
 from projects.wiki_experts.src.evolution.config import EvolExpertConfig
 from projects.wiki_experts.src.evolution.utils import (
     log_wandb,
@@ -32,12 +28,12 @@ from projects.wiki_experts.src.evolution.utils import (
 )
 
 from projects.wiki_experts.src.evolution.evaluators import Evaluator, prepare_evaluator
-from mttl.utils import setup_logging, logger
+from mttl.utils import remote_login, setup_logging, logger
 
 # register models
 from projects.wiki_experts.src.expert_model import MultiExpertModel
 from mttl.vllm_engines.engines import free_memory
-from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
+from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 
 DEBUG = False
 if "AMLT_OUTPUT_DIR" in os.environ:
@@ -215,12 +211,26 @@ def run_eval(args: EvolExpertConfig, debug=None):
     # if not DEBUG:
     if wandb.run is None:
         init_wandb_logger(args)
-    if args.hf_token_hub:
-        login(token=args.hf_token_hub)
+
+    remote_login(token=args.remote_token)
 
     print("###### Tasks", args.finetune_task_name)
     # can work with other library types as well, but need to implement clone and filter_with_tasks
-    if os.path.isfile(args.hf_repo_id):
+
+    if args.hf_repo_id is None:
+        # empty lib, eval only base model
+        temp_dir = TemporaryDirectory(dir=args.output_dir + "/")
+        destination = temp_dir.name
+        expert_lib = LocalExpertLibrary(repo_id=destination)
+    elif isinstance(args.hf_repo_id, Expert):
+        expert: Expert = args.hf_repo_id
+        expert.expert_info.expert_name = "joint"
+        expert.expert_info.expert_task_name = "joint"
+        temp_dir = TemporaryDirectory(dir=args.output_dir + "/")
+        destination = temp_dir.name
+        expert_lib = LocalExpertLibrary(repo_id=destination)
+        expert_lib.add_expert(expert)
+    elif os.path.isfile(args.hf_repo_id):
         # testing a single model
         expert = load_expert(args.hf_repo_id)
         expert.expert_info.expert_name = "joint"
@@ -234,8 +244,8 @@ def run_eval(args: EvolExpertConfig, debug=None):
         destination = args.output_dir + "/library/"
         os.makedirs(destination, exist_ok=True)
         hf_repo_id, expert_name = resolve_hf_repo_id(args.hf_repo_id)
-        expert_lib: LocalExpertLibrary = LocalExpertLibrary.create_from_remote(
-            HFExpertLibrary(repo_id=hf_repo_id), destination=destination
+        expert_lib: LocalExpertLibrary = LocalExpertLibrary.from_expert_library(
+            get_expert_library(repo_id=hf_repo_id), repo_id=destination
         )
         if expert_name is not None:
             for name in list(expert_lib.keys()):

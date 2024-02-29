@@ -5,7 +5,6 @@ import torch
 import wandb
 import logging
 import pytorch_lightning as pl
-from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.callbacks import ModelCheckpoint
 
@@ -15,7 +14,7 @@ from mttl.callbacks import MMLUCallback
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.platypus_module import PlatypusModule
 from mttl.datamodule.ni_data_module import NiDataModule
-from mttl.utils import add_mlf_logger, add_tb_logger, setup_logging, logger
+from mttl.utils import add_mlf_logger, add_tb_logger, remote_login, setup_logging, logger
 from mttl.models.monitors import SelectorMetricsLog, SelectorRoutingsLog, get_monitors
 from mttl.dist_utils import is_main_process
 from mttl.models.modifiers.routing import RoutingSelector
@@ -173,8 +172,7 @@ def run_multitask(args):
 
     logger.info("Args: {}".format(args.to_json()))
 
-    if args.hf_token_hub:
-        login(token=args.hf_token_hub)
+    remote_login(token=args.remote_token)
 
     if args.example_to_ids_path:
         raise NotImplementedError()

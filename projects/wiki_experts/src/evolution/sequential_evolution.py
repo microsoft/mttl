@@ -9,10 +9,9 @@ import seaborn as sns
 from dataclasses import replace
 from functools import partial
 from matplotlib import pyplot as plt
-from huggingface_hub import login
 from tempfile import TemporaryDirectory
 from pytorch_lightning import seed_everything
-from huggingface_hub import create_repo, login, HfApi
+from huggingface_hub import create_repo, HfApi
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
@@ -27,12 +26,11 @@ from projects.wiki_experts.src.evolution.utils import (
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from mttl.models.modifiers.expert_containers.expert_library import (
-    get_best_expert_for_task,
-    get_best_expert_for_score,
     LocalExpertLibrary,
     HFExpertLibrary,
     ExpertLibrary,
     Score,
+    get_expert_library,
 )
 from projects.wiki_experts.src.evolution.train_router import train_module
 from projects.wiki_experts.src.evolution.evaluators import (
@@ -42,14 +40,14 @@ from projects.wiki_experts.src.evolution.evaluators import (
 )
 
 
-from mttl.models.modifiers.expert_containers.module_graph import Expert
+from mttl.models.modifiers.expert_containers.expert import Expert
 
 from projects.wiki_experts.src.evolution.config import (
     EvolExpertConfig,
     increase_version,
 )
 from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
-from mttl.utils import setup_logging, logger
+from mttl.utils import remote_login, setup_logging, logger
 from projects.wiki_experts.src.expert_model import (
     MultiExpertModel,
 )
@@ -132,13 +130,12 @@ def setup(args: EvolExpertConfig):
     else:
         local_lib_location = os.path.join(args.output_dir, args.hf_repo_id)
 
-    if args.hf_token_hub:
-        login(token=args.hf_token_hub)
+    remote_login(token=args.remote_token)
 
     os.makedirs(local_lib_location, exist_ok=True)
     print("Local lib location", local_lib_location)
-    expert_lib = LocalExpertLibrary.create_from_remote(
-        HFExpertLibrary(args.hf_repo_id), local_lib_location
+    expert_lib = LocalExpertLibrary.from_expert_library(
+        get_expert_library(args.hf_repo_id), local_lib_location
     )
     expert_lib.ignore_sliced = True
 
@@ -162,8 +159,7 @@ def setup(args: EvolExpertConfig):
 
     if args.upload_lib_to_hub:
         global to_repo_id
-        token = os.environ.get("HF_TOKEN", args.hf_token_hub)
-        login(token=token)
+        token = os.environ.get("HF_TOKEN", args.remote_token)
         user_name = HfApi().whoami(token=token)["name"]
 
         exp_name: str = os.getenv("AMLT_JOB_NAME", "_test_evol")
@@ -667,7 +663,7 @@ def main(args: EvolExpertConfig):
                 svd_embedder = SVDEmbeddingTransform(
                     SVDEmbeddingTransformConfig(sparsity_threshold=0.5)
                 )
-                svd_embedder.transform(expert_lib, upload_to_hf=True)
+                svd_embedder.transform(expert_lib, persist=True)
 
             log_row = active_task_iteration(
                 args, task, expert_lib, module=module
@@ -681,7 +677,7 @@ def main(args: EvolExpertConfig):
         # send updates to remote
         if args.upload_lib_to_hub:
             try:
-                remote_lib = HFExpertLibrary.from_local(
+                remote_lib = HFExpertLibrary.from_expert_library(
                     expert_lib,
                     to_repo_id,
                     force=True,

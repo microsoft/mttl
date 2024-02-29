@@ -8,13 +8,11 @@ import seaborn as sns
 from dataclasses import replace
 from functools import partial
 from matplotlib import pyplot as plt
-from huggingface_hub import login
 from tempfile import TemporaryDirectory
 from pytorch_lightning import seed_everything
-from huggingface_hub import create_repo, login, HfApi
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-from mttl.models.modifiers.expert_containers.module_graph import Expert, load_expert
+from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 
 from projects.wiki_experts.src.evolution.sequential_evolution import *
 from projects.wiki_experts.src.evolution.utils import (
@@ -26,35 +24,22 @@ from projects.wiki_experts.src.evolution.utils import (
 
 from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from mttl.models.modifiers.expert_containers.expert_library import (
-    get_best_expert_for_task,
-    get_best_expert_for_score,
     LocalExpertLibrary,
-    HFExpertLibrary,
     ExpertLibrary,
-    Score,
-)
-from projects.wiki_experts.src.evolution.evaluators import (
-    Evaluator,
-    prepare_evaluator,
-    EvalCallback,
+    get_expert_library,
 )
 
-
-from mttl.models.modifiers.expert_containers.module_graph import Expert
+from mttl.models.modifiers.expert_containers.expert import Expert
 
 from projects.wiki_experts.src.evolution.config import (
     EvolExpertConfig,
     increase_version,
 )
 from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
-from mttl.utils import setup_logging, logger
+from mttl.utils import remote_login, setup_logging, logger
 from projects.wiki_experts.src.expert_model import MultiExpertModel
 from projects.wiki_experts.src.evolution.experiment_state import ExperimentState
 from mttl.vllm_engines.engines import free_memory
-from projects.wiki_experts.src.evolution.transfer_matrix import (
-    eval_all_experts_on_task,
-    eval_expert_on_task,
-)
 
 ai = 0
 DEBUG = True
@@ -96,11 +81,10 @@ def setup(args: EvolExpertConfig):
 
         os.makedirs(local_lib_location, exist_ok=True)
 
-        if args.hf_token_hub:
-            login(token=args.hf_token_hub)
+        remote_login(token=args.remote_token)
 
-        expert_lib = LocalExpertLibrary.create_from_remote(
-            HFExpertLibrary(args.hf_repo_id), local_lib_location
+        expert_lib = LocalExpertLibrary.from_expert_library(
+            get_expert_library(args.hf_repo_id), local_lib_location
         )
         expert_lib.ignore_sliced = True
         # make sure we only consider modules of the latest version

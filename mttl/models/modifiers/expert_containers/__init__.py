@@ -7,7 +7,7 @@ from mttl.models.modifiers.expert_containers.selectors import (
 )
 from mttl.models.modifiers.expert_containers.expert_containers import *
 from mttl.utils import logger
-from mttl.models.modifiers.expert_containers.module_graph import Expert
+from mttl.models.modifiers.expert_containers.expert import Expert
 
 
 def _extract_identifier(string, match_on="finegrained"):
@@ -17,7 +17,7 @@ def _extract_identifier(string, match_on="finegrained"):
     e.g. 'block' : 'encoder.block.0.layer.0.SelfAttention' -> 'encoder.block.0'
     """
     if match_on == "finegrained":
-        return string.replace(".", "_")
+        return string
     if match_on == "coarsegrained":
         return "shared"
     pos = string.find(f"{match_on}")
@@ -35,6 +35,12 @@ def get_container_class(modifier: str):
         if os.environ.get("COALESCED_LORA_CONTAINER", "False") == "1":
             return CoalescedLoRAExpertContainer
         return LoRAExpertContainer
+    elif modifier == "skilled_lora":
+        if not os.environ.get("COALESCED_LORA_CONTAINER", "False") == "1":
+            logger.warning(
+                "COALESCED_LORA_CONTAINER is not set to 1, but still using it for SkilledLoRA"
+            )
+        return CoalescedLoRAExpertContainer
     elif modifier == "kv_adapter":
         return KVExpertContainer
     else:
@@ -111,8 +117,8 @@ def add_expert_to_transformer(
     )
 
     # create a shared container for the task id
-    if not hasattr(transformer, "task_id_container"):
-        transformer.task_id_container = {}
+    if not hasattr(transformer, "info_container"):
+        transformer.info_container = {}
     if not hasattr(transformer, "selectors"):
         transformer.selectors = {}
 
@@ -152,12 +158,13 @@ def add_expert_to_transformer(
                                 # Special case when you have a decoder layer in an enc-dec model
                                 selector = get_selector(
                                     routing_config,
-                                    info_container=transformer.task_id_container,
+                                    info_container=transformer.info_container,
                                     layer=layer,
                                     training_config=training_config,
                                 )
                                 selector.__layer_name__ = identifier + ".selector"
                                 transformer.selectors[identifier] = selector
+
                                 # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
                                 selector.total_calls_per_forward += 1
                                 n_selectors += 1
@@ -171,9 +178,14 @@ def add_expert_to_transformer(
                         CONTAINER_CLASS = get_container_class(model_modifier)
                         expert_container = CONTAINER_CLASS(
                             expert_config,
-                            transformer.task_id_container,
+                            transformer.info_container,
                             layer,
                             selector,
+                            lora_merge_after=(
+                                routing_config.lora_merge_after
+                                if routing_config
+                                else False
+                            ),
                         )
                         expert_container.__layer_name__ = layer_name
                         setattr(

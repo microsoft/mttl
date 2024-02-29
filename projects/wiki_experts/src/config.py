@@ -1,7 +1,7 @@
+import json
 import os
 import torch
 
-import json
 from mttl.config import Config
 import mttl.datamodule.task_sequences
 import mttl.datamodule.task_cluster_flan
@@ -15,9 +15,10 @@ class ExpertConfig(Config):
         self.load_in_8bit = False
         self.wandb_project = None
         self.tensorboard = False
-        self.hf_token_hub = None
-        self.hf_lib_id = None
-        self.hf_repo_id = None
+
+        self.remote_token = None
+        self.library_id = None
+
         self.do_train = True
 
         # just a lame flag to 0 out all adapter weights
@@ -34,7 +35,6 @@ class ExpertConfig(Config):
         self.routing = "subject"
         self.mmlu_test_split = "test"
         self.load_module = None
-        self.module_graph = None
         self.micro_batch_size = None
         self.validation_portion = 0.03
 
@@ -52,15 +52,6 @@ class ExpertConfig(Config):
         self.moe_ent_free_bits = 0.0
         self.moe_top_k = -1
 
-        self.expand_val_set_w_downstream = False
-
-        self.eval_mmlu_callbacks_every = 0
-        self.eval_test_set_callback_every = 0
-        self.eval_rougeL_callback_every = 0
-        self.test_sets_callbacks = []
-
-        self.use_custom_valid_callback = False  # if True use custom callback to early stop on eval loss instead of lightning callback
-
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
 
@@ -73,13 +64,53 @@ class ExpertConfig(Config):
 
         self.eval_metric = "loss"
         self.use_vllm = False
-        self.reset_lr = False
-        self.reset_optim = False
 
-        self.create_transfer_matrix = False
+        # for finetuning a library
+        self.hf_repo_query = (
+            None  # for retrieval, we take query expert from this library
+        )
+        self.sk = 5  # number of experts to retrieve from a library
+        self.finetune_regime = None  # polylib_full, lib_mu, polylib_selector
+        self.eval_before_training = True
+
+        # hidden state computation transform
+        self.use_base_model_only = False
+        self.max_samples_per_task = 100
+        self.track = "each_layer"
+        self.pool = "last"
+        self.delta_scale = None  # how much to extrapolate the shift in the expert's prototype direction
+        self.use_similarity_scaling = (
+            False  # whether to scale the centroids as a function of LoRA similarity
+        )
+        self.transform_sparsity = 1.0
+
+        # Clown Router
+        self.router_temp = 1.0
+        self.notes = None
+        self.proto_init = "hidden"  # also "svd"
+        self.scale_prototypes = False  # clown routing with SVD
+        self.router_window_size = 3
+        self.clown_mode = "per_token"
+        self.normalize_router_input = False
+
+        # Eval Library
+        self.merge_or_route = None  # "uniform", "ties", "clown"
         self.tasksets_path = None
+        self.remove_experts = None
+        self.create_transfer_matrix = False
+        self.es_metric = "loss"
+        self.n_ng_iterations = 30  # number of iterations for LoraHub
 
-    def post_init(self):
+        # for MBC
+        self.mbc_num_clusters = 10  # number of clusters
+        self.phi_2_align_heads = False
+        self.lora_merge_after = False  # if True, tried to merge after the outer product, currently only applicable to LoRA
+
+        # phatgoose
+        self.n_steps_pg = 2000
+        self.learning_rate_pg = 0.01
+
+    def post_init(self, silent=False):
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size
 
@@ -104,22 +135,20 @@ class ExpertConfig(Config):
             tasks = self.finetune_task_name.split(
                 "+"
             )  # use "+" for assign multiple task set vars to be found in task_sequences
+
             task_sets = None
             if self.tasksets_path is not None:
                 task_sets = json.load(open(self.tasksets_path))
 
             for task_name in tasks:
-                if task_sets is not None and task_name in task_sets:
-                    task_names.extend(task_sets[task_name])
+                if task_name in mttl.datamodule.task_sequences.__dict__:
+                    task_names.extend(
+                        getattr(mttl.datamodule.task_sequences.__dict__, task_name)
+                    )
+                elif task_name in mttl.datamodule.task_cluster_flan.__dict__:
+                    task_names.extend(
+                        getattr(mttl.datamodule.task_cluster_flan, task_name)
+                    )
                 else:
-                    if task_name in mttl.datamodule.task_sequences.__dict__:
-                        task_names.extend(
-                            getattr(mttl.datamodule.task_sequences, task_name)
-                        )
-                    elif task_name in mttl.datamodule.task_cluster_flan.__dict__:
-                        task_names.extend(
-                            getattr(mttl.datamodule.task_cluster_flan, task_name)
-                        )
-                    else:
-                        task_names.extend([task_name])
+                    task_names.extend([task_name])
             self.finetune_task_name = ",".join(task_names)

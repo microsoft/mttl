@@ -7,7 +7,6 @@ from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.kv_adapter import (
     KVAdapter,
     KVAdapterConfig,
-    PolyKVAdapterConfig,
 )
 
 
@@ -18,10 +17,6 @@ def test_llama_adapter(adapter_type, model_arg):
 
     if adapter_type == "kv_adapter":
         adapter_config = KVAdapterConfig(n_tasks=768, soft_prompt_learn_kv=True)
-    else:
-        adapter_config = PolyKVAdapterConfig(
-            n_tasks=768, n_splits=1, soft_prompt_learn_kv=True
-        )
 
     adapter_config.model = model_arg
     seed_everything(0)
@@ -64,7 +59,7 @@ def test_llama_adapter(adapter_type, model_arg):
         model = GPTNeoForCausalLM(small_config)
 
     bs, max_seq_len = 10, 100
-    model.task_id_container = {}
+    model.info_container = {}
     seed_everything(0)
     batch = {
         "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
@@ -74,15 +69,17 @@ def test_llama_adapter(adapter_type, model_arg):
     attn_mask = torch.zeros(bs, max_seq_len, dtype=torch.int32)
     attn_mask[torch.arange(bs), seq_len] = 1
     attn_mask = 1 - attn_mask.cumsum(dim=-1)
+
+    # TODO: rewrite to use taks names instead
     task_ids = torch.randint(0, adapter_config.n_tasks, (bs,))
     batch["attention_mask"] = attn_mask
 
-    model.task_id_container["routing_infos"] = RoutingInfo(task_ids=task_ids)
+    model.info_container["routing_infos"] = RoutingInfo(task_ids=task_ids)
 
     # Test with llama adapter
     new_model = modify_transformer(model, adapter_config)
 
-    new_model.task_id_container["routing_infos"] = RoutingInfo(task_ids=task_ids)
+    new_model.info_container["routing_infos"] = RoutingInfo(task_ids=task_ids)
 
     print("model : ", model_arg)
     if model_arg == "llama":

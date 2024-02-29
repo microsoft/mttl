@@ -6,7 +6,6 @@ from collections import Counter
 from sklearn.utils.extmath import safe_sparse_dot
 from huggingface_hub import (
     create_repo,
-    login,
     CommitOperationAdd,
     create_commit,
     preupload_lfs_files,
@@ -14,7 +13,7 @@ from huggingface_hub import (
 
 import torch
 
-from mttl.utils import logger
+from mttl.utils import logger, remote_login
 from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRanker
 
 try:
@@ -27,7 +26,7 @@ except:
 def upload_checkpoint(repo_id, filename, path_in_repo):
     import os
 
-    login(os.environ["HF_TOKEN"])
+    remote_login()
     create_repo(repo_id, repo_type="model", exist_ok=True)
     additions = [
         CommitOperationAdd(path_in_repo=path_in_repo, path_or_fileobj=filename),

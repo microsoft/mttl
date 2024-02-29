@@ -70,7 +70,7 @@ class EncoderDecoder(EfficientCheckpointModule):
     def teacher_force_step(self, batch, reduction="mean"):
         input_ids, target_ids = batch["input_ids"], batch["labels"]
 
-        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
+        self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
 
         decoder_input_ids = self.model.prepare_decoder_input_ids_from_labels(target_ids)
         # need to transform -100 into padding tokens
@@ -171,7 +171,7 @@ class Finetuner(EncoderDecoder):
         input_ids = batch["input_ids"]
         attention_mask = batch["attention_mask"]
 
-        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
+        self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
 
         outputs = self.model.generate(
             input_ids=input_ids,

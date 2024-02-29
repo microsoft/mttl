@@ -1,14 +1,7 @@
 import os
 import sys
 from pytorch_lightning import seed_everything
-from mttl.datamodule.mt_seq_to_seq_module import (
-    FlanModule,
-    FlanConfig,
-    FlatMultiTaskConfig,
-    FlatMultiTaskModule,
-    HeldOutFlatMultiTaskModule,
-)
-
+from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
 from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -22,6 +15,10 @@ from projects.wiki_experts.src.expert_model import (
 from projects.wiki_experts.src.config import ExpertConfig
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
 from mttl.evaluators.loss_evaluator import LossEvaluator
+from mttl.datamodule.mt_seq_to_seq_module import (
+    HeldOutFlatMultiTaskModule,
+    FlatMultiTaskConfig,
+)
 
 
 def parse_experts_to_load(experts_to_load):
@@ -152,26 +149,18 @@ def run_eval(args):
 
     evaluator = RougeEvaluator(data_module)
     # load module
-    if args.ranker_model:
-        module = MultiExpertModelRanker(
-            **vars(args),
-            tokenizer=data_module.tokenizer,
-        )
-    else:
-        module = MultiExpertModel(
-            **vars(args),
-            tokenizer=data_module.tokenizer,
-        )
-    if args.hf_lib_id:
-        library = HFExpertLibrary(args.hf_lib_id)
 
-        module.load_from_library(library, filtering_experts=filtering_experts)
+    module = MultiExpertModelRanker(
+        **vars(args),
+        tokenizer=data_module.tokenizer,
+    )
+    if args.expert_library_path:
+        library = HFExpertLibrary(args.expert_library_path)
+        module.load_from_library(library)
     elif args.load_module is not None:
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:
             module.load_expert(**expert_kwargs)
-    elif args.module_graph is not None:
-        module.load_from_graph_string(args.module_graph)
 
     module.to("cuda")
     # evaluate all the category

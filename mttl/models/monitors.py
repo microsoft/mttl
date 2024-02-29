@@ -8,12 +8,11 @@ from typing import Any
 
 import pytorch_lightning as pl
 import matplotlib.pyplot as plt
-from torch.distributions import Categorical
 from pytorch_lightning import Callback
 
 from mttl.utils import agg_dicts, Averager
 from mttl.models.modifiers.routing import RoutingSelector
-from mttl.models.modifiers.poly import PolytroponSelector, PerTokenPolytroponSelector
+from mttl.models.modifiers.expert_containers.selectors import Selector
 
 try:
     import wandb
@@ -33,8 +32,8 @@ def get_monitors(config):
     ):
         monitors += [PolytroponLog()]
 
-    if config.model_modifier and "llama_adapter" in config.model_modifier:
-        monitors += [AlphaLog()]
+    else:
+        monitors += [SelectorLog(config)]
 
     return monitors
 
@@ -96,33 +95,6 @@ class PolytroponLog(Callback):
                         f"Z/{coder}.{k}", v, on_epoch=True, on_step=True, sync_dist=True
                     )
 
-        # Finally, log seen task information
-        counts = None
-        if PolytroponSelector.seen_samples_per_task is not None:
-            counts = PolytroponSelector.seen_samples_per_task
-        elif PerTokenPolytroponSelector.seen_samples_per_token is not None:
-            counts = PerTokenPolytroponSelector.seen_samples_per_token
-
-        if counts is not None:
-            is_seen = counts > 0
-            n_seen, n_unseen = is_seen.sum(), (~is_seen).sum()
-            seen_tasks = counts[is_seen]
-            seen_min, seen_max = seen_tasks.min(), seen_tasks.max()
-            to_log = {
-                "n_seen": n_seen,
-                "n_unseen": n_unseen,
-                "seen_min": seen_min,
-                "seen_max": seen_max,
-            }
-            for k, v in to_log.items():
-                pl_module.log(
-                    f"Z/{k}",
-                    v.float().item(),
-                    on_epoch=True,
-                    on_step=True,
-                    sync_dist=True,
-                )
-
 
 class SelectorRoutingsLog(Callback):
     ACC_OVER = 10
@@ -130,7 +102,7 @@ class SelectorRoutingsLog(Callback):
     def __init__(self, args):
         self.averager = Averager(0.5)
         self.acc_routings = {}
-        self.log_per_layer = args.selector_log_per_layer
+        self.log_per_layer = True
 
     def aggregate_and_maybe_log(self, trainer, pl_module, current_step, split) -> None:
         # get routing attributes of all layers
@@ -227,6 +199,49 @@ class SelectorRoutingsLog(Callback):
         self.aggregate_and_maybe_log(trainer, pl_module, batch_idx, split="val")
 
 
+class SelectorLog(SelectorRoutingsLog):
+    def __init__(self, args):
+        super().__init__(args)
+        self.plot_every = 10
+
+    def aggregate_and_maybe_log(self, trainer, pl_module, current_step, split) -> None:
+        # get routing attributes of all layers
+        if current_step % self.plot_every != 0:
+            return
+        all_routing_gates = []
+        for name, module in pl_module.named_modules():
+            if isinstance(module, Selector) and hasattr(module, "routing_gates"):
+                if isinstance(module.routing_gates, list):
+                    gates = np.mean([torch.mean(gate) for gate in module.routing_gates])
+                    all_routing_gates.append(gates.item())
+                    module.routing_gates = []
+                else:
+                    continue
+        if len(all_routing_gates) > 0:
+            # log and empty routing_gates
+            # we log averaged gates across samples and layers
+            if wandb.run is not None:
+                wandb_logger = [
+                    lgr
+                    for lgr in pl_module.loggers
+                    if isinstance(lgr, pl.loggers.wandb.WandbLogger)
+                ][0]
+                prefix = (
+                    f"{pl_module._log_pref}" if hasattr(pl_module, "_log_pref") else ""
+                )
+                wandb_logger.log_metrics(
+                    {f"{prefix}{split}/routing_gates": np.mean(all_routing_gates)}
+                )
+                if self.log_per_layer:
+                    plt.clf()
+                    _ = plt.plot(range(len(all_routing_gates)), all_routing_gates)
+                    wandb_logger.log_image(
+                        f"{prefix}{split}/routing_gates_per_layer",
+                        [wandb.Image(plt)],
+                        step=pl_module.global_step,
+                    )
+
+
 class SelectorMetricsLog(Callback):
     def __init__(self):
         self.averager = Averager(weight=0.5)
@@ -252,29 +267,3 @@ class SelectorMetricsLog(Callback):
                 prog_bar=True,
             )
         self.metrics.clear()
-
-
-class AlphaLog(Callback):
-    LOG_EVERY = 5
-
-    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:
-        if trainer.global_step == 0 or trainer.global_step % self.LOG_EVERY > 0:
-            return
-
-        gate_values = []
-        for mod in pl_module.modules():
-            if hasattr(mod, "adapter_gate"):
-                gate_values += [mod.adapter_gate.mean().item()]
-
-        to_log = {
-            "train/alpha_mean": sum(gate_values) / len(gate_values),
-            "train/alpha_max": max(gate_values),
-            "train/alpha_min": min(gate_values),
-        }
-
-        pl_module.log_dict(
-            to_log,
-            on_epoch=True,
-            on_step=True,
-            sync_dist=True,
-        )

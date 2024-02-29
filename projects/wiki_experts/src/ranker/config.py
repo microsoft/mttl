@@ -16,7 +16,7 @@ class RankerConfig(ExpertConfig):
         self.limit_val_batches = 1.0
         self.limit_train_batches = 1.0
 
-    def post_init(self):
+    def post_init(self, silent=False):
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size
 
