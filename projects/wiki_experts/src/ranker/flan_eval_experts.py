@@ -8,8 +8,8 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from mttl.utils import setup_logging, logger
 
 # register models
-from projects.wiki_experts.src.expert_model import MultiExpertModelRanker
-from projects.wiki_experts.src.config import ExpertConfig
+from mttl.models.expert_model import MultiExpertModelRanker
+from mttl.models.expert_config import ExpertConfig
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
 
 

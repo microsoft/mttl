@@ -1,27 +1,20 @@
 import os
 import sys
-import json
 import torch
 import copy
 from copy import deepcopy
-import torch.nn.functional as F
+from pytorch_lightning import seed_everything
+import json
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
+
 from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
 from mttl.models.modifiers.expert_containers.selectors import ClownSelector
 from mttl.models.modifiers.lora import LoRAConfig
 
-
-from pytorch_lightning import seed_everything
-import json
-
 from mttl.utils import logger, remote_login, setup_logging
-
-from projects.wiki_experts.src.expert_model import (
-    MultiExpertModel,
-    RoutedMultiExpertModel,
-)
-from projects.wiki_experts.src.config import ExpertConfig
+from mttl.models.expert_model import MultiExpertModel
+from mttl.models.expert_config import ExpertConfig
 
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.models.modifiers.expert_containers.library_transforms import (
@@ -178,7 +171,7 @@ def run_multitask(args: ExpertConfig):
         args_copy.proto_init = args.proto_init
         args_copy.normalize_router_input = args.normalize_router_input
         args_copy.lora_merge_after = args.merge_or_route == "clown_lora_after_op"
-        module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
+        module = MultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
         patch_prototypes(module, library, args)
         module = module.to("cuda")
@@ -203,7 +196,7 @@ def run_multitask(args: ExpertConfig):
         )
         prototypes = phagoose_transform.transform(library, default_args=args)
 
-        module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
+        module = MultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
         # load prototypes into the router
         for mod in module.modules():

@@ -13,8 +13,8 @@ from mttl.utils import (
     logger,
 )
 import torch
-from projects.wiki_experts.src.expert_trainer import ExpertTrainer
-from projects.wiki_experts.src.config import ExpertConfig
+from mttl.models.expert_model import ExpertModel as ExpertTrainer
+from mttl.models.expert_config import ExpertConfig
 from pytorch_lightning import Trainer, seed_everything
 
 

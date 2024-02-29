@@ -1,16 +1,11 @@
-import os
 import torch
 import pytest
 import numpy as np
 from mttl.config import Config
 from pytorch_lightning import seed_everything
-from projects.wiki_experts.src.expert_trainer import ExpertTrainer
-from projects.wiki_experts.src.config import ExpertConfig
-from projects.wiki_experts.src.expert_model import (
-    MoETrainer,
-    RoutedMultiExpertModel,
-)
+from mttl.models.expert_config import ExpertConfig
 
+from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 from mttl.models.modifiers.expert_containers import (
     LoRAExpertContainer,
@@ -20,9 +15,9 @@ from mttl.models.modifiers.expert_containers.selectors import (
     BatchSequenceModulesAndWeightsSelectorOutput,
     PolySelectorDirect,
     MOERKHSSelector,
-    SelectorView,
     ClownSelector,
 )
+from mttl.models.expert_model import ExpertModel, MoEModel, MultiExpertModel
 from mttl.models.modifiers.lora import LoRA
 
 
@@ -82,15 +77,10 @@ def bigger_dummy_batch():
 
 class TestMultiExpertModel:
     def create_dummy_expert(self, config: ExpertConfig, exp_name) -> Expert:
-        exp_trainer = ExpertTrainer(
-            tokenizer=None,
-            **vars(config),
+        model = MultiExpertModel(model=config.model, device_map="cpu")
+        expert = model.add_empty_expert(
+            exp_name, ModifierConfig.from_training_config(config)
         )
-        dir = f"{config.output_dir}/{exp_name}"
-        os.makedirs(dir, exist_ok=True)
-        checkpoint = exp_trainer.save_pretrained(dir)
-        expert = load_expert(checkpoint, exp_name)
-        expert.expert_info.expert_name = exp_name
         return expert
 
     def test_add_expert_with_action_merge(self, tmp_exp_config):
@@ -102,11 +92,7 @@ class TestMultiExpertModel:
         exp2_dest = self.create_dummy_expert(config, "exp2")
         module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
 
-        module = RoutedMultiExpertModel(
-            tokenizer=None,
-            expert_info={},
-            **vars(config),
-        )
+        module = MultiExpertModel(**vars(config))
         module.load_from_module_dict(module_dict, action="merge")
         bs, max_seq_len = 10, 100
 
@@ -128,22 +114,28 @@ class TestMultiExpertModel:
 
         # Test Base Llama model
         output = module(batch)
-        assert np.allclose(output.item(), 9.7, atol=0.1)
+        assert np.allclose(output.item(), 10.15, atol=0.1)
 
     def test_expert_selector_with_task_name_routing(self, tmp_exp_config):
         seed_everything(0)
         config: Config = tmp_exp_config
 
+        def create_dummy_expert(config, exp_name):
+            expert_model = MultiExpertModel(
+                tokenizer=None,
+                **vars(config),
+            )
+            expert = expert_model.add_empty_expert(
+                exp_name, ModifierConfig.from_training_config(config)
+            )
+            return expert
+
         config.router_selector = "task_selector"
-        exp1 = self.create_dummy_expert(config, "exp1")
-        exp2 = self.create_dummy_expert(config, "exp2")
+        exp1 = create_dummy_expert(config, "exp1")
+        exp2 = create_dummy_expert(config, "exp2")
         module_dict = {"mod1": exp1, "mod2": exp2, "default": exp1}
 
-        module = RoutedMultiExpertModel(
-            # model_object=make_tiny_llama(),
-            tokenizer=None,
-            **vars(config),
-        )
+        module = MultiExpertModel(**vars(config))
         assert module.hparams.model_modifier == None
         module.load_from_module_dict(module_dict, action="route")
         bs, max_seq_len = 10, 100
@@ -177,11 +169,7 @@ class TestMultiExpertModel:
         exp2_dest = self.create_dummy_expert(config, "exp2")
         module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
 
-        module = RoutedMultiExpertModel(
-            tokenizer=None,
-            expert_info={},
-            **vars(config),
-        )
+        module = MultiExpertModel(**vars(config))
         module.load_from_module_dict(module_dict, action="route")
 
         assert isinstance(
@@ -204,10 +192,13 @@ class TestMultiExpertModel:
         assert np.allclose(output.item(), 10.15, atol=0.1)
 
         # check the get_router_weights function
-        routing_weights = module.get_router_weights()
+        weights = {}
+        for _, selector_dict in module.selectors.items():
+            for _, selector in selector_dict.items():
+                weights[selector.layer_name] = selector.get_routing_weights()
         assert (
-            "mod1" in routing_weights["shared.selector"]
-            and "mod2" in routing_weights["shared.selector"]
+            "mod1" in weights["shared.selector"]
+            and "mod2" in weights["shared.selector"]
         )
 
         assert isinstance(
@@ -223,57 +214,15 @@ class TestMultiExpertModel:
 
         # change router_granularity to finegrained
         config.router_granularity = "finegrained"
-        module = RoutedMultiExpertModel(
-            tokenizer=None,
-            expert_info={},
+        module = MultiExpertModel(
             **vars(config),
         )
         module.load_from_module_dict(module_dict)
         output = module(batch)
-        routing_weights = module.get_router_weights()
         assert np.allclose(output.item(), 10.15, atol=0.1)
 
-        expert = module.to_expert()
+        expert = module.get_merged_expert()
         assert isinstance(expert, Expert)
-        module.replace_container_with_expert("mod1")
-        assert isinstance(module.model.transformer.h[0].attn.attention.k_proj, LoRA)
-
-    def test_add_expert_with_action_merge(self, tmp_exp_config):
-        seed_everything(0)
-        config: ExpertConfig = tmp_exp_config
-
-        config.router_selector = "poly_router"
-        exp1_dest = self.create_dummy_expert(config, "exp1")
-        exp2_dest = self.create_dummy_expert(config, "exp2")
-        module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
-
-        module = RoutedMultiExpertModel(
-            tokenizer=None,
-            expert_info={},
-            **vars(config),
-        )
-        module.load_from_module_dict(module_dict, action="merge")
-        bs, max_seq_len = 10, 100
-
-        assert isinstance(
-            module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
-        )
-        # expert container should be empty
-        assert len(module.model.transformer.h[0].attn.attention.k_proj) == 0
-
-        batch = {
-            "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
-            "labels": torch.randint(10, 400, (bs, max_seq_len)),
-        }
-        seq_len = torch.randint(0, max_seq_len, (bs,))
-        attn_mask = torch.zeros(bs, max_seq_len, dtype=torch.int32)
-        attn_mask[torch.arange(bs), seq_len] = 1
-        attn_mask = 1 - attn_mask.cumsum(dim=-1)
-        batch["attention_mask"] = attn_mask
-
-        # Test Base Llama model
-        output = module(batch)
-        assert np.allclose(output.item(), 10.15, atol=0.1)
 
     def test_expert_selector_with_moe_routing_soft(
         self, mocker, tmp_exp_config, dummy_batch
@@ -285,11 +234,7 @@ class TestMultiExpertModel:
         config.moe_emb_dim = 10
         config.moe_rkhs_dim = 10
 
-        module = MoETrainer(
-            tokenizer=None,
-            expert_info={},
-            **vars(config),
-        )
+        module = MoEModel(**vars(config))
 
         container = module.model.transformer.h[0].attn.attention.k_proj
         assert isinstance(container, LoRAExpertContainer)
@@ -317,11 +262,7 @@ class TestMultiExpertModel:
         config.moe_emb_dim = 10
         config.moe_rkhs_dim = 10
 
-        module = MoETrainer(
-            tokenizer=None,
-            expert_info={},
-            **vars(config),
-        )
+        module = MoEModel(**vars(config))
 
         container = module.model.transformer.h[0].attn.attention.k_proj
         assert isinstance(container, LoRAExpertContainer)
@@ -337,9 +278,7 @@ class TestMultiExpertModel:
         config.router_granularity = "mixer"
         # mixer not found
         with pytest.raises(ValueError):
-            module = MoETrainer(
-                tokenizer=None,
-                expert_info={},
+            module = MoEModel(
                 **vars(config),
             )
 
@@ -356,11 +295,7 @@ class TestMultiExpertModel:
         config.moe_emb_dim = 10
         config.moe_rkhs_dim = 10
 
-        module = MoETrainer(
-            tokenizer=None,
-            expert_info={},
-            **vars(config),
-        )
+        module = MoEModel(**vars(config))
 
         container = module.model.transformer.h[0].attn.attention.k_proj
         assert isinstance(container, CoalescedLoRAExpertContainer)
@@ -389,11 +324,7 @@ class TestMultiExpertModel:
         config.moe_emb_dim = 10
         config.moe_rkhs_dim = 10
 
-        module = MoETrainer(
-            tokenizer=None,
-            expert_info={},
-            **vars(config),
-        )
+        module = MoEModel(**vars(config))
 
         container = module.model.transformer.h[0].attn.attention.k_proj
         assert isinstance(container, LoRAExpertContainer)
@@ -422,11 +353,7 @@ class TestMultiExpertModel:
         config.router_granularity = "finegrained"
         config.router_temp = 0.1
 
-        module = MoETrainer(
-            tokenizer=None,
-            expert_info={},
-            **vars(config),
-        )
+        module = MoEModel(**vars(config))
 
         container = module.model.transformer.h[0].attn.attention.k_proj
         assert isinstance(container, CoalescedLoRAExpertContainer)

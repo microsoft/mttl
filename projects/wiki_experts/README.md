@@ -13,7 +13,7 @@ to new tasks, or update existing ones, brining us one step closer to seamless co
 
 ```python
 # Create e.g. LoRA wrapped LLM
-expert_trainer = ExpertTrainer(**vars(args))
+expert_trainer = ExpertModel(**vars(args))
 
 print(expert_trainer)
 """
@@ -85,11 +85,10 @@ We will describe below some key object classes that will be useful when developi
 
 ### Model Wrapper (Lightning) Classes
 
-1. **ExpertTrainer** : is your base pytorch lightning wrapper taking care of (i) backbone model creation, (ii) adapter / expert insertion, and (iii) a potential routing mechanism (from the `Selector` class)
-2. **MultiExpertModel** : generalizes `ExpertTrainer` to multiple experts; that is, it contains `ExpertContainers`, and can be used for inference across multiple experts, (and also to train a router ?)
-3. **MoeTrainer** : TODO
-4. **RoutedMultiExpertModel** : TODO
-5. **MultiExpertModelRanker:** TODO
+1. **ExpertModel** : is your base pytorch lightning wrapper taking care of (i) backbone model creation, (ii) adapter / expert insertion, and (iii) a potential routing mechanism (from the `Selector` class)
+2. **MultiExpertModel** : generalizes `ExpertModel` to multiple experts; that is, it contains `ExpertContainers`, and can be used for inference across multiple experts, (and also to train a router ?)
+3. **MoeModel** : TODO
+
 
 ### Routers
 

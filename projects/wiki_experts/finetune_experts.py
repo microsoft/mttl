@@ -40,13 +40,10 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
 from typing import Callable
 
 from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
-from projects.wiki_experts.src.expert_model import (
-    MoETrainer,
-    MultiExpertModel,
-    RoutedMultiExpertModel,
-)
-from projects.wiki_experts.src.expert_trainer import ExpertTrainer
-from projects.wiki_experts.src.config import ExpertConfig
+from mttl.models.expert_model import MoEModel as MoETrainer
+from mttl.models.expert_model import ExpertModel as ExpertTrainer
+from mttl.models.expert_model import MultiExpertModel
+from mttl.models.expert_config import ExpertConfig
 from projects.wiki_experts.train_experts_main import create_transfer_matrix
 from projects.wiki_experts.utils import get_datamodule
 from projects.wiki_experts.src.evolution.retrievers import (
@@ -194,7 +191,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
     def get_loss(model):
         return -1.0 * rouge_evaluator.evaluate(model, split="train", verbose=False)
 
-    module = RoutedMultiExpertModel(**vars(args), device_map="auto")
+    module = MultiExpertModel(**vars(args), device_map="auto")
 
     optimizer = NGRoutingOptimizer(
         model=module,
@@ -205,17 +202,12 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
         regularizer_factor=0.05,
     )
 
-    best_weights, best_graph_string = optimizer.optimize()
+    _, best_graph_string = optimizer.optimize()
     module.load_from_graph_string(best_graph_string, "route", expert_library=library)
-    expert = module.replace_container_with_expert("new_task")
-    expert = Expert(
-        ExpertInfo(
-            expert_name="nevergrad",
-            expert_config=ModifierConfig.from_training_config(args),
-            training_config=args,
-        ),
-        expert.expert_weights,
-    )
+    expert = module.get_expert_instance("new_task")
+    expert.name = "nevergrad"
+    expert.expert_config = ModifierConfig.from_training_config(args)
+    expert.training_config = args
     return expert
 
 
@@ -245,7 +237,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
     def get_loss(model):
         return -1.0 * rouge_evaluator.evaluate(model, split="train", verbose=False)
 
-    module = RoutedMultiExpertModel(**vars(args), device_map="auto")
+    module = MultiExpertModel(**vars(args), device_map="auto")
 
     optimizer = NGRoutingOptimizer(
         model=module,
@@ -258,15 +250,10 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
 
     best_weights, best_graph_string = optimizer.optimize()
     module.load_from_graph_string(best_graph_string, "route", expert_library=expert_lib)
-    expert = module.replace_container_with_expert("new_task")
-    expert = Expert(
-        ExpertInfo(
-            expert_name="nevergrad",
-            expert_config=ModifierConfig.from_training_config(args),
-            training_config=args,
-        ),
-        expert.expert_weights,
-    )
+    expert = module.get_expert_instance("new_task")
+    expert.name = "nevergrad"
+    expert.expert_config = ModifierConfig.from_training_config(args)
+    expert.training_config = args
     return expert
 
 
