@@ -1038,11 +1038,12 @@ class TaskNameSelector(Selector):
         super().__init__(info_container)
 
         self.default_expert_name = None
+        self.task2expert_name = {}
 
     @forward_with_cache
     def forward(self, input, **kwargs) -> ModulesSelectorOutput:
-        # try to infer batch size
         if not self.routing_infos or not self.routing_infos.task_names:
+            # try to infer batch size
             if "input_ids" in kwargs:
                 batch_size = kwargs["input_ids"].size(0)
             else:
@@ -1056,19 +1057,23 @@ class TaskNameSelector(Selector):
             task_names = self.routing_infos.task_names
 
             if (
-                any(task_name not in self.expert_names for task_name in task_names)
+                any(task_name not in self.task2expert_name for task_name in task_names)
                 and not self.default_expert_name
-                and len(self.expert_names)
+                and len(self.task2expert_name)
             ):
                 raise ValueError(
                     "Experts for all tasks have not been loaded! Set a default expert?"
                 )
-            modules = task_names
+            modules = [
+                self.task2expert_name.get(task_name, self.default_expert_name)
+                for task_name in task_names
+            ]
 
         return ModulesSelectorOutput(modules)
 
-    def add_expert(self, expert_name: str, **kwargs):
-        self.expert_names.append(expert_name)
+    def add_expert(self, expert_name: str, expert_info, **kwargs):
+        for task_name in expert_info.expert_task_name.split(","):
+            self.task2expert_name[task_name] = expert_name
 
 
 class KVSelector(Selector):
