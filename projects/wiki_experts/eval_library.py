@@ -40,6 +40,7 @@ from projects.wiki_experts.src.evolution.transfer_matrix import (
     TransferMatrixConfig,
     run_eval as produce_transfer_matrix,
 )
+from mttl.callbacks import LossCallback
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
 from projects.wiki_experts.src.evolution.utils import TableLogger
@@ -124,19 +125,35 @@ def eval_in_distribution(module, args: ExpertConfig, tasks):
     for task in tasks:
         args.finetune_task_name = task
         args.predict_batch_size = 16
-        dm = get_datamodule(args, for_generation=True)
-        evaluator = RougeEvaluator(
-            datamodule=dm,
-        )
-        rouge = evaluator.evaluate(
-            module,
-            split="test",
-            verbose=False,
-        )
-        wandb.log({f"test/rougeL_{task}": rouge})
-        transfer_table.log({"task": task, "rougeL": rouge})
+        if args.eval_metric in ["val_loss", "loss"]:
+            dm = get_datamodule(args)
+            evaluator = LossCallback(
+                dm.val_dataloader(), output_dir=args.output_dir, name=task + "_val"
+            )
+            metric = evaluator.test(model=module)
+
+        if args.eval_metric == "test_loss":
+            dm = get_datamodule(args)
+            evaluator = LossCallback(
+                dm.test_dataloader(), output_dir=args.output_dir, name=task + "_val"
+            )
+            metric = evaluator.test(model=module)
+        elif args.eval_metric == "rougeL":
+            dm = get_datamodule(args, for_generation=True)
+            evaluator = RougeEvaluator(
+                datamodule=dm,
+            )
+            metric = evaluator.evaluate(
+                module,
+                split="test",
+                verbose=False,
+            )
+        else:
+            raise ValueError(f"Unknown eval metric {args.eval_metric}")
+        wandb.log({f"test/{args.eval_metric}_{task}": metric})
+        transfer_table.log({"task": task, args.eval_metric: metric})
     transfer_table.log_table_wandb()
-    wandb.log({"mean_rougeL": transfer_table.df["rougeL"].mean()})
+    wandb.log({f"mean_{args.eval_metric}": transfer_table.df[args.eval_metric].mean()})
 
 
 def run_multitask(args: ExpertConfig):

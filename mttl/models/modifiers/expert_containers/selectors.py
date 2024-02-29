@@ -1072,8 +1072,14 @@ class TaskNameSelector(Selector):
         return ModulesSelectorOutput(modules)
 
     def add_expert(self, expert_name: str, expert_info, **kwargs):
-        for task_name in expert_info.expert_task_name.split(","):
-            self.task2expert_name[task_name] = expert_name
+        if expert_info.expert_task_name is None:
+            logger.warn(
+                "Expert's task_name not set, assume task name corresponds to expert name!"
+            )
+            self.task2expert_name[expert_name] = expert_name
+        else:
+            for task_name in expert_info.expert_task_name.split(","):
+                self.task2expert_name[task_name] = expert_name
 
 
 class KVSelector(Selector):
