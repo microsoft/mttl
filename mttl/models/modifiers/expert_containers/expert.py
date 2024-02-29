@@ -4,6 +4,7 @@ from typing import Dict, Union
 import re
 from string import Template
 from mttl.models.modifiers.base import ModifierConfig
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from mttl.models.modifiers.modify_model import CONFIGS_TO_MODIFIERS
 
 from mttl.models.utils import download_from_hub
@@ -135,7 +136,7 @@ class Expert:
 
 def load_expert(
     expert_path: str,
-    expert_library: Union[Dict, "ExpertLibrary"] = None,
+    expert_library: Union[Dict, ExpertLibrary] = None,
     expert_name: str = None,
     **kwargs,
 ):

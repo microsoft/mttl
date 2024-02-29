@@ -1093,7 +1093,7 @@ class ExpertLibrary:
     def add_expert_from_ckpt(
         self, ckpt_path: str, expert_name: str = None, force: bool = False
     ):
-        expert_dump = load_expert(ckpt_path)
+        expert_dump = load_expert(ckpt_path, expert_name=expert_name)
         self.add_expert(expert_dump, expert_name=expert_name, force=force)
 
     def rename_expert(self, old_name, new_name):

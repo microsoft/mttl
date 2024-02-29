@@ -6,7 +6,7 @@ from pytorch_lightning import Trainer, seed_everything
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
-from mttl.callbacks import LiveCheckpointCallback, LiveLibraryCheckpointCallback
+from mttl.callbacks import LiveCheckpointCallback
 from mttl.models.monitors import get_monitors
 from mttl.datamodule.base import get_datamodule
 from mttl.callbacks import NanoMMLUCallback, RougeCallback
@@ -54,6 +54,10 @@ def run_multitask(args: ExpertConfig):
     logger.info("Args: {}".format(args.to_json()))
 
     remote_login(args.remote_token)
+    expert_library = None
+    if args.library_id:
+        expert_library = get_expert_library(args.library_id, create=True)
+
     loggers = get_pl_loggers(args)
     # select dataloader
     model_class = ExpertTrainer
@@ -71,21 +75,14 @@ def run_multitask(args: ExpertConfig):
         monitor = "val/loss"
         mode = "min"
 
-    if args.save_each_epoch:
-        checkpoint_callback = LiveLibraryCheckpointCallback(
-            dirpath=args.output_dir,
-            monitor=monitor,
-            mode=mode,
-            save_last=True,
-            save_each_epoch=args.save_each_epoch,
-            library_name=args.library_name,
-            hf_token_hub=os.environ.get("HF_TOKEN", None),
-            cluster_name=args.cluster_name,
-        )
-    else:
-        checkpoint_callback = LiveCheckpointCallback(
-            dirpath=args.output_dir, monitor=monitor, save_last=True, mode=mode
-        )
+    checkpoint_callback = LiveCheckpointCallback(
+        dirpath=args.output_dir,
+        monitor=monitor,
+        save_last=True,
+        mode=mode,
+        expert_library=expert_library,
+        save_each_epoch=args.save_each_epoch,
+    )
     callbacks.append(checkpoint_callback)
 
     if args.eval_rouge_flag:
@@ -166,14 +163,6 @@ def run_multitask(args: ExpertConfig):
         module.load_state_dict(torch.load(checkpoint)["state_dict"])
         trainer.test(module, dm)
 
-        if args.library_id and checkpoint:
-            library = get_expert_library(args.library_id, create=True)
-            library.add_expert_from_ckpt(checkpoint)
-
-        if args.hf_repo_id and checkpoint:
-            from projects.wiki_experts.src.expert_model import push_expert_to_hub
-
-            push_expert_to_hub(checkpoint, args.hf_repo_id, auto_search=False)
         if args.create_transfer_matrix:
             create_transfer_matrix(args, checkpoint)
 
