@@ -9,10 +9,8 @@ from mttl.evaluators import MMLUEvaluator
 from mttl.utils import remote_login, setup_logging, logger
 
 # register models
-from projects.wiki_experts.src.expert_model import (
-    MoETrainer,
-)
-from projects.wiki_experts.src.config import ExpertConfig
+from mttl.models.expert_model import MoEModel as MoETrainer
+from mttl.models.expert_config import ExpertConfig
 
 
 def run_eval(args):

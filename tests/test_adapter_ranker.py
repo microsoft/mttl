@@ -1,7 +1,7 @@
 # unit test for adapter_ranker
 import pytest
 from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
-from projects.wiki_experts.src.expert_model import (
+from mttl.models.expert_model import (
     MultiExpertModelRanker,
     MultiExpertModel,
 )
@@ -9,7 +9,7 @@ from projects.wiki_experts.src.ranker.classifier_ranker import (
     SentenceTransformerClassifier,
 )
 from projects.wiki_experts.src.ranker.clip_ranker import CLIPRanker
-from projects.wiki_experts.src.config import ExpertConfig
+from mttl.models.expert_config import ExpertConfig
 
 
 def test_clip_routing():
@@ -68,7 +68,6 @@ def test_classifier_routing():
 
 
 def test_expert_model_generate():
-
     config = ExpertConfig()
     config.model = "EleutherAI/gpt-neo-125m"
     finetune_task_name = "adversarial_qa_dbert_answer_the_following_q"
