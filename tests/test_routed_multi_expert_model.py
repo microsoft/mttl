@@ -125,16 +125,16 @@ class TestMultiExpertModel:
         config.ranker_path = "zhan1993/classifier_ranker_debug"
         exp1_dest = self.create_dummy_expert(config, "exp1")
         exp2_dest = self.create_dummy_expert(config, "exp2")
-        module_dict = {"niv2_misc": exp1_dest, "niv2_misc": exp2_dest}
+        module_dict = {"niv2_sentence_compression": exp1_dest, "niv2_misc": exp2_dest}
 
         module = MultiExpertModel(**vars(config))
         module.load_from_module_dict(module_dict, action="route")
 
-        bs, max_seq_len = 10, 100
+        bs, max_seq_len = 2, 100
         batch = {
-            "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
-            "labels": torch.randint(10, 400, (bs, max_seq_len)),
-            "sources_texts": ["task predictor"] * 10,
+            "input_ids": torch.randint(bs, 400, (bs, max_seq_len)),
+            "labels": torch.randint(bs, 400, (bs, max_seq_len)),
+            "sources_texts": ["task predictor", "hello world"],
         }
 
         seq_len = torch.randint(0, max_seq_len, (bs,))
@@ -144,7 +144,7 @@ class TestMultiExpertModel:
         batch["attention_mask"] = attn_mask
 
         output = module(batch)
-        assert np.allclose(output.item(), 10.59, atol=0.1)
+        assert np.allclose(output.item(), 9.71, atol=0.1)
 
     def test_expert_selector_with_task_name_routing(self, tmp_exp_config):
         seed_everything(0)
