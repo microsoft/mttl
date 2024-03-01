@@ -297,12 +297,6 @@ class TaskPredictorSelector(Selector):
             )
             return BatchModulesAndWeightsSelectorOutput(modules, weights)
 
-    def get_merging_weights(self, **selector_kwargs) -> Dict:
-        return {k: 1.0 for k in self.expert_names}
-
-    def add_expert(self, expert_name: str, **kwargs):
-        self.expert_names.append(expert_name)
-
 
 @register_multi_expert_selector("poly_router", PolySelectorConfig)
 class PolySelector(Selector):
