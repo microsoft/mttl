@@ -279,19 +279,17 @@ class TaskPredictorSelectorConfig(SelectorConfig):
 
 @register_multi_expert_selector("task_predictor_selector", TaskPredictorSelectorConfig)
 class TaskPredictorSelector(Selector):
-    def __init__(self, info_container, config, **kwargs) -> None:
-        super().__init__(info_container, config)
-
-        self.top_k = config.top_k
-
+    def __init__(self, info_container, **kwargs) -> None:
+        super().__init__(info_container, **kwargs)
+        self.top_k = self.config.top_k
         # get the routing model
         self.expert_ranker = AdapterRankerHelper.get_ranker_instance(
-            ranker_model=config.ranker_model,
-            ranker_path=config.ranker_path,
+            ranker_model=self.config.ranker_model,
+            ranker_path=self.config.ranker_path,
         )
 
-    def forward(self, **kwargs) -> BatchModulesAndWeightsSelectorOutput:
-        # get the sources_texts
+    def forward(self, input, **kwargs) -> BatchModulesAndWeightsSelectorOutput:
+        # get the sources_texts from routing_infos
         if hasattr(self.info_container["routing_infos"], "sources_texts"):
             sources_texts = self.info_container["routing_infos"].sources_texts
             modules, weights = self.expert_ranker.predict_task(
