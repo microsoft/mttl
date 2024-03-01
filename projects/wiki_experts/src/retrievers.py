@@ -10,9 +10,7 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     VirtualLocalLibrary,
 )
 from mttl.models.expert_model import MultiExpertModel
-from projects.wiki_experts.src.utils.utils import (
-    get_svd_embedding,
-)
+from projects.wiki_experts.src.utils.utils import get_svd_embedding
 
 RETRIEVERS = {}
 
