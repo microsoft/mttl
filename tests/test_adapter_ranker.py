@@ -5,10 +5,8 @@ from mttl.models.expert_model import (
     MultiExpertModelRanker,
     MultiExpertModel,
 )
-from projects.wiki_experts.src.ranker.classifier_ranker import (
-    SentenceTransformerClassifier,
-)
-from projects.wiki_experts.src.ranker.clip_ranker import CLIPRanker
+from mttl.models.ranker.classifier_ranker import SentenceTransformerClassifier
+from mttl.models.ranker.clip_ranker import CLIPRanker
 from mttl.models.expert_config import ExpertConfig
 
 

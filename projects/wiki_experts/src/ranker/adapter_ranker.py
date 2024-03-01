@@ -18,12 +18,12 @@ class AdapterRanker(ABC):
 class AdapterRankerHelper:
     @staticmethod
     def get_ranker_instance(ranker_model, ranker_path, device="cuda"):
-        from projects.wiki_experts.src.ranker.baseline_rankers import KATERanker
-        from projects.wiki_experts.src.ranker.classifier_ranker import (
+        from mttl.models.ranker.baseline_rankers import KATERanker
+        from mttl.models.ranker.classifier_ranker import (
             SentenceTransformerClassifier,
             ClusterPredictor,
         )
-        from projects.wiki_experts.src.ranker.clip_ranker import (
+        from mttl.models.ranker.clip_ranker import (
             CLIPRanker,
             CLIPTripletRanker,
         )
