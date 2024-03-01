@@ -136,7 +136,7 @@ class HardPromptExpertContainer(ExpertContainer):
             raise NotImplementedError("Not implemented for this modifier.")
 
         self.experts[expert.name] = expert_module
-        self.add_expert_to_selector(expert.name)
+        self.add_expert_to_selector(expert.name, expert_info=expert.expert_info)
 
     def route(self, input_ids, selection, attention_mask=None, labels=None):
         if isinstance(selection, ModulesSelectorOutput):

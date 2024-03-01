@@ -24,6 +24,7 @@ from mttl.utils import remote_login, setup_logging, logger
 
 # register models
 from mttl.models.expert_model import ExpertModel
+
 from mttl.vllm_engines.engines import free_memory
 from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 
@@ -160,7 +161,7 @@ def produce_transfer_matrix(
 
         print(transfer_table.df)
         transfer_table.log(log_row)
-        transfer_table.log_table_wandb()
+        transfer_table.log_final_table()
         transfer_table.df.to_csv(os.path.join(args.output_dir, "transfer_matrix.csv"))
 
     transfer_table.means()
@@ -189,7 +190,7 @@ def run_eval(args: TransferMatrixConfig, debug=None):
         args, expert_lib, tasks=args.finetune_task_name
     )
 
-    transfer_table.log_table_wandb()
+    transfer_table.log_final_table()
     transfer_matrix = transfer_table.df
     transfer_matrix = transfer_matrix.set_index("eval_task")
     if wandb.run is not None:

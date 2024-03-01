@@ -74,7 +74,7 @@ def test_hard_prompt_eval(flan_batch_for_generation):
     expert = Expert(
         expert_info=ExpertInfo(
             expert_name="prefix",
-            expert_task_name="test_task",
+            expert_task_name="prefix",
             expert_config=config,
         ),
         expert_weights=weight,

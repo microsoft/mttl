@@ -158,12 +158,14 @@ def replace_selector_for_container(
         for _, layer in dict(module.named_children()).items():
             if isinstance(layer, ExpertContainer):
                 # check if the container holds the same modifier type, e.g. LoRAConfig --> "lora"
-                container_modifier = get_modifier_type(layer.__supports_configs__[0])
-                # selector does not apply to this container
-                if not container_modifier == modifier_type:
-                    continue
-                else:
-                    expert_containers.append(layer)
+                for supports_config in layer.__supports_configs__:
+                    container_modifier = get_modifier_type(supports_config)
+                    # selector does not apply to this container
+                    if not container_modifier == modifier_type:
+                        continue
+                    else:
+                        expert_containers.append(layer)
+                        break
 
     if not expert_containers:
         raise ValueError(
