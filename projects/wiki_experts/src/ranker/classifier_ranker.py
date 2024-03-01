@@ -108,7 +108,31 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
                 self.available_mask[self.task_names_to_ids[task]] = 1.0
 
     def predict_task(self, query, n=1):
-        raise NotImplementedError("Not implemented yet.")
+        logits = self(query).detach().cpu()
+
+        if self.available_mask is not None:
+            logits = logits + (1.0 - self.available_mask) * -100
+
+        # safe softmax
+        max_logits = torch.max(logits, dim=1, keepdim=True).values
+        logits = logits - max_logits
+
+        expert_indices = torch.topk(logits, k=n, dim=1)
+
+        expert_prediction = [
+            [self.ids_to_tasks_names[index.item()] for index in indices]
+            for indices in expert_indices.indices
+        ]
+        expert_weights = [
+            [weight.item() for weight in weights] for weights in expert_indices.values
+        ]
+        # increate the entropy of the weights
+        expert_weights = np.array(expert_weights) / self.temperature
+
+        expert_weights = np.exp(np.array(expert_weights))
+        expert_weights = expert_weights / expert_weights.sum(axis=1, keepdims=True)
+
+        return expert_prediction, expert_weights.tolist()
 
     @torch.no_grad()
     def predict_batch(self, batch, n=1):
@@ -339,10 +363,10 @@ class ClusterPredictor(SentenceTransformerClassifier):
         # get the cluster distribution
         cluster_distribution = torch.zeros(logits.shape[0], len(self.cluster_names))
         for cluster_name in self.cluster_names_to_ids:
-            cluster_distribution[
-                :, self.cluster_names_to_ids[cluster_name]
-            ] = torch.sum(
-                logits[:, self.cluster_names_to_expert_ids[cluster_name]], dim=-1
+            cluster_distribution[:, self.cluster_names_to_ids[cluster_name]] = (
+                torch.sum(
+                    logits[:, self.cluster_names_to_expert_ids[cluster_name]], dim=-1
+                )
             )
 
         # get the topk clusters
