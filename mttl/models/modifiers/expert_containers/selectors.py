@@ -319,11 +319,11 @@ class PolySelector(Selector):
                 assert not self.training, "Unknown tasks during training"
 
         module_logits = torch.sigmoid(self.module_logits[task_ids])
+        module_logits = module_logits.view(
+            module_logits.size(0), self.config.n_splits, self.n_experts
+        )
         module_weights = module_logits / (module_logits.sum(dim=-1, keepdim=True) + EPS)
 
-        module_weights = module_weights.view(
-            module_weights.size(0), self.config.n_splits, self.n_experts
-        )
         return module_weights
 
     @forward_with_cache
