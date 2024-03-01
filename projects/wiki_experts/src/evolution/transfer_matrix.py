@@ -31,7 +31,7 @@ from projects.wiki_experts.src.evolution.evaluators import Evaluator, prepare_ev
 from mttl.utils import remote_login, setup_logging, logger
 
 # register models
-from projects.wiki_experts.src.expert_model import MultiExpertModel
+from mttl.models.expert_model import MultiExpertModel
 from mttl.vllm_engines.engines import free_memory
 from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 

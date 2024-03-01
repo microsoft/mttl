@@ -29,10 +29,6 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     ArrowConfig,
 )
 from mttl.models.modifiers.expert_containers.expert_containers import ExpertContainer
-from projects.wiki_experts.src.evolution.transfer_matrix import (
-    TransferMatrixConfig,
-    run_eval as produce_transfer_matrix,
-)
 from mttl.callbacks import LossCallback
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
@@ -108,13 +104,19 @@ def patch_prototypes(module, library, args, proto_inits=None):
 
 
 def eval_in_distribution(module, args: ExpertConfig, tasks):
+    import prettytable
+
+    table = prettytable.PrettyTable()
     args.include_task_source = "*"
     transfer_table = TableLogger()
-    wandb.init(
-        project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
-        config=dict(module.hparams),
-        name=os.environ.get("AMLT_JOB_NAME", None),
-    )
+    args.subsample_test = 1
+    # check that environment variable is set
+    if os.environ.get("WANDB_API_KEY"):
+        wandb.init(
+            project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
+            config=dict(module.hparams),
+            name=os.environ.get("AMLT_JOB_NAME", None),
+        )
     for task in tasks:
         args.finetune_task_name = task
         args.predict_batch_size = 16
@@ -123,12 +125,12 @@ def eval_in_distribution(module, args: ExpertConfig, tasks):
             evaluator = LossCallback(
                 dm.val_dataloader(), output_dir=args.output_dir, name=task + "_val"
             )
-            metric = evaluator.test(model=module)
+            metric = evaluator.test(pl_module=module)
 
         if args.eval_metric == "test_loss":
             dm = get_datamodule(args)
             evaluator = LossCallback(
-                dm.test_dataloader(), output_dir=args.output_dir, name=task + "_val"
+                dm.test_dataloader(), output_dir=args.output_dir, name=task + "_test"
             )
             metric = evaluator.test(model=module)
         elif args.eval_metric == "rougeL":
@@ -143,10 +145,19 @@ def eval_in_distribution(module, args: ExpertConfig, tasks):
             )
         else:
             raise ValueError(f"Unknown eval metric {args.eval_metric}")
-        wandb.log({f"test/{args.eval_metric}_{task}": metric})
+        if wandb.run is not None:
+            wandb.log({f"test/{args.eval_metric}_{task}": metric})
         transfer_table.log({"task": task, args.eval_metric: metric})
+        table.add_row([task, str(metric)])
+
     transfer_table.log_table_wandb()
-    wandb.log({f"mean_{args.eval_metric}": transfer_table.df[args.eval_metric].mean()})
+    if wandb.run is not None:
+        wandb.log(
+            {f"mean_{args.eval_metric}": transfer_table.df[args.eval_metric].mean()}
+        )
+
+    table.add_row(["mean", str(transfer_table.df[args.eval_metric].mean())])
+    logger.info("Results:\n" + str(table))
 
 
 def run_multitask(args: ExpertConfig):
@@ -174,7 +185,7 @@ def run_multitask(args: ExpertConfig):
         token=args.remote_token,
         exclude_selection=exclude_phi_tasks,
     )
-
+    args_copy = None
     if args.merge_or_route in ["uniform", "weighted"]:
         weights = None
         if args.merge_or_route == "weighted":
@@ -194,6 +205,9 @@ def run_multitask(args: ExpertConfig):
         ).transform(library)
         module = MultiExpertModel(**vars(expert.training_config)).to("cuda")
         module.add_expert_instance(expert, is_default=True)
+        args_copy = expert.training_config
+        args_copy.output_dir = args.output_dir
+        args_copy.eval_metric = args.eval_metric
     elif args.merge_or_route == "uniform_lora_after_op":
         # Here we merge the LoRa experts after the outer product
         # we cannot really do it with the lib transform, cause this would require storing large matrices in memory
@@ -261,12 +275,12 @@ def run_multitask(args: ExpertConfig):
         args_copy: ExpertConfig = deepcopy(an_expert.training_config)
         args_copy.output_dir = args.output_dir
         args_copy.router_selector = "task_selector"
-        module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
+        module = MultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
 
     if args.pipeline_eval_tasks == "in_distribution":
         tasks = [expert.expert_task_name for expert in library.data.values()]
-        scores = eval_in_distribution(module, args_copy, tasks)
+        scores = eval_in_distribution(module, args_copy or args, tasks)
         return
     else:
         if args.pipeline_eval_tasks == "all":
