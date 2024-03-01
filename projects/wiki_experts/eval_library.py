@@ -104,19 +104,10 @@ def patch_prototypes(module, library, args, proto_inits=None):
 
 
 def eval_in_distribution(module, args: ExpertConfig, tasks):
-    import prettytable
-
-    table = prettytable.PrettyTable()
     args.include_task_source = "*"
     transfer_table = TableLogger()
     args.subsample_test = 1
-    # check that environment variable is set
-    if os.environ.get("WANDB_API_KEY"):
-        wandb.init(
-            project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
-            config=dict(module.hparams),
-            name=os.environ.get("AMLT_JOB_NAME", None),
-        )
+
     for task in tasks:
         args.finetune_task_name = task
         args.predict_batch_size = 16
@@ -148,16 +139,19 @@ def eval_in_distribution(module, args: ExpertConfig, tasks):
         if wandb.run is not None:
             wandb.log({f"test/{args.eval_metric}_{task}": metric})
         transfer_table.log({"task": task, args.eval_metric: metric})
-        table.add_row([task, str(metric)])
 
-    transfer_table.log_table_wandb()
     if wandb.run is not None:
         wandb.log(
             {f"mean_{args.eval_metric}": transfer_table.df[args.eval_metric].mean()}
         )
 
-    table.add_row(["mean", str(transfer_table.df[args.eval_metric].mean())])
-    logger.info("Results:\n" + str(table))
+    transfer_table.log(
+        {
+            "task": "mean",
+            args.eval_metric: str(transfer_table.df[args.eval_metric].mean()),
+        }
+    )
+    transfer_table.log_final_table()
 
 
 def run_multitask(args: ExpertConfig):
@@ -278,6 +272,15 @@ def run_multitask(args: ExpertConfig):
         module = MultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
 
+    if os.environ.get("WANDB_API_KEY"):
+        import wandb
+
+        wandb.init(
+            project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
+            config=dict(module.hparams),
+            name=os.environ.get("AMLT_JOB_NAME", None),
+        )
+
     if args.pipeline_eval_tasks == "in_distribution":
         tasks = [expert.expert_task_name for expert in library.data.values()]
         scores = eval_in_distribution(module, args_copy or args, tasks)
@@ -310,16 +313,8 @@ def run_multitask(args: ExpertConfig):
                 for k, v in task_dict.items():
                     routing_stats[f"{task_name}/{k}"] = v
 
-        if os.environ.get("WANDB_API_KEY"):
-            import wandb
-
-            wandb.init(
-                project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
-                config=dict(module.hparams),
-                name=os.environ.get("AMLT_JOB_NAME", None),
-            )
+        if wandb.run is not None:
             wandb.log({f"downstream/{k}": v for k, v in scores.items()})
-
             if len(routing_stats) > 0:
                 wandb.log(routing_stats)
 

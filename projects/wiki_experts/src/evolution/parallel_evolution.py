@@ -138,7 +138,7 @@ def main(args: EvolExpertConfig):
             args, task, expert_lib, module=module, ai=ai, callbacks=callbacks
         )
         tablelogger.log(log_row)
-        tablelogger.log_table_wandb()
+        tablelogger.log_final_table()
 
         lib_cynced = False
         try:

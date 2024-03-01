@@ -169,11 +169,11 @@ def produce_transfer_matrix(
 
         print(transfer_table.df)
         transfer_table.log(log_row)
-        transfer_table.log_table_wandb()
+        transfer_table.log_final_table()
         transfer_table.df.to_csv(os.path.join(args.output_dir, "transfer_matrix.csv"))
 
     transfer_table.means()
-    transfer_table.log_table_wandb()
+    transfer_table.log_final_table()
 
     transfer_matrix = transfer_table.df
     if wandb.run is not None:
