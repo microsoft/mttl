@@ -9,7 +9,7 @@ from torch import nn
 import torch.nn.functional as F
 from mttl.models.modifiers.routing import RoutingInfo
 from torch.distributions import Bernoulli, Categorical
-from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRankerHelper
+from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
 
 
 # from mttl.models.modifiers.routing import RoutingMixin
