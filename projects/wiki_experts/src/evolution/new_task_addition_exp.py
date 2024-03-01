@@ -129,7 +129,7 @@ def main(args: EvolExpertConfig):
             wandb_logger_local=wandb_logger,
         )
         tablelogger.log(log_row)
-        tablelogger.log_table_wandb()
+        tablelogger.log_final_table()
 
 
 if __name__ == "__main__":
