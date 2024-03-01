@@ -22,6 +22,7 @@ from mttl.models.modifiers.expert_containers.selectors import (
     MOERKHSSelector,
     SelectorView,
     ClownSelector,
+    PolySelector,
 )
 from mttl.models.modifiers.lora import LoRA
 
@@ -129,6 +130,100 @@ class TestMultiExpertModel:
         # Test Base Llama model
         output = module(batch)
         assert np.allclose(output.item(), 9.7, atol=0.1)
+
+    def test_expert_selector_with_poly_task_routing(self, tmp_exp_config):
+        seed_everything(0)
+        config: Config = tmp_exp_config
+        config.router_selector = "poly_router"
+
+        # Tasks need to be specified to the selector to perform routing
+        config.task_names = ["task_1", "task_2", "task_3"]
+
+        exp1 = self.create_dummy_expert(config, "task_1")
+        exp2 = self.create_dummy_expert(config, "task_2")
+        module_dict = {"mod1": exp1, "mod2": exp2}
+
+        def nonzero_B_init(model):
+            gen = torch.Generator()
+            gen.manual_seed(0)
+            for mod in model.modules():
+                if isinstance(mod, LoRA):
+                    # Also re-initing lora_a so that we have the exact same values
+                    # for both the Poly and MHR test
+                    mod.lora_a.data = torch.rand(mod.lora_a.shape, generator=gen) * 0.5
+                    mod.lora_b.data = torch.rand(mod.lora_b.shape, generator=gen) * 0.5
+
+        module = RoutedMultiExpertModel(
+            tokenizer=None,
+            **vars(config),
+        )
+        assert module.hparams.model_modifier == None
+        module.load_from_module_dict(module_dict, action="route")
+        bs, max_seq_len = 10, 100
+
+        assert isinstance(
+            module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
+        )
+
+        batch = {
+            "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
+            "labels": torch.randint(10, 400, (bs, max_seq_len)),
+        }
+        seq_len = torch.randint(0, max_seq_len, (bs,))
+        attn_mask = torch.zeros(bs, max_seq_len, dtype=torch.int32)
+        attn_mask[torch.arange(bs), seq_len] = 1
+        attn_mask = 1 - attn_mask.cumsum(dim=-1)
+        batch["attention_mask"] = attn_mask
+        batch["task_names"] = ["task_1", "task_2"] * 5
+
+        # BASE MODEL FWD BASS (because all Bs are == 0, so functially same as backbone)
+        output = module(batch)
+        assert np.allclose(output.item(), 10.20, atol=0.1)
+
+        # Now let's change the adapter params, and also the function parameterized by the model
+        nonzero_B_init(module)
+        output = module(batch)
+        assert np.allclose(output.item(), 14.69, atol=0.1)
+
+        """ Multi-Head Routing Test """
+        # NOTE: We need to add SkilledLoRAs instead of standard LoRAs
+        # We follow the procedure as in MoETrainer constructor :
+        # init SkilledLoras n_skills=1, for `n_experts` amount of times
+        config.n_splits = 4
+        config.n_skills = 1
+        config.model_modifier = "skilled_lora"
+
+        # Need to recreate experts so that they have the right amt of splits
+        exp1 = self.create_dummy_expert(config, "task_1")
+        exp2 = self.create_dummy_expert(config, "task_2")
+
+        module_dict = {"mod1": exp1, "mod2": exp2}
+        module = RoutedMultiExpertModel(
+            tokenizer=None,
+            **vars(config),
+        )
+        assert module.hparams.model_modifier == None
+        module.load_from_module_dict(module_dict, action="route")
+        nonzero_B_init(module)
+
+        output = module(batch)
+
+        # Because routing is initialized to uniform, should give same result
+        assert np.allclose(output.item(), 15.27, atol=0.1)
+
+        # Now let's change the routing, to make sure the output also changes
+        for mod in module.modules():
+            if isinstance(mod, PolySelector):
+                mod.module_logits.data.uniform_(-10, 10)
+                mod.module_logits.data[:, -1] = 999
+
+        output = module(batch)
+        assert np.allclose(output.item(), 15.21, atol=0.1)
+
+        # Finally, Test invalid tasks
+        batch["task_names"][-1] = "task_10"
+        with pytest.raises(AssertionError):
+            output = module(batch)
 
     def test_expert_selector_with_task_name_routing(self, tmp_exp_config):
         seed_everything(0)
