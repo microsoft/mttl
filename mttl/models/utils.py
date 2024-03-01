@@ -430,7 +430,10 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
 
 
 def model_loader_helper(model_name, device_map="auto", load_in_8bit=False):
-    from transformers import LlamaForCausalLM, AutoModelForCausalLM
+    from transformers import PreTrainedModel, LlamaForCausalLM, AutoModelForCausalLM
+
+    if isinstance(model_name, PreTrainedModel):
+        return model_name
 
     if "llama" in model_name:
         model_object = LlamaForCausalLM.from_pretrained(

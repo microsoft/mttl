@@ -1,27 +1,21 @@
 import os
 import sys
-import json
 import torch
 import copy
+import wandb
 from copy import deepcopy
-import torch.nn.functional as F
+from pytorch_lightning import seed_everything
+import json
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
+
 from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
 from mttl.models.modifiers.expert_containers.selectors import ClownSelector
 from mttl.models.modifiers.lora import LoRAConfig
 
-
-from pytorch_lightning import seed_everything
-import json
-
 from mttl.utils import logger, remote_login, setup_logging
-
-from projects.wiki_experts.src.expert_model import (
-    MultiExpertModel,
-    RoutedMultiExpertModel,
-)
-from projects.wiki_experts.src.config import ExpertConfig
+from mttl.models.expert_model import MultiExpertModel
+from mttl.models.expert_config import ExpertConfig
 
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.models.modifiers.expert_containers.library_transforms import (
@@ -35,6 +29,10 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     ArrowConfig,
 )
 from mttl.models.modifiers.expert_containers.expert_containers import ExpertContainer
+from mttl.callbacks import LossCallback
+from mttl.datamodule.base import get_datamodule
+from mttl.evaluators.rouge_evaluator import RougeEvaluator
+from projects.wiki_experts.src.evolution.utils import TableLogger
 
 
 def get_hidden_states(library, args):
@@ -81,12 +79,14 @@ def patch_prototypes(module, library, args, proto_inits=None):
 
     for mod in module.modules():
         if isinstance(mod, ClownSelector):
+            patched_layer_name = mod.layer_name.replace(".selector", "")
             prototypes = []
             params = []
             for expert_name in mod.expert_names:
+                patched_layer_name = mod.layer_name.replace(".selector", "")
                 layer_names = proto_inits[expert_name].keys()
                 valid_layer_names = [
-                    k for k in layer_names if k.startswith(mod.layer_name)
+                    k for k in layer_names if k.startswith(patched_layer_name)
                 ]
                 key = sorted(valid_layer_names)[0]
                 prototypes += [proto_inits[expert_name][key]]
@@ -101,6 +101,57 @@ def patch_prototypes(module, library, args, proto_inits=None):
                 prototypes = prototypes / max_norm
 
             mod.overwrite_prototypes(prototypes)
+
+
+def eval_in_distribution(module, args: ExpertConfig, tasks):
+    args.include_task_source = "*"
+    transfer_table = TableLogger()
+    args.subsample_test = 1
+
+    for task in tasks:
+        args.finetune_task_name = task
+        args.predict_batch_size = 16
+        if args.eval_metric in ["val_loss", "loss"]:
+            dm = get_datamodule(args)
+            evaluator = LossCallback(
+                dm.val_dataloader(), output_dir=args.output_dir, name=task + "_val"
+            )
+            metric = evaluator.test(pl_module=module)
+
+        if args.eval_metric == "test_loss":
+            dm = get_datamodule(args)
+            evaluator = LossCallback(
+                dm.test_dataloader(), output_dir=args.output_dir, name=task + "_test"
+            )
+            metric = evaluator.test(model=module)
+        elif args.eval_metric == "rougeL":
+            dm = get_datamodule(args, for_generation=True)
+            evaluator = RougeEvaluator(
+                datamodule=dm,
+            )
+            metric = evaluator.evaluate(
+                module,
+                split="test",
+                verbose=False,
+            )
+        else:
+            raise ValueError(f"Unknown eval metric {args.eval_metric}")
+        if wandb.run is not None:
+            wandb.log({f"test/{args.eval_metric}_{task}": metric})
+        transfer_table.log({"task": task, args.eval_metric: metric})
+
+    if wandb.run is not None:
+        wandb.log(
+            {f"mean_{args.eval_metric}": transfer_table.df[args.eval_metric].mean()}
+        )
+
+    transfer_table.log(
+        {
+            "task": "mean",
+            args.eval_metric: str(transfer_table.df[args.eval_metric].mean()),
+        }
+    )
+    transfer_table.log_final_table()
 
 
 def run_multitask(args: ExpertConfig):
@@ -155,6 +206,9 @@ def run_multitask(args: ExpertConfig):
         ).transform(library)
         module = MultiExpertModel(**vars(expert.training_config)).to("cuda")
         module.add_expert_instance(expert, is_default=True)
+        args_copy = expert.training_config
+        args_copy.output_dir = args.output_dir
+        args_copy.eval_metric = args.eval_metric
     elif args.merge_or_route == "uniform_lora_after_op":
         # Here we merge the LoRa experts after the outer product
         # we cannot really do it with the lib transform, cause this would require storing large matrices in memory
@@ -184,7 +238,7 @@ def run_multitask(args: ExpertConfig):
         args_copy.proto_init = args.proto_init
         args_copy.normalize_router_input = args.normalize_router_input
         args_copy.lora_merge_after = args.merge_or_route == "clown_lora_after_op"
-        module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
+        module = MultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
         patch_prototypes(module, library, args)
         module = module.to("cuda")
@@ -209,7 +263,7 @@ def run_multitask(args: ExpertConfig):
         )
         prototypes = phagoose_transform.transform(library, default_args=args)
 
-        module = RoutedMultiExpertModel(**vars(args_copy), device_map="auto")
+        module = MultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
         # load prototypes into the router
         for mod in module.modules():
@@ -244,16 +298,8 @@ def run_multitask(args: ExpertConfig):
             for k, v in task_dict.items():
                 routing_stats[f"{task_name}/{k}"] = v
 
-    if os.environ.get("WANDB_API_KEY"):
-        import wandb
-
-        wandb.init(
-            project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
-            config=dict(module.hparams),
-            name=os.environ.get("AMLT_JOB_NAME", None),
-        )
+    if wandb.run is not None:
         wandb.log({f"downstream/{k}": v for k, v in scores.items()})
-
         if len(routing_stats) > 0:
             wandb.log(routing_stats)
 

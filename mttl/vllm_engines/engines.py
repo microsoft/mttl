@@ -27,11 +27,11 @@ def save_merged_model(model, model_path, hf_path="/tmp/merged"):
 
     if model_path:
         # TODO: REMOVE this
-        from projects.wiki_experts.src.expert_trainer import ExpertTrainer
+        from mttl.models.expert_model import ExpertModel
 
         logger.info("Model path is given. Loading model from: %s" % model_path)
 
-        model = ExpertTrainer.from_pretrained(
+        model = ExpertModel.from_pretrained(
             model_path,
             load_in_8bit=False,
             device_map={"": "cpu"},

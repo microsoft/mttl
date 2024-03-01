@@ -2,7 +2,6 @@ import os
 import re
 
 import sys
-import json
 import torch
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer, seed_everything
@@ -11,10 +10,11 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
 from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
-from projects.wiki_experts.src.config import ExpertConfig
+from mttl.models.expert_model import ExpertModel as ExpertTrainer
+from mttl.models.expert_config import ExpertConfig
+
 from config import EvolExpertConfig
 from typing import List
-from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 
 
 def save_new_module(module_copy, args):

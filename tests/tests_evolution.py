@@ -3,9 +3,9 @@ import os
 import pytest
 from pytorch_lightning import seed_everything
 from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
-from projects.wiki_experts.src.expert_trainer import ExpertTrainer
-from projects.wiki_experts.src.config import ExpertConfig
-from projects.wiki_experts.src.expert_model import MultiExpertModel
+from mttl.models.expert_model import ExpertModel as ExpertTrainer
+from mttl.models.expert_config import ExpertConfig
+from mttl.models.expert_model import MultiExpertModel
 from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 from conftest import make_tiny_llama
 
@@ -25,55 +25,56 @@ def create_dummy_expert(config: ExpertConfig, exp_name) -> Expert:
     return expert
 
 
-def test_NGRoutingOptimizer(tmp_path):
-    from transformers.models.llama.configuration_llama import LlamaConfig
+# remove this for now, since NG Routing is be to rebuilt.
+# def test_NGRoutingOptimizer(tmp_path):
+#     from transformers.models.llama.configuration_llama import LlamaConfig
 
-    config = ExpertConfig(
-        kwargs={
-            "model_modifier": "lora",
-            "modify_layers": "gate_proj|down_proj|up_proj",
-            "modify_modules": ".*mlp.*",
-            "trainable_param_names": ".*lora_[ab].*",
-            "output_dir": tmp_path,
-            "model": "",
-        }
-    )
-    # create random Lora
-    expert = create_dummy_expert(config, "module1")
+#     config = ExpertConfig(
+#         kwargs={
+#             "model_modifier": "lora",
+#             "modify_layers": "gate_proj|down_proj|up_proj",
+#             "modify_modules": ".*mlp.*",
+#             "trainable_param_names": ".*lora_[ab].*",
+#             "output_dir": tmp_path,
+#             "model": "",
+#         }
+#     )
+#     # create random Lora
+#     expert = create_dummy_expert(config, "module1")
 
-    get_loss = lambda *args, **kwargs: 0.0
+#     get_loss = lambda *args, **kwargs: 0.0
 
-    modules_2_dest = {"module1": expert}
-    model_object = make_tiny_llama()
-    config.model_modifier = None
-    model = MultiExpertModel(model_object=model_object, tokenizer=None, **vars(config))
+#     modules_2_dest = {"module1": expert}
+#     model_object = make_tiny_llama()
+#     config.model_modifier = None
+#     model = MultiExpertModel(model_object=model_object, tokenizer=None, **vars(config))
 
-    # create an NGRoutingOptimizer instance
-    optimizer = NGRoutingOptimizer(
-        model_constructor=lambda: MultiExpertModel(
-            model_object=model_object, tokenizer=None, **vars(config)
-        ),
-        expert_lib=modules_2_dest,
-        get_loss=get_loss,
-        budget=1,
-        task_name="new_task",
-        regularizer_factor=0.0,
-        action="route",
-    )
+#     # create an NGRoutingOptimizer instance
+#     optimizer = NGRoutingOptimizer(
+#         model_constructor=lambda: MultiExpertModel(
+#             model_object=model_object, tokenizer=None, **vars(config)
+#         ),
+#         expert_lib=modules_2_dest,
+#         get_loss=get_loss,
+#         budget=1,
+#         task_name="new_task",
+#         regularizer_factor=0.0,
+#         action="route",
+#     )
 
-    # call the optimize method
-    result = optimizer.optimize()
+#     # call the optimize method
+#     result = optimizer.optimize()
 
-    # assert that the result is a tuple with two elements
-    assert isinstance(result, tuple)
-    assert len(result) == 2
+#     # assert that the result is a tuple with two elements
+#     assert isinstance(result, tuple)
+#     assert len(result) == 2
 
-    # assert that the first element of the result is a list
-    print(result[0].__class__)
-    assert isinstance(result[0], np.ndarray)
+#     # assert that the first element of the result is a list
+#     print(result[0].__class__)
+#     assert isinstance(result[0], np.ndarray)
 
-    # assert that the second element of the result is a string
-    assert isinstance(result[1], str)
+#     # assert that the second element of the result is a string
+#     assert isinstance(result[1], str)
 
 
 def test_expert_retrieval(tmp_path, mocker):
