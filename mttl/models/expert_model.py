@@ -45,7 +45,7 @@ from mttl.models.utils import (
     prepare_model_for_kbit_training,
 )
 from mttl.models.expert_config import ExpertConfig
-from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRankerHelper
+from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
 
 
 torch.set_float32_matmul_precision("high")
@@ -322,7 +322,7 @@ class MultiExpertModel(ExpertModel):
                     setattr(module, c_name, child.layer)
         self.experts_names.clear()
 
-    def add_experts_from_library(self, library):
+    def add_experts_from_library(self, library, filtering_experts):
         import tqdm
         import concurrent.futures
 
@@ -335,6 +335,9 @@ class MultiExpertModel(ExpertModel):
             futures = []
 
             for element in library.keys():
+                if filtering_experts is not None and element in filtering_experts:
+                    print("skip", element)
+                    continue
                 futures.append(executor.submit(partial(add_module, self), element))
 
             # Progress bar setup
