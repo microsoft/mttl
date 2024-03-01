@@ -131,7 +131,19 @@ class TestMultiExpertModel:
         output = module(batch)
         assert np.allclose(output.item(), 9.7, atol=0.1)
 
-    def test_expert_selector_with_poly_task_routing(self, tmp_exp_config):
+    def nonzero_B_init(self, model):
+        gen = torch.Generator()
+        gen.manual_seed(0)
+        for mod in model.modules():
+            if isinstance(mod, LoRA):
+                # Also re-initing lora_a so that we have the exact same values
+                # for both the Poly and MHR test
+                mod.lora_a.data = torch.rand(mod.lora_a.shape, generator=gen) * 0.5
+                mod.lora_b.data = torch.rand(mod.lora_b.shape, generator=gen) * 0.5
+
+    def test_expert_selector_with_poly_task_routing(
+        self, tmp_exp_config
+    ):  # this fails, why?
         seed_everything(0)
         config: Config = tmp_exp_config
         config.router_selector = "poly_router"
@@ -142,16 +154,6 @@ class TestMultiExpertModel:
         exp1 = self.create_dummy_expert(config, "task_1")
         exp2 = self.create_dummy_expert(config, "task_2")
         module_dict = {"mod1": exp1, "mod2": exp2}
-
-        def nonzero_B_init(model):
-            gen = torch.Generator()
-            gen.manual_seed(0)
-            for mod in model.modules():
-                if isinstance(mod, LoRA):
-                    # Also re-initing lora_a so that we have the exact same values
-                    # for both the Poly and MHR test
-                    mod.lora_a.data = torch.rand(mod.lora_a.shape, generator=gen) * 0.5
-                    mod.lora_b.data = torch.rand(mod.lora_b.shape, generator=gen) * 0.5
 
         module = RoutedMultiExpertModel(
             tokenizer=None,
@@ -181,7 +183,7 @@ class TestMultiExpertModel:
         assert np.allclose(output.item(), 10.20, atol=0.1)
 
         # Now let's change the adapter params, and also the function parameterized by the model
-        nonzero_B_init(module)
+        self.nonzero_B_init(module)
         output = module(batch)
         assert np.allclose(output.item(), 14.69, atol=0.1)
 
@@ -204,7 +206,7 @@ class TestMultiExpertModel:
         )
         assert module.hparams.model_modifier == None
         module.load_from_module_dict(module_dict, action="route")
-        nonzero_B_init(module)
+        self.nonzero_B_init(module)
 
         output = module(batch)
 
