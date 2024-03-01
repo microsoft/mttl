@@ -7,6 +7,7 @@ import wandb
 import numpy as np
 from torch import nn
 import torch.nn.functional as F
+from mttl.models.modifiers.expert_containers.expert import ExpertInfo
 from mttl.models.modifiers.routing import RoutingInfo
 from torch.distributions import Bernoulli, Categorical
 
@@ -1103,8 +1104,8 @@ class TaskNameSelector(Selector):
 
         return ModulesSelectorOutput(modules)
 
-    def add_expert(self, expert_name: str, expert_info, **kwargs):
-        if expert_info.expert_task_name is None:
+    def add_expert(self, expert_name: str, expert_info: ExpertInfo = None, **kwargs):
+        if expert_info is None or expert_info.expert_task_name is None:
             logger.warn(
                 "Expert's task_name not set, assume task name corresponds to expert name!"
             )
@@ -1112,10 +1113,12 @@ class TaskNameSelector(Selector):
         else:
             for task_name in expert_info.expert_task_name.split(","):
                 self.task2expert_name[task_name] = expert_name
+
     def get_merging_weights(self, **selector_kwargs) -> Dict:
         raise NotImplementedError(
             "Not required for TaskNameSelector as it performs hard selection. Use 'get_expert_instance' instead."
         )
+
 
 class KVSelector(Selector):
     """Selector specific to KV adapters. The KV Adapter modifies the self-attention
