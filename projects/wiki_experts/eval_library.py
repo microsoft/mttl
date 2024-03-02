@@ -147,7 +147,7 @@ def eval_in_distribution(module, args: ExpertConfig, tasks):
     transfer_table.log(
         {
             "task": "mean",
-            args.eval_metric: str(transfer_table.df[args.eval_metric].mean()),
+            args.eval_metric: transfer_table.df[args.eval_metric].mean(),
         }
     )
     transfer_table.log_final_table()
