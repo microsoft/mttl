@@ -252,6 +252,8 @@ def add_expert_to_transformer(
         if re.fullmatch(expert_config.modify_modules, m_name):
             for c_name, layer in dict(module.named_children()).items():
                 if re.fullmatch(expert_config.modify_layers, c_name):
+                    if "out_projecter" in c_name:
+                        continue
                     total_layers += 1
                     layer_name = f"{m_name}.{c_name}"
 

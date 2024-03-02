@@ -56,9 +56,7 @@ def run_eval(args):
         for expert_kwargs in kwargs:
             module.load_expert(**expert_kwargs, expert_library=library)
     elif args.library_id is not None:
-        module.add_experts_from_library(
-            library, filtering_experts=filtering_experts.split(",")
-        )
+        module.add_experts_from_library(library, filtering_experts=filtering_experts)
     module.to("cuda")
 
     runner: EvaluatorRunner = setup_evaluators(
