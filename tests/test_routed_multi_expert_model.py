@@ -141,8 +141,7 @@ class TestMultiExpertModel:
         exp2 = self.create_dummy_expert(config, "task_2")
         module_dict = {"mod1": exp1, "mod2": exp2}
 
-        module = RoutedMultiExpertModel(
-            tokenizer=None,
+        module = MultiExpertModel(
             **vars(config),
         )
         assert module.hparams.model_modifier == None
@@ -186,8 +185,7 @@ class TestMultiExpertModel:
         exp2 = self.create_dummy_expert(config, "task_2")
 
         module_dict = {"mod1": exp1, "mod2": exp2}
-        module = RoutedMultiExpertModel(
-            tokenizer=None,
+        module = MultiExpertModel(
             **vars(config),
         )
         assert module.hparams.model_modifier == None
