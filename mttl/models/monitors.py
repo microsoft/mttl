@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 from pytorch_lightning import Callback
 
 from mttl.utils import agg_dicts, Averager
-from mttl.models.modifiers.routing import RoutingSelector
 from mttl.models.modifiers.expert_containers.selectors import Selector
 
 try:
@@ -107,7 +106,7 @@ class SelectorRoutingsLog(Callback):
     def aggregate_and_maybe_log(self, trainer, pl_module, current_step, split) -> None:
         # get routing attributes of all layers
         for name, module in pl_module.named_modules():
-            if isinstance(module, RoutingSelector) and hasattr(module, "routings"):
+            if hasattr(module, "routings"):
                 if name not in self.acc_routings:
                     self.acc_routings[name] = []
                 self.acc_routings[name].append(module.routings.detach())
@@ -250,7 +249,7 @@ class SelectorMetricsLog(Callback):
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:
         # get routing attributes of all layers
         for name, module in pl_module.named_modules():
-            if isinstance(module, RoutingSelector) and hasattr(module, "metrics"):
+            if hasattr(module, "metrics"):
                 self.metrics[name] = module.metrics
 
         layer_stats = list(self.metrics.values())
