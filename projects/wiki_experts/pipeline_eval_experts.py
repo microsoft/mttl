@@ -30,10 +30,7 @@ def run_eval(args):
     logger.info("Args: {}".format(args.to_json()))
 
     remote_login(args.remote_token)
-    # load module
-    # if args.ranker_model is not None:
-    #     module = MultiExpertModelRanker(**vars(args))
-    # else:
+
     module = MultiExpertModel(**vars(args))
 
     filtering_experts = os.environ.get("FILTERING_EXPERTS", None)
