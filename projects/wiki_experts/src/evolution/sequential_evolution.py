@@ -24,7 +24,7 @@ from projects.wiki_experts.src.evolution.utils import (
     remove_outdated_experts_from_library,
 )
 
-from projects.wiki_experts.src.expert_trainer import ExpertTrainer
+from mttl.models.expert_model import ExpertModel as ExpertTrainer
 from mttl.models.modifiers.expert_containers.expert_library import (
     LocalExpertLibrary,
     HFExpertLibrary,
@@ -669,7 +669,7 @@ def main(args: EvolExpertConfig):
                 args, task, expert_lib, module=module
             )  # finds a better module for the task, and eds/replaces it into the library
             tablelogger.log(log_row)
-            tablelogger.log_table_wandb()
+            tablelogger.log_final_table()
             exper_state.update(active_iteration=a_i)
             logger.disabled = False
             # exper_state.save()

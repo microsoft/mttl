@@ -4,6 +4,7 @@ import os
 import re
 import copy
 import wandb
+import prettytable
 import numpy as np
 import pandas as pd
 from functools import partial
@@ -58,9 +59,14 @@ class TableLogger:
         self.df.loc["mean"] = df_numeric.mean(axis=0)
         self.df.loc["mean", "mean"] = np.diag(df_numeric).mean()
 
-    def log_table_wandb(self):
+    def log_final_table(self):
         if wandb.run is not None:
             wandb.log({"table": wandb.Table(data=self.get_table())})
+        table = prettytable.PrettyTable()
+        table.field_names = list(self.df.columns)
+        for i, row in self.df.iterrows():
+            table.add_row(list(row))
+        logger.info("Results:\n" + str(table))
 
 
 def get_loss(model, evaluator: Evaluator, **kwargs):

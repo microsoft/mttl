@@ -1,7 +1,7 @@
 from pyparsing import abstractmethod
 import torch
 from torch import nn
-from typing import List
+from typing import List, Union
 from mttl.config import Config
 from mttl.models.modifiers.base import (
     ModifierConfig,
@@ -9,11 +9,16 @@ from mttl.models.modifiers.base import (
     ModifierConfig,
     ModifyMixin,
 )
+from mttl.models.modifiers.expert_containers.selectors import (
+    BatchModulesAndWeightsSelectorOutput,
+    BatchSequenceModulesAndWeightsSelectorOutput,
+    ModulesAndWeightsSelectorOutput,
+    ModulesSelectorOutput,
+)
 
 from mttl.utils import logger
 from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
 from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
-from mttl.models.modifiers.expert_containers.selectors import *
 from mttl.models.modifiers.expert_containers.expert import Expert
 from mttl.models.modifiers.modify_model import get_modifier_type
 
@@ -22,6 +27,8 @@ class ExpertContainer:
     __supports_configs__ = []
 
     def __init__(self, config, info_container, layer, selector=None):
+        from mttl.models.modifiers.expert_containers.selectors import TaskNameSelector
+
         self.config = config
         self.layer = layer
         self.info_container = info_container
@@ -31,6 +38,18 @@ class ExpertContainer:
         self.expert_infos = {}
         self.expert_names = []
         self.default_expert_name = None
+
+    def assign_selector(self, selector):
+        del self.selector
+        self._modules.pop("selector", None)
+        # propagate experts to the selector
+        self.selector = selector
+        for expert_name, expert_info in self.expert_infos.items():
+            self.add_expert_to_selector(expert_name, expert_info=expert_info)
+
+    def add_expert_to_selector(self, expert_name: str, **kwargs):
+        self.selector.add_expert(expert_name, **kwargs)
+        self.selector.default_expert_name = self.default_expert_name
 
     def _add_expert(self, expert_name, expert_info, expert_module):
         self.expert_infos[expert_name] = expert_info
@@ -76,15 +95,16 @@ class ExpertContainer:
 
     @property
     def layer_name(self):
+        if not hasattr(self, "__layer_name__"):
+            raise ValueError("Dependency injection for layer name has not been done.")
         return self.__layer_name__
+
+    def _get_expert_weights(self, expert_name):
+        return self.experts[expert_name].state_dict()
 
     @abstractmethod
     def forward(self, input, **kwargs):
         pass
-
-    def add_expert_to_selector(self, expert_name: str, **kwargs):
-        self.selector.add_expert(expert_name, **kwargs)
-        self.selector.default_expert_name = self.default_expert_name
 
     def get(self, key: Union[int, str]):
         if type(key) == int:
@@ -99,6 +119,24 @@ class ExpertContainer:
                 )
             return self.experts[self.default_expert_name]
         return self.experts[key]
+
+    def get_merged_params(self, with_global_names=True, **merger_kwargs):
+        """
+        Merges experts to one expert according to selector weights.
+        """
+        merged_params = {}
+        merging_weights = self.selector.get_merging_weights(
+            **merger_kwargs
+        )  # expert_name: weight
+        for exp_name, merging_weight in merging_weights.items():
+            for k, parameter in self._get_expert_weights(exp_name).items():
+                key = k if not with_global_names else self.layer_name + "." + k
+                if k not in merged_params:
+                    merged_params[key] = parameter * merging_weight
+                else:
+                    merged_params[key] += parameter * merging_weight
+
+        return merged_params
 
     def __getitem__(self, key):
         return self.experts[key]
@@ -168,27 +206,25 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         if expert_weights is not None:
             expert_module.load_lora_weights(expert_weights)
 
+        # fill the expert weights upon adding the expert
+        if expert.expert_weights is None:
+            expert.expert_weights = {}
+
+        for k, v in expert_module.state_dict().items():
+            if (self.layer_name + "." + k) not in expert.expert_weights and (
+                "lora_a" in k or "lora_b" in k
+            ):
+                expert.expert_weights[self.layer_name + "." + k] = v
+
         if action == "merge":
             # weight is merged with layer so we can discard it now
             expert_module.merge_with_layer()
             self.merged_expert_names.append(expert.name)
-
         else:
             if is_default:
                 self.default_expert_name = expert.name
 
             self._add_expert(expert.name, expert.expert_info, expert_module)
-
-    def get_merged_weights(self, with_global_names=True, **merger_kwargs):
-        """
-        Merges experts to one expert according to weights, if weights are not given, it uses the selector to get the weights.
-        Does not merge the layer.
-        """
-        weights_ = {}
-        for k, v in self.selector.get_merged_weights(self, **merger_kwargs).items():
-            key = k if not with_global_names else self.layer_name + "." + k
-            weights_[key] = v
-        return self.config, weights_
 
     def merge_with_layer(self):
         if not len(self.experts):
@@ -199,6 +235,13 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
 
         self.merged_expert_names.extend(self.experts)
         self.experts.clear()
+
+    def _get_expert_weights(self, expert_name):
+        return {
+            n: w
+            for n, w in self.experts[expert_name].state_dict().items()
+            if "lora" in n
+        }
 
     def route(self, input, selection, **kwargs):
         """Depending on the selection output, we and merge differently."""
@@ -333,9 +376,11 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             lora_dropout=config.lora_dropout,
             lora_init_b_random=config.lora_init_b_random,
             lora_rank=config.lora_rank,
-            n_splits=config.n_splits,
+            n_splits=config.n_splits if isinstance(config, SkilledLoRAConfig) else 1,
             n_skills=0,
-            phi_2_align_heads=config.phi_2_align_heads,
+            phi_2_align_heads=config.phi_2_align_heads
+            if isinstance(config, SkilledLoRAConfig)
+            else False,
         )
         self.experts = SkilledLoRA(dummy_config, layer)
 

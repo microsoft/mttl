@@ -12,15 +12,14 @@ from functools import partial
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
 from typing import Union, Callable, List, Dict
+
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators.base import compute_task_aggregation
-
-from projects.wiki_experts.src.expert_model import MultiExpertModel
-from mttl.utils import logger, setup_logging
+from mttl.models.expert_model import MultiExpertModel
+from mttl.utils import logger
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
 from mttl.evaluators import MMLUEvaluator
 from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
-from projects.wiki_experts.src.evolution.config import EvolExpertConfig as ExpertConfig
 import wandb
 
 from mttl.models.modifiers.expert_containers.expert import ModuleGraph

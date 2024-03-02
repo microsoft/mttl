@@ -11,14 +11,10 @@ from mttl.datamodule.base import get_datamodule
 from mttl.models.modifiers.expert_containers.expert import Expert
 from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from mttl.utils import logger
+from mttl.models.expert_model import ExpertModel, MultiExpertModel
 
 from projects.wiki_experts.src.evolution.utils import get_loss, get_task_expert
-from projects.wiki_experts.src.expert_trainer import ExpertTrainer
 from projects.wiki_experts.src.evolution.train_router import train_module
-from projects.wiki_experts.src.expert_model import (
-    MultiExpertModel,
-    RoutedMultiExpertModel,
-)
 from projects.wiki_experts.src.evolution.evaluators import Evaluator
 from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
 from projects.wiki_experts.src.evolution.config import (
@@ -147,7 +143,7 @@ def evolve_nevergrad(
     model_optimal.load_from_graph_string(
         best_graph_string, "route", expert_library=expert_lib
     )
-    expert = model_optimal.replace_container_with_expert("new_task")
+    expert = model_optimal.get_expert_instance("new_task")
     expert.expert_weights = {
         k: v
         for k, v in expert.expert_weights.items()
@@ -188,7 +184,7 @@ def evolve_selector_and_experts(
         + "|.*module_logits.*|.*selector.*"  # adds selector params to trainable params
     )
     log_prefix = kwargs.get("log_prefix", "")
-    module = RoutedMultiExpertModel(
+    module = MultiExpertModel(
         **vars(args),
         device_map="auto",
         logging_prefix=log_prefix,
@@ -232,7 +228,7 @@ def evolve_selector_only(
     )
 
     log_prefix = kwargs.get("log_prefix", "")
-    module = RoutedMultiExpertModel(
+    module = MultiExpertModel(
         **vars(args),
         device_map="auto",
         logging_prefix=log_prefix,
@@ -250,7 +246,7 @@ def evolve_selector_only(
     )
 
 
-def load_lora_expert_in_experttrainer(module: ExpertTrainer, expert: Expert):
+def load_lora_expert_in_experttrainer(module: ExpertModel, expert: Expert):
     keys = module.model.load_state_dict(expert.expert_weights, strict=False)
     assert sum(["lora" in k for k in keys.missing_keys]) == 0, "Some keys are missing"
 
@@ -276,7 +272,7 @@ def independent_expert_fine_tuning(
     args.modify_modules = task_expert.expert_config.modify_modules
 
     args.trainable_param_names = task_expert.training_config.trainable_param_names
-    module_to_train = ExpertTrainer(**vars(args))
+    module_to_train = ExpertModel(**vars(args))
     load_lora_expert_in_experttrainer(module_to_train, task_expert)
 
     return evolve_with_sgd(
@@ -310,7 +306,7 @@ def evolve_scratch(
         Tuple[Expert, dict]: The evolved expert and additional information.
 
     """
-    module_to_train = ExpertTrainer(**vars(args))
+    module_to_train = ExpertModel(**vars(args))
     return evolve_with_sgd(
         args,
         task,
@@ -341,7 +337,7 @@ def evolve_from_joint(
     Returns:
         Tuple[Expert, dict]: The evolved expert and additional information.
     """
-    module_to_train: ExpertTrainer = ExpertTrainer(**vars(args))
+    module_to_train: ExpertModel = ExpertModel(**vars(args))
     assert "joint" in expert_lib, "No joint expert in library"
     joint_expert = expert_lib["joint"]
     load_lora_expert_in_experttrainer(module_to_train, joint_expert)
@@ -377,7 +373,7 @@ def evolve_with_mope(
         Tuple[Expert, dict]: The evolved expert and additional information.
     """
     log_prefix = kwargs.get("log_prefix", "")
-    module = RoutedMultiExpertModel(
+    module = MultiExpertModel(
         **vars(args),
         device_map="auto",
         logging_prefix=log_prefix,
