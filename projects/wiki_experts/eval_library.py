@@ -106,7 +106,6 @@ def patch_prototypes(module, library, args, proto_inits=None):
 def eval_in_distribution(module, args: ExpertConfig, tasks):
     args.include_task_source = "*"
     transfer_table = TableLogger()
-    args.subsample_test = 1
 
     for task in tasks:
         args.finetune_task_name = task
@@ -173,22 +172,34 @@ def run_multitask(args: ExpertConfig):
         "bool_q_1_0_0",
         "openbookqa_0_1_0",
     ]
+    if args.finetune_task_name is not None:
+        args.finetune_task_name = (
+            args.finetune_task_name
+            if isinstance(args.finetune_task_name, list)
+            else args.finetune_task_name.split(",")
+        )
+        exclude_phi_tasks = None
 
     library = get_expert_library(
         repo_id=args.library_id,
         token=args.remote_token,
         exclude_selection=exclude_phi_tasks,
+        selection=args.finetune_task_name,
     )
     args_copy = None
     if args.merge_or_route in ["uniform", "weighted"]:
         weights = None
         if args.merge_or_route == "weighted":
             # get weights from 10 cluster
-            from mttl.datamodule import task_cluster_flan
+            _task_cluster_flan = json.load(
+                open(
+                    "projects/wiki_experts/task_sets/phi/clusters_kmeans_simmatrix_phi2_v3.json"
+                )
+            )
 
             tasks = []
             for i in range(10):
-                tasks += [getattr(task_cluster_flan, f"c{i}_2e")]
+                tasks += _task_cluster_flan[f"c{i}_2e"]
             weights = {}
             for task_subset in tasks:
                 for task in task_subset:
