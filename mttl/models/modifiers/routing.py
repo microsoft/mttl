@@ -27,6 +27,7 @@ class RoutingInfo:
         task_ids = batch.get("task_ids").long() if "task_ids" in batch else None
         task_names = batch.get("task_names", None)
         task_weights = batch.get("task_weights", None)
+
         ri = cls(
             task_ids=task_ids,
             task_names=task_names,

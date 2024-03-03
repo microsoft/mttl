@@ -322,7 +322,7 @@ class MultiExpertModel(ExpertModel):
                     setattr(module, c_name, child.layer)
         self.experts_names.clear()
 
-    def add_experts_from_library(self, library, filtering_experts):
+    def add_experts_from_library(self, library, filtering_experts=None):
         import tqdm
         import concurrent.futures
 
