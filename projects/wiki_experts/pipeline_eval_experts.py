@@ -13,10 +13,7 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     get_expert_library,
 )
 from mttl.utils import remote_login, setup_logging, logger
-from mttl.models.expert_model import (
-    MultiExpertModel,
-    MultiExpertModelRanker,
-)
+from mttl.models.expert_model import MultiExpertModel
 from mttl.models.expert_config import ExpertConfig
 from projects.wiki_experts.mmlu_eval_experts import parse_experts_to_load
 

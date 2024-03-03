@@ -703,35 +703,3 @@ class MoEModel(MultiExpertModel):
         for i, pg in enumerate(self.optimizers().optimizer.param_groups):
             self.log(f"train/lr_{i}", pg["lr"])
         return total_loss
-
-
-class MultiExpertModelRanker(MultiExpertModel):
-    def __init__(self, **kwargs):
-        kwargs["router_selector"] = "info_selector"
-        super().__init__(**kwargs)
-
-        self.expert_ranker = AdapterRankerHelper.get_ranker_instance(
-            ranker_model=kwargs["ranker_model"],
-            ranker_path=kwargs["ranker_path"],
-        )
-
-    def set_routing_infos(self, batch, generate=False):
-        self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
-
-        self.expert_ranker.set_available_tasks(self.experts_names)
-        mod_names, mod_weights = self.expert_ranker.predict_batch(
-            batch,
-            n=self.hparams.ranker_top_k,
-        )
-
-        # fill in the weights for the routing selector, for now just take the first one
-        # mod_names = [['mod1', 'mod2'], ['mod3', 'mod4']]
-        # mod_wgths = [[0.5, 0.5], [0.3, 0.7]]
-        # mod_names = [['default', 'mod1']]
-        # mod_wgths = [[0.7, 0.3]]
-        self.model.info_container["routing_infos"].routing_modules = mod_names
-        self.model.info_container["routing_infos"].routing_weights = mod_weights
-
-        # infos
-        logger.info(f"Most similar: {str(mod_names)}")
-        logger.info(f"Most similar weights: {str(mod_weights)}")
