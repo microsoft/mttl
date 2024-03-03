@@ -266,7 +266,6 @@ class SelectorView:
 class PolySelectorConfig(SelectorConfig):
     n_splits: int = 1
     task_names: List[str] = None
-    pass
 
 
 @register_multi_expert_selector("poly_router", PolySelectorConfig)
@@ -338,7 +337,7 @@ class PolySelector(Selector):
         return module_weights
 
     @forward_with_cache
-    def forward(self, **kwargs) -> ModulesAndWeightsSelectorOutput:
+    def forward(self, input, **kwargs) -> ModulesAndWeightsSelectorOutput:
         weights = self._get_weights()
         modules = self.expert_names
         return ModulesAndWeightsSelectorOutput(modules, weights)
