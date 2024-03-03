@@ -4,6 +4,7 @@ import os
 import re
 import copy
 import wandb
+import prettytable
 import numpy as np
 import pandas as pd
 from functools import partial
@@ -12,7 +13,7 @@ import pytorch_lightning as pl
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
 from mttl.utils import setup_logging, logger
-from projects.wiki_experts.src.evolution.evaluators import (
+from projects.wiki_experts.src.utils.evaluators import (
     TestLossEvaluator,
     ExtendedMMLUEvaluator,
     Evaluator,
@@ -25,7 +26,6 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     get_best_expert_for_score,
     get_best_expert_for_task,
 )
-from projects.wiki_experts.src.evolution.config import find_version
 from mttl.models.modifiers.expert_containers.expert import Expert
 
 
@@ -58,9 +58,14 @@ class TableLogger:
         self.df.loc["mean"] = df_numeric.mean(axis=0)
         self.df.loc["mean", "mean"] = np.diag(df_numeric).mean()
 
-    def log_table_wandb(self):
+    def log_final_table(self):
         if wandb.run is not None:
             wandb.log({"table": wandb.Table(data=self.get_table())})
+        table = prettytable.PrettyTable()
+        table.field_names = list(self.df.columns)
+        for i, row in self.df.iterrows():
+            table.add_row(list(row))
+        logger.info("Results:\n" + str(table))
 
 
 def get_loss(model, evaluator: Evaluator, **kwargs):
@@ -78,20 +83,6 @@ def save_new_module(output_dir, module, task_name, postfix=""):
     ckpt_path = module_copy.save_pretrained(dest)
     del module_copy
     return ckpt_path
-
-
-def remove_outdated_experts_from_library(library: HFExpertLibrary):
-    for task in library.tasks:
-        experts = library.get_experts_for_task(task)
-        if len(experts) <= 1:
-            continue
-        version = [find_version(metadatum.expert_name) for metadatum in experts]
-        arg_max = np.argmax(version)
-        for i, metadatum in enumerate(experts):
-            if isinstance(metadatum.expert_task_name, list):
-                library.remove_expert(metadatum.expert_name, soft_delete=True)
-            if i != arg_max:
-                library.remove_expert(metadatum.expert_name, soft_delete=True)
 
 
 def get_svd_embedding(lib, expert_name: str):

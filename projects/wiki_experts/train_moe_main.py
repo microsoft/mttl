@@ -131,11 +131,6 @@ def run_multitask(args: ExpertConfig):
             library = get_expert_library(args.library_id, create=True)
             library.add_expert_from_ckpt(checkpoint)
 
-        if args.hf_repo_id and checkpoint:
-            from projects.wiki_experts.src.expert_model import push_expert_to_hub
-
-            push_expert_to_hub(checkpoint, args.hf_repo_id, auto_search=False)
-
 
 if __name__ == "__main__":
     args = ExpertConfig.parse()

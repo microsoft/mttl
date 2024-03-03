@@ -1287,6 +1287,12 @@ class VirtualLocalLibrary(ExpertLibrary, LocalFSEngine):
     Useful for temporary library objects used during runtime.
     """
 
+    def create_repo(self, repo_id, repo_type, exist_ok, private=True):
+        pass
+
+    def delete_repo(self, repo_id, repo_type=None):
+        pass
+
     def _upload_metadata(self, metadata):
         pass
 

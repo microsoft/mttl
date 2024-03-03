@@ -395,7 +395,7 @@ class EvaluatorRunner:
                 module,
                 verbose=verbose,
                 output_path=task_output_path,
-                split="test",
+                split="test"
             )
 
             if self.output_path:
