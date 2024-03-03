@@ -498,7 +498,7 @@ class TestMultiExpertModel:
         exp2_dest = self.create_dummy_expert(config, "exp2")
         module_dict = {"niv2_sentence_compression": exp1_dest, "niv2_misc": exp2_dest}
 
-        module = MultiExpertModel(**vars(config))
+        module = MultiExpertModel(**vars(config), device_map="cpu")
         module.load_from_module_dict(module_dict, action="route")
 
         bs, max_seq_len = 2, 100
