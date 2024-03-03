@@ -1,6 +1,0 @@
-{
-    "modify_modules": ".*SelfAttention|.*EncDecAttention|.*DenseReluDense",
-    "modify_layers": "k|v|wi_1.*",
-    "trainable_param_names": ".*lora_b.*",
-    "model_modifier": "ia3"
-}
