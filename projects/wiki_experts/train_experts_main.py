@@ -1,13 +1,18 @@
 import os
 import sys
 import torch
+import shutil
 from pytorch_lightning import Trainer, seed_everything
+from tempfile import TemporaryDirectory
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.models.expert_model import ExpertModel
 from mttl.models.expert_config import ExpertConfig
-from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
+from mttl.models.modifiers.expert_containers.expert_library import (
+    get_expert_library,
+    LocalExpertLibrary,
+)
 from mttl.callbacks import LiveCheckpointCallback
 from mttl.models.monitors import get_monitors
 from mttl.datamodule.base import get_datamodule
@@ -19,8 +24,9 @@ from mttl.utils import (
     logger,
 )
 
+from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
-from projects.wiki_experts.src.evolution.transfer_matrix import (
+from projects.wiki_experts.src.transfer_matrix import (
     TransferMatrixConfig,
     run_eval as produce_transfer_matrix,
 )
@@ -35,15 +41,23 @@ def create_transfer_matrix(args, checkpoint):
             setattr(config, k, v)
     config.eval_base = False
     config.eval_metric = "rougeL"
-    config.hf_repo_id = checkpoint
+
+    expert: Expert = load_expert(checkpoint)
+    expert.expert_info.expert_name = str(args.finetune_task_name)
+    expert.expert_info.expert_task_name = str(args.finetune_task_name)
+    temp_dir = TemporaryDirectory()
+    destination = temp_dir.name
+    LocalExpertLibrary.from_expert_dict({"checkpoint": expert}, destination=destination)
+    config.library_id = destination
     config.finetune_task_name = (
         args.finetune_task_name.split(",")
         if not isinstance(args.finetune_task_name, list)
         else args.finetune_task_name
     )
-    if len(config.finetune_task_name) < 70:
+    if len(config.finetune_task_name) < 50:
         produce_transfer_matrix(config, debug=False)
     ########################
+    temp_dir.cleanup()
 
 
 def run_multitask(args: ExpertConfig):
@@ -136,9 +150,9 @@ def run_multitask(args: ExpertConfig):
         enable_checkpointing=False,
         log_every_n_steps=args.gradient_accumulation_steps,
         accumulate_grad_batches=args.gradient_accumulation_steps,
-        precision=int(args.precision)
-        if args.precision in ["16", "32"]
-        else args.precision,
+        precision=(
+            int(args.precision) if args.precision in ["16", "32"] else args.precision
+        ),
         val_check_interval=val_check_interval,
     )
 
@@ -161,10 +175,6 @@ def run_multitask(args: ExpertConfig):
             library = get_expert_library(args.library_id, create=True)
             library.add_expert_from_ckpt(checkpoint)
 
-        if args.hf_repo_id and checkpoint:
-            from projects.wiki_experts.src.expert_model import push_expert_to_hub
-
-            push_expert_to_hub(checkpoint, args.hf_repo_id, auto_search=False)
         if args.create_transfer_matrix:
             create_transfer_matrix(args, checkpoint)
 

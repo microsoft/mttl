@@ -1,8 +1,7 @@
 from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 from mttl.models.modifiers.expert_containers.library_transforms import LibraryTransform
-from projects.wiki_experts.src.evolution.config import (
-    EvolExpertConfig,
-)
+
+from mttl.models.expert_config import ExpertConfig
 import copy
 import torch
 import numpy as np
@@ -10,13 +9,8 @@ from mttl.utils import setup_logging, logger
 from mttl.models.modifiers.expert_containers.expert_library import (
     VirtualLocalLibrary,
 )
-from projects.wiki_experts.src.expert_model import (
-    MultiExpertModel,
-)
-
-from projects.wiki_experts.src.evolution.utils import (
-    get_svd_embedding,
-)
+from mttl.models.expert_model import MultiExpertModel
+from projects.wiki_experts.src.utils.utils import get_svd_embedding
 
 RETRIEVERS = {}
 
@@ -32,9 +26,7 @@ def register_retriever(name):
 
 
 class Retriever(LibraryTransform):
-    def __init__(
-        self, config: EvolExpertConfig, sk=None, retriever_include_parent=True
-    ):
+    def __init__(self, config: ExpertConfig, sk=None, retriever_include_parent=True):
         super().__init__(config)
         self.sk = sk if sk is not None else config.sk
         self.retriever_include_parent = retriever_include_parent
@@ -166,6 +158,7 @@ class SVDEmbeddingRetriever(Retriever):
         task_module_name = task_expert.name
         # compute cosine similarity between each expert and current task's expert, keep top sk
         emb_tasks = {}
+        # TODO: fix this when all pieces are merged + add test for retrievers
         emb_tasks[task_module_name] = get_svd_embedding(
             expert_lib_copy, task_module_name
         )
