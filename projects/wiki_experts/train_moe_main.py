@@ -18,8 +18,8 @@ from mttl.utils import (
 from mttl.datamodule.base import get_datamodule
 
 from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
-from projects.wiki_experts.src.expert_model import MoETrainer
-from projects.wiki_experts.src.config import ExpertConfig
+from mttl.models.expert_model import MoEModel
+from mttl.models.expert_config import ExpertConfig
 
 
 def run_multitask(args: ExpertConfig):
@@ -31,7 +31,7 @@ def run_multitask(args: ExpertConfig):
 
     remote_login(args.remote_token)
     # select dataloader
-    model_class = MoETrainer
+    model_class = MoEModel
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
     args.task_names = dm._task_names
@@ -130,11 +130,6 @@ def run_multitask(args: ExpertConfig):
         if args.library_id and checkpoint:
             library = get_expert_library(args.library_id, create=True)
             library.add_expert_from_ckpt(checkpoint)
-
-        if args.hf_repo_id and checkpoint:
-            from projects.wiki_experts.src.expert_model import push_expert_to_hub
-
-            push_expert_to_hub(checkpoint, args.hf_repo_id, auto_search=False)
 
 
 if __name__ == "__main__":

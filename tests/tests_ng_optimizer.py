@@ -1,13 +1,12 @@
 import numpy as np
 import os
 import pytest
-from pytorch_lightning import seed_everything
-from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
-from projects.wiki_experts.src.expert_trainer import ExpertTrainer
-from projects.wiki_experts.src.config import ExpertConfig
-from projects.wiki_experts.src.expert_model import MultiExpertModel
+from projects.wiki_experts.src.nevergrad_opt import NGRoutingOptimizer
+from mttl.models.expert_model import ExpertModel as ExpertTrainer
+from mttl.models.expert_config import ExpertConfig
 from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 from conftest import make_tiny_llama
+from mttl.models.modifiers.expert_containers.expert_library import LocalExpertLibrary
 
 
 def create_dummy_expert(config: ExpertConfig, exp_name) -> Expert:
@@ -21,10 +20,11 @@ def create_dummy_expert(config: ExpertConfig, exp_name) -> Expert:
     dir = f"{config.output_dir}/{exp_name}"
     os.makedirs(dir, exist_ok=True)
     checkpoint = exp_trainer.save_pretrained(dir)
-    expert = load_expert(checkpoint, exp_name)
+    expert = load_expert(checkpoint, expert_name=exp_name)
     return expert
 
 
+# remove this for now, since NG Routing is be to rebuilt.
 def test_NGRoutingOptimizer(tmp_path):
     from transformers.models.llama.configuration_llama import LlamaConfig
 
@@ -39,26 +39,25 @@ def test_NGRoutingOptimizer(tmp_path):
         }
     )
     # create random Lora
-    expert = create_dummy_expert(config, "module1")
+    expert1 = create_dummy_expert(config, "module1")
+    expert2 = create_dummy_expert(config, "module2")
 
     get_loss = lambda *args, **kwargs: 0.0
 
-    modules_2_dest = {"module1": expert}
+    library = LocalExpertLibrary(tmp_path)
+    library.add_expert(expert1, expert1.name)
+    library.add_expert(expert2, expert2.name)
     model_object = make_tiny_llama()
-    config.model_modifier = None
-    model = MultiExpertModel(model_object=model_object, tokenizer=None, **vars(config))
+    model = ExpertTrainer(model_object=model_object, **vars(config))
 
     # create an NGRoutingOptimizer instance
     optimizer = NGRoutingOptimizer(
-        model_constructor=lambda: MultiExpertModel(
-            model_object=model_object, tokenizer=None, **vars(config)
-        ),
-        expert_lib=modules_2_dest,
+        model=model,
+        expert_lib=library,
         get_loss=get_loss,
         budget=1,
         task_name="new_task",
         regularizer_factor=0.0,
-        action="route",
     )
 
     # call the optimize method
@@ -73,17 +72,7 @@ def test_NGRoutingOptimizer(tmp_path):
     assert isinstance(result[0], np.ndarray)
 
     # assert that the second element of the result is a string
-    assert isinstance(result[1], str)
-
-
-def test_expert_retrieval(tmp_path, mocker):
-    seed_everything(0)
-    # TODO write this test
-    return
-
-
-def test_train_router():
-    return
+    assert isinstance(result[1], dict)
 
 
 if __name__ == "__main__":

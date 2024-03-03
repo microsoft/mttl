@@ -40,16 +40,13 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
 from typing import Callable
 
 from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
-from projects.wiki_experts.src.expert_model import (
-    MoETrainer,
-    MultiExpertModel,
-    RoutedMultiExpertModel,
-)
-from projects.wiki_experts.src.expert_trainer import ExpertTrainer
-from projects.wiki_experts.src.config import ExpertConfig
+from mttl.models.expert_model import MoEModel as MoETrainer
+from mttl.models.expert_model import ExpertModel as ExpertTrainer
+from mttl.models.expert_model import MultiExpertModel
+from mttl.models.expert_config import ExpertConfig
 from projects.wiki_experts.train_experts_main import create_transfer_matrix
 from projects.wiki_experts.utils import get_datamodule
-from projects.wiki_experts.src.evolution.retrievers import (
+from projects.wiki_experts.src.retrievers import (
     RandomRetriever,
     SVDEmbeddingRetriever,
 )
@@ -179,7 +176,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
         # log args to wandb
         wandb.config.update(args)
 
-    from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
+    from projects.wiki_experts.src.nevergrad_opt import NGRoutingOptimizer
     from mttl.evaluators.rouge_evaluator import RougeEvaluator
 
     library = retrieve(args, args.finetune_task_name, args.sk, retrieve_with="random")
@@ -194,28 +191,22 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
     def get_loss(model):
         return -1.0 * rouge_evaluator.evaluate(model, split="train", verbose=False)
 
-    module = RoutedMultiExpertModel(**vars(args), device_map="auto")
+    module = MultiExpertModel(**vars(args), device_map="auto")
 
     optimizer = NGRoutingOptimizer(
         model=module,
         expert_lib=library,
         get_loss=get_loss,
         budget=args.n_ng_iterations,
-        action="route",
         regularizer_factor=0.05,
     )
 
-    best_weights, best_graph_string = optimizer.optimize()
+    _, best_graph_string = optimizer.optimize()
     module.load_from_graph_string(best_graph_string, "route", expert_library=library)
-    expert = module.replace_container_with_expert("new_task")
-    expert = Expert(
-        ExpertInfo(
-            expert_name="nevergrad",
-            expert_config=ModifierConfig.from_training_config(args),
-            training_config=args,
-        ),
-        expert.expert_weights,
-    )
+    expert = module.get_expert_instance("new_task")
+    expert.name = "nevergrad"
+    expert.expert_config = ModifierConfig.from_training_config(args)
+    expert.training_config = args
     return expert
 
 
@@ -231,7 +222,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
         # log args to wandb
         wandb.config.update(args)
 
-    from projects.wiki_experts.src.evolution.nevergrad_opt import NGRoutingOptimizer
+    from projects.wiki_experts.src.nevergrad_opt import NGRoutingOptimizer
     from mttl.evaluators.rouge_evaluator import RougeEvaluator
 
     lib_location = f"/tmp/{args.library_id}"
@@ -245,7 +236,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
     def get_loss(model):
         return -1.0 * rouge_evaluator.evaluate(model, split="train", verbose=False)
 
-    module = RoutedMultiExpertModel(**vars(args), device_map="auto")
+    module = MultiExpertModel(**vars(args), device_map="auto")
 
     optimizer = NGRoutingOptimizer(
         model=module,
@@ -256,17 +247,14 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
         regularizer_factor=0.05,
     )
 
-    best_weights, best_graph_string = optimizer.optimize()
-    module.load_from_graph_string(best_graph_string, "route", expert_library=expert_lib)
-    expert = module.replace_container_with_expert("new_task")
-    expert = Expert(
-        ExpertInfo(
-            expert_name="nevergrad",
-            expert_config=ModifierConfig.from_training_config(args),
-            training_config=args,
-        ),
-        expert.expert_weights,
-    )
+    best_weights, best_rout_weights = optimizer.optimize()
+
+    config = WeightedLinearMergeConfig(best_rout_weights)
+    weighted_merge = WeightedLinearMerge(config)
+    expert = weighted_merge.transform(expert_lib)
+    expert.name = "nevergrad"
+    expert.expert_config = ModifierConfig.from_training_config(args)
+    expert.training_config = args
     return expert
 
 
@@ -469,7 +457,14 @@ def finetune_joint(args: ExpertConfig, dm):
     """
     Finetunes a pretrained shared model
     """
-    from projects.wiki_experts.src.evolution.transfer_matrix import resolve_hf_repo_id
+
+    # TODO: move this to utils for reuse
+    def resolve_hf_repo_id(hf_repo_id):
+        parts = hf_repo_id.split("/")
+        if len(parts) == 3:
+            return "/".join(parts[:-1]), parts[-1]
+        else:
+            return hf_repo_id, None
 
     hf_repo_id, expert_name = resolve_hf_repo_id(args.library_id)
     library = HFExpertLibrary(hf_repo_id)

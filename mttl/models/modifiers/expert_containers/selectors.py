@@ -7,6 +7,8 @@ import wandb
 import numpy as np
 from torch import nn
 import torch.nn.functional as F
+from mttl.models.modifiers.expert_containers.expert import ExpertInfo
+from mttl.models.modifiers.routing import RoutingInfo
 from torch.distributions import Bernoulli, Categorical
 
 # from mttl.models.modifiers.routing import RoutingMixin
@@ -203,8 +205,13 @@ class Selector(nn.Module):
     def views(self):
         return self.selector_views
 
-    def get_merged_weights(self, container, **selector_kwargs) -> Dict:
-        return {}
+    @abstractmethod
+    def get_merging_weights(self, **selector_kwargs) -> Dict:
+        """
+        Returns a dictionary of the form {expert_name: weight} for each expert in the container.
+        raises ValueError if not supported, e.g. because routing depends on the input x.
+        """
+        pass
 
     @property
     def layer_name(self):
@@ -238,14 +245,18 @@ class SelectorView:
     def __init__(self, selector_instance):
         self.selector_instance = selector_instance
 
+    @property
+    def config(self):
+        return self.selector_instance.config
+
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
     def forward(self, *args, **kwargs):
         return self.selector_instance.forward(*args, **kwargs)
 
-    def get_merged_weights(self, container, **selector_kwargs) -> Dict:
-        return self.selector_instance.get_merged_weights(container, **selector_kwargs)
+    def get_merging_weights(self, **selector_kwargs) -> Dict:
+        return self.selector_instance.get_merging_weights(**selector_kwargs)
 
     def add_expert(self, expert_name: str, **kwargs):
         pass
@@ -255,7 +266,6 @@ class SelectorView:
 class PolySelectorConfig(SelectorConfig):
     n_splits: int = 1
     task_names: List[str] = None
-    pass
 
 
 @register_multi_expert_selector("poly_router", PolySelectorConfig)
@@ -332,10 +342,14 @@ class PolySelector(Selector):
         modules = self.expert_names
         return ModulesAndWeightsSelectorOutput(modules, weights)
 
-    def get_routing_weights(self):
-        return {
-            k: v.detach().item() for k, v in zip(self.expert_names, self._get_weights())
-        }
+    def get_merging_weights(self, **selector_kwargs) -> Dict:
+        return self.get_routing_weights(**selector_kwargs)
+
+    def get_routing_weights(self, task_name, **selector_kwargs) -> Dict:
+        assert task_name in self.config.task_names, f"Task {task_name} not found."
+        self.info_container["routing_infos"] = RoutingInfo(task_names=[task_name])
+        weights = self._get_weights()
+        return {k: v.detach().item() for k, v in zip(self.expert_names, weights[0][0])}
 
     def add_expert(self, expert_name: str, **kwargs):
         self.expert_names.append(expert_name)
@@ -410,8 +424,10 @@ class MOERKHSSelector(Selector):
             modules=selected_experts, weights=routing_weights
         )
 
-    def get_merged_weights(self, container, **selector_kwargs) -> Dict:
-        raise ValueError("Not supported for MOESelector.")
+    def get_merging_weights(self, **selector_kwargs) -> Dict:
+        raise ValueError(
+            f"Not supported for {self.__class__} since routing depends on input."
+        )
 
     def get_routing_weights(self):
         raise ValueError("Not supported for MOESelector.")
@@ -587,8 +603,10 @@ class ClownSelector(Selector):
             modules=None, weights=routing_weights
         )
 
-    def get_merged_weights(self, container, **selector_kwargs) -> Dict:
-        raise ValueError("Not supported for ClownSelector.")
+    def get_merging_weights(self, **selector_kwargs) -> Dict:
+        raise ValueError(
+            f"Not supported for {self.__class__} since routing depends on input."
+        )
 
     def get_routing_weights(self):
         raise ValueError("Not supported for ClownSelector.")
@@ -662,8 +680,10 @@ class ZeroSelector(Selector):
             modules=selected_experts, weights=routing_weights
         )
 
-    def get_merged_weights(self, container, **selector_kwargs) -> Dict:
-        raise ValueError("Not supported for MOESelector.")
+    def get_merging_weights(self, **selector_kwargs) -> Dict:
+        raise ValueError(
+            f"Not supported for {self.__class__} since routing depends on input."
+        )
 
     def get_routing_weights(self):
         raise ValueError("Not supported for MOESelector.")
@@ -723,8 +743,10 @@ class ZeroPerTokenSelector(Selector):
             modules=selected_experts, weights=routing_weights
         )
 
-    def get_merged_weights(self, container, **selector_kwargs) -> Dict:
-        raise ValueError("Not supported for MOESelector.")
+    def get_merging_weights(self, **selector_kwargs) -> Dict:
+        raise ValueError(
+            f"Not supported for {self.__class__} since routing depends on input."
+        )
 
     def get_routing_weights(self):
         raise ValueError("Not supported for MOESelector.")
@@ -898,6 +920,11 @@ class PhatgooseSelector(Selector):
                 device=self.device,
             )
 
+    def get_merging_weights(self, **selector_kwargs) -> Dict:
+        raise ValueError(
+            f"Not supported for {self.__class__}  since routing depends on input."
+        )
+
 
 @dataclass
 class PolySelectorDirectConfig(PolySelectorConfig):
@@ -920,7 +947,6 @@ class PolySelectorDirect(PolySelector):
         super().__init__(info_container, **kwargs)
 
         self.module_logits_dict = nn.ParameterDict()
-
         self.training_config = kwargs["training_config"]
         self.init_gap = [-1e-3, 1e-3]
 
@@ -932,6 +958,9 @@ class PolySelectorDirect(PolySelector):
         )
         return weights
 
+    def get_merging_weights(self, **selector_kwargs) -> Dict:
+        return self.get_routing_weights(**selector_kwargs)
+
     def get_routing_weights(self):
         return {k: v.detach().item() for k, v in self.module_logits_dict.items()}
 
@@ -941,9 +970,7 @@ class PolySelectorDirect(PolySelector):
         expert_task_name -- task name expert is pecialized at
         self.config.finetune_task_name -- name of the task the model is currently trained on
 
-        If we eocounter a module for the current task, we init it with one hot, otherwise with uniform.
-
-
+        If we encounter a module for the current task, we init it with one hot, otherwise with uniform.
         """
         main_m = 1
 
@@ -1026,6 +1053,11 @@ class RoutingInfosContainerSelector(Selector):
         routing_weights = self.routing_infos.routing_weights
         return BatchModulesAndWeightsSelectorOutput(routing_mods, routing_weights)
 
+    def get_merging_weights(self, **selector_kwargs) -> Dict:
+        raise NotImplementedError(
+            "Not implemented yet for RoutingInfosContainerSelector."
+        )
+
 
 @dataclass
 class TaskNameSelectorConfig(SelectorConfig):
@@ -1038,11 +1070,12 @@ class TaskNameSelector(Selector):
         super().__init__(info_container)
 
         self.default_expert_name = None
+        self.task2expert_name = {}
 
     @forward_with_cache
     def forward(self, input, **kwargs) -> ModulesSelectorOutput:
-        # try to infer batch size
         if not self.routing_infos or not self.routing_infos.task_names:
+            # try to infer batch size
             if "input_ids" in kwargs:
                 batch_size = kwargs["input_ids"].size(0)
             else:
@@ -1056,19 +1089,34 @@ class TaskNameSelector(Selector):
             task_names = self.routing_infos.task_names
 
             if (
-                any(task_name not in self.expert_names for task_name in task_names)
+                any(task_name not in self.task2expert_name for task_name in task_names)
                 and not self.default_expert_name
-                and len(self.expert_names)
+                and len(self.task2expert_name)
             ):
                 raise ValueError(
                     "Experts for all tasks have not been loaded! Set a default expert?"
                 )
-            modules = task_names
+            modules = [
+                self.task2expert_name.get(task_name, self.default_expert_name)
+                for task_name in task_names
+            ]
 
         return ModulesSelectorOutput(modules)
 
-    def add_expert(self, expert_name: str, **kwargs):
-        self.expert_names.append(expert_name)
+    def add_expert(self, expert_name: str, expert_info: ExpertInfo = None, **kwargs):
+        if expert_info is None or expert_info.expert_task_name is None:
+            logger.warn(
+                "Expert's task_name not set, assume task name corresponds to expert name!"
+            )
+            self.task2expert_name[expert_name] = expert_name
+        else:
+            for task_name in expert_info.expert_task_name.split(","):
+                self.task2expert_name[task_name] = expert_name
+
+    def get_merging_weights(self, **selector_kwargs) -> Dict:
+        raise NotImplementedError(
+            "Not required for TaskNameSelector as it performs hard selection. Use 'get_expert_instance' instead."
+        )
 
 
 class KVSelector(Selector):
@@ -1094,6 +1142,11 @@ class KVSelector(Selector):
     @abstractmethod
     def get_gate(self, adapter_weights):
         pass
+
+    def get_merging_weights(self, **selector_kwargs) -> Dict:
+        raise ValueError(
+            f"Not supported for {self.__class__}  since routing depends on input."
+        )
 
 
 @dataclass

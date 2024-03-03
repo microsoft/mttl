@@ -1,7 +1,6 @@
 import sys
 import os
 import tqdm
-import copy
 import torch
 import hashlib
 import nevergrad as ng
@@ -12,22 +11,23 @@ from functools import partial
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
 from typing import Union, Callable, List, Dict
+
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators.base import compute_task_aggregation
-
-from projects.wiki_experts.src.expert_model import MultiExpertModel
-from mttl.utils import logger, setup_logging
+from mttl.models.expert_model import ExpertModel
+from mttl.utils import logger
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
 from mttl.evaluators import MMLUEvaluator
 from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
-from projects.wiki_experts.src.evolution.config import EvolExpertConfig as ExpertConfig
 import wandb
-
-from mttl.models.modifiers.expert_containers.expert import ModuleGraph
+from mttl.models.modifiers.expert_containers.library_transforms import (
+    WeightedLinearMerge,
+    WeightedLinearMergeConfig,
+)
 
 
 def mmlu_get_loss(
-    model: MultiExpertModel,
+    model: ExpertModel,
     tokenizer,
     dataloader: DataLoader,
     use_vllm=True,
@@ -96,26 +96,23 @@ def default_l1_regularization(weights):
 class NGRoutingOptimizer:
     def __init__(
         self,
-        model: MultiExpertModel,
+        model: ExpertModel,
         expert_lib: ExpertLibrary,
         get_loss: Callable,  # function that takes model as input and returns loss
         budget=5,
         task_name="new_task",
         base_module_name=None,
         regularizer_factor=0.0,
-        action="route",
         log=True,
     ) -> None:
-        self.action = action
         self.log = log
         self.regularizer_factor = regularizer_factor
         self.task_name = task_name
-        self.model: MultiExpertModel = model
-        self.module_graph: ModuleGraph = self.construct_graph(expert_lib)
-        self.varaibles = self.module_graph.get_variables()
-        self.K = len(self.varaibles)
+        self.model: ExpertModel = model
+        self.K = len(expert_lib)
         # vars ordered in the same order as data in expert_lib
         init = [0] * self.K
+        self.library = expert_lib
         if base_module_name is not None:
             init_one = list(expert_lib.keys()).index(base_module_name)
             init[init_one] = 1
@@ -132,51 +129,38 @@ class NGRoutingOptimizer:
 
         self._iteration = 0
 
-    def construct_graph(self, modules_to_dest: Union[Dict, ExpertLibrary]):
-        return ModuleGraph.from_expert_dict(modules_to_dest, module_name="new_task")
-
-    def get_graph_vars(self, weights: list):
-        s = {}
-        for p, w in zip(self.varaibles, list(weights)):
-            s[p] = w
-        return s
-
     def optimize(
         self,
     ):
-        def get_score(
-            weights,
-            basemodel: MultiExpertModel,
-            get_loss,
-            get_regular,
-            get_vars,
-            action,
-        ):
-            graph_vars = get_vars(weights)
-            logger.info(f"Testing weights {graph_vars.values()} into the model")
-            model = basemodel.deepcopy()
-            model.load_from_graph(self.module_graph, action=action, **graph_vars)
-            # import numpy as np
-            # np.sum([p.detach().cpu().sum().item() for p in model.parameters()])
-            if action == "route":
-                model.replace_container_with_expert("new_task")
+        def get_score(weights, basemodel: ExpertModel, get_loss, get_regular):
+            config = WeightedLinearMergeConfig(
+                {exp_name: w for exp_name, w in zip(self.library.keys(), weights)}
+            )
+            weighted_merge = WeightedLinearMerge(config)
+            logger.info(f"Testing weights {weights}")
+            expert = weighted_merge.transform(self.library)
+            assert all(
+                [
+                    key in basemodel.model.state_dict()
+                    for key in expert.expert_weights.keys()
+                ]
+            )
+            basemodel.model.load_state_dict(expert.expert_weights, strict=False)
 
             # minimize the metric
             loss = get_loss(
-                model=model,
+                model=basemodel,
             )
-            if self.log:
+            if self.log and wandb.run is not None:
                 wandb.log(
                     {
-                        "loss": loss,
+                        "ng_loss": loss,
                         "iteration": self._iteration,
                     }
                 )
 
             # L1 regularization term
             metric_val = loss + self.regularizer_factor * get_regular(weights)
-            del model
-            free_memory()
             self._iteration += 1
             return metric_val
 
@@ -185,12 +169,12 @@ class NGRoutingOptimizer:
             get_loss=self.get_loss,
             basemodel=self.model,
             get_regular=default_l1_regularization,
-            get_vars=self.get_graph_vars,
-            action=self.action,
         )
         recommendation = self.optimizer.minimize(_get_score)
         logger.info(recommendation.value)
 
-        best_vars = self.get_graph_vars(recommendation.value)
-        best_graph = self.module_graph.dumps(**best_vars)
-        return recommendation.value, best_graph
+        best_combo = {
+            expert_name: w
+            for expert_name, w in zip(self.library.keys(), recommendation.value)
+        }
+        return recommendation.value, best_combo

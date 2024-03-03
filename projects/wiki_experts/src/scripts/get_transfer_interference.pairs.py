@@ -15,7 +15,7 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     SVDEmbeddingTransformConfig,
 )
 from mttl.utils import remote_login
-from projects.wiki_experts.src.evolution.utils import get_svd_embedding
+from projects.wiki_experts.src.utils.utils import get_svd_embedding
 
 remote_login()
 
