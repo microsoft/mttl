@@ -123,7 +123,7 @@ def eval_in_distribution(module, args: ExpertConfig, tasks):
             )
             metric = evaluator.test(pl_module=module)
 
-        if args.eval_metric == "test_loss":
+        elif args.eval_metric == "test_loss":
             dm = get_datamodule(args)
             evaluator = LossCallback(
                 dm.test_dataloader(), output_dir=args.output_dir, name=task + "_test"
@@ -178,19 +178,12 @@ def run_multitask(args: ExpertConfig):
         "bool_q_1_0_0",
         "openbookqa_0_1_0",
     ]
-    if args.finetune_task_name is not None:
-        args.finetune_task_name = (
-            args.finetune_task_name
-            if isinstance(args.finetune_task_name, list)
-            else args.finetune_task_name.split(",")
-        )
-        exclude_phi_tasks = None
 
     library = get_expert_library(
         repo_id=args.library_id,
         token=args.remote_token,
         exclude_selection=exclude_phi_tasks,
-        selection=args.finetune_task_name,
+        make_local=True,
     )
     args_copy = None
     if args.merge_or_route in ["uniform", "weighted"]:
@@ -290,6 +283,7 @@ def run_multitask(args: ExpertConfig):
         args_copy.router_selector = "task_selector"
         module = MultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
+        module = module.to("cuda")
 
     if os.environ.get("WANDB_API_KEY"):
         import wandb
