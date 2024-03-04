@@ -43,9 +43,13 @@ def get_hidden_states(library, args):
             pool=args.pool,
             use_base_model_only=True,
         )
-        base = HiddenStateComputer(cfg).transform(library, default_args=args)
+        base = HiddenStateComputer(cfg).transform(
+            library, default_args=args, recompute=args.recompute_prototypes
+        )
         cfg.use_base_model_only = False
-        expert = HiddenStateComputer(cfg).transform(library, default_args=args)
+        expert = HiddenStateComputer(cfg).transform(
+            library, default_args=args, recompute=args.recompute_prototypes
+        )
         output = {
             exp_name: {
                 k: (expert[exp_name][k] - base[exp_name][k]) * args.delta_scale
@@ -61,14 +65,16 @@ def get_hidden_states(library, args):
             track=args.track,
             pool=args.pool,
         )
-        output = HiddenStateComputer(cfg).transform(library)
+        output = HiddenStateComputer(cfg).transform(
+            library, recompute=args.recompute_prototypes
+        )
 
     return output
 
 
 def get_svd_embeddings(library, args):
     cfg = ArrowConfig(scale=args.scale_prototypes)
-    return ArrowTransform(cfg).transform(library)
+    return ArrowTransform(cfg).transform(library, recompute=args.recompute_prototypes)
 
 
 def patch_prototypes(module, library, args, proto_inits=None):
@@ -265,7 +271,9 @@ def run_multitask(args: ExpertConfig):
                 n_steps=args.n_steps_pg, learning_rate=args.learning_rate_pg
             )
         )
-        prototypes = phagoose_transform.transform(library, default_args=args)
+        prototypes = phagoose_transform.transform(
+            library, default_args=args, recompute=args.recompute_prototypes
+        )
 
         module = MultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
