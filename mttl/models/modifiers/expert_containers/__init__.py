@@ -249,12 +249,11 @@ def add_expert_to_transformer(
     added_layers = []
 
     for m_name, module in dict(transformer.named_modules()).items():
+        if "expert_ranker" in m_name:
+            continue
         if re.fullmatch(expert_config.modify_modules, m_name):
             for c_name, layer in dict(module.named_children()).items():
                 if re.fullmatch(expert_config.modify_layers, c_name):
-                    # if it's the child of a expert container, skip it
-                    if "out_projecter" in c_name:
-                        continue
                     total_layers += 1
                     layer_name = f"{m_name}.{c_name}"
 
@@ -285,7 +284,6 @@ def add_expert_to_transformer(
                         action=action,
                         is_default=is_default,
                     )
-    breakpoint()
     if routing_config is not None:
         replace_selector_for_container(
             transformer,
