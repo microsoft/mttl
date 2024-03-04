@@ -12,7 +12,7 @@ from mttl.evaluators import MMLUEvaluator
 from mttl.utils import remote_login, setup_logging, logger
 
 # register models
-from mttl.models.expert_model import MultiExpertModel, MultiExpertModelRanker
+from mttl.models.expert_model import MultiExpertModel
 from mttl.models.expert_config import ExpertConfig
 
 

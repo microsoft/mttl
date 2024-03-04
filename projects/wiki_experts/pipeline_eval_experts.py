@@ -31,6 +31,9 @@ def run_eval(args):
     module = MultiExpertModel(**vars(args))
 
     filtering_experts = os.environ.get("FILTERING_EXPERTS", None)
+    if filtering_experts:
+        filtering_experts = filtering_experts.split(",")
+
     if args.library_id:
         if os.path.exists(args.library_id):
             # it's a local library
@@ -39,7 +42,9 @@ def run_eval(args):
             for file in glob.glob(os.path.join(args.library_id, "*")):
                 library.add_expert_from_ckpt(file, force=True)
         else:
-            library = get_expert_library(args.library_id)
+            library = get_expert_library(
+                args.library_id, exclude_selection=filtering_experts
+            )
 
         logger.info("Loaded library: {}".format(args.library_id))
     else:
@@ -50,7 +55,7 @@ def run_eval(args):
         for expert_kwargs in kwargs:
             module.load_expert(**expert_kwargs, expert_library=library)
     elif args.library_id is not None:
-        module.add_experts_from_library(library, filtering_experts=filtering_experts)
+        module.add_experts_from_library(library)
     module.to("cuda")
 
     runner: EvaluatorRunner = setup_evaluators(
