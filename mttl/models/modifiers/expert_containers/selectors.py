@@ -266,7 +266,6 @@ class SelectorView:
 class PolySelectorConfig(SelectorConfig):
     n_splits: int = 1
     task_names: List[str] = None
-    pass
 
 
 @register_multi_expert_selector("poly_router", PolySelectorConfig)
@@ -330,15 +329,15 @@ class PolySelector(Selector):
                 assert not self.training, "Unknown tasks during training"
 
         module_logits = torch.sigmoid(self.module_logits[task_ids])
+        module_logits = module_logits.view(
+            module_logits.size(0), self.config.n_splits, self.n_experts
+        )
         module_weights = module_logits / (module_logits.sum(dim=-1, keepdim=True) + EPS)
 
-        module_weights = module_weights.view(
-            module_weights.size(0), self.config.n_splits, self.n_experts
-        )
         return module_weights
 
     @forward_with_cache
-    def forward(self, **kwargs) -> ModulesAndWeightsSelectorOutput:
+    def forward(self, input, **kwargs) -> ModulesAndWeightsSelectorOutput:
         weights = self._get_weights()
         modules = self.expert_names
         return ModulesAndWeightsSelectorOutput(modules, weights)

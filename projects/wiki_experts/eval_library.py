@@ -32,7 +32,7 @@ from mttl.models.modifiers.expert_containers.expert_containers import ExpertCont
 from mttl.callbacks import LossCallback
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
-from projects.wiki_experts.src.evolution.utils import TableLogger
+from projects.wiki_experts.src.utils.utils import TableLogger
 
 
 def get_hidden_states(library, args):

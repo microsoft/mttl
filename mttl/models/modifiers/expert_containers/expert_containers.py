@@ -20,6 +20,7 @@ from mttl.utils import logger
 from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
 from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
 from mttl.models.modifiers.expert_containers.expert import Expert
+from mttl.models.modifiers.modify_model import get_modifier_type
 
 
 class ExpertContainer:
@@ -197,7 +198,10 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         # back-compatibility, in previous versions, the expert config was a training config
         self._check_config(expert.expert_config)
 
-        expert_module = LoRA(expert.expert_config, self.layer)
+        # We may want to add a SkilledLoRA directly, if we are loading an MHR model for example
+        lora_type = get_modifier_type(expert.expert_config)
+        LoRA_cls = {"lora": LoRA, "skilled_lora": SkilledLoRA}[lora_type]
+        expert_module = LoRA_cls(expert.expert_config, self.layer)
 
         if expert_weights is not None:
             expert_module.load_lora_weights(expert_weights)
