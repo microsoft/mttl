@@ -115,7 +115,6 @@ class ExpertConfig(Config):
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size
 
-        # to reproduce setup in https://github.com/daanelson/alpaca-lora
         self.gradient_accumulation_steps = (
             self.train_batch_size // self.micro_batch_size
         )
