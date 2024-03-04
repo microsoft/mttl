@@ -322,7 +322,7 @@ class MultiExpertModel(ExpertModel):
                     setattr(module, c_name, child.layer)
         self.experts_names.clear()
 
-    def add_experts_from_library(self, library, filtering_experts=None):
+    def add_experts_from_library(self, library):
         import tqdm
         import concurrent.futures
 
@@ -334,9 +334,6 @@ class MultiExpertModel(ExpertModel):
             # Create a list to hold the futures
             futures = []
             for element in library.keys():
-                if filtering_experts is not None and element in filtering_experts:
-                    print("skip", element)
-                    continue
                 futures.append(executor.submit(partial(add_module, self), element))
 
             # Progress bar setup
