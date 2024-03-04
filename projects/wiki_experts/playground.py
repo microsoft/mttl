@@ -5,7 +5,7 @@ import glob
 import sys
 from typing import List
 
-from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from mttl.evaluators.base import StoppingCriteriaSub, StoppingCriteriaList
 
 
@@ -126,7 +126,7 @@ def main():
                 module = parts[0].strip()
                 library = parts[2].strip()
                 model.delete_expert_container()
-                expert = get_expert_library(library)[module]
+                expert = ExpertLibrary.get_expert_library(library)[module]
                 model.add_expert_instance(expert, "default")
                 continue
 

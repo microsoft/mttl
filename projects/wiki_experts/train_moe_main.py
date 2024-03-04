@@ -5,7 +5,7 @@ from pytorch_lightning import Trainer, seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from mttl.callbacks import LiveCheckpointCallback
 from mttl.models.monitors import get_monitors
 from mttl.callbacks import NanoMMLUCallback, RougeCallback
@@ -32,7 +32,7 @@ def run_multitask(args: ExpertConfig):
     remote_login(args.remote_token)
     expert_library = None
     if args.library_id:
-        expert_library = get_expert_library(args.library_id, create=True)
+        expert_library = ExpertLibrary.get_expert_library(args.library_id, create=True)
 
     # select dataloader
     model_class = MoEModel

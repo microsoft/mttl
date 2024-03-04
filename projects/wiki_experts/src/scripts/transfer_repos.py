@@ -2,13 +2,14 @@ import multiprocessing
 
 from mttl.models.modifiers.expert_containers.expert_library import (
     BlobExpertLibrary,
-    get_expert_library,
+    ExpertLibrary,
 )
+
 
 def copy_repo(origin_repo_id, target_repo_id):
     try:
         print(f"Copying {origin_repo_id} to {target_repo_id}")
-        origin_repo = get_expert_library(origin_repo_id)
+        origin_repo = ExpertLibrary.get_expert_library(origin_repo_id)
         BlobExpertLibrary.from_expert_library(
             expert_lib=origin_repo,
             repo_id=target_repo_id,

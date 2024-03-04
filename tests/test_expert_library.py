@@ -19,7 +19,7 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     VirtualLocalLibrary,
     LocalFSEngine,
     HFExpertLibrary,
-    get_expert_library,
+    ExpertLibrary,
 )
 
 
@@ -406,7 +406,7 @@ def test_copy_library_blob_to_blob(tmp_path, build_meta_ckpt, setup_repo, repo_i
     _ = asyncio.run(engine.async_upload_blobs(repo_id, filenames))
 
     # Get the expert library
-    library = get_expert_library(repo_id)
+    library = ExpertLibrary.get_expert_library(repo_id)
 
     # Create a new library from the first one
     new_repo_id = str(uuid.uuid4())
@@ -429,7 +429,7 @@ def test_copy_library_blob_to_local(tmp_path, build_meta_ckpt, setup_repo, repo_
     _ = asyncio.run(engine.async_upload_blobs(repo_id, filenames))
 
     # Get the expert library
-    library = get_expert_library(repo_id)
+    library = ExpertLibrary.get_expert_library(repo_id)
 
     # Create a new library from the first one
     new_repo_id = tmp_path / "new_repo"
@@ -444,12 +444,13 @@ def test_copy_library_local_to_local(tmp_path, build_meta_ckpt, setup_repo, repo
     # Create a library with two experts
     local_path = repo_id = tmp_path / "base_repo"
     repo_id.mkdir()
+    repo_id = str(repo_id)
     engine = LocalFSEngine()
     setup_repo(engine, repo_id)
     filenames = build_meta_ckpt(local_path, 2)
 
     # Get the expert library
-    library = get_expert_library(repo_id)
+    library = ExpertLibrary.get_expert_library(repo_id)
 
     # Create a new library from the first one
     new_repo_id = tmp_path / "new_repo"
@@ -465,11 +466,12 @@ def test_virtual_library_is_in_memory(tmp_path, build_meta_ckpt, setup_repo, rep
     # Create a library with two experts
     local_path = repo_id = tmp_path / "base_repo"
     repo_id.mkdir()
+    repo_id = str(repo_id)
     engine = LocalFSEngine()
     setup_repo(engine, repo_id)
     filenames = build_meta_ckpt(local_path, 2)
     # Get the expert library
-    local_library = get_expert_library(repo_id)
+    local_library = ExpertLibrary.get_expert_library(repo_id)
 
     # Create a new library from the first one
     virtual_repo_id = tmp_path / "virtual_repo"

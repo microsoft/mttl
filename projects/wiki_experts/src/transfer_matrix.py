@@ -8,10 +8,7 @@ from pytorch_lightning import seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
-from mttl.models.modifiers.expert_containers.expert_library import (
-    ExpertLibrary,
-    get_expert_library,
-)
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 
 from mttl.models.expert_config import ExpertConfig
 from projects.wiki_experts.src.utils.utils import (
@@ -184,7 +181,9 @@ def run_eval(args: TransferMatrixConfig, debug=None):
     remote_login(token=args.remote_token)
 
     print("###### Tasks", args.finetune_task_name)
-    expert_lib = get_expert_library(repo_id=args.library_id, token=args.remote_token)
+    expert_lib = ExpertLibrary.get_expert_library(
+        repo_id=args.library_id, token=args.remote_token
+    )
 
     transfer_table: TableLogger = produce_transfer_matrix(
         args, expert_lib, tasks=args.finetune_task_name

@@ -7,7 +7,7 @@ import glob
 import io
 import logging
 import sys
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Type, Union
 import torch
 import os
 import time
@@ -562,13 +562,13 @@ class LocalFSEngine(BackendEngine):
 class ExpertLibrary:
     def __init__(
         self,
-        repo_id,
-        token=None,
-        model_name=None,
-        selection=None,
-        exclude_selection=None,
-        create=False,
-        ignore_sliced=False,
+        repo_id: str,
+        token: Optional[str] = None,
+        model_name: Optional[str] = None,
+        selection: Optional[List[str]] = None,
+        exclude_selection: Optional[List[str]] = None,
+        create: bool = False,
+        ignore_sliced: bool = False,
     ):
         super().__init__()
 
@@ -1221,7 +1221,7 @@ class ExpertLibrary:
             It can be either an instance of `ExpertLibrary` or a string representing the expert library.
         """
         if isinstance(expert_library, str):
-            expert_library = get_expert_library(expert_library)
+            expert_library = self.get_expert_library(expert_library)
         for name, expert in expert_library.items():
             if expert not in self and not expert.expert_info.expert_deleted:
                 self.add_expert(expert)
@@ -1233,7 +1233,7 @@ class ExpertLibrary:
         cls,
         expert_dict: Dict[str, Expert],
         destination: str,
-        expert_library_type: Union["ExpertLibrary", str] = None,
+        expert_library_type: Optional[Union["ExpertLibrary", str]] = None,
     ):
         """
         Create a new ExpertLibrary object from a dictionary of experts.
@@ -1246,13 +1246,85 @@ class ExpertLibrary:
         Returns:
             ExpertLibrary: A new ExpertLibrary object containing the experts from the dictionary.
         """
-        new_lib = get_expert_library(
+        new_lib = cls.get_expert_library(
             repo_id=destination, expert_library_type=expert_library_type or cls
         )
         for name, expert in expert_dict.items():
             if expert not in new_lib:
                 new_lib.add_expert(expert)
         return new_lib
+
+    @classmethod
+    def get_expert_library(
+        cls,
+        repo_id: str,
+        token: Optional[str] = None,
+        model_name: Optional[str] = None,
+        selection: Optional[List[str]] = None,
+        exclude_selection: Optional[List[str]] = None,
+        create: bool = False,
+        ignore_sliced: bool = False,
+        expert_library_type: Union[Type["ExpertLibrary"], str] = None,
+    ):
+        """Instantiate an ExpertLibrary from one of the available expert library types:
+            - "local": LocalExpertLibrary,
+            - "virtual": VirtualLocalLibrary,
+            - "az": BlobExpertLibrary,
+            - "hf": HFExpertLibrary,
+
+        The expert library type is selected based on the following order of priority:
+            1. If expert_library_type is provided, and is one of ExpertLibrary subclasses, uses it.
+            2. If repo_id includes one of the following substrings: "local://", "virtual://", "az://", "hf://".
+            3. If repo_id is a directory that exists on the local file system, uses LocalExpertLibrary.
+            4. If repo_id follows the format "owner/repo", uses HFExpertLibrary.
+            5. Otherwise, uses BlobExpertLibrary.
+        Note:
+            - VirtualLocalLibrary can only be instantiated explicitly by providing
+              the expert_library_type or prefix repo_id with "virtual://".
+        """
+
+        available_libraries = {
+            "local": LocalExpertLibrary,
+            "virtual": VirtualLocalLibrary,
+            "az": BlobExpertLibrary,
+            "hf": HFExpertLibrary,
+        }
+
+        if expert_library_type in available_libraries:
+            expert_lib_class = available_libraries[expert_library_type]
+        elif expert_library_type in available_libraries.values():
+            expert_lib_class = expert_library_type
+        else:
+            # if repo_id includes "local://", "virtual://", "az://", "hf://"
+            prefix = repo_id.split("://")
+            if prefix[0] in available_libraries:
+                expert_library_type = prefix[0]
+                repo_id = prefix[1]
+            else:
+                # guess mode based on the repo_id
+                if os.path.isdir(repo_id):
+                    expert_library_type = "local"
+                elif len(repo_id.split("/")) == 2:
+                    expert_library_type = "hf"
+                else:
+                    expert_library_type = "az"
+
+            try:
+                expert_lib_class = available_libraries[expert_library_type]
+            except KeyError:
+                raise ValueError(f"Unknown expert library type {expert_library_type}.")
+
+        expert_lib = expert_lib_class(
+            repo_id=repo_id,
+            token=token,
+            model_name=model_name,
+            selection=selection,
+            exclude_selection=exclude_selection,
+            create=create,
+            ignore_sliced=ignore_sliced,
+        )
+
+        return expert_lib
 
 
 class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
@@ -1338,58 +1410,3 @@ def get_best_expert_for_task(library: HFExpertLibrary, task, hash) -> Expert:
             best_expert = metadata
     assert best_expert is not None
     return library[best_expert.expert_name]
-
-
-def get_expert_library(
-    repo_id,
-    token: str = None,
-    model_name=None,
-    selection=None,
-    exclude_selection=None,
-    create=False,
-    ignore_sliced=False,
-    expert_library_type: Union[ExpertLibrary, str] = None,
-):
-    """Select the appropriate expert library based on the following order of priority:
-    1. If expert_library_type is provided, and is a proper subclass of ExpertLibrary, uses it.
-    2. If repo_id is a directory that exists on the local file system, uses LocalExpertLibrary.
-    3. If token is provided and contains "blob.core.windows.net", uses BlobExpertLibrary.
-    4. If token is not provided, but the BLOB_SAS_URL envvar is set, uses BlobExpertLibrary.
-    5. Otherwise, uses HFExpertLibrary.
-    """
-    if (  # if expert_library_type is a proper subclass of ExpertLibrary, use it
-        isinstance(expert_library_type, type)
-        and issubclass(expert_library_type, ExpertLibrary)
-        and expert_library_type is not ExpertLibrary
-    ):
-        expert_lib_class = expert_library_type
-    else:  # otherwise, select the appropriate expert library based on its str representation
-        available_libraries = {
-            "local": LocalExpertLibrary,
-            "blob_storage": BlobExpertLibrary,
-            "huggingface_hub": HFExpertLibrary,
-        }
-        if expert_library_type is None:
-            if os.path.isdir(repo_id):
-                expert_library_type = "local"
-            elif len(repo_id.split("/")) == 2:
-                expert_library_type = "huggingface_hub"
-            else:
-                expert_library_type = "blob_storage"
-
-        try:
-            expert_lib_class = available_libraries[expert_library_type]
-        except KeyError:
-            raise ValueError(f"Unknown expert library type {expert_library_type}.")
-
-    expert_lib = expert_lib_class(
-        repo_id=repo_id,
-        token=token,
-        model_name=model_name,
-        selection=selection,
-        exclude_selection=exclude_selection,
-        create=create,
-        ignore_sliced=ignore_sliced,
-    )
-
-    return expert_lib

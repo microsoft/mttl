@@ -15,10 +15,7 @@ from collections import defaultdict
 
 from mttl.models.modifiers.expert_containers.expert import Expert
 from mttl.models.modifiers.expert_containers.expert_containers import ExpertContainer
-from mttl.models.modifiers.expert_containers.expert_library import (
-    get_expert_library,
-    ExpertLibrary,
-)
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from mttl.utils import logger
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
 from mttl.datamodule.base import get_datamodule
@@ -97,7 +94,7 @@ class SVDEmbeddingTransform(LibraryTransform):
 
     def transform(self, library, persist=True, recompute=False):
         if type(library) == str:
-            library = get_expert_library(library)
+            library = ExpertLibrary.get_expert_library(library)
 
         # try to fetch auxiliary data
         output = library.get_auxiliary_data(data_type=self.config.save_name)
@@ -184,7 +181,7 @@ class WeightedLinearMerge(LibraryTransform):
     @torch.no_grad()
     def transform(self, library) -> Expert:
         if type(library) == str:
-            library = get_expert_library(library)
+            library = ExpertLibrary.get_expert_library(library)
 
         expert_names = list(library.keys())
         experts = [library[name] for name in expert_names]
@@ -250,7 +247,7 @@ class TiesMerge(LibraryTransform):
     @torch.no_grad()
     def transform(self, library) -> Expert:
         if type(library) == str:
-            library = get_expert_library(library)
+            library = ExpertLibrary.get_expert_library(library)
 
         expert_names = list(library.keys())
         experts = [library[name] for name in expert_names]
@@ -403,7 +400,7 @@ class HiddenStateComputer(LibraryTransform):
         from projects.wiki_experts.src.expert_model import MultiExpertModel
 
         if type(library) == str:
-            library = get_expert_library(library)
+            library = ExpertLibrary.get_expert_library(library)
 
         logger.info(f"Hidden state computer dumps to: {self.config.save_name}")
 
@@ -539,7 +536,7 @@ class PhatgooseTransform(HiddenStateComputer):
             expert: Expert = library[expert_name]
 
             if type(library) == str:
-                library = get_expert_library(library)
+                library = ExpertLibrary.get_expert_library(library)
             loaded_output = library.get_auxiliary_data(data_type=self.config.save_name)
 
             if (
@@ -681,7 +678,7 @@ class ArrowTransform(LibraryTransform):
     @torch.no_grad()
     def transform(self, library, persist=True, recompute=False) -> Expert:
         if isinstance(library, str):
-            library = get_expert_library(library)
+            library = ExpertLibrary.get_expert_library(library)
 
         # try to fetch auxiliary data
         vectors = library.get_auxiliary_data(
@@ -869,10 +866,10 @@ class ExpertProjector(LibraryTransform):
     @torch.no_grad()
     def transform(self, expert_library, cluster_library) -> Expert:
         if isinstance(expert_library, str):
-            expert_library = get_expert_library(expert_library)
+            expert_library = ExpertLibrary.get_expert_library(expert_library)
 
         if isinstance(cluster_library, str):
-            cluster_library = get_expert_library(cluster_library)
+            cluster_library = ExpertLibrary.get_expert_library(cluster_library)
 
         output = {}
         for cluster_name, cluster_exp in cluster_library.items():
@@ -908,7 +905,7 @@ class CrossExpertNormComputer(HiddenStateComputer):
     @torch.no_grad()
     def transform(self, library, default_args=None) -> Expert:
         if isinstance(library, str):
-            library = get_expert_library(library)
+            library = ExpertLibrary.get_expert_library(library)
 
         expert_names = list(library.keys())
         an_expert = library[expert_names[0]]

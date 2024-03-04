@@ -10,7 +10,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from mttl.models.expert_model import ExpertModel
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.modifiers.expert_containers.expert_library import (
-    get_expert_library,
+    ExpertLibrary,
     LocalExpertLibrary,
 )
 from mttl.callbacks import LiveCheckpointCallback
@@ -70,7 +70,7 @@ def run_multitask(args: ExpertConfig):
     remote_login(args.remote_token)
     expert_library = None
     if args.library_id:
-        expert_library = get_expert_library(args.library_id, create=True)
+        expert_library = ExpertLibrary.get_expert_library(args.library_id, create=True)
 
     loggers = get_pl_loggers(args)
     # select dataloader
