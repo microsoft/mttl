@@ -43,9 +43,13 @@ def get_hidden_states(library, args):
             pool=args.pool,
             use_base_model_only=True,
         )
-        base = HiddenStateComputer(cfg).transform(library, default_args=args)
+        base = HiddenStateComputer(cfg).transform(
+            library, default_args=args, recompute=args.recompute_prototypes
+        )
         cfg.use_base_model_only = False
-        expert = HiddenStateComputer(cfg).transform(library, default_args=args)
+        expert = HiddenStateComputer(cfg).transform(
+            library, default_args=args, recompute=args.recompute_prototypes
+        )
         output = {
             exp_name: {
                 k: (expert[exp_name][k] - base[exp_name][k]) * args.delta_scale
@@ -61,14 +65,16 @@ def get_hidden_states(library, args):
             track=args.track,
             pool=args.pool,
         )
-        output = HiddenStateComputer(cfg).transform(library)
+        output = HiddenStateComputer(cfg).transform(
+            library, recompute=args.recompute_prototypes
+        )
 
     return output
 
 
 def get_svd_embeddings(library, args):
     cfg = ArrowConfig(scale=args.scale_prototypes)
-    return ArrowTransform(cfg).transform(library)
+    return ArrowTransform(cfg).transform(library, recompute=args.recompute_prototypes)
 
 
 def patch_prototypes(module, library, args, proto_inits=None):
@@ -117,7 +123,7 @@ def eval_in_distribution(module, args: ExpertConfig, tasks):
             )
             metric = evaluator.test(pl_module=module)
 
-        if args.eval_metric == "test_loss":
+        elif args.eval_metric == "test_loss":
             dm = get_datamodule(args)
             evaluator = LossCallback(
                 dm.test_dataloader(), output_dir=args.output_dir, name=task + "_test"
@@ -172,19 +178,12 @@ def run_multitask(args: ExpertConfig):
         "bool_q_1_0_0",
         "openbookqa_0_1_0",
     ]
-    if args.finetune_task_name is not None:
-        args.finetune_task_name = (
-            args.finetune_task_name
-            if isinstance(args.finetune_task_name, list)
-            else args.finetune_task_name.split(",")
-        )
-        exclude_phi_tasks = None
 
     library = ExpertLibrary.get_expert_library(
         repo_id=args.library_id,
         token=args.remote_token,
         exclude_selection=exclude_phi_tasks,
-        selection=args.finetune_task_name,
+        make_local=True,
     )
 
     # cfg = TiesMergeConfig(top_k=0.2)
@@ -267,12 +266,14 @@ def run_multitask(args: ExpertConfig):
         args_copy.router_temp = args.router_temp
         args_copy.moe_top_k = args.moe_top_k
 
-        phagoose_transform = PhatgooseTransform(
+        phatgoose_transform = PhatgooseTransform(
             PhatgooseConfig(
                 n_steps=args.n_steps_pg, learning_rate=args.learning_rate_pg
             )
         )
-        prototypes = phagoose_transform.transform(library, default_args=args)
+        prototypes = phatgoose_transform.transform(
+            library, default_args=args, recompute=args.recompute_prototypes
+        )
 
         module = MultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
@@ -280,6 +281,15 @@ def run_multitask(args: ExpertConfig):
         for mod in module.modules():
             if isinstance(mod, ExpertContainer):
                 mod.selector.set_prototypes(prototypes)
+        module = module.to("cuda")
+    elif args.merge_or_route == "oracle":
+        # TaskNameSelector
+        an_expert = library[next(iter(library.keys()))]
+        args_copy: ExpertConfig = deepcopy(an_expert.training_config)
+        args_copy.output_dir = args.output_dir
+        args_copy.router_selector = "task_selector"
+        module = MultiExpertModel(**vars(args_copy), device_map="auto")
+        module.load_from_module_dict(library)
         module = module.to("cuda")
 
     if args.pipeline_eval_tasks == "all":
@@ -298,12 +308,34 @@ def run_multitask(args: ExpertConfig):
         )
         scores = runner.run(module)
 
-    # try to fetch routing statistics
-    routing_stats = {}
-    if hasattr(module.model, "task_id_container"):
-        for task_name in module.model.task_id_container.keys():
-            if task_name == "routing_infos":
-                continue
+    if args.pipeline_eval_tasks == "in_distribution":
+        tasks = [expert.expert_task_name for expert in library.data.values()]
+        args_copy.eval_metric = args.eval_metric
+        scores = eval_in_distribution(module, args_copy or args, tasks)
+        return
+    else:
+        if args.pipeline_eval_tasks == "all":
+            args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
+
+        with torch.no_grad():
+            runner: EvaluatorRunner = setup_evaluators(
+                model_type=module.hparams.model,
+                model_family=module.hparams.model_family,
+                max_input_length=module.hparams.max_input_length,
+                max_output_length=module.hparams.max_output_length,
+                predict_batch_size=args.predict_batch_size,
+                truncation_side=module.hparams.truncation_side,
+                tasks=args.pipeline_eval_tasks,
+                output_path=os.path.join(args.output_dir, "DOWNSTREAM"),
+            )
+            scores = runner.run(module)
+
+        # try to fetch routing statistics
+        routing_stats = {}
+        if hasattr(module.model, "task_id_container"):
+            for task_name in module.model.task_id_container.keys():
+                if task_name == "routing_infos":
+                    continue
 
             task_dict = module.model.task_id_container[task_name]
             for k, v in task_dict.items():
