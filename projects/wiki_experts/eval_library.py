@@ -66,14 +66,14 @@ def get_hidden_states(library, args):
     return output
 
 
-def get_svd_embeddings(library, args):
-    cfg = ArrowConfig(scale=args.scale_prototypes)
-    return ArrowTransform(cfg).transform(library)
+def get_arrow_embeddings(library, args):
+    cfg = ArrowConfig(scale=args.scale_prototypes, tie_qkv=args.tie_qkv_routing)
+    return ArrowTransform(cfg).transform(library, recompute=False, persist=False)
 
 
 def patch_prototypes(module, library, args, proto_inits=None):
-    if not proto_inits and args.proto_init == "svd":
-        proto_inits = get_svd_embeddings(library, args)
+    if not proto_inits and args.proto_init == "arrow":
+        proto_inits = get_arrow_embeddings(library, args)
     elif not proto_inits and args.proto_init == "hidden":
         proto_inits = get_hidden_states(library, args)
 
@@ -85,6 +85,7 @@ def patch_prototypes(module, library, args, proto_inits=None):
             for expert_name in mod.expert_names:
                 patched_layer_name = mod.layer_name.replace(".selector", "")
                 layer_names = proto_inits[expert_name].keys()
+                patched_layer_name = mod.layer_name.replace(".selector", "")
                 valid_layer_names = [
                     k for k in layer_names if k.startswith(patched_layer_name)
                 ]
@@ -226,11 +227,11 @@ def run_multitask(args: ExpertConfig):
         args_copy.router_temp = args.router_temp
         args_copy.moe_top_k = args.moe_top_k
         args_copy.precision = 32
-        args_copy.router_window_size = args.router_window_size
-        args_copy.clown_mode = args.clown_mode
         args_copy.proto_init = args.proto_init
         args_copy.normalize_router_input = args.normalize_router_input
         args_copy.lora_merge_after = args.merge_or_route == "clown_lora_after_op"
+        args_copy.router_entropy = args.router_entropy
+        args_copy.tie_qkv_routing = args.tie_qkv_routing
         module = MultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
         patch_prototypes(module, library, args)

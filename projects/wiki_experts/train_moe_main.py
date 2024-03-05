@@ -110,6 +110,7 @@ def run_multitask(args: ExpertConfig):
         if args.precision in ["16", "32"]
         else args.precision,
         val_check_interval=val_check_interval,
+        limit_val_batches=200,
     )
 
     # initial validation only for a bunch of datasets... ?

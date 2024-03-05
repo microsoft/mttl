@@ -451,10 +451,10 @@ class ClownRouterConfig(SelectorConfig):
     router_granularity: str = "finegrained"
     router_temp: float = 1.0
     moe_top_k: int = -1
-    clown_mode: str = "window"  # "last", "mean", "per_token", "window"
     router_window_size: int = 3
     proto_init: str = "hidden"
     normalize_router_input: bool = True
+    router_entropy: float = None  # float from 0 to 1, controling the relative entropy w.r.t to the uniform distribution
 
 
 @register_multi_expert_selector("clown_router", ClownRouterConfig)
@@ -474,16 +474,35 @@ class ClownSelector(Selector):
             torch.empty((0, self.input_dim), device=layer.weight.device)
         )
 
-        if config.clown_mode == "window":
-            # Build conv kernel to compute mean over window
-            router_window_size = self.config.router_window_size
-            avg_1d_conv_kernel = (
-                torch.ones(1, 1, router_window_size) / router_window_size
-            )
-            self.register_buffer("avg_1d_conv_kernel", avg_1d_conv_kernel)
+        self.layer_norm = nn.LayerNorm(self.input_dim, elementwise_affine=False)
 
     def overwrite_prototypes(self, prototypes):
         self.prototypes.data = prototypes.type_as(self.prototypes)
+
+    def entropy_normalization(self, x, rel_entropy_target, atol=0.1):
+        diff = 1e5
+        bs, sq_len, n_exp = x.size()
+
+        uniform_entropy = np.log(n_exp)
+        entropy_target = rel_entropy_target * uniform_entropy
+
+        values = (torch.arange(-50, 50) / 10.0).exp().to(x.device)
+        scores = x.unsqueeze(1) / values.view(1, values.size(0), *(1,) * (x.ndim - 1))
+        prob = F.softmax(scores, dim=-1)  # (bs, 100, sq, n_experts)
+        prob[prob != prob] = 1e-10
+        entropy = Categorical(probs=prob).entropy()
+        diff = (entropy - entropy_target).abs()
+        min_idx = diff.argmin(1)
+        min_vals = diff.gather(dim=1, index=min_idx.unsqueeze(1))
+
+        # TODO: loop until all is ok ?
+        is_ok = (min_vals < atol).float().mean()
+
+        out = prob.gather(
+            1, min_idx.view(bs, 1, sq_len, 1).expand(-1, -1, -1, n_exp)
+        ).squeeze(1)
+
+        return out
 
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchSequenceModulesAndWeightsSelectorOutput:
@@ -499,52 +518,29 @@ class ClownSelector(Selector):
         input = input.to(dtype=self.prototypes.dtype)
 
         if self.config.normalize_router_input:
-            input /= input.norm(dim=-1, p=2, keepdim=True).clamp(min=EPS)
+            # input /= input.norm(dim=-1, p=2, keepdim=True).clamp(min=EPS)
+            input = self.layer_norm(input)
 
         input_ids = self.info_container["routing_infos"].input_ids
         attn_mask = self.info_container["routing_infos"].attention_mask
         bs, sq, D = input.shape
 
-        if self.config.clown_mode == "per_token":
-            router_logits = F.linear(input, self.prototypes)
-            if self.config.proto_init == "svd":
-                router_logits = router_logits.abs()
+        router_logits = F.linear(input, self.prototypes)
 
-            routing_weights = F.softmax(router_logits / temp, dim=-1, dtype=torch.float)
+        if self.config.proto_init == "arrow":
+            router_logits = router_logits.abs()
+
+        if self.config.router_entropy is not None:
+            # decay entropy over layers from uniform to 0
+            layer_id = 0  # int(self.__layer_name__.split(".")[1])
+            total_layers = 33
+            entropy_decay = max(1 - (layer_id / total_layers), 1e-3)
+
+            # tune the temperature so that it matches the desired entropy
+            routing_weights = self.entropy_normalization(
+                router_logits, self.config.router_entropy
+            )
         else:
-            attn_mask = self.info_container["routing_infos"].attention_mask
-            if sq == attn_mask.size(1):
-                if self.config.clown_mode == "mean":
-                    # teacher force mode. router input is the mean over valid tokens
-                    router_input = (input * attn_mask.unsqueeze(-1)).sum(dim=1) / (
-                        attn_mask.sum(dim=1, keepdim=True) + EPS
-                    )
-                elif self.config.clown_mode == "last":
-                    last_idx = attn_mask.sum(1) - 1
-                    router_input = input[torch.arange(bs), last_idx]
-                elif self.config.clown_mode == "window":
-                    flat_input = input.transpose(1, 2).reshape(bs * D, 1, sq)
-                    left_pad_input = torch.cat(
-                        (
-                            flat_input[:, :, [0]].expand(
-                                -1, -1, self.config.router_window_size - 1
-                            ),
-                            flat_input,
-                        ),
-                        dim=-1,
-                    )
-                    conv_out = F.conv1d(left_pad_input, self.avg_1d_conv_kernel).view(
-                        bs, D, sq
-                    )
-                    router_input = conv_out.transpose(1, 2)
-            else:
-                assert sq == 1
-                # we are in generation mode
-                router_input = input.squeeze(1)
-
-            router_logits = F.linear(router_input, self.prototypes)
-            if self.config.proto_init == "svd":
-                router_logits = router_logits.abs()
             routing_weights = F.softmax(router_logits / temp, dim=-1, dtype=torch.float)
 
         if routing_weights.ndim == 2:

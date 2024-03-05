@@ -511,8 +511,10 @@ class HiddenStateComputer(LibraryTransform):
 
 @dataclass
 class PhatgooseConfig(LibraryTransformConfig):
-    n_steps: int = 1000
+    n_steps: int = 10
     learning_rate: float = 3e-3
+    micro_batch_size: int = 1
+    train_batch_size: int = 16
 
 
 class PhatgooseTransform(HiddenStateComputer):
@@ -529,13 +531,13 @@ class PhatgooseTransform(HiddenStateComputer):
         default_args=None,
     ):
         # TODO: remove project import
-        from projects.wiki_experts.src.expert_model import MultiExpertModel
+        from mttl.models.expert_model import MultiExpertModel
         from mttl.models.modifiers.expert_containers.utils import train_module
 
         outputs = {}
         expert_names = expert_names or list(library.keys())
         for expert_name in expert_names:
-            logger.info(f"Computing centroids for expert {expert_name}")
+            logger.info(f"Computing PHATGOOSE gates for expert {expert_name}")
             expert: Expert = library[expert_name]
 
             if type(library) == str:
@@ -548,7 +550,7 @@ class PhatgooseTransform(HiddenStateComputer):
                 and expert_name
                 in loaded_output  # cause loaded_output loads all experts
             ):
-                logger.info("Found {} precomputed centroids".format(len(loaded_output)))
+                logger.info("Found {} precomputed gates".format(len(loaded_output)))
                 # format is dict[layer_name] = embedding, layer_name ends with selector.{task_name}.v
                 outputs[expert_name] = (
                     loaded_output
@@ -562,6 +564,15 @@ class PhatgooseTransform(HiddenStateComputer):
             training_config.trainable_param_names = ".*selector.*"
             training_config.logging_prefix = expert_name + "/"
             training_config.weight_decay = 0.0
+            training_config.train_batch_size = self.config.micro_batch_size
+            training_config.gradient_accumulation_steps = (
+                self.config.train_batch_size // self.config.micro_batch_size
+            )
+
+            # for training, we set this to true even if there is just a single expert.
+            # This ensures that we do (gate * AB * x) instead of ((gate * A) * (gate * B) * x)
+            training_config.lora_merge_after = True
+
             model = MultiExpertModel(**vars(training_config)).to("cuda")
             model.add_expert_instance(expert, is_default=True)
 
@@ -614,8 +625,8 @@ class PhatgooseTransform(HiddenStateComputer):
             )
             assert p_sum_before == p_sum_after
 
-            model_before = MultiExpertModel(**vars(training_config)).to("cuda")
-            model_before.add_expert_instance(expert, is_default=True)
+            # model_before = MultiExpertModel(**vars(training_config)).to("cuda")
+            # model_before.add_expert_instance(expert, is_default=True)
 
             p_sum_sel_after = sum(
                 p.sum() for n, p in model.named_parameters() if "selector" in n
@@ -655,6 +666,7 @@ class PhatgooseTransform(HiddenStateComputer):
 class ArrowConfig(LibraryTransformConfig):
     ab_only: bool = True
     scale: bool = False  # If True, scale by eigenvalue
+    tie_qkv: bool = False  # If True, tie the QKV matrices
 
 
 class ArrowTransform(LibraryTransform):
@@ -703,10 +715,10 @@ class ArrowTransform(LibraryTransform):
             vectors[expert_name] = {}
             eigvals[expert_name] = {}
 
-            if not self.config.ab_only and base_model is None:
+            if base_model is None:
                 training_config = expert.training_config
                 training_config.model_modifier = None
-                from projects.wiki_experts.src.expert_model import MultiExpertModel
+                from mttl.models.expert_model import MultiExpertModel
 
                 base_model = MultiExpertModel(**vars(training_config))
 
@@ -718,12 +730,13 @@ class ArrowTransform(LibraryTransform):
                     )
                 )
             )
+            expert_weights = expert.expert_weights
 
             for param_name in state_dict_keys:
                 logger.info(f"\tComputing SVD for parameter {param_name}")
                 A, B = (
-                    expert.expert_weights[f"{param_name}.lora_a"],
-                    expert.expert_weights[f"{param_name}.lora_b"],
+                    expert_weights[f"{param_name}.lora_a"],
+                    expert_weights[f"{param_name}.lora_b"],
                 )
                 W = (A @ B).T  # out_features, in_features
 
@@ -747,6 +760,12 @@ class ArrowTransform(LibraryTransform):
                     top_vector = U_W[:, 0]
                     top_value = Sigma_C[0] ** 2
                     bottom_vector = U_W[:, -1]
+
+                    diff_AB = (U_W.T @ U_A).abs().diag()
+                    if diff_AB[0] < 0.9:
+                        logger.warning(
+                            "The first singular vector of U_A and U_AB are not aligned"
+                        )
 
                 else:
                     base_W = base_model.model.state_dict()[f"{param_name}.weight"]
@@ -779,6 +798,73 @@ class ArrowTransform(LibraryTransform):
                 # Save eigenvector and eigvenvalue
                 vectors[expert_name][param_name] = top_vector.real.cpu().numpy()
                 eigvals[expert_name][param_name] = top_value.item()
+
+            if self.config.tie_qkv:
+                print("tying")
+                unique_attn_prefixes = set(
+                    ".".join(k.split(".")[:-1]) for k in state_dict_keys if "attn" in k
+                )
+                for prefix in unique_attn_prefixes:
+                    print(f"layer {prefix}")
+                    Aq = vectors[expert_name][prefix + ".q_proj"]
+                    Ak = vectors[expert_name][prefix + ".k_proj"]
+                    Av = vectors[expert_name][prefix + ".v_proj"]
+                    # '''
+                    vA = expert_weights[f"{prefix}.v_proj.lora_a"]
+                    kA = expert_weights[f"{prefix}.k_proj.lora_a"]
+                    qA = expert_weights[f"{prefix}.q_proj.lora_a"]
+
+                    vB = expert_weights[f"{prefix}.v_proj.lora_b"]
+                    kB = expert_weights[f"{prefix}.k_proj.lora_b"]
+                    qB = expert_weights[f"{prefix}.q_proj.lora_b"]
+
+                    qkvA = torch.cat((qA, kA, vA), dim=1)
+                    qkvB = torch.cat((qB, kB, vB), dim=0)
+
+                    U_A, Sigma_A, V_A = torch.svd(qkvA)
+                    U_B, Sigma_B, V_B = torch.svd(qkvB.T)
+
+                    # OG matrices
+                    U_q, Sigma_q, V_q = torch.svd(
+                        base_model.state_dict()[f"model.{prefix}.q_proj.weight"]
+                    )
+                    U_v, Sigma_v, V_v = torch.svd(
+                        base_model.state_dict()[f"model.{prefix}.v_proj.weight"]
+                    )
+                    U_k, Sigma_k, V_k = torch.svd(
+                        base_model.state_dict()[f"model.{prefix}.k_proj.weight"]
+                    )
+
+                    print(f"V_v, V_q sim {(V_v[:, 0] * V_q[:, 0]).sum().item():.4f}")
+                    print(f"V_v, V_k sim {(V_v[:, 0] * V_k[:, 0]).sum().item():.4f}")
+                    print(f"V_q, V_k sim {(V_q[:, 0] * V_k[:, 0]).sum().item():.4f}\n")
+
+                    print(f"V_v, A_v sim {(V_v[:, 0] * Av).sum().item():.4f}")
+                    print(f"V_k, A_k sim {(V_k[:, 0] * Ak).sum().item():.4f}")
+                    print(f"V_q, A_q sim {(V_q[:, 0] * Aq).sum().item():.4f}\n")
+
+                    breakpoint()
+                    # '''
+                    # Compute mean by making sure the vectors are aligned
+                    if (Aq * Ak).sum() < 0:
+                        Aqk = (Aq - Ak) / 2
+                    else:
+                        Aqk = (Aq + Ak) / 2
+
+                    if (Aqk * Av).sum() < 0:
+                        Aqkv = (Aqk * 2 - Av) / 3
+                    else:
+                        Aqkv = (Aqk * 2 + Av) / 3
+
+                    # kv only
+                    # if (Ak * Av).sum() < 0:
+                    #    Akv = (Ak - Av) / 2
+                    # else:
+                    #    Akv = (Ak + Av) / 2
+
+                    vectors[expert_name][prefix + ".q_proj"] = Aqkv
+                    vectors[expert_name][prefix + ".k_proj"] = Aqkv
+                    vectors[expert_name][prefix + ".v_proj"] = Aqkv
 
         if persist:
             # add embeddings to the library
