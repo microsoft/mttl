@@ -277,6 +277,12 @@ class ExpertModel(EfficientCheckpointModule):
         )
         ckpt["expert_info"] = expert_info.asdict()
 
+        if self.training_config.model_modifier == "tied_lora":
+            # due to weight sharing some keys are not in named_parameters() and are removed in _delete_non_trainable_params
+            self.trainable_param_names = [
+                k for k in self.state_dict().keys() if "lora" in k
+            ]
+
     def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
         return super().on_before_optimizer_step(optimizer)
 
