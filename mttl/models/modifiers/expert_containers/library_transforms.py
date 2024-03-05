@@ -22,6 +22,7 @@ from mttl.models.modifiers.expert_containers.expert_library import (
 from mttl.utils import logger
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
 from mttl.datamodule.base import get_datamodule
+from mttl.models.expert_config import ExpertConfig
 
 
 class LibraryTransform(abc.ABC):
@@ -399,8 +400,7 @@ class HiddenStateComputer(LibraryTransform):
     def transform(
         self, library: ExpertLibrary, persist=False, recompute=False, default_args=None
     ) -> Expert:
-        # TODO: remove project import
-        from projects.wiki_experts.src.expert_model import MultiExpertModel
+        from mttl.models.expert_model import MultiExpertModel
 
         if type(library) == str:
             library = get_expert_library(library)
@@ -528,8 +528,7 @@ class PhatgooseTransform(HiddenStateComputer):
         expert_names: list = None,
         default_args=None,
     ):
-        # TODO: remove project import
-        from projects.wiki_experts.src.expert_model import MultiExpertModel
+        from mttl.models.expert_model import MultiExpertModel
         from mttl.models.modifiers.expert_containers.utils import train_module
 
         outputs = {}
@@ -557,11 +556,12 @@ class PhatgooseTransform(HiddenStateComputer):
                 )
                 continue
 
-            training_config = expert.training_config
+            training_config: ExpertConfig = expert.training_config
             training_config.router_selector = "phatgoose_selector"
             training_config.trainable_param_names = ".*selector.*"
             training_config.logging_prefix = expert_name + "/"
             training_config.weight_decay = 0.0
+            training_config.lora_merge_after = True
             model = MultiExpertModel(**vars(training_config)).to("cuda")
             model.add_expert_instance(expert, is_default=True)
 
@@ -590,6 +590,14 @@ class PhatgooseTransform(HiddenStateComputer):
                 training_config.include_task_source = default_args.include_task_source
                 training_config.output_dir = default_args.output_dir
                 training_config.wandb_project = default_args.wandb_project
+                # we set also train_batch_size, micro_batch_size, and gradient_accumulation_steps from default_args
+                # TODO: correct this in the future
+                # background: gradient_accumulation_steps is set in post_init of the mttl/config.py and hence not saved correctly in expert's config
+                training_config.gradient_accumulation_steps = (
+                    default_args.gradient_accumulation_steps
+                )
+                training_config.train_batch_size = default_args.train_batch_size
+                training_config.micro_batch_size = default_args.micro_batch_size
 
             # get datamodule
             dm = get_datamodule(training_config)
@@ -706,7 +714,7 @@ class ArrowTransform(LibraryTransform):
             if not self.config.ab_only and base_model is None:
                 training_config = expert.training_config
                 training_config.model_modifier = None
-                from projects.wiki_experts.src.expert_model import MultiExpertModel
+                from mttl.models.expert_model import MultiExpertModel
 
                 base_model = MultiExpertModel(**vars(training_config))
 

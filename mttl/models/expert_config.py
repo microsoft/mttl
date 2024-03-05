@@ -99,6 +99,7 @@ class ExpertConfig(Config):
         self.create_transfer_matrix = False
         self.es_metric = "loss"
         self.n_ng_iterations = 30  # number of iterations for LoraHub
+        self.recompute_prototypes = False
 
         # for MBC
         self.mbc_num_clusters = 10  # number of clusters
@@ -113,7 +114,6 @@ class ExpertConfig(Config):
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size
 
-        # to reproduce setup in https://github.com/daanelson/alpaca-lora
         self.gradient_accumulation_steps = (
             self.train_batch_size // self.micro_batch_size
         )

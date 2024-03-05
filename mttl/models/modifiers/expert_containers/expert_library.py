@@ -1349,6 +1349,7 @@ def get_expert_library(
     create=False,
     ignore_sliced=False,
     expert_library_type: Union[ExpertLibrary, str] = None,
+    make_local: bool = False,
 ):
     """Select the appropriate expert library based on the following order of priority:
     1. If expert_library_type is provided, and is a proper subclass of ExpertLibrary, uses it.
@@ -1391,5 +1392,14 @@ def get_expert_library(
         create=create,
         ignore_sliced=ignore_sliced,
     )
+    if make_local and isinstance(expert_lib, HFExpertLibrary):
+        user = HfApi().whoami()["name"]
+        if user != repo_id.split("/")[0]:
+            destination = os.environ.get(
+                "HF_LIB_CACHE", os.path.expanduser("~/.cache/huggingface/libraries/")
+            )
+            destination += repo_id
+            os.makedirs(destination, exist_ok=True)
+            expert_lib = LocalExpertLibrary.from_expert_library(expert_lib, destination)
 
     return expert_lib
