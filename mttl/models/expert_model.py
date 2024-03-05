@@ -15,10 +15,7 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
 from mttl.models.modifiers.lora import SkilledLoRAConfig
 
 from mttl.models.modifiers.expert_containers import add_expert_to_transformer
-from mttl.models.modifiers.expert_containers.expert_library import (
-    ExpertLibrary,
-    get_expert_library,
-)
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from mttl.models.modifiers.routing import RoutingInfo
 from mttl.utils import logger
 from mttl.models.modifiers.expert_containers.expert import Expert, ExpertInfo
@@ -623,7 +620,7 @@ class MoEModel(MultiExpertModel):
                 self.add_empty_expert(f"e{i}", exp_config)
             self.moe_num_experts = kwargs["moe_num_experts"]
         else:
-            library = get_expert_library(self.hparams.library_id)
+            library = ExpertLibrary.get_expert_library(self.hparams.library_id)
             for i, expert in enumerate(sorted(list(library.keys()))):
                 self.add_expert_instance(library[expert], expert_name=f"e{i}")
 

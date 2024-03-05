@@ -1,6 +1,7 @@
 # unit test for adapter_ranker
 import io
 import os
+from unittest.mock import patch
 import pytest
 import asyncio
 import uuid
@@ -19,7 +20,7 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     VirtualLocalLibrary,
     LocalFSEngine,
     HFExpertLibrary,
-    get_expert_library,
+    ExpertLibrary,
 )
 
 
@@ -125,7 +126,7 @@ def test_add_auxiliary_data(mocker, tmp_path):
     )
 
 
-token = os.getenv("BLOB_SAS_URL")
+token = os.getenv("BLOB_SAS_TOKEN")
 
 
 @pytest.fixture
@@ -145,7 +146,7 @@ def build_local_files():
 
 @pytest.fixture
 def repo_id():
-    return str(uuid.uuid4())
+    return f"mttldata/{uuid.uuid4()}"
 
 
 @pytest.fixture
@@ -406,17 +407,19 @@ def test_copy_library_blob_to_blob(tmp_path, build_meta_ckpt, setup_repo, repo_i
     _ = asyncio.run(engine.async_upload_blobs(repo_id, filenames))
 
     # Get the expert library
-    library = get_expert_library(repo_id)
+    az_repo_id = f"az://{repo_id}"
+    library = ExpertLibrary.get_expert_library(az_repo_id)
 
     # Create a new library from the first one
-    new_repo_id = str(uuid.uuid4())
+    new_repo_id = f"mttldata/{uuid.uuid4()}"
+    az_new_repo_id = f"az://{new_repo_id}"
     try:  # Clean up the new repo if the test fails
-        new_lib = BlobExpertLibrary.from_expert_library(library, new_repo_id)
+        new_lib = BlobExpertLibrary.from_expert_library(library, az_new_repo_id)
         assert set(new_lib.list_repo_files(new_repo_id)) == set(
             library.list_repo_files(repo_id)
         )
     finally:
-        BlobExpertLibrary(new_repo_id).delete_repo(new_repo_id)
+        BlobExpertLibrary(az_new_repo_id).delete_repo(new_repo_id)
 
 
 @pytest.mark.skipif(token is None, reason="Requires access to Azure Blob Storage")
@@ -429,7 +432,8 @@ def test_copy_library_blob_to_local(tmp_path, build_meta_ckpt, setup_repo, repo_
     _ = asyncio.run(engine.async_upload_blobs(repo_id, filenames))
 
     # Get the expert library
-    library = get_expert_library(repo_id)
+    az_repo_id = f"az://{repo_id}"
+    library = ExpertLibrary.get_expert_library(az_repo_id)
 
     # Create a new library from the first one
     new_repo_id = tmp_path / "new_repo"
@@ -444,12 +448,13 @@ def test_copy_library_local_to_local(tmp_path, build_meta_ckpt, setup_repo, repo
     # Create a library with two experts
     local_path = repo_id = tmp_path / "base_repo"
     repo_id.mkdir()
+    repo_id = str(repo_id)
     engine = LocalFSEngine()
     setup_repo(engine, repo_id)
     filenames = build_meta_ckpt(local_path, 2)
 
     # Get the expert library
-    library = get_expert_library(repo_id)
+    library = ExpertLibrary.get_expert_library(repo_id)
 
     # Create a new library from the first one
     new_repo_id = tmp_path / "new_repo"
@@ -465,11 +470,12 @@ def test_virtual_library_is_in_memory(tmp_path, build_meta_ckpt, setup_repo, rep
     # Create a library with two experts
     local_path = repo_id = tmp_path / "base_repo"
     repo_id.mkdir()
+    repo_id = str(repo_id)
     engine = LocalFSEngine()
     setup_repo(engine, repo_id)
     filenames = build_meta_ckpt(local_path, 2)
     # Get the expert library
-    local_library = get_expert_library(repo_id)
+    local_library = ExpertLibrary.get_expert_library(repo_id)
 
     # Create a new library from the first one
     virtual_repo_id = tmp_path / "virtual_repo"
@@ -498,3 +504,24 @@ def test_virtual_library_is_in_memory(tmp_path, build_meta_ckpt, setup_repo, rep
         "expert_2.meta",
         "expert_2.ckpt",
     }
+
+
+@pytest.mark.skipif(token is None, reason="Requires access to Azure Blob Storage")
+@pytest.mark.parametrize(
+    "expert_lib_class, repo_id",
+    [
+        (BlobExpertLibrary, "az://mttldata/abc"),
+        (HFExpertLibrary, "hf://mttldata/abc"),
+        (LocalExpertLibrary, "local://mttldata/abc"),
+        (VirtualLocalLibrary, "virtual://mttldata/abc"),
+        (LocalExpertLibrary, "mttldata/abc"),
+    ],
+)
+def test_get_expert_library(expert_lib_class, repo_id):
+    class_name = expert_lib_class.__name__
+    with patch(
+        f"mttl.models.modifiers.expert_containers.expert_library.{class_name}"
+    ) as mock_expert_lib:
+        expert_library = ExpertLibrary.get_expert_library(repo_id)
+        mock_expert_lib.assert_called_once()
+        assert class_name in str(expert_library)

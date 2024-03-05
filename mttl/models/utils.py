@@ -449,8 +449,8 @@ def model_loader_helper(model_name, device_map="auto", load_in_8bit=False):
     elif "stabilityai" in model_name:
         model_object = AutoModelForCausalLM.from_pretrained(
             model_name,
-            torch_dtype=torch.bfloat16,
             trust_remote_code=True,
+            torch_dtype="auto",
         )
     else:
         model_object = AutoModelForCausalLM.from_pretrained(

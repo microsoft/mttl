@@ -1,10 +1,11 @@
 import os
 import sys
 from pytorch_lightning import seed_everything
-from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
-from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from mttl.utils import setup_logging, logger
 
 # register models
@@ -94,7 +95,7 @@ def run_eval(args):
         tokenizer=data_module.tokenizer,
     )
     if args.expert_library_path:
-        library = HFExpertLibrary(args.expert_library_path)
+        library = ExpertLibrary.get_expert_library(args.expert_library_path)
         module.load_from_library(library)
     elif args.load_module is not None:
         kwargs = parse_experts_to_load(args.load_module)

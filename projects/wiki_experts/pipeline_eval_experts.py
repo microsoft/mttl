@@ -2,15 +2,14 @@ import glob
 import os
 import sys
 
-import prettytable
 from pytorch_lightning import seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.models.modifiers.expert_containers.expert_library import (
+    ExpertLibrary,
     LocalExpertLibrary,
-    get_expert_library,
 )
 from mttl.utils import remote_login, setup_logging, logger
 from mttl.models.expert_model import MultiExpertModel
@@ -42,7 +41,7 @@ def run_eval(args):
             for file in glob.glob(os.path.join(args.library_id, "*")):
                 library.add_expert_from_ckpt(file, force=True)
         else:
-            library = get_expert_library(
+            library = ExpertLibrary.get_expert_library(
                 args.library_id, exclude_selection=filtering_experts
             )
 
