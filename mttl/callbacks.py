@@ -1,5 +1,6 @@
 import sys, os
 import copy
+from typing import Optional
 import torch
 import tqdm
 
@@ -10,6 +11,7 @@ from torch.optim import Optimizer
 
 from mttl.utils import logger
 from mttl.models.utils import transfer_batch_to_device
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 
 
 DEBUG = False
@@ -22,9 +24,11 @@ class LiveCheckpointCallback(pl.Callback):
         self,
         dirpath,
         monitor=None,
-        mode="min",
-        save_last=True,
-        save_weights_only=True,
+        mode: str = "min",
+        save_last: bool = True,
+        save_weights_only: bool = True,
+        save_each_epoch: bool = False,
+        expert_library: Optional[ExpertLibrary] = None,
     ):
         if not monitor and not save_last:
             raise ValueError(
@@ -40,26 +44,30 @@ class LiveCheckpointCallback(pl.Callback):
         self._last_step = -1
         self._last_value = None
         self.save_weights_only = save_weights_only
+        self.save_each_epoch = save_each_epoch
+        self.expert_library = expert_library
 
-    def on_train_end(self, trainer, pl_module):
+    def _store_checkpoint(self, trainer, checkpoint_path, checkpoint_name=None):
+        """Saves the checkpoint and pushes to the ExpertLibrary if one is available."""
+        trainer.save_checkpoint(checkpoint_path, weights_only=self.save_weights_only)
+        if self.expert_library is not None:
+            self.expert_library.add_expert_from_ckpt(
+                checkpoint_path, expert_name=checkpoint_name, force=True
+            )
+
+    def on_train_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Saves the last checkpoint."""
         if self.save_last:
             self.last_model_path = os.path.join(f"{self.dirpath}", "last.ckpt")
-            trainer.save_checkpoint(
-                self.last_model_path, weights_only=self.save_weights_only
-            )
+            self._store_checkpoint(trainer, self.last_model_path)
 
-    @classmethod
-    def parse_ckpt_name(cls, filename):
-        try:
-            fields = filename.split("_")
-            mode = fields[2]
-            monitor = fields[4]
-            value = float(fields[6])
-            step = int(fields[8].split(".")[0])
-            return (mode, monitor, value, step)
-        except:
-            raise ValueError(f"Could not parse filename {filename}.")
+    def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """Saves each checkpoint after each epoch"""
+        if self.save_each_epoch:
+            expert_name = getattr(pl_module.hparams, "expert_name", None)
+            checkpoint_name = f"{expert_name}-epoch-{trainer.current_epoch}"
+            save_model_path = os.path.join(f"{self.dirpath}", f"{checkpoint_name}.ckpt")
+            self._store_checkpoint(trainer, save_model_path, checkpoint_name)
 
     def _save_best(self, trainer, this_value):
         if this_value is None:
@@ -78,7 +86,7 @@ class LiveCheckpointCallback(pl.Callback):
         )
 
         logger.info("Saving new best model to %s", this_filename)
-        trainer.save_checkpoint(this_filename, weights_only=self.save_weights_only)
+        self._store_checkpoint(trainer, this_filename)
         self.best_model_path = this_filename
 
     def on_log(self, trainer, pl_module, metric_name, metric_value, **kwargs):
@@ -399,9 +407,11 @@ class MMLUCallback(cb.Callback):
             mmlu_data_config = MMLUDataConfig(
                 model=pl_module.hparams.model,
                 predict_batch_size=pl_module.hparams.predict_batch_size,
-                max_input_length=pl_module.hparams.max_input_length
-                if self.max_input_length is None
-                else self.max_input_length,
+                max_input_length=(
+                    pl_module.hparams.max_input_length
+                    if self.max_input_length is None
+                    else self.max_input_length
+                ),
                 max_output_length=pl_module.hparams.max_input_length,  # not necessary
                 model_family=pl_module.hparams.model_family,
                 finetune_task_name=pl_module.hparams.finetune_task_name,

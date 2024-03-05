@@ -5,7 +5,7 @@ from pytorch_lightning import Trainer, seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from mttl.callbacks import LiveCheckpointCallback
 from mttl.models.monitors import get_monitors
 from mttl.callbacks import NanoMMLUCallback, RougeCallback
@@ -30,6 +30,10 @@ def run_multitask(args: ExpertConfig):
     logger.info("Args: {}".format(args.to_json()))
 
     remote_login(args.remote_token)
+    expert_library = None
+    if args.library_id:
+        expert_library = ExpertLibrary.get_expert_library(args.library_id, create=True)
+
     # select dataloader
     model_class = MoEModel
     dm = get_datamodule(args)
@@ -46,6 +50,8 @@ def run_multitask(args: ExpertConfig):
         monitor="val/loss",
         save_last=True,
         mode="min",
+        expert_library=expert_library,
+        save_each_epoch=args.save_each_epoch,
     )
     callbacks.append(checkpoint_callback)
 
@@ -126,10 +132,6 @@ def run_multitask(args: ExpertConfig):
         )
         module.load_state_dict(torch.load(checkpoint)["state_dict"])
         trainer.test(module, dm)
-
-        if args.library_id and checkpoint:
-            library = get_expert_library(args.library_id, create=True)
-            library.add_expert_from_ckpt(checkpoint)
 
 
 if __name__ == "__main__":

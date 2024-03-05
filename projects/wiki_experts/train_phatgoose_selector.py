@@ -3,7 +3,7 @@ import sys
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from pytorch_lightning import seed_everything
 from mttl.models.expert_config import ExpertConfig
 
@@ -24,7 +24,7 @@ def train_with_transform(args: ExpertConfig):
     )
 
     library_id, expert_names = parse_libname(args.library_id)
-    library = get_expert_library(library_id, create=False)
+    library = ExpertLibrary.get_expert_library(library_id, create=False)
     phagoose_transform = PhatgooseTransform(
         PhatgooseConfig(n_steps=args.n_steps_pg, learning_rate=args.learning_rate_pg)
     )

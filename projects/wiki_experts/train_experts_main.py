@@ -10,7 +10,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from mttl.models.expert_model import ExpertModel
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.modifiers.expert_containers.expert_library import (
-    get_expert_library,
+    ExpertLibrary,
     LocalExpertLibrary,
 )
 from mttl.callbacks import LiveCheckpointCallback
@@ -68,6 +68,10 @@ def run_multitask(args: ExpertConfig):
     logger.info("Args: {}".format(args.to_json()))
 
     remote_login(args.remote_token)
+    expert_library = None
+    if args.library_id:
+        expert_library = ExpertLibrary.get_expert_library(args.library_id, create=True)
+
     loggers = get_pl_loggers(args)
     # select dataloader
     model_class = ExpertModel
@@ -90,6 +94,8 @@ def run_multitask(args: ExpertConfig):
         monitor=monitor,
         save_last=True,
         mode=mode,
+        expert_library=expert_library,
+        save_each_epoch=args.save_each_epoch,
     )
     callbacks.append(checkpoint_callback)
 
@@ -170,10 +176,6 @@ def run_multitask(args: ExpertConfig):
         )
         module.load_state_dict(torch.load(checkpoint)["state_dict"])
         trainer.test(module, dm)
-
-        if args.library_id and checkpoint:
-            library = get_expert_library(args.library_id, create=True)
-            library.add_expert_from_ckpt(checkpoint)
 
         if args.create_transfer_matrix:
             create_transfer_matrix(args, checkpoint)

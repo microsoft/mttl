@@ -2,7 +2,6 @@ import os
 import sys
 import shutil
 import torch
-from huggingface_hub import login
 from pytorch_lightning import Trainer, seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -19,7 +18,6 @@ from mttl.models.monitors import get_monitors
 from mttl.models.modifiers.expert_containers.expert import (
     load_expert,
     Expert,
-    ExpertInfo,
 )
 from mttl.models.modifiers.expert_containers.library_transforms import (
     WeightedLinearMerge,
@@ -30,6 +28,7 @@ from mttl.callbacks import RougeCallback
 from mttl.utils import (
     get_checkpoint_path,
     get_pl_loggers,
+    remote_login,
     setup_logging,
     logger,
 )
@@ -483,8 +482,7 @@ def run_multitask(args: ExpertConfig):
     setup_logging(args.output_dir)
     logger.info("Args: {}".format(args.to_json()))
 
-    if args.hf_token_hub:
-        login(token=args.hf_token_hub)
+    remote_login(args.remote_token)
 
     # select dataloader
     dm = get_datamodule(args)

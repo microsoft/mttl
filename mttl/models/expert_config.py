@@ -110,6 +110,8 @@ class ExpertConfig(Config):
         self.n_steps_pg = 2000
         self.learning_rate_pg = 0.01
 
+        self.save_each_epoch = False
+
     def post_init(self, silent=False):
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size
@@ -144,4 +146,5 @@ class ExpertConfig(Config):
                         )
             else:
                 task_names = tasks
+
             self.finetune_task_name = ",".join(task_names)

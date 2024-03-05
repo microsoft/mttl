@@ -9,7 +9,7 @@ import json
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from mttl.models.modifiers.expert_containers.selectors import ClownSelector
 from mttl.models.modifiers.lora import LoRAConfig
 
@@ -179,13 +179,20 @@ def run_multitask(args: ExpertConfig):
         "openbookqa_0_1_0",
     ]
 
-    library = get_expert_library(
+    library = ExpertLibrary.get_expert_library(
         repo_id=args.library_id,
         token=args.remote_token,
         exclude_selection=exclude_phi_tasks,
         make_local=True,
     )
-    args_copy = None
+
+    # cfg = TiesMergeConfig(top_k=0.2)
+    # ties_expert = TiesMerge(cfg).transform(library)
+    ave_cfg = WeightedLinearMergeConfig()
+    ave_expert = WeightedLinearMerge(ave_cfg).transform(library)
+    module = MultiExpertModel(**vars(ave_expert.training_config)).to("cuda")
+    module.add_expert_instance(ave_expert, is_default=True)
+
     if args.merge_or_route in ["uniform", "weighted"]:
         weights = None
         if args.merge_or_route == "weighted":
@@ -285,14 +292,21 @@ def run_multitask(args: ExpertConfig):
         module.load_from_module_dict(library)
         module = module.to("cuda")
 
-    if os.environ.get("WANDB_API_KEY"):
-        import wandb
+    if args.pipeline_eval_tasks == "all":
+        args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
 
-        wandb.init(
-            project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
-            config=dict(module.hparams),
-            name=os.environ.get("AMLT_JOB_NAME", None),
+    with torch.no_grad():
+        runner: EvaluatorRunner = setup_evaluators(
+            model_type=module.hparams.model,
+            model_family=module.hparams.model_family,
+            max_input_length=module.hparams.max_input_length,
+            max_output_length=module.hparams.max_output_length,
+            predict_batch_size=args.predict_batch_size,
+            truncation_side=module.hparams.truncation_side,
+            tasks=args.pipeline_eval_tasks,
+            output_path=os.path.join(args.output_dir, "DOWNSTREAM"),
         )
+        scores = runner.run(module)
 
     if args.pipeline_eval_tasks == "in_distribution":
         tasks = [expert.expert_task_name for expert in library.data.values()]
@@ -323,16 +337,16 @@ def run_multitask(args: ExpertConfig):
                 if task_name == "routing_infos":
                     continue
 
-                task_dict = module.model.task_id_container[task_name]
-                for k, v in task_dict.items():
-                    routing_stats[f"{task_name}/{k}"] = v
+            task_dict = module.model.task_id_container[task_name]
+            for k, v in task_dict.items():
+                routing_stats[f"{task_name}/{k}"] = v
 
-        if wandb.run is not None:
-            wandb.log({f"downstream/{k}": v for k, v in scores.items()})
-            if len(routing_stats) > 0:
-                wandb.log(routing_stats)
+    if wandb.run is not None:
+        wandb.log({f"downstream/{k}": v for k, v in scores.items()})
+        if len(routing_stats) > 0:
+            wandb.log(routing_stats)
 
-            wandb.finish()
+        wandb.finish()
 
 
 if __name__ == "__main__":

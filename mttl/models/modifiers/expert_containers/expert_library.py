@@ -7,7 +7,7 @@ import glob
 import io
 import logging
 import sys
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import torch
 import os
 import time
@@ -27,7 +27,6 @@ from huggingface_hub import (
     create_repo,
     delete_repo,
     HfApi,
-    whoami,
 )
 from functools import total_ordering
 from huggingface_hub.utils._errors import RepositoryNotFoundError
@@ -196,18 +195,13 @@ class BlobStorageEngine(BackendEngine):
         """Initialize the blob storage engine. The cache directory can be
         provided as an argument or through the environment variable BLOB_CACHE_DIR.
         If no cache directory is provided, the default cache directory ~/.cache/mttl is used.
-        You can provide a SAS URL as an argument when login or set the environment variable BLOB_SAS_URL.
+        You can provide a SAS Token as an argument when login or set the environment variable BLOB_SAS_TOKEN.
 
         IMPORTANT: Some special characters such as underscore "_" are not allowed in the repo_id.
         Please use dashes "-" instead. For more information on the naming recommendation, see:
         https://learn.microsoft.com/en-us/rest/api/storageservices/naming-and-referencing-containers--blobs--and-metadata
         """
         super().__init__()
-
-        logging.getLogger("azure").setLevel(
-            logging.WARNING
-        )  # Quiet down the azure logging
-
         self._token: str = token
         self.cache_dir: Path = self._get_cache_dir(cache_dir)
         # Quiet down the azure logging
@@ -234,20 +228,21 @@ class BlobStorageEngine(BackendEngine):
     def login(self, token: Optional[str] = None):
         """Set the SAS token to use for authentication."""
         if token is None:
-            token = os.environ.get("BLOB_SAS_URL", None)
+            token = os.environ.get("BLOB_SAS_TOKEN", None)
         if token is None:
             raise ValueError(
                 "No token provided. Please provide a token when initializing "
-                "the engine or set the BLOB_SAS_URL environment variable."
+                "the engine or set the BLOB_SAS_TOKEN environment variable."
             )
         self._token = token
 
     def _last_modified(self, repo_id: str) -> datetime.datetime:
         """Get the last modified date of a repository."""
         try:
-            container_client = BlobServiceClient(self.token).get_container_client(
-                repo_id
-            )
+            connection_string, container = self._parse_repo_id_to_storage_info(repo_id)
+            container_client = BlobServiceClient(
+                connection_string
+            ).get_container_client(container)
             return container_client.get_container_properties().last_modified
         except ResourceNotFoundError as error:
             raise ValueError(f"Repository {repo_id} not found") from error
@@ -264,6 +259,15 @@ class BlobStorageEngine(BackendEngine):
     def _get_local_filepath(self, repo_id, filename) -> Path:
         repo_cache_dir = self.get_repository_cache_dir(repo_id)
         return repo_cache_dir / filename
+
+    def _parse_repo_id_to_storage_info(self, repo_id: str) -> Tuple[str, str]:
+        """Extracts storage account and container from repo_id.
+        Returns the container and its connection string (with SAS token)."""
+        storage_account, container = repo_id.split("/", 1)  # split at first "/"
+        connection_string = (
+            f"https://{storage_account}.blob.core.windows.net/{self.token}"
+        )
+        return connection_string, container
 
     def snapshot_download(
         self, repo_id, allow_patterns: Optional[Union[List[str], str]] = None
@@ -295,7 +299,8 @@ class BlobStorageEngine(BackendEngine):
     def create_repo(self, repo_id, repo_type=None, exist_ok=True, private=True):
         """Creates a new repository. repo_type and private are ignored for blob storage."""
         try:
-            BlobServiceClient(self.token).create_container(name=repo_id)
+            connection_string, container = self._parse_repo_id_to_storage_info(repo_id)
+            BlobServiceClient(connection_string).create_container(name=container)
         except ResourceExistsError as error:
             error_message = "A container with this name already exists"
             if exist_ok:
@@ -305,8 +310,9 @@ class BlobStorageEngine(BackendEngine):
 
     def delete_repo(self, repo_id, repo_type=None):
         """Deletes a repository."""
-        container_client = BlobServiceClient(self.token).get_container_client(
-            container=repo_id
+        connection_string, container = self._parse_repo_id_to_storage_info(repo_id)
+        container_client = BlobServiceClient(connection_string).get_container_client(
+            container=container
         )
         try:
             container_client.delete_container()
@@ -374,9 +380,10 @@ class BlobStorageEngine(BackendEngine):
     def list_repo_files(self, repo_id):
         """List all files in a repository. The files might not be downloaded locally."""
         try:
-            container_client = BlobServiceClient(self.token).get_container_client(
-                repo_id
-            )
+            connection_string, container = self._parse_repo_id_to_storage_info(repo_id)
+            container_client = BlobServiceClient(
+                connection_string
+            ).get_container_client(container)
             return [b.name for b in container_client.list_blobs()]
         except ResourceNotFoundError as error:
             raise ValueError(f"Repository {repo_id} not found") from error
@@ -404,9 +411,10 @@ class BlobStorageEngine(BackendEngine):
         return filenames[0] if is_str else filenames
 
     async def _async_upload_blob(self, repo_id, filename, buffer=None, overwrite=False):
-        async with AsyncBlobServiceClient(self.token) as blob_service_client:
+        connection_string, container = self._parse_repo_id_to_storage_info(repo_id)
+        async with AsyncBlobServiceClient(connection_string) as blob_service_client:
             blob_client = blob_service_client.get_blob_client(
-                container=repo_id, blob=filename
+                container=container, blob=filename
             )
             if buffer is not None:
                 await blob_client.upload_blob(buffer, overwrite=overwrite)
@@ -428,9 +436,10 @@ class BlobStorageEngine(BackendEngine):
         return local_filenames[0] if is_str else local_filenames
 
     async def _async_download_blob(self, repo_id, filename):
-        async with AsyncBlobServiceClient(self.token) as blob_service_client:
+        connection_string, container = self._parse_repo_id_to_storage_info(repo_id)
+        async with AsyncBlobServiceClient(connection_string) as blob_service_client:
             blob_client = blob_service_client.get_blob_client(
-                container=repo_id, blob=filename
+                container=container, blob=filename
             )
             local_filename = self._get_local_filepath(repo_id, filename)
             os.makedirs(os.path.dirname(local_filename), exist_ok=True)
@@ -483,12 +492,21 @@ class BlobStorageEngine(BackendEngine):
         destination_filename,
         overwrite=True,
     ):
-        async with AsyncBlobServiceClient(self.token) as blob_service_client:
+        (
+            source_connection_string,
+            source_container,
+        ) = self._parse_repo_id_to_storage_info(source_repo_id)
+        async with AsyncBlobServiceClient(
+            source_connection_string
+        ) as blob_service_client:
             source_blob_client = blob_service_client.get_blob_client(
-                container=source_repo_id, blob=source_filename
+                container=source_container, blob=source_filename
+            )
+            _, destination_container = self._parse_repo_id_to_storage_info(
+                destination_repo_id
             )
             destination_blob_client = blob_service_client.get_blob_client(
-                container=destination_repo_id, blob=destination_filename
+                container=destination_container, blob=destination_filename
             )
             await destination_blob_client.upload_blob_from_url(
                 source_url=source_blob_client.url, overwrite=overwrite
@@ -501,9 +519,10 @@ class BlobStorageEngine(BackendEngine):
         await asyncio.gather(*tasks)
 
     async def _async_delete_blob(self, repo_id, filename):
-        async with AsyncBlobServiceClient(self.token) as blob_service_client:
+        connection_string, container = self._parse_repo_id_to_storage_info(repo_id)
+        async with AsyncBlobServiceClient(connection_string) as blob_service_client:
             blob_client = blob_service_client.get_blob_client(
-                container=repo_id, blob=filename
+                container=container, blob=filename
             )
             await blob_client.delete_blob()
 
@@ -562,17 +581,17 @@ class LocalFSEngine(BackendEngine):
 class ExpertLibrary:
     def __init__(
         self,
-        repo_id,
-        token=None,
-        model_name=None,
-        selection=None,
-        exclude_selection=None,
-        create=False,
-        ignore_sliced=False,
+        repo_id: str,
+        token: Optional[str] = None,
+        model_name: Optional[str] = None,
+        selection: Optional[List[str]] = None,
+        exclude_selection: Optional[List[str]] = None,
+        create: bool = False,
+        ignore_sliced: bool = False,
     ):
         super().__init__()
 
-        self.repo_id = repo_id
+        self.repo_id = self._remove_protocol(repo_id)
         self._sliced = False
         self.selection = selection
         self.exclude_selection = exclude_selection
@@ -592,7 +611,7 @@ class ExpertLibrary:
         try:
             if create:
                 self.create_repo(
-                    repo_id, repo_type="model", exist_ok=True, private=True
+                    self.repo_id, repo_type="model", exist_ok=True, private=True
                 )
         except Exception as e:
             logger.error("Error creating repo %s.", repo_id)
@@ -605,6 +624,12 @@ class ExpertLibrary:
     @property
     def sliced(self):
         return self._sliced and not self.ignore_sliced
+
+    def _remove_protocol(self, repo_id):
+        """Remove the protocol from the repo_id. Ex:
+        az://storage_account/container -> storage_account/container
+        """
+        return str(repo_id).split("://")[-1]
 
     def _build_lib(self):
         self._sliced = False
@@ -1093,7 +1118,7 @@ class ExpertLibrary:
     def add_expert_from_ckpt(
         self, ckpt_path: str, expert_name: str = None, force: bool = False
     ):
-        expert_dump = load_expert(ckpt_path)
+        expert_dump = load_expert(ckpt_path, expert_name=expert_name)
         self.add_expert(expert_dump, expert_name=expert_name, force=force)
 
     def rename_expert(self, old_name, new_name):
@@ -1221,7 +1246,7 @@ class ExpertLibrary:
             It can be either an instance of `ExpertLibrary` or a string representing the expert library.
         """
         if isinstance(expert_library, str):
-            expert_library = get_expert_library(expert_library)
+            expert_library = self.get_expert_library(expert_library)
         for name, expert in expert_library.items():
             if expert not in self and not expert.expert_info.expert_deleted:
                 self.add_expert(expert)
@@ -1233,7 +1258,7 @@ class ExpertLibrary:
         cls,
         expert_dict: Dict[str, Expert],
         destination: str,
-        expert_library_type: Union["ExpertLibrary", str] = None,
+        expert_library_type: Optional[Union["ExpertLibrary", str]] = None,
     ):
         """
         Create a new ExpertLibrary object from a dictionary of experts.
@@ -1246,13 +1271,73 @@ class ExpertLibrary:
         Returns:
             ExpertLibrary: A new ExpertLibrary object containing the experts from the dictionary.
         """
-        new_lib = get_expert_library(
+        new_lib = cls.get_expert_library(
             repo_id=destination, expert_library_type=expert_library_type or cls
         )
         for name, expert in expert_dict.items():
             if expert not in new_lib:
                 new_lib.add_expert(expert)
         return new_lib
+
+    @classmethod
+    def get_expert_library(
+        cls,
+        repo_id: str,
+        token: Optional[str] = None,
+        model_name: Optional[str] = None,
+        selection: Optional[List[str]] = None,
+        exclude_selection: Optional[List[str]] = None,
+        create: bool = False,
+        ignore_sliced: bool = False,
+        expert_library_type: Union[Type["ExpertLibrary"], str] = None,
+    ):
+        """Instantiate an ExpertLibrary from one of the available expert library types:
+            - "local": LocalExpertLibrary,
+            - "virtual": VirtualLocalLibrary,
+            - "az": BlobExpertLibrary,
+            - "hf": HFExpertLibrary,
+
+        The expert library type is selected based on the following order of priority:
+            1. If expert_library_type is provided, and is one of ExpertLibrary subclasses, uses it.
+            2. If repo_id includes one of the following substrings: "local://", "virtual://", "az://", "hf://".
+            3. Otherwise, uses LocalExpertLibrary.
+        """
+
+        available_libraries = {
+            "local": LocalExpertLibrary,
+            "virtual": VirtualLocalLibrary,
+            "az": BlobExpertLibrary,
+            "hf": HFExpertLibrary,
+        }
+
+        if expert_library_type in available_libraries:
+            expert_lib_class = available_libraries[expert_library_type]
+        elif expert_library_type in available_libraries.values():
+            expert_lib_class = expert_library_type
+        else:
+            # if repo_id includes "local://", "virtual://", "az://", "hf://"
+            prefix = repo_id.split("://")
+            if prefix[0] in available_libraries:
+                expert_library_type = prefix[0]
+                repo_id = prefix[1]
+            else:
+                expert_library_type = "local"
+            try:
+                expert_lib_class = available_libraries[expert_library_type]
+            except KeyError:
+                raise ValueError(f"Unknown expert library type {expert_library_type}.")
+
+        expert_lib = expert_lib_class(
+            repo_id=repo_id,
+            token=token,
+            model_name=model_name,
+            selection=selection,
+            exclude_selection=exclude_selection,
+            create=create,
+            ignore_sliced=ignore_sliced,
+        )
+
+        return expert_lib
 
 
 class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
@@ -1338,68 +1423,3 @@ def get_best_expert_for_task(library: HFExpertLibrary, task, hash) -> Expert:
             best_expert = metadata
     assert best_expert is not None
     return library[best_expert.expert_name]
-
-
-def get_expert_library(
-    repo_id,
-    token: str = None,
-    model_name=None,
-    selection=None,
-    exclude_selection=None,
-    create=False,
-    ignore_sliced=False,
-    expert_library_type: Union[ExpertLibrary, str] = None,
-    make_local: bool = False,
-):
-    """Select the appropriate expert library based on the following order of priority:
-    1. If expert_library_type is provided, and is a proper subclass of ExpertLibrary, uses it.
-    2. If repo_id is a directory that exists on the local file system, uses LocalExpertLibrary.
-    3. If token is provided and contains "blob.core.windows.net", uses BlobExpertLibrary.
-    4. If token is not provided, but the BLOB_SAS_URL envvar is set, uses BlobExpertLibrary.
-    5. Otherwise, uses HFExpertLibrary.
-    """
-    if (  # if expert_library_type is a proper subclass of ExpertLibrary, use it
-        isinstance(expert_library_type, type)
-        and issubclass(expert_library_type, ExpertLibrary)
-        and expert_library_type is not ExpertLibrary
-    ):
-        expert_lib_class = expert_library_type
-    else:  # otherwise, select the appropriate expert library based on its str representation
-        available_libraries = {
-            "local": LocalExpertLibrary,
-            "blob_storage": BlobExpertLibrary,
-            "huggingface_hub": HFExpertLibrary,
-        }
-        if expert_library_type is None:
-            if os.path.isdir(repo_id):
-                expert_library_type = "local"
-            elif len(repo_id.split("/")) == 2:
-                expert_library_type = "huggingface_hub"
-            else:
-                expert_library_type = "blob_storage"
-
-        try:
-            expert_lib_class = available_libraries[expert_library_type]
-        except KeyError:
-            raise ValueError(f"Unknown expert library type {expert_library_type}.")
-
-    expert_lib = expert_lib_class(
-        repo_id=repo_id,
-        token=token,
-        model_name=model_name,
-        selection=selection,
-        exclude_selection=exclude_selection,
-        create=create,
-        ignore_sliced=ignore_sliced,
-    )
-    if make_local and isinstance(expert_lib, HFExpertLibrary):
-        user = HfApi().whoami()["name"]
-        if user != repo_id.split("/")[0]:
-            destination = os.environ.get(
-                "HF_LIB_CACHE", os.path.expanduser("~/.cache/huggingface/libraries/")
-            )
-            destination += repo_id
-            os.makedirs(destination, exist_ok=True)
-            expert_lib = LocalExpertLibrary.from_expert_library(expert_lib, destination)
-
-    return expert_lib

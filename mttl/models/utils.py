@@ -450,6 +450,12 @@ def model_loader_helper(model_name, device_map="auto", load_in_8bit=False):
             device_map=device_map,
             trust_remote_code=True,
         )
+    elif "stabilityai" in model_name:
+        model_object = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            torch_dtype="auto",
+        )
     else:
         model_object = AutoModelForCausalLM.from_pretrained(
             model_name,
