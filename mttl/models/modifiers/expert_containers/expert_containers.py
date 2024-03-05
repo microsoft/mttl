@@ -222,7 +222,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                     ".".join(self.__layer_name__.split(".")[:-1]),
                     self.__layer_name__.split(".")[-1],
                 )
-                assert layer != "g_proj"
+                assert layer != "q_proj"
                 # quick and dirty hack
                 expert_weights["lora_a"] = expert.expert_weights[
                     parent + ".q_proj.lora_a"
