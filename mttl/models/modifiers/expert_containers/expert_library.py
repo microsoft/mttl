@@ -1393,11 +1393,13 @@ def get_expert_library(
         ignore_sliced=ignore_sliced,
     )
     if make_local and isinstance(expert_lib, HFExpertLibrary):
-        destination = os.environ.get(
-            "HF_LIB_CACHE", os.path.expanduser("~/.cache/huggingface/libraries/")
-        )
-        destination += repo_id
-        os.makedirs(destination, exist_ok=True)
-        expert_lib = LocalExpertLibrary.from_expert_library(expert_lib, destination)
+        user = HfApi().whoami()["name"]
+        if user != repo_id.split("/")[0]:
+            destination = os.environ.get(
+                "HF_LIB_CACHE", os.path.expanduser("~/.cache/huggingface/libraries/")
+            )
+            destination += repo_id
+            os.makedirs(destination, exist_ok=True)
+            expert_lib = LocalExpertLibrary.from_expert_library(expert_lib, destination)
 
     return expert_lib

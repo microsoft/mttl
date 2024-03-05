@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import os
+import re
 from typing import List
 import numpy as np
 import torch
@@ -10,8 +11,14 @@ import torch
 import math
 import bitsandbytes as bnb
 
+from mttl.utils import logger
 from mttl.models.modifiers import register_modifier
-from mttl.models.modifiers.base import MergeableAdapter, ModifyMixin, ModifierConfig
+from mttl.models.modifiers.base import (
+    MergeableAdapter,
+    ModifyMixin,
+    ModifierConfig,
+    Adapter,
+)
 
 
 @dataclass
@@ -546,6 +553,11 @@ class LoRAView(LoRA):
         self.lora_a = lora_a
         self.lora_b = lora_b
 
+        if isinstance(layer, nn.Linear):
+            self.forward_fn = self.forward_linear_
+        else:
+            raise NotImplementedError("LoRAView only supports nn.Linear layers.")
+
     def create_for_layer(self, layer):
         pass
 
@@ -612,3 +624,99 @@ class SkilledLoRAView(SkilledLoRA):
             lora_b=torch.stack([lora.lora_b for lora in loras], dim=0).unsqueeze(2),
         )
         return skilled_lora
+
+
+class TiedLoRAConfig(LoRAConfig):
+    pass
+
+
+@register_modifier("tied_lora", config_cls=TiedLoRAConfig)
+class TiedLoRAForKQV(Adapter):
+    """
+    Makes sure that lora_a (d_in x r) is shared across layers.
+    """
+
+    def __init__(self, config, layer, layer_name):
+        super().__init__()
+        self.config = config
+        self.rank = config.lora_rank
+
+        self.layers = [layer]
+        self.layer_names = [layer_name]
+        self.lora_bs = nn.ParameterList([self.create_lora_b()])
+        self.create_lora_a()  # shared across layers
+
+    def add_layer(self, layer, layer_name):
+        if len(self.layers) > 0:
+            assert layer.out_features == self.layers[-1].out_features
+            assert layer.in_features == self.layers[-1].in_features
+
+        self.layers.append(layer)
+        self.layer_names.append(layer_name)
+
+        self.lora_bs.append(self.create_lora_b())
+
+    def create_lora_a(self):
+        self.lora_a = nn.Parameter(
+            torch.empty(self.layers[0].in_features, self.rank).to(
+                device=self.layers[0].weight.device
+            ),
+        )
+        gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
+        std = gain / math.sqrt(self.layers[0].in_features)
+        with torch.no_grad():
+            self.lora_a.uniform_(-std, std)
+
+    def create_lora_b(self):
+        """
+        Create A and B s.t. A is d_in x r , B is r x (d_out x len(layers))
+        """
+        lora_b = nn.Parameter(
+            torch.empty(self.rank, self.layers[0].out_features).to(
+                device=self.layers[0].weight.device
+            ),
+        )
+        torch.nn.init.zeros_(lora_b)
+        return lora_b
+
+    def get_view_for_layer(self, i):
+        return LoRAView(
+            self.config,
+            self.layers[i],
+            self.lora_a,  # shared
+            self.lora_bs[i],  # specific
+        )
+
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        for m_name, module in dict(transformer.named_modules()).items():
+            if re.fullmatch(config.modify_modules, m_name):
+                # tie within the parent module
+                tied_adapter = None
+                for c_name, layer in dict(module.named_children()).items():
+                    if re.fullmatch(config.modify_layers, c_name):
+                        logger.info(f"Patching {m_name}.{c_name}...")
+
+                        if re.fullmatch(config.tie_layers, c_name):
+                            if tied_adapter is None:
+                                tied_adapter = cls(config, layer, c_name)
+                            else:
+                                tied_adapter.add_layer(layer, c_name)
+                            continue
+
+                        setattr(
+                            module,
+                            c_name,
+                            LoRA(config, layer),
+                        )
+                if tied_adapter is not None:
+                    for i, (c_name, layer) in enumerate(
+                        zip(tied_adapter.layer_names, tied_adapter.layers)
+                    ):
+                        setattr(
+                            module,
+                            c_name,
+                            tied_adapter.get_view_for_layer(i),
+                        )
+
+        return transformer

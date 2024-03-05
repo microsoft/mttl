@@ -1,12 +1,18 @@
 # unit test for adapter_ranker
 import copy
+import os
 import torch
 import pytest
 import numpy as np
 from collections import OrderedDict
+from mttl.models.expert_config import ExpertConfig
+from mttl.models.expert_model import ExpertModel as ExpertTrainer
 from mttl.models.modifiers.expert_containers.expert_library import (
     HFExpertLibrary,
+    LocalExpertLibrary,
 )
+from conftest import make_tiny_llama
+from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 from mttl.models.modifiers.expert_containers.library_transforms import (
     TiesMerge,
     TiesMergeConfig,
@@ -17,6 +23,7 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     ArrowTransform,
     ArrowConfig,
 )
+from pytorch_lightning import seed_everything
 
 
 def test_config():
@@ -30,13 +37,75 @@ def test_config():
     assert cfg3.save_name == cfg.save_name
 
 
-def test_arrow():
+# def test_arrow():
+#     import logging
+#     from mttl.utils import logger
+
+#     logger.setLevel(logging.DEBUG)
+
+#     library = HFExpertLibrary("sordonia/new-test-library")
+
+#     cfg = ArrowConfig(ab_only=True, scale=False)
+#     transform = ArrowTransform(cfg)
+
+#     protos = transform.transform(library, persist=False, recompute=True)
+#     sums = []
+#     for task_name in sorted(protos.keys()):
+#         task_sum = 0.0
+#         for key in protos[task_name].keys():
+#             task_sum += protos[task_name][key].sum().item()
+#         sums.append(task_sum)
+
+#     assert np.allclose(sums, [2728.4163, 2284.9968])
+
+
+def test_arrow_with_tiedlora(tmp_path):
     import logging
     from mttl.utils import logger
 
+    seed_everything(0)
+
     logger.setLevel(logging.DEBUG)
 
-    library = HFExpertLibrary("sordonia/new-test-library")
+    def create_dummy_expert(config: ExpertConfig, exp_name) -> Expert:
+        model_object = make_tiny_llama()
+        exp_trainer = ExpertTrainer(
+            tokenizer=None,
+            expert_info={},
+            **vars(config),
+            model_object=model_object,
+        )
+        dir = f"{config.output_dir}/{exp_name}"
+        os.makedirs(dir, exist_ok=True)
+        exp_trainer.trainable_param_names = [
+            k for k in exp_trainer.state_dict().keys() if "lora" in k
+        ]
+        checkpoint = exp_trainer.save_pretrained(dir)
+        expert = load_expert(checkpoint, expert_name=exp_name)
+        for k, v in expert.expert_weights.items():
+            if "lora_b" in k:
+                expert.expert_weights[k] = torch.randn_like(v)
+
+        return expert
+
+    config = ExpertConfig(
+        kwargs={
+            "model_modifier": "tied_lora",
+            "tie_layers": "q_proj|k_proj|v_proj",
+            "modify_layers": "k_proj|v_proj|q_proj|o_proj",
+            "modify_modules": ".*self_attn.*",
+            "trainable_param_names": ".*lora_[ab].*",
+            "output_dir": tmp_path,
+            "model": "",
+        }
+    )
+    # create random Lora
+    expert1 = create_dummy_expert(config, "module1")
+    expert2 = create_dummy_expert(config, "module2")
+
+    library = LocalExpertLibrary(tmp_path)
+    library.add_expert(expert1, expert1.name)
+    library.add_expert(expert2, expert2.name)
 
     cfg = ArrowConfig(ab_only=True, scale=False)
     transform = ArrowTransform(cfg)
@@ -49,7 +118,7 @@ def test_arrow():
             task_sum += protos[task_name][key].sum().item()
         sums.append(task_sum)
 
-    assert np.allclose(sums, [2728.4163, 2284.9968])
+    assert np.allclose(sums, [8.483, 2.373], atol=1e-3)
 
 
 def test_compute_svd_embeddings():

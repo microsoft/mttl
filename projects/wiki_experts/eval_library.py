@@ -259,12 +259,12 @@ def run_multitask(args: ExpertConfig):
         args_copy.router_temp = args.router_temp
         args_copy.moe_top_k = args.moe_top_k
 
-        phagoose_transform = PhatgooseTransform(
+        phatgoose_transform = PhatgooseTransform(
             PhatgooseConfig(
                 n_steps=args.n_steps_pg, learning_rate=args.learning_rate_pg
             )
         )
-        prototypes = phagoose_transform.transform(
+        prototypes = phatgoose_transform.transform(
             library, default_args=args, recompute=args.recompute_prototypes
         )
 
@@ -296,6 +296,7 @@ def run_multitask(args: ExpertConfig):
 
     if args.pipeline_eval_tasks == "in_distribution":
         tasks = [expert.expert_task_name for expert in library.data.values()]
+        args_copy.eval_metric = args.eval_metric
         scores = eval_in_distribution(module, args_copy or args, tasks)
         return
     else:
