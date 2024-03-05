@@ -22,14 +22,14 @@ def copy_repo(origin_repo_id, target_repo_id):
 
 
 def main():
-    """Set your environment variables HF_TOKEN and BLOB_SAS_URL, and
+    """Set your environment variables HF_TOKEN and BLOB_SAS_TOKEN, and
     eddit the expert_repos list to include the repos you want to copy.
     """
 
     expert_repos = [
-        # ("old_repo_id", "new_repo_id")
-        ("hf-user/anexpert", "anexpert"),
-        ("hf-user/anotherone", "anotherone"),
+        # ("hf://<hf_user>/<old_repo_id>", "az://<storage_account>/<new_repo_id>")
+        ("hf://hf-user/anexpert", "az://storage_account/anexpert"),
+        ("hf://hf-user/anotherone", "az://storage_account/anotherone"),
     ]
     pool = multiprocessing.Pool()
     pool.starmap(copy_repo, expert_repos)

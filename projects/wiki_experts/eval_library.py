@@ -9,7 +9,7 @@ import json
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from mttl.models.modifiers.expert_containers.selectors import ClownSelector
 from mttl.models.modifiers.lora import LoRAConfig
 
@@ -174,7 +174,7 @@ def run_multitask(args: ExpertConfig):
         "openbookqa_0_1_0",
     ]
 
-    library = get_expert_library(
+    library = ExpertLibrary.get_expert_library(
         repo_id=args.library_id,
         token=args.remote_token,
         exclude_selection=exclude_phi_tasks,

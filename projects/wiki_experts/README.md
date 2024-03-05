@@ -98,33 +98,33 @@ We will describe below some key object classes that will be useful when developi
 ## ExpertLibrary Backend
 
 
-Wiki-experts supports HuggingFace and Azure Blob Storage for storing and retrieving experts. Use the `HFExpertLibrary` for HuggingFace integration and `BlobExpertLibrary` for Azure Blob Storage. Alternatively, you can use the `get_expert_library` function to get the appropriate library instance based on the repository id and token you provide.
+Wiki-experts supports HuggingFace and Azure Blob Storage for storing and retrieving experts. Use the `HFExpertLibrary` for HuggingFace integration and `BlobExpertLibrary` for Azure Blob Storage. Alternatively, you can use the `ExpertLibrary.get_expert_library` to get the appropriate library instance based on the repository id. In this case, the repository id should follow the format `"hf://<user_id_>/<lib_id>"` for HuggingFace and `"az://<storage_account>/<lib_id>"` for Azure Blob Storage.
 
 ```python
 # For HuggingFace
-repo_id = "<your_hf_usename>/<my_lora_library>"
 token = "<your_hf_token>"
+repo_id = "<your_hf_usename>/<my_lora_library>"
 hf_export_lib = HFExpertLibrary(repo_id, token=token)
+# or
+repo_id = "hf://<your_hf_usename>/<my_lora_library>"
+hf_export_lib = ExpertLibrary.get_expert_library(repo_id, token)
 
 # For Azure Blob Storage
-repo_id = "<my_lora_library>"
-token = "<your_blob_sas_url>"
+token = "<your_sas_token>"
+repo_id = "<storage_account>/<my_lora_library>"
 blob_export_lib = BlobExpertLibrary(repo_id, token=token)
-
-# Alternatively, use the helper function
-hf_export_lib = get_expert_library(repo_id, token)
+# or
+repo_id = "az://<storage_account>/<my_lora_library>"
+blob_export_lib = ExpertLibrary.get_expert_library(repo_id, token)
+# or
+az_expert_lib = ExpertLibrary.get_expert_library(
+   repo_id, token, expert_library_type="az"
+) # az, hf, local (filesystem), or virtual (in memory)
 ```
 
-Note that the `repo_id` for HuggingFace should include your username, while for Azure Blob Storage, it should not. Also, the HuggingFace token is your API token, while the Azure Blob Storage token should be the complete SAS URL.
+Note that the `repo_id` for HuggingFace should include your username, while for Azure Blob Storage, it should include the storage account name.
 
-To avoid managing tokens each time you instantiate an `ExpertLibrary`, set the `HF_TOKEN` for HuggingFace or `BLOB_SAS_URL` for Azure Blob Storage as environment variables.
-
-If you use the `get_expert_library` function without a specified token, and both environment variables are set, Azure Blob Storage is selected by default. Override this by specifying the `expert_library_type` argument.
-
-```python
-# Choose the library type: "huggingface_hub", "blob_storage", or "local"
-hf_export_lib = get_expert_library(repo_id, token, expert_library_type="huggingface_hub")
-```
+To avoid managing tokens each time you instantiate an `ExpertLibrary`, set the `HF_TOKEN` for HuggingFace or `BLOB_SAS_TOKEN` for Azure Blob Storage as environment variables.
 
 
 ### Getting a HuggingFace API token
@@ -135,7 +135,7 @@ hf_export_lib = get_expert_library(repo_id, token, expert_library_type="huggingf
 4. Copy the generated token.
 
 
-### Getting an Azure Blob Storage SAS URL
+### Getting an Azure Blob Storage SAS Token
 
 1. Open the Azure Portal.
 2. Locate and select your storage account.
@@ -143,7 +143,7 @@ hf_export_lib = get_expert_library(repo_id, token, expert_library_type="huggingf
 4. Ensure 'Blob' is the selected resource type.
 5. Check necessary permissions and set an expiration date.
 6. Click "Generate SAS".
-7. Copy the "Blob service SAS URL".
+7. Copy the "SAS token".
 
 
 ### Cache directory
