@@ -17,7 +17,14 @@ from mttl.models.modifiers.expert_containers.selectors import (
 )
 
 from mttl.utils import logger
-from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
+from mttl.models.modifiers.lora import (
+    LoRA,
+    LoRAConfig,
+    SkilledLoRA,
+    SkilledLoRAConfig,
+    TiedLoRAForKQV,
+    TiedLoRAConfig,
+)
 from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
 from mttl.models.modifiers.expert_containers.expert import Expert
 from mttl.models.modifiers.modify_model import get_modifier_type
@@ -146,7 +153,7 @@ class ExpertContainer:
 
 
 class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
-    __supports_configs__ = [LoRAConfig]
+    __supports_configs__ = [LoRAConfig, TiedLoRAConfig]
 
     def __init__(
         self,
@@ -200,11 +207,29 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
 
         # We may want to add a SkilledLoRA directly, if we are loading an MHR model for example
         lora_type = get_modifier_type(expert.expert_config)
-        LoRA_cls = {"lora": LoRA, "skilled_lora": SkilledLoRA}[lora_type]
-        expert_module = LoRA_cls(expert.expert_config, self.layer)
+        LoRA_cls = {
+            "lora": LoRA,
+            "skilled_lora": SkilledLoRA,
+            "tied_lora": LoRA,
+        }[lora_type]
+        expert_module = LoRA_cls(
+            expert.expert_config, self.layer, layer_name=self.__layer_name__
+        )
 
         if expert_weights is not None:
-            expert_module.load_lora_weights(expert_weights)
+            if "lora_a" not in expert_weights and lora_type == "tied_lora":
+                parent, layer = (
+                    ".".join(self.__layer_name__.split(".")[:-1]),
+                    self.__layer_name__.split(".")[-1],
+                )
+                assert layer != "g_proj"
+                # quick and dirty hack
+                expert_weights["lora_a"] = expert.expert_weights[
+                    parent + ".q_proj.lora_a"
+                ]
+                expert_module.load_lora_weights(expert_weights)
+            else:
+                expert_module.load_lora_weights(expert_weights)
 
         # fill the expert weights upon adding the expert
         if expert.expert_weights is None:
@@ -378,9 +403,11 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             lora_rank=config.lora_rank,
             n_splits=config.n_splits if isinstance(config, SkilledLoRAConfig) else 1,
             n_skills=0,
-            phi_2_align_heads=config.phi_2_align_heads
-            if isinstance(config, SkilledLoRAConfig)
-            else False,
+            phi_2_align_heads=(
+                config.phi_2_align_heads
+                if isinstance(config, SkilledLoRAConfig)
+                else False
+            ),
         )
         self.experts = SkilledLoRA(dummy_config, layer)
 
