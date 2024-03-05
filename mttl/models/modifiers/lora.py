@@ -35,6 +35,7 @@ class LoRA(MergeableAdapter, ModifyMixin):
         self,
         config: LoRAConfig,
         layer: nn.Module,
+        **kwargs,
     ):
         super().__init__()
 
@@ -209,6 +210,7 @@ class SkilledLoRA(LoRA):
         self,
         config: SkilledLoRAConfig,
         layer: nn.Module,
+        **kwargs,
     ):
         self.n_splits = config.n_splits
         self.n_skills = config.n_skills
@@ -548,7 +550,7 @@ class LoRAView(LoRA):
     on a bunch of other LoRAs parameters stacked together.
     """
 
-    def __init__(self, config, layer, lora_a, lora_b):
+    def __init__(self, config, layer, lora_a, lora_b, **kwargs):
         super().__init__(config, layer)
         self.lora_a = lora_a
         self.lora_b = lora_b

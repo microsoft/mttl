@@ -725,12 +725,27 @@ class ArrowTransform(LibraryTransform):
                 )
             )
 
+            def fetch_AB(expert: Expert, param_name: str):
+                try:
+                    A, B = (
+                        expert.expert_weights[f"{param_name}.lora_a"],
+                        expert.expert_weights[f"{param_name}.lora_b"],
+                    )
+                except KeyError:
+                    # quick and dirty fix
+                    # why this happens: since we share A in tied lora, lora_a does not appear in model.named_parameters for k_proj and v_proj and is removed from state dict. when checkpointing
+                    parent, layer_name = (
+                        ".".join(param_name.split(".")[:-1]),
+                        param_name.split(".")[-1],
+                    )
+                    assert layer_name != "q_proj"
+                    B = expert.expert_weights[f"{param_name}.lora_b"]
+                    A = expert.expert_weights[f"{parent}.q_proj.lora_a"]
+                return A, B
+
             for param_name in state_dict_keys:
                 logger.info(f"\tComputing SVD for parameter {param_name}")
-                A, B = (
-                    expert.expert_weights[f"{param_name}.lora_a"],
-                    expert.expert_weights[f"{param_name}.lora_b"],
-                )
+                A, B = fetch_AB(expert, param_name)
 
                 if expert.expert_info.model_modifier == "tied_lora":
                     parent, layer_name = (
@@ -763,8 +778,9 @@ class ArrowTransform(LibraryTransform):
                                 expert.expert_info.training_config.tie_layers,
                                 layer_name,
                             ):
-                                As.append(expert.expert_weights[f"{p}.lora_a"])
-                                Bs.append(expert.expert_weights[f"{p}.lora_b"])
+                                _A, _B = fetch_AB(expert, p)
+                                Bs.append(_B)
+                                As.append(_A)
                         assert np.all(
                             [A.sum() == a.sum() for a in As]
                         )  # since As are shared in tied_lora, they should be the same
