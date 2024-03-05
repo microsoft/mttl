@@ -3,6 +3,7 @@ import sys
 import torch
 import copy
 import wandb
+import numpy as np
 from copy import deepcopy
 from pytorch_lightning import seed_everything
 import json
@@ -73,7 +74,11 @@ def get_hidden_states(library, args):
 
 
 def get_arrow_embeddings(library, args):
-    cfg = ArrowConfig(scale=args.scale_prototypes, tie_qkv=args.tie_qkv_routing)
+    cfg = ArrowConfig(
+        scale=args.scale_prototypes,
+        tie_qkv=args.tie_qkv_routing,
+        name=args.expert_embeds_save_name,
+    )
     return ArrowTransform(cfg).transform(library, recompute=args.recompute_prototypes)
 
 
@@ -93,10 +98,16 @@ def patch_prototypes(module, library, args, proto_inits=None):
                 layer_names = proto_inits[expert_name].keys()
                 patched_layer_name = mod.layer_name.replace(".selector", "")
                 valid_layer_names = [
-                    k for k in layer_names if k.startswith(patched_layer_name)
+                    k
+                    for k in layer_names
+                    if patched_layer_name in k  # k.startswith(patched_layer_name)
                 ]
+                assert len(valid_layer_names) <= 2, breakpoint()
                 key = sorted(valid_layer_names)[0]
-                prototypes += [proto_inits[expert_name][key]]
+                proto = proto_inits[expert_name][key]
+                if isinstance(proto, np.ndarray):
+                    proto = torch.from_numpy(proto)
+                prototypes += [proto.squeeze()]
 
             logger.info(
                 f"setting prototypes for selector at {mod.layer_name} with hidden states from {key}"
@@ -184,7 +195,7 @@ def run_multitask(args: ExpertConfig):
         repo_id=args.library_id,
         token=args.remote_token,
         exclude_selection=exclude_phi_tasks,
-        make_local=True,
+        # make_local=True,
     )
 
     # cfg = TiesMergeConfig(top_k=0.2)
@@ -263,13 +274,15 @@ def run_multitask(args: ExpertConfig):
         args_copy = deepcopy(an_expert.training_config)
         # phatgoose does merging after by default
         args_copy.lora_merge_after = True
-        args_copy.router_selector = "phatgoose_selector"
+        args_copy.router_selector = "clown_router"  # "phatgoose_selector"
         args_copy.router_temp = args.router_temp
         args_copy.moe_top_k = args.moe_top_k
 
         phatgoose_transform = PhatgooseTransform(
             PhatgooseConfig(
-                n_steps=args.n_steps_pg, learning_rate=args.learning_rate_pg
+                n_steps=args.n_steps_pg,
+                learning_rate=args.learning_rate_pg,
+                name=args.expert_embeds_save_name,
             )
         )
         prototypes = phatgoose_transform.transform(
@@ -278,11 +291,13 @@ def run_multitask(args: ExpertConfig):
 
         module = MultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
+        patch_prototypes(module, library, args, proto_inits=prototypes)
         # load prototypes into the router
-        for mod in module.modules():
-            if isinstance(mod, ExpertContainer):
-                mod.selector.set_prototypes(prototypes)
+        # for mod in module.modules():
+        #     if isinstance(mod, ExpertContainer):
+        #         mod.selector.set_prototypes(prototypes)
         module = module.to("cuda")
+
     elif args.merge_or_route == "oracle":
         # TaskNameSelector
         an_expert = library[next(iter(library.keys()))]

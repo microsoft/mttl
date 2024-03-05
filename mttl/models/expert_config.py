@@ -100,6 +100,7 @@ class ExpertConfig(Config):
         self.es_metric = "loss"
         self.n_ng_iterations = 30  # number of iterations for LoraHub
         self.recompute_prototypes = False
+        self.expert_embeds_save_name = None
 
         # for MBC
         self.mbc_num_clusters = 10  # number of clusters
