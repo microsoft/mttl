@@ -9,7 +9,7 @@ import json
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.models.modifiers.expert_containers.expert_library import get_expert_library
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from mttl.models.modifiers.expert_containers.selectors import ClownSelector
 from mttl.models.modifiers.lora import LoRAConfig
 
@@ -43,9 +43,13 @@ def get_hidden_states(library, args):
             pool=args.pool,
             use_base_model_only=True,
         )
-        base = HiddenStateComputer(cfg).transform(library, default_args=args)
+        base = HiddenStateComputer(cfg).transform(
+            library, default_args=args, recompute=args.recompute_prototypes
+        )
         cfg.use_base_model_only = False
-        expert = HiddenStateComputer(cfg).transform(library, default_args=args)
+        expert = HiddenStateComputer(cfg).transform(
+            library, default_args=args, recompute=args.recompute_prototypes
+        )
         output = {
             exp_name: {
                 k: (expert[exp_name][k] - base[exp_name][k]) * args.delta_scale
@@ -61,14 +65,16 @@ def get_hidden_states(library, args):
             track=args.track,
             pool=args.pool,
         )
-        output = HiddenStateComputer(cfg).transform(library)
+        output = HiddenStateComputer(cfg).transform(
+            library, recompute=args.recompute_prototypes
+        )
 
     return output
 
 
 def get_arrow_embeddings(library, args):
     cfg = ArrowConfig(scale=args.scale_prototypes, tie_qkv=args.tie_qkv_routing)
-    return ArrowTransform(cfg).transform(library, recompute=False, persist=False)
+    return ArrowTransform(cfg).transform(library, recompute=args.recompute_prototypes)
 
 
 def patch_prototypes(module, library, args, proto_inits=None):
@@ -107,7 +113,6 @@ def patch_prototypes(module, library, args, proto_inits=None):
 def eval_in_distribution(module, args: ExpertConfig, tasks):
     args.include_task_source = "*"
     transfer_table = TableLogger()
-    args.subsample_test = 1
 
     for task in tasks:
         args.finetune_task_name = task
@@ -119,7 +124,7 @@ def eval_in_distribution(module, args: ExpertConfig, tasks):
             )
             metric = evaluator.test(pl_module=module)
 
-        if args.eval_metric == "test_loss":
+        elif args.eval_metric == "test_loss":
             dm = get_datamodule(args)
             evaluator = LossCallback(
                 dm.test_dataloader(), output_dir=args.output_dir, name=task + "_test"
@@ -149,7 +154,7 @@ def eval_in_distribution(module, args: ExpertConfig, tasks):
     transfer_table.log(
         {
             "task": "mean",
-            args.eval_metric: str(transfer_table.df[args.eval_metric].mean()),
+            args.eval_metric: transfer_table.df[args.eval_metric].mean(),
         }
     )
     transfer_table.log_final_table()
@@ -175,21 +180,33 @@ def run_multitask(args: ExpertConfig):
         "openbookqa_0_1_0",
     ]
 
-    library = get_expert_library(
+    library = ExpertLibrary.get_expert_library(
         repo_id=args.library_id,
         token=args.remote_token,
         exclude_selection=exclude_phi_tasks,
+        make_local=True,
     )
-    args_copy = None
+
+    # cfg = TiesMergeConfig(top_k=0.2)
+    # ties_expert = TiesMerge(cfg).transform(library)
+    ave_cfg = WeightedLinearMergeConfig()
+    ave_expert = WeightedLinearMerge(ave_cfg).transform(library)
+    module = MultiExpertModel(**vars(ave_expert.training_config)).to("cuda")
+    module.add_expert_instance(ave_expert, is_default=True)
+
     if args.merge_or_route in ["uniform", "weighted"]:
         weights = None
         if args.merge_or_route == "weighted":
             # get weights from 10 cluster
-            from mttl.datamodule import task_cluster_flan
+            _task_cluster_flan = json.load(
+                open(
+                    "projects/wiki_experts/task_sets/phi/clusters_kmeans_simmatrix_phi2_v3.json"
+                )
+            )
 
             tasks = []
             for i in range(10):
-                tasks += [getattr(task_cluster_flan, f"c{i}_2e")]
+                tasks += _task_cluster_flan[f"c{i}_2e"]
             weights = {}
             for task_subset in tasks:
                 for task in task_subset:
@@ -250,12 +267,14 @@ def run_multitask(args: ExpertConfig):
         args_copy.router_temp = args.router_temp
         args_copy.moe_top_k = args.moe_top_k
 
-        phagoose_transform = PhatgooseTransform(
+        phatgoose_transform = PhatgooseTransform(
             PhatgooseConfig(
                 n_steps=args.n_steps_pg, learning_rate=args.learning_rate_pg
             )
         )
-        prototypes = phagoose_transform.transform(library, default_args=args)
+        prototypes = phatgoose_transform.transform(
+            library, default_args=args, recompute=args.recompute_prototypes
+        )
 
         module = MultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
@@ -272,18 +291,27 @@ def run_multitask(args: ExpertConfig):
         args_copy.router_selector = "task_selector"
         module = MultiExpertModel(**vars(args_copy), device_map="auto")
         module.load_from_module_dict(library)
+        module = module.to("cuda")
 
-    if os.environ.get("WANDB_API_KEY"):
-        import wandb
+    if args.pipeline_eval_tasks == "all":
+        args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
 
-        wandb.init(
-            project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
-            config=dict(module.hparams),
-            name=os.environ.get("AMLT_JOB_NAME", None),
+    with torch.no_grad():
+        runner: EvaluatorRunner = setup_evaluators(
+            model_type=module.hparams.model,
+            model_family=module.hparams.model_family,
+            max_input_length=module.hparams.max_input_length,
+            max_output_length=module.hparams.max_output_length,
+            predict_batch_size=args.predict_batch_size,
+            truncation_side=module.hparams.truncation_side,
+            tasks=args.pipeline_eval_tasks,
+            output_path=os.path.join(args.output_dir, "DOWNSTREAM"),
         )
+        scores = runner.run(module)
 
     if args.pipeline_eval_tasks == "in_distribution":
         tasks = [expert.expert_task_name for expert in library.data.values()]
+        args_copy.eval_metric = args.eval_metric
         scores = eval_in_distribution(module, args_copy or args, tasks)
         return
     else:
@@ -310,16 +338,16 @@ def run_multitask(args: ExpertConfig):
                 if task_name == "routing_infos":
                     continue
 
-                task_dict = module.model.task_id_container[task_name]
-                for k, v in task_dict.items():
-                    routing_stats[f"{task_name}/{k}"] = v
+            task_dict = module.model.task_id_container[task_name]
+            for k, v in task_dict.items():
+                routing_stats[f"{task_name}/{k}"] = v
 
-        if wandb.run is not None:
-            wandb.log({f"downstream/{k}": v for k, v in scores.items()})
-            if len(routing_stats) > 0:
-                wandb.log(routing_stats)
+    if wandb.run is not None:
+        wandb.log({f"downstream/{k}": v for k, v in scores.items()})
+        if len(routing_stats) > 0:
+            wandb.log(routing_stats)
 
-            wandb.finish()
+        wandb.finish()
 
 
 if __name__ == "__main__":

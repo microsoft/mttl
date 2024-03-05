@@ -3,8 +3,6 @@ import os
 import torch
 
 from mttl.config import Config
-import mttl.datamodule.task_sequences
-import mttl.datamodule.task_cluster_flan
 from mttl.utils import logger
 
 
@@ -101,6 +99,7 @@ class ExpertConfig(Config):
         self.create_transfer_matrix = False
         self.es_metric = "loss"
         self.n_ng_iterations = 30  # number of iterations for LoraHub
+        self.recompute_prototypes = False
 
         # for MBC
         self.mbc_num_clusters = 10  # number of clusters
@@ -111,11 +110,12 @@ class ExpertConfig(Config):
         self.n_steps_pg = 2000
         self.learning_rate_pg = 0.01
 
+        self.save_each_epoch = False
+
     def post_init(self, silent=False):
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size
 
-        # to reproduce setup in https://github.com/daanelson/alpaca-lora
         self.gradient_accumulation_steps = (
             self.train_batch_size // self.micro_batch_size
         )
@@ -133,23 +133,18 @@ class ExpertConfig(Config):
         ):
             # resolve task keys
             task_names = []
-            tasks = self.finetune_task_name.split(
-                "+"
-            )  # use "+" for assign multiple task set vars to be found in task_sequences
-
-            task_sets = None
+            tasks = self.finetune_task_name.split(",")
             if self.tasksets_path is not None:
+                # load task names from json file
                 task_sets = json.load(open(self.tasksets_path))
+                for task_name in tasks:
+                    if task_name in task_sets:
+                        task_names.extend(task_sets[task_name])
+                    else:
+                        raise ValueError(
+                            f"tasksets_path os passed, but task name {task_name} not found in tasksets file {self.tasksets_path}"
+                        )
+            else:
+                task_names = tasks
 
-            for task_name in tasks:
-                if task_name in mttl.datamodule.task_sequences.__dict__:
-                    task_names.extend(
-                        getattr(mttl.datamodule.task_sequences.__dict__, task_name)
-                    )
-                elif task_name in mttl.datamodule.task_cluster_flan.__dict__:
-                    task_names.extend(
-                        getattr(mttl.datamodule.task_cluster_flan, task_name)
-                    )
-                else:
-                    task_names.extend([task_name])
             self.finetune_task_name = ",".join(task_names)

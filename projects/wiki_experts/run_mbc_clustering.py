@@ -17,7 +17,7 @@ def main(args: ExpertConfig):
 
     # making local copy of remote lib
     destination = os.environ.get(
-        "HF_LIB_CACHE", os.path.expanduser("~/.cache/huggingface/libraries")
+        "HF_LIB_CACHE", os.path.expanduser("~/.cache/huggingface/libraries/")
     )
     destination += args.library_id
     os.makedirs(destination, exist_ok=True)

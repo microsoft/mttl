@@ -15,13 +15,11 @@ from collections import defaultdict
 
 from mttl.models.modifiers.expert_containers.expert import Expert
 from mttl.models.modifiers.expert_containers.expert_containers import ExpertContainer
-from mttl.models.modifiers.expert_containers.expert_library import (
-    get_expert_library,
-    ExpertLibrary,
-)
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from mttl.utils import logger
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
 from mttl.datamodule.base import get_datamodule
+from mttl.models.expert_config import ExpertConfig
 
 
 class LibraryTransform(abc.ABC):
@@ -97,7 +95,7 @@ class SVDEmbeddingTransform(LibraryTransform):
 
     def transform(self, library, persist=True, recompute=False):
         if type(library) == str:
-            library = get_expert_library(library)
+            library = ExpertLibrary.get_expert_library(library)
 
         # try to fetch auxiliary data
         output = library.get_auxiliary_data(data_type=self.config.save_name)
@@ -184,7 +182,7 @@ class WeightedLinearMerge(LibraryTransform):
     @torch.no_grad()
     def transform(self, library) -> Expert:
         if type(library) == str:
-            library = get_expert_library(library)
+            library = ExpertLibrary.get_expert_library(library)
 
         expert_names = list(library.keys())
         experts = [library[name] for name in expert_names]
@@ -250,7 +248,7 @@ class TiesMerge(LibraryTransform):
     @torch.no_grad()
     def transform(self, library) -> Expert:
         if type(library) == str:
-            library = get_expert_library(library)
+            library = ExpertLibrary.get_expert_library(library)
 
         expert_names = list(library.keys())
         experts = [library[name] for name in expert_names]
@@ -399,11 +397,10 @@ class HiddenStateComputer(LibraryTransform):
     def transform(
         self, library: ExpertLibrary, persist=False, recompute=False, default_args=None
     ) -> Expert:
-        # TODO: remove project import
-        from projects.wiki_experts.src.expert_model import MultiExpertModel
+        from mttl.models.expert_model import MultiExpertModel
 
         if type(library) == str:
-            library = get_expert_library(library)
+            library = ExpertLibrary.get_expert_library(library)
 
         logger.info(f"Hidden state computer dumps to: {self.config.save_name}")
 
@@ -530,7 +527,6 @@ class PhatgooseTransform(HiddenStateComputer):
         expert_names: list = None,
         default_args=None,
     ):
-        # TODO: remove project import
         from mttl.models.expert_model import MultiExpertModel
         from mttl.models.modifiers.expert_containers.utils import train_module
 
@@ -541,7 +537,7 @@ class PhatgooseTransform(HiddenStateComputer):
             expert: Expert = library[expert_name]
 
             if type(library) == str:
-                library = get_expert_library(library)
+                library = ExpertLibrary.get_expert_library(library)
             loaded_output = library.get_auxiliary_data(data_type=self.config.save_name)
 
             if (
@@ -559,7 +555,7 @@ class PhatgooseTransform(HiddenStateComputer):
                 )
                 continue
 
-            training_config = expert.training_config
+            training_config: ExpertConfig = expert.training_config
             training_config.router_selector = "phatgoose_selector"
             training_config.trainable_param_names = ".*selector.*"
             training_config.logging_prefix = expert_name + "/"
@@ -601,6 +597,14 @@ class PhatgooseTransform(HiddenStateComputer):
                 training_config.include_task_source = default_args.include_task_source
                 training_config.output_dir = default_args.output_dir
                 training_config.wandb_project = default_args.wandb_project
+                # we set also train_batch_size, micro_batch_size, and gradient_accumulation_steps from default_args
+                # TODO: correct this in the future
+                # background: gradient_accumulation_steps is set in post_init of the mttl/config.py and hence not saved correctly in expert's config
+                training_config.gradient_accumulation_steps = (
+                    default_args.gradient_accumulation_steps
+                )
+                training_config.train_batch_size = default_args.train_batch_size
+                training_config.micro_batch_size = default_args.micro_batch_size
 
             # get datamodule
             dm = get_datamodule(training_config)
@@ -693,7 +697,7 @@ class ArrowTransform(LibraryTransform):
     @torch.no_grad()
     def transform(self, library, persist=True, recompute=False) -> Expert:
         if isinstance(library, str):
-            library = get_expert_library(library)
+            library = ExpertLibrary.get_expert_library(library)
 
         # try to fetch auxiliary data
         vectors = library.get_auxiliary_data(
@@ -955,10 +959,10 @@ class ExpertProjector(LibraryTransform):
     @torch.no_grad()
     def transform(self, expert_library, cluster_library) -> Expert:
         if isinstance(expert_library, str):
-            expert_library = get_expert_library(expert_library)
+            expert_library = ExpertLibrary.get_expert_library(expert_library)
 
         if isinstance(cluster_library, str):
-            cluster_library = get_expert_library(cluster_library)
+            cluster_library = ExpertLibrary.get_expert_library(cluster_library)
 
         output = {}
         for cluster_name, cluster_exp in cluster_library.items():
@@ -994,7 +998,7 @@ class CrossExpertNormComputer(HiddenStateComputer):
     @torch.no_grad()
     def transform(self, library, default_args=None) -> Expert:
         if isinstance(library, str):
-            library = get_expert_library(library)
+            library = ExpertLibrary.get_expert_library(library)
 
         expert_names = list(library.keys())
         an_expert = library[expert_names[0]]
