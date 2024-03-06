@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from mttl.models.modifiers.expert_containers.expert import ExpertInfo
 from mttl.models.modifiers.routing import RoutingInfo
 from torch.distributions import Bernoulli, Categorical
+from mttl.models.utils import MetricLogger
 
 # from mttl.models.modifiers.routing import RoutingMixin
 from mttl.utils import logger
@@ -24,7 +25,7 @@ EPS = 1e-8
 
 
 def register_multi_expert_selector(name, config_cls):
-    print("Registering multi-expert selector..." + name)
+    print("Registering muti-expert selector..." + name)
 
     def _thunk(fn):
         if name in SELECTORS_NAME_TO_KLASS:
@@ -172,6 +173,8 @@ def forward_with_cache(func):
 
 
 class Selector(nn.Module):
+    metric_logger: MetricLogger = MetricLogger()
+
     def __init__(self, info_container, config=None, **kwargs):
         nn.Module.__init__(self)
 
@@ -498,35 +501,25 @@ class PerTokenSelector(Selector):
         self.prototypes.data = prototypes.type_as(self.prototypes)
 
     def _log_entropy(self, logits):
-        # TODO: make sure this gets logged correctly
         # uniform routing entropy
-        attn_mask = self.info_container["routing_infos"].attention_mask == 1.0
-        bs, sq = attn_mask.size()
+        bs, sq, dim = logits.size()
 
         dist = Categorical(logits=logits)
         entropy = dist.entropy()
 
         if sq > 1:
+            attn_mask = self.info_container["routing_infos"].attention_mask == 1.0
             mean_entropy = entropy[attn_mask].sum() / attn_mask.sum()
         else:
             mean_entropy = entropy.mean()
 
-        to_store = {
-            "ent_uniform": np.log(len(self.expert_names)),
-            "ent_routing": mean_entropy.item(),
-        }
-
-        # Keep running statistics of routing
-        task = self.info_container["routing_infos"].task_names[0]
-        task_container = self.info_container.get(task, {})
-        count = task_container.get("routing_count", 0)
-
-        for name, value in to_store.items():
-            old_value = task_container.get(name, 0)
-            task_container[name] = (old_value * count + value) / (count + 1)
-
-        task_container["routing_count"] = count + 1
-        self.info_container[task] = task_container
+        task = self.info_container["routing_infos"].task_sources[0]
+        to_store = {"ent_routing": mean_entropy.item()}
+        self.metric_logger.update(prefix=f"task_{task}", value_dict=to_store)
+        self.metric_logger.update(prefix=self.__layer_name__, value_dict=to_store)
+        self.metric_logger.update(
+            value_dict={"ent_uniform": np.log(len(self.expert_names))}
+        )
 
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchSequenceModulesAndWeightsSelectorOutput:
