@@ -77,16 +77,14 @@ class ExpertConfig(Config):
         self.max_samples_per_task = 100
         self.track = "each_layer"
         self.pool = "last"
-        self.delta_scale = None  # how much to extrapolate the shift in the expert's prototype direction
-        self.use_similarity_scaling = (
-            False  # whether to scale the centroids as a function of LoRA similarity
-        )
+
+        # Ties Merging
         self.transform_sparsity = 1.0
 
-        # Clown / Per Token Router
+        # Per Token Router [Arrow, Phatgoose, hidden]
         self.router_temp = 1.0
         self.notes = None
-        self.proto_init = "hidden"  # also "arrow"
+        self.proto_init = None  # also "arrow"
         self.input_norm_fn = None
         self.proto_norm_fn = None
 
@@ -105,7 +103,7 @@ class ExpertConfig(Config):
         self.phi_2_align_heads = False
         self.lora_merge_after = False  # if True, tried to merge after the outer product, currently only applicable to LoRA
 
-        # phatgoose
+        # phatgoose gate learning
         self.n_steps_pg = 2000
         self.learning_rate_pg = 0.01
 
@@ -147,3 +145,60 @@ class ExpertConfig(Config):
                 task_names = tasks
 
             self.finetune_task_name = ",".join(task_names)
+
+    def overwrite_eval_args(self, cmd_args):
+        """
+        When loading ExpertConfig from Expert checkpoint, overwrite default values
+        according to args passed in command line in `cmd_args`
+        """
+
+        # For starters, always overwrite the following arguments
+        for arg_name in ["output_dir", "eval_metric"]:
+            value = getattr(cmd_args, arg_name, None)
+            setattr(self, arg_name, value)
+
+        # For 0-shot evaluation, depending on the approach we use different default values
+        if cmd_args.merge_or_route is not None:
+            updated_kwargs = cmd_args._updated_kwargs
+
+            if cmd_args.merge_or_route in ["uniform", "ties"]:
+                defaults = {}
+            elif cmd_args.merge_or_route == "arrow":
+                defaults = {
+                    "router_selector": "per_token_router",
+                    "router_temp": 1.0,
+                    "moe_top_k": -1,
+                    "input_norm_fn": None,
+                    "proto_norm_fn": None,
+                    "lora_merge_after": False,
+                    "proto_init": "arrow",
+                }
+            elif cmd_args.merge_or_route == "phatgoose":
+                defaults = {
+                    "router_selector": "per_token_router",
+                    "router_temp": -1,  # defaults to sqrt(d)
+                    "moe_top_k": 2,
+                    "input_norm_fn": "layer_norm",
+                    "proto_norm_fn": "layer_norm",
+                    "lora_merge_after": True,
+                    "proto_init": "phatgoose",
+                }
+            elif cmd_args.merge_or_route == "hidden":
+                defaults = {
+                    "router_selector": "per_token_router",
+                    "proto_init": "hidden",
+                }
+            elif cmd_args.merge_or_route == "oracle":
+                defaults = {"router_selector": "task_selector"}
+            else:
+                raise ValueError(f"merge_or_route {self.merge_or_route} not recognized")
+
+            for arg_name, arg_value in defaults.items():
+                if arg_name not in updated_kwargs:
+                    setattr(self, arg_name, arg_value)
+                    logger.info(
+                        f"Setting training config default value for {arg_name} to {arg_value}"
+                    )
+                else:
+                    # overwrite the default value with the one passed in cmd_args
+                    setattr(self, arg_name, updated_kwargs[arg_name])
