@@ -94,7 +94,6 @@ def run_multitask(args: ExpertConfig):
         monitor=monitor,
         save_last=True,
         mode=mode,
-        expert_library=expert_library,
         save_each_epoch=args.save_each_epoch,
     )
     callbacks.append(checkpoint_callback)
@@ -176,6 +175,10 @@ def run_multitask(args: ExpertConfig):
         )
         module.load_state_dict(torch.load(checkpoint)["state_dict"])
         trainer.test(module, dm)
+
+        if expert_library is not None:
+            expert_name = args.expert_name or args.finetune_task_name
+            expert_library.add_expert_from_ckpt(checkpoint, expert_name)
 
         if args.create_transfer_matrix:
             create_transfer_matrix(args, checkpoint)
