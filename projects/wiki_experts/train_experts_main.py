@@ -102,7 +102,7 @@ def run_multitask(args: ExpertConfig):
     if args.eval_rouge_flag:
         rouge = RougeCallback(
             get_datamodule(args, for_generation=True),
-            every_n_epochs=3 if args.num_train_epochs > 3 else 1,
+            every_n_epochs=3 if args.num_train_epochs > 5 else 1,
         )
         callbacks.append(rouge)
     else:
