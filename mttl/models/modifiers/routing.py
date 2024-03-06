@@ -14,6 +14,7 @@ from mttl.utils import logger
 class RoutingInfo:
     task_ids: torch.Tensor = None
     task_names: List[str] = None
+    task_sources: List[str] = None
     example_ids: List[int] = None
     labels: torch.Tensor = None
     input_ids: torch.Tensor = None
@@ -26,11 +27,13 @@ class RoutingInfo:
         task_ids = batch.get("task_ids").long() if "task_ids" in batch else None
         task_names = batch.get("task_names", None)
         task_weights = batch.get("task_weights", None)
+        task_sources = batch.get("task_sources", None)
 
         ri = cls(
             task_ids=task_ids,
             task_names=task_names,
             task_weights=task_weights,
+            task_sources=task_sources,
             input_ids=batch.get("input_ids", None),
             example_ids=batch.get("example_ids", None),
             labels=batch.get("labels", None),
@@ -51,5 +54,6 @@ class RoutingInfo:
         # useful for beam search
         self.task_ids = self._repeat(self.task_ids, repeats)
         self.task_names = self._repeat(self.task_names, repeats)
+        self.task_sources = self._repeat(self.task_sources, repeats)
         self.example_ids = self._repeat(self.example_ids, repeats)
         self.task_weights = self._repeat(self.task_weights, repeats)
