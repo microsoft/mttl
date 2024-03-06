@@ -217,19 +217,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         )
 
         if expert_weights is not None:
-            if "lora_a" not in expert_weights and lora_type == "tied_lora":
-                parent, layer = (
-                    ".".join(self.__layer_name__.split(".")[:-1]),
-                    self.__layer_name__.split(".")[-1],
-                )
-                assert layer != "q_proj"
-                # quick and dirty hack
-                expert_weights["lora_a"] = expert.expert_weights[
-                    parent + ".q_proj.lora_a"
-                ]
-                expert_module.load_lora_weights(expert_weights)
-            else:
-                expert_module.load_lora_weights(expert_weights)
+            expert_module.load_lora_weights(expert_weights)
 
         # fill the expert weights upon adding the expert
         if expert.expert_weights is None:
