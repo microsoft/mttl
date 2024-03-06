@@ -635,7 +635,7 @@ class TiedLoRAConfig(LoRAConfig):
 @register_modifier("tied_lora", config_cls=TiedLoRAConfig)
 class TiedLoRAForKQV(Adapter):
     """
-    Makes sure that lora_a (d_in x r) is shared across q_proj|k_proj|v_proj.
+    Makes sure that lora_a (d_in x r) is shared across q_proj|k_proj|v_proj, while lora_b is specific to each layer.
     """
 
     def __init__(self, config, layer, layer_name):
@@ -649,10 +649,6 @@ class TiedLoRAForKQV(Adapter):
         self.create_lora_a()  # shared across layers
 
     def add_layer(self, layer, layer_name):
-        if len(self.layers) > 0:
-            assert layer.out_features == self.layers[-1].out_features
-            assert layer.in_features == self.layers[-1].in_features
-
         self.layers.append(layer)
         self.layer_names.append(layer_name)
 
@@ -674,8 +670,8 @@ class TiedLoRAForKQV(Adapter):
         Create A and B s.t. A is d_in x r , B is r x (d_out x len(layers))
         """
         lora_b = nn.Parameter(
-            torch.empty(self.rank, self.layers[0].out_features).to(
-                device=self.layers[0].weight.device
+            torch.empty(self.rank, self.layers[-1].out_features).to(
+                device=self.layers[-1].weight.device
             ),
         )
         torch.nn.init.zeros_(lora_b)
