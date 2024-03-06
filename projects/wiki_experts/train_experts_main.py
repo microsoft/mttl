@@ -163,7 +163,7 @@ def run_multitask(args: ExpertConfig):
     )
 
     # initial validation only for a bunch of datasets... ?
-    # trainer.validate(module, dm)
+    trainer.validate(module, dm)
 
     if args.do_train:
         trainer.fit(module, dm)
