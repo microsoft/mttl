@@ -718,7 +718,7 @@ class ArrowTransform(LibraryTransform):
             vectors[expert_name] = {}
             eigvals[expert_name] = {}
 
-            if base_model is None:
+            if not self.config.ab_only and base_model is None:
                 training_config = expert.training_config
                 training_config.model_modifier = None
                 from mttl.models.expert_model import MultiExpertModel
@@ -801,73 +801,6 @@ class ArrowTransform(LibraryTransform):
                 # Save eigenvector and eigvenvalue
                 vectors[expert_name][param_name] = top_vector.real.cpu().numpy()
                 eigvals[expert_name][param_name] = top_value.item()
-
-            if self.config.tie_qkv:
-                print("tying")
-                unique_attn_prefixes = set(
-                    ".".join(k.split(".")[:-1]) for k in state_dict_keys if "attn" in k
-                )
-                for prefix in unique_attn_prefixes:
-                    print(f"layer {prefix}")
-                    Aq = vectors[expert_name][prefix + ".q_proj"]
-                    Ak = vectors[expert_name][prefix + ".k_proj"]
-                    Av = vectors[expert_name][prefix + ".v_proj"]
-                    # '''
-                    vA = expert_weights[f"{prefix}.v_proj.lora_a"]
-                    kA = expert_weights[f"{prefix}.k_proj.lora_a"]
-                    qA = expert_weights[f"{prefix}.q_proj.lora_a"]
-
-                    vB = expert_weights[f"{prefix}.v_proj.lora_b"]
-                    kB = expert_weights[f"{prefix}.k_proj.lora_b"]
-                    qB = expert_weights[f"{prefix}.q_proj.lora_b"]
-
-                    qkvA = torch.cat((qA, kA, vA), dim=1)
-                    qkvB = torch.cat((qB, kB, vB), dim=0)
-
-                    U_A, Sigma_A, V_A = torch.svd(qkvA)
-                    U_B, Sigma_B, V_B = torch.svd(qkvB.T)
-
-                    # OG matrices
-                    U_q, Sigma_q, V_q = torch.svd(
-                        base_model.state_dict()[f"model.{prefix}.q_proj.weight"]
-                    )
-                    U_v, Sigma_v, V_v = torch.svd(
-                        base_model.state_dict()[f"model.{prefix}.v_proj.weight"]
-                    )
-                    U_k, Sigma_k, V_k = torch.svd(
-                        base_model.state_dict()[f"model.{prefix}.k_proj.weight"]
-                    )
-
-                    print(f"V_v, V_q sim {(V_v[:, 0] * V_q[:, 0]).sum().item():.4f}")
-                    print(f"V_v, V_k sim {(V_v[:, 0] * V_k[:, 0]).sum().item():.4f}")
-                    print(f"V_q, V_k sim {(V_q[:, 0] * V_k[:, 0]).sum().item():.4f}\n")
-
-                    print(f"V_v, A_v sim {(V_v[:, 0] * Av).sum().item():.4f}")
-                    print(f"V_k, A_k sim {(V_k[:, 0] * Ak).sum().item():.4f}")
-                    print(f"V_q, A_q sim {(V_q[:, 0] * Aq).sum().item():.4f}\n")
-
-                    breakpoint()
-                    # '''
-                    # Compute mean by making sure the vectors are aligned
-                    if (Aq * Ak).sum() < 0:
-                        Aqk = (Aq - Ak) / 2
-                    else:
-                        Aqk = (Aq + Ak) / 2
-
-                    if (Aqk * Av).sum() < 0:
-                        Aqkv = (Aqk * 2 - Av) / 3
-                    else:
-                        Aqkv = (Aqk * 2 + Av) / 3
-
-                    # kv only
-                    # if (Ak * Av).sum() < 0:
-                    #    Akv = (Ak - Av) / 2
-                    # else:
-                    #    Akv = (Ak + Av) / 2
-
-                    vectors[expert_name][prefix + ".q_proj"] = Aqkv
-                    vectors[expert_name][prefix + ".k_proj"] = Aqkv
-                    vectors[expert_name][prefix + ".v_proj"] = Aqkv
 
         if persist:
             # add embeddings to the library
