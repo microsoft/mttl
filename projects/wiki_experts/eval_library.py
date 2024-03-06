@@ -224,6 +224,9 @@ def run_eval(args: ExpertConfig):
         module.load_from_module_dict(library)
 
     module = module.to("cuda")
+    from mttl.models.modifiers.expert_containers import Selector
+
+    metric_logger = Selector.metric_logger
 
     if args.pipeline_eval_tasks == "in_distribution":
         tasks = [expert.expert_task_name for expert in library.data.values()]
@@ -247,21 +250,17 @@ def run_eval(args: ExpertConfig):
             )
             scores = runner.run(module)
 
-        # try to fetch routing statistics
-        routing_stats = {}
-        if hasattr(module.model, "task_id_container"):
-            for task_name in module.model.task_id_container.keys():
-                if task_name == "routing_infos":
-                    continue
-
-            task_dict = module.model.task_id_container[task_name]
-            for k, v in task_dict.items():
-                routing_stats[f"{task_name}/{k}"] = v
+    if len(metric_logger) > 0:
+        task_table = metric_logger.pretty_table(match_on="task|.*uniform.*")
+        layer_table = metric_logger.pretty_table(match_on="layer|.*uniform.*")
+        print(task_table)
+        print(layer_table)
+        print(scores)
 
     if wandb.run is not None:
         wandb.log({f"downstream/{k}": v for k, v in scores.items()})
-        if len(routing_stats) > 0:
-            wandb.log(routing_stats)
+        if len(metric_logger) > 0:
+            wandb.log({k: v.avg for k, v in metric_logger.meters.items()})
 
         wandb.finish()
 
