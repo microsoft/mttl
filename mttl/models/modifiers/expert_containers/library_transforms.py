@@ -508,7 +508,7 @@ class HiddenStateComputer(LibraryTransform):
 
 @dataclass
 class PhatgooseConfig(LibraryTransformConfig):
-    n_steps: int = 10
+    n_steps: int = 1000
     learning_rate: float = 3e-3
     micro_batch_size: int = 1
     train_batch_size: int = 16
