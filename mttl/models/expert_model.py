@@ -265,14 +265,44 @@ class ExpertModel(EfficientCheckpointModule):
         )
         return generations
 
+    def _delete_non_trainable_params(self, state_dict):
+        if not self.training_config.model_modifier == "tied_lora":
+            return super()._delete_non_trainable_params(state_dict)
+
+        # include shared params in the state dict
+        if not hasattr(self, "_params_from_checkpoint"):
+            self._params_from_checkpoint = set()
+
+        trainable_param_names = set()
+        for k in state_dict.keys():
+            if re.fullmatch(self.training_config.trainable_param_names, k) and (
+                not self.training_config.non_trainable_param_names
+                or not re.fullmatch(self.training_config.non_trainable_param_names, k)
+            ):
+                trainable_param_names.add(k)
+
+        keys = [k for k in state_dict.keys()]
+
+        # remove also parameters in the loss plugins, these need not be saved
+        # (auxiliary parameters for the losses)
+        plugin_param_keys = set()
+        for _, plugin in self.loss_plugins.items():
+            plugin_param_keys.update(plugin.state_dict().keys())
+
+        deleted = []
+        for key in keys:
+            # we can safely avoid dumping this parameter if it is both
+            # not in the trainable parameters and was not loaded from checkpoint
+            if (
+                not (key in trainable_param_names)
+                and not (key in self._params_from_checkpoint)
+            ) or key in plugin_param_keys:
+                del state_dict[key]
+                deleted.append(key)
+
+        logger.info("Deleted from state dict: {}".format(len(deleted)))
+
     def on_save_checkpoint(self, ckpt):
-        if self.training_config.model_modifier == "tied_lora":
-            # TODO: make this more robust
-            # hacky way make sure we also save lora_a for k_proj and v_proj
-            # due to weight sharing some keys are not in named_parameters() and are removed in _delete_non_trainable_params
-            self.trainable_param_names = [
-                k for k in self.state_dict().keys() if "lora" in k
-            ]
         super().on_save_checkpoint(ckpt)
 
         # inject expert info in the expert checkpoint

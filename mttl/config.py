@@ -302,8 +302,6 @@ class Config:
         self.modify_modules = None
         self.modify_layers = None
 
-        self.tie_layers = None
-
         """
         router_granularity : how granular is the module selection
         coarsegrained : 1 single selector across all linear layers

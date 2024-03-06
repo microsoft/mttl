@@ -27,7 +27,6 @@ class MergeableAdapter(ABC, Adapter):
 class ModifierConfig(object):
     modify_modules: str = ".*"
     modify_layers: str = ".*"
-    tie_layers: str = None
 
     def __eq__(self, other):
         # compare all the attributes

@@ -629,13 +629,13 @@ class SkilledLoRAView(SkilledLoRA):
 
 
 class TiedLoRAConfig(LoRAConfig):
-    pass
+    tie_layers = "q_proj|k_proj|v_proj"
 
 
 @register_modifier("tied_lora", config_cls=TiedLoRAConfig)
 class TiedLoRAForKQV(Adapter):
     """
-    Makes sure that lora_a (d_in x r) is shared across layers.
+    Makes sure that lora_a (d_in x r) is shared across q_proj|k_proj|v_proj.
     """
 
     def __init__(self, config, layer, layer_name):

@@ -37,26 +37,26 @@ def test_config():
     assert cfg3.save_name == cfg.save_name
 
 
-# def test_arrow():
-#     import logging
-#     from mttl.utils import logger
+def test_arrow():
+    import logging
+    from mttl.utils import logger
 
-#     logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.DEBUG)
 
-#     library = HFExpertLibrary("sordonia/new-test-library")
+    library = HFExpertLibrary("sordonia/new-test-library")
 
-#     cfg = ArrowConfig(ab_only=True, scale=False)
-#     transform = ArrowTransform(cfg)
+    cfg = ArrowConfig(ab_only=True, scale=False)
+    transform = ArrowTransform(cfg)
 
-#     protos = transform.transform(library, persist=False, recompute=True)
-#     sums = []
-#     for task_name in sorted(protos.keys()):
-#         task_sum = 0.0
-#         for key in protos[task_name].keys():
-#             task_sum += protos[task_name][key].sum().item()
-#         sums.append(task_sum)
+    protos = transform.transform(library, persist=False, recompute=True)
+    sums = []
+    for task_name in sorted(protos.keys()):
+        task_sum = 0.0
+        for key in protos[task_name].keys():
+            task_sum += protos[task_name][key].sum().item()
+        sums.append(task_sum)
 
-#     assert np.allclose(sums, [2728.4163, 2284.9968])
+    assert np.allclose(sums, [2728.4163, 2284.9968])
 
 
 def test_arrow_with_tiedlora(tmp_path):
@@ -70,28 +70,26 @@ def test_arrow_with_tiedlora(tmp_path):
     def create_dummy_expert(config: ExpertConfig, exp_name) -> Expert:
         model_object = make_tiny_llama()
         exp_trainer = ExpertTrainer(
-            tokenizer=None,
             expert_info={},
             **vars(config),
             model_object=model_object,
         )
         dir = f"{config.output_dir}/{exp_name}"
         os.makedirs(dir, exist_ok=True)
-        exp_trainer.trainable_param_names = [
-            k for k in exp_trainer.state_dict().keys() if "lora" in k
-        ]
         checkpoint = exp_trainer.save_pretrained(dir)
         expert = load_expert(checkpoint, expert_name=exp_name)
         for k, v in expert.expert_weights.items():
+            if "q_proj" in k or "k_proj" in k or "v_proj" in k or "o_proj" in k:
+                assert ".".join(k.split(".")[:-1]) + ".lora_a" in expert.expert_weights
+                assert ".".join(k.split(".")[:-1]) + ".lora_b" in expert.expert_weights
+
             if "lora_b" in k:
                 expert.expert_weights[k] = torch.randn_like(v)
-
         return expert
 
     config = ExpertConfig(
         kwargs={
             "model_modifier": "tied_lora",
-            "tie_layers": "q_proj|k_proj|v_proj",
             "modify_layers": "k_proj|v_proj|q_proj|o_proj",
             "modify_modules": ".*self_attn.*",
             "trainable_param_names": ".*lora_[ab].*",
