@@ -225,19 +225,6 @@ def run_eval(args: ExpertConfig):
 
     module = module.to("cuda")
 
-    with torch.no_grad():
-        runner: EvaluatorRunner = setup_evaluators(
-            model_type=module.hparams.model,
-            model_family=module.hparams.model_family,
-            max_input_length=module.hparams.max_input_length,
-            max_output_length=module.hparams.max_output_length,
-            predict_batch_size=args.predict_batch_size,
-            truncation_side=module.hparams.truncation_side,
-            tasks=args.pipeline_eval_tasks,
-            output_path=os.path.join(args.output_dir, "DOWNSTREAM"),
-        )
-        scores = runner.run(module)
-
     if args.pipeline_eval_tasks == "in_distribution":
         tasks = [expert.expert_task_name for expert in library.data.values()]
         train_cfg.eval_metric = args.eval_metric
