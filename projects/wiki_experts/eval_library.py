@@ -32,7 +32,6 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     PhatgooseConfig,
 )
 
-from mttl.models.modifiers.expert_containers.expert_containers import ExpertContainer
 from mttl.callbacks import LossCallback
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
@@ -160,7 +159,7 @@ def eval_in_distribution(module, args: ExpertConfig, tasks):
     transfer_table.log_final_table()
 
 
-def run_multitask(args: ExpertConfig):
+def run_eval(args: ExpertConfig):
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file
@@ -189,82 +188,42 @@ def run_multitask(args: ExpertConfig):
     an_expert = library[next(iter(library.keys()))]
     train_cfg = deepcopy(an_expert.training_config)
 
-    if args.merge_or_route in ["uniform", "weighted"]:
-        weights = None
-        if args.merge_or_route == "weighted":
-            # get weights from 10 cluster
-            _task_cluster_flan = json.load(
-                open(
-                    "projects/wiki_experts/task_sets/phi/clusters_kmeans_simmatrix_phi2_v3.json"
-                )
-            )
+    # Transfer command line args to the saved config
+    train_cfg.overwrite_eval_args(args)
 
-            tasks = []
-            for i in range(10):
-                tasks += _task_cluster_flan[f"c{i}_2e"]
-            weights = {}
-            for task_subset in tasks:
-                for task in task_subset:
-                    weights[task] = 1 / len(task_subset) / 10
-
-        expert = WeightedLinearMerge(
-            WeightedLinearMergeConfig(weights=weights)
-        ).transform(library)
+    """ Parameter Merging Approaches """
+    if args.merge_or_route in ["uniform", "ties"]:
+        if args.merge_or_route == "uniform":
+            expert = WeightedLinearMerge(WeightedLinearMergeConfig()).transform(library)
+        elif args.merge_or_route == "ties":
+            cfg = TiesMergeConfig(top_k=args.transform_sparsity)
+            expert = TiesMerge(cfg).transform(library)
 
         module = MultiExpertModel(**vars(expert.training_config))
         module.add_expert_instance(expert, is_default=True)
-        train_cfg.output_dir = args.output_dir
-        train_cfg.eval_metric = args.eval_metric
     elif args.merge_or_route == "uniform_lora_after_op":
-        # Here we merge the LoRA experts after the outer product
-        # we cannot really do it with the lib transform, cause this would require storing large matrices in memory
+        # Here we merge the LoRA experts after the outer product we cannot really do it
+        # with the lib transform, cause this would require storing large matrices in memory
         # Instead we do it with a uniform selector
         assert type(expert.expert_info.expert_config) == LoRAConfig
         train_cfg.router_selector = "uniform"
         train_cfg.lora_merge_after = True
         module = MultiExpertModel(**vars(train_cfg))
         module.add_experts_from_library(library)
-    elif args.merge_or_route == "ties":
-        cfg = TiesMergeConfig(top_k=args.transform_sparsity)
-        ties_expert = TiesMerge(cfg).transform(library)
-        module = MultiExpertModel(**vars(ties_expert.training_config))
-        module.add_expert_instance(ties_expert, is_default=True)
-    elif args.merge_or_route == "route":
-        train_cfg.router_selector = "per_token_router"
-        train_cfg.precision = 32
-        train_cfg.proto_init = args.proto_init
 
-        # Proto init
-        if args.proto_init == "arrow":
-            # Set default arrow params, unless they are overwritten
-            train_cfg.router_temp = args.router_temp or 1
-            train_cfg.moe_top_k = args.moe_top_k or -1
-            train_cfg.input_norm_fn = args.input_norm_fn  # or None
-            train_cfg.proto_norm_fn = args.proto_norm_fn  # or None
-        elif args.proto_init == "phatgoose":
-            # TODO: overwrite to default values ?
-            train_cfg.router_temp = args.router_temp or -1  # defaults to sqrt(d)
-            train_cfg.moe_top_k = args.moe_top_k or 2
-            train_cfg.input_norm_fn = args.input_norm_fn or "layer_norm"
-            train_cfg.proto_norm_fn = args.proto_norm_fn or "layer_norm"
-        else:
-            assert args.proto_init == "hidden"
-
+    """ Routing Approaches """
+    if args.merge_or_route in ["phatgoose", "arrow", "hidden"]:
         module = MultiExpertModel(**vars(train_cfg), device_map="auto")
         module.load_from_module_dict(library)
-        patch_prototypes(module, library, args)
+        patch_prototypes(module, library, train_cfg)
 
     elif args.merge_or_route == "oracle":
-        # TaskNameSelector
-        train_cfg.output_dir = args.output_dir
-        train_cfg.router_selector = "task_selector"
+        """TaskNameSelector"""
+
         module = MultiExpertModel(**vars(train_cfg), device_map="auto")
         module.load_from_module_dict(library)
 
     module = module.to("cuda")
-
-    if args.pipeline_eval_tasks == "all":
-        args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
 
     with torch.no_grad():
         runner: EvaluatorRunner = setup_evaluators(
@@ -281,8 +240,8 @@ def run_multitask(args: ExpertConfig):
 
     if args.pipeline_eval_tasks == "in_distribution":
         tasks = [expert.expert_task_name for expert in library.data.values()]
-        args_copy.eval_metric = args.eval_metric
-        scores = eval_in_distribution(module, args_copy or args, tasks)
+        train_cfg.eval_metric = args.eval_metric
+        scores = eval_in_distribution(module, args, tasks)
         return
     else:
         if args.pipeline_eval_tasks == "all":
@@ -322,4 +281,4 @@ def run_multitask(args: ExpertConfig):
 
 if __name__ == "__main__":
     args = ExpertConfig.parse()
-    run_multitask(args)
+    run_eval(args)
