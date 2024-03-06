@@ -670,7 +670,6 @@ class PhatgooseTransform(HiddenStateComputer):
 class ArrowConfig(LibraryTransformConfig):
     ab_only: bool = True
     scale: bool = False  # If True, scale by eigenvalue
-    tie_qkv: bool = False  # If True, tie the QKV matrices
 
 
 class ArrowTransform(LibraryTransform):

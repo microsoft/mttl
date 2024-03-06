@@ -83,14 +83,12 @@ class ExpertConfig(Config):
         )
         self.transform_sparsity = 1.0
 
-        # Clown Router
+        # Clown / Per Token Router
         self.router_temp = 1.0
         self.notes = None
         self.proto_init = "hidden"  # also "arrow"
-        self.scale_prototypes = False  # clown routing with SVD
-        self.normalize_router_input = False
-        self.router_entropy = None
-        self.tie_qkv_routing = False
+        self.input_norm_fn = None
+        self.proto_norm_fn = None
 
         # Eval Library
         self.merge_or_route = None  # "uniform", "ties", "clown"

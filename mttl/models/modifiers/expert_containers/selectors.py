@@ -447,18 +447,16 @@ class MOERKHSSelector(Selector):
 
 
 @dataclass
-class ClownRouterConfig(SelectorConfig):
-    router_granularity: str = "finegrained"
+class PerTokenRouterConfig(SelectorConfig):
     router_temp: float = 1.0
     moe_top_k: int = -1
-    router_window_size: int = 3
-    proto_init: str = "hidden"
-    normalize_router_input: bool = True
-    router_entropy: float = None  # float from 0 to 1, controling the relative entropy w.r.t to the uniform distribution
+    proto_init: str = None
+    input_norm_fn: str = None
+    proto_norm_fn: str = None
 
 
-@register_multi_expert_selector("clown_router", ClownRouterConfig)
-class ClownSelector(Selector):
+@register_multi_expert_selector("per_token_router", PerTokenRouterConfig)
+class PerTokenSelector(Selector):
     def __init__(self, info_container, config, **kwargs) -> None:
         super().__init__(info_container, config, **kwargs)
 
@@ -474,95 +472,48 @@ class ClownSelector(Selector):
             torch.empty((0, self.input_dim), device=layer.weight.device)
         )
 
-        self.layer_norm = nn.LayerNorm(self.input_dim, elementwise_affine=False)
+        # validate args
+        assert self.config.proto_init is not None
+        assert self.config.input_norm_fn in [None, "layer_norm", "unit"]
+        assert self.config.proto_norm_fn in [None, "layer_norm", "unit"]
+
+        def _get_norm_layer(norm_fn):
+            """helper for normalizing input and expert embeddings"""
+
+            if norm_fn == "layer_norm":
+                return nn.LayerNorm(self.input_dim, elementwise_affine=False)
+            elif norm_fn == "unit":
+
+                def _unit_norm(x):
+                    return x / x.norm(dim=-1, p=2, keepdim=True).clamp(min=EPS)
+
+                return _unit_norm
+            else:
+                return nn.Identity()
+
+        self.input_norm = _get_norm_layer(self.config.input_norm_fn)
+        self.proto_norm = _get_norm_layer(self.config.proto_norm_fn)
 
     def overwrite_prototypes(self, prototypes):
         self.prototypes.data = prototypes.type_as(self.prototypes)
 
-    def entropy_normalization(self, x, rel_entropy_target, atol=0.1):
-        diff = 1e5
-        bs, sq_len, n_exp = x.size()
-
-        uniform_entropy = np.log(n_exp)
-        entropy_target = rel_entropy_target * uniform_entropy
-
-        values = (torch.arange(-50, 50) / 10.0).exp().to(x.device)
-        scores = x.unsqueeze(1) / values.view(1, values.size(0), *(1,) * (x.ndim - 1))
-        prob = F.softmax(scores, dim=-1)  # (bs, 100, sq, n_experts)
-        prob[prob != prob] = 1e-10
-        entropy = Categorical(probs=prob).entropy()
-        diff = (entropy - entropy_target).abs()
-        min_idx = diff.argmin(1)
-        min_vals = diff.gather(dim=1, index=min_idx.unsqueeze(1))
-
-        # TODO: loop until all is ok ?
-        is_ok = (min_vals < atol).float().mean()
-
-        out = prob.gather(
-            1, min_idx.view(bs, 1, sq_len, 1).expand(-1, -1, -1, n_exp)
-        ).squeeze(1)
-
-        return out
-
-    @forward_with_cache
-    def forward(self, input, **kwargs) -> BatchSequenceModulesAndWeightsSelectorOutput:
-        # do routing business on fp32
-        temp = (
-            self.config.router_temp
-            if self.config.router_temp > 0
-            else np.sqrt(input.shape[-1])
-        )
-        if self.prototypes.size(0) != len(self.expert_names):
-            raise ValueError("Prototypes not initialized correctly.")
-
-        input = input.to(dtype=self.prototypes.dtype)
-
-        if self.config.normalize_router_input:
-            # input /= input.norm(dim=-1, p=2, keepdim=True).clamp(min=EPS)
-            input = self.layer_norm(input)
-
-        input_ids = self.info_container["routing_infos"].input_ids
-        attn_mask = self.info_container["routing_infos"].attention_mask
-        bs, sq, D = input.shape
-
-        router_logits = F.linear(input, self.prototypes)
-
-        if self.config.proto_init == "arrow":
-            router_logits = router_logits.abs()
-
-        if self.config.router_entropy is not None:
-            # decay entropy over layers from uniform to 0
-            layer_id = 0  # int(self.__layer_name__.split(".")[1])
-            total_layers = 33
-            entropy_decay = max(1 - (layer_id / total_layers), 1e-3)
-
-            # tune the temperature so that it matches the desired entropy
-            routing_weights = self.entropy_normalization(
-                router_logits, self.config.router_entropy
-            )
-        else:
-            routing_weights = F.softmax(router_logits / temp, dim=-1, dtype=torch.float)
-
-        if routing_weights.ndim == 2:
-            routing_weights = routing_weights.unsqueeze(1).expand(
-                -1, input.shape[1], -1
-            )
-
+    def _log_entropy(self, logits):
+        # TODO: make sure this gets logged correctly
         # uniform routing entropy
-        ent_routing = -1 * (routing_weights * torch.log(routing_weights + 1e-6)).sum(-1)
-        if sq == 1:
-            ent_routing = ent_routing.sum()
-            valid_ps = routing_weights
-        else:
-            ent_routing = (ent_routing * attn_mask).sum() / attn_mask.sum()
-            valid_ps = routing_weights[attn_mask == 1]
+        attn_mask = self.info_container["routing_infos"].attention_mask == 1.0
+        bs, sq = attn_mask.size()
 
-        max_p, min_p = valid_ps.max(), valid_ps.min()
+        dist = Categorical(logits=logits)
+        entropy = dist.entropy()
+
+        if sq > 1:
+            mean_entropy = entropy[attn_mask].sum() / attn_mask.sum()
+        else:
+            mean_entropy = entropy.mean()
+
         to_store = {
             "ent_uniform": np.log(len(self.expert_names)),
-            "ent_routing": ent_routing.item(),
-            "max_p": max_p.item(),
-            "min_p": min_p.item(),
+            "ent_routing": mean_entropy.item(),
         }
 
         # Keep running statistics of routing
@@ -577,35 +528,42 @@ class ClownSelector(Selector):
         task_container["routing_count"] = count + 1
         self.info_container[task] = task_container
 
-        if self.config.moe_top_k > 0:
-            # TODO: mask and renormalize the routing_weights, so that it's still differentiable
-            _, selected_experts = torch.topk(
-                routing_weights, self.config.moe_top_k, dim=-1
-            )
+    @forward_with_cache
+    def forward(self, input, **kwargs) -> BatchSequenceModulesAndWeightsSelectorOutput:
+        # do routing business on fp32
+        temp = (
+            self.config.router_temp
+            if self.config.router_temp > 0
+            else np.sqrt(input.shape[-1])
+        )
+        if self.prototypes.size(0) != len(self.expert_names):
+            raise ValueError("Prototypes not initialized correctly.")
 
-            routing_weights = torch.zeros_like(routing_weights)
-            value = (
-                torch.ones(
-                    size=(1,),
-                    device=routing_weights.device,
-                    dtype=routing_weights.dtype,
-                )
-                / self.config.moe_top_k
+        input = input.to(dtype=self.prototypes.dtype)
+        input = self.input_norm(input)
+        prototypes = self.proto_norm(self.prototypes)
+
+        """ Logit Computation """
+        router_logits = F.linear(input, prototypes) / temp
+
+        if self.config.proto_init == "arrow":
+            router_logits = router_logits.abs()
+
+        self._log_entropy(router_logits)
+
+        if self.config.moe_top_k > 0:
+            # For now, we always renormalize the routing weights for hard routing
+            top_k_logits, modules = torch.topk(
+                router_logits, self.config.moe_top_k, dim=-1
             )
-            value = value.expand_as(selected_experts)
-            routing_weights.scatter_(dim=-1, index=selected_experts, src=value)
+            router_probs = F.softmax(top_k_logits, dim=-1)
+        else:
+            modules = None
+            router_probs = F.softmax(router_logits, dim=-1, dtype=torch.float)
 
         return BatchSequenceModulesAndWeightsSelectorOutput(
-            modules=None, weights=routing_weights
+            modules=modules, weights=router_probs
         )
-
-    def get_merging_weights(self, **selector_kwargs) -> Dict:
-        raise ValueError(
-            f"Not supported for {self.__class__} since routing depends on input."
-        )
-
-    def get_routing_weights(self):
-        raise ValueError("Not supported for ClownSelector.")
 
     def add_expert(self, expert_name: str, **kwargs):
         self.expert_names.append(expert_name)
@@ -750,10 +708,11 @@ class ZeroPerTokenSelector(Selector):
 
 @dataclass
 class PhatgooseSelectorConfig(SelectorConfig):
-    moe_top_k: int = 2  # negative number means we take all
-    router_temp: float = (
-        -1
-    )  # negative value means we use the default \sqrt(d) temp, where n is the input dimension.
+    pass
+    # moe_top_k: int = 2  # negative number means we take all
+    # router_temp: float = (
+    #     -1
+    # )  # negative value means we use the default \sqrt(d) temp, where n is the input dimension.
 
 
 class SigmoidGate(nn.Module):
@@ -823,7 +782,7 @@ class PhatgooseSelector(Selector):
         self.device = kwargs["layer"].weight.device
 
         self.gates = nn.ParameterDict()
-        self.router = None
+        # self.router = None
         self.layer = kwargs["layer"]
         self.default_expert_name = None
         self.routing_gates = []  # for logging purposes at training time
@@ -832,6 +791,7 @@ class PhatgooseSelector(Selector):
     def get_prototypes(self):
         return {k: gate.v.detach().cpu().numpy() for k, gate in self.gates.items()}
 
+    '''
     def set_prototypes(self, prototypes):
         """
         Sets prototypes for the gates and re-initializes the router with the new gates
@@ -850,55 +810,56 @@ class PhatgooseSelector(Selector):
             top_k=self.top_k,
             device=self.device,
         )
+    '''
 
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchSequenceModulesAndWeightsSelectorOutput:
-        if len(self.gates) == 1:
-            # selectors for tasks are trained independently
-            # all samples go through the same selector
-            scores = self.gates[self.default_expert_name](input)
-            # log the scores
-            container = kwargs.get("container", None)
-            if container is not None:
-                self.routing_gates.append(scores.detach().cpu().float())
-            return BatchSequenceModulesAndWeightsSelectorOutput(
-                torch.zeros_like(scores, dtype=torch.int8), scores
-            )
-        else:
-            # the inference procedure: we have multiple gates
-            # parallel forward + top-k selection
-            assert len(self.gates) == len(self.expert_names)
-            modules, scores = self.router(input)
-            routings = torch.zeros(
-                (input.shape[0], input.shape[1], len(self.expert_names)),
-                dtype=torch.float,
-                device=self.device,
-            )
+        # selectors for tasks are trained independently
+        # all samples go through the same selector
+        scores = self.gates[self.default_expert_name](input)
+        # log the scores
+        container = kwargs.get("container", None)
+        if container is not None:
+            self.routing_gates.append(scores.detach().cpu().float())
+        return BatchSequenceModulesAndWeightsSelectorOutput(
+            torch.zeros_like(scores, dtype=torch.int8), scores
+        )
+        """
+        # the inference procedure: we have multiple gates
+        # parallel forward + top-k selection
+        assert len(self.gates) == len(self.expert_names)
+        modules, scores = self.router(input)
+        routings = torch.zeros(
+            (input.shape[0], input.shape[1], len(self.expert_names)),
+            dtype=torch.float,
+            device=self.device,
+        )
 
-            if self.log_routing_stats:
-                # for logging purposes: we transform it into tokens x experts
-                _modules = modules.view(-1, self.router.moe_top_k)
-                _routings = routings.view(-1, len(self.expert_names))
-                _scores = scores.view(-1, self.router.moe_top_k)
-                _routings = _routings.scatter(1, _modules, _scores)
-                # calculate entropy and MI over the toekns dimention and log
-                layer_routing_dist = _routings
-                dims = layer_routing_dist.shape[1]
-                layer_routing_mean = layer_routing_dist.mean(0)
-                h_mean = Categorical(probs=layer_routing_mean).entropy() / math.log(
-                    dims
-                )
-                mean_h = Categorical(
-                    probs=layer_routing_dist
-                ).entropy().mean() / math.log(dims)
-                mi = h_mean - mean_h
-                logger.info(f"Layer {self.__layer_name__} MI: {mi}, mean_H: {mean_h}")
-                # TODO: figure out a way of how to actually log it to somewhere
-                # at first glance there is no collapse here, i.e. MI is low and entropy is not too low.
-
-            return BatchSequenceModulesAndWeightsSelectorOutput(
-                modules=modules, weights=scores
+        if self.log_routing_stats:
+            # for logging purposes: we transform it into tokens x experts
+            _modules = modules.view(-1, self.router.moe_top_k)
+            _routings = routings.view(-1, len(self.expert_names))
+            _scores = scores.view(-1, self.router.moe_top_k)
+            _routings = _routings.scatter(1, _modules, _scores)
+            # calculate entropy and MI over the toekns dimention and log
+            layer_routing_dist = _routings
+            dims = layer_routing_dist.shape[1]
+            layer_routing_mean = layer_routing_dist.mean(0)
+            h_mean = Categorical(probs=layer_routing_mean).entropy() / math.log(
+                dims
             )
+            mean_h = Categorical(
+                probs=layer_routing_dist
+            ).entropy().mean() / math.log(dims)
+            mi = h_mean - mean_h
+            logger.info(f"Layer {self.__layer_name__} MI: {mi}, mean_H: {mean_h}")
+            # TODO: figure out a way of how to actually log it to somewhere
+            # at first glance there is no collapse here, i.e. MI is low and entropy is not too low.
+
+        return BatchSequenceModulesAndWeightsSelectorOutput(
+            modules=modules, weights=scores
+        )
+        """
 
     def add_expert(self, expert_name: str, **kwargs):
         self.expert_names.append(expert_name)
