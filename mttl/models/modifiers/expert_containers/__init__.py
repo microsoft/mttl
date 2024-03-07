@@ -34,7 +34,7 @@ def _extract_identifier(string, match_on="finegrained"):
 def get_container_class(modifier: str):
     import os
 
-    if modifier in ["lora", "tied_lora"]:
+    if modifier == "lora":
         if os.environ.get("COALESCED_LORA_CONTAINER", "False") == "1":
             return CoalescedLoRAExpertContainer
         return LoRAExpertContainer

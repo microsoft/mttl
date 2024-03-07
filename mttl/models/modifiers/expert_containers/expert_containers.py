@@ -17,14 +17,7 @@ from mttl.models.modifiers.expert_containers.selectors import (
 )
 
 from mttl.utils import logger
-from mttl.models.modifiers.lora import (
-    LoRA,
-    LoRAConfig,
-    SkilledLoRA,
-    SkilledLoRAConfig,
-    TiedLoRAForKQV,
-    TiedLoRAConfig,
-)
+from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
 from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
 from mttl.models.modifiers.expert_containers.expert import Expert
 from mttl.models.modifiers.modify_model import get_modifier_type
@@ -153,7 +146,7 @@ class ExpertContainer:
 
 
 class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
-    __supports_configs__ = [LoRAConfig, TiedLoRAConfig]
+    __supports_configs__ = [LoRAConfig]
 
     def __init__(
         self,
@@ -207,11 +200,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
 
         # We may want to add a SkilledLoRA directly, if we are loading an MHR model for example
         lora_type = get_modifier_type(expert.expert_config)
-        LoRA_cls = {
-            "lora": LoRA,
-            "skilled_lora": SkilledLoRA,
-            "tied_lora": LoRA,
-        }[lora_type]
+        LoRA_cls = {"lora": LoRA, "skilled_lora": SkilledLoRA}[lora_type]
         expert_module = LoRA_cls(
             expert.expert_config, self.layer, layer_name=self.__layer_name__
         )

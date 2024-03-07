@@ -89,7 +89,8 @@ def test_arrow_with_tiedlora(tmp_path):
 
     config = ExpertConfig(
         kwargs={
-            "model_modifier": "tied_lora",
+            "tie_params": "q_proj\\.lora_a|k_proj\\.lora_a|v_proj\\.lora_a",
+            "model_modifier": "lora",
             "modify_layers": "k_proj|v_proj|q_proj|o_proj",
             "modify_modules": ".*self_attn.*",
             "trainable_param_names": ".*lora_[ab].*",
@@ -116,7 +117,7 @@ def test_arrow_with_tiedlora(tmp_path):
             task_sum += protos[task_name][key].sum().item()
         sums.append(task_sum)
 
-    assert np.allclose(sums, [8.483, 2.373], atol=1e-3)
+    assert np.allclose(sums, [-3.8098, 13.9056], atol=1e-3)
 
 
 def test_compute_svd_embeddings():

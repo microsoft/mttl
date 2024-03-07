@@ -101,4 +101,19 @@ def modify_with_adapter(transformer, config, adapter_klass):
                         c_name,
                         adapter_klass(config, layer),
                     )
+
+    if config.tie_params:
+        params_map = {}
+        for p_name, param in dict(transformer.named_parameters()).items():
+            match = re.search(config.tie_params, p_name)
+            if match:
+                # which option matched
+                matched_option = match.group()
+                key = p_name.split(matched_option)[0]
+                print(f"Tying {m_name}.{p_name}...")
+                if key in params_map:
+                    param.data = params_map[key].data
+                else:
+                    params_map[key] = param
+
     return transformer

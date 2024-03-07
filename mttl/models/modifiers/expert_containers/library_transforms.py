@@ -732,12 +732,16 @@ class ArrowTransform(LibraryTransform):
                     expert.expert_weights[f"{param_name}.lora_b"],
                 )
 
-                if expert.expert_info.model_modifier == "tied_lora":
+                if (
+                    expert.training_config.tie_params
+                    == "q_proj\\.lora_a|k_proj\\.lora_a|v_proj\\.lora_a"
+                ):
+                    tie_layers = "q_proj|k_proj|v_proj"
                     parent, layer_name = (
                         ".".join(param_name.split(".")[:-1]),
                         param_name.split(".")[-1],
                     )
-                    if re.fullmatch(expert.expert_config.tie_layers, layer_name):
+                    if re.fullmatch(tie_layers, layer_name):
                         params_under_same_parent = [
                             k
                             for k in state_dict_keys
@@ -758,14 +762,14 @@ class ArrowTransform(LibraryTransform):
                         for p in params_under_same_parent:
                             layer_name = p.split(".")[-1]
                             if re.fullmatch(
-                                expert.expert_config.tie_layers,
+                                tie_layers,
                                 layer_name,
                             ):
                                 Bs.append(expert.expert_weights[f"{p}.lora_b"])
                                 As.append(expert.expert_weights[f"{p}.lora_a"])
                         assert np.all(
                             [A.sum() == a.sum() for a in As]
-                        )  # since As are shared in tied_lora, they should be the same
+                        )  # since As are shared, they should be the same
                         B = torch.cat(Bs, dim=-1)
 
                 W = (A @ B).T  # out_features, in_features
@@ -792,7 +796,10 @@ class ArrowTransform(LibraryTransform):
                     bottom_vector = U_W[:, -1]
 
                 else:
-                    if expert.expert_info.model_modifier == "tied_lora":
+                    if (
+                        expert.training_config.tie_layers
+                        == "q_proj.lora_a|k_proj.lora_a|v_proj.lora_a"
+                    ):
                         raise NotImplementedError(
                             "Currently, tied LORA not supported for ArrowTransform with ab_only = False"
                         )
