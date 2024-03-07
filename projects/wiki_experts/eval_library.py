@@ -11,7 +11,7 @@ import json
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
-from mttl.models.modifiers.expert_containers.selectors import PerTokenSelector
+from mttl.models.modifiers.expert_containers.selectors import PerTokenSelector, Selector
 from mttl.models.modifiers.lora import LoRAConfig
 
 from mttl.utils import logger, remote_login, setup_logging
@@ -113,7 +113,7 @@ def eval_in_distribution(module, args: ExpertConfig, tasks):
     args.include_task_source = "*"
     transfer_table = TableLogger()
 
-    for task in tasks:
+    for i, task in enumerate(tasks):
         args.finetune_task_name = task
         args.predict_batch_size = 16
         if args.eval_metric in ["val_loss", "loss"]:
@@ -224,15 +224,12 @@ def run_eval(args: ExpertConfig):
         module.load_from_module_dict(library)
 
     module = module.to("cuda")
-    from mttl.models.modifiers.expert_containers import Selector
-
     metric_logger = Selector.metric_logger
 
     if args.pipeline_eval_tasks == "in_distribution":
         tasks = [expert.expert_task_name for expert in library.data.values()]
         train_cfg.eval_metric = args.eval_metric
-        scores = eval_in_distribution(module, args, tasks)
-        return
+        scores = eval_in_distribution(module, train_cfg, tasks)
     else:
         if args.pipeline_eval_tasks == "all":
             args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
@@ -253,9 +250,10 @@ def run_eval(args: ExpertConfig):
     if len(metric_logger) > 0:
         task_table = metric_logger.pretty_table(match_on="task|.*uniform.*")
         layer_table = metric_logger.pretty_table(match_on="layer|.*uniform.*")
+        expert_p = metric_logger.pretty_table(match_on=".*expert_p|.*uniform.*")
         print(task_table)
         print(layer_table)
-        print(scores)
+        print(expert_p)
 
     if wandb.run is not None:
         wandb.log({f"downstream/{k}": v for k, v in scores.items()})
