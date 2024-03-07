@@ -27,6 +27,7 @@ class MergeableAdapter(ABC, Adapter):
 class ModifierConfig(object):
     modify_modules: str = ".*"
     modify_layers: str = ".*"
+    tie_params: str = None
 
     def __eq__(self, other):
         # compare all the attributes
@@ -104,16 +105,20 @@ def modify_with_adapter(transformer, config, adapter_klass):
 
     if config.tie_params:
         params_map = {}
-        for p_name, param in dict(transformer.named_parameters()).items():
-            match = re.search(config.tie_params, p_name)
-            if match:
-                # which option matched
-                matched_option = match.group()
-                key = p_name.split(matched_option)[0]
-                print(f"Tying {m_name}.{p_name}...")
-                if key in params_map:
-                    param.data = params_map[key].data
-                else:
-                    params_map[key] = param
-
+        target_2_source_param = {}  # target param -> source param
+        for m_name, module in dict(transformer.named_modules()).items():
+            for p_name, param in dict(module.named_parameters(recurse=False)).items():
+                match = re.search(config.tie_params, f"{m_name}.{p_name}")
+                if match:
+                    matched_option = match.group()
+                    full_p_name = f"{m_name}.{p_name}"
+                    key = full_p_name.split(matched_option)[0]
+                    if key in params_map:
+                        logger.info(f"Tying {full_p_name}...")
+                        setattr(module, p_name, params_map[key][1])
+                        target_2_source_param[full_p_name] = params_map[key][0]
+                    else:
+                        params_map[key] = [full_p_name, param]
+        if len(target_2_source_param) > 0:
+            setattr(transformer, "remapped_params", target_2_source_param)
     return transformer

@@ -27,7 +27,6 @@ class LoRAConfig(ModifierConfig):
     lora_alpha: float = 16.0
     lora_dropout: float = 0.0
     lora_init_b_random: bool = False
-    tie_params: str = None
 
 
 @register_modifier("lora", config_cls=LoRAConfig)
