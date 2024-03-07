@@ -266,6 +266,10 @@ class ExpertModel(EfficientCheckpointModule):
         return generations
 
     def _delete_non_trainable_params(self, state_dict):
+        # this is making sure that shared params are int he final state dict.
+        # shared param by default will only appear in one place, e.g in q_proj. But we want them to also appear in k_proj and v_proj.
+        # without this they will be removed, since shared params are not in model.named_params()
+
         if not self.training_config.model_modifier == "tied_lora":
             return super()._delete_non_trainable_params(state_dict)
 
