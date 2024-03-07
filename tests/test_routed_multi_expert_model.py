@@ -15,7 +15,7 @@ from mttl.models.modifiers.expert_containers.selectors import (
     BatchSequenceModulesAndWeightsSelectorOutput,
     PolySelectorDirect,
     MOERKHSSelector,
-    ClownSelector,
+    PerTokenSelector,
     PolySelector,
 )
 from mttl.models.expert_model import ExpertModel, MoEModel, MultiExpertModel
@@ -73,6 +73,7 @@ def bigger_dummy_batch():
     attn_mask = 1 - attn_mask.cumsum(dim=-1)
     batch["attention_mask"] = attn_mask
     batch["task_names"] = ["dummy_task"] * bs
+    batch["task_sources"] = batch["task_names"]
     return batch
 
 
@@ -250,6 +251,7 @@ class TestMultiExpertModel:
         batch["attention_mask"] = attn_mask
         batch["task_names"] = ["mod1", "mod2"] * 4
         batch["task_names"] += ["some_unknown_task_name"] * 2
+        batch["task_sources"] = batch["task_names"]
 
         # Test Base Llama model
         output = module(batch)
@@ -444,7 +446,8 @@ class TestMultiExpertModel:
 
         seed_everything(0)
         config: ExpertConfig = tmp_exp_config
-        config.router_selector = "clown_router"
+        config.router_selector = "per_token_router"
+        config.proto_init = "arrow"
         config.router_granularity = "finegrained"
         config.router_temp = 0.1
 
@@ -452,7 +455,7 @@ class TestMultiExpertModel:
 
         container = module.model.transformer.h[0].attn.attention.k_proj
         assert isinstance(container, CoalescedLoRAExpertContainer)
-        assert isinstance(container.selector, ClownSelector)
+        assert isinstance(container.selector, PerTokenSelector)
         assert container.selector.config.moe_top_k == -1
         assert container.selector.config.router_temp == 0.1
 
@@ -466,7 +469,7 @@ class TestMultiExpertModel:
         # Initialize the prototypes
         def init_proto(fill_value=0.0, random=False):
             for sub_mod in module.modules():
-                if isinstance(sub_mod, ClownSelector):
+                if isinstance(sub_mod, PerTokenSelector):
                     print("overwriting")
                     protos = torch.full(
                         (len(sub_mod.expert_names), sub_mod.input_dim), fill_value
@@ -477,14 +480,14 @@ class TestMultiExpertModel:
 
         init_proto(1.0)
         output = module(bigger_dummy_batch)
-        entropy_uniform = container.selector.info_container["dummy_task"]["ent_uniform"]
-        actual_entropy = container.selector.info_container["dummy_task"]["ent_routing"]
+        entropy_uniform = container.selector.metric_logger.meters["ent_uniform"].avg
+        actual_entropy = container.selector.metric_logger.meters["ent_routing"].avg
         assert np.allclose(entropy_uniform, actual_entropy, atol=0.1)
 
         init_proto(random=True)
         output = module(bigger_dummy_batch)
-        entropy_uniform = container.selector.info_container["dummy_task"]["ent_uniform"]
-        actual_entropy = container.selector.info_container["dummy_task"]["ent_routing"]
+        entropy_uniform = container.selector.metric_logger.meters["ent_uniform"].avg
+        actual_entropy = container.selector.metric_logger.meters["ent_routing"].avg
         assert actual_entropy < entropy_uniform
 
 

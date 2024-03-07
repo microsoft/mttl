@@ -517,9 +517,8 @@ class PerTokenSelector(Selector):
         to_store = {"ent_routing": mean_entropy.item()}
         self.metric_logger.update(prefix=f"task_{task}", value_dict=to_store)
         self.metric_logger.update(prefix=self.__layer_name__, value_dict=to_store)
-        self.metric_logger.update(
-            value_dict={"ent_uniform": np.log(len(self.expert_names))}
-        )
+        to_store.update({"ent_uniform": np.log(len(self.expert_names))})
+        self.metric_logger.update(value_dict=to_store)
 
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchSequenceModulesAndWeightsSelectorOutput:
