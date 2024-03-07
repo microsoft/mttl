@@ -181,6 +181,8 @@ def run_multitask(args: ExpertConfig):
         trainer.test(module, dm)
 
         if expert_library is not None:
+            # refresh expert library: so we dont overwrite the readme if the remote has changed.
+            expert_library.refresh_from_remote()
             expert_name = args.expert_name or args.finetune_task_name
             expert_library.add_expert_from_ckpt(checkpoint, expert_name)
 
