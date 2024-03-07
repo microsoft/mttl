@@ -42,7 +42,9 @@ def run_eval(args):
                 library.add_expert_from_ckpt(file, force=True)
         else:
             library = ExpertLibrary.get_expert_library(
-                args.library_id, exclude_selection=filtering_experts
+                repo_id=args.library_id,
+                exclude_selection=filtering_experts,
+                destination_id=args.destination_library_id,
             )
 
         logger.info("Loaded library: {}".format(args.library_id))

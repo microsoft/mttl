@@ -113,7 +113,10 @@ def run_eval(args):
         module = MultiExpertModel(**vars(args), tokenizer=mmlu.datamodule.tokenizer)
 
     if args.library_id:
-        library = ExpertLibrary.get_expert_library(args.library_id)
+        library = ExpertLibrary.get_expert_library(
+            repo_id=args.library_id,
+            destination_id=args.destination_library_id,
+        )
     else:
         library = None
 

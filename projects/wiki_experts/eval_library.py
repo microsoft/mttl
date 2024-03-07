@@ -183,7 +183,7 @@ def run_multitask(args: ExpertConfig):
         repo_id=args.library_id,
         token=args.remote_token,
         exclude_selection=exclude_phi_tasks,
-        make_local=True,
+        destination_id=args.destination_library_id,
     )
 
     # cfg = TiesMergeConfig(top_k=0.2)
