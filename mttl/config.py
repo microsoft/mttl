@@ -301,6 +301,7 @@ class Config:
         # which modules to modify and which layers for adapters
         self.modify_modules = None
         self.modify_layers = None
+        self.tie_params = None  #  "q_proj\\.lora_a|k_proj\\.lora_a|v_proj\\.lora_a" to share lora_a for q,k,v
 
         """
         router_granularity : how granular is the module selection

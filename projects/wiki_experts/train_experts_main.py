@@ -70,7 +70,11 @@ def run_multitask(args: ExpertConfig):
     remote_login(args.remote_token)
     expert_library = None
     if args.library_id:
-        expert_library = ExpertLibrary.get_expert_library(args.library_id, create=True)
+        expert_library = ExpertLibrary.get_expert_library(
+            repo_id=args.library_id,
+            create=True,
+            destination_id=args.destination_library_id,
+        )
 
     loggers = get_pl_loggers(args)
     # select dataloader
@@ -78,7 +82,7 @@ def run_multitask(args: ExpertConfig):
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
 
-    module = model_class(**vars(args), tokenizer=dm.tokenizer)
+    module = model_class(**vars(args), tokenizer=dm.tokenizer, device_map="auto")
 
     # get metric monitors for models
     callbacks = get_monitors(args)
@@ -94,7 +98,6 @@ def run_multitask(args: ExpertConfig):
         monitor=monitor,
         save_last=True,
         mode=mode,
-        expert_library=expert_library,
         save_each_epoch=args.save_each_epoch,
     )
     callbacks.append(checkpoint_callback)
@@ -102,7 +105,7 @@ def run_multitask(args: ExpertConfig):
     if args.eval_rouge_flag:
         rouge = RougeCallback(
             get_datamodule(args, for_generation=True),
-            every_n_epochs=3 if args.num_train_epochs > 3 else 1,
+            every_n_epochs=3 if args.num_train_epochs > 5 else 1,
         )
         callbacks.append(rouge)
     else:
@@ -176,6 +179,12 @@ def run_multitask(args: ExpertConfig):
         )
         module.load_state_dict(torch.load(checkpoint)["state_dict"])
         trainer.test(module, dm)
+
+        if expert_library is not None:
+            # refresh expert library: so we dont overwrite the readme if the remote has changed.
+            expert_library.refresh_from_remote()
+            expert_name = args.expert_name or args.finetune_task_name
+            expert_library.add_expert_from_ckpt(checkpoint, expert_name)
 
         if args.create_transfer_matrix:
             create_transfer_matrix(args, checkpoint)

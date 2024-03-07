@@ -201,7 +201,9 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         # We may want to add a SkilledLoRA directly, if we are loading an MHR model for example
         lora_type = get_modifier_type(expert.expert_config)
         LoRA_cls = {"lora": LoRA, "skilled_lora": SkilledLoRA}[lora_type]
-        expert_module = LoRA_cls(expert.expert_config, self.layer)
+        expert_module = LoRA_cls(
+            expert.expert_config, self.layer, layer_name=self.__layer_name__
+        )
 
         if expert_weights is not None:
             expert_module.load_lora_weights(expert_weights)
@@ -378,9 +380,11 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             lora_rank=config.lora_rank,
             n_splits=config.n_splits if isinstance(config, SkilledLoRAConfig) else 1,
             n_skills=0,
-            phi_2_align_heads=config.phi_2_align_heads
-            if isinstance(config, SkilledLoRAConfig)
-            else False,
+            phi_2_align_heads=(
+                config.phi_2_align_heads
+                if isinstance(config, SkilledLoRAConfig)
+                else False
+            ),
         )
         self.experts = SkilledLoRA(dummy_config, layer)
 

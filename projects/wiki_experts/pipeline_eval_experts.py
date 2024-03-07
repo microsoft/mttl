@@ -44,7 +44,10 @@ def run_eval(args):
             for file in glob.glob(os.path.join(args.library_id, "*")):
                 library.add_expert_from_ckpt(file, force=True)
         else:
-            library = ExpertLibrary.get_expert_library(args.library_id)
+            library = ExpertLibrary.get_expert_library(
+                repo_id=args.library_id,
+                destination_id=args.destination_library_id,
+            )
 
         logger.info("Loaded library: {}".format(args.library_id))
     else:
