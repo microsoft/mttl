@@ -183,7 +183,7 @@ def run_eval(args: ExpertConfig):
         repo_id=args.library_id,
         token=args.remote_token,
         exclude_selection=exclude_phi_tasks,
-        # make_local=True,
+        destination_id=args.destination_library_id,
     )
     an_expert = library[next(iter(library.keys()))]
     train_cfg = deepcopy(an_expert.training_config)

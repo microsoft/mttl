@@ -99,6 +99,7 @@ We will describe below some key object classes that will be useful when developi
 
 
 Wiki-experts supports HuggingFace and Azure Blob Storage for storing and retrieving experts. Use the `HFExpertLibrary` for HuggingFace integration and `BlobExpertLibrary` for Azure Blob Storage. Alternatively, you can use the `ExpertLibrary.get_expert_library` to get the appropriate library instance based on the repository id. In this case, the repository id should follow the format `"hf://<user_id_>/<lib_id>"` for HuggingFace and `"az://<storage_account>/<lib_id>"` for Azure Blob Storage.
+You can also use the `destination_id` parameter to create a copy of any kind of the library.
 
 ```python
 # For HuggingFace
@@ -108,6 +109,11 @@ hf_export_lib = HFExpertLibrary(repo_id, token=token)
 # or
 repo_id = "hf://<your_hf_usename>/<my_lora_library>"
 hf_export_lib = ExpertLibrary.get_expert_library(repo_id, token)
+
+# making a copy of the library using the `destination_id` parameter
+local_expert_lib = ExpertLibrary.get_expert_library(
+   repo_id, token, destination_id="local://my_local_library"
+)
 
 # For Azure Blob Storage
 token = "<your_sas_token>"

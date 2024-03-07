@@ -16,6 +16,7 @@ class ExpertConfig(Config):
 
         self.remote_token = None
         self.library_id = None
+        self.destination_library_id = None
 
         self.do_train = True
 

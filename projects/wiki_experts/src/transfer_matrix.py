@@ -182,7 +182,9 @@ def run_eval(args: TransferMatrixConfig, debug=None):
 
     print("###### Tasks", args.finetune_task_name)
     expert_lib = ExpertLibrary.get_expert_library(
-        repo_id=args.library_id, token=args.remote_token
+        repo_id=args.library_id,
+        token=args.remote_token,
+        destination_id=args.destination_library_id,
     )
 
     transfer_table: TableLogger = produce_transfer_matrix(

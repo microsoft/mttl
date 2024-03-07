@@ -70,7 +70,11 @@ def run_multitask(args: ExpertConfig):
     remote_login(args.remote_token)
     expert_library = None
     if args.library_id:
-        expert_library = ExpertLibrary.get_expert_library(args.library_id, create=True)
+        expert_library = ExpertLibrary.get_expert_library(
+            repo_id=args.library_id,
+            create=True,
+            destination_id=args.destination_library_id,
+        )
 
     loggers = get_pl_loggers(args)
     # select dataloader

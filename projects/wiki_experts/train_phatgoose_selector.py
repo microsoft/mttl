@@ -24,7 +24,11 @@ def train_with_transform(args: ExpertConfig):
     )
 
     library_id, expert_names = parse_libname(args.library_id)
-    library = ExpertLibrary.get_expert_library(library_id, create=False)
+    library = ExpertLibrary.get_expert_library(
+        repo_id=library_id,
+        create=False,
+        destination_id=args.destination_library_id,
+    )
     phagoose_transform = PhatgooseTransform(
         PhatgooseConfig(n_steps=args.n_steps_pg, learning_rate=args.learning_rate_pg)
     )
