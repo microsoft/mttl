@@ -265,47 +265,6 @@ class ExpertModel(EfficientCheckpointModule):
         )
         return generations
 
-    def _delete_non_trainable_params(self, state_dict):
-        # this is making sure that shared params are int he final state dict.
-        # shared param by default will only appear in one place, e.g in q_proj. But we want them to also appear in k_proj and v_proj.
-        # without this they will be removed, since shared params are not in model.named_params()
-
-        if not self.training_config.model_modifier == "tied_lora":
-            return super()._delete_non_trainable_params(state_dict)
-
-        # include shared params in the state dict
-        if not hasattr(self, "_params_from_checkpoint"):
-            self._params_from_checkpoint = set()
-
-        trainable_param_names = set()
-        for k in state_dict.keys():
-            if re.fullmatch(self.training_config.trainable_param_names, k) and (
-                not self.training_config.non_trainable_param_names
-                or not re.fullmatch(self.training_config.non_trainable_param_names, k)
-            ):
-                trainable_param_names.add(k)
-
-        keys = [k for k in state_dict.keys()]
-
-        # remove also parameters in the loss plugins, these need not be saved
-        # (auxiliary parameters for the losses)
-        plugin_param_keys = set()
-        for _, plugin in self.loss_plugins.items():
-            plugin_param_keys.update(plugin.state_dict().keys())
-
-        deleted = []
-        for key in keys:
-            # we can safely avoid dumping this parameter if it is both
-            # not in the trainable parameters and was not loaded from checkpoint
-            if (
-                not (key in trainable_param_names)
-                and not (key in self._params_from_checkpoint)
-            ) or key in plugin_param_keys:
-                del state_dict[key]
-                deleted.append(key)
-
-        logger.info("Deleted from state dict: {}".format(len(deleted)))
-
     def on_save_checkpoint(self, ckpt):
         super().on_save_checkpoint(ckpt)
 

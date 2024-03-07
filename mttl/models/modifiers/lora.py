@@ -651,7 +651,6 @@ class TiedLoRAForKQV(Adapter):
     def add_layer(self, layer, layer_name):
         self.layers.append(layer)
         self.layer_names.append(layer_name)
-
         self.lora_bs.append(self.create_lora_b())
 
     def create_lora_a(self):
@@ -681,7 +680,7 @@ class TiedLoRAForKQV(Adapter):
         return LoRAView(
             self.config,
             self.layers[i],
-            self.lora_a,  # shared
+            nn.Parameter(self.lora_a.data),
             self.lora_bs[i],  # specific
         )
 
