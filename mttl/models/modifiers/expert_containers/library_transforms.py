@@ -768,7 +768,7 @@ class ArrowTransform(LibraryTransform):
                                 Bs.append(expert.expert_weights[f"{p}.lora_b"])
                                 As.append(expert.expert_weights[f"{p}.lora_a"])
                         assert np.all(
-                            [A.sum() == a.sum() for a in As]
+                            [np.allclose(A, a) for a in As]
                         )  # since As are shared, they should be the same
                         B = torch.cat(Bs, dim=-1)
 
