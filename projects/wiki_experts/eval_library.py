@@ -251,9 +251,11 @@ def run_eval(args: ExpertConfig):
         task_table = metric_logger.pretty_table(match_on="task|.*uniform.*")
         layer_table = metric_logger.pretty_table(match_on="layer|.*uniform.*")
         expert_p = metric_logger.pretty_table(match_on=".*expert_p|.*uniform.*")
+        angle = metric_logger.pretty_table(match_on=".*angle.*")
         print(task_table)
         print(layer_table)
         print(expert_p)
+        print(angle)
 
     if wandb.run is not None:
         wandb.log({f"downstream/{k}": v for k, v in scores.items()})
