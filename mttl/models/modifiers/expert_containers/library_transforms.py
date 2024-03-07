@@ -1,5 +1,6 @@
 from abc import abstractmethod
 import abc
+import re
 from dataclasses import dataclass
 import dataclasses
 import copy
@@ -741,6 +742,47 @@ class ArrowTransform(LibraryTransform):
                     expert_weights[f"{param_name}.lora_a"],
                     expert_weights[f"{param_name}.lora_b"],
                 )
+
+                if (
+                    expert.training_config.tie_params
+                    == "q_proj\\.lora_a|k_proj\\.lora_a|v_proj\\.lora_a"
+                ):
+                    tie_layers = "q_proj|k_proj|v_proj"
+                    parent, layer_name = (
+                        ".".join(param_name.split(".")[:-1]),
+                        param_name.split(".")[-1],
+                    )
+                    if re.fullmatch(tie_layers, layer_name):
+                        params_under_same_parent = [
+                            k
+                            for k in state_dict_keys
+                            if ".".join(k.split(".")[:-1]) == parent
+                        ]
+                        for p in params_under_same_parent:
+                            if p in vectors[expert_name]:
+                                # SVD for this parameter group has been computed already
+                                vectors[expert_name][param_name] = vectors[expert_name][
+                                    p
+                                ]
+                                eigvals[expert_name][param_name] = eigvals[expert_name][
+                                    p
+                                ]
+                                continue
+
+                        As, Bs = [], []
+                        for p in params_under_same_parent:
+                            layer_name = p.split(".")[-1]
+                            if re.fullmatch(
+                                tie_layers,
+                                layer_name,
+                            ):
+                                Bs.append(expert.expert_weights[f"{p}.lora_b"])
+                                As.append(expert.expert_weights[f"{p}.lora_a"])
+                        assert np.all(
+                            [np.allclose(A, a) for a in As]
+                        )  # since As are shared, they should be the same
+                        B = torch.cat(Bs, dim=-1)
+
                 W = (A @ B).T  # out_features, in_features
 
                 if self.config.ab_only:
@@ -771,6 +813,13 @@ class ArrowTransform(LibraryTransform):
                         )
 
                 else:
+                    if (
+                        expert.training_config.tie_layers
+                        == "q_proj.lora_a|k_proj.lora_a|v_proj.lora_a"
+                    ):
+                        raise NotImplementedError(
+                            "Currently, tied LORA not supported for ArrowTransform with ab_only = False"
+                        )
                     base_W = base_model.model.state_dict()[f"{param_name}.weight"]
                     W_AB = base_W + W
                     eig_input = W_AB.T @ W_AB
