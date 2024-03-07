@@ -23,8 +23,8 @@ def is_phi2_eval_task(task):
 
 
 @retry(max_retries=5, wait_seconds=60)
-def load_dataset_with_retry(**kwargs):
-    return load_dataset(**kwargs)
+def load_dataset_with_retry(*args, **kwargs):
+    return load_dataset(*args, **kwargs)
 
 
 def augment_few_shot_task(
