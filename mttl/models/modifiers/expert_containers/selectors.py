@@ -522,6 +522,20 @@ class PerTokenSelector(TaskToExpertTracker):
     def overwrite_prototypes(self, prototypes):
         self.prototypes.data = prototypes.type_as(self.prototypes)
 
+    def _log_angle(self, angle):
+        bs, sq, n_exp = angle.size()
+
+        if sq > 1:
+            attn_mask = self.info_container["routing_infos"].attention_mask == 1.0
+            mean_angle = angle[attn_mask].sum() / attn_mask.sum() / n_exp
+        else:
+            mean_angle = angle.mean()
+
+        task = self.info_container["routing_infos"].task_sources[0]
+        to_store = {"angle": mean_angle.item()}
+        self.metric_logger.update(prefix=f"task_{task}", value_dict=to_store)
+        self.metric_logger.update(prefix=self.__layer_name__, value_dict=to_store)
+
     def _log_entropy(self, logits):
         # uniform routing entropy
         bs, sq, dim = logits.size()
@@ -585,10 +599,17 @@ class PerTokenSelector(TaskToExpertTracker):
         prototypes = self.proto_norm(self.prototypes)
 
         """ Logit Computation """
-        router_logits = F.linear(input, prototypes) / temp
-
+        router_logits = F.linear(input, prototypes)
         if self.config.proto_init == "arrow":
             router_logits = router_logits.abs()
+
+        # log angle between input and prototypes
+        angle = router_logits / input.norm(p=2, dim=-1, keepdim=True).clamp(min=EPS)
+        angle = angle / prototypes.norm(p=2, dim=-1).view(1, 1, -1).clamp(min=EPS)
+        self._log_angle(angle)
+
+        # control entropy of distribution
+        router_logits /= temp
 
         if self.config.moe_top_k > 0:
             # For now, we always renormalize the routing weights for hard routing
