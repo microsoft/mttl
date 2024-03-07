@@ -466,6 +466,28 @@ def test_copy_library_local_to_local(tmp_path, build_meta_ckpt, setup_repo, repo
     assert base_files == new_files
 
 
+def test_get_expert_library_copy(tmp_path, build_meta_ckpt, setup_repo, repo_id):
+    # Create a library with two experts
+    local_path = repo_id = tmp_path / "base_repo"
+    repo_id.mkdir()
+    repo_id = str(repo_id)
+    engine = LocalFSEngine()
+    setup_repo(engine, repo_id)
+    filenames = build_meta_ckpt(local_path, 2)
+
+    # Get the expert library
+    library = ExpertLibrary.get_expert_library(repo_id)
+
+    # Get the expert library creating a copy of the original
+    new_repo_id = str(tmp_path / "new_repo")
+    new_lib = ExpertLibrary.get_expert_library(repo_id, destination_id=new_repo_id)
+
+    # drop the path and keep the filenames
+    base_files = {f.split("/")[-1] for f in library.list_repo_files(repo_id)}
+    new_files = {f.split("/")[-1] for f in new_lib.list_repo_files(new_repo_id)}
+    assert base_files == new_files
+
+
 def test_virtual_library_is_in_memory(tmp_path, build_meta_ckpt, setup_repo, repo_id):
     # Create a library with two experts
     local_path = repo_id = tmp_path / "base_repo"

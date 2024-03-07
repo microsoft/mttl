@@ -1279,30 +1279,9 @@ class ExpertLibrary:
                 new_lib.add_expert(expert)
         return new_lib
 
-    @classmethod
-    def get_expert_library(
-        cls,
-        repo_id: str,
-        token: Optional[str] = None,
-        model_name: Optional[str] = None,
-        selection: Optional[List[str]] = None,
-        exclude_selection: Optional[List[str]] = None,
-        create: bool = False,
-        ignore_sliced: bool = False,
-        expert_library_type: Union[Type["ExpertLibrary"], str] = None,
-    ):
-        """Instantiate an ExpertLibrary from one of the available expert library types:
-            - "local": LocalExpertLibrary,
-            - "virtual": VirtualLocalLibrary,
-            - "az": BlobExpertLibrary,
-            - "hf": HFExpertLibrary,
-
-        The expert library type is selected based on the following order of priority:
-            1. If expert_library_type is provided, and is one of ExpertLibrary subclasses, uses it.
-            2. If repo_id includes one of the following substrings: "local://", "virtual://", "az://", "hf://".
-            3. Otherwise, uses LocalExpertLibrary.
-        """
-
+    @staticmethod
+    def _get_expert_lib_class(repo_id, expert_library_type):
+        """Decide which ExpertLibrary subclass to use based on the repo_id."""
         available_libraries = {
             "local": LocalExpertLibrary,
             "virtual": VirtualLocalLibrary,
@@ -1322,11 +1301,39 @@ class ExpertLibrary:
                 repo_id = prefix[1]
             else:
                 expert_library_type = "local"
-            try:
-                expert_lib_class = available_libraries[expert_library_type]
-            except KeyError:
-                raise ValueError(f"Unknown expert library type {expert_library_type}.")
+        try:
+            expert_lib_class = available_libraries[expert_library_type]
+        except KeyError:
+            raise ValueError(f"Unknown expert library type {expert_library_type}.")
+        return expert_lib_class
 
+    @classmethod
+    def get_expert_library(
+        cls,
+        repo_id: str,
+        token: Optional[str] = None,
+        model_name: Optional[str] = None,
+        selection: Optional[List[str]] = None,
+        exclude_selection: Optional[List[str]] = None,
+        create: bool = False,
+        ignore_sliced: bool = False,
+        expert_library_type: Union[Type["ExpertLibrary"], str] = None,
+        destination_id: Optional[str] = None,
+    ):
+        """Instantiate an ExpertLibrary from one of the available expert library types:
+            - "local": LocalExpertLibrary,
+            - "virtual": VirtualLocalLibrary,
+            - "az": BlobExpertLibrary,
+            - "hf": HFExpertLibrary,
+
+        The expert library type is selected based on the following order of priority:
+            1. If expert_library_type is provided, and is one of ExpertLibrary subclasses, uses it.
+            2. If repo_id includes one of the following substrings: "local://", "virtual://", "az://", "hf://".
+            3. Otherwise, uses LocalExpertLibrary.
+
+        If a destination_id is provided, the expert library will be copied to the new destination.
+        """
+        expert_lib_class = cls._get_expert_lib_class(repo_id, expert_library_type)
         expert_lib = expert_lib_class(
             repo_id=repo_id,
             token=token,
@@ -1336,6 +1343,13 @@ class ExpertLibrary:
             create=create,
             ignore_sliced=ignore_sliced,
         )
+        if destination_id is not None:
+            expert_lib_class_copy = cls._get_expert_lib_class(
+                destination_id, expert_library_type
+            )
+            expert_lib = expert_lib_class_copy.from_expert_library(
+                expert_lib, destination_id, force=True, upload_aux_data=True
+            )
 
         return expert_lib
 
