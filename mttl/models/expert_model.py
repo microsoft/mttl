@@ -280,6 +280,21 @@ class ExpertModel(EfficientCheckpointModule):
     def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
         return super().on_before_optimizer_step(optimizer)
 
+    def _delete_non_trainable_params(self, *args, **kwargs):
+        if hasattr(self.model, "remapped_params"):
+            # in case of tied params, 'remapped_params' will contains
+            # for each tied param in key, the name of param it is tied to in value.
+            # This makes sure the resulting state dict contains all the params.
+            return super()._delete_non_trainable_params(
+                *args,
+                **kwargs,
+                add_trainable_params=[
+                    "model." + p for p in self.model.remapped_params.keys()
+                ],
+            )
+
+        return super()._delete_non_trainable_params(*args, **kwargs)
+
 
 class MultiExpertModel(ExpertModel):
     """Adds all functions and properties for a multi-expert model."""

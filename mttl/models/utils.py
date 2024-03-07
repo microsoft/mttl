@@ -292,25 +292,17 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
                 logger.info("Loading {} from state dict.".format(name))
         return super().load_state_dict(ckpt, strict=False)
 
-    def _delete_non_trainable_params(self, state_dict):
+    def _delete_non_trainable_params(self, state_dict, add_trainable_params=[]):
         if not hasattr(self, "_params_from_checkpoint"):
             self._params_from_checkpoint = set()
 
-        trainable_param_names = []
         if not hasattr(self, "trainable_param_names"):
             trainable_param_names = [
                 n for n, p in self.named_parameters() if p.requires_grad
             ]
         else:
             trainable_param_names = self.trainable_param_names
-
-        if hasattr(self.model, "remapped_params"):
-            # in case of tied params, 'remapped_params' will contains
-            # for each tied param in key, the name of param it is tied to in value.
-            # This makes sure the resulting state dict contains all the params.
-            trainable_param_names.extend(
-                ["model." + p for p in self.model.remapped_params.keys()]
-            )
+        trainable_param_names.extend(add_trainable_params)
 
         keys = [k for k in state_dict.keys()]
 
