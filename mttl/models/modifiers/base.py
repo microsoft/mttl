@@ -4,6 +4,7 @@ from torch import nn
 import re
 from mttl.utils import logger
 from dataclasses import dataclass
+from typing import Iterable
 
 
 class Adapter(nn.Module):
@@ -90,6 +91,83 @@ class ModifyMixin(nn.Module):
         return modify_with_adapter(transformer, config, cls)
 
 
+def get_target_2_source_param_mapping(
+    named_params: Iterable, tie_params, expand_if_targets_are_missing=False
+) -> Dict[str, str]:
+    """
+    Create a dict for parameter tieing: target param -> source param
+    Assumes:
+        - that "tie_params" is a regex that matches the parameters that need to be tied.
+        - matched parameters will be tied within a common pare module.
+
+        Example for Llama like model:
+            - if tie_params = "q_proj.lora_a|k_proj.lora_a|v_proj.lora_a", lora_a will be tied across q_proj, k_proj, and v_proj within the same parent (attn_module).
+            - if tie_params = ".*lora_a.*", nothing will be tied because lora_a is not within the same parent module.
+
+    Args:
+        param_names: Iterable of tuples (param_name, any)
+        tie_params: regex that matches the parameters that need to be tied within the same parent.
+        expand_if_targets_are_missing: bool, if True, will add missing targets to target_2_source_param at first match without checking if targets are also in named_params. Should be used when name_params only contains the sources.
+
+    """
+    target_2_source_param = {}  # target param -> source param
+    if tie_params:
+        source_2_parameter = {}
+        for p_name, _ in named_params:
+            match = re.search(tie_params, p_name)
+            if match:
+                matched_option = match.group()
+                parent = p_name.split(matched_option)[0]
+                if parent in source_2_parameter:
+                    if not expand_if_targets_are_missing:
+                        target_2_source_param[p_name] = source_2_parameter[parent]
+                    assert p_name in target_2_source_param
+                else:
+                    source_2_parameter[parent] = p_name
+
+                    if expand_if_targets_are_missing:
+                        params_to_add = tie_params.replace("\\", "").split("|")
+                        for p in params_to_add:
+                            if p not in p_name:
+                                target_2_source_param[f"{parent}{p}"] = p_name
+
+    return target_2_source_param
+
+
+def get_parameter_object(transformer, p_name_query):
+    """
+    Given a model and a parameter name, returns the parameter object.
+    """
+    for m_name, module in dict(transformer.named_modules()).items():
+        for p_name, param in dict(module.named_parameters(recurse=False)).items():
+            if f"{m_name}.{p_name}" == p_name_query:
+                return getattr(module, p_name)
+
+
+def tie_params(transformer, config, target_2_source_param):
+    """
+    Given a dict for parameter tieing: target param -> source param, ties the parameters.
+    """
+    if len(target_2_source_param) > 0:
+        for m_name, module in dict(transformer.named_modules()).items():
+            for p_name, param in dict(module.named_parameters(recurse=False)).items():
+                if f"{m_name}.{p_name}" in target_2_source_param:
+                    logger.info(
+                        f"Tying {m_name}.{p_name} to {target_2_source_param[f'{m_name}.{p_name}']}..."
+                    )
+                    # m_name is the common parent module,
+                    # but to keep it more general we retrieve the module by parameter name again
+                    p_source = get_parameter_object(
+                        transformer, target_2_source_param[f"{m_name}.{p_name}"]
+                    )
+
+                    setattr(module, p_name, p_source)
+                    assert getattr(module, p_name) is p_source
+        assert len(transformer.state_dict().keys()) > len(
+            list(transformer.named_parameters())
+        ), "Some parameters are not tied."
+
+
 def modify_with_adapter(transformer, config, adapter_klass):
     for m_name, module in dict(transformer.named_modules()).items():
         if re.fullmatch(config.modify_modules, m_name):
@@ -103,22 +181,8 @@ def modify_with_adapter(transformer, config, adapter_klass):
                         adapter_klass(config, layer),
                     )
 
-    if config.tie_params:
-        params_map = {}
-        target_2_source_param = {}  # target param -> source param
-        for m_name, module in dict(transformer.named_modules()).items():
-            for p_name, param in dict(module.named_parameters(recurse=False)).items():
-                match = re.search(config.tie_params, f"{m_name}.{p_name}")
-                if match:
-                    matched_option = match.group()
-                    full_p_name = f"{m_name}.{p_name}"
-                    key = full_p_name.split(matched_option)[0]
-                    if key in params_map:
-                        logger.info(f"Tying {full_p_name}...")
-                        setattr(module, p_name, params_map[key][1])
-                        target_2_source_param[full_p_name] = params_map[key][0]
-                    else:
-                        params_map[key] = [full_p_name, param]
-        if len(target_2_source_param) > 0:
-            setattr(transformer, "remapped_params", target_2_source_param)
+    target_2_source_param = get_target_2_source_param_mapping(
+        transformer.named_parameters(), config.tie_params
+    )
+    tie_params(transformer, config, target_2_source_param)
     return transformer

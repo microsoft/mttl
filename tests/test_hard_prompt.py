@@ -77,7 +77,7 @@ def test_hard_prompt_eval(flan_batch_for_generation):
             expert_task_name="prefix",
             expert_config=config,
         ),
-        expert_weights=weight,
+        weights=weight,
     )
     model = add_expert_to_transformer(
         model,
