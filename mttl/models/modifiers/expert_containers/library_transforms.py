@@ -630,9 +630,6 @@ class PhatgooseTransform(HiddenStateComputer):
             )
             assert p_sum_before == p_sum_after
 
-            # model_before = MultiExpertModel(**vars(training_config)).to("cuda")
-            # model_before.add_expert_instance(expert, is_default=True)
-
             p_sum_sel_after = sum(
                 p.sum() for n, p in model.named_parameters() if "selector" in n
             )
