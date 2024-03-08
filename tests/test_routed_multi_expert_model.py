@@ -446,8 +446,7 @@ class TestMultiExpertModel:
 
         seed_everything(0)
         config: ExpertConfig = tmp_exp_config
-        config.router_selector = "per_token_router"
-        config.proto_init = "arrow"
+        config.router_selector = "arrow_router"
         config.router_granularity = "finegrained"
         config.router_temp = 0.1
 
