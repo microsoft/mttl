@@ -1,9 +1,6 @@
 import os
 import json
-from mttl.models.modifiers.expert_containers.expert_library import (
-    HFExpertLibrary,
-    LocalExpertLibrary,
-)
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from mttl.models.modifiers.expert_containers.library_transforms import (
     MBClusteringTransformConfig,
     MBCWithCosSimTransform,
@@ -13,24 +10,17 @@ from mttl.models.expert_config import ExpertConfig
 
 
 def main(args: ExpertConfig):
-    library = HFExpertLibrary(args.library_id)
-
-    # making local copy of remote lib
-    destination = os.environ.get(
-        "HF_LIB_CACHE", os.path.expanduser("~/.cache/huggingface/libraries/")
+    library = ExpertLibrary.get_expert_library(
+        repo_id=args.library_id,
+        create=False,
+        destination_id=args.destination_library_id,
     )
-    destination += args.library_id
-    os.makedirs(destination, exist_ok=True)
-    library = LocalExpertLibrary.from_expert_library(library, repo_id=destination)
 
     cfg = MBClusteringTransformConfig(
-        k=args.mbc_num_clusters,
-        random_state=42,
-        sparsity_threshold=0.1,
-        recompute_embeddings=False,
+        k=args.mbc_num_clusters, random_state=42, sparsity_threshold=0.5
     )
     transform = MBCWithCosSimTransform(cfg)
-    clusters = transform.transform(library)
+    clusters = transform.transform(library, recompute=True)
 
     output_json_file = (
         f"{os.path.dirname(os.path.realpath(__file__))}/task_sets/{args.library_id}/"

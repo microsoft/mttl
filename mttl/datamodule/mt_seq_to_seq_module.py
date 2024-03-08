@@ -6,6 +6,7 @@ from datasets import Dataset
 from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task, logger
 from dataclasses import dataclass
+from mttl.models.modifiers.expert_containers.expert_library import retry
 
 
 def is_phi2_eval_task(task):
@@ -19,6 +20,11 @@ def is_phi2_eval_task(task):
         "openbookqa_0_1_0",
     ]
     return task in eval_tasks
+
+
+@retry(max_retries=5, wait_seconds=60)
+def load_dataset_with_retry(*args, **kwargs):
+    return load_dataset(*args, **kwargs)
 
 
 def augment_few_shot_task(
@@ -75,12 +81,14 @@ def augment_few_shot_task(
             "source": prompt,
             "target": dataset[index]["target"],
             "task_name": dataset[index]["task_name"],
-            "task_source": "few_shot_{}".format(dataset[index]["task_source"])
-            if modify_task_source
-            else dataset[index]["task_source"],
-            "split": dataset[index]["split"]
-            if "split" in dataset.column_names
-            else None,
+            "task_source": (
+                "few_shot_{}".format(dataset[index]["task_source"])
+                if modify_task_source
+                else dataset[index]["task_source"]
+            ),
+            "split": (
+                dataset[index]["split"] if "split" in dataset.column_names else None
+            ),
         }
 
     augmented_dataset = dataset.map(map_to_few_shot, with_indices=True, num_proc=16)
@@ -131,7 +139,7 @@ def apply_source_template(dataset, source_template):
 
 class FlatMultiTaskModule(DefaultDataModule):
     def setup_dataset(self):
-        self.dataset = load_dataset(self.config.dataset)
+        self.dataset = load_dataset_with_retry(self.config.dataset)
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
 
         if "split" not in self.dataset.column_names["train"]:
@@ -210,7 +218,7 @@ def filter_task_source(include_task_source, example):
 
 class FlanModule(DefaultDataModule):
     def setup_dataset(self):
-        dataset = load_dataset(self.config.dataset)
+        dataset = load_dataset_with_retry(self.config.dataset)
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
         if "split" not in dataset.column_names["train"]:
             raise ValueError(
@@ -292,7 +300,7 @@ class T0FlatConfig(DatasetConfig):
 
 class T0FlatModule(DefaultDataModule):
     def setup_dataset(self):
-        dataset = load_dataset(self.config.dataset)
+        dataset = load_dataset_with_retry(self.config.dataset)
 
         (
             self._task_names,
