@@ -103,10 +103,10 @@ class Expert:
     @property
     def expert_weights(self):
         if (
-            self.expert_info.expert_config is not None,
-            hasattr(self.expert_info.expert_config, "tie_params")
+            self.expert_info.expert_config is not None
+            and hasattr(self.expert_info.expert_config, "tie_params")
             and self.expert_info.expert_config.tie_params is not None
-            and self._expert_weights is not None,
+            and isinstance(self._expert_weights, Dict)
         ):
             # make sure tied params are in the state dict.
             target_2_source_params_map = get_target_2_source_param_mapping(
