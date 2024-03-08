@@ -487,6 +487,35 @@ class TestMultiExpertModel:
         actual_entropy = container.selector.info_container["dummy_task"]["ent_routing"]
         assert actual_entropy < entropy_uniform
 
+    def test_expert_selector_with_task_predictor_selection(self, tmp_exp_config):
+        seed_everything(0)
+        config: Config = tmp_exp_config
+
+        config.router_selector = "task_predictor_selector"
+        config.ranker_model = "classifier"
+        config.ranker_path = "zhan1993/classifier_ranker_debug"
+        exp1_dest = self.create_dummy_expert(config, "exp1")
+        exp2_dest = self.create_dummy_expert(config, "exp2")
+        module_dict = {"niv2_sentence_compression": exp1_dest, "niv2_misc": exp2_dest}
+
+        module = MultiExpertModel(**vars(config), device_map="cpu")
+        module.load_from_module_dict(module_dict, action="route")
+
+        bs, max_seq_len = 2, 100
+        batch = {
+            "input_ids": torch.randint(bs, 400, (bs, max_seq_len)),
+            "labels": torch.randint(bs, 400, (bs, max_seq_len)),
+            "sources_texts": ["task predictor", "hello world"],
+        }
+
+        seq_len = torch.randint(0, max_seq_len, (bs,))
+        attn_mask = torch.zeros(bs, max_seq_len, dtype=torch.int32)
+        attn_mask[torch.arange(bs), seq_len] = 1
+        attn_mask = 1 - attn_mask.cumsum(dim=-1)
+        batch["attention_mask"] = attn_mask
+
+        output = module(batch)
+
 
 if __name__ == "__main__":
     pytest.main([__file__])

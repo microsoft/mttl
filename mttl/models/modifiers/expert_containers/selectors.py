@@ -10,6 +10,8 @@ import torch.nn.functional as F
 from mttl.models.modifiers.expert_containers.expert import ExpertInfo
 from mttl.models.modifiers.routing import RoutingInfo
 from torch.distributions import Bernoulli, Categorical
+from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
+
 
 # from mttl.models.modifiers.routing import RoutingMixin
 from mttl.utils import logger
@@ -260,6 +262,50 @@ class SelectorView:
 
     def add_expert(self, expert_name: str, **kwargs):
         pass
+
+
+@dataclass
+class TaskPredictorSelectorConfig(SelectorConfig):
+    ranker_path: str = None
+    ranker_model: str = None
+    ranker_top_k: int = 1
+
+
+@register_multi_expert_selector("task_predictor_selector", TaskPredictorSelectorConfig)
+class TaskPredictorSelector(Selector):
+    def __init__(self, info_container, **kwargs) -> None:
+        super().__init__(info_container, **kwargs)
+        self.ranker_top_k = self.config.ranker_top_k
+        # get the routing model
+
+        self.expert_ranker = AdapterRankerHelper.get_ranker_instance(
+            ranker_model=self.config.ranker_model,
+            ranker_path=self.config.ranker_path,
+        )
+
+    @forward_with_cache
+    def forward(self, input, **kwargs) -> BatchModulesAndWeightsSelectorOutput:
+        # get the sources_texts from routing_infos
+        if hasattr(self.info_container["routing_infos"], "sources_texts"):
+            sources_texts = self.info_container["routing_infos"].sources_texts
+            self.expert_ranker.set_available_tasks(self.expert_names)
+            modules, weights = self.expert_ranker.predict_task(
+                sources_texts, n=self.ranker_top_k
+            )
+            logger.debug(f"Predicted tasks: {modules} with weights {weights}")
+            return BatchModulesAndWeightsSelectorOutput(modules, weights)
+        else:
+            raise ValueError(
+                "Routing infos does not contain sources_texts, cannot predict tasks."
+            )
+
+    def get_merging_weights(self, **selector_kwargs) -> Dict:
+        raise ValueError(
+            f"Not supported for {self.__class__} since routing depends on input."
+        )
+
+    def add_expert(self, expert_name: str, **kwargs):
+        self.expert_names.append(expert_name)
 
 
 @dataclass

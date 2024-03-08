@@ -14,7 +14,7 @@ from huggingface_hub import (
 import torch
 
 from mttl.utils import logger, remote_login
-from projects.wiki_experts.src.ranker.adapter_ranker import AdapterRanker
+from mttl.models.ranker.adapter_ranker import AdapterRanker
 
 try:
     import faiss

@@ -1,0 +1,7 @@
+{
+    "num_train_epochs": 1,
+    "train_batch_size": 2048,
+    "dataset": "sordonia/adauni-v1-flat",
+    "model": "EleutherAI/gpt-neo-125m",
+    "ranker_model": "classifier"
+}
