@@ -176,6 +176,18 @@ def forward_with_cache(func):
     return wrapper
 
 
+def safe_logging(func):
+    def wrapper(*args, **kwargs):
+        try:
+            result = func(*args, **kwargs)
+        except Exception as e:
+            logger.exception(f"An error occurred in {func.__name__}: {e}")
+            result = None
+        return result
+
+    return wrapper
+
+
 class Selector(nn.Module):
     metric_logger: MetricLogger = MetricLogger()
 
@@ -570,6 +582,7 @@ class PerTokenSelector(TaskToExpertTracker):
     def overwrite_prototypes(self, prototypes):
         self.prototypes.data = prototypes.type_as(self.prototypes)
 
+    @safe_logging
     def _log_angle(self, angle):
         bs, sq, n_exp = angle.size()
 
@@ -584,6 +597,7 @@ class PerTokenSelector(TaskToExpertTracker):
         self.metric_logger.update(prefix=f"task_{task}", value_dict=to_store)
         self.metric_logger.update(prefix=self.__layer_name__, value_dict=to_store)
 
+    @safe_logging
     def _log_entropy(self, logits):
         # uniform routing entropy
         bs, sq, dim = logits.size()
@@ -605,6 +619,7 @@ class PerTokenSelector(TaskToExpertTracker):
         to_store["ent_uniform"] = np.log(len(self.expert_names))
         self.metric_logger.update(value_dict=to_store)
 
+    @safe_logging
     def _maybe_log_in_dist(self, logits):
         probs = F.softmax(logits, dim=-1)
         bs, seq_len, _ = probs.size()
