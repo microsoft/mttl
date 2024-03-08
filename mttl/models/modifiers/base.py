@@ -95,7 +95,7 @@ def get_target_2_source_param_mapping(
     named_params: Iterable, tie_params, expand_if_targets_are_missing=False
 ) -> Dict[str, str]:
     """
-    Create a dict for parameter tieing: target param -> source param
+    Create a dict for parameter tying: target param -> source param
     Assumes:
         - that "tie_params" is a regex that matches the parameters that need to be tied.
         - matched parameters will be tied within a common pare module.
@@ -146,7 +146,7 @@ def get_parameter_object(transformer, p_name_query):
 
 def tie_params(transformer, config, target_2_source_param):
     """
-    Given a dict for parameter tieing: target param -> source param, ties the parameters.
+    Given a dict for parameter tying: target param -> source param, ties the parameters.
     """
     if len(target_2_source_param) > 0:
         for m_name, module in dict(transformer.named_modules()).items():
