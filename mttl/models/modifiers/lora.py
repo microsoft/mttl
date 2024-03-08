@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import os
+import re
 from typing import List
 import numpy as np
 import torch
@@ -10,8 +11,14 @@ import torch
 import math
 import bitsandbytes as bnb
 
+from mttl.utils import logger
 from mttl.models.modifiers import register_modifier
-from mttl.models.modifiers.base import MergeableAdapter, ModifyMixin, ModifierConfig
+from mttl.models.modifiers.base import (
+    MergeableAdapter,
+    ModifyMixin,
+    ModifierConfig,
+    Adapter,
+)
 
 
 @dataclass
@@ -28,6 +35,7 @@ class LoRA(MergeableAdapter, ModifyMixin):
         self,
         config: LoRAConfig,
         layer: nn.Module,
+        **kwargs,
     ):
         super().__init__()
 
@@ -202,6 +210,7 @@ class SkilledLoRA(LoRA):
         self,
         config: SkilledLoRAConfig,
         layer: nn.Module,
+        **kwargs,
     ):
         self.n_splits = config.n_splits
         self.n_skills = config.n_skills
@@ -541,10 +550,15 @@ class LoRAView(LoRA):
     on a bunch of other LoRAs parameters stacked together.
     """
 
-    def __init__(self, config, layer, lora_a, lora_b):
+    def __init__(self, config, layer, lora_a, lora_b, **kwargs):
         super().__init__(config, layer)
         self.lora_a = lora_a
         self.lora_b = lora_b
+
+        if isinstance(layer, nn.Linear):
+            self.forward_fn = self.forward_linear_
+        else:
+            raise NotImplementedError("LoRAView only supports nn.Linear layers.")
 
     def create_for_layer(self, layer):
         pass

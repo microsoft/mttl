@@ -1,12 +1,18 @@
 # unit test for adapter_ranker
 import copy
+import os
 import torch
 import pytest
 import numpy as np
 from collections import OrderedDict
+from mttl.models.expert_config import ExpertConfig
+from mttl.models.expert_model import ExpertModel as ExpertTrainer
 from mttl.models.modifiers.expert_containers.expert_library import (
     HFExpertLibrary,
+    LocalExpertLibrary,
 )
+from conftest import make_tiny_llama
+from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 from mttl.models.modifiers.expert_containers.library_transforms import (
     TiesMerge,
     TiesMergeConfig,
@@ -17,6 +23,7 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     ArrowTransform,
     ArrowConfig,
 )
+from pytorch_lightning import seed_everything
 
 
 def test_config():
@@ -50,6 +57,67 @@ def test_arrow():
         sums.append(task_sum)
 
     assert np.allclose(sums, [2728.4163, 2284.9968])
+
+
+def test_arrow_with_tiedlora(tmp_path):
+    import logging
+    from mttl.utils import logger
+
+    seed_everything(0)
+
+    logger.setLevel(logging.DEBUG)
+
+    def create_dummy_expert(config: ExpertConfig, exp_name) -> Expert:
+        model_object = make_tiny_llama()
+        exp_trainer = ExpertTrainer(
+            expert_info={},
+            **vars(config),
+            model_object=model_object,
+        )
+        dir = f"{config.output_dir}/{exp_name}"
+        os.makedirs(dir, exist_ok=True)
+        checkpoint = exp_trainer.save_pretrained(dir)
+        expert = load_expert(checkpoint, expert_name=exp_name)
+        for k, v in expert.expert_weights.items():
+            if "q_proj" in k or "k_proj" in k or "v_proj" in k or "o_proj" in k:
+                assert ".".join(k.split(".")[:-1]) + ".lora_a" in expert.expert_weights
+                assert ".".join(k.split(".")[:-1]) + ".lora_b" in expert.expert_weights
+
+            if "lora_b" in k:
+                expert.expert_weights[k] = torch.randn_like(v)
+        return expert
+
+    config = ExpertConfig(
+        kwargs={
+            "tie_params": "q_proj\\.lora_a|k_proj\\.lora_a|v_proj\\.lora_a",
+            "model_modifier": "lora",
+            "modify_layers": "k_proj|v_proj|q_proj|o_proj",
+            "modify_modules": ".*self_attn.*",
+            "trainable_param_names": ".*lora_[ab].*",
+            "output_dir": tmp_path,
+            "model": "",
+        }
+    )
+    # create random Lora
+    expert1 = create_dummy_expert(config, "module1")
+    expert2 = create_dummy_expert(config, "module2")
+
+    library = LocalExpertLibrary(tmp_path)
+    library.add_expert(expert1, expert1.name)
+    library.add_expert(expert2, expert2.name)
+
+    cfg = ArrowConfig(ab_only=True, scale=False)
+    transform = ArrowTransform(cfg)
+
+    protos = transform.transform(library, persist=False, recompute=True)
+    sums = []
+    for task_name in sorted(protos.keys()):
+        task_sum = 0.0
+        for key in protos[task_name].keys():
+            task_sum += protos[task_name][key].sum().item()
+        sums.append(task_sum)
+
+    assert np.allclose(sums, [-3.8098, 13.9056], atol=1e-3)
 
 
 def test_compute_svd_embeddings():

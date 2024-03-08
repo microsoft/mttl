@@ -674,6 +674,9 @@ class ExpertLibrary:
                 k: v for k, v in self.data.items() if k not in self.exclude_selection
             }
 
+    def refresh_from_remote(self):
+        self._build_lib()
+
     def _download_model(self, model_name):
         if model_name not in self.data:
             raise ValueError(f"Model {model_name} not found in repository.")
@@ -1319,7 +1322,7 @@ class ExpertLibrary:
         ignore_sliced: bool = False,
         expert_library_type: Union[Type["ExpertLibrary"], str] = None,
         destination_id: Optional[str] = None,
-    ):
+    ) -> "ExpertLibrary":
         """Instantiate an ExpertLibrary from one of the available expert library types:
             - "local": LocalExpertLibrary,
             - "virtual": VirtualLocalLibrary,
