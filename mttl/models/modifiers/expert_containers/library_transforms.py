@@ -557,7 +557,7 @@ class PhatgooseTransform(HiddenStateComputer):
                 continue
 
             training_config: ExpertConfig = expert.training_config
-            training_config.router_selector = "phatgoose_selector"
+            training_config.router_selector = "phatgoose_trainer_selector"
             training_config.trainable_param_names = ".*selector.*"
             training_config.logging_prefix = expert_name + "/"
             training_config.weight_decay = 0.0

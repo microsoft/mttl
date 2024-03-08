@@ -11,7 +11,11 @@ import json
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
-from mttl.models.modifiers.expert_containers.selectors import PerTokenSelector, Selector
+from mttl.models.modifiers.expert_containers.selectors import (
+    PerTokenSelector,
+    Selector,
+    SelectorConfig,
+)
 from mttl.models.modifiers.lora import LoRAConfig
 
 from mttl.utils import logger, remote_login, setup_logging
@@ -74,11 +78,11 @@ def get_phatgoose_embeddings(library, args):
 
 
 def patch_prototypes(module, library, args, proto_inits=None):
-    if not proto_inits and args.proto_init == "arrow":
+    if not proto_inits and args.router_selector == "arrow_router":
         proto_inits = get_arrow_embeddings(library, args)
-    elif not proto_inits and args.proto_init == "hidden":
+    elif not proto_inits and args.router_selector == "hidden_router":
         proto_inits = get_hidden_states(library, args)
-    elif not proto_inits and args.proto_init == "phatgoose":
+    elif not proto_inits and args.router_selector == "phatgoose_router":
         proto_inits = get_phatgoose_embeddings(library, args)
 
     for mod in module.modules():
@@ -188,8 +192,10 @@ def run_eval(args: ExpertConfig):
     an_expert = library[next(iter(library.keys()))]
     train_cfg = deepcopy(an_expert.training_config)
 
-    # Transfer command line args to the saved config
-    train_cfg.overwrite_eval_args(args)
+    # For starts, always overwrite the following arguments
+    for arg_name in ["output_dir", "eval_metric"]:
+        value = getattr(args, arg_name, None)
+        setattr(train_cfg, arg_name, value)
 
     """ Parameter Merging Approaches """
     if args.merge_or_route in ["uniform", "ties"]:
@@ -212,15 +218,23 @@ def run_eval(args: ExpertConfig):
         module.add_experts_from_library(library)
 
     """ Routing Approaches """
-    if args.merge_or_route in ["phatgoose", "arrow", "hidden"]:
-        module = MultiExpertModel(**vars(train_cfg), device_map="auto")
+    if args.merge_or_route in ["phatgoose", "arrow", "avg_act"]:
+        args.router_selector = f"{args.merge_or_route}_router"
+
+        selector_config = SelectorConfig.from_training_config(args)
+        module = MultiExpertModel(
+            **vars(train_cfg), selector_config=selector_config, device_map="auto"
+        )
         module.load_from_module_dict(library)
-        patch_prototypes(module, library, train_cfg)
+        patch_prototypes(module, library, args)
 
     elif args.merge_or_route == "oracle":
         """TaskNameSelector"""
-
-        module = MultiExpertModel(**vars(train_cfg), device_map="auto")
+        args.router_selector = "task_selector"
+        selector_config = SelectorConfig.from_training_config(args)
+        module = MultiExpertModel(
+            **vars(train_cfg), selector_config=selector_config, device_map="auto"
+        )
         module.load_from_module_dict(library)
 
     module = module.to("cuda")
