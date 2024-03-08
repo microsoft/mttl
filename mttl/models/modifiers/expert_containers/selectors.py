@@ -265,12 +265,6 @@ class SelectorView:
 
 
 @dataclass
-class PolySelectorConfig(SelectorConfig):
-    n_splits: int = 1
-    task_names: List[str] = None
-
-
-@dataclass
 class TaskPredictorSelectorConfig(SelectorConfig):
     ranker_path: str = None
     ranker_model: str = None
@@ -312,6 +306,12 @@ class TaskPredictorSelector(Selector):
 
     def add_expert(self, expert_name: str, **kwargs):
         self.expert_names.append(expert_name)
+
+
+@dataclass
+class PolySelectorConfig(SelectorConfig):
+    n_splits: int = 1
+    task_names: List[str] = None
 
 
 @register_multi_expert_selector("poly_router", PolySelectorConfig)
