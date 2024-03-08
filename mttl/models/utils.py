@@ -292,21 +292,10 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
         if not hasattr(self, "_params_from_checkpoint"):
             self._params_from_checkpoint = set()
 
-        trainable_param_names = []
         if not hasattr(self, "trainable_param_names"):
-            trainable_param_names = [
+            self.trainable_param_names = [
                 n for n, p in self.named_parameters() if p.requires_grad
             ]
-        else:
-            trainable_param_names = self.trainable_param_names
-
-        if hasattr(self.model, "remapped_params"):
-            # in case of tied params, 'remapped_params' will contains
-            # for each tied param in key, the name of param it is tied to in value.
-            # This makes sure the resulting state dict contains all the params.
-            trainable_param_names.extend(
-                ["model." + p for p in self.model.remapped_params.keys()]
-            )
 
         keys = [k for k in state_dict.keys()]
 
@@ -321,7 +310,7 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
             # we can safely avoid dumping this parameter if it is both
             # not in the trainable parameters and was not loaded from checkpoint
             if (
-                not (key in trainable_param_names)
+                not (key in self.trainable_param_names)
                 and not (key in self._params_from_checkpoint)
             ) or key in plugin_param_keys:
                 del state_dict[key]

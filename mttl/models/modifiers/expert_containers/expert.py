@@ -7,6 +7,7 @@ from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.modify_model import CONFIGS_TO_MODIFIERS
 
 from mttl.models.utils import download_from_hub
+from mttl.models.modifiers.base import get_target_2_source_param_mapping
 from mttl.utils import get_checkpoint_path, logger
 from mttl.config import Config
 from dataclasses import dataclass
@@ -89,19 +90,54 @@ class ExpertInfo:
 
 @dataclass
 class Expert:
-    expert_info: ExpertInfo
-    expert_weights: Dict[str, torch.Tensor] = None
-    expert_optimizer_state: Dict[str, torch.Tensor] = None
+    def __init__(
+        self,
+        expert_info: ExpertInfo,
+        expert_weights: Dict[str, torch.Tensor] = None,
+        expert_optimizer_state: Dict[str, torch.Tensor] = None,
+    ):
+        self.expert_info = expert_info
+        self._expert_weights = expert_weights
+        self.expert_optimizer_state = expert_optimizer_state
+
+    @property
+    def expert_weights(self):
+        if (
+            self.expert_info.expert_config is not None
+            and hasattr(self.expert_info.expert_config, "tie_params")
+            and self.expert_info.expert_config.tie_params is not None
+            and isinstance(self._expert_weights, Dict)
+        ):
+            # make sure tied params are in the state dict.
+            target_2_source_params_map = get_target_2_source_param_mapping(
+                self._expert_weights.items(),
+                self.expert_info.expert_config.tie_params,
+                expand_if_targets_are_missing=True,
+            )
+            expert_weights = self._expert_weights
+            for target_name, source_name in target_2_source_params_map.items():
+                if not target_name in expert_weights:
+                    # tie weights
+                    expert_weights[target_name] = expert_weights[source_name]
+                assert torch.allclose(
+                    expert_weights[target_name], expert_weights[source_name]
+                ), f"Weight tying failed for {target_name} and {source_name}"
+            return expert_weights
+        return self._expert_weights
+
+    @expert_weights.setter
+    def expert_weights(self, weights):
+        self._expert_weights = weights
 
     def clone(self):
         import copy
 
-        copy = Expert(
+        exp_copy = Expert(
             expert_info=copy.deepcopy(self.expert_info),
-            expert_weights=copy.deepcopy(self.expert_weights),
+            expert_weights=copy.deepcopy(self._expert_weights),
             expert_optimizer_state=copy.deepcopy(self.expert_optimizer_state),
         )
-        return copy
+        return exp_copy
 
     @classmethod
     def fromdict(cls, data):
@@ -120,7 +156,7 @@ class Expert:
     def asdict(self):
         return {
             "expert_info": self.expert_info.asdict(),
-            "expert_weights": self.expert_weights,
+            "expert_weights": self._expert_weights,
             "expert_optimizer_state": self.expert_optimizer_state,
         }
 
