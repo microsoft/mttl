@@ -2,7 +2,6 @@ import glob
 import os
 import sys
 
-import prettytable
 from pytorch_lightning import seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -13,10 +12,7 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     LocalExpertLibrary,
 )
 from mttl.utils import remote_login, setup_logging, logger
-from mttl.models.expert_model import (
-    MultiExpertModel,
-    MultiExpertModelRanker,
-)
+from mttl.models.expert_model import MultiExpertModel
 from mttl.models.expert_config import ExpertConfig
 from projects.wiki_experts.mmlu_eval_experts import parse_experts_to_load
 
@@ -30,11 +26,12 @@ def run_eval(args):
     logger.info("Args: {}".format(args.to_json()))
 
     remote_login(args.remote_token)
-    # load module
-    if args.ranker_model is not None:
-        module = MultiExpertModelRanker(**vars(args))
-    else:
-        module = MultiExpertModel(**vars(args))
+
+    module = MultiExpertModel(**vars(args))
+
+    filtering_experts = os.environ.get("FILTERING_EXPERTS", None)
+    if filtering_experts:
+        filtering_experts = filtering_experts.split(",")
 
     if args.library_id:
         if os.path.exists(args.library_id):
@@ -46,6 +43,7 @@ def run_eval(args):
         else:
             library = ExpertLibrary.get_expert_library(
                 repo_id=args.library_id,
+                exclude_selection=filtering_experts,
                 destination_id=args.destination_library_id,
             )
 

@@ -30,11 +30,13 @@ class DataCollatorForCLIPExpertsTriple(DefaultCollator):
         sources = [b["sources_texts"] for b in batch]
         positive_experts = [b["positive_expert_names"] for b in batch]
         negative_experts = [b["negative_expert_names"] for b in batch]
+        eval_task = [b["eval_task"] for b in batch]
 
         return {
             "sources_texts": sources,
             "positive_expert_names": positive_experts,
             "negative_expert_names": negative_experts,
+            "eval_task": eval_task, 
         }
 
 
@@ -111,10 +113,13 @@ class CLIPExpertsDatamodule(DefaultDataModule):
             _,
         ) = maybe_filter_hf_dataset_by_key(
             dataset,
-            key="expert_name",
+            key="positive_expert_names",
             task_names=self.config.finetune_task_name,
             n_proc=n_proc,
         )
+
+        # get all the tasks_names from the dataset
+        self._task_names = dataset["positive_expert_names"].unique()
 
         if "split" in dataset.column_names["train"]:
             self.train_dataset = train_dataset.filter(
@@ -181,6 +186,14 @@ class CLIPTripleDataModule(DefaultDataModule):
             key="eval_task",
             task_names=self.config.finetune_task_name,
             n_proc=n_proc,
+        )
+
+        # get all the tasks_names from the dataset
+        self._task_names = list(
+            set(
+                train_dataset["positive_expert_names"]
+                + train_dataset["negative_expert_names"]
+            )
         )
 
         if "split" in dataset.column_names["train"]:

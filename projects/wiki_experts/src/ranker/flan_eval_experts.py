@@ -1,10 +1,11 @@
 import os
 import sys
 from pytorch_lightning import seed_everything
-from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
-from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from mttl.utils import setup_logging, logger
 
 # register models
@@ -68,10 +69,14 @@ def run_eval(args):
 
     # get directory of the current file
     setup_logging(args.output_dir)
+    filtering_experts = os.environ.get("FILTERING_EXPERTS", None)
+    if filtering_experts is not None:
+        filtering_experts = filtering_experts.split(",")
 
     logger.info("Args: {}".format(args.to_json()))
 
     # add FlanEvaluator
+
     data_module = FlanModule(
         FlanConfig(
             dataset=args.dataset,
@@ -99,11 +104,7 @@ def run_eval(args):
 
     module.to("cuda")
     # evaluate all the category
-    rouge = evaluator.evaluate(module, split="test", verbose=False)
-
-    if args.routing == "retrieval":
-        accuracy = module.get_retrieval_accuracy(data_module.val_dataloader())
-        logger.info("Accuracy: {}".format(accuracy))
+    rouge = evaluator.evaluate(module, split="val", verbose=False, subsample=-1)
     logger.info("Flan rouge: {}".format(rouge))
     del module
 

@@ -244,11 +244,7 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
                 model_family=ckpt["hyper_parameters"]["model_family"],
                 padding_side=ckpt["hyper_parameters"]["padding_side"],
             )
-
-        expert_info = ckpt.get("expert_info", None)
-        model = cls(
-            **ckpt["hyper_parameters"], expert_info=expert_info, tokenizer=tokenizer
-        )
+        model = cls(**ckpt["hyper_parameters"])
         model.load_state_dict(ckpt["state_dict"], strict=False)
         return model
 
