@@ -449,8 +449,30 @@ class MOERKHSSelector(Selector):
         )
 
 
+""" 
+Abstract Class which builds `task2expert_name` mapping. Can be used for 
+Routing (as in TaskNameSelector) or for logging in-dist stats (PerTokenSelector)
+"""
+
+
+class TaskToExpertTracker(Selector):
+    def __init__(self, info_container, config=None, **kwargs) -> None:
+        super().__init__(info_container, config=config)
+        self.task2expert_name = {}
+
+    def add_expert(self, expert_name: str, expert_info: ExpertInfo = None, **kwargs):
+        if expert_info is None or expert_info.expert_task_name is None:
+            logger.warn(
+                "Expert's task_name not set, assume task name corresponds to expert name!"
+            )
+            self.task2expert_name[expert_name] = expert_name
+        else:
+            for task_name in expert_info.expert_task_name.split(","):
+                self.task2expert_name[task_name] = expert_name
+
+
 @dataclass
-class PerTokenRouterConfig(SelectorConfig):
+class PerTokenSelectorConfig(SelectorConfig):
     router_temp: float = 1.0
     moe_top_k: int = -1
     proto_init: str = None
@@ -458,8 +480,8 @@ class PerTokenRouterConfig(SelectorConfig):
     proto_norm_fn: str = None
 
 
-@register_multi_expert_selector("per_token_router", PerTokenRouterConfig)
-class PerTokenSelector(Selector):
+@register_multi_expert_selector("per_token_router", PerTokenSelectorConfig)
+class PerTokenSelector(TaskToExpertTracker):
     def __init__(self, info_container, config, **kwargs) -> None:
         super().__init__(info_container, config, **kwargs)
 
@@ -500,6 +522,20 @@ class PerTokenSelector(Selector):
     def overwrite_prototypes(self, prototypes):
         self.prototypes.data = prototypes.type_as(self.prototypes)
 
+    def _log_angle(self, angle):
+        bs, sq, n_exp = angle.size()
+
+        if sq > 1:
+            attn_mask = self.info_container["routing_infos"].attention_mask == 1.0
+            mean_angle = angle[attn_mask].sum() / attn_mask.sum() / n_exp
+        else:
+            mean_angle = angle.mean()
+
+        task = self.info_container["routing_infos"].task_sources[0]
+        to_store = {"angle": mean_angle.item()}
+        self.metric_logger.update(prefix=f"task_{task}", value_dict=to_store)
+        self.metric_logger.update(prefix=self.__layer_name__, value_dict=to_store)
+
     def _log_entropy(self, logits):
         # uniform routing entropy
         bs, sq, dim = logits.size()
@@ -520,6 +556,33 @@ class PerTokenSelector(Selector):
         to_store.update({"ent_uniform": np.log(len(self.expert_names))})
         self.metric_logger.update(value_dict=to_store)
 
+    def _maybe_log_in_dist(self, logits):
+        probs = F.softmax(logits, dim=-1)
+        bs, seq_len, _ = probs.size()
+        task_names = self.info_container["routing_infos"].task_names
+        if all([t in self.task2expert_name for t in task_names]):
+            expert_names = [self.task2expert_name[t] for t in task_names]
+            expert_ids = torch.LongTensor(
+                [self.expert_names.index(e) for e in expert_names]
+            ).to(logits.device)
+            expert_p = torch.gather(
+                probs, index=expert_ids.view(bs, 1, 1).expand(-1, seq_len, -1), dim=-1
+            )
+
+            attn_mask = self.info_container["routing_infos"].attention_mask == 1.0
+
+            # are we teacher forcing or generating ?
+            if seq_len == 1:
+                mean_correct_p = expert_p.mean()
+            else:
+                mean_correct_p = expert_p[attn_mask].mean()
+
+            to_store = {"expert_p": mean_correct_p.item()}
+            self.metric_logger.update(
+                prefix=f"task_{task_names[0]}", value_dict=to_store
+            )
+            self.metric_logger.update(prefix=self.__layer_name__, value_dict=to_store)
+
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchSequenceModulesAndWeightsSelectorOutput:
         # do routing business on fp32
@@ -536,12 +599,17 @@ class PerTokenSelector(Selector):
         prototypes = self.proto_norm(self.prototypes)
 
         """ Logit Computation """
-        router_logits = F.linear(input, prototypes) / temp
-
+        router_logits = F.linear(input, prototypes)
         if self.config.proto_init == "arrow":
             router_logits = router_logits.abs()
 
-        self._log_entropy(router_logits)
+        # log angle between input and prototypes
+        angle = router_logits / input.norm(p=2, dim=-1, keepdim=True).clamp(min=EPS)
+        angle = angle / prototypes.norm(p=2, dim=-1).view(1, 1, -1).clamp(min=EPS)
+        self._log_angle(angle)
+
+        # control entropy of distribution
+        router_logits /= temp
 
         if self.config.moe_top_k > 0:
             # For now, we always renormalize the routing weights for hard routing
@@ -549,15 +617,26 @@ class PerTokenSelector(Selector):
                 router_logits, self.config.moe_top_k, dim=-1
             )
             router_probs = F.softmax(top_k_logits, dim=-1)
+
+            # Adjust router_logits accordingly for logging
+            chosen = torch.zeros_like(router_logits, dtype=torch.bool)
+            chosen.scatter_add_(
+                dim=-1, index=modules, src=torch.ones_like(modules).bool()
+            )
+            router_logits = router_logits.masked_fill(~chosen, -1e9)
         else:
             modules = None
             router_probs = F.softmax(router_logits, dim=-1, dtype=torch.float)
+
+        self._log_entropy(router_logits)
+        self._maybe_log_in_dist(router_logits)
 
         return BatchSequenceModulesAndWeightsSelectorOutput(
             modules=modules, weights=router_probs
         )
 
-    def add_expert(self, expert_name: str, **kwargs):
+    def add_expert(self, expert_name: str, expert_info: ExpertInfo = None, **kwargs):
+        super().add_expert(expert_name, expert_info, **kwargs)
         self.expert_names.append(expert_name)
 
 
@@ -1014,12 +1093,10 @@ class TaskNameSelectorConfig(SelectorConfig):
 
 
 @register_multi_expert_selector("task_selector", TaskNameSelectorConfig)
-class TaskNameSelector(Selector):
+class TaskNameSelector(TaskToExpertTracker):
     def __init__(self, info_container, **kwargs) -> None:
         super().__init__(info_container)
-
         self.default_expert_name = None
-        self.task2expert_name = {}
 
     @forward_with_cache
     def forward(self, input, **kwargs) -> ModulesSelectorOutput:
@@ -1051,16 +1128,6 @@ class TaskNameSelector(Selector):
             ]
 
         return ModulesSelectorOutput(modules)
-
-    def add_expert(self, expert_name: str, expert_info: ExpertInfo = None, **kwargs):
-        if expert_info is None or expert_info.expert_task_name is None:
-            logger.warn(
-                "Expert's task_name not set, assume task name corresponds to expert name!"
-            )
-            self.task2expert_name[expert_name] = expert_name
-        else:
-            for task_name in expert_info.expert_task_name.split(","):
-                self.task2expert_name[task_name] = expert_name
 
     def get_merging_weights(self, **selector_kwargs) -> Dict:
         raise NotImplementedError(
