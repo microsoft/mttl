@@ -760,7 +760,7 @@ class ExpertLibrary:
         model = torch.load(model, map_location="cpu")
         return Expert(
             expert_info=self.data[expert_name],
-            weights=model,
+            expert_weights=model,
         )
 
     def __len__(self):

@@ -77,7 +77,7 @@ class ExpertContainer:
         for name, expert_module in self.experts.items():
             expert = Expert(
                 expert_info=self.expert_infos[name],
-                weights={
+                expert_weights={
                     self.layer_name + "." + n: v for n, v in expert_module.state_dict()
                 },
             )

@@ -538,7 +538,7 @@ class MultiExpertModel(ExpertModel):
                 }
                 expert_params.update(expert_weights)
 
-        retrieved_expert = Expert(expert_info=expert_info, weights=expert_params)
+        retrieved_expert = Expert(expert_info=expert_info, expert_weights=expert_params)
 
         return retrieved_expert
 
@@ -590,7 +590,7 @@ class MultiExpertModel(ExpertModel):
             training_config=self.training_config,
             expert_config=expert_config,
         )
-        return Expert(expert_info=expert_info, weights=expert_params)
+        return Expert(expert_info=expert_info, expert_weights=expert_params)
 
     def set_routing_infos(self, batch, generate=False):
         self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)

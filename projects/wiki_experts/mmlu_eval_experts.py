@@ -133,7 +133,7 @@ def run_eval(args):
         )
         expert = Expert(
             expert_info=ExpertInfo("hard_prompt", expert_config=config),
-            weights=args.mmlu_use_hard_prompt,
+            expert_weights=args.mmlu_use_hard_prompt,
         )
         module.add_expert_instance(expert, action="route", is_default=True)
 
