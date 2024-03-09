@@ -658,7 +658,7 @@ class PerTokenSelector(TaskToExpertTracker):
         input = self.input_norm(input)
         prototypes = self.proto_norm(self.prototypes)
 
-        """ Logit Computation """
+        # logit computation
         router_logits = F.linear(input, prototypes)
         if self.config.proto_init == "arrow":
             router_logits = router_logits.abs()
