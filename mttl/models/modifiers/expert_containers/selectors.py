@@ -12,9 +12,6 @@ from mttl.models.modifiers.routing import RoutingInfo
 from torch.distributions import Bernoulli, Categorical
 from mttl.models.utils import MetricLogger
 from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
-
-
-# from mttl.models.modifiers.routing import RoutingMixin
 from mttl.utils import logger
 
 
@@ -509,26 +506,25 @@ class MOERKHSSelector(Selector):
         )
 
 
-""" 
-Abstract Class which builds `task2expert_name` mapping. Can be used for 
-Routing (as in TaskNameSelector) or for logging in-dist stats (PerTokenSelector)
-"""
-
-
 class TaskToExpertTracker(Selector):
+    """
+    Abstract Class which builds `task_to_expert_name` mapping. Can be used for
+    Routing (as in TaskNameSelector) or for logging in-dist stats (PerTokenSelector)
+    """
+
     def __init__(self, info_container, config=None, **kwargs) -> None:
         super().__init__(info_container, config=config)
-        self.task2expert_name = {}
+        self.task_to_expert_name = {}
 
     def add_expert(self, expert_name: str, expert_info: ExpertInfo = None, **kwargs):
         if expert_info is None or expert_info.expert_task_name is None:
             logger.warn(
                 "Expert's task_name not set, assume task name corresponds to expert name!"
             )
-            self.task2expert_name[expert_name] = expert_name
+            self.task_to_expert_name[expert_name] = expert_name
         else:
             for task_name in expert_info.expert_task_name.split(","):
-                self.task2expert_name[task_name] = expert_name
+                self.task_to_expert_name[task_name] = expert_name
 
 
 @dataclass
@@ -624,8 +620,8 @@ class PerTokenSelector(TaskToExpertTracker):
         probs = F.softmax(logits, dim=-1)
         bs, seq_len, _ = probs.size()
         task_names = self.info_container["routing_infos"].task_names
-        if all([t in self.task2expert_name for t in task_names]):
-            expert_names = [self.task2expert_name[t] for t in task_names]
+        if all([t in self.task_to_expert_name for t in task_names]):
+            expert_names = [self.task_to_expert_name[t] for t in task_names]
             expert_ids = torch.LongTensor(
                 [self.expert_names.index(e) for e in expert_names]
             ).to(logits.device)
@@ -1113,15 +1109,18 @@ class TaskNameSelector(TaskToExpertTracker):
             task_names = self.routing_infos.task_names
 
             if (
-                any(task_name not in self.task2expert_name for task_name in task_names)
+                any(
+                    task_name not in self.task_to_expert_name
+                    for task_name in task_names
+                )
                 and not self.default_expert_name
-                and len(self.task2expert_name)
+                and len(self.task_to_expert_name)
             ):
                 raise ValueError(
                     "Experts for all tasks have not been loaded! Set a default expert?"
                 )
             modules = [
-                self.task2expert_name.get(task_name, self.default_expert_name)
+                self.task_to_expert_name.get(task_name, self.default_expert_name)
                 for task_name in task_names
             ]
 
