@@ -50,7 +50,7 @@ class ExpertConfig(Config):
         self.moe_rkhs_dim = 512
         self.moe_ent_reg = 0.0
         self.moe_ent_free_bits = 0.0
-        self.moe_top_k = -1
+        self.moe_top_k = None
 
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
@@ -78,20 +78,16 @@ class ExpertConfig(Config):
         self.max_samples_per_task = 100
         self.track = "each_layer"
         self.pool = "last"
-        self.delta_scale = None  # how much to extrapolate the shift in the expert's prototype direction
-        self.use_similarity_scaling = (
-            False  # whether to scale the centroids as a function of LoRA similarity
-        )
+
+        # Ties Merging
         self.transform_sparsity = 1.0
 
-        # Clown Router
-        self.router_temp = 1.0
+        # Per Token Router [Arrow, Phatgoose, hidden]
+        self.router_temp = None
         self.notes = None
-        self.proto_init = "hidden"  # also "svd"
-        self.scale_prototypes = False  # clown routing with SVD
-        self.router_window_size = 3
-        self.clown_mode = "per_token"
-        self.normalize_router_input = False
+        self.proto_init = None  # also "arrow"
+        self.input_norm_fn = None
+        self.proto_norm_fn = None
 
         # Eval Library
         self.merge_or_route = None  # "uniform", "ties", "clown"
@@ -101,13 +97,14 @@ class ExpertConfig(Config):
         self.es_metric = "loss"
         self.n_ng_iterations = 30  # number of iterations for LoraHub
         self.recompute_prototypes = False
+        self.expert_embeds_save_name = None
 
         # for MBC
         self.mbc_num_clusters = 10  # number of clusters
         self.phi_2_align_heads = False
         self.lora_merge_after = False  # if True, tried to merge after the outer product, currently only applicable to LoRA
 
-        # phatgoose
+        # phatgoose gate learning
         self.n_steps_pg = 2000
         self.learning_rate_pg = 0.01
 

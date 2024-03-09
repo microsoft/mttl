@@ -99,7 +99,12 @@ class ExpertModel(EfficientCheckpointModule):
         # passing the whole training config to the modify_transformer func
         self.modifier_config = ModifierConfig.from_training_config(self.training_config)
         # config about the routing
-        self.selector_config = SelectorConfig.from_training_config(self.training_config)
+        if "selector_config" in kwargs:
+            self.selector_config = kwargs.pop("selector_config")
+        else:
+            self.selector_config = SelectorConfig.from_training_config(
+                self.training_config
+            )
 
         self.model = modify_transformer(model_object, self.modifier_config)
 

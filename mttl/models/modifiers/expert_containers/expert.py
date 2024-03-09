@@ -5,6 +5,7 @@ import re
 from string import Template
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.modify_model import CONFIGS_TO_MODIFIERS
+from mttl.models.expert_config import ExpertConfig
 
 from mttl.models.utils import download_from_hub
 from mttl.models.modifiers.base import get_target_2_source_param_mapping
@@ -25,7 +26,7 @@ class ExpertInfo:
     # configuration for this expert, i.e. a modifier config
     expert_config: ModifierConfig = None
     # configuration with which the expert was trained, i.e. a training config
-    training_config: Config = None
+    training_config: ExpertConfig = None
 
     @classmethod
     def fromdict(cls, data):
@@ -48,7 +49,7 @@ class ExpertInfo:
 
         if "training_config" in data:
             # convert it to the generic Config object
-            training_config = Config.fromdict(data["training_config"])
+            training_config = ExpertConfig.fromdict(data["training_config"])
 
         if training_config is None:
             training_config = expert_config
@@ -145,7 +146,7 @@ class Expert:
         return cls(**data)
 
     @property
-    def training_config(self) -> Config:
+    def training_config(self) -> ExpertConfig:
         # back-compatibility, returns expert config
         return self.expert_info.training_config
 
