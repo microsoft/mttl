@@ -283,31 +283,6 @@ def get_modules_to_modify_trie(transformer):
         yield m_name, module
 
 
-def get_modules_to_modify(transformer):
-    """Get modules to modify in the transformer model.
-    Filter out modules that are inside expert containers."""
-    containers = {}  # cache containers to avoid redundant checks
-    for m_name, module in dict(transformer.named_modules()).items():
-        in_container = False
-        module_names = m_name.split(".")
-        for p in range(len(module_names)):
-            parent_name = ".".join(module_names[:p])
-            is_parent_container = containers.get(parent_name)
-            if is_parent_container is None:
-                parent_module = transformer.get_submodule(parent_name)
-                if isinstance(parent_module, ExpertContainer):
-                    is_parent_container = True
-                else:
-                    is_parent_container = False
-            containers[parent_name] = is_parent_container
-            if is_parent_container:
-                in_container = True
-                break
-        if in_container:
-            continue
-        yield m_name, module
-
-
 def add_expert_to_transformer(
     transformer,
     expert: Expert,

@@ -4,10 +4,7 @@ from pytorch_lightning import seed_everything
 from transformers import AutoModelForCausalLM
 
 from mttl.models.expert_model import MultiExpertModel
-from mttl.models.modifiers.expert_containers import (
-    get_modules_to_modify,
-    get_modules_to_modify_trie,
-)
+from mttl.models.modifiers.expert_containers import get_modules_to_modify_trie
 from mttl.models.modifiers.lora import LoRAConfig
 from mttl.models.modifiers.expert_containers.selectors import (
     PolySelector,
@@ -70,36 +67,9 @@ def test_get_modules_to_modify_trie():
     assert one_expert_modules.keys() == transformer_modules.keys()
     assert len(one_expert_all_modules) > len(transformer_modules)
 
-    # test if the trie consistent to the modules
-    one_expert_modules_pre = dict(get_modules_to_modify(multi_expert_model.model))
-    assert one_expert_modules.keys() == one_expert_modules_pre.keys()
-
     # add another expert
     multi_expert_model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
     two_expert_modules = dict(get_modules_to_modify_trie(multi_expert_model.model))
-    two_expert_all_modules = dict(multi_expert_model.model.named_modules())
-    assert two_expert_modules.keys() == transformer_modules.keys()
-    assert len(two_expert_all_modules) > len(one_expert_all_modules)
-
-
-def test_get_modules_to_modify():
-    model_name = "EleutherAI/gpt-neo-125m"
-    transformer = AutoModelForCausalLM.from_pretrained(model_name)
-    multi_expert_model = MultiExpertModel(model=model_name, device_map="cpu")
-    transformer_modules = dict(get_modules_to_modify(transformer))
-    clean_multi_expert_modules = dict(get_modules_to_modify(multi_expert_model.model))
-    assert clean_multi_expert_modules.keys() == transformer_modules.keys()
-
-    # add an expert
-    multi_expert_model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
-    one_expert_modules = dict(get_modules_to_modify(multi_expert_model.model))
-    one_expert_all_modules = dict(multi_expert_model.model.named_modules())
-    assert one_expert_modules.keys() == transformer_modules.keys()
-    assert len(one_expert_all_modules) > len(transformer_modules)
-
-    # add another expert
-    multi_expert_model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
-    two_expert_modules = dict(get_modules_to_modify(multi_expert_model.model))
     two_expert_all_modules = dict(multi_expert_model.model.named_modules())
     assert two_expert_modules.keys() == transformer_modules.keys()
     assert len(two_expert_all_modules) > len(one_expert_all_modules)
