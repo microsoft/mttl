@@ -3,6 +3,7 @@ import sys
 import torch
 import copy
 import wandb
+import numpy as np
 from copy import deepcopy
 from pytorch_lightning import seed_everything
 import json
@@ -10,7 +11,11 @@ import json
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
-from mttl.models.modifiers.expert_containers.selectors import ClownSelector
+from mttl.models.modifiers.expert_containers.selectors import (
+    PerTokenSelector,
+    Selector,
+    SelectorConfig,
+)
 from mttl.models.modifiers.lora import LoRAConfig
 
 from mttl.utils import logger, remote_login, setup_logging
@@ -27,8 +32,10 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     TiesMergeConfig,
     ArrowTransform,
     ArrowConfig,
+    PhatgooseTransform,
+    PhatgooseConfig,
 )
-from mttl.models.modifiers.expert_containers.expert_containers import ExpertContainer
+
 from mttl.callbacks import LossCallback
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
@@ -36,76 +43,73 @@ from projects.wiki_experts.src.utils.utils import TableLogger
 
 
 def get_hidden_states(library, args):
-    if args.delta_scale:
-        cfg = HiddenStateComputerConfig(
-            max_samples_per_task=args.max_samples_per_task,
-            track=args.track,
-            pool=args.pool,
-            use_base_model_only=True,
-        )
-        base = HiddenStateComputer(cfg).transform(
-            library, default_args=args, recompute=args.recompute_prototypes
-        )
-        cfg.use_base_model_only = False
-        expert = HiddenStateComputer(cfg).transform(
-            library, default_args=args, recompute=args.recompute_prototypes
-        )
-        output = {
-            exp_name: {
-                k: (expert[exp_name][k] - base[exp_name][k]) * args.delta_scale
-                + base[exp_name][k]
-                for k in base[exp_name].keys()
-            }
-            for exp_name in base.keys()
-        }
-    else:
-        cfg = HiddenStateComputerConfig(
-            use_base_model_only=args.use_base_model_only,
-            max_samples_per_task=args.max_samples_per_task,
-            track=args.track,
-            pool=args.pool,
-        )
-        output = HiddenStateComputer(cfg).transform(
-            library, recompute=args.recompute_prototypes
-        )
+    cfg = HiddenStateComputerConfig(
+        use_base_model_only=args.use_base_model_only,
+        max_samples_per_task=args.max_samples_per_task,
+        name=args.expert_embeds_save_name,
+        track=args.track,
+        pool=args.pool,
+    )
+    output = HiddenStateComputer(cfg).transform(
+        library, recompute=args.recompute_prototypes
+    )
 
     return output
 
 
-def get_svd_embeddings(library, args):
-    cfg = ArrowConfig(scale=args.scale_prototypes)
+def get_arrow_embeddings(library, args):
+    cfg = ArrowConfig(
+        name=args.expert_embeds_save_name,
+    )
     return ArrowTransform(cfg).transform(library, recompute=args.recompute_prototypes)
 
 
+def get_phatgoose_embeddings(library, args):
+    phatgoose_transform = PhatgooseTransform(
+        PhatgooseConfig(
+            n_steps=args.n_steps_pg,
+            learning_rate=args.learning_rate_pg,
+            name=args.expert_embeds_save_name,
+        )
+    )
+    return phatgoose_transform.transform(
+        library, default_args=args, recompute=args.recompute_prototypes
+    )
+
+
 def patch_prototypes(module, library, args, proto_inits=None):
-    if not proto_inits and args.proto_init == "svd":
-        proto_inits = get_svd_embeddings(library, args)
-    elif not proto_inits and args.proto_init == "hidden":
+    if not proto_inits and args.router_selector == "arrow_router":
+        proto_inits = get_arrow_embeddings(library, args)
+    elif not proto_inits and args.router_selector == "hidden_router":
         proto_inits = get_hidden_states(library, args)
+    elif not proto_inits and args.router_selector == "phatgoose_router":
+        proto_inits = get_phatgoose_embeddings(library, args)
 
     for mod in module.modules():
-        if isinstance(mod, ClownSelector):
+        if isinstance(mod, PerTokenSelector):
             patched_layer_name = mod.layer_name.replace(".selector", "")
             prototypes = []
-            params = []
             for expert_name in mod.expert_names:
                 patched_layer_name = mod.layer_name.replace(".selector", "")
                 layer_names = proto_inits[expert_name].keys()
+                patched_layer_name = mod.layer_name.replace(".selector", "")
                 valid_layer_names = [
-                    k for k in layer_names if k.startswith(patched_layer_name)
+                    k
+                    for k in layer_names
+                    if patched_layer_name in k  # k.startswith(patched_layer_name)
                 ]
+                assert len(valid_layer_names) <= 2, breakpoint()
                 key = sorted(valid_layer_names)[0]
-                prototypes += [proto_inits[expert_name][key]]
+                proto = proto_inits[expert_name][key]
+                if isinstance(proto, np.ndarray):
+                    proto = torch.from_numpy(proto)
+
+                prototypes += [proto.squeeze()]
 
             logger.info(
                 f"setting prototypes for selector at {mod.layer_name} with hidden states from {key}"
             )
             prototypes = torch.stack(prototypes)
-            if args.scale_prototypes:
-                # prototypes are not normalized, we will at least make their norm smaller than 1
-                max_norm = torch.norm(prototypes, dim=1, p=2).max()
-                prototypes = prototypes / max_norm
-
             mod.overwrite_prototypes(prototypes)
 
 
@@ -113,7 +117,7 @@ def eval_in_distribution(module, args: ExpertConfig, tasks):
     args.include_task_source = "*"
     transfer_table = TableLogger()
 
-    for task in tasks:
+    for i, task in enumerate(tasks):
         args.finetune_task_name = task
         args.predict_batch_size = 16
         if args.eval_metric in ["val_loss", "loss"]:
@@ -159,7 +163,7 @@ def eval_in_distribution(module, args: ExpertConfig, tasks):
     transfer_table.log_final_table()
 
 
-def run_multitask(args: ExpertConfig):
+def run_eval(args: ExpertConfig):
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file
@@ -185,134 +189,61 @@ def run_multitask(args: ExpertConfig):
         exclude_selection=exclude_phi_tasks,
         destination_id=args.destination_library_id,
     )
+    an_expert = library[next(iter(library.keys()))]
+    train_cfg = deepcopy(an_expert.training_config)
 
-    # cfg = TiesMergeConfig(top_k=0.2)
-    # ties_expert = TiesMerge(cfg).transform(library)
-    ave_cfg = WeightedLinearMergeConfig()
-    ave_expert = WeightedLinearMerge(ave_cfg).transform(library)
-    module = MultiExpertModel(**vars(ave_expert.training_config)).to("cuda")
-    module.add_expert_instance(ave_expert, is_default=True)
+    # For starts, always overwrite the following arguments
+    for arg_name in ["output_dir", "eval_metric"]:
+        value = getattr(args, arg_name, None)
+        setattr(train_cfg, arg_name, value)
 
-    if args.merge_or_route in ["uniform", "weighted"]:
-        weights = None
-        if args.merge_or_route == "weighted":
-            # get weights from 10 cluster
-            _task_cluster_flan = json.load(
-                open(
-                    "projects/wiki_experts/task_sets/phi/clusters_kmeans_simmatrix_phi2_v3.json"
-                )
-            )
+    """ Parameter Merging Approaches """
+    if args.merge_or_route in ["uniform", "ties"]:
+        if args.merge_or_route == "uniform":
+            expert = WeightedLinearMerge(WeightedLinearMergeConfig()).transform(library)
+        elif args.merge_or_route == "ties":
+            cfg = TiesMergeConfig(top_k=args.transform_sparsity)
+            expert = TiesMerge(cfg).transform(library)
 
-            tasks = []
-            for i in range(10):
-                tasks += _task_cluster_flan[f"c{i}_2e"]
-            weights = {}
-            for task_subset in tasks:
-                for task in task_subset:
-                    weights[task] = 1 / len(task_subset) / 10
-
-        expert = WeightedLinearMerge(
-            WeightedLinearMergeConfig(weights=weights)
-        ).transform(library)
-        module = MultiExpertModel(**vars(expert.training_config)).to("cuda")
+        module = MultiExpertModel(**vars(expert.training_config))
         module.add_expert_instance(expert, is_default=True)
-        args_copy = expert.training_config
-        args_copy.output_dir = args.output_dir
-        args_copy.eval_metric = args.eval_metric
     elif args.merge_or_route == "uniform_lora_after_op":
-        # Here we merge the LoRa experts after the outer product
-        # we cannot really do it with the lib transform, cause this would require storing large matrices in memory
+        # Here we merge the LoRA experts after the outer product we cannot really do it
+        # with the lib transform, cause this would require storing large matrices in memory
         # Instead we do it with a uniform selector
-        expert_names = list(library.keys())
-        expert = copy.deepcopy(library[expert_names[0]])
         assert type(expert.expert_info.expert_config) == LoRAConfig
-        config = expert.training_config
-        config.router_selector = "uniform"
-        config.lora_merge_after = True
-        module = MultiExpertModel(**vars(config)).to("cuda")
+        train_cfg.router_selector = "uniform"
+        train_cfg.lora_merge_after = True
+        module = MultiExpertModel(**vars(train_cfg))
         module.add_experts_from_library(library)
-    elif args.merge_or_route == "ties":
-        cfg = TiesMergeConfig(top_k=args.transform_sparsity)
-        ties_expert = TiesMerge(cfg).transform(library)
-        module = MultiExpertModel(**vars(ties_expert.training_config)).to("cuda")
-        module.add_expert_instance(ties_expert, is_default=True)
-    elif args.merge_or_route in ["clown", "clown_lora_after_op"]:
-        an_expert = library[next(iter(library.keys()))]
-        args_copy = deepcopy(an_expert.training_config)
-        args_copy.router_selector = "clown_router"
-        args_copy.router_temp = args.router_temp
-        args_copy.moe_top_k = args.moe_top_k
-        args_copy.precision = 32
-        args_copy.router_window_size = args.router_window_size
-        args_copy.clown_mode = args.clown_mode
-        args_copy.proto_init = args.proto_init
-        args_copy.normalize_router_input = args.normalize_router_input
-        args_copy.lora_merge_after = args.merge_or_route == "clown_lora_after_op"
-        module = MultiExpertModel(**vars(args_copy), device_map="auto")
+
+    """ Routing Approaches """
+    if args.merge_or_route in ["phatgoose", "arrow", "avg_act"]:
+        args.router_selector = f"{args.merge_or_route}_router"
+
+        selector_config = SelectorConfig.from_training_config(args)
+        module = MultiExpertModel(
+            **vars(train_cfg), selector_config=selector_config, device_map="auto"
+        )
         module.load_from_module_dict(library)
         patch_prototypes(module, library, args)
-        module = module.to("cuda")
-    elif args.merge_or_route == "phatgoose":
-        from mttl.models.modifiers.expert_containers.library_transforms import (
-            PhatgooseTransform,
-            PhatgooseConfig,
-        )
 
-        an_expert = library[next(iter(library.keys()))]
-        args_copy = deepcopy(an_expert.training_config)
-        # phatgoose does merging after by default
-        args_copy.lora_merge_after = True
-        args_copy.router_selector = "phatgoose_selector"
-        args_copy.router_temp = args.router_temp
-        args_copy.moe_top_k = args.moe_top_k
-
-        phatgoose_transform = PhatgooseTransform(
-            PhatgooseConfig(
-                n_steps=args.n_steps_pg, learning_rate=args.learning_rate_pg
-            )
-        )
-        prototypes = phatgoose_transform.transform(
-            library, default_args=args, recompute=args.recompute_prototypes
-        )
-
-        module = MultiExpertModel(**vars(args_copy), device_map="auto")
-        module.load_from_module_dict(library)
-        # load prototypes into the router
-        for mod in module.modules():
-            if isinstance(mod, ExpertContainer):
-                mod.selector.set_prototypes(prototypes)
-        module = module.to("cuda")
     elif args.merge_or_route == "oracle":
-        # TaskNameSelector
-        an_expert = library[next(iter(library.keys()))]
-        args_copy: ExpertConfig = deepcopy(an_expert.training_config)
-        args_copy.output_dir = args.output_dir
-        args_copy.router_selector = "task_selector"
-        module = MultiExpertModel(**vars(args_copy), device_map="auto")
-        module.load_from_module_dict(library)
-        module = module.to("cuda")
-
-    if args.pipeline_eval_tasks == "all":
-        args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
-
-    with torch.no_grad():
-        runner: EvaluatorRunner = setup_evaluators(
-            model_type=module.hparams.model,
-            model_family=module.hparams.model_family,
-            max_input_length=module.hparams.max_input_length,
-            max_output_length=module.hparams.max_output_length,
-            predict_batch_size=args.predict_batch_size,
-            truncation_side=module.hparams.truncation_side,
-            tasks=args.pipeline_eval_tasks,
-            output_path=os.path.join(args.output_dir, "DOWNSTREAM"),
+        """TaskNameSelector"""
+        args.router_selector = "task_selector"
+        selector_config = SelectorConfig.from_training_config(args)
+        module = MultiExpertModel(
+            **vars(train_cfg), selector_config=selector_config, device_map="auto"
         )
-        scores = runner.run(module)
+        module.load_from_module_dict(library)
+
+    module = module.to("cuda")
+    metric_logger = Selector.metric_logger
 
     if args.pipeline_eval_tasks == "in_distribution":
         tasks = [expert.expert_task_name for expert in library.data.values()]
-        args_copy.eval_metric = args.eval_metric
-        scores = eval_in_distribution(module, args_copy or args, tasks)
-        return
+        train_cfg.eval_metric = args.eval_metric
+        scores = eval_in_distribution(module, train_cfg, tasks)
     else:
         if args.pipeline_eval_tasks == "all":
             args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
@@ -330,25 +261,24 @@ def run_multitask(args: ExpertConfig):
             )
             scores = runner.run(module)
 
-        # try to fetch routing statistics
-        routing_stats = {}
-        if hasattr(module.model, "task_id_container"):
-            for task_name in module.model.task_id_container.keys():
-                if task_name == "routing_infos":
-                    continue
-
-            task_dict = module.model.task_id_container[task_name]
-            for k, v in task_dict.items():
-                routing_stats[f"{task_name}/{k}"] = v
+    if len(metric_logger) > 0:
+        task_table = metric_logger.pretty_table(match_on="task|.*uniform.*")
+        layer_table = metric_logger.pretty_table(match_on="layer|.*uniform.*")
+        expert_p = metric_logger.pretty_table(match_on=".*expert_p|.*uniform.*")
+        angle = metric_logger.pretty_table(match_on=".*angle.*")
+        print(task_table)
+        print(layer_table)
+        print(expert_p)
+        print(angle)
 
     if wandb.run is not None:
         wandb.log({f"downstream/{k}": v for k, v in scores.items()})
-        if len(routing_stats) > 0:
-            wandb.log(routing_stats)
+        if len(metric_logger) > 0:
+            wandb.log({k: v.avg for k, v in metric_logger.meters.items()})
 
         wandb.finish()
 
 
 if __name__ == "__main__":
     args = ExpertConfig.parse()
-    run_multitask(args)
+    run_eval(args)

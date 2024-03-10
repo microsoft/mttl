@@ -10,10 +10,8 @@ import torch.nn.functional as F
 from mttl.models.modifiers.expert_containers.expert import ExpertInfo
 from mttl.models.modifiers.routing import RoutingInfo
 from torch.distributions import Bernoulli, Categorical
+from mttl.models.utils import MetricLogger
 from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
-
-
-# from mttl.models.modifiers.routing import RoutingMixin
 from mttl.utils import logger
 
 
@@ -26,7 +24,7 @@ EPS = 1e-8
 
 
 def register_multi_expert_selector(name, config_cls):
-    print("Registering multi-expert selector..." + name)
+    print("Registering muti-expert selector..." + name)
 
     def _thunk(fn):
         if name in SELECTORS_NAME_TO_KLASS:
@@ -102,8 +100,10 @@ class SelectorConfig:
 
         config_klass = SELECTORS_NAME_TO_CONFIG[training_config.router_selector]
         kwargs = {}
-        for key, _ in config_klass.__dataclass_fields__.items():
-            if hasattr(training_config, key):
+        for key in config_klass.__dataclass_fields__.keys():
+            # only overwrite default if value exists and is not None
+            train_cfg_value = getattr(training_config, key, None)
+            if train_cfg_value is not None:
                 kwargs[key] = getattr(training_config, key)
         return config_klass(**kwargs)
 
@@ -173,7 +173,21 @@ def forward_with_cache(func):
     return wrapper
 
 
+def safe_logging(func):
+    def wrapper(*args, **kwargs):
+        try:
+            result = func(*args, **kwargs)
+        except Exception as e:
+            logger.exception(f"An error occurred in {func.__name__}: {e}")
+            result = None
+        return result
+
+    return wrapper
+
+
 class Selector(nn.Module):
+    metric_logger: MetricLogger = MetricLogger()
+
     def __init__(self, info_container, config=None, **kwargs):
         nn.Module.__init__(self)
 
@@ -492,19 +506,38 @@ class MOERKHSSelector(Selector):
         )
 
 
+class TaskToExpertTracker(Selector):
+    """
+    Abstract Class which builds `task_to_expert_name` mapping. Can be used for
+    Routing (as in TaskNameSelector) or for logging in-dist stats (PerTokenSelector)
+    """
+
+    def __init__(self, info_container, config=None, **kwargs) -> None:
+        super().__init__(info_container, config=config)
+        self.task_to_expert_name = {}
+
+    def add_expert(self, expert_name: str, expert_info: ExpertInfo = None, **kwargs):
+        if expert_info is None or expert_info.expert_task_name is None:
+            logger.warn(
+                "Expert's task_name not set, assume task name corresponds to expert name!"
+            )
+            self.task_to_expert_name[expert_name] = expert_name
+        else:
+            for task_name in expert_info.expert_task_name.split(","):
+                self.task_to_expert_name[task_name] = expert_name
+
+
 @dataclass
-class ClownRouterConfig(SelectorConfig):
-    router_granularity: str = "finegrained"
-    router_temp: float = 1.0
-    moe_top_k: int = -1
-    clown_mode: str = "window"  # "last", "mean", "per_token", "window"
-    router_window_size: int = 3
-    proto_init: str = "hidden"
-    normalize_router_input: bool = True
+class PerTokenSelectorConfig(SelectorConfig):
+    router_temp: float = None
+    moe_top_k: int = None
+    proto_init: str = None
+    input_norm_fn: str = None
+    proto_norm_fn: str = None
 
 
-@register_multi_expert_selector("clown_router", ClownRouterConfig)
-class ClownSelector(Selector):
+@register_multi_expert_selector("per_token_router", PerTokenSelectorConfig)
+class PerTokenSelector(TaskToExpertTracker):
     def __init__(self, info_container, config, **kwargs) -> None:
         super().__init__(info_container, config, **kwargs)
 
@@ -520,16 +553,95 @@ class ClownSelector(Selector):
             torch.empty((0, self.input_dim), device=layer.weight.device)
         )
 
-        if config.clown_mode == "window":
-            # Build conv kernel to compute mean over window
-            router_window_size = self.config.router_window_size
-            avg_1d_conv_kernel = (
-                torch.ones(1, 1, router_window_size) / router_window_size
-            )
-            self.register_buffer("avg_1d_conv_kernel", avg_1d_conv_kernel)
+        # validate args
+        assert self.config.proto_init is not None
+        assert self.config.input_norm_fn in [None, "layer_norm", "unit"]
+        assert self.config.proto_norm_fn in [None, "layer_norm", "unit"]
+
+        def _get_norm_layer(norm_fn):
+            """helper for normalizing input and expert embeddings"""
+
+            if norm_fn == "layer_norm":
+                return nn.LayerNorm(self.input_dim, elementwise_affine=False)
+            elif norm_fn == "unit":
+
+                def _unit_norm(x):
+                    return x / x.norm(dim=-1, p=2, keepdim=True).clamp(min=EPS)
+
+                return _unit_norm
+            else:
+                return nn.Identity()
+
+        self.input_norm = _get_norm_layer(self.config.input_norm_fn)
+        self.proto_norm = _get_norm_layer(self.config.proto_norm_fn)
 
     def overwrite_prototypes(self, prototypes):
         self.prototypes.data = prototypes.type_as(self.prototypes)
+
+    @safe_logging
+    def _log_angle(self, angle):
+        bs, sq, n_exp = angle.size()
+
+        if sq > 1:
+            attn_mask = self.info_container["routing_infos"].attention_mask == 1.0
+            mean_angle = angle[attn_mask].sum() / attn_mask.sum() / n_exp
+        else:
+            mean_angle = angle.mean()
+
+        task = self.info_container["routing_infos"].task_sources[0]
+        to_store = {"angle": mean_angle.item()}
+        self.metric_logger.update(prefix=f"task_{task}", value_dict=to_store)
+        self.metric_logger.update(prefix=self.__layer_name__, value_dict=to_store)
+
+    @safe_logging
+    def _log_entropy(self, logits):
+        # uniform routing entropy
+        bs, sq, dim = logits.size()
+
+        dist = Categorical(logits=logits)
+        entropy = dist.entropy()
+
+        if sq > 1:
+            attn_mask = self.info_container["routing_infos"].attention_mask == 1.0
+            mean_entropy = entropy[attn_mask].sum() / attn_mask.sum()
+        else:
+            mean_entropy = entropy.mean()
+
+        task = self.info_container["routing_infos"].task_sources[0]
+        to_store = {"ent_routing": mean_entropy.item()}
+        self.metric_logger.update(prefix=f"task_{task}", value_dict=to_store)
+        self.metric_logger.update(prefix=self.__layer_name__, value_dict=to_store)
+
+        to_store["ent_uniform"] = np.log(len(self.expert_names))
+        self.metric_logger.update(value_dict=to_store)
+
+    @safe_logging
+    def _maybe_log_in_dist(self, logits):
+        probs = F.softmax(logits, dim=-1)
+        bs, seq_len, _ = probs.size()
+        task_names = self.info_container["routing_infos"].task_names
+        if all([t in self.task_to_expert_name for t in task_names]):
+            expert_names = [self.task_to_expert_name[t] for t in task_names]
+            expert_ids = torch.LongTensor(
+                [self.expert_names.index(e) for e in expert_names]
+            ).to(logits.device)
+            expert_p = torch.gather(
+                probs, index=expert_ids.view(bs, 1, 1).expand(-1, seq_len, -1), dim=-1
+            )
+
+            attn_mask = self.info_container["routing_infos"].attention_mask == 1.0
+
+            # are we teacher forcing or generating ?
+            if seq_len == 1:
+                mean_correct_p = expert_p.mean()
+            else:
+                mean_correct_p = expert_p[attn_mask].mean()
+
+            to_store = {"expert_p": mean_correct_p.item()}
+            self.metric_logger.update(
+                prefix=f"task_{task_names[0]}", value_dict=to_store
+            )
+            self.metric_logger.update(prefix=self.__layer_name__, value_dict=to_store)
 
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchSequenceModulesAndWeightsSelectorOutput:
@@ -543,122 +655,95 @@ class ClownSelector(Selector):
             raise ValueError("Prototypes not initialized correctly.")
 
         input = input.to(dtype=self.prototypes.dtype)
+        input = self.input_norm(input)
+        prototypes = self.proto_norm(self.prototypes)
 
-        if self.config.normalize_router_input:
-            input /= input.norm(dim=-1, p=2, keepdim=True).clamp(min=EPS)
+        # logit computation
+        router_logits = F.linear(input, prototypes)
+        if self.config.proto_init == "arrow":
+            router_logits = router_logits.abs()
 
-        input_ids = self.info_container["routing_infos"].input_ids
-        attn_mask = self.info_container["routing_infos"].attention_mask
-        bs, sq, D = input.shape
+        # log angle between input and prototypes
+        angle = router_logits / input.norm(p=2, dim=-1, keepdim=True).clamp(min=EPS)
+        angle = angle / prototypes.norm(p=2, dim=-1).view(1, 1, -1).clamp(min=EPS)
+        self._log_angle(angle)
 
-        if self.config.clown_mode == "per_token":
-            router_logits = F.linear(input, self.prototypes)
-            if self.config.proto_init == "svd":
-                router_logits = router_logits.abs()
-
-            routing_weights = F.softmax(router_logits / temp, dim=-1, dtype=torch.float)
-        else:
-            attn_mask = self.info_container["routing_infos"].attention_mask
-            if sq == attn_mask.size(1):
-                if self.config.clown_mode == "mean":
-                    # teacher force mode. router input is the mean over valid tokens
-                    router_input = (input * attn_mask.unsqueeze(-1)).sum(dim=1) / (
-                        attn_mask.sum(dim=1, keepdim=True) + EPS
-                    )
-                elif self.config.clown_mode == "last":
-                    last_idx = attn_mask.sum(1) - 1
-                    router_input = input[torch.arange(bs), last_idx]
-                elif self.config.clown_mode == "window":
-                    flat_input = input.transpose(1, 2).reshape(bs * D, 1, sq)
-                    left_pad_input = torch.cat(
-                        (
-                            flat_input[:, :, [0]].expand(
-                                -1, -1, self.config.router_window_size - 1
-                            ),
-                            flat_input,
-                        ),
-                        dim=-1,
-                    )
-                    conv_out = F.conv1d(left_pad_input, self.avg_1d_conv_kernel).view(
-                        bs, D, sq
-                    )
-                    router_input = conv_out.transpose(1, 2)
-            else:
-                assert sq == 1
-                # we are in generation mode
-                router_input = input.squeeze(1)
-
-            router_logits = F.linear(router_input, self.prototypes)
-            if self.config.proto_init == "svd":
-                router_logits = router_logits.abs()
-            routing_weights = F.softmax(router_logits / temp, dim=-1, dtype=torch.float)
-
-        if routing_weights.ndim == 2:
-            routing_weights = routing_weights.unsqueeze(1).expand(
-                -1, input.shape[1], -1
-            )
-
-        # uniform routing entropy
-        ent_routing = -1 * (routing_weights * torch.log(routing_weights + 1e-6)).sum(-1)
-        if sq == 1:
-            ent_routing = ent_routing.sum()
-            valid_ps = routing_weights
-        else:
-            ent_routing = (ent_routing * attn_mask).sum() / attn_mask.sum()
-            valid_ps = routing_weights[attn_mask == 1]
-
-        max_p, min_p = valid_ps.max(), valid_ps.min()
-        to_store = {
-            "ent_uniform": np.log(len(self.expert_names)),
-            "ent_routing": ent_routing.item(),
-            "max_p": max_p.item(),
-            "min_p": min_p.item(),
-        }
-
-        # Keep running statistics of routing
-        task = self.info_container["routing_infos"].task_names[0]
-        task_container = self.info_container.get(task, {})
-        count = task_container.get("routing_count", 0)
-
-        for name, value in to_store.items():
-            old_value = task_container.get(name, 0)
-            task_container[name] = (old_value * count + value) / (count + 1)
-
-        task_container["routing_count"] = count + 1
-        self.info_container[task] = task_container
+        # control entropy of distribution
+        router_logits /= temp
 
         if self.config.moe_top_k > 0:
-            # TODO: mask and renormalize the routing_weights, so that it's still differentiable
-            _, selected_experts = torch.topk(
-                routing_weights, self.config.moe_top_k, dim=-1
+            # For now, we always renormalize the routing weights for hard routing
+            top_k_logits, modules = torch.topk(
+                router_logits, self.config.moe_top_k, dim=-1
             )
+            router_probs = F.softmax(top_k_logits, dim=-1)
 
-            routing_weights = torch.zeros_like(routing_weights)
-            value = (
-                torch.ones(
-                    size=(1,),
-                    device=routing_weights.device,
-                    dtype=routing_weights.dtype,
-                )
-                / self.config.moe_top_k
+            # Adjust router_logits accordingly for logging
+            chosen = torch.zeros_like(router_logits, dtype=torch.bool)
+            chosen.scatter_add_(
+                dim=-1, index=modules, src=torch.ones_like(modules).bool()
             )
-            value = value.expand_as(selected_experts)
-            routing_weights.scatter_(dim=-1, index=selected_experts, src=value)
+            router_logits = router_logits.masked_fill(~chosen, -1e9)
+        else:
+            modules = None
+            router_probs = F.softmax(router_logits, dim=-1, dtype=torch.float)
+
+        self._log_entropy(router_logits)
+        self._maybe_log_in_dist(router_logits)
 
         return BatchSequenceModulesAndWeightsSelectorOutput(
-            modules=None, weights=routing_weights
+            modules=modules, weights=router_probs
         )
 
-    def get_merging_weights(self, **selector_kwargs) -> Dict:
-        raise ValueError(
-            f"Not supported for {self.__class__} since routing depends on input."
-        )
-
-    def get_routing_weights(self):
-        raise ValueError("Not supported for ClownSelector.")
-
-    def add_expert(self, expert_name: str, **kwargs):
+    def add_expert(self, expert_name: str, expert_info: ExpertInfo = None, **kwargs):
+        super().add_expert(expert_name, expert_info, **kwargs)
         self.expert_names.append(expert_name)
+
+
+@dataclass
+class ArrowSelectorConfig(PerTokenSelectorConfig):
+    router_temp: float = 1.0
+    moe_top_k: int = -1
+    proto_init: str = "arrow"
+    input_norm_fn: str = None
+    proto_norm_fn: str = None
+
+
+@register_multi_expert_selector("arrow_router", ArrowSelectorConfig)
+class ArrowSelector(PerTokenSelector):
+    pass
+
+
+@dataclass
+class PhatgooseSelectorConfig(PerTokenSelectorConfig):
+    router_temp: float = -1
+    moe_top_k: int = 2
+    proto_init: str = "phatgoose"
+    input_norm_fn: str = "layer_norm"
+    proto_norm_fn: str = "layer_norm"
+    lora_merge_after: bool = True
+
+
+@register_multi_expert_selector("phatgoose_router", PhatgooseSelectorConfig)
+class PhatgooseSelector(PerTokenSelector):
+    def __init__(self, info_container, config, **kwargs) -> None:
+        super().__init__(info_container, config, **kwargs)
+        if not self.config.lora_merge_after:
+            logger.warning("PhatgooseSelector should have lora_merge_after=True")
+
+
+@dataclass
+class AverageActivationSelectorConfig(PerTokenSelectorConfig):
+    router_temp: float = -1
+    moe_top_k: int = -1
+    proto_init: str = "avg_act"
+    input_norm_fn: str = None
+    proto_norm_fn: str = None
+
+
+@register_multi_expert_selector("avg_act_router", AverageActivationSelectorConfig)
+class AverageActivationSelector(PerTokenSelector):
+    pass
 
 
 @dataclass
@@ -799,11 +884,8 @@ class ZeroPerTokenSelector(Selector):
 
 
 @dataclass
-class PhatgooseSelectorConfig(SelectorConfig):
-    moe_top_k: int = 2  # negative number means we take all
-    router_temp: float = (
-        -1
-    )  # negative value means we use the default \sqrt(d) temp, where n is the input dimension.
+class PhatgooseTrainerSelectorConfig(SelectorConfig):
+    pass
 
 
 class SigmoidGate(nn.Module):
@@ -815,51 +897,16 @@ class SigmoidGate(nn.Module):
         return torch.sigmoid(F.linear(x, self.v, bias=None))
 
 
-class Router(nn.Module):
-    def __init__(
-        self, gates: nn.ModuleList, hard=False, t=-1, top_k=2, device="cuda", **kwargs
-    ):
-        super().__init__()
-        self.hard = hard
-        self.moe_top_k = top_k
-        self.temperature = t
-        self.expert_embeddings = torch.stack([g.v.T.squeeze() for g in gates]).to(
-            device
-        )  # (n_experts, input_dim)
-        # standardize the expert embeddings: sub mean and divide by std
-        self.standardizer = nn.LayerNorm(
-            self.expert_embeddings.shape[1], elementwise_affine=False
-        )
-        self.expert_embeddings = self.standardizer(self.expert_embeddings)
-
-    def forward(self, input):
-        # x: (batch_size, seq, d)
-        # expert_embeddings: (n_experts, d)
-        # perform routing business in fp32 as in Clown
-        input = input.to(self.expert_embeddings.dtype)
-        # standardize the input
-        input = self.standardizer(input)
-        # cosine similarity of each token with each expert
-        sim = torch.einsum(
-            "bsd,ed->bse", input, self.expert_embeddings
-        )  # (batch_size, seq, n_experts)
-        temp = self.temperature if self.temperature > 0 else np.sqrt(input.shape[-1])
-
-        if self.hard:
-            weights, module_indices = torch.topk(sim, self.moe_top_k, dim=-1)
-            return module_indices, F.softmax(weights / temp, dim=-1)
-        else:
-            return None, F.softmax(sim / temp, dim=-1)
-
-
-@register_multi_expert_selector("phatgoose_selector", PhatgooseSelectorConfig)
-class PhatgooseSelector(Selector):
+@register_multi_expert_selector(
+    "phatgoose_trainer_selector", PhatgooseTrainerSelectorConfig
+)
+class PhatgooseTrainerSelector(Selector):
     """
     Selector from https://arxiv.org/abs/2402.05859
     """
 
     def __init__(
-        self, info_container, config: PhatgooseSelectorConfig, **kwargs
+        self, info_container, config: PhatgooseTrainerSelectorConfig, **kwargs
     ) -> None:
         super().__init__(info_container, config)
 
@@ -868,103 +915,32 @@ class PhatgooseSelector(Selector):
                 "PhatgooseSelector requires a layer to be passed in kwargs to infer the input dimension."
             )
 
-        self.top_k = config.moe_top_k
         self.input_dim = kwargs["layer"].weight.data.shape[-1]
         self.device = kwargs["layer"].weight.device
 
         self.gates = nn.ParameterDict()
-        self.router = None
         self.layer = kwargs["layer"]
         self.default_expert_name = None
         self.routing_gates = []  # for logging purposes at training time
-        self.log_routing_stats = False
-
-    def get_prototypes(self):
-        return {k: gate.v.detach().cpu().numpy() for k, gate in self.gates.items()}
-
-    def set_prototypes(self, prototypes):
-        """
-        Sets prototypes for the gates and re-initializes the router with the new gates
-        Input:
-            - prototypes: a dictionary with expert names as keys mapped to another dict with layer names as keys and values as the prototypes
-        """
-        for task_name, gates in prototypes.items():
-            gate_v = gates[f"model.{self.__layer_name__}.{task_name}.v"]
-            assert self.gates[task_name].v.shape == gate_v.shape
-            self.gates[task_name].v.data = torch.tensor(gate_v).to(self.device)
-
-        self.router = Router(
-            self.gates.values(),
-            hard=self.top_k > 0,
-            t=self.config.router_temp,
-            top_k=self.top_k,
-            device=self.device,
-        )
 
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchSequenceModulesAndWeightsSelectorOutput:
-        if len(self.gates) == 1:
-            # selectors for tasks are trained independently
-            # all samples go through the same selector
-            scores = self.gates[self.default_expert_name](input)
-            # log the scores
-            container = kwargs.get("container", None)
-            if container is not None:
-                self.routing_gates.append(scores.detach().cpu().float())
-            return BatchSequenceModulesAndWeightsSelectorOutput(
-                torch.zeros_like(scores, dtype=torch.int8), scores
-            )
-        else:
-            # the inference procedure: we have multiple gates
-            # parallel forward + top-k selection
-            assert len(self.gates) == len(self.expert_names)
-            modules, scores = self.router(input)
-            routings = torch.zeros(
-                (input.shape[0], input.shape[1], len(self.expert_names)),
-                dtype=torch.float,
-                device=self.device,
-            )
-
-            if self.log_routing_stats:
-                # for logging purposes: we transform it into tokens x experts
-                _modules = modules.view(-1, self.router.moe_top_k)
-                _routings = routings.view(-1, len(self.expert_names))
-                _scores = scores.view(-1, self.router.moe_top_k)
-                _routings = _routings.scatter(1, _modules, _scores)
-                # calculate entropy and MI over the toekns dimention and log
-                layer_routing_dist = _routings
-                dims = layer_routing_dist.shape[1]
-                layer_routing_mean = layer_routing_dist.mean(0)
-                h_mean = Categorical(probs=layer_routing_mean).entropy() / math.log(
-                    dims
-                )
-                mean_h = Categorical(
-                    probs=layer_routing_dist
-                ).entropy().mean() / math.log(dims)
-                mi = h_mean - mean_h
-                logger.info(f"Layer {self.__layer_name__} MI: {mi}, mean_H: {mean_h}")
-                # TODO: figure out a way of how to actually log it to somewhere
-                # at first glance there is no collapse here, i.e. MI is low and entropy is not too low.
-
-            return BatchSequenceModulesAndWeightsSelectorOutput(
-                modules=modules, weights=scores
-            )
+        # selectors for tasks are trained independently
+        # all samples go through the same selector
+        scores = self.gates[self.default_expert_name](input)
+        # log the scores
+        container = kwargs.get("container", None)
+        if container is not None:
+            self.routing_gates.append(scores.detach().cpu().float())
+        return BatchSequenceModulesAndWeightsSelectorOutput(
+            torch.zeros_like(scores, dtype=torch.int8), scores
+        )
 
     def add_expert(self, expert_name: str, **kwargs):
         self.expert_names.append(expert_name)
         expert_info = kwargs["expert_info"]
         self.default_expert_name = expert_name
-
         self.gates[expert_name] = SigmoidGate(self.input_dim)
-
-        if len(self.gates) > 1:
-            self.router = Router(
-                self.gates.values(),
-                hard=self.top_k > 0,
-                t=self.config.router_temp,
-                top_k=self.top_k,
-                device=self.device,
-            )
 
     def get_merging_weights(self, **selector_kwargs) -> Dict:
         raise ValueError(
@@ -1111,12 +1087,10 @@ class TaskNameSelectorConfig(SelectorConfig):
 
 
 @register_multi_expert_selector("task_selector", TaskNameSelectorConfig)
-class TaskNameSelector(Selector):
+class TaskNameSelector(TaskToExpertTracker):
     def __init__(self, info_container, **kwargs) -> None:
         super().__init__(info_container)
-
         self.default_expert_name = None
-        self.task2expert_name = {}
 
     @forward_with_cache
     def forward(self, input, **kwargs) -> ModulesSelectorOutput:
@@ -1135,29 +1109,22 @@ class TaskNameSelector(Selector):
             task_names = self.routing_infos.task_names
 
             if (
-                any(task_name not in self.task2expert_name for task_name in task_names)
+                any(
+                    task_name not in self.task_to_expert_name
+                    for task_name in task_names
+                )
                 and not self.default_expert_name
-                and len(self.task2expert_name)
+                and len(self.task_to_expert_name)
             ):
                 raise ValueError(
                     "Experts for all tasks have not been loaded! Set a default expert?"
                 )
             modules = [
-                self.task2expert_name.get(task_name, self.default_expert_name)
+                self.task_to_expert_name.get(task_name, self.default_expert_name)
                 for task_name in task_names
             ]
 
         return ModulesSelectorOutput(modules)
-
-    def add_expert(self, expert_name: str, expert_info: ExpertInfo = None, **kwargs):
-        if expert_info is None or expert_info.expert_task_name is None:
-            logger.warn(
-                "Expert's task_name not set, assume task name corresponds to expert name!"
-            )
-            self.task2expert_name[expert_name] = expert_name
-        else:
-            for task_name in expert_info.expert_task_name.split(","):
-                self.task2expert_name[task_name] = expert_name
 
     def get_merging_weights(self, **selector_kwargs) -> Dict:
         raise NotImplementedError(
