@@ -217,7 +217,8 @@ class Trie:
     def __init__(self):
         self.root = TrieNode()
 
-    def insert(self, word):
+    def insert(self, sequence):
+        word = sequence.split(".")
         node = self.root
         for char in word:
             if char not in node.children:
@@ -225,7 +226,8 @@ class Trie:
             node = node.children[char]
         node.is_end_of_word = True
 
-    def search(self, word):
+    def search(self, sequence):
+        word = sequence.split(".")
         node = self.root
         for char in word:
             if char not in node.children:
@@ -233,16 +235,18 @@ class Trie:
             node = node.children[char]
         return node.is_end_of_word
 
-    def starts_with(self, prefix):
+    def starts_with(self, sequence):
         node = self.root
+        prefix = sequence.split(".")
         for char in prefix:
             if char not in node.children:
                 return False
             node = node.children[char]
         return True
 
-    def has_leaf_prefix(self, prefix):
+    def has_leaf_prefix(self, sequence):
         node = self.root
+        prefix = sequence.split(".")
         for char in prefix:
             if char not in node.children:
                 return False
@@ -270,8 +274,9 @@ def get_modules_to_modify_trie(transformer):
         # if m_name is ExpertContainer, insert to the trie
         if isinstance(module, ExpertContainer):
             trie.insert(m_name)
+    for m_name, module in dict(transformer.named_modules()).items():
         # for all the sub modules in the trie, skip if it is inside an expert container
-        if trie.has_leaf_prefix(
+        if not trie.search(m_name) and trie.has_leaf_prefix(
             m_name
         ):  # it indicate the m_name is from the expert container
             continue
