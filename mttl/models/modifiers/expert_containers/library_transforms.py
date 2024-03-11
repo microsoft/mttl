@@ -511,8 +511,6 @@ class HiddenStateComputer(LibraryTransform):
 class PhatgooseConfig(LibraryTransformConfig):
     n_steps: int = 1000
     learning_rate: float = 3e-3
-    micro_batch_size: int = 1
-    train_batch_size: int = 16
 
 
 class PhatgooseTransform(HiddenStateComputer):
@@ -561,10 +559,6 @@ class PhatgooseTransform(HiddenStateComputer):
             training_config.trainable_param_names = ".*selector.*"
             training_config.logging_prefix = expert_name + "/"
             training_config.weight_decay = 0.0
-            training_config.train_batch_size = self.config.micro_batch_size
-            training_config.gradient_accumulation_steps = (
-                self.config.train_batch_size // self.config.micro_batch_size
-            )
 
             # for training, we set this to true even if there is just a single expert.
             # This ensures that we do (gate * AB * x) instead of ((gate * A) * (gate * B) * x)
@@ -606,6 +600,10 @@ class PhatgooseTransform(HiddenStateComputer):
                 )
                 training_config.train_batch_size = default_args.train_batch_size
                 training_config.micro_batch_size = default_args.micro_batch_size
+            else:
+                raise ValueError(
+                    "batch size and gradient accumulation steps must be set from the cmd line args"
+                )
 
             # get datamodule
             dm = get_datamodule(training_config)
