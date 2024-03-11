@@ -132,7 +132,7 @@ def eval_in_distribution(module, args: ExpertConfig, tasks):
             evaluator = LossCallback(
                 dm.test_dataloader(), output_dir=args.output_dir, name=task + "_test"
             )
-            metric = evaluator.test(model=module)
+            metric = evaluator.test(pl_module=module)
         elif args.eval_metric == "rougeL":
             dm = get_datamodule(args, for_generation=True)
             evaluator = RougeEvaluator(
@@ -191,6 +191,7 @@ def run_eval(args: ExpertConfig):
     )
     an_expert = library[next(iter(library.keys()))]
     train_cfg = deepcopy(an_expert.training_config)
+    train_cfg.device_map = "auto"
 
     # For starts, always overwrite the following arguments
     for arg_name in ["output_dir", "eval_metric"]:
@@ -224,9 +225,7 @@ def run_eval(args: ExpertConfig):
         args.router_selector = f"{args.merge_or_route}_router"
 
         selector_config = SelectorConfig.from_training_config(args)
-        module = MultiExpertModel(
-            **vars(train_cfg), selector_config=selector_config, device_map="auto"
-        )
+        module = MultiExpertModel(**vars(train_cfg), selector_config=selector_config)
         module.load_from_module_dict(library)
         patch_prototypes(module, library, args)
 
@@ -234,9 +233,7 @@ def run_eval(args: ExpertConfig):
         """TaskNameSelector"""
         args.router_selector = "task_selector"
         selector_config = SelectorConfig.from_training_config(args)
-        module = MultiExpertModel(
-            **vars(train_cfg), selector_config=selector_config, device_map="auto"
-        )
+        module = MultiExpertModel(**vars(train_cfg), selector_config=selector_config)
         module.load_from_module_dict(library)
 
     module = module.to("cuda")
