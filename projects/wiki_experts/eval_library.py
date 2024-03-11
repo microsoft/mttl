@@ -19,7 +19,7 @@ from mttl.models.modifiers.expert_containers.selectors import (
 from mttl.models.modifiers.lora import LoRAConfig
 
 from mttl.utils import logger, remote_login, setup_logging
-from mttl.models.expert_model import MultiExpertModel
+from mttl.models.expert_model import MultiExpertModel, ExpertModel
 from mttl.models.expert_config import ExpertConfig
 
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
@@ -216,6 +216,8 @@ def run_eval(args: ExpertConfig):
         train_cfg.lora_merge_after = True
         module = MultiExpertModel(**vars(train_cfg))
         module.add_experts_from_library(library)
+    elif args.merge_or_route == "base":
+        module = ExpertModel(**vars(train_cfg))
 
     """ Routing Approaches """
     if args.merge_or_route in ["phatgoose", "arrow", "avg_act"]:
@@ -239,6 +241,13 @@ def run_eval(args: ExpertConfig):
 
     module = module.to("cuda")
     metric_logger = Selector.metric_logger
+
+    if wandb.run is None and os.environ.get("WANDB_API_KEY"):
+        wandb.init(
+            project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
+            config=dict(module.hparams),
+            name=os.environ.get("AMLT_JOB_NAME", None),
+        )
 
     if args.pipeline_eval_tasks == "in_distribution":
         tasks = [expert.expert_task_name for expert in library.data.values()]

@@ -132,16 +132,15 @@ class ExpertConfig(Config):
             # resolve task keys
             task_names = []
             tasks = self.finetune_task_name.split(",")
-            if self.tasksets_path is not None:
+            if self.tasksets_path is not None and os.path.exists(self.tasksets_path):
                 # load task names from json file
                 task_sets = json.load(open(self.tasksets_path))
                 for task_name in tasks:
+                    # try to fetch task_names from the file
                     if task_name in task_sets:
                         task_names.extend(task_sets[task_name])
                     else:
-                        raise ValueError(
-                            f"tasksets_path os passed, but task name {task_name} not found in tasksets file {self.tasksets_path}"
-                        )
+                        task_names.append(task_name)
             else:
                 task_names = tasks
 
