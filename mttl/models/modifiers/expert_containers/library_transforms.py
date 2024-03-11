@@ -12,8 +12,8 @@ import sklearn.decomposition
 from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
 from collections import defaultdict
-from collections import defaultdict
 
+from mttl.models.modifiers.base import get_target_2_source_param_mapping
 from mttl.models.modifiers.expert_containers.expert import Expert
 from mttl.models.modifiers.expert_containers.expert_containers import ExpertContainer
 from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
@@ -666,6 +666,7 @@ class PhatgooseTransform(HiddenStateComputer):
 class ArrowConfig(LibraryTransformConfig):
     ab_only: bool = True
     scale: bool = False  # If True, scale by eigenvalue
+    tie_params: str = None
 
 
 class ArrowTransform(LibraryTransform):
@@ -688,6 +689,38 @@ class ArrowTransform(LibraryTransform):
                 output[expert_name][layer_name] = torch.from_numpy(vector)
 
         return output
+
+    def _low_rank_svd(self, A, B):
+        # Compute SVD of A
+        U_A, Sigma_A, V_A = torch.svd(A)
+
+        # Compute SVD of B.T (transpose of B)
+        U_B, Sigma_B, V_B = torch.svd(B.T)
+
+        # Compute product matrix C = Sigma_A * (V_A.T @ V_B) * Sigma_B
+        # Since V_A and V_B are orthogonal, their product is also an orthogonal matrix
+        C = Sigma_A.diag_embed() @ V_A.t() @ V_B @ Sigma_B.diag_embed()
+
+        # Compute SVD of the product matrix C
+        U_C, Sigma_C, V_C = torch.svd(C)
+
+        # Construct the final SVD components of W
+        U_W = U_A @ U_C
+        V_W_T = V_C.t() @ U_B.t()
+
+        diff_AB = (U_W.T @ U_A).abs().diag()
+        if diff_AB[0] < 0.9:
+            logger.warning("The first singular vector of U_A and U_AB are not aligned")
+
+        return U_W, Sigma_C, V_W_T
+
+    def _get_unique_parent_names(self, alist):
+        """
+        if adict.keys() = ['model.layer1.lora_a', 'model.layer.lora_b', 'model.layer2.lora_a']
+        output will be {'model.layer1', 'model.layer2'}
+        """
+        dict_keys = sorted(list(set(".".join(k.split(".")[:-1]) for k in alist)))
+        return dict_keys
 
     @torch.no_grad()
     def transform(self, library, persist=True, recompute=False) -> Expert:
@@ -721,116 +754,78 @@ class ArrowTransform(LibraryTransform):
 
                 base_model = MultiExpertModel(**vars(training_config))
 
-            state_dict_keys = sorted(
-                list(
-                    set(
-                        ".".join(k.split(".")[:-1])
-                        for k in expert.expert_weights.keys()
-                    )
-                )
+            tied_params = get_target_2_source_param_mapping(
+                expert.expert_weights.items(), expert.training_config.tie_params
             )
-            expert_weights = expert.expert_weights
-
-            for param_name in state_dict_keys:
-                logger.info(f"\tComputing SVD for parameter {param_name}")
-                A, B = (
-                    expert_weights[f"{param_name}.lora_a"],
-                    expert_weights[f"{param_name}.lora_b"],
+            if self.config.tie_params:
+                _tied_params_cfg = get_target_2_source_param_mapping(
+                    expert.expert_weights.items(), self.config.tie_params
                 )
-
-                if (
-                    expert.training_config.tie_params
-                    == "q_proj\\.lora_a|k_proj\\.lora_a|v_proj\\.lora_a"
-                ):
-                    tie_layers = "q_proj|k_proj|v_proj"
-                    parent, layer_name = (
-                        ".".join(param_name.split(".")[:-1]),
-                        param_name.split(".")[-1],
+                # Make sure that params tied during training are also tied for Arrow
+                if any(key not in _tied_params_cfg for key in tied_params):
+                    raise ValueError(
+                        "Parameters that are tied during training must also be tied during Arrow computation."
                     )
-                    if re.fullmatch(tie_layers, layer_name):
-                        params_under_same_parent = [
-                            k
-                            for k in state_dict_keys
-                            if ".".join(k.split(".")[:-1]) == parent
-                        ]
-                        for p in params_under_same_parent:
-                            if p in vectors[expert_name]:
-                                # SVD for this parameter group has been computed already
-                                vectors[expert_name][param_name] = vectors[expert_name][
-                                    p
-                                ]
-                                eigvals[expert_name][param_name] = eigvals[expert_name][
-                                    p
-                                ]
-                                continue
+                tied_params = _tied_params_cfg
 
-                        As, Bs = [], []
-                        for p in params_under_same_parent:
-                            layer_name = p.split(".")[-1]
-                            if re.fullmatch(
-                                tie_layers,
-                                layer_name,
-                            ):
-                                Bs.append(expert.expert_weights[f"{p}.lora_b"])
-                                As.append(expert.expert_weights[f"{p}.lora_a"])
-                        assert np.all(
-                            [np.allclose(A, a) for a in As]
-                        )  # since As are shared, they should be the same
-                        B = torch.cat(Bs, dim=-1)
+            # instead of target param name -> source param name, let's reverse this dict and map to a list
+            # source param name -> list of target param names
+            tied_params_source2target = defaultdict(list)
+            for k, v in tied_params.items():
+                tied_params_source2target[v].append(k)
+
+            # extend this mapping to contain untied params. They will map to empty arrays
+            tied_parents = self._get_unique_parent_names(
+                tied_params_source2target.keys()
+            )
+            tied_parents += self._get_unique_parent_names(tied_params.keys())
+            for k in expert.expert_weights.keys():
+                parent = ".".join(k.split(".")[:-1])
+                if parent not in tied_parents:
+                    print("adding k : ", k)
+                    tied_params_source2target[k] = []
+
+            for param_name in self._get_unique_parent_names(
+                tied_params_source2target.keys()
+            ):
+                logger.info(f"\tComputing SVD for parameter {param_name}")
+
+                parents_tied = [param_name]
+                A_name, B_name = f"{param_name}.lora_a", f"{param_name}.lora_b"
+                As = [expert.expert_weights[A_name]]
+                Bs = [expert.expert_weights[B_name]]
+
+                for a_tied in tied_params_source2target[A_name]:
+                    parent_name = ".".join(a_tied.split(".")[:-1])
+                    As += [expert.expert_weights[a_tied]]
+                    Bs += [expert.expert_weights[f"{parent_name}.lora_b"]]
+                    parents_tied += [parent_name]
+
+                assert (
+                    len(tied_params_source2target[B_name]) == 0
+                ), "B_name should not be tied"
+
+                if len(As) > 1:
+                    # assert (A[0] == A).all(), 'A should be the same for all tied parameters'
+                    A = torch.cat(As, dim=1)
+                    B = torch.cat(Bs, dim=0)
+                else:
+                    A, B = As[0], Bs[0]
 
                 W = (A @ B).T  # out_features, in_features
 
                 if self.config.ab_only:
-                    # Now, the efficient way
-                    # Compute SVD of A
-                    U_A, Sigma_A, V_A = torch.svd(A)
-
-                    # Compute SVD of B.T (transpose of B)
-                    U_B, Sigma_B, V_B = torch.svd(B.T)
-
-                    # Compute product matrix C = Sigma_A * (V_A.T @ V_B) * Sigma_B
-                    # Since V_A and V_B are orthogonal, their product is also an orthogonal matrix
-                    C = Sigma_A.diag_embed() @ V_A.t() @ V_B @ Sigma_B.diag_embed()
-
-                    # Compute SVD of the product matrix C
-                    U_C, Sigma_C, V_C = torch.svd(C)
-
-                    # Construct the final SVD components of W
-                    U_W = U_A @ U_C
-                    top_vector = U_W[:, 0]
-                    top_value = Sigma_C[0] ** 2
+                    U_W, Sigma_W, _ = self._low_rank_svd(A, B)
+                    top_value = Sigma_W[0] ** 2
                     bottom_vector = U_W[:, -1]
-
-                    diff_AB = (U_W.T @ U_A).abs().diag()
-                    if diff_AB[0] < 0.9:
-                        logger.warning(
-                            "The first singular vector of U_A and U_AB are not aligned"
-                        )
-
+                    top_vector = U_W[:, 0]
                 else:
-                    if (
-                        expert.training_config.tie_layers
-                        == "q_proj.lora_a|k_proj.lora_a|v_proj.lora_a"
-                    ):
-                        raise NotImplementedError(
-                            "Currently, tied LORA not supported for ArrowTransform with ab_only = False"
-                        )
                     base_W = base_model.model.state_dict()[f"{param_name}.weight"]
-                    W_AB = base_W + W
-                    eig_input = W_AB.T @ W_AB
-                    out = torch.linalg.eig(eig_input)
-                    eigvector = out.eigenvectors
-                    largest, smallest = eigvector[:, 0], eigvector[:, -1]
-
-                    img_eig_vals = eigvector.imag.abs().mean().item()
-                    if img_eig_vals > 1e-2:
-                        logger.warning(
-                            f"Found {img_eig_vals} imaginary eigenvalues, this is likely due to numerical instability"
-                        )
-
-                    top_vector = largest.real
-                    top_value = out.eigenvalues.real[0]
-                    bottom_vector = smallest.real
+                    W += base_W
+                    U, E, Vt = torch.linalg.svd(W)
+                    top_vector = Vt[0]
+                    bottom_vector = Vt[-1]
+                    top_value = E[0]
 
                 # Check that top vector is indeed an eigenvector
                 WTW = W.T @ W
@@ -843,8 +838,9 @@ class ArrowTransform(LibraryTransform):
                 ).sum()
 
                 # Save eigenvector and eigvenvalue
-                vectors[expert_name][param_name] = top_vector.real.cpu().numpy()
-                eigvals[expert_name][param_name] = top_value.item()
+                for parent in parents_tied:
+                    vectors[expert_name][parent] = top_vector.real.cpu().numpy()
+                    eigvals[expert_name][parent] = top_value.item()
 
         if persist:
             # add embeddings to the library
