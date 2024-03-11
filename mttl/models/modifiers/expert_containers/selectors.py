@@ -947,6 +947,9 @@ class PhatgooseTrainerSelector(Selector):
             f"Not supported for {self.__class__}  since routing depends on input."
         )
 
+    def get_prototypes(self):
+        return {k: gate.v.detach().cpu().numpy() for k, gate in self.gates.items()}
+
 
 @dataclass
 class PolySelectorDirectConfig(PolySelectorConfig):
