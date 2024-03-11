@@ -754,59 +754,71 @@ class ArrowTransform(LibraryTransform):
 
                 base_model = MultiExpertModel(**vars(training_config))
 
-            tied_params = get_target_2_source_param_mapping(
+            # get parameters tied during training
+            param_map = get_target_2_source_param_mapping(
                 expert.expert_weights.items(), expert.training_config.tie_params
             )
             if self.config.tie_params:
-                _tied_params_cfg = get_target_2_source_param_mapping(
+                # get parameters we wish to tie during for Arrow
+                _tied_params = get_target_2_source_param_mapping(
                     expert.expert_weights.items(), self.config.tie_params
                 )
                 # Make sure that params tied during training are also tied for Arrow
-                if any(key not in _tied_params_cfg for key in tied_params):
+                if any(key not in _tied_params for key in param_map):
                     raise ValueError(
                         "Parameters that are tied during training must also be tied during Arrow computation."
                     )
-                tied_params = _tied_params_cfg
+                param_map = _tied_params
 
-            # instead of target param name -> source param name, let's reverse this dict and map to a list
-            # source param name -> list of target param names
-            tied_params_source2target = defaultdict(list)
-            for k, v in tied_params.items():
-                tied_params_source2target[v].append(k)
+            tied_params = list(param_map.keys()) + list(param_map.values())
+            assert all(
+                "lora_b" not in param_name for param_name in tied_params
+            ), "Support for tied B not available"
+            assert all(
+                "lora_a" in param_name for param_name in tied_params
+            ), "Only support tied As for now"
 
-            # extend this mapping to contain untied params. They will map to empty arrays
-            tied_parents = self._get_unique_parent_names(
-                tied_params_source2target.keys()
-            )
-            tied_parents += self._get_unique_parent_names(tied_params.keys())
-            for k in expert.expert_weights.keys():
-                parent = ".".join(k.split(".")[:-1])
-                if parent not in tied_parents:
-                    print("adding k : ", k)
-                    tied_params_source2target[k] = []
+            # Now that we know only A's are tied, we can proceed using only the parent names
+            # e.g. 'model.layers.30.self_attn.q_proj' instead of 'model.layers.30.self_attn.q_proj.lora_a'
+            tied_parents = self._get_unique_parent_names(tied_params)
 
-            for param_name in self._get_unique_parent_names(
-                tied_params_source2target.keys()
-            ):
-                logger.info(f"\tComputing SVD for parameter {param_name}")
+            untied_parents = [
+                parent
+                for parent in self._get_unique_parent_names(
+                    expert.expert_weights.keys()
+                )
+                if parent not in tied_parents
+            ]
 
-                parents_tied = [param_name]
-                A_name, B_name = f"{param_name}.lora_a", f"{param_name}.lora_b"
+            # Build a mapping from source to target parameters
+            # e.g. <name_of_parent_of_param> : [<list of all tied parameters to it>]
+            # NOTE: list will be empty if the param is not tied to anything
+            tied_param_bins = defaultdict(list)
+
+            for tgt_name, src_name in param_map.items():
+                parent_src = ".".join(src_name.split(".")[:-1])
+                parent_tgt = ".".join(tgt_name.split(".")[:-1])
+                tied_param_bins[parent_src].append(parent_tgt)
+            for parent in untied_parents:
+                tied_param_bins[parent] = []
+
+            for parent_name, dependents in tied_param_bins.items():
+                logger.info(f"\tComputing SVD for parameter {parent_name}")
+
+                parent_names = [parent_name]
+                A_name, B_name = f"{parent_name}.lora_a", f"{parent_name}.lora_b"
                 As = [expert.expert_weights[A_name]]
                 Bs = [expert.expert_weights[B_name]]
 
-                for a_tied in tied_params_source2target[A_name]:
-                    parent_name = ".".join(a_tied.split(".")[:-1])
-                    As += [expert.expert_weights[a_tied]]
-                    Bs += [expert.expert_weights[f"{parent_name}.lora_b"]]
-                    parents_tied += [parent_name]
-
-                assert (
-                    len(tied_params_source2target[B_name]) == 0
-                ), "B_name should not be tied"
+                for tied_module in dependents:
+                    logger.info(f"\t\t\tTying Arrow with {tied_module}")
+                    As += [expert.expert_weights[f"{tied_module}.lora_a"]]
+                    Bs += [expert.expert_weights[f"{tied_module}.lora_b"]]
+                    parent_names += [tied_module]
 
                 if len(As) > 1:
                     # assert (A[0] == A).all(), 'A should be the same for all tied parameters'
+                    # This is equivalent to summing the ABs of tied layers
                     A = torch.cat(As, dim=1)
                     B = torch.cat(Bs, dim=0)
                 else:
@@ -820,7 +832,7 @@ class ArrowTransform(LibraryTransform):
                     bottom_vector = U_W[:, -1]
                     top_vector = U_W[:, 0]
                 else:
-                    base_W = base_model.model.state_dict()[f"{param_name}.weight"]
+                    base_W = base_model.model.state_dict()[f"{parent_name}.weight"]
                     W += base_W
                     U, E, Vt = torch.linalg.svd(W)
                     top_vector = Vt[0]
@@ -838,7 +850,8 @@ class ArrowTransform(LibraryTransform):
                 ).sum()
 
                 # Save eigenvector and eigvenvalue
-                for parent in parents_tied:
+                for parent in parent_names:
+                    assert parent not in vectors[expert_name]
                     vectors[expert_name][parent] = top_vector.real.cpu().numpy()
                     eigvals[expert_name][parent] = top_value.item()
 
