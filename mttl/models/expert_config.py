@@ -139,9 +139,7 @@ class ExpertConfig(Config):
                     if task_name in task_sets:
                         task_names.extend(task_sets[task_name])
                     else:
-                        raise ValueError(
-                            f"tasksets_path os passed, but task name {task_name} not found in tasksets file {self.tasksets_path}"
-                        )
+                        task_names.append(task_name)
             else:
                 task_names = tasks
 
