@@ -19,7 +19,7 @@ from mttl.models.modifiers.expert_containers.selectors import (
 from mttl.models.modifiers.lora import LoRAConfig
 
 from mttl.utils import logger, remote_login, setup_logging
-from mttl.models.expert_model import MultiExpertModel
+from mttl.models.expert_model import MultiExpertModel, ExpertModel
 from mttl.models.expert_config import ExpertConfig
 
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
@@ -132,7 +132,7 @@ def eval_in_distribution(module, args: ExpertConfig, tasks):
             evaluator = LossCallback(
                 dm.test_dataloader(), output_dir=args.output_dir, name=task + "_test"
             )
-            metric = evaluator.test(model=module)
+            metric = evaluator.test(pl_module=module)
         elif args.eval_metric == "rougeL":
             dm = get_datamodule(args, for_generation=True)
             evaluator = RougeEvaluator(
@@ -191,6 +191,7 @@ def run_eval(args: ExpertConfig):
     )
     an_expert = library[next(iter(library.keys()))]
     train_cfg = deepcopy(an_expert.training_config)
+    train_cfg.device_map = "auto"
 
     # For starts, always overwrite the following arguments
     for arg_name in ["output_dir", "eval_metric"]:
@@ -216,15 +217,15 @@ def run_eval(args: ExpertConfig):
         train_cfg.lora_merge_after = True
         module = MultiExpertModel(**vars(train_cfg))
         module.add_experts_from_library(library)
+    elif args.merge_or_route == "base":
+        module = ExpertModel(**vars(train_cfg))
 
     """ Routing Approaches """
     if args.merge_or_route in ["phatgoose", "arrow", "avg_act"]:
         args.router_selector = f"{args.merge_or_route}_router"
 
         selector_config = SelectorConfig.from_training_config(args)
-        module = MultiExpertModel(
-            **vars(train_cfg), selector_config=selector_config, device_map="auto"
-        )
+        module = MultiExpertModel(**vars(train_cfg), selector_config=selector_config)
         module.load_from_module_dict(library)
         patch_prototypes(module, library, args)
 
@@ -232,13 +233,18 @@ def run_eval(args: ExpertConfig):
         """TaskNameSelector"""
         args.router_selector = "task_selector"
         selector_config = SelectorConfig.from_training_config(args)
-        module = MultiExpertModel(
-            **vars(train_cfg), selector_config=selector_config, device_map="auto"
-        )
+        module = MultiExpertModel(**vars(train_cfg), selector_config=selector_config)
         module.load_from_module_dict(library)
 
     module = module.to("cuda")
     metric_logger = Selector.metric_logger
+
+    if wandb.run is None and os.environ.get("WANDB_API_KEY"):
+        wandb.init(
+            project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
+            config=dict(module.hparams),
+            name=os.environ.get("AMLT_JOB_NAME", None),
+        )
 
     if args.pipeline_eval_tasks == "in_distribution":
         tasks = [expert.expert_task_name for expert in library.data.values()]

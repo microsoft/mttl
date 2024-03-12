@@ -9,11 +9,11 @@ from mttl.models.expert_config import ExpertConfig
 
 
 def parse_libname(libname):
-    parts = libname.split("/")
-    if len(parts) == 2:
+    parts = libname.split("||")
+    if len(parts) == 1:
         return libname, None
     else:
-        return "/".join(parts[:-1]), parts[-1].split(",")
+        return parts[0], parts[-1].split(",")
 
 
 def train_with_transform(args: ExpertConfig):
