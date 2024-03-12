@@ -667,6 +667,7 @@ class ArrowConfig(LibraryTransformConfig):
     ab_only: bool = True
     scale: bool = False  # If True, scale by eigenvalue
     tie_params: str = None
+    compute_base_proto: bool = True
 
 
 class ArrowTransform(LibraryTransform):
@@ -738,16 +739,33 @@ class ArrowTransform(LibraryTransform):
         if len(vectors) == len(eigvals) == len(library) and not recompute:
             logger.info("Found {} precomputed centroids".format(len(vectors)))
 
+            vectors.update(
+                {
+                    "base_model": library.get_auxiliary_data(
+                        data_type=self.config.save_name + "_vectors",
+                        expert_name="base_model",
+                    )
+                }
+            )
+            eigvals.update(
+                {
+                    "base_model": library.get_auxiliary_data(
+                        data_type=self.config.save_name + "_eigvals",
+                        expert_name="base_model",
+                    )
+                }
+            )
+
             return self._maybe_scale(vectors, eigvals)
 
         base_model = None
-        vectors, eigvals = {}, {}
+        vectors, eigvals = {"base_model": {}}, {"base_model": {}}
         for expert_name, expert in library.items():
             logger.info(f"Computing SVD for expert {expert_name}")
             vectors[expert_name] = {}
             eigvals[expert_name] = {}
 
-            if not self.config.ab_only and base_model is None:
+            if base_model is None:
                 training_config = expert.training_config
                 training_config.model_modifier = None
                 from mttl.models.expert_model import MultiExpertModel
@@ -809,12 +827,18 @@ class ArrowTransform(LibraryTransform):
                 A_name, B_name = f"{parent_name}.lora_a", f"{parent_name}.lora_b"
                 As = [expert.expert_weights[A_name]]
                 Bs = [expert.expert_weights[B_name]]
+                base_W = []
 
                 for tied_module in dependents:
                     logger.info(f"\t\t\tTying Arrow with {tied_module}")
                     As += [expert.expert_weights[f"{tied_module}.lora_a"]]
                     Bs += [expert.expert_weights[f"{tied_module}.lora_b"]]
                     parent_names += [tied_module]
+
+                    if not self.config.ab_only:
+                        base_W += [
+                            base_model.model.state_dict()[f"{tied_module}.weight"]
+                        ]
 
                 if len(As) > 1:
                     # assert (A[0] == A).all(), 'A should be the same for all tied parameters'
@@ -832,7 +856,10 @@ class ArrowTransform(LibraryTransform):
                     bottom_vector = U_W[:, -1]
                     top_vector = U_W[:, 0]
                 else:
-                    base_W = base_model.model.state_dict()[f"{parent_name}.weight"]
+                    base_W += [
+                        base_model.model.state_dict()[f"{parent_name}.weight"]
+                    ].float()
+                    base_W = torch.stack(base_W).sum(0)
                     W += base_W
                     U, E, Vt = torch.linalg.svd(W)
                     top_vector = Vt[0]
@@ -855,10 +882,25 @@ class ArrowTransform(LibraryTransform):
                     vectors[expert_name][parent] = top_vector.real.cpu().numpy()
                     eigvals[expert_name][parent] = top_value.item()
 
+                    if (
+                        self.config.compute_base_proto
+                        and not parent in vectors["base_model"]
+                    ):
+                        logger.info(
+                            f"\tComputing SVD for base model parameter {parent_name}"
+                        )
+                        base_W = base_model.model.state_dict()[
+                            f"{parent}.weight"
+                        ].float()
+                        U, E, Vt = torch.linalg.svd(base_W)
+                        vectors["base_model"][parent] = Vt[0].cpu().numpy()
+                        eigvals["base_model"][parent] = E[0].item()
+
+        expert_names = vectors.keys()
         if persist:
             # add embeddings to the library
             with library.batched_commit():
-                for expert_name in library.keys():
+                for expert_name in expert_names:
                     logger.info(
                         f"Uploading centroids to the library for expert {expert_name}"
                     )
