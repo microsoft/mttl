@@ -545,6 +545,8 @@ class PhatgooseTransform(HiddenStateComputer):
                 library = ExpertLibrary.get_expert_library(library)
             loaded_output = library.get_auxiliary_data(data_type=self.config.save_name)
 
+            logger.info("Phatgoose save name : {}".format(self.config.save_name))
+
             if (
                 not recompute
                 and len(loaded_output) > 0
@@ -569,20 +571,6 @@ class PhatgooseTransform(HiddenStateComputer):
             # for training, we set this to true even if there is just a single expert.
             # This ensures that we do (gate * AB * x) instead of ((gate * A) * (gate * B) * x)
             training_config.lora_merge_after = True
-
-            model = MultiExpertModel(**vars(training_config)).to("cuda")
-            model.add_expert_instance(expert, is_default=True)
-
-            # for checksum
-            frozen_sum, unfrozen_sum = 0, 0
-            for key, value in model.state_dict().items():
-                if re.match(".*selector.gates.*.v", key):
-                    assert torch.allclose(
-                        value, torch.zeros_like(value)
-                    ), "gate should be 0 init"
-                    unfrozen_sum += value.sum()
-                else:
-                    frozen_sum += value.sum()
 
             training_config.dataset = expert.expert_info.dataset
             if expert.expert_info.expert_task_name:
@@ -616,6 +604,22 @@ class PhatgooseTransform(HiddenStateComputer):
             training_config.learning_rate = self.config.learning_rate
             training_config.warmup_steps = 0
             training_config.warmup_proportion = 0.0
+
+            # init model
+            model = MultiExpertModel(**vars(training_config)).to("cuda")
+            model.add_expert_instance(expert, is_default=True)
+
+            # for checksum
+            frozen_sum, unfrozen_sum = 0, 0
+            for key, value in model.state_dict().items():
+                if re.match(".*selector.gates.*.v", key):
+                    assert torch.allclose(
+                        value, torch.zeros_like(value)
+                    ), "gate should be 0 init"
+                    unfrozen_sum += value.sum()
+                else:
+                    frozen_sum += value.sum()
+
             checkpoint = train_module(training_config, model, dm)
 
             model_after = MultiExpertModel(**vars(training_config)).to("cuda")
