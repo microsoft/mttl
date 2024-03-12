@@ -575,6 +575,7 @@ class PhatgooseTransform(HiddenStateComputer):
                 and "norm" not in n
                 and "ln" not in n
                 and "layer_norm" not in n
+                and "layernorm" not in n
             )
             p_sum_sel_before = sum(
                 p.sum() for n, p in model.named_parameters() if "selector" in n
@@ -625,6 +626,7 @@ class PhatgooseTransform(HiddenStateComputer):
                 and ".norm" not in n
                 and ".ln." not in n
                 and "layer_norm" not in n
+                and "layernorm" not in n
             )
             assert p_sum_before == p_sum_after
 
