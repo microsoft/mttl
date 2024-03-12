@@ -227,6 +227,9 @@ class WeightedLinearMerge(LibraryTransform):
             for k, v in base_expert.expert_weights.items():
                 base_expert.expert_weights[k] /= len(experts)
 
+        # manually change the config of the expert to remove the tie_params
+        base_expert.expert_config.tie_params = None
+
         return base_expert
 
 
@@ -318,6 +321,9 @@ class TiesMerge(LibraryTransform):
         logger.info(
             "Params used to compute TIES mean: {:.10f}%".format(100.0 * used / total)
         )
+
+        # manually change the config of the expert to remove the tie_params
+        base_expert.expert_config.tie_params = None
 
         return base_expert
 
@@ -568,18 +574,15 @@ class PhatgooseTransform(HiddenStateComputer):
             model.add_expert_instance(expert, is_default=True)
 
             # for checksum
-            p_sum_before = sum(
-                p.sum()
-                for n, p in model.named_parameters()
-                if "selector" not in n
-                and "norm" not in n
-                and "ln" not in n
-                and "layer_norm" not in n
-                and "layernorm" not in n
-            )
-            p_sum_sel_before = sum(
-                p.sum() for n, p in model.named_parameters() if "selector" in n
-            )
+            frozen_sum, unfrozen_sum = 0, 0
+            for key, value in model.state_dict().items():
+                if re.match(".*selector.gates.*.v", key):
+                    assert torch.allclose(
+                        value, torch.zeros_like(value)
+                    ), "gate should be 0 init"
+                    unfrozen_sum += value.sum()
+                else:
+                    frozen_sum += value.sum()
 
             training_config.dataset = expert.expert_info.dataset
             if expert.expert_info.expert_task_name:
@@ -619,23 +622,20 @@ class PhatgooseTransform(HiddenStateComputer):
             model_after.add_expert_instance(expert, is_default=True)
             model_after.load_state_dict(torch.load(checkpoint)["state_dict"])
 
-            p_sum_after = sum(
-                p.sum()
-                for n, p in model_after.named_parameters()
-                if ".selector" not in n
-                and ".norm" not in n
-                and ".ln." not in n
-                and "layer_norm" not in n
-                and "layernorm" not in n
-            )
-            assert p_sum_before == p_sum_after
+            # for checksum
+            frozen_sum_after, unfrozen_sum_after = 0, 0
+            for key, value in model_after.state_dict().items():
+                if re.match(".*selector.gates.*.v", key):
+                    unfrozen_sum_after += value.sum()
+                else:
+                    frozen_sum_after += value.sum()
 
-            p_sum_sel_after = sum(
-                p.sum() for n, p in model.named_parameters() if "selector" in n
-            )
             assert (
-                p_sum_sel_before != p_sum_sel_after
-            ), "Selector parameters have not changed after training"
+                frozen_sum == frozen_sum_after
+            ), "Frozen params changed during training"
+            assert (
+                unfrozen_sum != unfrozen_sum_after
+            ), "Unfrozen params did not change during training"
 
             # extract prototypes
             prototypes = {}
