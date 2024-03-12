@@ -555,8 +555,8 @@ class PerTokenSelector(TaskToExpertTracker):
 
         # validate args
         assert self.config.proto_init is not None
-        assert self.config.input_norm_fn in [None, "layer_norm", "unit"]
-        assert self.config.proto_norm_fn in [None, "layer_norm", "unit"]
+        assert self.config.input_norm_fn in ["id", "layer_norm", "unit"]
+        assert self.config.proto_norm_fn in ["id", "layer_norm", "unit"]
 
         def _get_norm_layer(norm_fn):
             """helper for normalizing input and expert embeddings"""
@@ -705,8 +705,8 @@ class ArrowSelectorConfig(PerTokenSelectorConfig):
     router_temp: float = 1.0
     moe_top_k: int = -1
     proto_init: str = "arrow"
-    input_norm_fn: str = None
-    proto_norm_fn: str = None
+    input_norm_fn: str = "id"
+    proto_norm_fn: str = "id"
 
 
 @register_multi_expert_selector("arrow_router", ArrowSelectorConfig)
@@ -737,8 +737,8 @@ class AverageActivationSelectorConfig(PerTokenSelectorConfig):
     router_temp: float = -1
     moe_top_k: int = -1
     proto_init: str = "avg_act"
-    input_norm_fn: str = None
-    proto_norm_fn: str = None
+    input_norm_fn: str = "id"
+    proto_norm_fn: str = "id"
 
 
 @register_multi_expert_selector("avg_act_router", AverageActivationSelectorConfig)
@@ -946,6 +946,9 @@ class PhatgooseTrainerSelector(Selector):
         raise ValueError(
             f"Not supported for {self.__class__}  since routing depends on input."
         )
+
+    def get_prototypes(self):
+        return {k: gate.v.detach().cpu().numpy() for k, gate in self.gates.items()}
 
 
 @dataclass
