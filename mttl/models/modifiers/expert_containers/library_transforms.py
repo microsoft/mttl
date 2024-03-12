@@ -530,13 +530,13 @@ class PhatgooseTransform(HiddenStateComputer):
         from mttl.models.modifiers.expert_containers.utils import train_module
 
         outputs = {}
+        if type(library) == str:
+            library = ExpertLibrary.get_expert_library(library)
         expert_names = expert_names or list(library.keys())
         for expert_name in expert_names:
             logger.info(f"Computing PHATGOOSE gates for expert {expert_name}")
             expert: Expert = library[expert_name]
 
-            if type(library) == str:
-                library = ExpertLibrary.get_expert_library(library)
             loaded_output = library.get_auxiliary_data(data_type=self.config.save_name)
 
             if (
@@ -569,12 +569,7 @@ class PhatgooseTransform(HiddenStateComputer):
 
             # for checksum
             p_sum_before = sum(
-                p.sum()
-                for n, p in model.named_parameters()
-                if "selector" not in n
-                and "norm" not in n
-                and "ln" not in n
-                and "layer_norm" not in n
+                p.sum() for n, p in model.named_parameters() if "selector" not in n
             )
             p_sum_sel_before = sum(
                 p.sum() for n, p in model.named_parameters() if "selector" in n
@@ -622,9 +617,6 @@ class PhatgooseTransform(HiddenStateComputer):
                 p.sum()
                 for n, p in model_after.named_parameters()
                 if ".selector" not in n
-                and ".norm" not in n
-                and ".ln." not in n
-                and "layer_norm" not in n
             )
             assert p_sum_before == p_sum_after
 
