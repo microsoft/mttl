@@ -61,7 +61,9 @@ def get_arrow_embeddings(library, args):
     cfg = ArrowConfig(
         name=args.expert_embeds_save_name,
     )
-    return ArrowTransform(cfg).transform(library, recompute=args.recompute_prototypes)
+    return ArrowTransform(cfg).transform(
+        library, recompute=args.recompute_prototypes, stack_bs=args.stack_bs
+    )
 
 
 def get_phatgoose_embeddings(library, args):

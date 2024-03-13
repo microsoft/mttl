@@ -681,8 +681,60 @@ class ArrowTransform(LibraryTransform):
 
         return output
 
+    @staticmethod
+    def _prepare_tied_params(
+        A, B, expert: Expert, vectors, eigvals, expert_name, param_name, state_dict_keys
+    ):
+        if (
+            expert.training_config.tie_params
+            == "q_proj\\.lora_a|k_proj\\.lora_a|v_proj\\.lora_a"
+        ):
+            # q_proj, k_proj, v_proj should have the same routing
+            tie_layers = "q_proj|k_proj|v_proj"
+            parent, layer_name = (
+                ".".join(param_name.split(".")[:-1]),
+                param_name.split(".")[-1],
+            )
+            if re.fullmatch(tie_layers, layer_name):
+                toied_params_under_same_parent = [
+                    k
+                    for k in state_dict_keys
+                    if ".".join(k.split(".")[:-1]) == parent
+                    and re.fullmatch(tie_layers, k.split(".")[-1])
+                ]
+                for p in toied_params_under_same_parent:
+                    if p in vectors[expert_name]:
+                        # SVD for this parameter group has been computed already
+                        return (
+                            None,
+                            None,
+                            vectors[expert_name][p],
+                            eigvals[expert_name][p],
+                        )
+
+                As, Bs = [], []
+                for p in toied_params_under_same_parent:
+                    layer_name = p.split(".")[-1]
+                    if re.fullmatch(
+                        tie_layers,
+                        layer_name,
+                    ):
+                        Bs.append(expert.expert_weights[f"{p}.lora_b"])
+                        As.append(expert.expert_weights[f"{p}.lora_a"])
+                assert np.all(
+                    [np.allclose(A, a) for a in As]
+                )  # since As are shared, they should be the same
+                B = torch.cat(Bs, dim=-1)
+            return A, B, None, None
+
+        raise NotImplementedError(
+            f"Unknown expert.training_config.tie_params {expert.training_config.tie_params}"
+        )
+
     @torch.no_grad()
-    def transform(self, library, persist=True, recompute=False) -> Expert:
+    def transform(
+        self, library, persist=True, recompute=False, stack_bs=True
+    ) -> Expert:
         if isinstance(library, str):
             library = ExpertLibrary.get_expert_library(library)
 
@@ -724,54 +776,29 @@ class ArrowTransform(LibraryTransform):
             expert_weights = expert.expert_weights
 
             for param_name in state_dict_keys:
-                logger.info(f"\tComputing SVD for parameter {param_name}")
                 A, B = (
                     expert_weights[f"{param_name}.lora_a"],
                     expert_weights[f"{param_name}.lora_b"],
                 )
-
-                if (
-                    expert.training_config.tie_params
-                    == "q_proj\\.lora_a|k_proj\\.lora_a|v_proj\\.lora_a"
-                ):
-                    tie_layers = "q_proj|k_proj|v_proj"
-                    parent, layer_name = (
-                        ".".join(param_name.split(".")[:-1]),
-                        param_name.split(".")[-1],
+                if stack_bs and expert.training_config.tie_params:
+                    A, B, v, s = self._prepare_tied_params(
+                        A,
+                        B,
+                        expert,
+                        vectors,
+                        eigvals,
+                        expert_name,
+                        param_name,
+                        state_dict_keys,
                     )
-                    if re.fullmatch(tie_layers, layer_name):
-                        params_under_same_parent = [
-                            k
-                            for k in state_dict_keys
-                            if ".".join(k.split(".")[:-1]) == parent
-                        ]
-                        for p in params_under_same_parent:
-                            if p in vectors[expert_name]:
-                                # SVD for this parameter group has been computed already
-                                vectors[expert_name][param_name] = vectors[expert_name][
-                                    p
-                                ]
-                                eigvals[expert_name][param_name] = eigvals[expert_name][
-                                    p
-                                ]
-                                continue
-
-                        As, Bs = [], []
-                        for p in params_under_same_parent:
-                            layer_name = p.split(".")[-1]
-                            if re.fullmatch(
-                                tie_layers,
-                                layer_name,
-                            ):
-                                Bs.append(expert.expert_weights[f"{p}.lora_b"])
-                                As.append(expert.expert_weights[f"{p}.lora_a"])
-                        assert np.all(
-                            [np.allclose(A, a) for a in As]
-                        )  # since As are shared, they should be the same
-                        B = torch.cat(Bs, dim=-1)
+                    if v is not None:
+                        assert s is not None
+                        vectors[expert_name][param_name] = v
+                        eigvals[expert_name][param_name] = s
+                        continue
 
                 W = (A @ B).T  # out_features, in_features
-
+                logger.info(f"\tComputing SVD for parameter {param_name}")
                 if self.config.ab_only:
                     # Now, the efficient way
                     # Compute SVD of A
@@ -800,10 +827,7 @@ class ArrowTransform(LibraryTransform):
                         )
 
                 else:
-                    if (
-                        expert.training_config.tie_layers
-                        == "q_proj.lora_a|k_proj.lora_a|v_proj.lora_a"
-                    ):
+                    if stack_bs and expert.training_config.tie_params:
                         raise NotImplementedError(
                             "Currently, tied LORA not supported for ArrowTransform with ab_only = False"
                         )
