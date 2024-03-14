@@ -5,6 +5,7 @@ import copy
 import wandb
 import numpy as np
 from copy import deepcopy
+import torch.nn.functional as F
 from pytorch_lightning import seed_everything
 import json
 
@@ -60,6 +61,8 @@ def get_hidden_states(library, args):
 def get_arrow_embeddings(library, args):
     cfg = ArrowConfig(
         name=args.expert_embeds_save_name,
+        ab_only=args.ab_only,
+        tie_params=args.tie_params,
     )
     return ArrowTransform(cfg).transform(library, recompute=args.recompute_prototypes)
 
@@ -87,12 +90,10 @@ def patch_prototypes(module, library, args, proto_inits=None):
 
     for mod in module.modules():
         if isinstance(mod, PerTokenSelector):
-            patched_layer_name = mod.layer_name.replace(".selector", "")
             prototypes = []
+            patched_layer_name = mod.layer_name.replace(".selector", "")
             for expert_name in mod.expert_names:
-                patched_layer_name = mod.layer_name.replace(".selector", "")
                 layer_names = proto_inits[expert_name].keys()
-                patched_layer_name = mod.layer_name.replace(".selector", "")
                 valid_layer_names = [
                     k
                     for k in layer_names
