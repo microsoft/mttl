@@ -218,7 +218,7 @@ def run_eval(args: ExpertConfig):
         train_cfg.router_selector = "uniform"
         train_cfg.lora_merge_after = True
         module = MultiExpertModel(**vars(train_cfg))
-        module.add_experts_from_library(library)
+        module.load_from_module_dict(library)
     elif args.merge_or_route == "base":
         module = ExpertModel(**vars(train_cfg))
 

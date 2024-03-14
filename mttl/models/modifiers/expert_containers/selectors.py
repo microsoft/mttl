@@ -961,11 +961,6 @@ class PolySelectorDirectConfigUniform(PolySelectorConfig):
     pass
 
 
-@dataclass
-class PolySelectorDirectConfigUniform(SelectorConfig):
-    pass
-
-
 @register_multi_expert_selector("poly_router_dir", PolySelectorDirectConfig)
 class PolySelectorDirect(PolySelector):
     def __init__(self, info_container, **kwargs) -> None:
