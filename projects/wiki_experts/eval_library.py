@@ -214,7 +214,7 @@ def run_eval(args: ExpertConfig):
         # Here we merge the LoRA experts after the outer product we cannot really do it
         # with the lib transform, cause this would require storing large matrices in memory
         # Instead we do it with a uniform selector
-        assert type(expert.expert_info.expert_config) == LoRAConfig
+        assert type(an_expert.expert_info.expert_config) == LoRAConfig
         train_cfg.router_selector = "uniform"
         train_cfg.lora_merge_after = True
         module = MultiExpertModel(**vars(train_cfg))
