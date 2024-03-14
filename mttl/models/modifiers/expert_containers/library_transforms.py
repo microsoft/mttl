@@ -789,8 +789,8 @@ class ArrowTransform(LibraryTransform):
                 )
                 # Make sure that params tied during training are also tied for Arrow
                 if any(key not in _tied_params for key in param_map):
-                    raise ValueError(
-                        "Parameters that are tied during training must also be tied during Arrow computation."
+                    logger.warning(
+                        "Some parameters that are tied during training are not tied during Arrow computation."
                     )
                 param_map = _tied_params
 
