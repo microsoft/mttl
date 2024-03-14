@@ -89,6 +89,7 @@ class ExpertConfig(Config):
         self.input_norm_fn = None
         self.proto_norm_fn = None
         self.ab_only = True
+        self.base_model_proto = False  # compute Arrow embeddings for the backbone
 
         # Eval Library
         self.merge_or_route = None  # "uniform", "ties", "clown"

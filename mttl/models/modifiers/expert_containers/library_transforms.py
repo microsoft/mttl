@@ -729,11 +729,19 @@ class ArrowTransform(LibraryTransform):
     def _compute_base_proto(self, library, base_model=None, persist=True):
         """Compute Arrow prototypes for base model weights"""
 
-        base_vector = library.get_auxiliary_data(data_type="vectors")
-        base_eigval = library.get_auxiliary_data(data_type="eigvals")
+        try:
+            base_vector = library.get_auxiliary_data(
+                data_type="vectors", expert_name="base_model"
+            )
+            base_eigval = library.get_auxiliary_data(
+                data_type="eigvals", expert_name="base_model"
+            )
+        except ValueError:
+            # `get_auxiliary_data` will throw a ValueError if the object is not found.
+            base_vector = base_eigval = {}
 
-        if len(base_vector) == len(base_eigval) == 1:
-            assert "base_model" in base_vector and "base_model" in base_eigval
+        if len(base_vector) == len(base_eigval) > 0:
+            # TODO: should we perform some checks to see if the keys lineup
             return base_vector, base_eigval
 
         if base_model is None:
