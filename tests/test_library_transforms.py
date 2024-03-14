@@ -28,7 +28,7 @@ from pytorch_lightning import seed_everything
 
 def test_config():
     cfg = ArrowConfig(ab_only=True, scale=False)
-    assert cfg.save_name == "arrowconfig-4e6d15f51147b500281ab22ab4b51037"
+    assert cfg.save_name == "arrowconfig-a8327e21d374166ceeb94c40d2e7676f"
 
     cfg2 = ArrowConfig(ab_only=True, scale=True)
     assert cfg2.save_name != cfg.save_name

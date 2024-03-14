@@ -787,7 +787,7 @@ class ArrowTransform(LibraryTransform):
 
     @torch.no_grad()
     def transform(
-        self, library, persist=True, recompute=False, add_base_proto=True
+        self, library, persist=True, recompute=False, add_base_proto=False
     ) -> Expert:
         if isinstance(library, str):
             library = ExpertLibrary.get_expert_library(library)
@@ -896,10 +896,10 @@ class ArrowTransform(LibraryTransform):
                     if self.config.tie_op == "concat":
                         # Mimicking phi-2 behavior
                         assert self.config.ab_only
-                        assert (
-                            As == As[0].all()
+                        assert all(
+                            torch.allclose(A, As[0]) for A in As
                         ), "A should be the same for all tied parameters"
-                        A = A[0]
+                        A = As[0]
                         B = torch.cat(Bs, dim=1)
                     elif self.config.tie_op == "sum":
                         # A1B1 + A2B2 == [A1 A2] [B1; B2].
