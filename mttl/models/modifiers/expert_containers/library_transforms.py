@@ -404,8 +404,6 @@ class HiddenStateComputer(LibraryTransform):
     def transform(
         self, library: ExpertLibrary, persist=False, recompute=False, default_args=None
     ) -> Expert:
-        from mttl.models.expert_model import MultiExpertModel
-
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
 
@@ -427,6 +425,8 @@ class HiddenStateComputer(LibraryTransform):
 
             if self.config.use_base_model_only and self.config.model is not None:
                 training_config.model = self.config.model
+
+            from mttl.models.expert_model import MultiExpertModel
 
             model = MultiExpertModel(**vars(training_config)).to("cuda")
 
@@ -532,9 +532,6 @@ class PhatgooseTransform(HiddenStateComputer):
         expert_names: list = None,
         default_args=None,
     ):
-        from mttl.models.expert_model import MultiExpertModel
-        from mttl.models.modifiers.expert_containers.utils import train_module
-
         outputs = {}
         expert_names = expert_names or list(library.keys())
         for expert_name in expert_names:
@@ -606,6 +603,8 @@ class PhatgooseTransform(HiddenStateComputer):
             training_config.warmup_proportion = 0.0
 
             # init model
+            from mttl.models.expert_model import MultiExpertModel
+
             model = MultiExpertModel(**vars(training_config)).to("cuda")
             model.add_expert_instance(expert, is_default=True)
 
@@ -620,7 +619,11 @@ class PhatgooseTransform(HiddenStateComputer):
                 else:
                     frozen_sum += value.sum()
 
+            from mttl.models.modifiers.expert_containers.utils import train_module
+
             checkpoint = train_module(training_config, model, dm)
+
+            from mttl.models.expert_model import MultiExpertModel
 
             model_after = MultiExpertModel(**vars(training_config)).to("cuda")
             model_after.add_expert_instance(expert, is_default=True)
@@ -672,8 +675,8 @@ class PhatgooseTransform(HiddenStateComputer):
 class ArrowConfig(LibraryTransformConfig):
     ab_only: bool = True
     scale: bool = False  # If True, scale by eigenvalue
-    tie_params: str = None
-    compute_base_proto: bool = True
+    tie_params: str = "default"  # If default, ties the same params as during training. If a regex, processed the same way as during training
+    tie_op: str = "concat"
 
 
 class ArrowTransform(LibraryTransform):
@@ -698,6 +701,8 @@ class ArrowTransform(LibraryTransform):
         return output
 
     def _low_rank_svd(self, A, B):
+        """Faster SVD computation for low rank matrices"""
+
         # Compute SVD of A
         U_A, Sigma_A, V_A = torch.svd(A)
 
@@ -721,6 +726,49 @@ class ArrowTransform(LibraryTransform):
 
         return U_W, Sigma_C, V_W_T
 
+    def _compute_base_proto(self, library, base_model=None, persist=True):
+        """Compute Arrow prototypes for base model weights"""
+
+        base_vector = library.get_auxiliary_data(data_type="vectors")
+        base_eigval = library.get_auxiliary_data(data_type="eigvals")
+
+        if len(base_vector) == len(base_eigval) == 1:
+            assert "base_model" in base_vector and "base_model" in base_eigval
+            return base_vector, base_eigval
+
+        if base_model is None:
+            from mttl.models.expert_model import MultiExpertModel
+
+            an_expert = library[next(iter(library.keys()))]
+            training_config = an_expert.training_config
+            training_config.model_modifier = None
+            base_model = MultiExpertModel(**vars(training_config))
+
+        vectors, eigvals = {}, {}
+        for key, base_W in base_model.named_parameters():
+            if base_W.ndim != 2:  # Only compute base model for matrices
+                continue
+
+            logger.info(f"\tComputing SVD for base model parameter {key}")
+
+            base_W = base_W.float()
+            U, E, Vt = torch.linalg.svd(base_W)
+            vectors[key] = Vt[0].cpu().numpy()
+            eigvals[key] = E[0].item()
+
+        # Always persist
+        if persist:
+            for data_name, data in [("vectors", vectors), ("eigvals", eigvals)]:
+                library.add_auxiliary_data(
+                    data_type=data_name,
+                    expert_name="base_model",
+                    data=data,
+                    config=None,
+                    force=True,  # make sure we overwrite
+                )
+
+        return vectors, eigvals
+
     def _get_unique_parent_names(self, alist):
         """
         if adict.keys() = ['model.layer1.lora_a', 'model.layer.lora_b', 'model.layer2.lora_a']
@@ -730,7 +778,9 @@ class ArrowTransform(LibraryTransform):
         return dict_keys
 
     @torch.no_grad()
-    def transform(self, library, persist=True, recompute=False) -> Expert:
+    def transform(
+        self, library, persist=True, recompute=False, add_base_proto=True
+    ) -> Expert:
         if isinstance(library, str):
             library = ExpertLibrary.get_expert_library(library)
 
@@ -745,33 +795,21 @@ class ArrowTransform(LibraryTransform):
         if len(vectors) == len(eigvals) == len(library) and not recompute:
             logger.info("Found {} precomputed centroids".format(len(vectors)))
 
-            vectors.update(
-                {
-                    "base_model": library.get_auxiliary_data(
-                        data_type=self.config.save_name + "_vectors",
-                        expert_name="base_model",
-                    )
-                }
-            )
-            eigvals.update(
-                {
-                    "base_model": library.get_auxiliary_data(
-                        data_type=self.config.save_name + "_eigvals",
-                        expert_name="base_model",
-                    )
-                }
-            )
+            if add_base_proto:
+                base_vec, base_val = self._compute_base_proto(library, persist=persist)
+                vectors.update({"base_model": base_vec})
+                eigvals.update({"base_model": base_val})
 
             return self._maybe_scale(vectors, eigvals)
 
         base_model = None
-        vectors, eigvals = {"base_model": {}}, {"base_model": {}}
+        vectors, eigvals = {}, {}
         for expert_name, expert in library.items():
             logger.info(f"Computing SVD for expert {expert_name}")
             vectors[expert_name] = {}
             eigvals[expert_name] = {}
 
-            if base_model is None:
+            if base_model is None and not self.config.ab_only:
                 training_config = expert.training_config
                 training_config.model_modifier = None
                 from mttl.models.expert_model import MultiExpertModel
@@ -782,7 +820,7 @@ class ArrowTransform(LibraryTransform):
             param_map = get_target_2_source_param_mapping(
                 expert.expert_weights.items(), expert.training_config.tie_params
             )
-            if self.config.tie_params:
+            if self.config.tie_params != "default":
                 # get parameters we wish to tie during for Arrow
                 _tied_params = get_target_2_source_param_mapping(
                     expert.expert_weights.items(), self.config.tie_params
@@ -815,7 +853,7 @@ class ArrowTransform(LibraryTransform):
             ]
 
             # Build a mapping from source to target parameters
-            # e.g. <name_of_parent_of_param> : [<list of all tied parameters to it>]
+            # e.g. <name_of_parent_of_param> : [<list of all other params tied to it>]
             # NOTE: list will be empty if the param is not tied to anything
             tied_param_bins = defaultdict(list)
 
@@ -847,10 +885,21 @@ class ArrowTransform(LibraryTransform):
                         ]
 
                 if len(As) > 1:
-                    # assert (A[0] == A).all(), 'A should be the same for all tied parameters'
-                    # This is equivalent to summing the ABs of tied layers
-                    A = torch.cat(As, dim=1)
-                    B = torch.cat(Bs, dim=0)
+                    if self.config.tie_op == "concat":
+                        # Mimicking phi-2 behavior
+                        assert self.config.ab_only
+                        assert (
+                            As == As[0].all()
+                        ), "A should be the same for all tied parameters"
+                        A = A[0]
+                        B = torch.cat(Bs, dim=1)
+                    elif self.config.tie_op == "sum":
+                        # A1B1 + A2B2 == [A1 A2] [B1; B2].
+                        # We do it this way to leverage the low-rank SVD
+                        A = torch.cat(As, dim=1)
+                        B = torch.cat(Bs, dim=0)
+                    else:
+                        raise NotImplementedError()
                 else:
                     A, B = As[0], Bs[0]
 
@@ -888,25 +937,10 @@ class ArrowTransform(LibraryTransform):
                     vectors[expert_name][parent] = top_vector.real.cpu().numpy()
                     eigvals[expert_name][parent] = top_value.item()
 
-                    if (
-                        self.config.compute_base_proto
-                        and not parent in vectors["base_model"]
-                    ):
-                        logger.info(
-                            f"\tComputing SVD for base model parameter {parent_name}"
-                        )
-                        base_W = base_model.model.state_dict()[
-                            f"{parent}.weight"
-                        ].float()
-                        U, E, Vt = torch.linalg.svd(base_W)
-                        vectors["base_model"][parent] = Vt[0].cpu().numpy()
-                        eigvals["base_model"][parent] = E[0].item()
-
-        expert_names = vectors.keys()
         if persist:
             # add embeddings to the library
             with library.batched_commit():
-                for expert_name in expert_names:
+                for expert_name in library.keys():
                     logger.info(
                         f"Uploading centroids to the library for expert {expert_name}"
                     )
@@ -921,6 +955,14 @@ class ArrowTransform(LibraryTransform):
                             data=data[expert_name],
                             force=True,  # make sure we overwrite
                         )
+
+        if add_base_proto:
+            base_vec, base_val = self._compute_base_proto(
+                library, base_model=base_model, persist=persist
+            )
+            vectors.update({"base_model": base_vec})
+            eigvals.update({"base_model": base_val})
+
         return self._maybe_scale(vectors, eigvals)
 
 
