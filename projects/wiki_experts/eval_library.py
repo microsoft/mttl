@@ -236,6 +236,8 @@ def run_eval(args: ExpertConfig):
         selector_config = SelectorConfig.from_training_config(args)
         module = MultiExpertModel(**vars(train_cfg), selector_config=selector_config)
         module.load_from_module_dict(library)
+    else:
+        raise ValueError(f"Unknown merge_or_route {args.merge_or_route}")
 
     module = module.to("cuda")
     metric_logger = Selector.metric_logger
