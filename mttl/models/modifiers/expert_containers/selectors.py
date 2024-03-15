@@ -178,7 +178,9 @@ def safe_logging(func):
         try:
             result = func(*args, **kwargs)
         except Exception as e:
-            logger.exception(f"An error occurred in {func.__name__}: {e}")
+            if str(e)[:100] != getattr(logger, "previous_error", ""):
+                logger.exception(f"An error occurred in {func.__name__}: {e}")
+                logger.previous_error = str(e)[:100]
             result = None
         return result
 
