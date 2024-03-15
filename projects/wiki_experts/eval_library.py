@@ -64,7 +64,11 @@ def get_arrow_embeddings(library, args):
         ab_only=args.ab_only,
         tie_params=args.tie_params,
     )
-    return ArrowTransform(cfg).transform(library, recompute=args.recompute_prototypes)
+    return ArrowTransform(cfg).transform(
+        library,
+        recompute=args.recompute_prototypes,
+        add_base_proto=args.base_model_proto,
+    )
 
 
 def get_phatgoose_embeddings(library, args):
@@ -281,7 +285,8 @@ def run_eval(args: ExpertConfig):
         print(angle)
 
     if wandb.run is not None:
-        wandb.log({f"downstream/{k}": v for k, v in scores.items()})
+        if scores is not None:
+            wandb.log({f"downstream/{k}": v for k, v in scores.items()})
         if len(metric_logger) > 0:
             wandb.log({k: v.avg for k, v in metric_logger.meters.items()})
 
