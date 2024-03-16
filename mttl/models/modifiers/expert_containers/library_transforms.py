@@ -1160,3 +1160,24 @@ class MBCWithCosSimTransform(LibraryTransform):
         for key, label in zip(expert_names, cluster_labels):
             clusters[label].append(key)
         return clusters
+
+
+@dataclass
+class RandomClustersConfig(SVDEmbeddingTransformConfig):
+    random_state: int = 42
+    k: int = 10
+
+
+class RandomClustersTransform(LibraryTransform):
+    def __init__(self, config: RandomClustersConfig = None):
+        super().__init__(config or RandomClustersConfig())
+
+    def transform(self, library: ExpertLibrary):
+        # Extract the embeddings as a numpy array
+        expert_names = [expert.expert_name for expert in library.data.values()]
+        cluster_labels = np.random.randint(0, self.config.k, len(expert_names))
+        clusters = defaultdict(list)
+
+        for key, label in zip(expert_names, cluster_labels):
+            clusters[label].append(key)
+        return clusters

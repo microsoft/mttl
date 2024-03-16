@@ -99,8 +99,6 @@ class ExpertConfig(Config):
         self.recompute_prototypes = False
         self.expert_embeds_save_name = None
 
-        # for MBC
-        self.mbc_num_clusters = 10  # number of clusters
         self.phi_2_align_heads = False
         self.lora_merge_after = False  # if True, tried to merge after the outer product, currently only applicable to LoRA
 

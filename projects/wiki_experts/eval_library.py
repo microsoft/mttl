@@ -247,6 +247,8 @@ def run_eval(args: ExpertConfig):
             config=dict(module.hparams),
             name=os.environ.get("AMLT_JOB_NAME", None),
         )
+        # update config
+        wandb.config.update({f"cmd_args_{k}": v for k, v in vars(args).items()})
 
     if args.pipeline_eval_tasks == "in_distribution":
         tasks = [expert.expert_task_name for expert in library.data.values()]
