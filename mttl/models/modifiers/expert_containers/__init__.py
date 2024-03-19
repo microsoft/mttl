@@ -207,27 +207,78 @@ def replace_selector_for_container(
     return n_selectors, n_selectors_views
 
 
-def get_modules_to_modify(transformer):
+class TrieNode:
+    def __init__(self):
+        self.children = {}
+        self.is_end_of_word = False
+
+
+class Trie:
+    def __init__(self):
+        self.root = TrieNode()
+
+    def insert(self, sequence):
+        word = sequence.split(".")
+        node = self.root
+        for char in word:
+            if char not in node.children:
+                node.children[char] = TrieNode()
+            node = node.children[char]
+        node.is_end_of_word = True
+
+    def search(self, sequence):
+        word = sequence.split(".")
+        node = self.root
+        for char in word:
+            if char not in node.children:
+                return False
+            node = node.children[char]
+        return node.is_end_of_word
+
+    def starts_with(self, sequence):
+        node = self.root
+        prefix = sequence.split(".")
+        for char in prefix:
+            if char not in node.children:
+                return False
+            node = node.children[char]
+        return True
+
+    def has_leaf_prefix(self, sequence):
+        node = self.root
+        prefix = sequence.split(".")
+        for char in prefix:
+            if char not in node.children:
+                return False
+            node = node.children[char]
+            if node.is_end_of_word:
+                return True
+        return False
+
+    def print_all_words(self):
+        self._print_all_words_helper(self.root, "")
+
+    def _print_all_words_helper(self, node, prefix):
+        if node.is_end_of_word:
+            print(prefix)
+
+        for char, child_node in node.children.items():
+            self._print_all_words_helper(child_node, prefix + char)
+
+
+def get_modules_to_modify_trie(transformer):
     """Get modules to modify in the transformer model.
     Filter out modules that are inside expert containers."""
-    containers = {}  # cache containers to avoid redundant checks
+    trie = Trie()
     for m_name, module in dict(transformer.named_modules()).items():
-        in_container = False
-        module_names = m_name.split(".")
-        for p in range(len(module_names)):
-            parent_name = ".".join(module_names[:p])
-            is_parent_container = containers.get(parent_name)
-            if is_parent_container is None:
-                parent_module = transformer.get_submodule(parent_name)
-                if isinstance(parent_module, ExpertContainer):
-                    is_parent_container = True
-                else:
-                    is_parent_container = False
-            containers[parent_name] = is_parent_container
-            if is_parent_container:
-                in_container = True
-                break
-        if in_container:
+        # if m_name is ExpertContainer, insert to the trie
+        if isinstance(module, ExpertContainer):
+            trie.insert(m_name)
+    for m_name, module in dict(transformer.named_modules()).items():
+        # for all the sub modules in the trie, skip if it is inside an expert container
+        if not trie.search(m_name) and trie.has_leaf_prefix(
+            m_name
+        ):  # it indicate the m_name is from the expert container
             continue
         yield m_name, module
 
@@ -273,7 +324,7 @@ def add_expert_to_transformer(
     total_layers = 0
     added_layers = []
 
-    for m_name, module in get_modules_to_modify(transformer):
+    for m_name, module in get_modules_to_modify_trie(transformer):
         if re.fullmatch(expert_config.modify_modules, m_name):
             for c_name, layer in dict(module.named_children()).items():
                 if re.fullmatch(expert_config.modify_layers, c_name):

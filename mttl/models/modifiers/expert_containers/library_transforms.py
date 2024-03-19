@@ -532,7 +532,7 @@ class PhatgooseTransform(HiddenStateComputer):
         outputs = {}
         expert_names = expert_names or list(library.keys())
         for expert_name in expert_names:
-            logger.info(f"Computing centroids for expert {expert_name}")
+            logger.info(f"Computing PHATGOOSE gates for expert {expert_name}")
             expert: Expert = library[expert_name]
 
             if type(library) == str:
@@ -545,7 +545,7 @@ class PhatgooseTransform(HiddenStateComputer):
                 and expert_name
                 in loaded_output  # cause loaded_output loads all experts
             ):
-                logger.info("Found {} precomputed centroids".format(len(loaded_output)))
+                logger.info("Found {} precomputed gates".format(len(loaded_output)))
                 # format is dict[layer_name] = embedding, layer_name ends with selector.{task_name}.v
                 outputs[expert_name] = (
                     loaded_output
@@ -555,11 +555,15 @@ class PhatgooseTransform(HiddenStateComputer):
                 continue
 
             training_config: ExpertConfig = expert.training_config
-            training_config.router_selector = "phatgoose_selector"
+            training_config.router_selector = "phatgoose_trainer_selector"
             training_config.trainable_param_names = ".*selector.*"
             training_config.logging_prefix = expert_name + "/"
             training_config.weight_decay = 0.0
+
+            # for training, we set this to true even if there is just a single expert.
+            # This ensures that we do (gate * AB * x) instead of ((gate * A) * (gate * B) * x)
             training_config.lora_merge_after = True
+
             model = MultiExpertModel(**vars(training_config)).to("cuda")
             model.add_expert_instance(expert, is_default=True)
 
@@ -596,6 +600,10 @@ class PhatgooseTransform(HiddenStateComputer):
                 )
                 training_config.train_batch_size = default_args.train_batch_size
                 training_config.micro_batch_size = default_args.micro_batch_size
+            else:
+                raise ValueError(
+                    "batch size and gradient accumulation steps must be set from the cmd line args"
+                )
 
             # get datamodule
             dm = get_datamodule(training_config)
@@ -619,9 +627,6 @@ class PhatgooseTransform(HiddenStateComputer):
                 and "layer_norm" not in n
             )
             assert p_sum_before == p_sum_after
-
-            model_before = MultiExpertModel(**vars(training_config)).to("cuda")
-            model_before.add_expert_instance(expert, is_default=True)
 
             p_sum_sel_after = sum(
                 p.sum() for n, p in model.named_parameters() if "selector" in n
@@ -724,12 +729,13 @@ class ArrowTransform(LibraryTransform):
                     )
                 )
             )
+            expert_weights = expert.expert_weights
 
             for param_name in state_dict_keys:
                 logger.info(f"\tComputing SVD for parameter {param_name}")
                 A, B = (
-                    expert.expert_weights[f"{param_name}.lora_a"],
-                    expert.expert_weights[f"{param_name}.lora_b"],
+                    expert_weights[f"{param_name}.lora_a"],
+                    expert_weights[f"{param_name}.lora_b"],
                 )
 
                 if (
@@ -794,6 +800,12 @@ class ArrowTransform(LibraryTransform):
                     top_vector = U_W[:, 0]
                     top_value = Sigma_C[0] ** 2
                     bottom_vector = U_W[:, -1]
+
+                    diff_AB = (U_W.T @ U_A).abs().diag()
+                    if diff_AB[0] < 0.9:
+                        logger.warning(
+                            "The first singular vector of U_A and U_AB are not aligned"
+                        )
 
                 else:
                     if (

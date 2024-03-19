@@ -267,6 +267,7 @@ class DefaultCollator:
         labels = [b["target"] for b in batch]
         task_ids = [b.get("task_id", None) for b in batch]
         task_names = [b.get("task_name", None) for b in batch]
+        task_sources = [b.get("task_source", None) for b in batch]
 
         output_batch = (
             self.prepare_inputs_for_gpt_family(sources, labels)
@@ -274,6 +275,7 @@ class DefaultCollator:
             else self.prepare_inputs_for_seq2seq_family(sources, labels)
         )
 
+        has_task_sources = all(ts is not None for ts in task_sources)
         has_task_names = all(tn is not None for tn in task_names)
         has_task_ids = all(tid is not None for tid in task_ids)
 
@@ -284,9 +286,13 @@ class DefaultCollator:
         elif has_task_ids:
             output_batch["task_ids"] = torch.LongTensor(task_ids)
 
+        if has_task_names and not has_task_sources:
+            task_sources = task_names
+
         output_batch["task_names"] = task_names
         output_batch["sources_texts"] = sources
         output_batch["labels_texts"] = labels
+        output_batch["task_sources"] = task_sources
 
         # append other fields that might be available
         for key in batch[0].keys():
@@ -310,6 +316,7 @@ class MultipleChoiceCollator(DefaultCollator):
         label_index = [b["label_index"] for b in batch]
         task_ids = [b.get("task_id", None) for b in batch]
         task_names = [b.get("task_name", None) for b in batch]
+        task_sources = [b.get("task_source", None) for b in batch]
 
         if self.multisource:
             num_options = [len(t) for t in sources]
@@ -331,6 +338,7 @@ class MultipleChoiceCollator(DefaultCollator):
 
         has_task_names = all(tn is not None for tn in task_names)
         has_task_ids = all(tid is not None for tid in task_ids)
+        has_task_sources = all(ts is not None for ts in task_sources)
 
         if not has_task_ids and has_task_names and self.task_to_id:
             output_batch["task_ids"] = torch.LongTensor(
@@ -338,12 +346,15 @@ class MultipleChoiceCollator(DefaultCollator):
             )
         elif has_task_ids:
             output_batch["task_ids"] = torch.LongTensor(task_ids)
+        if has_task_names and not has_task_sources:
+            task_sources = task_names
 
         output_batch["sources_texts"] = sources
         output_batch["labels_texts"] = labels
         output_batch["labels_index"] = label_index
         output_batch["task_names"] = task_names
         output_batch["num_options"] = num_options
+        output_batch["task_sources"] = task_sources
         return output_batch
 
 

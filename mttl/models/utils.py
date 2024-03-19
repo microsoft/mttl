@@ -1,11 +1,14 @@
 from enum import Enum
 import hashlib
 import os
+import re
+from collections import defaultdict, deque
 from typing import Any, Callable, Optional, Union
 import pytorch_lightning as pl
 from pytorch_lightning import LightningModule, Trainer
 import torch
 import json
+import prettytable
 from transformers.utils import cached_file
 from transformers.file_utils import PushToHubMixin
 from mttl.utils import logger, get_checkpoint_path
@@ -292,21 +295,10 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
         if not hasattr(self, "_params_from_checkpoint"):
             self._params_from_checkpoint = set()
 
-        trainable_param_names = []
         if not hasattr(self, "trainable_param_names"):
-            trainable_param_names = [
+            self.trainable_param_names = [
                 n for n, p in self.named_parameters() if p.requires_grad
             ]
-        else:
-            trainable_param_names = self.trainable_param_names
-
-        if hasattr(self.model, "remapped_params"):
-            # in case of tied params, 'remapped_params' will contains
-            # for each tied param in key, the name of param it is tied to in value.
-            # This makes sure the resulting state dict contains all the params.
-            trainable_param_names.extend(
-                ["model." + p for p in self.model.remapped_params.keys()]
-            )
 
         keys = [k for k in state_dict.keys()]
 
@@ -321,7 +313,7 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
             # we can safely avoid dumping this parameter if it is both
             # not in the trainable parameters and was not loaded from checkpoint
             if (
-                not (key in trainable_param_names)
+                not (key in self.trainable_param_names)
                 and not (key in self._params_from_checkpoint)
             ) or key in plugin_param_keys:
                 del state_dict[key]
@@ -461,7 +453,6 @@ def model_loader_helper(model_name, device_map="auto", load_in_8bit=False):
         model_object = AutoModelForCausalLM.from_pretrained(
             model_name,
             trust_remote_code=True,
-            torch_dtype="auto",
         )
     else:
         model_object = AutoModelForCausalLM.from_pretrained(
@@ -471,3 +462,75 @@ def model_loader_helper(model_name, device_map="auto", load_in_8bit=False):
             trust_remote_code=True,
         )
     return model_object
+
+
+# https://github.com/facebookresearch/dino/blob/main/utils.py
+class SmoothedValue(object):
+    """Track a series of values and provide access to smoothed values over a
+    window or the global series average.
+    """
+
+    def __init__(self, window_size=20, fmt=None):
+        if fmt is None:
+            fmt = "{median:.6f} ({global_avg:.6f})"
+        self.deque = deque(maxlen=window_size)
+        self.total = 0.0
+        self.count = 0
+        self.fmt = fmt
+
+    def update(self, value, n=1):
+        self.deque.append(value)
+        self.count += n
+        self.total += value * n
+
+    @property
+    def median(self):
+        d = torch.tensor(list(self.deque))
+        return d.median().item()
+
+    @property
+    def avg(self):
+        d = torch.tensor(list(self.deque), dtype=torch.float32)
+        return d.mean().item()
+
+    @property
+    def max(self):
+        return max(self.deque)
+
+    @property
+    def value(self):
+        return self.deque[-1]
+
+
+class MetricLogger(object):
+    def __init__(self):
+        self.meters = defaultdict(SmoothedValue)
+
+    def update(self, prefix=None, value_dict={}):
+        prefix = "" if prefix is None else f"{prefix}/"
+        for k, v in value_dict.items():
+            if isinstance(v, torch.Tensor):
+                v = v.item()
+            assert isinstance(v, (float, int))
+            self.meters[f"{prefix}{k}"].update(v)
+
+    def __getattr__(self, attr):
+        if attr in self.meters:
+            return self.meters[attr]
+        if attr in self.__dict__:
+            return self.__dict__[attr]
+        raise AttributeError(
+            "'{}' object has no attribute '{}'".format(type(self).__name__, attr)
+        )
+
+    def pretty_table(self, match_on=".*"):
+        table = prettytable.PrettyTable()
+        table.field_names = ["Name", "Value"]
+        for name, meter in self.meters.items():
+            if re.match(match_on, name):
+                table.add_row([name, f"{meter.avg:.5f}"])
+
+        return str(table)
+
+    def __len__(self):
+        return len(self.meters)
