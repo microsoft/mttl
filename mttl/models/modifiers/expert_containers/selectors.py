@@ -11,6 +11,7 @@ from mttl.models.modifiers.expert_containers.expert import ExpertInfo
 from mttl.models.modifiers.routing import RoutingInfo
 from torch.distributions import Bernoulli, Categorical
 from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
+from mttl.models.ranker.classifier_ranker import ClusterPredictor
 
 
 # from mttl.models.modifiers.routing import RoutingMixin
@@ -282,6 +283,9 @@ class TaskPredictorSelector(Selector):
             ranker_model=self.config.ranker_model,
             ranker_path=self.config.ranker_path,
         )
+
+        if isinstance(self.expert_ranker, ClusterPredictor):
+            self.expert_ranker.init_clusters(kwargs["training_config"].library_id)
 
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchModulesAndWeightsSelectorOutput:
