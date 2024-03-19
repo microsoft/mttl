@@ -82,7 +82,7 @@ def get_phatgoose_embeddings(library, args):
 def patch_prototypes(module, library, args, proto_inits=None):
     if not proto_inits and args.router_selector == "arrow_router":
         proto_inits = get_arrow_embeddings(library, args)
-    elif not proto_inits and args.router_selector == "hidden_router":
+    elif not proto_inits and args.router_selector == "avg_act_router":
         proto_inits = get_hidden_states(library, args)
     elif not proto_inits and args.router_selector == "phatgoose_router":
         proto_inits = get_phatgoose_embeddings(library, args)
