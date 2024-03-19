@@ -256,7 +256,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
             ]
             weights = [torch.tensor(x_weights) for x_weights in selection.weights]
             return SkilledLoRA.parallel_linear_weighted_forward(
-                input, skilled_loras, weights
+                input, skilled_loras, weights, merge_after=self.lora_merge_after
             )
         elif isinstance(selection, ModulesAndWeightsSelectorOutput):
             skilled_lora = SkilledLoRAView.from_loras(
