@@ -17,9 +17,15 @@ PHI_TEMPLATE = "Instruct: {}\nAnswer:"
 
 
 def download_flan(
-    hf_repo_id=None, cutoff=10_000, filter_zs=False, template_examples=False
+    hf_repo_id=None,
+    cutoff=10_000,
+    filter_zs=False,
+    template_examples=False,
+    fast_dev=False,
 ):
-    dataset = load_dataset("chiayewken/flan-v2", split="train")
+    dataset = load_dataset(
+        "chiayewken/flan-v2", split="train[:1000]" if fast_dev else "train"
+    )
 
     # filter some examples from the dataset
     if filter_zs:
@@ -112,13 +118,15 @@ def download_flan(
 @click.command()
 @click.argument("task")
 @click.argument("hf_target_id")
-def main(task, hf_target_id):
+@click.option("--fast_dev", default=False, is_flag=True)
+def main(task, hf_target_id, fast_dev):
     if task == "flan":
         download_flan(
             hf_target_id,
             cutoff=10_000,
             filter_zs=False,
             template_examples=False,
+            fast_dev=fast_dev,
         )
         raise ValueError("Unknown task")
 
