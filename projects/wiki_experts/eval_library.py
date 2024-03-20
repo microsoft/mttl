@@ -51,7 +51,7 @@ def get_hidden_states(library, args):
         pool=args.pool,
     )
     output = HiddenStateComputer(cfg).transform(
-        library, recompute=args.recompute_prototypes
+        library, recompute=args.recompute_prototypes, default_args=args
     )
 
     return output

@@ -369,14 +369,14 @@ class HiddenStateComputer(LibraryTransform):
         if self.config.track == "last_layer":
             # Add a hook to the last layer
             def fetch_input(module, input, output):
-                model.container["last_layer"] = input[0].detach()
+                model.container["last_layer"] = input[0].detach().cpu()
 
             model.model.get_output_embeddings().register_forward_hook(fetch_input)
         elif self.config.track == "each_layer":
             # add a hook for all the layers that an expert modifies
             def build_hook(name):
                 def retrieve_input(module, input, output):
-                    model.container[name] = input[0].detach()
+                    model.container[name] = input[0].detach().cpu()
 
                 return retrieve_input
 
@@ -462,9 +462,11 @@ class HiddenStateComputer(LibraryTransform):
                     )
 
                 bs = batch["input_ids"].size(0)
-                bs_idx = torch.arange(bs, device=device)
-                last_token_idx = batch["attention_mask"].sum(1) - 1
+                last_token_idx = batch["attention_mask"].sum(1).cpu() - 1
                 hidden_states = self._retrieve_hidden_states(model)
+                bs_idx = torch.arange(
+                    bs, device=hidden_states[list(hidden_states.keys())[0]].device
+                )
 
                 for layer, hidden_state in hidden_states.items():
                     assert hidden_state.ndim == 3
