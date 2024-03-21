@@ -421,8 +421,8 @@ class HiddenStateComputer(LibraryTransform):
 
             if self.config.use_base_model_only and self.config.model is not None:
                 training_config.model = self.config.model
-
-            model = MultiExpertModel(**vars(training_config)).to("cuda")
+            training_config.device_map = "cuda"
+            model = MultiExpertModel(**vars(training_config))
 
             if not self.config.use_base_model_only:
                 model.add_expert_instance(expert, is_default=True)
@@ -494,6 +494,9 @@ class HiddenStateComputer(LibraryTransform):
             # convert to regular dict
             centroids = {k: v for k, v in centroid.items()}
             output[expert_name] = centroids
+
+            del model
+            torch.cuda.empty_cache()
 
         if persist:
             # add embeddings to the library
