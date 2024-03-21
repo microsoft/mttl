@@ -676,7 +676,7 @@ class ArrowConfig(LibraryTransformConfig):
     ab_only: bool = True
     scale: bool = False  # If True, scale by eigenvalue
     tie_params: str = "default"  # If default, ties the same params as during training. If a regex, processed the same way as during training
-    tie_op: str = "concat"
+    tie_op: str = "concat"  # or "sum"
 
 
 class ArrowTransform(LibraryTransform):
@@ -799,6 +799,8 @@ class ArrowTransform(LibraryTransform):
         eigvals = library.get_auxiliary_data(
             data_type=self.config.save_name + "_eigvals"
         )
+
+        logger.info("Arrow save name : {}".format(self.config.save_name))
 
         if len(vectors) == len(eigvals) == len(library) and not recompute:
             logger.info("Found {} precomputed centroids".format(len(vectors)))
