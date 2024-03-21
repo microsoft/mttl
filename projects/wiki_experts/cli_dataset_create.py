@@ -1,47 +1,25 @@
-from collections import defaultdict
 from functools import partial
-import itertools
-import json
+
 import click
-from datasets import load_dataset, concatenate_datasets, Dataset
 import numpy as np
-from promptsource import templates
-import tqdm
-from mttl.datamodule.t0_data_module import apply_template
-from mttl.dataloader import t0_dataset_readers
-from mttl.datamodule import t0_data_module
-import os
+from datasets import Dataset, concatenate_datasets, load_dataset
 
 
-PHI_TEMPLATE = "Instruct: {}\nAnswer:"
+def gen_from_iterable_dataset(iterable_ds):
+    yield from iterable_ds
 
 
-def download_flan(
-    hf_repo_id=None,
-    cutoff=10_000,
-    filter_zs=False,
-    template_examples=False,
-    fast_dev=False,
-):
-    dataset = load_dataset(
-        "chiayewken/flan-v2", split="train[:1000]" if fast_dev else "train"
-    )
-
-    # filter some examples from the dataset
-    if filter_zs:
-        part = dataset.filter(
-            lambda example: example["task_source"] != "NIv2", num_proc=24
+def download_flan(split="train", download_size=-1, cutoff=10_000):
+    dataset_name = "chiayewken/flan-v2"
+    if download_size <= 0:
+        dataset = load_dataset(dataset_name, split=split)
+    else:
+        iter_ds = load_dataset(dataset_name, split=split, streaming=True).take(
+            download_size
         )
-        part1 = part.filter(
-            lambda example: example["template_type"] == "zs_noopt", num_proc=24
+        dataset = Dataset.from_generator(
+            partial(gen_from_iterable_dataset, iter_ds), features=iter_ds.features
         )
-        part2 = part.filter(
-            lambda example: example["template_type"] == "zs_opt"
-            and example["task_source"] == "CoT",
-            num_proc=24,
-        )
-        dataset = concatenate_datasets([part1, part2])
-        print("# number of tasks:", len(set(dataset["task_name"])))
 
     # group the dataset using the task_name
     task_names = dataset.unique("task_name")
@@ -58,7 +36,7 @@ def download_flan(
         # if the dataset is too large, we randomly sample 5000 examples for the training
         task_dataset = task_dataset.shuffle(42)
 
-        if len(task_dataset) > cutoff:
+        if cutoff > 0 and len(task_dataset) > cutoff:
             task_dataset = task_dataset.select(range(cutoff))
 
         def assign_split(example, idx):
@@ -72,21 +50,11 @@ def download_flan(
                 return {"split": "test"}
 
         task_dataset = task_dataset.map(assign_split, with_indices=True)
-
-        if template_examples:
-            from mttl.datamodule.mt_seq_to_seq_module import apply_source_template
-            from mttl.datamodule.mt_seq_to_seq_module import augment_few_shot_task
-
-            task_dataset = apply_source_template(task_dataset, PHI_TEMPLATE)
-            few_shot_dataset = augment_few_shot_task(
-                task_dataset, 3, modify_task_source=False
-            )
-            task_dataset = concatenate_datasets([task_dataset, few_shot_dataset])
-
+        # smaller_dataset = Dataset.from_dict({k: [dic[k] for dic in examples] for k in examples[0]})
         # randomly cut the dataset again
         task_dataset = task_dataset.shuffle(42)
 
-        if len(task_dataset) > cutoff:
+        if cutoff and len(task_dataset) > cutoff:
             task_dataset = task_dataset.select(range(cutoff))
 
         all_datasets.append(task_dataset)
@@ -112,23 +80,50 @@ def download_flan(
         return x
 
     all_datasets = all_datasets.map(lambda x: clean_task(x))
-    all_datasets.push_to_hub(hf_repo_id)
+    return all_datasets
 
 
 @click.command()
 @click.argument("task")
-@click.argument("hf_target_id")
-@click.option("--fast_dev", default=False, is_flag=True)
-def main(task, hf_target_id, fast_dev):
+@click.option(
+    "--split",
+    type=str,
+    default="train",
+    help="Split to download",
+)
+@click.option(
+    "--download_size",
+    type=int,
+    default="-1",
+    help=(
+        "Download size from Hugging Face (before any processing). "
+        "Values <= 0 means download the whole dataset"
+    ),
+)
+@click.option(
+    "--cutoff",
+    type=int,
+    default=10_000,
+    help="Cutoff for the dataset size after processing. Zero means no cutoff.",
+)
+@click.option(
+    "--hf_target_id",
+    type=str,
+    default=None,
+    help="Repository ID where to push the processed dataset.",
+)
+def main(task, split, download_size, cutoff, hf_target_id):
     if task == "flan":
-        download_flan(
-            hf_target_id,
-            cutoff=10_000,
-            filter_zs=False,
-            template_examples=False,
-            fast_dev=fast_dev,
+        all_datasets = download_flan(
+            split=split,
+            download_size=download_size,
+            cutoff=cutoff,
         )
+    else:
         raise ValueError("Unknown task")
+
+    if hf_target_id is not None:
+        all_datasets.push_to_hub(hf_target_id)
 
 
 if __name__ == "__main__":
