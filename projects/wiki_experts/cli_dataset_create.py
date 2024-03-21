@@ -33,7 +33,7 @@ def download_flan(split="train", download_size=-1, cutoff=10_000):
             lambda x: x["task_name"] == task_name, num_proc=24
         )
 
-        # if the dataset is too large, we randomly sample 5000 examples for the training
+        # if the dataset is too large, we randomly sample "cutoff" examples for training
         task_dataset = task_dataset.shuffle(42)
 
         if cutoff > 0 and len(task_dataset) > cutoff:
@@ -50,7 +50,6 @@ def download_flan(split="train", download_size=-1, cutoff=10_000):
                 return {"split": "test"}
 
         task_dataset = task_dataset.map(assign_split, with_indices=True)
-        # smaller_dataset = Dataset.from_dict({k: [dic[k] for dic in examples] for k in examples[0]})
         # randomly cut the dataset again
         task_dataset = task_dataset.shuffle(42)
 
@@ -64,7 +63,7 @@ def download_flan(split="train", download_size=-1, cutoff=10_000):
         print("# Test", len(task_dataset.filter(lambda x: x["split"] == "test")))
         print("# Valid", len(task_dataset.filter(lambda x: x["split"] == "validation")))
 
-    all_datasets = concatenate_datasets(all_datasets)
+    concatenated_datasets = concatenate_datasets(all_datasets)
 
     def clean_task(x):
         if "task_name" not in x:
@@ -79,8 +78,8 @@ def download_flan(split="train", download_size=-1, cutoff=10_000):
         )
         return x
 
-    all_datasets = all_datasets.map(lambda x: clean_task(x))
-    return all_datasets
+    concatenated_datasets = concatenated_datasets.map(lambda x: clean_task(x))
+    return concatenated_datasets
 
 
 @click.command()
@@ -104,7 +103,7 @@ def download_flan(split="train", download_size=-1, cutoff=10_000):
     "--cutoff",
     type=int,
     default=10_000,
-    help="Cutoff for the dataset size after processing. Zero means no cutoff.",
+    help="Max number of examples per task. Zero means no cutoff.",
 )
 @click.option(
     "--hf_target_id",
@@ -114,7 +113,7 @@ def download_flan(split="train", download_size=-1, cutoff=10_000):
 )
 def main(task, split, download_size, cutoff, hf_target_id):
     if task == "flan":
-        all_datasets = download_flan(
+        concatenated_datasets = download_flan(
             split=split,
             download_size=download_size,
             cutoff=cutoff,
@@ -123,7 +122,7 @@ def main(task, split, download_size, cutoff, hf_target_id):
         raise ValueError("Unknown task")
 
     if hf_target_id is not None:
-        all_datasets.push_to_hub(hf_target_id)
+        concatenated_datasets.push_to_hub(hf_target_id)
 
 
 if __name__ == "__main__":
