@@ -63,6 +63,7 @@ def get_arrow_embeddings(library, args):
         name=args.expert_embeds_save_name,
         ab_only=args.ab_only,
         tie_params=args.tie_params,
+        tie_op=args.tie_op,
     )
     return ArrowTransform(cfg).transform(
         library,
@@ -87,7 +88,7 @@ def get_phatgoose_embeddings(library, args):
 def patch_prototypes(module, library, args, proto_inits=None):
     if not proto_inits and args.router_selector == "arrow_router":
         proto_inits = get_arrow_embeddings(library, args)
-    elif not proto_inits and args.router_selector == "hidden_router":
+    elif not proto_inits and args.router_selector == "avg_act_router":
         proto_inits = get_hidden_states(library, args)
     elif not proto_inits and args.router_selector == "phatgoose_router":
         proto_inits = get_phatgoose_embeddings(library, args)
@@ -225,8 +226,8 @@ def run_eval(args: ExpertConfig):
     elif args.merge_or_route == "base":
         module = ExpertModel(**vars(train_cfg))
 
-    """ Routing Approaches """
-    if args.merge_or_route in ["phatgoose", "arrow", "avg_act"]:
+    elif args.merge_or_route in ["phatgoose", "arrow", "avg_act"]:
+        """Routing Approaches"""
         args.router_selector = f"{args.merge_or_route}_router"
 
         selector_config = SelectorConfig.from_training_config(args)
