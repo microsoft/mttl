@@ -300,13 +300,14 @@ class TaskPredictorSelector(Selector):
 
         if isinstance(self.expert_ranker, ClusterPredictor):
             self.expert_ranker.init_clusters(kwargs["training_config"].library_id)
-        self.expert_ranker.set_available_tasks(self.expert_names)
 
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchModulesAndWeightsSelectorOutput:
         # get the sources_texts from routing_infos
         if hasattr(self.info_container["routing_infos"], "sources_texts"):
             sources_texts = self.info_container["routing_infos"].sources_texts
+            self.expert_ranker.set_available_tasks(self.expert_names)
+
             modules, weights = self.expert_ranker.predict_task(
                 sources_texts, n=self.ranker_top_k
             )
