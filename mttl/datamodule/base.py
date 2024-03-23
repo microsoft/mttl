@@ -34,7 +34,7 @@ class DatasetConfig:
     subsample_train: int = None
     subsample_dev: int = None
     subsample_test: int = None
-    subsample_per_task: bool = True
+    subsample_per_task: bool = False  # Changing default to False
     subsample: int = -1
 
 
@@ -515,12 +515,14 @@ class DefaultDataModule(LightningDataModule):
         total_size = len(dataset)
         # make this deterministic to always sample the same subset
         rng = torch.Generator().manual_seed(1234)
-        idxs = get_dst_idxs_sampled(n_samples, total_size, rng)
         if isinstance(dataset, ArrowDataset):
             if per_task:
                 task_names = dataset.unique("task_name")
                 subsampled_dataset = []
-                for task_name in task_names:
+                for i, task_name in enumerate(task_names):
+                    logger.info(
+                        f"Subsampling task {task_name}, {i+1}/{len(task_names)}"
+                    )
                     task_idxs = torch.tensor(
                         [
                             index
@@ -535,6 +537,7 @@ class DefaultDataModule(LightningDataModule):
                     assert all([t == task_name for t in task_dataset["task_name"]])
                 subsampled_dataset = concatenate_datasets(subsampled_dataset)
             else:
+                idxs = get_dst_idxs_sampled(n_samples, total_size, rng)
                 subsampled_dataset = dataset.select(idxs)
         else:
             assert (
