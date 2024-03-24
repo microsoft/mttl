@@ -263,6 +263,7 @@ def finetune_lib_mu(args: ExpertConfig, dm):
     1. Averages the library to a single expert
     2. Fine-tunes this expert on the downstream task
     """
+    args.router_selector = None
     mean_expert: Expert = create_mean_expert(args)
     if args.finetune_task_name:
         mean_expert.name = args.finetune_task_name
