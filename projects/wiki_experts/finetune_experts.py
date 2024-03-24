@@ -281,6 +281,7 @@ def finetune_lib_mu_with_rand_retrieval(args: ExpertConfig, dm):
     2. Averages the library to a single expert
     3. Fine-tunes this expert on the downstream task
     """
+    args.router_selector = None
     library = retrieve(args, args.finetune_task_name, args.sk, retrieve_with="random")
     assert (
         len(library) == args.sk
@@ -301,6 +302,7 @@ def finetune_lib_mu_with_svd_retrieval(args: ExpertConfig, dm):
     2. Averages the library to a single expert
     3. Fine-tunes this expert on the downstream task
     """
+    args.router_selector = None
     library = retrieve(args, args.finetune_task_name, args.sk, retrieve_with="svdemb")
     assert (
         len(library) == args.sk
