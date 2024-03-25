@@ -61,9 +61,7 @@ def get_arrow_embeddings(library, args):
     cfg = ArrowConfig(
         name=args.expert_embeds_save_name,
     )
-    return ArrowTransform(cfg).transform(
-        library, recompute=args.recompute_prototypes, stack_bs=args.stack_bs
-    )
+    return ArrowTransform(cfg).transform(library, recompute=args.recompute_prototypes)
 
 
 def get_phatgoose_embeddings(library, args):
@@ -127,14 +125,24 @@ def eval_in_distribution(module, args: ExpertConfig, tasks):
             evaluator = LossCallback(
                 dm.val_dataloader(), output_dir=args.output_dir, name=task + "_val"
             )
-            metric = evaluator.test(pl_module=module)
+            metric = evaluator.test(pl_module=module).item()
 
         elif args.eval_metric == "test_loss":
             dm = get_datamodule(args)
             evaluator = LossCallback(
                 dm.test_dataloader(), output_dir=args.output_dir, name=task + "_test"
             )
-            metric = evaluator.test(pl_module=module)
+            metric = evaluator.test(pl_module=module).item()
+        elif args.eval_metric == "val_rougeL":
+            dm = get_datamodule(args, for_generation=True)
+            evaluator = RougeEvaluator(
+                datamodule=dm,
+            )
+            metric = evaluator.evaluate(
+                module,
+                split="val",
+                verbose=False,
+            )
         elif args.eval_metric == "rougeL":
             dm = get_datamodule(args, for_generation=True)
             evaluator = RougeEvaluator(
@@ -196,7 +204,12 @@ def run_eval(args: ExpertConfig):
     train_cfg.device_map = "auto"
 
     # For starts, always overwrite the following arguments
-    for arg_name in ["output_dir", "eval_metric"]:
+    for arg_name in [
+        "output_dir",
+        "eval_metric",
+        "remove_phi_eval_tasks",
+        "include_task_source",
+    ]:
         value = getattr(args, arg_name, None)
         setattr(train_cfg, arg_name, value)
 
@@ -250,9 +263,28 @@ def run_eval(args: ExpertConfig):
         # update config
         wandb.config.update({f"cmd_args_{k}": v for k, v in vars(args).items()})
 
-    if args.pipeline_eval_tasks == "in_distribution":
+    if args.pipeline_eval_tasks in [
+        "in_distribution",
+        "in_distribution_all_tasks_together",
+        "in_distribution_per_task",
+    ]:
         tasks = [expert.expert_task_name for expert in library.data.values()]
+        if tasks[0] is None:
+            tasks = json.load(open("projects/wiki_experts/task_sets/flan_tasks.json"))[
+                "flan256"
+            ]
+        if (
+            args.pipeline_eval_tasks == "in_distribution_all_tasks_together"
+            and len(tasks) > 1
+        ):
+            # make sure all tasks clusters are evaluated together
+            tasks = [",".join(tasks)]
+        elif args.pipeline_eval_tasks == "in_distribution_per_task" and len(tasks) > 1:
+            # make sure we evaluate each task seperate
+            tasks = [",".join(tasks)].split(",")
+
         train_cfg.eval_metric = args.eval_metric
+        train_cfg.subsample_dev = args.subsample_dev
         scores = eval_in_distribution(module, train_cfg, tasks)
     else:
         if args.pipeline_eval_tasks == "all":
@@ -282,7 +314,8 @@ def run_eval(args: ExpertConfig):
         print(angle)
 
     if wandb.run is not None:
-        wandb.log({f"downstream/{k}": v for k, v in scores.items()})
+        if scores is not None:
+            wandb.log({f"downstream/{k}": v for k, v in scores.items()})
         if len(metric_logger) > 0:
             wandb.log({k: v.avg for k, v in metric_logger.meters.items()})
 
