@@ -999,7 +999,7 @@ class ExpertLibrary:
         data: Any,
         force: bool = False,
     ):
-        if expert_name not in self.data:
+        if expert_name not in self.data and expert_name != "base_model":
             raise ValueError(f"Expert {expert_name} not found in repository.")
 
         operations = []

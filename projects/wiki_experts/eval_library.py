@@ -5,6 +5,7 @@ import copy
 import wandb
 import numpy as np
 from copy import deepcopy
+import torch.nn.functional as F
 from pytorch_lightning import seed_everything
 import json
 
@@ -60,8 +61,15 @@ def get_hidden_states(library, args):
 def get_arrow_embeddings(library, args):
     cfg = ArrowConfig(
         name=args.expert_embeds_save_name,
+        ab_only=args.ab_only,
+        tie_params=args.tie_params,
+        tie_op=args.tie_op,
     )
-    return ArrowTransform(cfg).transform(library, recompute=args.recompute_prototypes)
+    return ArrowTransform(cfg).transform(
+        library,
+        recompute=args.recompute_prototypes,
+        add_base_proto=args.base_model_proto,
+    )
 
 
 def get_phatgoose_embeddings(library, args):
@@ -87,12 +95,10 @@ def patch_prototypes(module, library, args, proto_inits=None):
 
     for mod in module.modules():
         if isinstance(mod, PerTokenSelector):
-            patched_layer_name = mod.layer_name.replace(".selector", "")
             prototypes = []
+            patched_layer_name = mod.layer_name.replace(".selector", "")
             for expert_name in mod.expert_names:
-                patched_layer_name = mod.layer_name.replace(".selector", "")
                 layer_names = proto_inits[expert_name].keys()
-                patched_layer_name = mod.layer_name.replace(".selector", "")
                 valid_layer_names = [
                     k
                     for k in layer_names
@@ -235,8 +241,8 @@ def run_eval(args: ExpertConfig):
     elif args.merge_or_route == "base":
         module = ExpertModel(**vars(train_cfg))
 
-    """ Routing Approaches """
-    if args.merge_or_route in ["phatgoose", "arrow", "avg_act"]:
+    elif args.merge_or_route in ["phatgoose", "arrow", "avg_act"]:
+        """Routing Approaches"""
         args.router_selector = f"{args.merge_or_route}_router"
 
         selector_config = SelectorConfig.from_training_config(args)
@@ -250,6 +256,8 @@ def run_eval(args: ExpertConfig):
         selector_config = SelectorConfig.from_training_config(args)
         module = MultiExpertModel(**vars(train_cfg), selector_config=selector_config)
         module.load_from_module_dict(library)
+    else:
+        raise ValueError(f"Unknown merge_or_route {args.merge_or_route}")
 
     module = module.to("cuda")
     metric_logger = Selector.metric_logger

@@ -12,8 +12,8 @@ import sklearn.decomposition
 from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
 from collections import defaultdict
-from collections import defaultdict
 
+from mttl.models.modifiers.base import get_target_2_source_param_mapping
 from mttl.models.modifiers.expert_containers.expert import Expert
 from mttl.models.modifiers.expert_containers.expert_containers import ExpertContainer
 from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
@@ -227,6 +227,9 @@ class WeightedLinearMerge(LibraryTransform):
             for k, v in base_expert.expert_weights.items():
                 base_expert.expert_weights[k] /= len(experts)
 
+        # manually change the config of the expert to remove the tie_params
+        base_expert.expert_config.tie_params = None
+
         return base_expert
 
 
@@ -319,6 +322,9 @@ class TiesMerge(LibraryTransform):
             "Params used to compute TIES mean: {:.10f}%".format(100.0 * used / total)
         )
 
+        # manually change the config of the expert to remove the tie_params
+        base_expert.expert_config.tie_params = None
+
         return base_expert
 
 
@@ -409,8 +415,6 @@ class HiddenStateComputer(LibraryTransform):
         default_args=None,
         device="cpu",
     ) -> Expert:
-        from mttl.models.expert_model import MultiExpertModel
-
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
 

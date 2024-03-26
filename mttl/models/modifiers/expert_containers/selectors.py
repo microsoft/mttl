@@ -178,7 +178,9 @@ def safe_logging(func):
         try:
             result = func(*args, **kwargs)
         except Exception as e:
-            logger.exception(f"An error occurred in {func.__name__}: {e}")
+            if str(e)[:100] != getattr(logger, "previous_error", ""):
+                logger.exception(f"An error occurred in {func.__name__}: {e}")
+                logger.previous_error = str(e)[:100]
             result = None
         return result
 
@@ -559,14 +561,22 @@ class PerTokenSelector(TaskToExpertTracker):
 
         # validate args
         assert self.config.proto_init is not None
-        assert self.config.input_norm_fn in ["id", "layer_norm", "unit"]
-        assert self.config.proto_norm_fn in ["id", "layer_norm", "unit"]
+        assert self.config.input_norm_fn in ["id", "norm_d", "unit"]
+        assert self.config.proto_norm_fn in ["id", "norm_d", "norm_p", "unit"]
 
         def _get_norm_layer(norm_fn):
             """helper for normalizing input and expert embeddings"""
 
-            if norm_fn == "layer_norm":
+            if norm_fn == "norm_d":
                 return nn.LayerNorm(self.input_dim, elementwise_affine=False)
+            elif norm_fn == "norm_p":
+
+                def _unit_norm(x):
+                    x_ = x.transpose(0, 1)  # (d, n_exp)
+                    return F.layer_norm(x_, x_.shape[1:]).transpose(0, 1)
+
+                return _unit_norm
+
             elif norm_fn == "unit":
 
                 def _unit_norm(x):
@@ -723,8 +733,8 @@ class PhatgooseSelectorConfig(PerTokenSelectorConfig):
     router_temp: float = -1
     moe_top_k: int = 2
     proto_init: str = "phatgoose"
-    input_norm_fn: str = "layer_norm"
-    proto_norm_fn: str = "layer_norm"
+    input_norm_fn: str = "norm_d"
+    proto_norm_fn: str = "norm_d"
     lora_merge_after: bool = True
 
 
