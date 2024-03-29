@@ -308,6 +308,7 @@ def run_eval(args: ExpertConfig):
                 truncation_side=module.hparams.truncation_side,
                 tasks=args.pipeline_eval_tasks,
                 output_path=os.path.join(args.output_dir, "DOWNSTREAM"),
+                add_eos_to_targets=args.add_eos_to_downstream_targets,
             )
             scores = runner.run(module)
 

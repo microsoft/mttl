@@ -110,6 +110,7 @@ class ExpertConfig(Config):
         self.learning_rate_pg = 0.01
 
         self.save_each_epoch = False
+        self.add_eos_to_downstream_targets = True
 
     def post_init(self, silent=False):
         if self.micro_batch_size is None:
