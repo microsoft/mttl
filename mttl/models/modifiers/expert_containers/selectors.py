@@ -962,7 +962,9 @@ class PhatgooseTrainerSelector(Selector):
         )
 
     def get_prototypes(self):
-        return {k: gate.v.detach().cpu().numpy() for k, gate in self.gates.items()}
+        return {
+            k: gate.v.detach().float().cpu().numpy() for k, gate in self.gates.items()
+        }
 
 
 @dataclass
