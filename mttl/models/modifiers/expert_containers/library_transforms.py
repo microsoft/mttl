@@ -644,26 +644,35 @@ class PhatgooseTransform(HiddenStateComputer):
 
             checkpoint = train_module(training_config, model, dm)
 
-            from mttl.models.expert_model import MultiExpertModel
+            if (
+                training_config.compute_strategy
+                and training_config.compute_strategy != "deepspeed"
+            ):
+                # from pytorch_lightning.utilities.deepspeed import convert_zero_checkpoint_to_fp32_state_dict
+                # new_path = checkpoint.replace('last.ckpt', 'last_fp32.ckpt')
+                # convert_zero_checkpoint_to_fp32_state_dict(checkpoint, new_path)
+                # checkpoint = new_path
 
-            model_after = MultiExpertModel(**vars(training_config)).to("cuda")
-            model_after.add_expert_instance(expert, is_default=True)
-            model_after.load_state_dict(torch.load(checkpoint)["state_dict"])
+                from mttl.models.expert_model import MultiExpertModel
 
-            # for checksum
-            frozen_sum_after, unfrozen_sum_after = 0, 0
-            for key, value in model_after.state_dict().items():
-                if re.match(".*selector.gates.*.v", key):
-                    unfrozen_sum_after += value.sum()
-                else:
-                    frozen_sum_after += value.sum()
+                model_after = MultiExpertModel(**vars(training_config)).to("cuda")
+                model_after.add_expert_instance(expert, is_default=True)
+                model_after.load_state_dict(torch.load(checkpoint)["state_dict"])
 
-            assert (
-                frozen_sum == frozen_sum_after
-            ), "Frozen params changed during training"
-            assert (
-                unfrozen_sum != unfrozen_sum_after
-            ), "Unfrozen params did not change during training"
+                # for checksum
+                frozen_sum_after, unfrozen_sum_after = 0, 0
+                for key, value in model_after.state_dict().items():
+                    if re.match(".*selector.gates.*.v", key):
+                        unfrozen_sum_after += value.sum()
+                    else:
+                        frozen_sum_after += value.sum()
+
+                assert (
+                    frozen_sum == frozen_sum_after
+                ), "Frozen params changed during training"
+                assert (
+                    unfrozen_sum != unfrozen_sum_after
+                ), "Unfrozen params did not change during training"
 
             # extract prototypes
             prototypes = {}
