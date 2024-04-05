@@ -595,6 +595,7 @@ class MultiChoiceDataModule(DefaultDataModule):
             for_generation=self.for_generation,
             train_on_inputs=self.config.train_on_inputs,
             task_to_id=self.task_to_id,
+            add_eos_to_targets=self.config.add_eos_to_targets,
         )
 
 
@@ -618,6 +619,7 @@ class MultiChoiceSourceDataModule(DefaultDataModule):
             train_on_inputs=self.config.train_on_inputs,
             task_to_id=self.task_to_id,
             multisource=True,
+            add_eos_to_targets=self.config.add_eos_to_targets,
         )
 
 

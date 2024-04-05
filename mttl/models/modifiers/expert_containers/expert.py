@@ -100,6 +100,7 @@ class Expert:
         self.expert_info = expert_info
         self._expert_weights = expert_weights
         self.expert_optimizer_state = expert_optimizer_state
+        self._tied_expert_weights = None
 
     @property
     def expert_weights(self):
@@ -110,6 +111,8 @@ class Expert:
             and isinstance(self._expert_weights, Dict)
         ):
             # make sure tied params are in the state dict.
+            if self._tied_expert_weights is not None:
+                return self._tied_expert_weights
             target_2_source_params_map = get_target_2_source_param_mapping(
                 self._expert_weights.items(),
                 self.expert_info.expert_config.tie_params,
@@ -123,6 +126,7 @@ class Expert:
                 assert torch.allclose(
                     expert_weights[target_name], expert_weights[source_name]
                 ), f"Weight tying failed for {target_name} and {source_name}"
+            self._tied_expert_weights = expert_weights
             return expert_weights
         return self._expert_weights
 

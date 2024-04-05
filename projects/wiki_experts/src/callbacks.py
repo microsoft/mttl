@@ -32,6 +32,7 @@ class DownstreamEvalCallback(cb.Callback):
             truncation_side=args.truncation_side,
             tasks=args.pipeline_eval_tasks,
             output_path=os.path.join(args.output_dir, self.METRIC_KEY),
+            add_eos_to_targets=args.add_eos_to_downstream_targets,
         )
 
     def on_validation_epoch_start(

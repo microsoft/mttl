@@ -102,8 +102,6 @@ class ExpertConfig(Config):
         self.recompute_prototypes = False
         self.expert_embeds_save_name = None
 
-        # for MBC
-        self.mbc_num_clusters = 10  # number of clusters
         self.phi_2_align_heads = False
         self.lora_merge_after = False  # if True, tried to merge after the outer product, currently only applicable to LoRA
 
@@ -112,6 +110,7 @@ class ExpertConfig(Config):
         self.learning_rate_pg = 0.01
 
         self.save_each_epoch = False
+        self.add_eos_to_downstream_targets = True
 
     def post_init(self, silent=False):
         if self.micro_batch_size is None:

@@ -4,29 +4,47 @@ from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from mttl.models.modifiers.expert_containers.library_transforms import (
     MBClusteringTransformConfig,
     MBCWithCosSimTransform,
+    RandomClustersTransform,
+    RandomClustersConfig,
 )
 from mttl.utils import logger
 from mttl.models.expert_config import ExpertConfig
 
 
-def main(args: ExpertConfig):
+class ClusteringConfig(ExpertConfig):
+    def _set_defaults(self):
+        super()._set_defaults()
+        # for MBC
+        self.mbc_num_clusters = 10  # number of clusters
+        self.cluster_mode = "mbc"  # clustering mode: mbc, random
+
+
+def main(args: ClusteringConfig):
     library = ExpertLibrary.get_expert_library(
         repo_id=args.library_id,
         create=False,
         destination_id=args.destination_library_id,
     )
 
-    cfg = MBClusteringTransformConfig(
-        k=args.mbc_num_clusters, random_state=42, sparsity_threshold=0.5
-    )
-    transform = MBCWithCosSimTransform(cfg)
-    clusters = transform.transform(library, recompute=True)
+    if args.cluster_mode == "mbc":
+        cfg = MBClusteringTransformConfig(
+            k=args.mbc_num_clusters, random_state=42, sparsity_threshold=0.5
+        )
+        transform = MBCWithCosSimTransform(cfg)
+        clusters = transform.transform(library, recompute=True)
+        filename = f"{args.mbc_num_clusters}MBC.json"
+    elif args.cluster_mode == "random":
+        cfg = RandomClustersConfig(k=args.mbc_num_clusters, random_state=42)
+        transform = RandomClustersTransform(cfg)
+        clusters = transform.transform(library)
+        filename = f"{args.mbc_num_clusters}_random.json"
+    else:
+        raise ValueError(f"Unknown cluster mode {args.cluster_mode}")
 
     output_json_file = (
         f"{os.path.dirname(os.path.realpath(__file__))}/task_sets/{args.library_id}/"
     )
     os.makedirs(output_json_file, exist_ok=True)
-    filename = f"{args.mbc_num_clusters}MBC.json"
     cluster_dict = {}
     for c, l in clusters.items():
         print(f"Cluster {c} has {len(l)} elements")
@@ -38,5 +56,5 @@ def main(args: ExpertConfig):
 
 
 if __name__ == "__main__":
-    args = ExpertConfig.parse()
+    args = ClusteringConfig.parse()
     main(args)

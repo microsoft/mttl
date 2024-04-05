@@ -8,7 +8,7 @@
     "modify_layers": "q_proj|k_proj|v_proj|o_proj",
     "trainable_param_names": ".*lora_[ab].*",
     "num_train_epochs": 5,
-    "learning_rate": 3e-5,
+    "learning_rate": 1e-4,
     "micro_batch_size": 1,
     "train_batch_size": 16,
     "load_in_8bit": 0,

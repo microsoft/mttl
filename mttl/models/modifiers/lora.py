@@ -404,11 +404,19 @@ class SkilledLoRA(LoRA):
                     # partial_out = torch.einsum("bd,sdr->bsr", (input_lora, A))
                     # adapter_out = torch.einsum("bsr,srd->sbd", (partial_out, B))
                     # adapter_out = torch.einsum("s,sbo->bo", (weights, adapter_out)) * scaling
-                    # should be the same as:
-                    adapter_out = torch.matmul(torch.matmul(input_lora, A), B)
-                    adapter_out = (
-                        torch.einsum("s,sbo->bo", (weights, adapter_out)) * scaling
-                    )
+                    if input_lora.ndim == 2:
+                        # should be the same as:
+                        adapter_out = torch.matmul(torch.matmul(input_lora, A), B)
+                        adapter_out = (
+                            torch.einsum("s,sbo->bo", (weights, adapter_out)) * scaling
+                        )
+                    elif input_lora.ndim == 3:
+                        partial_out = torch.einsum("bkd,sdr->sbkr", (input_lora, A))
+                        adapter_out = torch.einsum("sbkr,srd->sbkd", (partial_out, B))
+                        adapter_out = (
+                            torch.einsum("s,sbkd->bkd", (weights, adapter_out))
+                            * scaling
+                        )
                 else:
                     A = torch.einsum("s,sqdr->qdr", (weights, skilled_loras_a))
                     B = torch.einsum("s,srqd->rqd", (weights, skilled_loras_b))
