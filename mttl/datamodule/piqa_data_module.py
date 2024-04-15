@@ -1,10 +1,11 @@
-from datasets import load_dataset
 from mttl.datamodule.base import (
     DatasetConfig,
     MultiChoiceDataModule,
 )
 from dataclasses import dataclass
 import os
+
+from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
 
 
 @dataclass
@@ -15,7 +16,7 @@ class PiqaDataConfig(DatasetConfig):
 class PiqaMultiChoiceDataModule(MultiChoiceDataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
-        dataset = load_dataset("piqa")
+        dataset = DatasetLibrary.pull_dataset("piqa")
 
         # convert task_id to task_name and labels
         def map_example(example):

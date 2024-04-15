@@ -1,8 +1,8 @@
-import re
+from dataclasses import dataclass
+
 import torch
 from typing import Dict, Union
-import re
-from string import Template
+
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.modify_model import CONFIGS_TO_MODIFIERS
 from mttl.models.expert_config import ExpertConfig
@@ -11,7 +11,6 @@ from mttl.models.utils import download_from_hub
 from mttl.models.modifiers.base import get_target_2_source_param_mapping
 from mttl.utils import get_checkpoint_path, logger
 from mttl.config import Config
-from dataclasses import dataclass
 
 
 @dataclass
@@ -27,6 +26,7 @@ class ExpertInfo:
     expert_config: ModifierConfig = None
     # configuration with which the expert was trained, i.e. a training config
     training_config: ExpertConfig = None
+    expert_model: str = None
 
     @classmethod
     def fromdict(cls, data):
@@ -67,6 +67,7 @@ class ExpertInfo:
             "expert_name": self.expert_name,
             "expert_task_name": self.expert_task_name,
             "parent_node": self.parent_node,
+            "expert_model": self.expert_model,
         }
         if self.expert_config:
             data["expert_config"] = self.expert_config.asdict()
@@ -76,11 +77,17 @@ class ExpertInfo:
 
     @property
     def model(self):
+        """Returns the expert model associated with the expert. Tries to get it
+        from training_config if expert_model is None for back-compatibility.
+        """
+        if self.expert_model is not None:
+            return self.expert_model
         return self.training_config.model
 
     @property
     def dataset(self):
-        return self.training_config.dataset
+        """Returns the dataset name from training config or an empty string."""
+        return getattr(getattr(self, "training_config", {}), "dataset", "")
 
     @property
     def model_modifier(self):

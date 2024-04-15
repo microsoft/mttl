@@ -1,7 +1,7 @@
 from pyparsing import abstractmethod
 import torch
 from torch import nn
-from typing import List, Union
+from typing import Dict, List, Union
 from mttl.config import Config
 from mttl.models.modifiers.base import (
     ModifierConfig,
@@ -178,13 +178,6 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
     ) -> None:
         from mttl.models.modifiers.expert_containers import filter_expert_weights
 
-        if expert.expert_weights is not None:
-            expert_weights = filter_expert_weights(
-                self.__layer_name__, expert.expert_weights
-            )
-        else:
-            expert_weights = None
-
         if expert.name in self.expert_infos:
             raise ValueError(
                 "An expert with name {} already exists.".format(expert.name)
@@ -201,32 +194,25 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         # We may want to add a SkilledLoRA directly, if we are loading an MHR model for example
         lora_type = get_modifier_type(expert.expert_config)
         LoRA_cls = {"lora": LoRA, "skilled_lora": SkilledLoRA}[lora_type]
-        expert_module = LoRA_cls(
+        modifier_module = LoRA_cls(
             expert.expert_config, self.layer, layer_name=self.__layer_name__
         )
 
-        if expert_weights is not None:
-            expert_module.load_lora_weights(expert_weights)
-
-        # fill the expert weights upon adding the expert
-        if expert.expert_weights is None:
-            expert.expert_weights = {}
-
-        for k, v in expert_module.state_dict().items():
-            if (self.layer_name + "." + k) not in expert.expert_weights and (
-                "lora_a" in k or "lora_b" in k
-            ):
-                expert.expert_weights[self.layer_name + "." + k] = v
+        if expert.expert_weights:
+            expert_weights = filter_expert_weights(
+                self.__layer_name__, expert.expert_weights
+            )
+            modifier_module.load_lora_weights(expert_weights)
 
         if action == "merge":
             # weight is merged with layer so we can discard it now
-            expert_module.merge_with_layer()
+            modifier_module.merge_with_layer()
             self.merged_expert_names.append(expert.name)
         else:
             if is_default:
                 self.default_expert_name = expert.name
 
-            self._add_expert(expert.name, expert.expert_info, expert_module)
+            self._add_expert(expert.name, expert.expert_info, modifier_module)
 
     def merge_with_layer(self):
         if not len(self.experts):
@@ -373,7 +359,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
         self.merged_expert_names = []
 
         # create a skilled lora config with 0 skills
-        dummy_config = SkilledLoRAConfig(
+        self.dummy_config = SkilledLoRAConfig(
             lora_alpha=config.lora_alpha,
             lora_dropout=config.lora_dropout,
             lora_init_b_random=config.lora_init_b_random,
@@ -386,7 +372,23 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                 else False
             ),
         )
-        self.experts = SkilledLoRA(dummy_config, layer)
+        self.experts = SkilledLoRA(self.dummy_config, layer)
+
+    def _get_expert_weights(self, expert_name) -> Dict:
+        from mttl.models.modifiers.modify_model import get_modifier_type
+
+        index_of = self.expert_names.index(expert_name)
+        weights = self.experts.get_skill_weights(index_of)
+
+        modifier_type = get_modifier_type(self.expert_infos[expert_name].expert_config)
+
+        if modifier_type == "lora":
+            assert self.dummy_config.n_splits == 1
+            # squeeze the first dimension and the n_splits dimension
+            return {n: w.squeeze() for n, w in weights.items()}
+        else:
+            # should be skilled lora
+            return weights
 
     def _add_expert(self, expert_name, expert_info, expert_module):
         self.expert_infos[expert_name] = expert_info

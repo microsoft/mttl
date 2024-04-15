@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import os
 import re
-from typing import List
+from typing import List, Union
 import numpy as np
 import torch
 from torch import nn
@@ -219,7 +219,16 @@ class SkilledLoRA(LoRA):
     def __len__(self):
         return self.n_skills
 
-    def add_skill(self, lora: LoRA):
+    def get_skill_weights(self, skill_index):
+        if skill_index >= self.n_skills:
+            raise ValueError(f"Skill index {skill_index} out of bounds.")
+
+        return {
+            "lora_a": self.lora_a[skill_index].unsqueeze(0).clone().detach().cpu(),
+            "lora_b": self.lora_b[skill_index].unsqueeze(0).clone().detach().cpu(),
+        }
+
+    def add_skill(self, lora: Union[LoRA, "SkilledLoRA"]):
         self.n_skills += 1
 
         self.lora_a.data = torch.cat(

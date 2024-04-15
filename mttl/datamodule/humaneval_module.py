@@ -1,10 +1,9 @@
 import os
-
-from datasets import load_dataset
 from dataclasses import dataclass
 
 from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
+from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
 
 
 @dataclass
@@ -59,7 +58,9 @@ def completion_template(example):
 class HumanEvalDataModule(DefaultDataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
-        dataset = load_dataset("openai_humaneval", name="openai_humaneval")
+        dataset = DatasetLibrary.pull_dataset(
+            "openai_humaneval", name="openai_humaneval"
+        )
 
         dataset = dataset.map(
             instruct_template

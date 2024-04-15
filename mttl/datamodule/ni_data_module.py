@@ -1,10 +1,8 @@
 import numpy as np
 import torch
 
-from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
-from datasets import load_dataset
 import json
 import tqdm
 import os
@@ -16,6 +14,7 @@ from dataclasses import dataclass
 
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 from mttl.datamodule.base import DefaultCollator, DefaultDataModule, DatasetConfig
+from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
 from mttl.utils import logger
 
 
@@ -358,7 +357,7 @@ class NiDataModule(DefaultDataModule):
 
         # if we are fine-tuning, we have to load ~1000 instances,
         # in order to be able to select the ones in training and in the valid set.
-        dataset = load_dataset(
+        dataset = DatasetLibrary.pull_dataset(
             filename,
             data_dir=os.environ["NI_DATA_DIR"],
             task_name=self.config.finetune_task_name,

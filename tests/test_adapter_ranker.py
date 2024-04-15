@@ -11,7 +11,7 @@ from mttl.models.ranker.clip_ranker import CLIPRanker
 from mttl.models.expert_config import ExpertConfig
 
 
-def test_clip_routing():
+def test_clip_routing(tiny_flan_id):
     config = ExpertConfig()
     config.ranker_model = "clip"
     config.ranker_path = "zhan1993/clip_ranker_debug"
@@ -19,10 +19,10 @@ def test_clip_routing():
     config.router_selector = "task_predictor_selector"
     config.router_granularity = "coarsegrained"
 
-    finetune_task_name = "adversarial_qa_dbert_answer_the_following_q"
+    finetune_task_name = "cot_gsm8k"
     data_module = FlanModule(
         FlanConfig(
-            dataset="sordonia/flan-debug-flat",
+            dataset=tiny_flan_id,
             model="EleutherAI/gpt-neo-125m",
             finetune_task_name=finetune_task_name,
             predict_batch_size=1,
@@ -42,24 +42,21 @@ def test_clip_routing():
     prediction_experts = selector.expert_ranker.predict_task(batch["sources_texts"])
     assert len(prediction_experts) == 2
     assert isinstance(selector.expert_ranker, CLIPRanker)
-    assert (
-        prediction_experts[0][0][0]
-        == "race_high_Write_a_multi_choice_question_for_the_following_article"
-    )
+    assert prediction_experts[0][0][0] == "quarel_do_not_use"
 
 
-def test_classifier_routing():
+def test_classifier_routing(tiny_flan_id):
     config = ExpertConfig()
     config.model = "EleutherAI/gpt-neo-125m"
     config.ranker_model = "classifier"
     config.ranker_path = "zhan1993/classifier_ranker_debug"
-    finetune_task_name = "adversarial_qa_dbert_answer_the_following_q"
+    finetune_task_name = "cot_gsm8k"
     config.router_selector = "task_predictor_selector"
     config.router_granularity = "coarsegrained"
 
     data_module = FlanModule(
         FlanConfig(
-            dataset="sordonia/flan-debug-flat",
+            dataset=tiny_flan_id,
             model="EleutherAI/gpt-neo-125m",
             finetune_task_name=finetune_task_name,
             predict_batch_size=1,
@@ -80,42 +77,43 @@ def test_classifier_routing():
     prediction_experts = selector.expert_ranker.predict_task(batch["sources_texts"])
     assert len(prediction_experts) == 2  # experts and names
     assert isinstance(selector.expert_ranker, SentenceTransformerClassifier)
-    assert prediction_experts[0][0][0] == "stream_qed_ii"
+    assert prediction_experts[0][0][0] == "cot_gsm8k"
 
 
-def test_expert_model_generate():
+def test_expert_model_generate(tmp_path, create_dummy_expert, flan_data_module):
     config = ExpertConfig()
     config.model = "EleutherAI/gpt-neo-125m"
-    finetune_task_name = "adversarial_qa_dbert_answer_the_following_q"
-    data_module = FlanModule(
-        FlanConfig(
-            dataset="sordonia/flan-debug-flat",
-            model="EleutherAI/gpt-neo-125m",
-            finetune_task_name=finetune_task_name,
-            predict_batch_size=1,
-            include_template_type="*",
-        ),
-        for_generation=True,
-    )
-
     module = MultiExpertModel(
-        **vars(config), device_map="cpu", tokenizer=data_module.tokenizer
+        **vars(config), device_map="cpu", tokenizer=flan_data_module.tokenizer
     )
-    module.load_expert(
-        expert_path="zhan1993/gpt-neo_adversarial_qa_dbert_answer_the_following_q",
-        expert_name="adversarial_qa_dbert_answer_the_following_q",
+    config = ExpertConfig(
+        kwargs={
+            "model_modifier": "lora",
+            "modify_layers": "k_proj|v_proj|q_proj",
+            "modify_modules": ".*",
+            "trainable_param_names": ".*lora_[ab].*",
+            "output_dir": tmp_path,
+            "model": "EleutherAI/gpt-neo-125m",
+        }
+    )
+    # create random Lora
+    expert1 = create_dummy_expert(config, "module1")
+    module.add_expert_instance(
+        expert1,
+        expert_name="expert1",
         action="route",
         is_default=True,
     )
 
-    batch = next(iter(data_module.val_dataloader()))
+    batch = next(iter(flan_data_module.val_dataloader()))
 
-    generation = module.generate(batch)[:, batch["input_ids"].shape[1] :]
-    assert generation[0][:4].cpu().numpy().tolist() == [220]
+    input_shift = batch["input_ids"].shape[1]
+    generation = module.generate(batch, max_new_tokens=3)[:, input_shift:]
+    assert generation.cpu().numpy().tolist() == [[198, 198, 464]]
 
     batch["attention_mask"][:1] = 0
-    generation = module.generate(batch)[:, batch["input_ids"].shape[1] :]
-    assert generation[0][:4].cpu().numpy().tolist() != [220]
+    generation = module.generate(batch, max_new_tokens=3)[:, input_shift:]
+    assert generation.cpu().numpy().tolist() == [[355, 257, 1255]]
 
 
 if __name__ == "__main__":

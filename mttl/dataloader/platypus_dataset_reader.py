@@ -1,11 +1,12 @@
 import torch
 from datasets import (
-    load_dataset,
     concatenate_datasets,
     get_dataset_config_names,
     Dataset,
 )
 import numpy as np
+
+from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
 
 
 class PlatypusTemplate:
@@ -74,7 +75,7 @@ class PlatypusDataset(torch.utils.data.dataset.Dataset):
     def __init__(self, dataset_name: str = "garage-bAInd/Open-Platypus"):
         super().__init__()
 
-        self.dataset = load_dataset(dataset_name)["train"]
+        self.dataset = DatasetLibrary.pull_dataset(dataset_name, split="train")
 
     def __len__(self):
         return len(self.dataset)
@@ -117,7 +118,7 @@ class PlatypusQADataset(torch.utils.data.dataset.Dataset):
 
         datasets_ = []
         for task_name in task_names:
-            datasets_.append(load_dataset(dataset_name, split=task_name))
+            datasets_.append(DatasetLibrary.pull_dataset(dataset_name, split=task_name))
 
         self.dataset = concatenate_datasets(datasets_)
         self.val_mixin = preprocess(val_mixin)

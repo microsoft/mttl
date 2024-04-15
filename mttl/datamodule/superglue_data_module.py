@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
-from datasets import load_dataset
 from mttl.datamodule.base import DatasetConfig, MultiChoiceDataModule
+from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
 
 
 @dataclass
@@ -20,7 +20,7 @@ class SuperGLUEMultiChoiceDataModule(MultiChoiceDataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
 
-        dataset = load_dataset("super_glue", name=self.TASK_NAME)
+        dataset = DatasetLibrary.pull_dataset("super_glue", name=self.TASK_NAME)
 
         # convert task_id to task_name and labels
         self._task_to_id = {}

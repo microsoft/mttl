@@ -6,7 +6,7 @@ from pytorch_lightning import seed_everything
 from mttl.models.expert_config import ExpertConfig
 
 from mttl.models.modifiers.base import ModifierConfig
-from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
+from mttl.models.modifiers.expert_containers.expert import Expert
 from mttl.models.modifiers.expert_containers import (
     LoRAExpertContainer,
     CoalescedLoRAExpertContainer,
@@ -18,27 +18,8 @@ from mttl.models.modifiers.expert_containers.selectors import (
     PerTokenSelector,
     PolySelector,
 )
-from mttl.models.expert_model import ExpertModel, MoEModel, MultiExpertModel
+from mttl.models.expert_model import MoEModel, MultiExpertModel
 from mttl.models.modifiers.lora import LoRA
-
-
-@pytest.fixture
-def tmp_exp_config(tmp_path):
-    class SimpleConfig(ExpertConfig):
-        def _set_defaults(self):
-            super()._set_defaults()
-            self.library_id = None
-            self.model_modifier = "lora"
-            self.modify_layers = "c_fc|c_proj|k_proj|v_proj|q_proj|out_proj"
-            self.modify_modules = ".*"
-            self.trainable_param_names = ".*lora_[ab].*"
-            self.output_dir = tmp_path
-            self.router_selector = "poly_router_dir"
-            self.router_granularity = "coarsegrained"
-            self.model = "EleutherAI/gpt-neo-125m"
-            self.n_tasks = 1
-
-    return SimpleConfig()
 
 
 @pytest.fixture
@@ -216,19 +197,9 @@ class TestMultiExpertModel:
         seed_everything(0)
         config: Config = tmp_exp_config
 
-        def create_dummy_expert(config, exp_name):
-            expert_model = MultiExpertModel(
-                tokenizer=None,
-                **vars(config),
-            )
-            expert = expert_model.add_empty_expert(
-                exp_name, ModifierConfig.from_training_config(config)
-            )
-            return expert
-
         config.router_selector = "task_selector"
-        exp1 = create_dummy_expert(config, "exp1")
-        exp2 = create_dummy_expert(config, "exp2")
+        exp1 = self.create_dummy_expert(config, "exp1")
+        exp2 = self.create_dummy_expert(config, "exp2")
         module_dict = {"mod1": exp1, "mod2": exp2, "default": exp1}
 
         module = MultiExpertModel(**vars(config))

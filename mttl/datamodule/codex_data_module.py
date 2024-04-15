@@ -1,8 +1,8 @@
 from functools import partial
 import os
 import numpy
-from datasets import load_dataset
 from mttl.datamodule.base import DefaultDataModule, DatasetConfig
+from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
 
 
 class CodexDataConfig(DatasetConfig):
@@ -11,7 +11,7 @@ class CodexDataConfig(DatasetConfig):
 
 class CodexDataModule(DefaultDataModule):
     def setup_dataset(self):
-        dataset = load_dataset("jinaai/code_exercises")["train"]
+        dataset = DatasetLibrary.pull_dataset("jinaai/code_exercises", split="train")
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
 
         def process(rng, ex):

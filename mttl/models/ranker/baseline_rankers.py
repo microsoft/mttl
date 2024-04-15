@@ -1,6 +1,5 @@
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
-from datasets import load_dataset
 from collections import Counter
 
 from sklearn.utils.extmath import safe_sparse_dot
@@ -13,6 +12,7 @@ from huggingface_hub import (
 
 import torch
 
+from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
 from mttl.utils import logger, remote_login
 from mttl.models.ranker.adapter_ranker import AdapterRanker
 
@@ -47,7 +47,9 @@ class TFIDFRanker(AdapterRanker):
         import tqdm
 
         self.dataset = (
-            load_dataset(self.dataset_name)["train"].shuffle().select(range(500_000))
+            DatasetLibrary.pull_dataset(self.dataset_name, split="train")
+            .shuffle()
+            .select(range(500_000))
         )
         self.vectorizer = TfidfVectorizer(
             norm="l2", sublinear_tf=True, stop_words="english"
@@ -123,7 +125,9 @@ class KATERanker(AdapterRanker):
 
     def train(self):
         self.dataset = (
-            load_dataset(self.dataset_name)["train"].shuffle().select(range(1_000_000))
+            DatasetLibrary.pull_dataset(self.dataset_name, split="train")
+            .shuffle()
+            .select(range(1_000_000))
         )
         self.train_features = self.embedder.encode(
             self.dataset["source"],

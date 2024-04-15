@@ -1,7 +1,7 @@
 import os
 import json
 import numpy as np
-from datasets import load_dataset, load_from_disk
+from datasets import load_from_disk
 import pkg_resources
 from promptsource import templates
 from promptsource.templates import DatasetTemplates
@@ -10,8 +10,7 @@ from typing import Dict, List, Optional, Tuple
 import re
 import pandas as pd
 
-
-import os
+from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
 
 
 DATASETS_OFFLINE = "no"
@@ -156,41 +155,6 @@ class T0DatasetConfig:
         return config
 
 
-def get_dataset_reader(args):
-    dataset_class = {
-        "T0Mixture": T0MixtureReader,
-        "rte": RTEReader,
-        "h-swag": HSwagReader,
-        "copa": COPAReader,
-        "wic": WiCReader,
-        "winogrande": WinograndeReader,
-        "cb": CBReader,
-        "storycloze": StoryClozeReader,
-        "anli-r1": ANLIR1Reader,
-        "anli-r2": ANLIR2Reader,
-        "anli-r3": ANLIR3Reader,
-        "wsc": WSCFixedReader,
-        "ade_corpus_v2": RaftReader,
-        "banking_77": RaftReader,
-        "terms_of_service": RaftReader,
-        "tai_safety_research": RaftReader,
-        "neurips_impact_statement_risks": RaftReader,
-        "overruling": RaftReader,
-        "systematic_review_inclusion": RaftReader,
-        "one_stop_english": RaftReader,
-        "tweet_eval_hate": RaftReader,
-        "twitter_complaints": RaftReader,
-        "semiconductor_org_types": RaftReader,
-    }
-
-    if args.finetune_task_name is None:
-        args.finetune_task_name = "T0Mixture"
-
-    dataset_class = dataset_class[args.finetune_task_name]
-
-    return dataset_class(T0DatasetConfig.from_args(args))
-
-
 class BaseDatasetReader(object):
     """
     DatasetReader is responsible for reading and processing dataset
@@ -242,7 +206,7 @@ class BaseDatasetReader(object):
                 os.path.join(DATASETS_OFFLINE, *self.dataset_stash)
             )[split]
         else:
-            orig_data = load_dataset(
+            orig_data = DatasetLibrary.pull_dataset(
                 *self.dataset_stash, split=split, cache_dir=self.config.data_dir
             )
         return orig_data
@@ -307,7 +271,7 @@ class StoryClozeReader(BaseDatasetReader):
             )[split]
         else:
             dataset_stash = ("story_cloze", "2016")
-            orig_data = load_dataset(
+            orig_data = DatasetLibrary.pull_dataset(
                 *dataset_stash,
                 split=split,
                 data_dir=os.environ.get("STORYCLOZE_DIR", self.config.data_dir),
@@ -620,7 +584,7 @@ class T0MixtureReader(object):
             else:
                 split_num = split
 
-            ds = load_dataset(
+            ds = DatasetLibrary.pull_dataset(
                 dataset_name,
                 subset_name,
                 split=split_num,
@@ -691,7 +655,9 @@ class RaftReader(object):
     def __init__(self, config):
         self.config = config
         self.dataset_name = config.dataset
-        self.orig_data = load_dataset("ought/raft", name=self.dataset_name)
+        self.orig_data = DatasetLibrary.pull_dataset(
+            "ought/raft", name=self.dataset_name
+        )
         self.answer_choices = self.orig_data["train"].features["Label"].names[1:]
 
         if self.config.dataset == "banking_77" and config.cleaned_answer_choices_b77:
@@ -752,3 +718,38 @@ class RaftReader(object):
         ]
         accuracy = sum(matching) / len(matching)
         return {"accuracy": accuracy}
+
+
+def get_dataset_reader(args):
+    dataset_class = {
+        "T0Mixture": T0MixtureReader,
+        "rte": RTEReader,
+        "h-swag": HSwagReader,
+        "copa": COPAReader,
+        "wic": WiCReader,
+        "winogrande": WinograndeReader,
+        "cb": CBReader,
+        "storycloze": StoryClozeReader,
+        "anli-r1": ANLIR1Reader,
+        "anli-r2": ANLIR2Reader,
+        "anli-r3": ANLIR3Reader,
+        "wsc": WSCFixedReader,
+        "ade_corpus_v2": RaftReader,
+        "banking_77": RaftReader,
+        "terms_of_service": RaftReader,
+        "tai_safety_research": RaftReader,
+        "neurips_impact_statement_risks": RaftReader,
+        "overruling": RaftReader,
+        "systematic_review_inclusion": RaftReader,
+        "one_stop_english": RaftReader,
+        "tweet_eval_hate": RaftReader,
+        "twitter_complaints": RaftReader,
+        "semiconductor_org_types": RaftReader,
+    }
+
+    if args.finetune_task_name is None:
+        args.finetune_task_name = "T0Mixture"
+
+    dataset_class = dataset_class[args.finetune_task_name]
+
+    return dataset_class(T0DatasetConfig.from_args(args))
