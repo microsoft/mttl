@@ -23,5 +23,5 @@ steps:
   displayName: 'Install dependencies'
  
 - script: |
-    pytest -n 4 -vv
+    pytest -vv
   displayName: 'Test with pytest'
