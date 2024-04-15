@@ -241,7 +241,7 @@ class GenerativeEvaluator(Evaluator):
 
     def _detect_max_new_tokens(self) -> int:
         """Tries to detect the max_new_tokens automatically based on the length of the test / valid set answers."""
-        logger.warn(
+        logger.warning(
             "Trying to auto detect max_new_tokens. This functionality should only be used for training and not for reporting results (as it assumes access to test labels)."
         )
 
@@ -254,10 +254,10 @@ class GenerativeEvaluator(Evaluator):
                 if "labels" in batch:
                     length = max(length, batch["labels"].shape[1])
         except Exception as e:
-            logger.warn("Exception: {}", e)
+            logger.warning("Exception: {}", e)
 
         if length == -1:
-            logger.warn("Could not auto detect max_new_tokens.")
+            logger.warning("Could not auto detect max_new_tokens.")
             return self.config.max_output_length
         else:
             logger.info("Auto detected max_new_tokens: %d", length)
@@ -392,10 +392,7 @@ class EvaluatorRunner:
                 task_output_path = None
 
             scores[name] = self.evaluators[name].evaluate(
-                module,
-                verbose=verbose,
-                output_path=task_output_path,
-                split="test"
+                module, verbose=verbose, output_path=task_output_path, split="test"
             )
 
             if self.output_path:

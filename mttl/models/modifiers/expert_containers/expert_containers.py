@@ -309,7 +309,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                 if hasattr(self, "_skilled_loras"):
                     skilled_loras = self._skilled_loras
                 else:
-                    logger.warn("Storing skilled loras for reuse.")
+                    logger.warning("Storing skilled loras for reuse.")
 
                     # store skilled lora view for reuse locally
                     skilled_loras = [

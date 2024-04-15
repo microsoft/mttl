@@ -558,7 +558,7 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
         )
         callbacks.append(rouge_callback)
     except:
-        logger.warn("Deactivating rouge callback. Exception thrown.")
+        logger.warning("Deactivating rouge callback. Exception thrown.")
         if "rouge" in args.es_metric:
             raise ValueError(
                 "Cannot stop on Rouge if no rouge callback is present! An exception was encountered while trying to load it."
@@ -590,7 +590,7 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
         eval_callback = DownstreamEvalCallback(args)
         callbacks.append(eval_callback)
     else:
-        logger.warn(
+        logger.warning(
             "Deactivating downstream eval callback as it is not enabled in the config. Please set `pipeline_eval_tasks`."
         )
 

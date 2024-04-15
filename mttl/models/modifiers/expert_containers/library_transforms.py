@@ -198,7 +198,7 @@ class WeightedLinearMerge(LibraryTransform):
                 expert_names
             ), "Weights must have the same keys as the experts"
             if not (1 - 1e-6) <= sum(self.config.weights.values()) <= (1 + 1e-6):
-                logger.warn(
+                logger.warning(
                     "Weights do not sum to 1.0, please make sure this is intended"
                 )
 

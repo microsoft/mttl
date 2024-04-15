@@ -470,7 +470,7 @@ class DefaultDataModule(LightningDataModule):
         validation_portion = validation_portion or self.config.validation_portion
 
         if validation_portion is None:
-            logger.warn(
+            logger.warning(
                 "No validation portion specified, no dev set available for this dataset."
             )
             return dataset, None
@@ -566,7 +566,9 @@ class DefaultDataModule(LightningDataModule):
             subsample = getattr(self.config, f"subsample_{split}", None)
 
             if subsample and subsample > 0:
-                logger.warn(f"subsampling the {split} dataset to {subsample} samples")
+                logger.warning(
+                    f"subsampling the {split} dataset to {subsample} samples"
+                )
                 dataset = getattr(self, f"{split}_dataset")
                 sub_dataset = self.subsample_dataset(
                     dataset, subsample, per_task=self.config.subsample_per_task

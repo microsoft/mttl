@@ -109,7 +109,7 @@ def run_multitask(args: ExpertConfig):
         )
         callbacks.append(rouge)
     else:
-        logger.warn(
+        logger.warning(
             "Deactivating rouge callback as it is not enabled in the config. Please set `eval_rouge_flag=True`."
         )
 
@@ -120,7 +120,7 @@ def run_multitask(args: ExpertConfig):
         )
         callbacks.append(mmlu)
     else:
-        logger.warn(
+        logger.warning(
             "Deactivating mmlu callback as it is not enabled in the config. Please set `eval_mmlu_flag=True`."
         )
 
@@ -131,7 +131,7 @@ def run_multitask(args: ExpertConfig):
         eval = DownstreamEvalCallback(args)
         callbacks.append(eval)
     else:
-        logger.warn(
+        logger.warning(
             "Deactivating downstream eval callback as it is not enabled in the config. Please set `pipeline_eval_tasks`."
         )
 

@@ -20,7 +20,7 @@ try:
     import faiss
     from faiss import IDSelectorBatch
 except:
-    logger.warn("Faiss not installed. KATE router will not work.")
+    logger.warning("Faiss not installed. KATE router will not work.")
 
 
 def upload_checkpoint(repo_id, filename, path_in_repo):

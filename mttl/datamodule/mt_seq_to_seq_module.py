@@ -139,7 +139,7 @@ class FlatMultiTaskModule(DefaultDataModule):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
 
         if "split" not in self.dataset.column_names["train"]:
-            logger.warn(
+            logger.warning(
                 "Dataset *should* have a 'split' column, try removing the dataset manually from the cache! Creating a new 'split' column."
             )
 

@@ -124,7 +124,7 @@ class ExpertConfig(Config):
 
         n_devices = torch.cuda.device_count()
         if n_devices > 1:
-            logger.warn(
+            logger.warning(
                 "You have multiple GPUs, but your device count is not being taken "
                 + "into account when computing `gradient_accumulation_steps`."
             )

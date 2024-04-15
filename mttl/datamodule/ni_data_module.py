@@ -310,7 +310,7 @@ class NiDataModule(DefaultDataModule):
         )
 
         if not os.path.exists(reference_file):
-            logger.warn("No test references found, skipping check.")
+            logger.warning("No test references found, skipping check.")
             return
 
         eval_instances = {}

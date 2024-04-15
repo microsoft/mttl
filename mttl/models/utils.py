@@ -334,7 +334,7 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
             ) * self.trainer.max_epochs
 
         if args.warmup_steps == -1 or args.warmup_proportion > 0.0:
-            logger.warn(
+            logger.warning(
                 "Warmup proportion is set to {}, has priority over warmup_steps".format(
                     args.warmup_proportion
                 )

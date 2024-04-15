@@ -108,7 +108,7 @@ class GPT:
                 )
             except openai.InvalidRequestError as e:
                 # Most likely a content filtering error from Azure.
-                logging.warn(str(e))
+                logging.warning(str(e))
                 return str(e)
         else:
             response = await openai.ChatCompletion.acreate(
@@ -149,7 +149,7 @@ class GPT:
                 )
             except openai.InvalidRequestError as e:
                 # Most likely a content filtering error from Azure.
-                logging.warn(str(e))
+                logging.warning(str(e))
                 return str(e)
         else:
             response = openai.ChatCompletion.create(
@@ -200,7 +200,7 @@ class GPT:
         except openai.InvalidRequestError as e:
             # Most likely a content filtering error from Azure.
             if "filtering" in str(e):
-                logging.warn(str(e))
+                logging.warning(str(e))
                 # Process each element in the batch individually.
                 response = {"choices": []}
                 for prompt in prompt_batch:

@@ -127,17 +127,19 @@ def get_tokenizer_with_args(
         tokenizer.model_max_length = int(1e9)
 
     tokenizer.padding_side = padding_side
-    logger.warn("Padding side is {}".format(tokenizer.padding_side))
+    logger.warning("Padding side is {}".format(tokenizer.padding_side))
 
     tokenizer.truncation_side = truncation_side
-    logger.warn("Truncation side is {}".format(tokenizer.truncation_side))
+    logger.warning("Truncation side is {}".format(tokenizer.truncation_side))
 
     if model_family == "gpt":
         if for_generation:
             if padding_side == "right":
-                logger.warn("Padding side is 'right', but we are in generation mode!")
+                logger.warning(
+                    "Padding side is 'right', but we are in generation mode!"
+                )
 
-            logger.warn(
+            logger.warning(
                 "for_generation is True, setting padding_side for tokenizer to 'left'."
             )
 
@@ -147,7 +149,7 @@ def get_tokenizer_with_args(
         tokenizer.add_eos_token = False
 
         if tokenizer.pad_token_id is None:
-            logger.warn(
+            logger.warning(
                 "!!! Setting pad_token_id to eos_token_id, given that pad_token_id was not detected !!!"
             )
             tokenizer.pad_token_id = tokenizer.eos_token_id

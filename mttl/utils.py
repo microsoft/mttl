@@ -330,7 +330,7 @@ def add_mlf_logger(loggers):
         )
         mlf_logger._run_id = run.id
     except:
-        logger.warn("Couldn't instantiate MLFlowLogger!")
+        logger.warning("Couldn't instantiate MLFlowLogger!")
         mlf_logger = None
 
     if mlf_logger is not None:
@@ -356,13 +356,15 @@ def get_checkpoint_path(path, step=None, use_last=False):
         # match the filename
         match = [m for m in matches if "best" in m.split("/")[-1]]
         if len(match) == 0:
-            logger.warn("No best checkpoints found! Defaulting to 'last'.")
+            logger.warning("No best checkpoints found! Defaulting to 'last'.")
 
             match = [m for m in matches if "last" in m]
             path = match[0]
         elif len(match) > 1:
-            logger.warn("Multiple best checkpoints found! Taking the most recent one!")
-            logger.warn(match)
+            logger.warning(
+                "Multiple best checkpoints found! Taking the most recent one!"
+            )
+            logger.warning(match)
             path = max(match, key=os.path.getctime)
         else:
             path = match[0]
