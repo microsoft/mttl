@@ -15,7 +15,7 @@ class ClusteringConfig(ExpertConfig):
     def _set_defaults(self):
         super()._set_defaults()
         # for MBC
-        self.mbc_num_clusters = 10  # number of clusters
+        self.num_clusters = 10  # number of clusters
         self.cluster_mode = "mbc"  # clustering mode: mbc, random
 
 
@@ -28,16 +28,16 @@ def main(args: ClusteringConfig):
 
     if args.cluster_mode == "mbc":
         cfg = MBClusteringTransformConfig(
-            k=args.mbc_num_clusters, random_state=42, sparsity_threshold=0.5
+            k=args.num_clusters, random_state=42, sparsity_threshold=0.5
         )
         transform = MBCWithCosSimTransform(cfg)
         clusters = transform.transform(library, recompute=True)
-        filename = f"{args.mbc_num_clusters}MBC.json"
+        filename = f"{args.num_clusters}MBC.json"
     elif args.cluster_mode == "random":
-        cfg = RandomClustersConfig(k=args.mbc_num_clusters, random_state=42)
+        cfg = RandomClustersConfig(k=args.num_clusters, random_state=42)
         transform = RandomClustersTransform(cfg)
         clusters = transform.transform(library)
-        filename = f"{args.mbc_num_clusters}_random.json"
+        filename = f"{args.num_clusters}_random.json"
     else:
         raise ValueError(f"Unknown cluster mode {args.cluster_mode}")
 
@@ -48,8 +48,8 @@ def main(args: ClusteringConfig):
     cluster_dict = {}
     for c, l in clusters.items():
         print(f"Cluster {c} has {len(l)} elements")
-        print(f"c{c}o{args.mbc_num_clusters} = {l}")
-        cluster_dict[f"c{c}o{args.mbc_num_clusters}"] = l
+        print(f"c{c}o{args.num_clusters} = {l}")
+        cluster_dict[f"c{c}o{args.num_clusters}"] = l
     with open(output_json_file + f"/{filename}", "w") as f:
         json.dump(cluster_dict, f, indent=4)
     logger.info(f"Saved clusters to {output_json_file}/{filename}")

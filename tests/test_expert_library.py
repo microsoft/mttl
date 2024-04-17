@@ -6,6 +6,7 @@ import pytest
 import asyncio
 import uuid
 
+from datasets import load_dataset
 import torch
 from huggingface_hub import (
     CommitOperationAdd,
@@ -21,6 +22,7 @@ from mttl.models.modifiers.expert_containers.expert_library import (
     LocalFSEngine,
     HFExpertLibrary,
     ExpertLibrary,
+    DatasetLibrary,
 )
 
 
@@ -547,3 +549,87 @@ def test_get_expert_library(expert_lib_class, repo_id):
         expert_library = ExpertLibrary.get_expert_library(repo_id)
         mock_expert_lib.assert_called_once()
         assert class_name in str(expert_library)
+
+
+def test_dataset_library(tmp_path, tiny_flan_dataset):
+    token = None  # not needed for local, just demostrating the API
+    dataset_path = tmp_path / "flan-test"
+    dataset_id = f"local://{dataset_path}"
+    # dataset_id = "hf://<hf-user-name>/flan-test"
+    # dataset_id = f"az://<storage-account>/flan-test"
+    try:
+        DatasetLibrary.push_dataset(tiny_flan_dataset, dataset_id, token=token)
+        dataset_from_lib = DatasetLibrary.pull_dataset(dataset_id, token=token)
+        assert tiny_flan_dataset.data == dataset_from_lib["train"].data
+    finally:  # Clean up. Delete the dataset from the library
+        DatasetLibrary.delete_dataset(dataset_id, token=token)
+
+
+def test_dataset_library_kwargs(tmp_path):
+    dataset_id = "winogrande"
+    config_name = "winogrande_xs"
+    split = "train"
+
+    # load from huggingface
+    dataset = load_dataset(dataset_id, name=config_name)
+
+    # load dataset with config name
+    dataset_from_lib = DatasetLibrary.pull_dataset(dataset_id, name=config_name)
+    assert dataset.keys() == dataset_from_lib.keys()
+    assert dataset[split].data == dataset_from_lib[split].data
+
+    # filter with split
+    dataset_from_lib = DatasetLibrary.pull_dataset(
+        dataset_id, name=config_name, split=split
+    )
+    assert dataset[split].data == dataset_from_lib.data
+
+    # save and load from local with name and split
+    local_path = tmp_path / dataset_id
+    local_dataset_id = f"local://{local_path}"
+    DatasetLibrary.push_dataset(
+        dataset, local_dataset_id, name=config_name, token=token
+    )
+    local_dataset_from_lib = DatasetLibrary.pull_dataset(
+        local_dataset_id, name=config_name, token=token
+    )
+    assert dataset.keys() == local_dataset_from_lib.keys()
+    assert dataset[split].data == local_dataset_from_lib[split].data
+
+    # load a split
+    local_dataset_from_lib = DatasetLibrary.pull_dataset(
+        local_dataset_id, name=config_name, split=split, token=token
+    )
+    assert dataset[split].data == local_dataset_from_lib.data
+
+
+@pytest.mark.skipif(token is None, reason="Requires access to Azure Blob Storage")
+def test_dataset_library_kwargs(tmp_path):
+    dataset_id = "winogrande"
+    config_name = "winogrande_xs"
+    split = "train"
+
+    # load from huggingface
+    dataset = load_dataset(dataset_id, name=config_name)
+
+    # save and load from local with name and split
+    local_path = tmp_path / dataset_id
+    blob_dataset_id = f"az://mttldata/{dataset_id}"
+    try:
+        DatasetLibrary.push_dataset(
+            dataset, blob_dataset_id, name=config_name, token=token
+        )
+        dataset_from_blob = DatasetLibrary.pull_dataset(
+            blob_dataset_id, name=config_name, token=token
+        )
+        assert dataset.keys() == dataset_from_blob.keys()
+        assert dataset[split].data == dataset_from_blob[split].data
+
+        # load a split
+        dataset_from_blob = DatasetLibrary.pull_dataset(
+            blob_dataset_id, name=config_name, split=split, token=token
+        )
+        assert dataset[split].data == dataset_from_blob.data
+
+    finally:  # Clean up. Delete the dataset from the library
+        DatasetLibrary.delete_dataset(blob_dataset_id, token=token)

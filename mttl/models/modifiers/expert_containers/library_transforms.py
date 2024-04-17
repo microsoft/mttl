@@ -198,7 +198,7 @@ class WeightedLinearMerge(LibraryTransform):
                 expert_names
             ), "Weights must have the same keys as the experts"
             if not (1 - 1e-6) <= sum(self.config.weights.values()) <= (1 + 1e-6):
-                logger.warn(
+                logger.warning(
                     "Weights do not sum to 1.0, please make sure this is intended"
                 )
 
@@ -362,6 +362,12 @@ class HiddenStateComputer(LibraryTransform):
             value = getattr(default_args, arg_name, None)
             setattr(args, arg_name, value)
 
+        for arg_name in [
+            "include_task_source",
+        ]:
+            value = getattr(default_args, arg_name, None)
+            setattr(args, arg_name, value)
+
     def _get_parent_from_name(self, model, name):
         parts = name.split(".")
         for part in parts:
@@ -420,6 +426,7 @@ class HiddenStateComputer(LibraryTransform):
     ) -> Expert:
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
+        from mttl.models.expert_model import MultiExpertModel
 
         logger.info(f"Hidden state computer dumps to: {self.config.save_name}")
 
@@ -485,7 +492,7 @@ class HiddenStateComputer(LibraryTransform):
                 last_token_idx = batch["attention_mask"].sum(1).to(device) - 1
                 hidden_states = self._retrieve_hidden_states(model)
                 bs_idx = torch.arange(
-                    bs, device=hidden_states[list(hidden_states.keys())[0]].device_model
+                    bs, device=hidden_states[list(hidden_states.keys())[0]].device
                 )
 
                 for layer, hidden_state in hidden_states.items():
@@ -698,6 +705,8 @@ class PhatgooseTransform(HiddenStateComputer):
                             data=data,
                             force=True,  # make sure we overwrite
                         )
+            del model
+            torch.cuda.empty_cache()
         return outputs
 
 

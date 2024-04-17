@@ -8,8 +8,6 @@ from typing import Any, Dict, Union, Optional
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-import sys
-import numpy as np
 from mttl.utils import logger
 from mttl.datamodule.utils import get_tokenizer
 from datasets import Dataset as ArrowDataset, concatenate_datasets
@@ -472,7 +470,7 @@ class DefaultDataModule(LightningDataModule):
         validation_portion = validation_portion or self.config.validation_portion
 
         if validation_portion is None:
-            logger.warn(
+            logger.warning(
                 "No validation portion specified, no dev set available for this dataset."
             )
             return dataset, None
@@ -571,7 +569,9 @@ class DefaultDataModule(LightningDataModule):
             subsample = getattr(self.config, f"subsample_{split}", None)
 
             if subsample and subsample > 0:
-                logger.warn(f"subsampling the {split} dataset to {subsample} samples")
+                logger.warning(
+                    f"subsampling the {split} dataset to {subsample} samples"
+                )
                 dataset = getattr(self, f"{split}_dataset")
                 sub_dataset = self.subsample_dataset(
                     dataset, subsample, per_task=self.config.subsample_per_task
@@ -750,64 +750,3 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
     else:
         raise ValueError(f"Unknown dataset {args.dataset}")
     return dm
-
-
-class AutoDataModule:
-    @classmethod
-    def create(cls, name, for_generation=False, val_mixin=False, **kwargs):
-        from mttl.datamodule.mt_seq_to_seq_module import (
-            FlanModule,
-            FlanConfig,
-            T0FlatModule,
-            T0FlatConfig,
-            FlatMultiTaskConfig,
-            FlatMultiTaskModule,
-        )
-        from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
-        from mttl.datamodule.platypus_module import PlatypusModule
-        from mttl.datamodule.alpaca_data_module import AlpacaDataModule
-        from mttl.datamodule.t0_data_module import T0PretrainDataModule
-        from mttl.datamodule.ni_data_module import NiDataModule
-
-        if name in ["sordonia/t0-10k-flat", "sordonia/t0-1.6M-flat"]:
-            return T0FlatModule(
-                T0FlatConfig(dataset=name, **kwargs),
-                for_generation=for_generation,
-                val_mixin=val_mixin,
-            )
-        elif "adauni-v1-flat" in name or "platypus-flat" in name:
-            return FlatMultiTaskModule(
-                FlatMultiTaskConfig(dataset=name, **kwargs),
-                for_generation=for_generation,
-                val_mixin=val_mixin,
-            )
-        elif name in ["sordonia/flan-10k-flat", "sordonia/flan-debug-flat"]:
-            return FlanModule(
-                FlanConfig(dataset=name, **kwargs),
-                for_generation=for_generation,
-                val_mixin=val_mixin,
-            )
-        elif name in ["mmlu"]:
-            return MMLUDataModule(
-                MMLUDataConfig(dataset=name, **kwargs),
-                for_generation=for_generation,
-                val_mixin=val_mixin,
-            )
-        elif name in ["alpaca"]:
-            return AlpacaDataModule(
-                DatasetConfig(dataset=name, **kwargs),
-                for_generation=for_generation,
-                val_mixin=val_mixin,
-            )
-        elif name in ["platypus"]:
-            return PlatypusModule(
-                DatasetConfig(dataset=name, **kwargs),
-                for_generation=for_generation,
-                val_mixin=val_mixin,
-            )
-        elif name in ["t0"]:
-            return T0PretrainDataModule(kwargs.pop("config"))
-        elif name in ["ni"]:
-            return NiDataModule(kwargs.pop("config"), for_generation=for_generation)
-        else:
-            raise ValueError(f"Unknown dataset {name}")

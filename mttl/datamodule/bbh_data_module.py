@@ -1,10 +1,10 @@
-from functools import partial
-from datasets import load_dataset, get_dataset_config_names, concatenate_datasets
+from datasets import get_dataset_config_names, concatenate_datasets
 from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from dataclasses import dataclass
 import os
 
 from mttl.datamodule.mt_seq_to_seq_module import augment_few_shot_task
+from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
 
 
 @dataclass
@@ -32,7 +32,9 @@ class BBHDataModule(DefaultDataModule):
             if task_name not in task_names:
                 continue
 
-            task_dataset = load_dataset("maveriq/bigbenchhard", task_name)["train"]
+            task_dataset = DatasetLibrary.pull_dataset(
+                "maveriq/bigbenchhard", task_name, split="train"
+            )
             task_dataset = task_dataset.map(
                 lambda x: {
                     "source": x["input"],

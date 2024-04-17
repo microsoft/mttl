@@ -191,5 +191,6 @@ def modify_with_adapter(transformer, config, adapter_klass):
     target_2_source_param = get_target_2_source_param_mapping(
         transformer.named_parameters(), config.tie_params
     )
+
     tie_params(transformer, config, target_2_source_param)
     return transformer

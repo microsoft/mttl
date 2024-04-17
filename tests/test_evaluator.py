@@ -2,10 +2,7 @@ import pytest
 import numpy as np
 import os
 
-from mttl.datamodule.base import AutoDataModule
-from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
-from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
-from mttl.datamodule.alpaca_data_module import AlpacaDataModule
+from mttl.datamodule.mmlu_data_module import MMLUDataConfig
 from mttl.datamodule.ni_data_module import NiDataConfig
 from mttl.evaluators import MMLUEvaluator
 from mttl.evaluators import NIEvaluator
@@ -13,68 +10,61 @@ from mttl.evaluators import RougeEvaluator
 from transformers import AutoModelForCausalLM
 
 
-def test_rouge_eval(mocker):
-    flan = AutoDataModule.create(
-        "sordonia/flan-debug-flat",
-        model="EleutherAI/gpt-neo-125m",
-        model_family="gpt",
-        max_input_length=1024,
-        max_output_length=128,
-        train_batch_size=4,
-        for_generation=True,
-        predict_batch_size=1,
-        truncation_side="left",
-        include_template_type="zs_noopt",
-        include_task_source="P3,Flan2021",
-    )
-
-    evaluator = RougeEvaluator(flan)
+def test_rouge_eval(mocker, flan_data_module):
+    evaluator = RougeEvaluator(flan_data_module)
     model = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-125m")
 
     generate_func = mocker.spy(model, "generate")
     rouge = evaluator.evaluate(model, num_batches=1)
-    assert pytest.approx(rouge, 0.01) == 1.769
+    assert pytest.approx(rouge, 0.01) == 16.949
     assert generate_func.call_args[1]["max_new_tokens"] == 128
 
     # new kwargs have been taken into consideration
-    evaluator = RougeEvaluator(flan, generation_kwargs={"max_new_tokens": 1})
-    rouge = evaluator.evaluate(model, num_batches=1)
+    evaluator = RougeEvaluator(
+        flan_data_module, generation_kwargs={"max_new_tokens": 1}
+    )
+    rouge = evaluator.evaluate(model, num_batches=5)
     assert generate_func.call_args[1]["max_new_tokens"] == 1
 
 
-def test_early_stopping(mocker):
-    flan = AutoDataModule.create(
-        "sordonia/flan-debug-flat",
-        model="EleutherAI/gpt-neo-125m",
-        model_family="gpt",
-        max_input_length=1024,
-        max_output_length=128,
-        train_batch_size=4,
-        for_generation=True,
-        predict_batch_size=1,
-        truncation_side="left",
-        include_template_type="zs_noopt",
-        include_task_source="P3,Flan2021",
-    )
+def test_early_stopping(mocker, flan_data_module):
+    def truncate_gen(generation_list):
+        # iterate over the model generation and truncate to 20 chars
+        return [i.generated_texts[0][:20] for i in generation_list]
 
-    evaluator = RougeEvaluator(flan, generation_kwargs={"stop_tokens": ["\n\n"]})
+    evaluator = RougeEvaluator(
+        flan_data_module, generation_kwargs={"stop_tokens": ["\n\n"]}
+    )
     model = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-125m")
 
     generate_func = mocker.spy(model, "generate")
     generate_for_batch_func = mocker.spy(evaluator, "generate_for_batch")
-    rouge = evaluator.evaluate(model, num_batches=1)
+    rouge = evaluator.evaluate(model, num_batches=5)
     assert generate_func.call_args[1]["stopping_criteria"][0].stop == [
         "\n\n",
         "<|endoftext|>",
     ]
+    assert truncate_gen(generate_for_batch_func.spy_return_list) == [
+        "",
+        "",
+        "",  # starts with "\n\n"
+        " whether the answer ",
+        " The man with the ax",
+    ]
+    assert pytest.approx(rouge, 0.01) == 7.412
 
-    assert "Trisha's step-dad" in generate_for_batch_func.spy_return.generated_texts[0]
-    assert pytest.approx(rouge, 0.01) == 1.769
-
-    evaluator = RougeEvaluator(flan, generation_kwargs={"stop_tokens": ["step-dad"]})
+    evaluator = RougeEvaluator(
+        flan_data_module, generation_kwargs={"stop_tokens": ["answer", "with"]}
+    )
     generate_for_batch_func = mocker.spy(evaluator, "generate_for_batch")
-    rouge = evaluator.evaluate(model, num_batches=1)
-    assert generate_for_batch_func.spy_return.generated_texts[0] == " Trisha's "
+    rouge = evaluator.evaluate(model, num_batches=5)
+    assert truncate_gen(generate_for_batch_func.spy_return_list) == [
+        "\n\nThe construction w",
+        "\n\nA:\n\nThe hypothesis",
+        "\n\nA:\n\nThe premise is",
+        " whether the ",
+        " The man ",
+    ]
 
 
 def test_mmlu_eval():

@@ -1,33 +1,13 @@
 import numpy as np
-import os
 import pytest
 from projects.wiki_experts.src.nevergrad_opt import NGRoutingOptimizer
 from mttl.models.expert_model import ExpertModel as ExpertTrainer
 from mttl.models.expert_config import ExpertConfig
-from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
-from conftest import make_tiny_llama
 from mttl.models.modifiers.expert_containers.expert_library import LocalExpertLibrary
 
 
-def create_dummy_expert(config: ExpertConfig, exp_name) -> Expert:
-    model_object = make_tiny_llama()
-    exp_trainer = ExpertTrainer(
-        tokenizer=None,
-        expert_info={},
-        **vars(config),
-        model_object=model_object,
-    )
-    dir = f"{config.output_dir}/{exp_name}"
-    os.makedirs(dir, exist_ok=True)
-    checkpoint = exp_trainer.save_pretrained(dir)
-    expert = load_expert(checkpoint, expert_name=exp_name)
-    return expert
-
-
 # remove this for now, since NG Routing is be to rebuilt.
-def test_NGRoutingOptimizer(tmp_path):
-    from transformers.models.llama.configuration_llama import LlamaConfig
-
+def test_NGRoutingOptimizer(tmp_path, make_tiny_llama, create_dummy_expert):
     config = ExpertConfig(
         kwargs={
             "model_modifier": "lora",
@@ -39,8 +19,8 @@ def test_NGRoutingOptimizer(tmp_path):
         }
     )
     # create random Lora
-    expert1 = create_dummy_expert(config, "module1")
-    expert2 = create_dummy_expert(config, "module2")
+    expert1 = create_dummy_expert(config, "module1", model_object=make_tiny_llama())
+    expert2 = create_dummy_expert(config, "module2", model_object=make_tiny_llama())
 
     get_loss = lambda *args, **kwargs: 0.0
 

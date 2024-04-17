@@ -11,7 +11,6 @@ from typing import Union, Optional
 import re
 import copy
 
-from datasets import load_dataset
 from dataclasses import dataclass
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 
@@ -20,6 +19,7 @@ from mttl.datamodule.base import (
     DefaultCollator,
     DefaultDataModule,
 )
+from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
 
 
 #################################################
@@ -246,7 +246,7 @@ class MMLUDataModule(DefaultDataModule):
         filename = pkg_resources.resource_filename(
             __name__, "../dataloader/mmlu_dataset.py"
         )
-        dataset = load_dataset(
+        dataset = DatasetLibrary.pull_dataset(
             filename,
             data_dir=os.environ[self.DATA_ENV],
             augment_with_prompts=self.config.augment_mmlu,

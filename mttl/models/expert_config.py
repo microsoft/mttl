@@ -111,6 +111,7 @@ class ExpertConfig(Config):
 
         self.save_each_epoch = False
         self.add_eos_to_downstream_targets = True
+        self.flan_tasks_path = "projects/wiki_experts/task_sets/flan_tasks.json"
 
     def post_init(self, silent=False):
         if self.micro_batch_size is None:
@@ -123,7 +124,7 @@ class ExpertConfig(Config):
 
         n_devices = torch.cuda.device_count()
         if n_devices > 1:
-            logger.warn(
+            logger.warning(
                 "You have multiple GPUs, but your device count is not being taken "
                 + "into account when computing `gradient_accumulation_steps`."
             )

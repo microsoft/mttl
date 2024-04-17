@@ -1,8 +1,8 @@
-from mttl.datamodule.base import DefaultDataModule, DatasetConfig, DefaultCollator
-from dataclasses import dataclass
-from datasets import load_dataset
 import os
-import torch
+from dataclasses import dataclass
+
+from mttl.datamodule.base import DefaultDataModule, DatasetConfig, DefaultCollator
+from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
 
 
 @dataclass
@@ -36,7 +36,7 @@ class DataCollatorForCLIPExpertsTriple(DefaultCollator):
             "sources_texts": sources,
             "positive_expert_names": positive_experts,
             "negative_expert_names": negative_experts,
-            "eval_task": eval_task, 
+            "eval_task": eval_task,
         }
 
 
@@ -101,7 +101,7 @@ class CLIPExpertsDatamodule(DefaultDataModule):
     def setup_dataset(self):
         dataset_name = "x_e_acc_dataset"
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
-        dataset = load_dataset(
+        dataset = DatasetLibrary.pull_dataset(
             "json", data_files=os.environ[self.DATA_ENV], name=dataset_name
         )
 
@@ -171,7 +171,7 @@ class CLIPTripleDataModule(DefaultDataModule):
     def setup_dataset(self):
         dataset_name = "x_m1_m2_dataset"
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
-        dataset = load_dataset(
+        dataset = DatasetLibrary.pull_dataset(
             "json", data_files=os.environ[self.DATA_ENV], name=dataset_name
         )
 

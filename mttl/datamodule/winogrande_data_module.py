@@ -1,10 +1,11 @@
-from datasets import load_dataset
 from mttl.datamodule.base import (
     MultiChoiceSourceDataModule,
     DatasetConfig,
 )
 from dataclasses import dataclass
 import os
+
+from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
 
 
 def doc_to_text(doc):
@@ -31,7 +32,7 @@ class WinograndeDataConfig(DatasetConfig):
 class WinograndeMultiChoiceDataModule(MultiChoiceSourceDataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
-        dataset = load_dataset("winogrande", name="winogrande_xl")
+        dataset = DatasetLibrary.pull_dataset("winogrande", name="winogrande_xl")
 
         # convert task_id to task_name and labels
         def map_example(example):

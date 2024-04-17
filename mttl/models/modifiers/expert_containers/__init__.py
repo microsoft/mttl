@@ -290,7 +290,7 @@ def add_expert_to_transformer(
     is_default: bool = False,
     routing_config: SelectorConfig = None,
     training_config: Config = None,
-) -> Expert:
+) -> None:
     """
     Routine to add an expert to the transformer architecture.
 
@@ -358,6 +358,7 @@ def add_expert_to_transformer(
                         action=action,
                         is_default=is_default,
                     )
+
     if routing_config is not None:
         replace_selector_for_container(
             transformer,
@@ -377,5 +378,11 @@ def add_expert_to_transformer(
             len(transformer.selectors[model_modifier]),
         )
 
+    # what about raising an error if no layers were found?
+    # if not added_layers:
+    #     raise ValueError(
+    #         f"No layers were found to modify with the given model and config settings."
+    #         f"Model: {transformer.__class__.__name__} Config: {expert_config}"
+
+    #     )
     logger.debug("Patched layers: %s", added_layers)
-    return expert

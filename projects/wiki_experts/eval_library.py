@@ -119,7 +119,7 @@ def patch_prototypes(module, library, args, proto_inits=None):
             mod.overwrite_prototypes(prototypes)
 
 
-def eval_in_distribution(module, args: ExpertConfig, tasks):
+def eval_in_distribution(module, args: ExpertConfig, tasks: list):
     args.include_task_source = "*"
     transfer_table = TableLogger()
 
@@ -273,24 +273,14 @@ def run_eval(args: ExpertConfig):
 
     if args.pipeline_eval_tasks in [
         "in_distribution",
-        "in_distribution_all_tasks_together",
-        "in_distribution_per_task",
     ]:
         tasks = [expert.expert_task_name for expert in library.data.values()]
+        tasks = [expert.expert_task_name for expert in library.data.values()]
         if tasks[0] is None:
-            tasks = json.load(open("projects/wiki_experts/task_sets/flan_tasks.json"))[
-                "flan256"
-            ]
-        if (
-            args.pipeline_eval_tasks == "in_distribution_all_tasks_together"
-            and len(tasks) > 1
-        ):
-            # make sure all tasks clusters are evaluated together
-            tasks = [",".join(tasks)]
-        elif args.pipeline_eval_tasks == "in_distribution_per_task" and len(tasks) > 1:
-            # make sure we evaluate each task seperate
-            tasks = [",".join(tasks)].split(",")
-
+            # for some older version of lib (in case of joint experts) no expert_task_name was set
+            tasks = json.load(open(args.flan_tasks_path))["flan256"]
+        # make sure we evaluate each task seperately (so the mean is over tasks at the end)
+        tasks = ",".join(tasks).split(",")
         train_cfg.eval_metric = args.eval_metric
         train_cfg.subsample_dev = args.subsample_dev
         scores = eval_in_distribution(module, train_cfg, tasks)

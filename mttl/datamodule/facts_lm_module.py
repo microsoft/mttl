@@ -1,11 +1,12 @@
 import torch
 import os
 
-from datasets import load_dataset, get_dataset_split_names, concatenate_datasets
+from datasets import get_dataset_split_names, concatenate_datasets
 from dataclasses import dataclass
 from mttl.datamodule.platypus_module import PlatypusConfig
 from mttl.datamodule.base import DefaultDataModule
 
+from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
 from mttl.utils import logger
 
 
@@ -21,7 +22,7 @@ class FactsCollator:
 
 
 def _load_dataset(dataset, split):
-    dataset = load_dataset(dataset)
+    dataset = DatasetLibrary.pull_dataset(dataset)
     if split in dataset:
         return dataset[split]
 

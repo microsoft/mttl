@@ -1,16 +1,15 @@
-from collections import defaultdict
 import torch
 import os
 import numpy as np
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
-from datasets import load_dataset
 from transformers.tokenization_utils_base import PaddingStrategy
 from typing import Union, Optional
 from dataclasses import dataclass
 
 from mttl.datamodule.utils import get_tokenizer
+from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
 from mttl.utils import logger
 
 
@@ -168,7 +167,7 @@ class RetrievalLMDataModule(LightningDataModule):
         self.setup_dataset()
 
     def setup_dataset(self, stage=None):
-        dataset = load_dataset(self.config.dataset)
+        dataset = DatasetLibrary.pull_dataset(self.config.dataset)
 
         self.collate_fn = RetrievalLMDataCollator(
             tokenizer=self.tokenizer,

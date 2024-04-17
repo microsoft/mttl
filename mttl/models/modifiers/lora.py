@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import os
 import re
-from typing import List
+from typing import List, Union
 import numpy as np
 import torch
 from torch import nn
@@ -219,7 +219,16 @@ class SkilledLoRA(LoRA):
     def __len__(self):
         return self.n_skills
 
-    def add_skill(self, lora: LoRA):
+    def get_skill_weights(self, skill_index):
+        if skill_index >= self.n_skills:
+            raise ValueError(f"Skill index {skill_index} out of bounds.")
+
+        return {
+            "lora_a": self.lora_a[skill_index].unsqueeze(0).clone().detach().cpu(),
+            "lora_b": self.lora_b[skill_index].unsqueeze(0).clone().detach().cpu(),
+        }
+
+    def add_skill(self, lora: Union[LoRA, "SkilledLoRA"]):
         self.n_skills += 1
 
         self.lora_a.data = torch.cat(
@@ -405,7 +414,7 @@ class SkilledLoRA(LoRA):
                     # adapter_out = torch.einsum("bsr,srd->sbd", (partial_out, B))
                     # adapter_out = torch.einsum("s,sbo->bo", (weights, adapter_out)) * scaling
                     if input_lora.ndim == 2:
-                        # should be the same as:
+                        # this option is for the test tests/test_lora.py::test_skilled_lora_parallel_merge_with_weights_and_merge_after
                         adapter_out = torch.matmul(torch.matmul(input_lora, A), B)
                         adapter_out = (
                             torch.einsum("s,sbo->bo", (weights, adapter_out)) * scaling
