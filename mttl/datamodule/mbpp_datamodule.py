@@ -1,10 +1,10 @@
 from functools import partial
-from datasets import load_dataset
 from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from dataclasses import dataclass
 import os
 import numpy
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
+from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
 
 
 @dataclass
@@ -88,7 +88,7 @@ def completion_template(for_generation, example):
 class MBPPDataModule(DefaultDataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
-        dataset = load_dataset("mbpp", name=self.config.name)
+        dataset = DatasetLibrary.pull_dataset("mbpp", name=self.config.name)
 
         dataset = dataset.map(
             instruct_template
@@ -132,7 +132,7 @@ class CodeExDataModule(DefaultDataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
 
-        dataset = load_dataset("jinaai/code_exercises")
+        dataset = DatasetLibrary.pull_dataset("jinaai/code_exercises")
         dataset = dataset["train"].select(range(10000))
 
         def create_split(rng, _):

@@ -90,7 +90,7 @@ def llama_forward_with_flash_attn(
     bsz, q_len, _ = hidden_states.size()
 
     if output_attentions:
-        warnings.warn(
+        warnings.warning(
             "Output attentions is not supported for patched `LlamaAttention`, returning `None` instead."
         )
     if self.config.pretraining_tp > 1:
@@ -236,7 +236,7 @@ def replace_attn_with_flash_attn(module):
         return
 
     if flash_attn_disabled:
-        logger.warn(
+        logger.warning(
             "FlashAttention not found, skipping replacing attn with flash attn."
         )
     else:

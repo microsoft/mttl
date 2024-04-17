@@ -1,5 +1,6 @@
 import torch
-from datasets import load_dataset
+
+from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
 
 
 class AlpacaTemplateForHash(
@@ -70,7 +71,9 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
     ):
         super().__init__()
 
-        self.dataset = load_dataset("yahma/alpaca-cleaned")["train"]
+        self.dataset = DatasetLibrary.pull_dataset(
+            "yahma/alpaca-cleaned", split="train"
+        )
 
     def __len__(self):
         return len(self.dataset)

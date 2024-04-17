@@ -2,7 +2,7 @@ from functools import partial
 import math
 import re
 import threading
-from typing import Dict, List
+from typing import Dict, List, Union
 import numpy as np
 import torch
 import tqdm
@@ -372,6 +372,7 @@ class MultiExpertModel(ExpertModel):
             expert_info=ExpertInfo(
                 expert_name,
                 expert_config=expert_config,
+                expert_model=self.hparams.model,
             ),
         )
 
@@ -414,7 +415,10 @@ class MultiExpertModel(ExpertModel):
         expert_name=None,
         action="route",
         is_default=False,
-    ):
+    ) -> Expert:
+        """
+        If action is merge, then the expert is merged with the existing model, and we return None.
+        """
         if expert_name is not None:
             # we want to load expert instance with a given name (might be different from the one in the expert instance)
             # we dont want to change expert instance though!
@@ -423,7 +427,7 @@ class MultiExpertModel(ExpertModel):
             expert_instance.name = expert_name
 
         with self.lock:
-            expert = add_expert_to_transformer(
+            add_expert_to_transformer(
                 self.model,
                 expert_instance,
                 action=action,
@@ -431,9 +435,12 @@ class MultiExpertModel(ExpertModel):
                 routing_config=self.selector_config,
                 training_config=self.training_config,
             )
+
             if action != "merge":
                 self.experts_names.append(expert_instance.name)
-        return expert
+                # reload the expert instance to fill the weights properly if this was an empty expert
+                expert_instance = self.get_expert_instance(expert_instance.name)
+            return expert_instance
 
     def load_from_library(self, library, subsample_library_experts=0):
         keys = list(library.keys())
@@ -541,9 +548,8 @@ class MultiExpertModel(ExpertModel):
                     f"{container.layer_name}.{k}": v for k, v in expert_weights.items()
                 }
                 expert_params.update(expert_weights)
-
+                # can we break here? or do we need to check all containers?
         retrieved_expert = Expert(expert_info=expert_info, expert_weights=expert_params)
-
         return retrieved_expert
 
     def get_merged_expert(

@@ -18,13 +18,13 @@ logger = logging.getLogger("mttl")
 
 
 def remote_login(token: Optional[str] = None):
-    """Caches the provided token and login to remote service (Azure Blob Storage or Hugging Face Hub).
+    """Caches the provided token and login to remote service: Azure Blob Storage or Hugging Face Hub.
 
-    When token contains "blob.core.windows.net", no login is performed for Azure Blob Storage,
-    instead it sets the environment variable "BLOB_SAS_TOKEN" for later use.
+    Sets the environment variable "BLOB_SAS_TOKEN" for later use
+    if token is provided and it does not start with "hf_"
 
-    Otherwise, Hugging Face Hub login is performed.
-    If no token is is provided, tries to login to Hugging Face Hub using HF_TOKEN environment variable.
+    Otherwise, Hugging Face Hub login is performed. If no token is provided,
+    tries to login to Hugging Face Hub using HF_TOKEN environment variable.
 
     Args:
         token (str): The token to use for login.
@@ -32,11 +32,11 @@ def remote_login(token: Optional[str] = None):
     Returns:
         None
     """
-    if token is not None:
-        if "blob.core.windows.net" in token:
-            os.environ["BLOB_SAS_TOKEN"] = token
+
+    if token is not None and not token.startswith("hf_"):
+        os.environ["BLOB_SAS_TOKEN"] = token
     else:
-        token = os.environ.get("HF_TOKEN", None)
+        token = token or os.environ.get("HF_TOKEN", None)
         if token is not None:
             from huggingface_hub import login as hf_hub_login
 
@@ -330,7 +330,7 @@ def add_mlf_logger(loggers):
         )
         mlf_logger._run_id = run.id
     except:
-        logger.warn("Couldn't instantiate MLFlowLogger!")
+        logger.warning("Couldn't instantiate MLFlowLogger!")
         mlf_logger = None
 
     if mlf_logger is not None:
@@ -356,13 +356,15 @@ def get_checkpoint_path(path, step=None, use_last=False):
         # match the filename
         match = [m for m in matches if "best" in m.split("/")[-1]]
         if len(match) == 0:
-            logger.warn("No best checkpoints found! Defaulting to 'last'.")
+            logger.warning("No best checkpoints found! Defaulting to 'last'.")
 
             match = [m for m in matches if "last" in m]
             path = match[0]
         elif len(match) > 1:
-            logger.warn("Multiple best checkpoints found! Taking the most recent one!")
-            logger.warn(match)
+            logger.warning(
+                "Multiple best checkpoints found! Taking the most recent one!"
+            )
+            logger.warning(match)
             path = max(match, key=os.path.getctime)
         else:
             path = match[0]

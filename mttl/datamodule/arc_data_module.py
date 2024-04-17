@@ -1,12 +1,13 @@
 from functools import partial
-from datasets import load_dataset
+
 from mttl.datamodule.base import (
     MultiChoiceDataModule,
     DatasetConfig,
-    MultipleChoiceCollator,
 )
 from dataclasses import dataclass
 import os
+
+from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
 
 
 @dataclass
@@ -17,7 +18,7 @@ class ArcDataConfig(DatasetConfig):
 class ArcMultiChoiceDataModule(MultiChoiceDataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
-        dataset = load_dataset("ai2_arc", name=self.config.arc_type)
+        dataset = DatasetLibrary.pull_dataset("ai2_arc", name=self.config.arc_type)
 
         # convert task_id to task_name and labels
         def map_example(arc_type, example):

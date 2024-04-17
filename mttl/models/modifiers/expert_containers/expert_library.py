@@ -16,6 +16,8 @@ from pathlib import Path
 
 import numpy as np
 
+from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
+
 from huggingface_hub import (
     hf_hub_download,
     CommitOperationAdd,
@@ -28,7 +30,7 @@ from huggingface_hub import (
     delete_repo,
     HfApi,
 )
-from functools import total_ordering
+from functools import total_ordering, wraps
 from huggingface_hub.utils._errors import RepositoryNotFoundError
 
 from huggingface_hub import HfApi
@@ -100,6 +102,7 @@ class MetadataEntry(ExpertInfo):
 
 def retry(max_retries=10, wait_seconds=60):
     def decorator(func):
+        @wraps(func)
         def wrapper(*args, **kwargs):
             for attempt in range(1, max_retries + 1):
                 try:
@@ -111,7 +114,7 @@ def retry(max_retries=10, wait_seconds=60):
                         print(f"Waiting {wait_seconds} seconds before retrying...")
                         time.sleep(wait_seconds)
             raise RuntimeError(
-                f"Function {func.__name__} failed after {max_retries} attempts."
+                f"Function {wrapper.__name__} failed after {max_retries} attempts."
             )
 
         return wrapper
@@ -203,21 +206,24 @@ class BlobStorageEngine(BackendEngine):
         """
         super().__init__()
         self._token: str = token
-        self.cache_dir: Path = self._get_cache_dir(cache_dir)
+        self.cache_dir = cache_dir
         # Quiet down the azure logging
         logging.getLogger("azure").setLevel(logging.WARNING)
 
-    @staticmethod
-    def _get_cache_dir(chache_dir: Optional[str] = None) -> Path:
+    @property
+    def cache_dir(self):
+        return self._cache_dir
+
+    @cache_dir.setter
+    def cache_dir(self, _cache_dir: Optional[str] = None) -> None:
         """If cache_dir is not provided, get it from envvar BLOB_CACHE_DIR.
         Use the default cache directory ~/.cache/mttl if not provided."""
-        if chache_dir is not None:
-            return Path(chache_dir)
+        if _cache_dir is not None:
+            self._cache_dir = Path(_cache_dir)
         if "BLOB_CACHE_DIR" in os.environ:
-            cache_dir = os.environ["BLOB_CACHE_DIR"]
+            self._cache_dir = os.environ["BLOB_CACHE_DIR"]
         else:
-            cache_dir = Path.home() / ".cache" / "mttl"
-        return Path(cache_dir)
+            self._cache_dir = Path.home() / ".cache" / "mttl"
 
     @property
     def token(self):
@@ -264,8 +270,10 @@ class BlobStorageEngine(BackendEngine):
         """Extracts storage account and container from repo_id.
         Returns the container and its connection string (with SAS token)."""
         storage_account, container = repo_id.split("/", 1)  # split at first "/"
+        # The connection string is in the format:
+        # https://<storage_account>.blob.core.windows.net/?<token>
         connection_string = (
-            f"https://{storage_account}.blob.core.windows.net/{self.token}"
+            f"https://{storage_account}.blob.core.windows.net/?{self.token}"
         )
         return connection_string, container
 
@@ -387,6 +395,35 @@ class BlobStorageEngine(BackendEngine):
             return [b.name for b in container_client.list_blobs()]
         except ResourceNotFoundError as error:
             raise ValueError(f"Repository {repo_id} not found") from error
+
+    async def async_upload_folder(
+        self,
+        repo_id: str,
+        folder: str,
+        recursive=True,
+    ):
+        """Uploads a folder to the repository. The folder structure is preserved.
+        If recursive is True, all files in the folder and subfolders are uploaded.
+        Only works for empty repositories.
+        """
+        if self.list_repo_files(repo_id):
+            logger.warning(
+                "Pushing a folder and its content to "
+                f"a non empty repository. Repository ID: {repo_id}"
+            )
+        folder_content = glob.glob(folder + "**/**", recursive=recursive)
+        relative_file_paths = []
+        buffers = []
+        for content in folder_content:
+            if os.path.isfile(content):
+                relative_file_paths.append(os.path.relpath(content, folder))
+                with open(content, "rb") as f:
+                    buffers.append(f.read())
+
+        await asyncio.gather(
+            self.async_upload_blobs(repo_id, relative_file_paths, buffers)
+        )
+        return folder
 
     async def async_upload_blobs(
         self,
@@ -999,7 +1036,7 @@ class ExpertLibrary:
         data: Any,
         force: bool = False,
     ):
-        if expert_name not in self.data:
+        if expert_name not in self.data and expert_name != "base_model":
             raise ValueError(f"Expert {expert_name} not found in repository.")
 
         operations = []
@@ -1440,3 +1477,199 @@ def get_best_expert_for_task(library: HFExpertLibrary, task, hash) -> Expert:
             best_expert = metadata
     assert best_expert is not None
     return library[best_expert.expert_name]
+
+
+class DatasetEngine(ABC):
+    def __init__(self, dataset_id: str, token: Optional[str] = None):
+        self.dataset_id = dataset_id
+        self.token = token
+
+    @property
+    def backend_engine(self) -> BackendEngine:
+        backend_engine: BackendEngine = self._backend_engine()
+        backend_engine.login(self.token)
+        return backend_engine
+
+    @property
+    @abstractmethod
+    def _backend_engine(self) -> Type[BackendEngine]:
+        pass
+
+    @abstractmethod
+    def pull_dataset(
+        self,
+        name: Optional[str] = None,
+        split: Optional[str] = None,
+    ) -> Dataset:
+        pass
+
+    @abstractmethod
+    def push_dataset(
+        self,
+        dataset: Union[DatasetDict, Dataset],
+        name: Optional[str] = None,
+    ) -> None:
+        pass
+
+    def delete_dataset(self) -> None:
+        self.backend_engine.delete_repo(self.dataset_id, repo_type="dataset")
+
+    def _concat_paths(self, *args) -> Path:
+        """Concatenate paths ordered as received. Ignore None values."""
+        results_path = Path()
+        for p in args:
+            if p is not None:
+                results_path /= p
+        return results_path
+
+
+class HuggingfaceHubDatasetEngine(DatasetEngine):
+    @property
+    def _backend_engine(self) -> Type[BackendEngine]:
+        return HuggingfaceHubEngine
+
+    def pull_dataset(
+        self,
+        name: Optional[str] = None,
+        split: Optional[str] = None,
+        **kwargs,
+    ) -> Dataset:
+        return load_dataset(self.dataset_id, name, split=split, **kwargs)
+
+    def push_dataset(
+        self,
+        dataset: Union[DatasetDict, Dataset],
+        name: Optional[str] = None,
+        **kwargs,
+    ) -> None:
+        dataset.push_to_hub(self.dataset_id, name, **kwargs)
+
+
+class LocalDatasetEngine(DatasetEngine):
+    @property
+    def _backend_engine(self) -> Type[BackendEngine]:
+        return LocalFSEngine
+
+    def pull_dataset(
+        self,
+        name: Optional[str] = None,
+        split: Optional[str] = None,
+    ) -> Dataset:
+        # Saves the dataset subset and split as subdirectories if provided
+        dataset_path = self._concat_paths(self.dataset_id, name, split)
+        dataset = load_from_disk(dataset_path)
+        return dataset
+
+    def push_dataset(
+        self,
+        dataset: Union[DatasetDict, Dataset],
+        name: Optional[str] = None,
+    ) -> None:
+        dataset_path = self._concat_paths(self.dataset_id, name)
+        self.backend_engine.create_repo(
+            repo_id=self.dataset_id, repo_type="dataset", exist_ok=True
+        )
+        # HF push_to_hub sets the split to "train" if it's None
+        if isinstance(dataset, Dataset):
+            dataset = DatasetDict({"train": dataset})
+        dataset.save_to_disk(dataset_path)
+
+
+class BlobStorageDatasetEngine(DatasetEngine):
+    @property
+    def _backend_engine(self) -> Type[BackendEngine]:
+        return BlobStorageEngine
+
+    def pull_dataset(
+        self,
+        name: Optional[str] = None,
+        split: Optional[str] = None,
+    ) -> Dataset:
+        local_path = str(self._concat_paths(self.dataset_id, name, split))
+        download_filter = str(self._concat_paths(local_path, "*"))
+        self.backend_engine.snapshot_download(self.dataset_id, download_filter)
+        dataset_cache_dir = str(
+            self.backend_engine.get_repository_cache_dir(self.dataset_id)
+        )
+        dataset_cache_dir = str(self._concat_paths(dataset_cache_dir, name, split))
+        dataset = load_from_disk(dataset_cache_dir)
+        return dataset
+
+    def push_dataset(
+        self,
+        dataset: Union[DatasetDict, Dataset],
+        name: Optional[str] = None,
+    ) -> None:
+        self.backend_engine.create_repo(
+            repo_id=self.dataset_id, repo_type="dataset", exist_ok=True
+        )
+        # HF push_to_hub sets the split to "train" if it's None
+        if isinstance(dataset, Dataset):
+            dataset = DatasetDict({"train": dataset})
+        dataset_cache_dir = str(
+            self.backend_engine.get_repository_cache_dir(self.dataset_id)
+        )
+        # Name is a subset of the dataset. Save in its own directory
+        dataset_path = str(self._concat_paths(dataset_cache_dir, name))
+        dataset.save_to_disk(dataset_path)
+
+        asyncio.run(
+            self.backend_engine.async_upload_folder(
+                self.dataset_id, dataset_cache_dir, recursive=True
+            )
+        )
+
+
+class DatasetLibrary:
+    @classmethod
+    def pull_dataset(
+        cls, dataset_id: str, token: Optional[str] = None, **kwargs
+    ) -> Dataset:
+        dataset_engine = cls._get_dataset_engine(dataset_id, token)
+        dataset = dataset_engine.pull_dataset(**kwargs)
+        return dataset
+
+    @classmethod
+    @retry(max_retries=5, wait_seconds=60)
+    def pull_dataset_with_retry(
+        cls, dataset_id: str, token: Optional[str] = None, **kwargs
+    ) -> Union[DatasetDict, Dataset]:
+        return cls.pull_dataset(dataset_id, token, **kwargs)
+
+    @classmethod
+    def push_dataset(
+        cls,
+        dataset: Union[DatasetDict, Dataset],
+        dataset_id: str,
+        token: Optional[str] = None,
+        **kwargs,
+    ) -> None:
+        dataset_engine = cls._get_dataset_engine(dataset_id, token)
+        dataset_engine.push_dataset(dataset, **kwargs)
+
+    @classmethod
+    def delete_dataset(cls, dataset_id: str, token: Optional[str] = None) -> None:
+        dataset_engine = cls._get_dataset_engine(dataset_id, token)
+        dataset_engine.delete_dataset()
+
+    @staticmethod
+    def _get_dataset_engine(dataset_id: str, token: Optional[str]) -> DatasetEngine:
+        engines = {
+            "local": LocalDatasetEngine,
+            "az": BlobStorageDatasetEngine,
+            "hf": HuggingfaceHubDatasetEngine,
+        }
+        prefix = dataset_id.split("://")
+        if prefix[0] in engines:
+            engine_id = prefix[0]
+            dataset_id = prefix[1]
+        else:  # Default to Hugging Face Hub to help with the transition
+            engine_id = "hf"
+        try:
+            engine = engines[engine_id](dataset_id=dataset_id, token=token)
+            return engine
+        except KeyError:
+            raise ValueError(
+                f"Unknown dataset engine type {engine_id}. "
+                f"Available engines: {list(engines.keys())}"
+            )

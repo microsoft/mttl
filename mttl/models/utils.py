@@ -5,7 +5,7 @@ import re
 from collections import defaultdict, deque
 from typing import Any, Callable, Optional, Union
 import pytorch_lightning as pl
-from pytorch_lightning import LightningModule, Trainer
+from pytorch_lightning import LightningModule
 import torch
 import json
 import prettytable
@@ -26,28 +26,12 @@ def transfer_batch_to_device(batch, device):
     return batch
 
 
-def convert_and_push_to_hub(
-    expert,
-    repo_id,
-) -> None:
-    import huggingface_hub
-    import io
-
-    with io.BytesIO() as buffer:
-        torch.save(expert.asdict(), buffer)
-
-        huggingface_hub.create_repo(repo_id, repo_type="model", exist_ok=True)
-        huggingface_hub.upload_file(
-            path_or_fileobj=buffer, repo_id=repo_id, path_in_repo=CHECKPOINT_PATH_IN_HUB
-        )
-
-
 def download_from_hub(repo_id) -> str:
     """Download checkpoint from hub."""
-    from huggingface_hub import hf_hub_download
+    from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 
-    return hf_hub_download(
-        repo_id=repo_id, filename=CHECKPOINT_PATH_IN_HUB, repo_type="model"
+    return ExpertLibrary.get_expert_library(repo_id).hf_hub_download(
+        repo_id=repo_id, filename=CHECKPOINT_PATH_IN_HUB
     )
 
 
@@ -192,7 +176,7 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
                     # Load from URL or cache if already cached
                     resolved_archive_file = cached_file(
                         pretrained_model_name_or_path,
-                        "checkpoint.ckpt",
+                        CHECKPOINT_PATH_IN_HUB,
                         cache_dir=cache_dir,
                         force_download=force_download,
                         proxies=proxies,
@@ -276,7 +260,7 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
         if hasattr(self, "expert_info"):
             save_package["expert_info"] = self.expert_info.__dict__
 
-        output_model_file = os.path.join(save_directory, "checkpoint.ckpt")
+        output_model_file = os.path.join(save_directory, CHECKPOINT_PATH_IN_HUB)
         torch.save(save_package, output_model_file)
         logger.info(f"Model weights saved in {output_model_file}")
         return output_model_file
@@ -350,7 +334,7 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
             ) * self.trainer.max_epochs
 
         if args.warmup_steps == -1 or args.warmup_proportion > 0.0:
-            logger.warn(
+            logger.warning(
                 "Warmup proportion is set to {}, has priority over warmup_steps".format(
                     args.warmup_proportion
                 )

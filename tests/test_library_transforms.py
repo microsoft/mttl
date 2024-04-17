@@ -1,18 +1,16 @@
 # unit test for adapter_ranker
 import copy
-import os
+from collections import OrderedDict
 import torch
 import pytest
 import numpy as np
-from collections import OrderedDict
+from pytorch_lightning import seed_everything
+
 from mttl.models.expert_config import ExpertConfig
-from mttl.models.expert_model import ExpertModel as ExpertTrainer
 from mttl.models.modifiers.expert_containers.expert_library import (
     HFExpertLibrary,
     LocalExpertLibrary,
 )
-from conftest import make_tiny_llama
-from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 from mttl.models.modifiers.expert_containers.library_transforms import (
     TiesMerge,
     TiesMergeConfig,
@@ -23,12 +21,11 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     ArrowTransform,
     ArrowConfig,
 )
-from pytorch_lightning import seed_everything
 
 
 def test_config():
     cfg = ArrowConfig(ab_only=True, scale=False)
-    assert cfg.save_name == "arrowconfig-4e6d15f51147b500281ab22ab4b51037"
+    assert cfg.save_name == "arrowconfig-a8327e21d374166ceeb94c40d2e7676f"
 
     cfg2 = ArrowConfig(ab_only=True, scale=True)
     assert cfg2.save_name != cfg.save_name
@@ -59,7 +56,7 @@ def test_arrow():
     assert np.allclose(sums, [2728.4163, 2284.9968])
 
 
-def test_arrow_with_tiedlora(tmp_path):
+def test_arrow_with_tiedlora(tmp_path, create_dummy_expert_):
     import logging
     from mttl.utils import logger
 
@@ -67,22 +64,11 @@ def test_arrow_with_tiedlora(tmp_path):
 
     logger.setLevel(logging.DEBUG)
 
-    def create_dummy_expert(config: ExpertConfig, exp_name) -> Expert:
-        model_object = make_tiny_llama()
-        exp_trainer = ExpertTrainer(
-            expert_info={},
-            **vars(config),
-            model_object=model_object,
-        )
-        dir = f"{config.output_dir}/{exp_name}"
-        os.makedirs(dir, exist_ok=True)
-        checkpoint = exp_trainer.save_pretrained(dir)
-        expert = load_expert(checkpoint, expert_name=exp_name)
+    def patch_expert_weights(expert):
         for k, v in expert.expert_weights.items():
             if "q_proj" in k or "k_proj" in k or "v_proj" in k or "o_proj" in k:
                 assert ".".join(k.split(".")[:-1]) + ".lora_a" in expert.expert_weights
                 assert ".".join(k.split(".")[:-1]) + ".lora_b" in expert.expert_weights
-
             if "lora_b" in k:
                 expert.expert_weights[k] = torch.randn_like(v)
         return expert
@@ -99,8 +85,15 @@ def test_arrow_with_tiedlora(tmp_path):
         }
     )
     # create random Lora
-    expert1 = create_dummy_expert(config, "module1")
-    expert2 = create_dummy_expert(config, "module2")
+    expert1 = patch_expert_weights(create_dummy_expert_(config, "module1"))
+    expert2 = patch_expert_weights(create_dummy_expert_(config, "module2"))
+    # replace by create_dummy_expert when we resolve tying
+    # expert1 = patch_expert_weights(
+    #     create_dummy_expert(config, "module1", model_object=make_tiny_llama())
+    # )
+    # expert2 = patch_expert_weights(
+    #     create_dummy_expert(config, "module2", model_object=make_tiny_llama())
+    # )
 
     library = LocalExpertLibrary(tmp_path)
     library.add_expert(expert1, expert1.name)

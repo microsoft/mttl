@@ -88,6 +88,9 @@ class ExpertConfig(Config):
         self.proto_init = None  # also "arrow"
         self.input_norm_fn = None
         self.proto_norm_fn = None
+        self.ab_only = True
+        self.base_model_proto = False  # compute Arrow embeddings for the backbone
+        self.tie_op = "concat"  # or "sum"
 
         # Eval Library
         self.merge_or_route = None  # "uniform", "ties", "clown"
@@ -121,7 +124,7 @@ class ExpertConfig(Config):
 
         n_devices = torch.cuda.device_count()
         if n_devices > 1:
-            logger.warn(
+            logger.warning(
                 "You have multiple GPUs, but your device count is not being taken "
                 + "into account when computing `gradient_accumulation_steps`."
             )
