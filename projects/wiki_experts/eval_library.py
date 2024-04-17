@@ -52,7 +52,7 @@ def get_hidden_states(library, args):
         pool=args.pool,
     )
     output = HiddenStateComputer(cfg).transform(
-        library, recompute=args.recompute_prototypes
+        library, recompute=args.recompute_prototypes, default_args=args
     )
 
     return output
@@ -119,7 +119,7 @@ def patch_prototypes(module, library, args, proto_inits=None):
             mod.overwrite_prototypes(prototypes)
 
 
-def eval_in_distribution(module, args: ExpertConfig, tasks):
+def eval_in_distribution(module, args: ExpertConfig, tasks: list):
     args.include_task_source = "*"
     transfer_table = TableLogger()
 
@@ -131,14 +131,24 @@ def eval_in_distribution(module, args: ExpertConfig, tasks):
             evaluator = LossCallback(
                 dm.val_dataloader(), output_dir=args.output_dir, name=task + "_val"
             )
-            metric = evaluator.test(pl_module=module)
+            metric = evaluator.test(pl_module=module).item()
 
         elif args.eval_metric == "test_loss":
             dm = get_datamodule(args)
             evaluator = LossCallback(
                 dm.test_dataloader(), output_dir=args.output_dir, name=task + "_test"
             )
-            metric = evaluator.test(pl_module=module)
+            metric = evaluator.test(pl_module=module).item()
+        elif args.eval_metric == "val_rougeL":
+            dm = get_datamodule(args, for_generation=True)
+            evaluator = RougeEvaluator(
+                datamodule=dm,
+            )
+            metric = evaluator.evaluate(
+                module,
+                split="val",
+                verbose=False,
+            )
         elif args.eval_metric == "rougeL":
             dm = get_datamodule(args, for_generation=True)
             evaluator = RougeEvaluator(
@@ -197,10 +207,15 @@ def run_eval(args: ExpertConfig):
     )
     an_expert = library[next(iter(library.keys()))]
     train_cfg = deepcopy(an_expert.training_config)
-    train_cfg.device_map = "auto"
+    train_cfg.device_map = "cpu"
 
     # For starts, always overwrite the following arguments
-    for arg_name in ["output_dir", "eval_metric"]:
+    for arg_name in [
+        "output_dir",
+        "eval_metric",
+        "remove_phi_eval_tasks",
+        "include_task_source",
+    ]:
         value = getattr(args, arg_name, None)
         setattr(train_cfg, arg_name, value)
 
@@ -218,11 +233,11 @@ def run_eval(args: ExpertConfig):
         # Here we merge the LoRA experts after the outer product we cannot really do it
         # with the lib transform, cause this would require storing large matrices in memory
         # Instead we do it with a uniform selector
-        assert type(expert.expert_info.expert_config) == LoRAConfig
+        assert type(an_expert.expert_info.expert_config) == LoRAConfig
         train_cfg.router_selector = "uniform"
         train_cfg.lora_merge_after = True
         module = MultiExpertModel(**vars(train_cfg))
-        module.add_experts_from_library(library)
+        module.load_from_module_dict(library)
     elif args.merge_or_route == "base":
         module = ExpertModel(**vars(train_cfg))
 
@@ -253,10 +268,23 @@ def run_eval(args: ExpertConfig):
             config=dict(module.hparams),
             name=os.environ.get("AMLT_JOB_NAME", None),
         )
+        # update config
+        wandb.config.update({f"cmd_args_{k}": v for k, v in vars(args).items()})
 
-    if args.pipeline_eval_tasks == "in_distribution":
+    if args.pipeline_eval_tasks in [
+        "in_distribution",
+    ]:  
         tasks = [expert.expert_task_name for expert in library.data.values()]
+        tasks = [expert.expert_task_name for expert in library.data.values()]
+        if tasks[0] is None:
+            # for some older version of lib (in case of joint experts) no expert_task_name was set
+            tasks = json.load(open(args.flan_tasks_path))[
+                "flan256"
+            ]
+        # make sure we evaluate each task seperately (so the mean is over tasks at the end)
+        tasks = ",".join(tasks).split(",")
         train_cfg.eval_metric = args.eval_metric
+        train_cfg.subsample_dev = args.subsample_dev
         scores = eval_in_distribution(module, train_cfg, tasks)
     else:
         if args.pipeline_eval_tasks == "all":
@@ -272,6 +300,7 @@ def run_eval(args: ExpertConfig):
                 truncation_side=module.hparams.truncation_side,
                 tasks=args.pipeline_eval_tasks,
                 output_path=os.path.join(args.output_dir, "DOWNSTREAM"),
+                add_eos_to_targets=args.add_eos_to_downstream_targets,
             )
             scores = runner.run(module)
 

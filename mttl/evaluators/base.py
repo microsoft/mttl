@@ -422,6 +422,7 @@ def setup_evaluators(
     instruct_template_for_code=False,
     output_path=None,
     tasks=None,
+    add_eos_to_targets=True,
 ) -> EvaluatorRunner:
     import copy
     from mttl.datamodule.mmlu_data_module import MMLUDataConfig
@@ -453,6 +454,7 @@ def setup_evaluators(
         "max_output_length": max_output_length,
         "predict_batch_size": predict_batch_size,
         "truncation_side": truncation_side,
+        "add_eos_to_targets": add_eos_to_targets,
     }
     generation_kwargs_ = {
         "temperature": 0.0,

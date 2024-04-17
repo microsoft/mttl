@@ -637,11 +637,11 @@ class MoEModel(MultiExpertModel):
 
             self.moe_num_experts = i + 1
             if isinstance(
-                self.routing_config, (ArrowConfig, HiddenStateComputerConfig)
+                self.selector_config, (ArrowConfig, HiddenStateComputerConfig)
             ):
                 from projects.wiki_experts.eval_library import patch_prototypes
 
-                patch_prototypes(self, library, self.routing_config)
+                patch_prototypes(self, library, self.selector_config)
 
     def training_step(self, batch, _):
         loss = super().training_step(batch, _)

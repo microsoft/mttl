@@ -3,6 +3,7 @@ import copy
 from typing import Optional
 import torch
 import tqdm
+import shutil
 
 import pytorch_lightning as pl
 from pytorch_lightning import LightningModule, Trainer, callbacks as cb
@@ -78,7 +79,12 @@ class LiveCheckpointCallback(pl.Callback):
 
         if self.best_model_path is not None:
             if os.path.exists(self.best_model_path):
-                os.remove(self.best_model_path)
+                # added this to enable training with multiple GPUS (with deepspeed)
+                # deepspeed seem to create a checkpoint per device, resulting in self.best_model_path being a directory
+                if os.path.isdir(self.best_model_path):
+                    shutil.rmtree(self.best_model_path)
+                else:
+                    os.remove(self.best_model_path)
 
         this_filename = os.path.join(
             f"{self.dirpath}",

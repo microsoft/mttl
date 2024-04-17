@@ -402,6 +402,10 @@ class PolySelector(Selector):
     def forward(self, input, **kwargs) -> ModulesAndWeightsSelectorOutput:
         weights = self._get_weights()
         modules = self.expert_names
+        if self.n_tasks == 0:
+            # for single task we just return a single distribution that should be used for all examples
+            # so that weights.ndim == 1
+            weights = weights.squeeze()
         return ModulesAndWeightsSelectorOutput(modules, weights)
 
     def get_merging_weights(self, **selector_kwargs) -> Dict:
@@ -968,11 +972,6 @@ class PolySelectorDirectConfig(PolySelectorConfig):
 
 @dataclass
 class PolySelectorDirectConfigUniform(PolySelectorConfig):
-    pass
-
-
-@dataclass
-class PolySelectorDirectConfigUniform(SelectorConfig):
     pass
 
 
