@@ -118,9 +118,12 @@ class SimpleLogger(pl.loggers.logger.DummyLogger):
                 v = v.item()
             lines.append({"name": k, "value": v, "step": step})
 
-        with open(self.output_file, "a+") as f:
-            for l in lines:
-                f.write(json.dumps(l) + "\n")
+        try:
+            with open(self.output_file, "a+") as f:
+                for l in lines:
+                    f.write(json.dumps(l) + "\n")
+        except Exception as e:
+            logger.error(f"Failed to log metrics: {e}")
 
 
 class OnLogCallback:
