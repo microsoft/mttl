@@ -207,7 +207,7 @@ def run_eval(args: ExpertConfig):
     )
     an_expert = library[next(iter(library.keys()))]
     train_cfg = deepcopy(an_expert.training_config)
-    train_cfg.device_map = "auto"
+    train_cfg.device_map = "cpu"
 
     # For starts, always overwrite the following arguments
     for arg_name in [
