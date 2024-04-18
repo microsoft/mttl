@@ -27,13 +27,12 @@ class BBHDataModule(DefaultDataModule):
             if isinstance(self.config.finetune_task_name, str)
             else self._task_names
         )
-
         for task_name in self._task_names:
             if task_name not in task_names:
                 continue
 
             task_dataset = DatasetLibrary.pull_dataset(
-                "maveriq/bigbenchhard", task_name, split="train"
+                "maveriq/bigbenchhard", name=task_name, split="train"
             )
             task_dataset = task_dataset.map(
                 lambda x: {
