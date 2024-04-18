@@ -655,11 +655,6 @@ class PhatgooseTransform(HiddenStateComputer):
                 training_config.compute_strategy
                 and training_config.compute_strategy != "deepspeed"
             ):
-                # from pytorch_lightning.utilities.deepspeed import convert_zero_checkpoint_to_fp32_state_dict
-                # new_path = checkpoint.replace('last.ckpt', 'last_fp32.ckpt')
-                # convert_zero_checkpoint_to_fp32_state_dict(checkpoint, new_path)
-                # checkpoint = new_path
-
                 from mttl.models.expert_model import MultiExpertModel
 
                 model_after = MultiExpertModel(**vars(training_config)).to("cuda")
