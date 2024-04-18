@@ -353,6 +353,40 @@ class ClusterPredictor(SentenceTransformerClassifier):
         }
 
     @torch.no_grad()
+    def predict_task(self, query, n=1):
+        logits = self(query).detach().cpu()
+
+        # softmax
+        logits = torch.softmax(logits, dim=-1)
+
+        # get the cluster distribution
+        cluster_distribution = torch.zeros(logits.shape[0], len(self.cluster_names))
+        for cluster_name in self.cluster_names_to_ids:
+            cluster_distribution[:, self.cluster_names_to_ids[cluster_name]] = (
+                torch.sum(
+                    logits[:, self.cluster_names_to_expert_ids[cluster_name]], dim=-1
+                )
+            )
+        # get the topk clusters
+        cluster_indices = torch.topk(cluster_distribution, k=n, dim=1)
+
+        cluster_prediction = [
+            [self.ids_to_cluster_names[index.item()] for index in indices]
+            for indices in cluster_indices.indices
+        ]
+
+        cluster_weights = [
+            [weight.item() for weight in weights] for weights in cluster_indices.values
+        ]
+        # increate the entropy of the weights
+        cluster_weights = np.array(cluster_weights) / self.temperature
+
+        cluster_weights = np.exp(np.array(cluster_weights))
+        cluster_weights = cluster_weights / cluster_weights.sum(axis=1, keepdims=True)
+
+        return cluster_prediction, cluster_weights.tolist()
+
+    @torch.no_grad()
     def predict_batch(self, batch, n=1):
         logits = self(batch["sources_texts"]).detach().cpu()
 
