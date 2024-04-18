@@ -313,9 +313,7 @@ class TaskPredictorSelector(Selector):
             modules, weights = self.expert_ranker.predict_task(
                 sources_texts, n=self.ranker_top_k
             )
-            # logger.debug(f"Predicted tasks: {modules} with weights {weights}")
-            logger.info(f"Most similar: {str(modules)}")
-            logger.info(f"Most similar weights: {str(weights)}")
+            logger.debug(f"Predicted tasks: {modules} with weights {weights}")
             return BatchModulesAndWeightsSelectorOutput(modules, weights)
         else:
             raise ValueError(
