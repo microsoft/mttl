@@ -98,11 +98,14 @@ def get_target_2_source_param_mapping(
     Create a dict for parameter tying: target param -> source param
     Assumes:
         - that "tie_params" is a regex that matches the parameters that need to be tied.
-        - matched parameters will be tied within a common pare module.
+        - matched parameters will be tied within a common parent module.
 
-        Example for Llama like model:
-            - if tie_params = "q_proj.lora_a|k_proj.lora_a|v_proj.lora_a", lora_a will be tied across q_proj, k_proj, and v_proj within the same parent (attn_module).
-            - if tie_params = ".*lora_a.*", nothing will be tied because lora_a is not within the same parent module.
+    Constraints:
+        - tie_params should match the parameter and not the module, e.g. it should be "q_proj.lora_a|k_proj.lora_a" and not "q_proj|k_proj".
+
+    Example for Llama like model:
+        - if tie_params = "q_proj.lora_a|k_proj.lora_a|v_proj.lora_a", lora_a will be tied across q_proj, k_proj, and v_proj within the same parent (attn_module).
+        - if tie_params = ".*lora_a.*", nothing will be tied because lora_a is not within the same parent module.
 
     Args:
         param_names: Iterable of tuples (param_name, any)
@@ -110,14 +113,18 @@ def get_target_2_source_param_mapping(
         expand_if_targets_are_missing: bool, if True, will add missing targets to target_2_source_param at first match without checking if targets are also in named_params. Should be used when name_params only contains the sources.
 
     """
+    valid_tie_names = [p for p, _ in named_params]
     target_2_source_param = {}  # target param -> source param
     if tie_params:
         source_2_parameter = {}
-        for p_name, _ in named_params:
+        for p_name in valid_tie_names:
             match = re.search(tie_params, p_name)
             if match:
                 matched_option = match.group()
                 parent = p_name.split(matched_option)[0]
+                assert (
+                    f"{parent}{matched_option}" in valid_tie_names
+                ), "tie_params should match the parameter and not the module, e.g. it should be 'q_proj.lora_a|k_proj.lora_a' and not 'q_proj|k_proj', revise your tie_params argument."
                 if parent in source_2_parameter:
                     if not expand_if_targets_are_missing:
                         target_2_source_param[p_name] = source_2_parameter[parent]

@@ -353,6 +353,12 @@ class HiddenStateComputer(LibraryTransform):
             if not hasattr(args, k):
                 setattr(args, k, v)
 
+        for arg_name in [
+            "include_task_source",
+        ]:
+            value = getattr(default_args, arg_name, None)
+            setattr(args, arg_name, value)
+
     def _get_parent_from_name(self, model, name):
         parts = name.split(".")
         for part in parts:
@@ -368,21 +374,21 @@ class HiddenStateComputer(LibraryTransform):
 
         return model
 
-    def _track_hidden_states(self, model, keys=None):
+    def _track_hidden_states(self, model, keys=None, device="cpu"):
         model.container = {}
         if model.model is None:
             raise ValueError("Model must have a model attribute")
         if self.config.track == "last_layer":
             # Add a hook to the last layer
             def fetch_input(module, input, output):
-                model.container["last_layer"] = input[0].detach()
+                model.container["last_layer"] = input[0].detach().to(device)
 
             model.model.get_output_embeddings().register_forward_hook(fetch_input)
         elif self.config.track == "each_layer":
             # add a hook for all the layers that an expert modifies
             def build_hook(name):
                 def retrieve_input(module, input, output):
-                    model.container[name] = input[0].detach()
+                    model.container[name] = input[0].detach().to(device)
 
                 return retrieve_input
 
@@ -402,10 +408,16 @@ class HiddenStateComputer(LibraryTransform):
 
     @torch.no_grad()
     def transform(
-        self, library: ExpertLibrary, persist=False, recompute=False, default_args=None
+        self,
+        library: ExpertLibrary,
+        persist=False,
+        recompute=False,
+        default_args=None,
+        device="cpu",
     ) -> Expert:
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
+        from mttl.models.expert_model import MultiExpertModel
 
         logger.info(f"Hidden state computer dumps to: {self.config.save_name}")
 
@@ -425,15 +437,15 @@ class HiddenStateComputer(LibraryTransform):
 
             if self.config.use_base_model_only and self.config.model is not None:
                 training_config.model = self.config.model
-
-            from mttl.models.expert_model import MultiExpertModel
-
-            model = MultiExpertModel(**vars(training_config)).to("cuda")
+            training_config.device_map = "cuda"
+            model = MultiExpertModel(**vars(training_config))
 
             if not self.config.use_base_model_only:
                 model.add_expert_instance(expert, is_default=True)
 
-            self._track_hidden_states(model, keys=expert.expert_weights.keys())
+            self._track_hidden_states(
+                model, keys=expert.expert_weights.keys(), device=device
+            )
             training_config.dataset = expert.expert_info.dataset
             training_config.subsample_train = self.config.max_samples_per_task
             if expert.expert_info.expert_task_name:
@@ -454,10 +466,10 @@ class HiddenStateComputer(LibraryTransform):
             centroid, count = defaultdict(lambda: 0.0), 0
 
             pbar = tqdm(enumerate(dataloader), total=len(dataloader))
-            device = next(model.parameters()).device
+            device_model = next(model.parameters()).device
 
             for _, batch in pbar:
-                batch = transfer_batch_to_device(batch, device)
+                batch = transfer_batch_to_device(batch, device_model)
 
                 if isinstance(model, EfficientCheckpointModule):
                     model.forward(batch, reduction="none")
@@ -468,9 +480,11 @@ class HiddenStateComputer(LibraryTransform):
                     )
 
                 bs = batch["input_ids"].size(0)
-                bs_idx = torch.arange(bs, device=device)
-                last_token_idx = batch["attention_mask"].sum(1) - 1
+                last_token_idx = batch["attention_mask"].sum(1).to(device) - 1
                 hidden_states = self._retrieve_hidden_states(model)
+                bs_idx = torch.arange(
+                    bs, device=hidden_states[list(hidden_states.keys())[0]].device
+                )
 
                 for layer, hidden_state in hidden_states.items():
                     assert hidden_state.ndim == 3
@@ -498,6 +512,9 @@ class HiddenStateComputer(LibraryTransform):
             # convert to regular dict
             centroids = {k: v for k, v in centroid.items()}
             output[expert_name] = centroids
+
+            del model
+            torch.cuda.empty_cache()
 
         if persist:
             # add embeddings to the library
@@ -668,6 +685,8 @@ class PhatgooseTransform(HiddenStateComputer):
                             data=data,
                             force=True,  # make sure we overwrite
                         )
+            del model
+            torch.cuda.empty_cache()
         return outputs
 
 
