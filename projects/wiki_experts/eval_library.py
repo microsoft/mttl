@@ -286,6 +286,16 @@ def run_eval(args: ExpertConfig):
         train_cfg.eval_metric = args.eval_metric
         train_cfg.subsample_dev = args.subsample_dev
         scores = eval_in_distribution(module, train_cfg, tasks)
+    elif "task" in args.pipeline_eval_tasks:
+        logger.info(f"TraEValuating SNI with Rouge: task {args.pipeline_eval_tasks}")
+        from finetune_experts import train_module
+        train_cfg.do_train = False
+        args.finetune_task_name = args.pipeline_eval_tasks
+        train_cfg.finetune_task_name = args.pipeline_eval_tasks
+        train_cfg.pipeline_eval_tasks = None
+        dm = get_datamodule(args)
+        train_module(train_cfg, module, dm)
+        return 
     else:
         if args.pipeline_eval_tasks == "all":
             args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
