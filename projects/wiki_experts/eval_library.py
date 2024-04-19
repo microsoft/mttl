@@ -290,10 +290,10 @@ def run_eval(args: ExpertConfig):
         logger.info(f"TraEValuating SNI with Rouge: task {args.pipeline_eval_tasks}")
         from finetune_experts import train_module
         train_cfg.do_train = False
-        args.finetune_task_name = args.pipeline_eval_tasks
         train_cfg.finetune_task_name = args.pipeline_eval_tasks
         train_cfg.pipeline_eval_tasks = None
-        dm = get_datamodule(args)
+        train_cfg.predict_batch_size = args.predict_batch_size
+        dm = get_datamodule(train_cfg)
         train_module(train_cfg, module, dm)
         return 
     else:
