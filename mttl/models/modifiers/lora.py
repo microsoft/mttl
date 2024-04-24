@@ -413,7 +413,7 @@ class SkilledLoRA(LoRA):
                     # partial_out = torch.einsum("bd,sdr->bsr", (input_lora, A))
                     # adapter_out = torch.einsum("bsr,srd->sbd", (partial_out, B))
                     # adapter_out = torch.einsum("s,sbo->bo", (weights, adapter_out)) * scaling
-                    if input_lora.ndim == 2: 
+                    if input_lora.ndim == 2:
                         # this option is for the test tests/test_lora.py::test_skilled_lora_parallel_merge_with_weights_and_merge_after
                         adapter_out = torch.matmul(torch.matmul(input_lora, A), B)
                         adapter_out = (

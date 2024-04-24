@@ -56,6 +56,7 @@ class SelectorConfig:
     # the granularity of the selector (which layers use the same selectors)
     router_granularity: str = "*"
     lora_merge_after: bool = False
+    selector_logging: bool = True
 
     def __eq__(self, other):
         # compare all the attributes
@@ -175,9 +176,11 @@ def forward_with_cache(func):
 
 
 def safe_logging(func):
-    def wrapper(*args, **kwargs):
+    def wrapper(selector, *args, **kwargs):
+        if not selector.config.selector_logging:
+            return None
         try:
-            result = func(*args, **kwargs)
+            result = func(selector, *args, **kwargs)
         except Exception as e:
             if str(e)[:100] != getattr(logger, "previous_error", ""):
                 logger.exception(f"An error occurred in {func.__name__}: {e}")
@@ -685,6 +688,7 @@ class PerTokenSelector(TaskToExpertTracker):
         # log angle between input and prototypes
         angle = router_logits / input.norm(p=2, dim=-1, keepdim=True).clamp(min=EPS)
         angle = angle / prototypes.norm(p=2, dim=-1).view(1, 1, -1).clamp(min=EPS)
+
         self._log_angle(angle)
 
         # control entropy of distribution
@@ -967,7 +971,9 @@ class PhatgooseTrainerSelector(Selector):
         )
 
     def get_prototypes(self):
-        return {k: gate.v.detach().cpu().numpy() for k, gate in self.gates.items()}
+        return {
+            k: gate.v.detach().float().cpu().numpy() for k, gate in self.gates.items()
+        }
 
 
 @dataclass

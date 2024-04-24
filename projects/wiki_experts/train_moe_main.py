@@ -106,7 +106,6 @@ def run_multitask(args: ExpertConfig):
         devices=-1,
         accelerator="gpu",
         logger=loggers,
-        strategy="auto",
         num_sanity_val_steps=0,
         default_root_dir=args.output_dir,
         max_epochs=args.num_train_epochs,
@@ -116,6 +115,7 @@ def run_multitask(args: ExpertConfig):
         enable_checkpointing=False,
         log_every_n_steps=args.gradient_accumulation_steps,
         accumulate_grad_batches=args.gradient_accumulation_steps,
+        strategy=args.compute_strategy if args.compute_strategy else "auto",
         precision=int(args.precision)
         if args.precision in ["16", "32"]
         else args.precision,
