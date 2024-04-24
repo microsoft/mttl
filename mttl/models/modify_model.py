@@ -1,10 +1,18 @@
-from mttl.models.lora import modify_with_lora, modify_with_ia3, modify_with_krona,modify_with_quantumIA3Linear
-from mttl.models.poly import (modify_with_poly_lora, 
-                              modify_with_poly_ia3, 
-                              modify_with_tensorpoly_lora,
-                              modify_with_tensororderpoly_lora,
-                              modify_with_tensorpoly_ia3,
-                              modify_with_tensororderpoly_ia3)
+from mttl.models.lora import (
+    modify_with_lora,
+    modify_with_ia3,
+    modify_with_krona,
+    modify_with_quantumIA3Linear,
+    modify_with_dora,
+)
+from mttl.models.poly import (
+    modify_with_poly_lora,
+    modify_with_poly_ia3,
+    modify_with_tensorpoly_lora,
+    modify_with_tensororderpoly_lora,
+    modify_with_tensorpoly_ia3,
+    modify_with_tensororderpoly_ia3,
+)
 
 
 modifier_dict = {
@@ -18,11 +26,12 @@ modifier_dict = {
     "tensorpoly_ia3": modify_with_tensorpoly_ia3,
     "tensororderpoly_ia3": modify_with_tensororderpoly_ia3,
     "quantum_ia3": modify_with_quantumIA3Linear,
+    "dora": modify_with_dora,
 }
 
 
 def modify_transformer(transformer, config):
-    # create a shared container for the task id 
+    # create a shared container for the task id
     transformer.task_id_container = {}
 
     if config.model_modifier:
