@@ -254,6 +254,7 @@ class Config:
         self.subsample_train = None
         self.subsample_dev = None
         self.subsample_test = None
+        self.subsample_per_task = False
 
         self.ni_online_eval = False  # zero-shot online eval for ni
         self.t0_online_eval = False  # zero-shot eval for t0
