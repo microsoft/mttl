@@ -43,7 +43,6 @@ from mttl.models.expert_model import MoEModel as MoETrainer
 from mttl.models.expert_model import ExpertModel as ExpertTrainer
 from mttl.models.expert_model import MultiExpertModel
 from mttl.models.expert_config import ExpertConfig
-from projects.wiki_experts.train_experts_main import create_transfer_matrix
 from projects.wiki_experts.utils import get_datamodule
 from projects.wiki_experts.src.retrievers import (
     RandomRetriever,
@@ -235,25 +234,26 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
     def get_loss(model):
         return -1.0 * rouge_evaluator.evaluate(model, split="train", verbose=False)
 
-    module = MultiExpertModel(**vars(args), device_map="auto")
+    module = ExpertTrainer(**vars(args), device_map="auto")
 
     optimizer = NGRoutingOptimizer(
         model=module,
         expert_lib=expert_lib,
         get_loss=get_loss,
         budget=args.n_ng_iterations,
-        action="route",
         regularizer_factor=0.05,
     )
 
     best_weights, best_rout_weights = optimizer.optimize()
 
-    config = WeightedLinearMergeConfig(best_rout_weights)
+    config = WeightedLinearMergeConfig(weights=best_rout_weights)
     weighted_merge = WeightedLinearMerge(config)
     expert = weighted_merge.transform(expert_lib)
-    expert.name = "nevergrad"
-    expert.expert_config = ModifierConfig.from_training_config(args)
-    expert.training_config = args
+    expert.name = "nevergrad"    
+    module.model.load_state_dict(expert.expert_weights, strict=False)
+    rouge = rouge_evaluator.evaluate(module, split="test", verbose=False)
+    if wandb.run is not None:
+        wandb.log({"test/rougeL": rouge})    
     return expert
 
 
@@ -462,13 +462,13 @@ def finetune_joint(args: ExpertConfig, dm):
 
     # TODO: move this to utils for reuse
     def resolve_hf_repo_id(hf_repo_id):
-        parts = hf_repo_id.split("/")
-        if len(parts) == 3:
-            return "/".join(parts[:-1]), parts[-1]
+        parts = hf_repo_id.split("|")
+        if len(parts) == 2:
+            return parts[0], parts[-1]
         else:
             return hf_repo_id, None
-
-    hf_repo_id, expert_name = resolve_hf_repo_id(args.library_id)
+    expert_name = "joint_flan"
+    hf_repo_id = args.library_id #, expert_name = resolve_hf_repo_id(args.library_id)
     library = HFExpertLibrary(hf_repo_id)
     expert: Expert = library[expert_name]
     pretrain_args = expert.training_config
@@ -476,7 +476,6 @@ def finetune_joint(args: ExpertConfig, dm):
     module.load_state_dict(expert.expert_weights)
 
     return train_module(args, module, dm)
-
 
 def run_multitask(args: ExpertConfig):
     seed_everything(args.seed, workers=True)
@@ -508,16 +507,11 @@ def run_multitask(args: ExpertConfig):
         elif expert.training_config.model_modifier == "poly":
             module.model.resize_module_logits(1)
         checkpoint = train_module(args, module, dm)
-        if args.create_transfer_matrix:
-            create_transfer_matrix(args, checkpoint)
 
     else:
         # fine-tuning with expert library
         assert args.finetune_regime in FINETUNE_FUNCTIONS
         expert = FINETUNE_FUNCTIONS[args.finetune_regime](args, dm)
-
-        if args.create_transfer_matrix or "nevergrad" in args.finetune_regime:
-            create_transfer_matrix(args, expert)
         shutil.rmtree(f"/tmp/{args.library_id}", ignore_errors=True)
 
 
