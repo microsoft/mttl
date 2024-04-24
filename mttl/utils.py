@@ -13,8 +13,15 @@ from typing import Dict, Optional
 import hashlib
 from pytorch_lightning.utilities.rank_zero import rank_zero_info
 from torch.autograd.function import Function
+from functools import lru_cache
+
 
 logger = logging.getLogger("mttl")
+
+
+@lru_cache
+def warn_once(msg: str):
+    logger.warning(msg)
 
 
 def remote_login(token: Optional[str] = None):
