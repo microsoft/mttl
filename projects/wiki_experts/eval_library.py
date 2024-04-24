@@ -287,7 +287,7 @@ def run_eval(args: ExpertConfig):
         train_cfg.subsample_dev = args.subsample_dev
         scores = eval_in_distribution(module, train_cfg, tasks)
     elif "task" in args.pipeline_eval_tasks:
-        logger.info(f"TraEValuating SNI with Rouge: task {args.pipeline_eval_tasks}")
+        logger.info(f"EValuating SNI with Rouge: task {args.pipeline_eval_tasks}")
         from finetune_experts import train_module
         train_cfg.do_train = False
         train_cfg.finetune_task_name = args.pipeline_eval_tasks
