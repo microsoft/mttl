@@ -227,7 +227,7 @@ def run_eval(args: ExpertConfig):
             cfg = TiesMergeConfig(top_k=args.transform_sparsity)
             expert = TiesMerge(cfg).transform(library)
 
-        module = MultiExpertModel(**vars(expert.training_config))
+        module = MultiExpertModel(**vars(expert.training_config)).to("cuda")
         module.add_expert_instance(expert, is_default=True)
     elif args.merge_or_route == "uniform_lora_after_op":
         # Here we merge the LoRA experts after the outer product we cannot really do it
@@ -236,7 +236,7 @@ def run_eval(args: ExpertConfig):
         assert type(an_expert.expert_info.expert_config) == LoRAConfig
         train_cfg.router_selector = "uniform"
         train_cfg.lora_merge_after = True
-        module = MultiExpertModel(**vars(train_cfg))
+        module = MultiExpertModel(**vars(train_cfg)).to("cuda")
         module.load_from_module_dict(library)
     elif args.merge_or_route == "base":
         module = ExpertModel(**vars(train_cfg))
@@ -246,7 +246,10 @@ def run_eval(args: ExpertConfig):
         args.router_selector = f"{args.merge_or_route}_router"
 
         selector_config = SelectorConfig.from_training_config(args)
-        module = MultiExpertModel(**vars(train_cfg), selector_config=selector_config)
+
+        module = MultiExpertModel(
+            **vars(train_cfg), selector_config=selector_config
+        ).to("cuda")
         module.load_from_module_dict(library)
         patch_prototypes(module, library, args)
 
@@ -254,12 +257,14 @@ def run_eval(args: ExpertConfig):
         """TaskNameSelector"""
         args.router_selector = "task_selector"
         selector_config = SelectorConfig.from_training_config(args)
-        module = MultiExpertModel(**vars(train_cfg), selector_config=selector_config)
+
+        module = MultiExpertModel(
+            **vars(train_cfg), selector_config=selector_config
+        ).to("cuda")
         module.load_from_module_dict(library)
     else:
         raise ValueError(f"Unknown merge_or_route {args.merge_or_route}")
 
-    module = module.to("cuda")
     metric_logger = Selector.metric_logger
 
     if wandb.run is None and os.environ.get("WANDB_API_KEY"):
