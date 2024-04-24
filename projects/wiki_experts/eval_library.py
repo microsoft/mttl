@@ -299,14 +299,17 @@ def run_eval(args: ExpertConfig):
         "task1557_jfleg_answer_generation",
     ]:
         logger.info(f"Evaluating SNI with Rouge: task {args.pipeline_eval_tasks}")
-        from finetune_experts import train_module
-
-        train_cfg.do_train = False
         train_cfg.finetune_task_name = args.pipeline_eval_tasks
         train_cfg.pipeline_eval_tasks = None
         train_cfg.predict_batch_size = args.predict_batch_size
-        dm = get_datamodule(train_cfg)
-        train_module(train_cfg, module, dm)
+        dm_for_gen = get_datamodule(train_cfg, for_generation=True)
+        rouge_evaluator = RougeEvaluator(dm_for_gen)
+        rouge = rouge_evaluator.evaluate(module, split="test", verbose=False)
+        logger.info(f"RougeL: {rouge}")
+        if wandb.run is not None:
+            if scores is not None:
+                wandb.log({f"downstream/test_rougeL": v for k, v in rouge})
+
         return
     else:
         if args.pipeline_eval_tasks == "all":
