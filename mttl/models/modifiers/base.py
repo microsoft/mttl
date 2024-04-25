@@ -133,7 +133,9 @@ def get_target_2_source_param_mapping(
                     source_2_parameter[parent] = p_name
 
                     if expand_if_targets_are_missing:
-                        params_to_add = tie_params.replace("\\", "").split("|")
+                        params_to_add = (
+                            tie_params.replace("\\", "").replace(".*", "").split("|")
+                        )
                         for p in params_to_add:
                             if p not in p_name:
                                 target_2_source_param[f"{parent}{p}"] = p_name

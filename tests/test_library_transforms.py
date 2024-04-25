@@ -56,7 +56,7 @@ def test_arrow():
     assert np.allclose(sums, [2728.4163, 2284.9968])
 
 
-def test_arrow_with_tiedlora(tmp_path, create_dummy_expert_):
+def test_arrow_with_tiedlora(tmp_path, create_dummy_expert):
     import logging
     from mttl.utils import logger
 
@@ -75,7 +75,7 @@ def test_arrow_with_tiedlora(tmp_path, create_dummy_expert_):
 
     config = ExpertConfig(
         kwargs={
-            "tie_params": "q_proj\\.lora_a|k_proj\\.lora_a|v_proj\\.lora_a",
+            "tie_params": "q_proj.*\\.lora_a|k_proj.*\\.lora_a|v_proj.*\\.lora_a",
             "model_modifier": "lora",
             "modify_layers": "k_proj|v_proj|q_proj|o_proj",
             "modify_modules": ".*self_attn.*",
@@ -85,8 +85,8 @@ def test_arrow_with_tiedlora(tmp_path, create_dummy_expert_):
         }
     )
     # create random Lora
-    expert1 = patch_expert_weights(create_dummy_expert_(config, "module1"))
-    expert2 = patch_expert_weights(create_dummy_expert_(config, "module2"))
+    expert1 = patch_expert_weights(create_dummy_expert(config, "module1"))
+    expert2 = patch_expert_weights(create_dummy_expert(config, "module2"))
     # replace by create_dummy_expert when we resolve tying
     # expert1 = patch_expert_weights(
     #     create_dummy_expert(config, "module1", model_object=make_tiny_llama())
