@@ -402,10 +402,8 @@ class SkilledLoRA(LoRA):
 
             # Special Case we have only have a single lora, we can use the standard forward
             # Occurs when uniformly merging MHR or Poly runs
-            if weights.ndim > 1:
-                weights = weights.squeeze(0)
-            if scaling.ndim > 1:
-                scaling = scaling.squeeze(0)
+            weights = weights.squeeze(0)
+            scaling = scaling.squeeze(0)
 
             if weights.ndim == 1:
                 assert not phi_2_align_heads
