@@ -128,8 +128,9 @@ def tmp_exp_config(tmp_path):
 @pytest.fixture
 def create_dummy_expert(make_tiny_llama):
     def _create_dummy_expert(config: ExpertConfig, exp_name, **kwargs) -> Expert:
-        model_object = make_tiny_llama()
-        model = MultiExpertModel(model_object=model_object, **vars(config), **kwargs)
+        if "model_object" not in kwargs:
+            kwargs["model_object"] = make_tiny_llama()
+        model = MultiExpertModel(**vars(config), **kwargs)
         expert = model.add_empty_expert(
             exp_name, ModifierConfig.from_training_config(config)
         )

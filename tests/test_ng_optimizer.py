@@ -19,8 +19,8 @@ def test_NGRoutingOptimizer(tmp_path, make_tiny_llama, create_dummy_expert):
         }
     )
     # create random Lora
-    expert1 = create_dummy_expert(config, "module1", model_object=make_tiny_llama())
-    expert2 = create_dummy_expert(config, "module2", model_object=make_tiny_llama())
+    expert1 = create_dummy_expert(config, "module1")
+    expert2 = create_dummy_expert(config, "module2")
 
     get_loss = lambda *args, **kwargs: 0.0
 
