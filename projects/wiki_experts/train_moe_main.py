@@ -54,7 +54,6 @@ def run_multitask(args: ExpertConfig):
         monitor="val/loss",
         save_last=True,
         mode="min",
-        expert_library=expert_library,
         save_each_epoch=args.save_each_epoch,
     )
     callbacks.append(checkpoint_callback)

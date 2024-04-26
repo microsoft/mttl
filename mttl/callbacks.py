@@ -29,7 +29,6 @@ class LiveCheckpointCallback(pl.Callback):
         save_last: bool = True,
         save_weights_only: bool = True,
         save_each_epoch: bool = False,
-        expert_library: Optional[ExpertLibrary] = None,
     ):
         if not monitor and not save_last:
             raise ValueError(
@@ -46,15 +45,10 @@ class LiveCheckpointCallback(pl.Callback):
         self._last_value = None
         self.save_weights_only = save_weights_only
         self.save_each_epoch = save_each_epoch
-        self.expert_library = expert_library
 
-    def _store_checkpoint(self, trainer, checkpoint_path, checkpoint_name=None):
+    def _store_checkpoint(self, trainer, checkpoint_path):
         """Saves the checkpoint and pushes to the ExpertLibrary if one is available."""
         trainer.save_checkpoint(checkpoint_path, weights_only=self.save_weights_only)
-        if self.expert_library is not None:
-            self.expert_library.add_expert_from_ckpt(
-                checkpoint_path, expert_name=checkpoint_name, force=True
-            )
 
     def on_train_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Saves the last checkpoint."""
@@ -65,10 +59,9 @@ class LiveCheckpointCallback(pl.Callback):
     def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Saves each checkpoint after each epoch"""
         if self.save_each_epoch:
-            expert_name = getattr(pl_module.hparams, "expert_name", None)
-            checkpoint_name = f"{expert_name}-epoch-{trainer.current_epoch}"
+            checkpoint_name = f"epoch_{trainer.current_epoch}"
             save_model_path = os.path.join(f"{self.dirpath}", f"{checkpoint_name}.ckpt")
-            self._store_checkpoint(trainer, save_model_path, checkpoint_name)
+            self._store_checkpoint(trainer, save_model_path)
 
     def _save_best(self, trainer, this_value):
         if this_value is None:
