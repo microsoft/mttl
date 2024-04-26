@@ -611,10 +611,11 @@ class MoEModel(MultiExpertModel):
         kwargs["top_k"] = kwargs["moe_top_k"]
         kwargs["emb_dim"] = kwargs["moe_emb_dim"]
         kwargs["rkhs_dim"] = kwargs["moe_rkhs_dim"]
+        init_from_scratch = kwargs.get("init_from_scratch", False)
 
         super().__init__(**kwargs)
 
-        if not self.hparams.library_id:
+        if not self.hparams.library_id or init_from_scratch:
             for i in range(self.hparams.moe_num_experts):
                 # Adding a Skilled LoRA with 1 skill.
                 exp_config = SkilledLoRAConfig(
