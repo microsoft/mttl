@@ -308,7 +308,7 @@ def run_eval(args: ExpertConfig):
         logger.info(f"RougeL: {rouge}")
         if wandb.run is not None:
             if rouge is not None:
-                wandb.log({f"downstream/test_rougeL": v for k, v in rouge})
+                wandb.log({f"downstream/test_rougeL": rouge})
 
         return
     else:
