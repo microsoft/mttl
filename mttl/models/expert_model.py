@@ -373,6 +373,7 @@ class MultiExpertModel(ExpertModel):
                 expert_name,
                 expert_config=expert_config,
                 expert_model=self.hparams.model,
+                training_config=self.training_config,
             ),
         )
 
