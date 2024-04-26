@@ -113,7 +113,7 @@ def get_tokenizer_with_args(
     if model_family is None:
         raise ValueError("model_family is None, please fix your config!")
 
-    if "llama" in model_name:
+    if "llama-2" in model_name:
         tokenizer = LlamaTokenizer.from_pretrained(model_name)
         tokenizer.pad_token_id = 0
         if not model_family == "gpt":
