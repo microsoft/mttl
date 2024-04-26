@@ -428,7 +428,7 @@ def model_loader_helper(model_name, device_map="auto", load_in_8bit=False):
             torch_dtype=torch.bfloat16,
             device_map=device_map,
         )
-    elif "phi-2" in model_name:
+    elif "phi-2" in model_name and "microsoft" not in model_name:
         model_object = AutoModelForCausalLM.from_pretrained(
             os.environ["PHI_PATH"],
             load_in_8bit=load_in_8bit,
