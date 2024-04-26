@@ -307,7 +307,7 @@ def run_eval(args: ExpertConfig):
         rouge = rouge_evaluator.evaluate(module, split="test", verbose=False)
         logger.info(f"RougeL: {rouge}")
         if wandb.run is not None:
-            if scores is not None:
+            if rouge is not None:
                 wandb.log({f"downstream/test_rougeL": v for k, v in rouge})
 
         return
