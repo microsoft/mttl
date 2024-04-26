@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 import dataclasses
 import copy
+from typing import Dict, List
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -1247,7 +1248,7 @@ class MBCWithCosSimTransform(LibraryTransform):
         library: ExpertLibrary,
         persist: bool = False,
         recompute: bool = False,
-    ) -> dict[str, list[str]]:
+    ) -> Dict[str, List[str]]:
         svd_config = SVDEmbeddingTransformConfig(
             name=self.config.name,
             n_components=self.config.n_components,
