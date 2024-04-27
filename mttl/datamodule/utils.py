@@ -121,7 +121,7 @@ def get_tokenizer_with_args(
                 "We detected a Llama model, but model_family != 'gpt', fix your config!"
             )
     else:
-        if "phi-2" in model_name:
+        if "phi-2" in model_name and "microsoft" not in model_name:
             model_name = os.environ["PHI_PATH"]
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         tokenizer.model_max_length = int(1e9)
