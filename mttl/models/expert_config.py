@@ -114,6 +114,8 @@ class ExpertConfig(Config):
         self.flan_tasks_path = "projects/wiki_experts/task_sets/flan_tasks.json"
 
     def post_init(self, silent=False):
+        if self.moe_top_k is not None and self.moe_top_k < 0:
+            self.moe_top_k = None
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size
 
