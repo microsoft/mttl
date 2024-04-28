@@ -231,8 +231,12 @@ def load_expert(
         # back-compatibility, we removed this
         expert_info_data.pop("expert_embeddings", None)
         expert_info_data.pop("expert_scores", None)
-
-        expert_weights = expert_checkpoint["state_dict"]
+        # in case of deepspeed checkpoints, the state_dict is named "module"
+        expert_weights = (
+            expert_checkpoint["state_dict"]
+            if "state_dict" in expert_checkpoint
+            else expert_checkpoint["module"]
+        )
         expert_weights = {
             k.replace("model.", "", 1): v for k, v in expert_weights.items()
         }
