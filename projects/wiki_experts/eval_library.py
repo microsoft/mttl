@@ -241,6 +241,12 @@ def run_eval(args: ExpertConfig):
     elif args.merge_or_route == "base":
         module = ExpertModel(**vars(train_cfg))
 
+    elif "single_module" in args.merge_or_route:
+        expert_name = args.merge_or_route.split("/")[-1]
+        module = MultiExpertModel(**vars(train_cfg))
+        expert = library[expert_name]
+        module.add_expert_instance(expert, is_default=True)
+
     elif args.merge_or_route in ["phatgoose", "arrow", "avg_act"]:
         """Routing Approaches"""
         args.router_selector = f"{args.merge_or_route}_router"
