@@ -86,6 +86,7 @@ def run_multitask(args: ExpertConfig):
 
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
+    args.task_names = dm._task_names
 
     module = model_class(**vars(args), tokenizer=dm.tokenizer)
 
