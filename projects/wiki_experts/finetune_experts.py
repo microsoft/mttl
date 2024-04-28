@@ -454,7 +454,7 @@ def finetune_polylib_full_with_svd_retrieval(args: ExpertConfig, dm):
     return load_expert_from_checkpoint(checkpoint)
 
 
-@register_finetune_func("joint")
+@register_finetune_func("shared")
 def finetune_joint(args: ExpertConfig, dm):
     """
     Finetunes a pretrained shared model
@@ -462,13 +462,12 @@ def finetune_joint(args: ExpertConfig, dm):
 
     # TODO: move this to utils for reuse
     def resolve_hf_repo_id(hf_repo_id):
-        parts = hf_repo_id.split("|")
+        parts = hf_repo_id.split("||")
         if len(parts) == 2:
             return parts[0], parts[-1]
         else:
             return hf_repo_id, None
-    expert_name = "joint_flan"
-    hf_repo_id = args.library_id #, expert_name = resolve_hf_repo_id(args.library_id)
+    hf_repo_id, expert_name = resolve_hf_repo_id(args.library_id)
     library = HFExpertLibrary(hf_repo_id)
     expert: Expert = library[expert_name]
     pretrain_args = expert.training_config
