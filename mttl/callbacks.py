@@ -1,6 +1,5 @@
 import sys, os
 import copy
-from typing import Optional
 import torch
 import tqdm
 import shutil
@@ -12,7 +11,6 @@ from torch.optim import Optimizer
 
 from mttl.utils import logger
 from mttl.models.utils import transfer_batch_to_device
-from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 
 
 DEBUG = False
