@@ -410,7 +410,7 @@ class PolySelector(Selector):
         if self.n_tasks == 0:
             # for single task we just return a single distribution that should be used for all examples
             # so that weights.ndim == 1
-            weights = weights.squeeze()
+            weights = weights.flatten()
         return ModulesAndWeightsSelectorOutput(modules, weights)
 
     def get_merging_weights(self, **selector_kwargs) -> Dict:

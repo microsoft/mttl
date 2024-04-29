@@ -234,7 +234,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
     def get_loss(model):
         return -1.0 * rouge_evaluator.evaluate(model, split="train", verbose=False)
 
-    module = ExpertTrainer(**vars(args), device_map="auto")
+    module = MultiExpertModel(**vars(args), device_map="auto")
 
     optimizer = NGRoutingOptimizer(
         model=module,
@@ -249,8 +249,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
     config = WeightedLinearMergeConfig(weights=best_rout_weights)
     weighted_merge = WeightedLinearMerge(config)
     expert = weighted_merge.transform(expert_lib)
-    expert.name = "nevergrad"    
-    module.model.load_state_dict(expert.expert_weights, strict=False)
+    module.add_expert_instance(expert, expert_name="nevergrad", is_default=True)
     rouge = rouge_evaluator.evaluate(module, split="test", verbose=False)
     if wandb.run is not None:
         wandb.log({"test/rougeL": rouge})    
@@ -535,6 +534,7 @@ def finetune_polylib_full(args: ExpertConfig, dm):
 
 
 def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
+    loggers = get_pl_loggers(args)
     callbacks = get_monitors(args)
 
     monitor = "val/loss"

@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 from projects.wiki_experts.src.nevergrad_opt import NGRoutingOptimizer
-from mttl.models.expert_model import ExpertModel as ExpertTrainer
+from mttl.models.expert_model import ExpertModel as ExpertTrainer, MultiExpertModel
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.modifiers.expert_containers.expert_library import LocalExpertLibrary
 
@@ -28,7 +28,7 @@ def test_NGRoutingOptimizer(tmp_path, make_tiny_llama, create_dummy_expert):
     library.add_expert(expert1, expert1.name)
     library.add_expert(expert2, expert2.name)
     model_object = make_tiny_llama()
-    model = ExpertTrainer(model_object=model_object, **vars(config))
+    model = MultiExpertModel(model_object=model_object, **vars(config))
 
     # create an NGRoutingOptimizer instance
     optimizer = NGRoutingOptimizer(
