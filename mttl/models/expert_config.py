@@ -50,7 +50,7 @@ class ExpertConfig(Config):
         self.moe_rkhs_dim = 512
         self.moe_ent_reg = 0.0
         self.moe_ent_free_bits = 0.0
-        self.moe_top_k = None
+        self.moe_top_k = -1
 
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
@@ -114,8 +114,6 @@ class ExpertConfig(Config):
         self.flan_tasks_path = "projects/wiki_experts/task_sets/flan_tasks.json"
 
     def post_init(self, silent=False):
-        if self.moe_top_k is not None and self.moe_top_k < 0:
-            self.moe_top_k = None
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size
 
