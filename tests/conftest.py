@@ -141,31 +141,6 @@ def create_dummy_expert(make_tiny_llama):
 
     return _create_dummy_expert
 
-
-@pytest.fixture
-def create_dummy_expert_(make_tiny_llama):
-    # works with tying for now, replace with create_dummy_expert once tying is fixed
-    from mttl.models.expert_model import ExpertModel
-    from mttl.models.expert_config import ExpertConfig
-    from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
-
-    def _create_dummy_expert(config: ExpertConfig, exp_name) -> Expert:
-        model_object = make_tiny_llama()
-        exp_trainer = ExpertModel(
-            tokenizer=None,
-            expert_info={},
-            **vars(config),
-            model_object=model_object,
-        )
-        dir = f"{config.output_dir}/{exp_name}"
-        os.makedirs(dir, exist_ok=True)
-        checkpoint = exp_trainer.save_pretrained(dir)
-        expert = load_expert(checkpoint, expert_name=exp_name)
-        return expert
-
-    return _create_dummy_expert
-
-
 def setup_mmlu(session):
     # setup_mmlu
     if "MMLU_DATA_DIR" not in os.environ:
