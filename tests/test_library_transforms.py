@@ -87,13 +87,6 @@ def test_arrow_with_tiedlora(tmp_path, create_dummy_expert):
     # create random Lora
     expert1 = patch_expert_weights(create_dummy_expert(config, "module1"))
     expert2 = patch_expert_weights(create_dummy_expert(config, "module2"))
-    # replace by create_dummy_expert when we resolve tying
-    # expert1 = patch_expert_weights(
-    #     create_dummy_expert(config, "module1", model_object=make_tiny_llama())
-    # )
-    # expert2 = patch_expert_weights(
-    #     create_dummy_expert(config, "module2", model_object=make_tiny_llama())
-    # )
 
     library = LocalExpertLibrary(tmp_path)
     library.add_expert(expert1, expert1.name)
