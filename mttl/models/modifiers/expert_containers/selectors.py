@@ -356,6 +356,11 @@ class PolySelector(Selector):
             torch.empty(self.n_tasks + 1, self.config.n_splits).uniform_(-1e-3, 1e-3)
         )
 
+        if self.n_tasks == 0:
+            logger.warning(
+                "No task names found in the config. Using a single task for PolySelector."
+            )
+
     def _get_weights(self):
         # Poly used for finetuning a single task
         if self.n_tasks == 0:
@@ -413,7 +418,7 @@ class PolySelector(Selector):
         if self.n_tasks == 0:
             # for single task we just return a single distribution that should be used for all examples
             # so that weights.ndim == 1
-            weights = weights.flatten()
+            weights = weights.squeeze()
         return ModulesAndWeightsSelectorOutput(modules, weights)
 
     def get_merging_weights(self, **selector_kwargs) -> Dict:
