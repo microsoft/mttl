@@ -202,8 +202,9 @@ def run_eval(args: ExpertConfig):
     library = ExpertLibrary.get_expert_library(
         repo_id=args.library_id,
         token=args.remote_token,
-        exclude_selection=exclude_phi_tasks,
+        exclude_selection=exclude_phi_tasks if args.expert_selection is None else None,
         destination_id=args.destination_library_id,
+        selection=args.expert_selection,
     )
     an_expert = library[next(iter(library.keys()))]
     train_cfg = deepcopy(an_expert.training_config)
@@ -240,12 +241,6 @@ def run_eval(args: ExpertConfig):
         module.load_from_module_dict(library)
     elif args.merge_or_route == "base":
         module = ExpertModel(**vars(train_cfg))
-
-    elif "single_module" in args.merge_or_route:
-        expert_name = args.merge_or_route.split("/")[-1]
-        module = MultiExpertModel(**vars(train_cfg))
-        expert = library[expert_name]
-        module.add_expert_instance(expert, is_default=True)
 
     elif args.merge_or_route in ["phatgoose", "arrow", "avg_act"]:
         """Routing Approaches"""

@@ -458,19 +458,9 @@ def finetune_joint(args: ExpertConfig, dm):
     """
     Finetunes a pretrained shared model
     """
-
-    # TODO: move this to utils for reuse
-    def resolve_hf_repo_id(hf_repo_id):
-        # split the hf_repo_id into the repo_id and the expert name, using "|" as a separator
-        # in this way we can pass the expert name to be loaded as an argument to the script
-        parts = hf_repo_id.split("|")
-        if len(parts) == 2:
-            return parts[0], parts[-1]
-        else:
-            return hf_repo_id, None
-    hf_repo_id, expert_name = resolve_hf_repo_id(args.library_id)
-    library = HFExpertLibrary(hf_repo_id)
-    expert: Expert = library[expert_name]
+    
+    library = HFExpertLibrary(args.library_id)
+    expert: Expert = library[args.expert_selection]
     pretrain_args = expert.training_config
     module = ExpertTrainer(**vars(pretrain_args))
     module.load_state_dict(expert.expert_weights)
