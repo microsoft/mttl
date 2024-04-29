@@ -462,6 +462,8 @@ def finetune_joint(args: ExpertConfig, dm):
 
     # TODO: move this to utils for reuse
     def resolve_hf_repo_id(hf_repo_id):
+        # split the hf_repo_id into the repo_id and the expert name, using "||" as a separator
+        # in this way we can pass the expert name to be loaded as an argument to the script
         parts = hf_repo_id.split("||")
         if len(parts) == 2:
             return parts[0], parts[-1]
@@ -533,7 +535,6 @@ def finetune_polylib_full(args: ExpertConfig, dm):
 
 
 def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
-    loggers = get_pl_loggers(args)
     callbacks = get_monitors(args)
 
     monitor = "val/loss"
