@@ -356,6 +356,11 @@ class PolySelector(Selector):
             torch.empty(self.n_tasks + 1, self.config.n_splits).uniform_(-1e-3, 1e-3)
         )
 
+        if self.n_tasks == 0:
+            logger.warning(
+                "No task names found in the config. Using a single task for PolySelector."
+            )
+
     def _get_weights(self):
         # Poly used for finetuning a single task
         if self.n_tasks == 0:

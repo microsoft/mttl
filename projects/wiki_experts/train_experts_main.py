@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.models.expert_model import ExpertModel
+from mttl.models.expert_model import ExpertModel, MoEModel
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.modifiers.expert_containers.expert_library import (
     ExpertLibrary,
@@ -78,9 +78,15 @@ def run_multitask(args: ExpertConfig):
 
     loggers = get_pl_loggers(args)
     # select dataloader
-    model_class = ExpertModel
+    if args.model_modifier == "poly":
+        args.init_from_scratch = True
+        model_class = MoEModel
+    else:
+        model_class = ExpertModel
+
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
+    args.task_names = dm._task_names
 
     module = model_class(**vars(args), tokenizer=dm.tokenizer)
 
@@ -185,8 +191,16 @@ def run_multitask(args: ExpertConfig):
         if expert_library is not None:
             # refresh expert library: so we dont overwrite the readme if the remote has changed.
             expert_library.refresh_from_remote()
-            expert_name = args.expert_name or args.finetune_task_name
-            expert_library.add_expert_from_ckpt(checkpoint, expert_name)
+
+            if isinstance(module, MoEModel):
+                for expert_name in module.experts_names:
+                    expert = module.get_expert_instance(expert_name)
+                    expert_library.add_expert(expert, expert_name)
+            elif isinstance(module, ExpertModel):
+                expert_name = args.expert_name or args.finetune_task_name
+                expert_library.add_expert_from_ckpt(checkpoint, expert_name)
+            else:
+                raise ValueError("Model class not recognized")
 
         if args.create_transfer_matrix:
             create_transfer_matrix(args, checkpoint)

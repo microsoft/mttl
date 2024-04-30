@@ -948,6 +948,11 @@ class ArrowTransform(LibraryTransform):
                 else:
                     A, B = As[0], Bs[0]
 
+                # Reshape As and Bs (needed for Poly / MHR weights)
+                rank = expert.expert_config.lora_rank
+                A = A.reshape(-1, rank)
+                B = B.reshape(rank, -1)
+
                 W = (A @ B).T  # out_features, in_features
 
                 if self.config.ab_only:
