@@ -8,6 +8,7 @@ import shutil
 import pytorch_lightning as pl
 from pytorch_lightning import LightningModule, Trainer, callbacks as cb
 from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
+from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch.optim import Optimizer
 
 from mttl.utils import logger
@@ -64,6 +65,16 @@ class LiveCheckpointCallback(pl.Callback):
             save_model_path = os.path.join(f"{self.dirpath}", f"{checkpoint_name}.ckpt")
             self._store_checkpoint(trainer, save_model_path, checkpoint_name)
 
+    @rank_zero_only
+    def _maybe_delete_best_path(self):
+        if self.best_model_path and os.path.exists(self.best_model_path):
+            # added this to enable training with multiple GPUS (with deepspeed)
+            # deepspeed seem to create a checkpoint per device, resulting in self.best_model_path being a directory
+            if os.path.isdir(self.best_model_path):
+                shutil.rmtree(self.best_model_path)
+            else:
+                os.remove(self.best_model_path)
+
     def _save_best(self, trainer, this_value):
         if this_value is None:
             raise ValueError("No value to save.. Something has gone wrong!")
@@ -71,15 +82,7 @@ class LiveCheckpointCallback(pl.Callback):
         monitor = self.monitor.replace("/", "-")
         monitor = monitor.replace("_", "-")
 
-        if self.best_model_path is not None:
-            if os.path.exists(self.best_model_path):
-                # added this to enable training with multiple GPUS (with deepspeed)
-                # deepspeed seem to create a checkpoint per device, resulting in self.best_model_path being a directory
-                if os.path.isdir(self.best_model_path):
-                    shutil.rmtree(self.best_model_path)
-                else:
-                    os.remove(self.best_model_path)
-
+        self._maybe_delete_best_path()
         this_filename = os.path.join(
             f"{self.dirpath}",
             f"best_mode_{self.mode}_metric_{monitor}_value_{this_value:.004f}_step_{self._last_step}.ckpt",
@@ -99,22 +102,38 @@ class LiveCheckpointCallback(pl.Callback):
         if metric_name != self.monitor:
             return
 
-        last_value = metric_value
         last_step = trainer.global_step
 
+        if last_step == self._last_step:
+            return
+
+        old_value = metric_value.clone()
+        sync_dist = kwargs.get("sync_dist", False)
+        if sync_dist:
+            is_dist_initialized = (
+                torch.distributed.is_available() and torch.distributed.is_initialized()
+            )
+            world_size = torch.distributed.get_world_size()
+            if is_dist_initialized and world_size > 1:
+                assert isinstance(
+                    metric_value, torch.Tensor
+                ), "sync_dist=True requires a scalar value"
+                metric_value = metric_value.to(torch.float32)
+                torch.distributed.all_reduce(metric_value)
+                metric_value = metric_value / world_size
+
         # compare last_value and _last_value wrt self.mode
-        if last_step > self._last_step:
-            do_save = False
-            self._last_step = last_step
+        do_save = False
+        self._last_step = last_step
 
-            if self.mode == "min":
-                do_save = self._last_value is None or last_value < self._last_value
-            else:
-                do_save = self._last_value is None or last_value > self._last_value
+        if self.mode == "min":
+            do_save = self._last_value is None or metric_value < self._last_value
+        else:
+            do_save = self._last_value is None or metric_value > self._last_value
 
-            if do_save:
-                self._save_best(trainer, last_value)
-                self._last_value = last_value
+        if do_save:
+            self._save_best(trainer, metric_value)
+            self._last_value = metric_value
 
 
 class LossCallback(cb.Callback):

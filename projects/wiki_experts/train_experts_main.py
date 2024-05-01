@@ -23,7 +23,7 @@ from mttl.utils import (
     setup_logging,
     logger,
 )
-
+from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
 from projects.wiki_experts.src.transfer_matrix import (
@@ -185,22 +185,50 @@ def run_multitask(args: ExpertConfig):
         checkpoint = (
             checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
         )
-        module.load_state_dict(torch.load(checkpoint)["state_dict"])
+        if args.compute_strategy == "deepspeed":
+            from deepspeed.utils.zero_to_fp32 import (
+                convert_zero_checkpoint_to_fp32_state_dict,
+            )
+
+            new_path = checkpoint.replace(".ckpt", "_fp32.ckpt")
+
+            @rank_zero_only
+            def convert_ckpt(path, new_path):
+                convert_zero_checkpoint_to_fp32_state_dict(path, new_path)
+
+            convert_ckpt(checkpoint, new_path)
+            if torch.distributed.is_available() and torch.distributed.is_initialized:
+                torch.distributed.barrier()
+
+            # make sure checkpoint has been converted before loading
+            checkpoint = torch.load(new_path)
+        else:
+            checkpoint = torch.load(checkpoint)["state_dict"]
+
+        module.load_state_dict(checkpoint)
         trainer.test(module, dm)
 
-        if expert_library is not None:
-            # refresh expert library: so we dont overwrite the readme if the remote has changed.
-            expert_library.refresh_from_remote()
+        @rank_zero_only
+        def upload_library(expert_library, module):
+            if expert_library is not None:
+                # refresh expert library: so we dont overwrite the readme if the remote has changed.
+                expert_library.refresh_from_remote()
 
-            if isinstance(module, MoEModel):
-                for expert_name in module.experts_names:
-                    expert = module.get_expert_instance(expert_name)
+                if isinstance(module, MoEModel):
+                    with expert_library.batched_commit():
+                        for expert_name in module.experts_names:
+                            expert = module.get_expert_instance(expert_name)
+                            expert_library.add_expert(expert, expert_name)
+                elif isinstance(module, ExpertModel):
+                    expert = module.as_expert()
+                    expert_name = args.expert_name or args.finetune_task_name
                     expert_library.add_expert(expert, expert_name)
-            elif isinstance(module, ExpertModel):
-                expert_name = args.expert_name or args.finetune_task_name
-                expert_library.add_expert_from_ckpt(checkpoint, expert_name)
-            else:
-                raise ValueError("Model class not recognized")
+                else:
+                    raise ValueError("Model class not recognized")
+
+        upload_library(expert_library, module)
+        if torch.distributed.is_available() and torch.distributed.is_initialized:
+            torch.distributed.barrier()
 
         if args.create_transfer_matrix:
             create_transfer_matrix(args, checkpoint)
