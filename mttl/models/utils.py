@@ -102,9 +102,12 @@ class SimpleLogger(pl.loggers.logger.DummyLogger):
                 v = v.item()
             lines.append({"name": k, "value": v, "step": step})
 
-        with open(self.output_file, "a+") as f:
-            for l in lines:
-                f.write(json.dumps(l) + "\n")
+        try:
+            with open(self.output_file, "a+") as f:
+                for l in lines:
+                    f.write(json.dumps(l) + "\n")
+        except Exception as e:
+            logger.error(f"Failed to log metrics: {e}")
 
 
 class OnLogCallback:
@@ -425,7 +428,8 @@ def model_loader_helper(model_name, device_map="auto", load_in_8bit=False):
             torch_dtype=torch.bfloat16,
             device_map=device_map,
         )
-    elif "phi-2" in model_name:
+    elif "phi-2" == model_name:
+        # local phi-2 version. use `microsoft/phi-2 for the official hf version`
         model_object = AutoModelForCausalLM.from_pretrained(
             os.environ["PHI_PATH"],
             load_in_8bit=load_in_8bit,

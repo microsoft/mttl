@@ -16,7 +16,7 @@ from mttl.models.modifiers.expert_containers.selectors import (
     ModulesSelectorOutput,
 )
 
-from mttl.utils import logger
+from mttl.utils import logger, warn_once
 from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
 from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
 from mttl.models.modifiers.expert_containers.expert import Expert
@@ -309,7 +309,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                 if hasattr(self, "_skilled_loras"):
                     skilled_loras = self._skilled_loras
                 else:
-                    logger.warning("Storing skilled loras for reuse.")
+                    warn_once("Storing skilled loras for reuse.")
 
                     # store skilled lora view for reuse locally
                     skilled_loras = [

@@ -5,7 +5,6 @@ from pytorch_lightning import Trainer, seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from mttl.callbacks import LiveCheckpointCallback
 from mttl.models.monitors import get_monitors
 from mttl.callbacks import NanoMMLUCallback, RougeCallback
@@ -30,13 +29,6 @@ def run_multitask(args: ExpertConfig):
     logger.info("Args: {}".format(args.to_json()))
 
     remote_login(args.remote_token)
-    expert_library = None
-    if args.library_id:
-        expert_library = ExpertLibrary.get_expert_library(
-            repo_id=args.library_id,
-            create=True,
-            destination_id=args.destination_library_id,
-        )
 
     # select dataloader
     model_class = MoEModel
@@ -54,7 +46,6 @@ def run_multitask(args: ExpertConfig):
         monitor="val/loss",
         save_last=True,
         mode="min",
-        expert_library=expert_library,
         save_each_epoch=args.save_each_epoch,
     )
     callbacks.append(checkpoint_callback)
@@ -106,7 +97,6 @@ def run_multitask(args: ExpertConfig):
         devices=-1,
         accelerator="gpu",
         logger=loggers,
-        strategy="auto",
         num_sanity_val_steps=0,
         default_root_dir=args.output_dir,
         max_epochs=args.num_train_epochs,
@@ -116,6 +106,7 @@ def run_multitask(args: ExpertConfig):
         enable_checkpointing=False,
         log_every_n_steps=args.gradient_accumulation_steps,
         accumulate_grad_batches=args.gradient_accumulation_steps,
+        strategy=args.compute_strategy if args.compute_strategy else "auto",
         precision=int(args.precision)
         if args.precision in ["16", "32"]
         else args.precision,

@@ -362,6 +362,9 @@ class SkilledLoRA(LoRA):
 
         num_skilled_loras = len(skilled_loras)
 
+        if type(weights) == list:
+            weights = torch.stack(weights, dim=0).to(device)
+
         if num_skilled_loras == 1:
             skilled_loras_a = skilled_loras[0].lora_a.unsqueeze(0)
             skilled_loras_b = skilled_loras[0].lora_b.unsqueeze(0)
@@ -372,9 +375,6 @@ class SkilledLoRA(LoRA):
             skilled_loras_b = torch.stack(
                 [lora.lora_b for lora in skilled_loras], dim=0
             )
-
-        if type(weights) == list:
-            weights = torch.stack(weights, dim=0).to(device)
 
         # assert skilled_loras_a.shape[2] == 1, "Only 1 split is supported for now."
         # assert skilled_loras_b.shape[3] == 1, "Only 1 split is supported for now."
@@ -399,6 +399,9 @@ class SkilledLoRA(LoRA):
             # no batch, skilled lora is shared across all examples, remove batch dimension
             skilled_loras_a = skilled_loras_a.squeeze(0)
             skilled_loras_b = skilled_loras_b.squeeze(0)
+
+            # Special Case we have only have a single lora, we can use the standard forward
+            # Occurs when uniformly merging MHR or Poly runs
             weights = weights.squeeze(0)
             scaling = scaling.squeeze(0)
 
@@ -413,7 +416,7 @@ class SkilledLoRA(LoRA):
                     # partial_out = torch.einsum("bd,sdr->bsr", (input_lora, A))
                     # adapter_out = torch.einsum("bsr,srd->sbd", (partial_out, B))
                     # adapter_out = torch.einsum("s,sbo->bo", (weights, adapter_out)) * scaling
-                    if input_lora.ndim == 2: 
+                    if input_lora.ndim == 2:
                         # this option is for the test tests/test_lora.py::test_skilled_lora_parallel_merge_with_weights_and_merge_after
                         adapter_out = torch.matmul(torch.matmul(input_lora, A), B)
                         adapter_out = (

@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 import dataclasses
 import copy
+from typing import Dict, List
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -347,11 +348,20 @@ class HiddenStateComputer(LibraryTransform):
     def __init__(self, config: HiddenStateComputerConfig = None):
         super().__init__(config or HiddenStateComputerConfig())
 
-    def _fill_missing_args(self, args, default_args):
+    def _update_args(self, args, default_args):
         # TODO: put in library utils
         for k, v in vars(default_args).items():
             if not hasattr(args, k):
                 setattr(args, k, v)
+        # Also, overwrite the updated args even if already present
+        for k, v in default_args._updated_kwargs.items():
+            setattr(args, k, v)
+
+        for arg_name in [
+            "include_task_source",
+        ]:
+            value = getattr(default_args, arg_name, None)
+            setattr(args, arg_name, value)
 
         for arg_name in [
             "include_task_source",
@@ -433,7 +443,7 @@ class HiddenStateComputer(LibraryTransform):
         for _, (expert_name, expert) in enumerate(library.items()):
             training_config = expert.training_config
             if default_args is not None:
-                self._fill_missing_args(training_config, default_args)
+                self._update_args(training_config, default_args)
 
             if self.config.use_base_model_only and self.config.model is not None:
                 training_config.model = self.config.model
@@ -534,13 +544,13 @@ class HiddenStateComputer(LibraryTransform):
 class PhatgooseConfig(LibraryTransformConfig):
     n_steps: int = 1000
     learning_rate: float = 3e-3
+    warmup_ratio: float = 0.1  # 0.9999999 # 0.1
 
 
 class PhatgooseTransform(HiddenStateComputer):
     def __init__(self, config: PhatgooseConfig = None):
         super().__init__(config or PhatgooseConfig())
 
-    @torch.no_grad()
     def transform(
         self,
         library,
@@ -549,16 +559,16 @@ class PhatgooseTransform(HiddenStateComputer):
         expert_names: list = None,
         default_args=None,
     ):
+        if type(library) == str:
+            library = ExpertLibrary.get_expert_library(library)
+
         outputs = {}
         expert_names = expert_names or list(library.keys())
+        loaded_output = library.get_auxiliary_data(data_type=self.config.save_name)
+
         for expert_name in expert_names:
             logger.info(f"Computing PHATGOOSE gates for expert {expert_name}")
             expert: Expert = library[expert_name]
-
-            if type(library) == str:
-                library = ExpertLibrary.get_expert_library(library)
-            loaded_output = library.get_auxiliary_data(data_type=self.config.save_name)
-
             logger.info("Phatgoose save name : {}".format(self.config.save_name))
 
             if (
@@ -594,7 +604,7 @@ class PhatgooseTransform(HiddenStateComputer):
                 train_tasks = None
 
             if default_args is not None:
-                self._fill_missing_args(training_config, default_args)
+                self._update_args(training_config, default_args)
                 training_config.include_task_source = default_args.include_task_source
                 training_config.output_dir = default_args.output_dir
                 training_config.wandb_project = default_args.wandb_project
@@ -616,8 +626,9 @@ class PhatgooseTransform(HiddenStateComputer):
             training_config.eval_every = -1
             training_config.total_steps = self.config.n_steps
             training_config.learning_rate = self.config.learning_rate
-            training_config.warmup_steps = 0
-            training_config.warmup_proportion = 0.0
+            training_config.warmup_proportion = self.config.warmup_ratio
+
+            logger.info("Training config: {}".format(vars(training_config)))
 
             # init model
             from mttl.models.expert_model import MultiExpertModel
@@ -635,31 +646,36 @@ class PhatgooseTransform(HiddenStateComputer):
                     unfrozen_sum += value.sum()
                 else:
                     frozen_sum += value.sum()
+                    value.requires_grad = False
 
             from mttl.models.modifiers.expert_containers.utils import train_module
 
             checkpoint = train_module(training_config, model, dm)
 
-            from mttl.models.expert_model import MultiExpertModel
+            if (
+                training_config.compute_strategy
+                and training_config.compute_strategy != "deepspeed"
+            ):
+                from mttl.models.expert_model import MultiExpertModel
 
-            model_after = MultiExpertModel(**vars(training_config)).to("cuda")
-            model_after.add_expert_instance(expert, is_default=True)
-            model_after.load_state_dict(torch.load(checkpoint)["state_dict"])
+                model_after = MultiExpertModel(**vars(training_config)).to("cuda")
+                model_after.add_expert_instance(expert, is_default=True)
+                model_after.load_state_dict(torch.load(checkpoint)["state_dict"])
 
-            # for checksum
-            frozen_sum_after, unfrozen_sum_after = 0, 0
-            for key, value in model_after.state_dict().items():
-                if re.match(".*selector.gates.*.v", key):
-                    unfrozen_sum_after += value.sum()
-                else:
-                    frozen_sum_after += value.sum()
+                # for checksum
+                frozen_sum_after, unfrozen_sum_after = 0, 0
+                for key, value in model_after.state_dict().items():
+                    if re.match(".*selector.gates.*.v", key):
+                        unfrozen_sum_after += value.sum()
+                    else:
+                        frozen_sum_after += value.sum()
 
-            assert (
-                frozen_sum == frozen_sum_after
-            ), "Frozen params changed during training"
-            assert (
-                unfrozen_sum != unfrozen_sum_after
-            ), "Unfrozen params did not change during training"
+                assert (
+                    frozen_sum == frozen_sum_after
+                ), "Frozen params changed during training"
+                assert (
+                    unfrozen_sum != unfrozen_sum_after
+                ), "Unfrozen params did not change during training"
 
             # extract prototypes
             prototypes = {}
@@ -932,6 +948,11 @@ class ArrowTransform(LibraryTransform):
                 else:
                     A, B = As[0], Bs[0]
 
+                # Reshape As and Bs (needed for Poly / MHR weights)
+                rank = expert.expert_config.lora_rank
+                A = A.reshape(-1, rank)
+                B = B.reshape(rank, -1)
+
                 W = (A @ B).T  # out_features, in_features
 
                 if self.config.ab_only:
@@ -1113,7 +1134,7 @@ class CrossExpertNormComputer(HiddenStateComputer):
         training_config.router_selector = "task_selector"
 
         if default_args is not None:
-            self._fill_missing_args(training_config, default_args)
+            self._update_args(training_config, default_args)
 
         training_config.train_batch_size = (
             default_args.predict_batch_size if default_args is not None else 4
@@ -1125,10 +1146,11 @@ class CrossExpertNormComputer(HiddenStateComputer):
             ]
         )
 
-        from projects.wiki_experts.src.expert_model import MoETrainer
         from mttl.models.modifiers.expert_containers import ExpertContainer
 
-        model = MoETrainer(**vars(training_config)).to("cuda")
+        from mttl.models.expert_model import MoEModel
+
+        model = MoEModel(**vars(training_config)).to("cuda")
 
         # build a hook to forward across other (ood) experts
         def build_hook(layer_name, container, task_id_container):
@@ -1231,7 +1253,7 @@ class MBCWithCosSimTransform(LibraryTransform):
         library: ExpertLibrary,
         persist: bool = False,
         recompute: bool = False,
-    ) -> dict[str, list[str]]:
+    ) -> Dict[str, List[str]]:
         svd_config = SVDEmbeddingTransformConfig(
             name=self.config.name,
             n_components=self.config.n_components,

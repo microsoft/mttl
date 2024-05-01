@@ -102,6 +102,9 @@ class ExpertConfig(Config):
         self.n_ng_iterations = 30  # number of iterations for LoraHub
         self.recompute_prototypes = False
         self.expert_embeds_save_name = None
+        self.selector_logging = (
+            True  # If false, routing specific stats are not computed
+        )
 
         self.phi_2_align_heads = False
         self.lora_merge_after = False  # if True, tried to merge after the outer product, currently only applicable to LoRA

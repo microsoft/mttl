@@ -373,6 +373,7 @@ class MultiExpertModel(ExpertModel):
                 expert_name,
                 expert_config=expert_config,
                 expert_model=self.hparams.model,
+                training_config=self.training_config,
             ),
         )
 
@@ -607,13 +608,15 @@ class MultiExpertModel(ExpertModel):
 
 
 class MoEModel(MultiExpertModel):
-    def __init__(self, expert_library:ExpertLibrary=None, **kwargs):
+    def __init__(self, expert_library: ExpertLibrary = None, **kwargs):
         kwargs["top_k"] = kwargs["moe_top_k"]
         kwargs["emb_dim"] = kwargs["moe_emb_dim"]
         kwargs["rkhs_dim"] = kwargs["moe_rkhs_dim"]
+        init_from_scratch = kwargs.get("init_from_scratch", False)
+
         super().__init__(**kwargs)
 
-        if not self.hparams.library_id and expert_library is None:
+        if not self.hparams.library_id and expert_library is None or init_from_scratch:
             for i in range(self.hparams.moe_num_experts):
                 # Adding a Skilled LoRA with 1 skill.
                 exp_config = SkilledLoRAConfig(
@@ -631,7 +634,9 @@ class MoEModel(MultiExpertModel):
             self.moe_num_experts = kwargs["moe_num_experts"]
         else:
             if expert_library is None:
-                expert_library = ExpertLibrary.get_expert_library(self.hparams.library_id)
+                expert_library = ExpertLibrary.get_expert_library(
+                    self.hparams.library_id
+                )
             for i, expert in enumerate(sorted(list(expert_library.keys()))):
                 self.add_expert_instance(expert_library[expert], expert_name=f"e{i}")
 
