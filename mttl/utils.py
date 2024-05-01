@@ -519,13 +519,26 @@ def retry_with_exponential_backoff(
 
 
 # decorator like rank_zero_only but with a barrier at the end
-def rank_zero_only_and_wait():
+def rank_zero_only_and_wait(before=True, after=True):
     def decorator(fn):
         def wrapped_fn(*args, **kwargs):
-            if rank_zero_only.rank == 0:
-                fn(*args, **kwargs)
-            if torch.distributed.is_available() and torch.distributed.is_initialized():
+            output = None
+            if (
+                before
+                and torch.distributed.is_available()
+                and torch.distributed.is_initialized()
+            ):
                 torch.distributed.barrier()
+            if rank_zero_only.rank == 0:
+                output = fn(*args, **kwargs)
+            if (
+                after
+                and torch.distributed.is_available()
+                and torch.distributed.is_initialized()
+            ):
+                torch.distributed.barrier()
+
+            return output
 
         return wrapped_fn
 

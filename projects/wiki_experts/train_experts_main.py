@@ -71,7 +71,7 @@ def run_multitask(args: ExpertConfig):
     expert_library = None
     if args.library_id:
 
-        @rank_zero_only_and_wait()
+        @rank_zero_only_and_wait(before=False, after=True)
         def create_library(args):
             expert_library = ExpertLibrary.get_expert_library(
                 repo_id=args.library_id,
@@ -198,7 +198,7 @@ def run_multitask(args: ExpertConfig):
 
             new_path = checkpoint.replace(".ckpt", "_fp32.ckpt")
 
-            @rank_zero_only_and_wait()
+            @rank_zero_only_and_wait(before=True, after=True)
             def convert_ckpt(path, new_path):
                 convert_zero_checkpoint_to_fp32_state_dict(path, new_path)
 
@@ -210,7 +210,7 @@ def run_multitask(args: ExpertConfig):
         module.load_state_dict(checkpoint)
         trainer.test(module, dm)
 
-        @rank_zero_only_and_wait()
+        @rank_zero_only_and_wait(before=False, after=True)
         def upload_library(expert_library, module):
             if expert_library is not None:
                 # refresh expert library: so we dont overwrite the readme if the remote has changed.
