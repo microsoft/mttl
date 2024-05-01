@@ -51,7 +51,7 @@ class ExpertConfig(Config):
         self.moe_rkhs_dim = 512
         self.moe_ent_reg = 0.0
         self.moe_ent_free_bits = 0.0
-        self.moe_top_k = -1
+        self.moe_top_k = None
 
         self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
         self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
