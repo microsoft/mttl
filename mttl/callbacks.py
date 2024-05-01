@@ -113,7 +113,9 @@ class LiveCheckpointCallback(pl.Callback):
             is_dist_initialized = (
                 torch.distributed.is_available() and torch.distributed.is_initialized()
             )
-            world_size = torch.distributed.get_world_size()
+            world_size = (
+                torch.distributed.get_world_size() if is_dist_initialized else 1
+            )
             if is_dist_initialized and world_size > 1:
                 assert isinstance(
                     metric_value, torch.Tensor

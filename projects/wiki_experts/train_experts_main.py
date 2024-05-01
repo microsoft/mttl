@@ -21,9 +21,9 @@ from mttl.utils import (
     get_pl_loggers,
     remote_login,
     setup_logging,
+    rank_zero_only_and_wait,
     logger,
 )
-from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
 from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
 from projects.wiki_experts.src.transfer_matrix import (
@@ -70,11 +70,17 @@ def run_multitask(args: ExpertConfig):
     remote_login(args.remote_token)
     expert_library = None
     if args.library_id:
-        expert_library = ExpertLibrary.get_expert_library(
-            repo_id=args.library_id,
-            create=True,
-            destination_id=args.destination_library_id,
-        )
+
+        @rank_zero_only_and_wait()
+        def create_library(args):
+            expert_library = ExpertLibrary.get_expert_library(
+                repo_id=args.library_id,
+                create=True,
+                destination_id=args.destination_library_id,
+            )
+            return expert_library
+
+        expert_library = create_library(args)
 
     loggers = get_pl_loggers(args)
     # select dataloader
@@ -192,15 +198,11 @@ def run_multitask(args: ExpertConfig):
 
             new_path = checkpoint.replace(".ckpt", "_fp32.ckpt")
 
-            @rank_zero_only
+            @rank_zero_only_and_wait()
             def convert_ckpt(path, new_path):
                 convert_zero_checkpoint_to_fp32_state_dict(path, new_path)
 
             convert_ckpt(checkpoint, new_path)
-            if torch.distributed.is_available() and torch.distributed.is_initialized:
-                torch.distributed.barrier()
-
-            # make sure checkpoint has been converted before loading
             checkpoint = torch.load(new_path)
         else:
             checkpoint = torch.load(checkpoint)["state_dict"]
@@ -208,7 +210,7 @@ def run_multitask(args: ExpertConfig):
         module.load_state_dict(checkpoint)
         trainer.test(module, dm)
 
-        @rank_zero_only
+        @rank_zero_only_and_wait()
         def upload_library(expert_library, module):
             if expert_library is not None:
                 # refresh expert library: so we dont overwrite the readme if the remote has changed.
@@ -227,8 +229,6 @@ def run_multitask(args: ExpertConfig):
                     raise ValueError("Model class not recognized")
 
         upload_library(expert_library, module)
-        if torch.distributed.is_available() and torch.distributed.is_initialized:
-            torch.distributed.barrier()
 
         if args.create_transfer_matrix:
             create_transfer_matrix(args, checkpoint)
