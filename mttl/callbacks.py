@@ -1,6 +1,5 @@
 import sys, os
 import copy
-from typing import Optional
 import torch
 import tqdm
 import shutil
@@ -12,7 +11,6 @@ from torch.optim import Optimizer
 
 from mttl.utils import logger
 from mttl.models.utils import transfer_batch_to_device
-from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 
 
 DEBUG = False
@@ -46,7 +44,7 @@ class LiveCheckpointCallback(pl.Callback):
         self.save_weights_only = save_weights_only
         self.save_each_epoch = save_each_epoch
 
-    def _store_checkpoint(self, trainer, checkpoint_path, checkpoint_name=None):
+    def _store_checkpoint(self, trainer, checkpoint_path):
         """Saves the checkpoint and pushes to the ExpertLibrary if one is available."""
         trainer.save_checkpoint(checkpoint_path, weights_only=self.save_weights_only)
 
@@ -59,10 +57,9 @@ class LiveCheckpointCallback(pl.Callback):
     def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Saves each checkpoint after each epoch"""
         if self.save_each_epoch:
-            expert_name = getattr(pl_module.hparams, "expert_name", None)
-            checkpoint_name = f"{expert_name}-epoch-{trainer.current_epoch}"
+            checkpoint_name = f"epoch_{trainer.current_epoch}"
             save_model_path = os.path.join(f"{self.dirpath}", f"{checkpoint_name}.ckpt")
-            self._store_checkpoint(trainer, save_model_path, checkpoint_name)
+            self._store_checkpoint(trainer, save_model_path)
 
     def _save_best(self, trainer, this_value):
         if this_value is None:

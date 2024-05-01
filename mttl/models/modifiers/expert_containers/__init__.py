@@ -186,6 +186,7 @@ def replace_selector_for_container(
 
     n_selectors = 0
     n_selectors_views = 0
+
     for container in expert_containers:
         selector = create_selector_for_container(
             transformer,
@@ -202,9 +203,11 @@ def replace_selector_for_container(
         n_selectors_views += isinstance(selector, SelectorView)
 
     if selector_weights is not None:
-        raise NotImplementedError()
-
-    return n_selectors, n_selectors_views
+        raise NotImplementedError(
+            "Support for `selector_weights` is not implemented yet."
+        )
+    else:
+        return n_selectors, n_selectors_views
 
 
 class TrieNode:
@@ -323,6 +326,7 @@ def add_expert_to_transformer(
 
     total_layers = 0
     added_layers = []
+    added_containers = []
 
     for m_name, module in get_modules_to_modify_trie(transformer):
         if re.fullmatch(expert_config.modify_modules, m_name):
@@ -349,6 +353,7 @@ def add_expert_to_transformer(
                             c_name,
                             expert_container,
                         )
+                        added_containers.append(expert_container)
                     else:
                         expert_container = layer
 
@@ -358,6 +363,12 @@ def add_expert_to_transformer(
                         action=action,
                         is_default=is_default,
                     )
+
+    if not added_layers:
+        raise ValueError(
+            "You were trying to add an expert but no expert containers were created, this is likely due to a misconfiguration of the expert config."
+            " `modify_layers` and `modify_modules` did not return a match for the current model."
+        )
 
     if routing_config is not None:
         replace_selector_for_container(
@@ -378,11 +389,4 @@ def add_expert_to_transformer(
             len(transformer.selectors[model_modifier]),
         )
 
-    # what about raising an error if no layers were found?
-    # if not added_layers:
-    #     raise ValueError(
-    #         f"No layers were found to modify with the given model and config settings."
-    #         f"Model: {transformer.__class__.__name__} Config: {expert_config}"
-
-    #     )
     logger.debug("Patched layers: %s", added_layers)
