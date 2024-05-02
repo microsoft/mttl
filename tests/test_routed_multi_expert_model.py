@@ -13,6 +13,7 @@ from mttl.models.modifiers.expert_containers import (
 )
 from mttl.models.modifiers.expert_containers.selectors import (
     BatchSequenceExpertsAndWeightsSelectorOutput,
+    SelectorOutput,
     PolySelectorDirect,
     MOERKHSSelector,
     PerTokenSelector,
@@ -317,7 +318,7 @@ class TestMultiExpertModel:
 
         assert spy.call_count == 1
         assert isinstance(spy.spy_return, BatchSequenceExpertsAndWeightsSelectorOutput)
-        assert spy.spy_return.experts == None
+        assert spy.spy_return.experts is SelectorOutput.ALL_EXPERTS
         assert spy.spy_return.weights.shape == (2, 3, 8)
 
     def test_expert_selector_with_moe_routing_soft_granularity(
@@ -378,7 +379,7 @@ class TestMultiExpertModel:
 
         assert spy.call_count == 1
         assert isinstance(spy.spy_return, BatchSequenceExpertsAndWeightsSelectorOutput)
-        assert spy.spy_return.experts == None
+        assert spy.spy_return.experts is SelectorOutput.ALL_EXPERTS
         assert spy.spy_return.weights.shape == (2, 3, 8)
 
     def test_expert_selector_with_moe_routing_hard(
