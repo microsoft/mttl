@@ -114,51 +114,97 @@ class SelectorConfig:
 class SelectorOutput:
     pass
 
+    def __post_init__(self):
+        if hasattr(self, "weights") and self.weights.ndim != len(self.dim_names):
+            raise ValueError(
+                "Weights should have the same number of dimensions as dim_names for this SelectorOutput."
+            )
+
+    @property
+    def dim_names(self):
+        raise NotImplementedError("dim_names not implemented for this selector output.")
+
 
 @dataclass
-class ModulesSelectorOutput(SelectorOutput):
-    """A selector output that contains a list of modules without weights.
+class BatchExpertsSelectorOutput(SelectorOutput):
+    """A selector output that contains a list of experts without weights.
 
-    modules: names of the selected modules
+    experts: names of the selected experts for each element in the batch
     """
 
-    modules: List[str]
+    experts: List[str]
 
 
 @dataclass
-class ModulesAndWeightsSelectorOutput(SelectorOutput):
-    """A selector output that contains a list of modules and weights shared across the batch.
+class ExpertsAndWeightsSelectorOutput(SelectorOutput):
+    """A selector output that contains a list of experts and weights shared across the batch.
 
-    modules: names of the selected modules
+    experts: names of the selected experts
     weights: their weights
     """
 
-    modules: List[str]
-    weights: Union[List[float], torch.Tensor]
+    experts: List[str]
+    weights: torch.Tensor
+
+    @property
+    def dim_names(self):
+        return ["experts"]
 
 
 @dataclass
-class BatchModulesAndWeightsSelectorOutput(SelectorOutput):
-    """A selector output that contains a list of modules and weights for each example.
+class BatchExpertsAndWeightsSelectorOutput(SelectorOutput):
+    """A selector output that contains a list of experts and weights for each example.
 
-    modules: either names or indices of the selected modules
+    experts: either names or indices of the selected experts
     weights: their weights
     """
 
-    modules: Union[List[List[str]], torch.Tensor]
-    weights: Union[List[List[float]], torch.Tensor]
+    experts: Union[List[List[str]], torch.Tensor]
+    weights: torch.Tensor
+
+    @property
+    def dim_names(self):
+        return ["batch", "experts"]
 
 
 @dataclass
-class BatchSequenceModulesAndWeightsSelectorOutput(SelectorOutput):
-    """A selector output that contains a list of modules and weights for each example and token.
+class ExpertsAndSplitsAndWeightsSelectorOutput(BatchExpertsAndWeightsSelectorOutput):
+    """A selector output that contains a list of experts and weights for each split (MHR) and expert shared across the batch.
 
-    modules: indices of the selected modules
+    experts: names of the selected experts
     weights: their weights
     """
 
-    modules: torch.Tensor
-    weights: Union[List[List[float]], torch.Tensor]
+    @property
+    def dim_names(self):
+        return ["splits", "experts"]
+
+
+@dataclass
+class BatchSequenceExpertsAndWeightsSelectorOutput(SelectorOutput):
+    """A selector output that contains a list of experts and weights for each example and token.
+
+    experts: indices of the selected experts
+    weights: their weights
+    """
+
+    experts: torch.Tensor
+    weights: torch.Tensor
+
+    @property
+    def dim_names(self):
+        return ["batch", "sequence", "experts"]
+
+
+@dataclass
+class BatchSequenceExpertsSplitsAndWeightsSelectorOutput(
+    BatchSequenceExpertsAndWeightsSelectorOutput
+):
+    """A selector output that contains a list of experts and weights for each example, token and split (MHR)."""
+
+    @property
+    def dim_names(self):
+        return ["batch", "sequence", "splits", "experts"]
 
 
 def forward_with_cache(func):
@@ -307,17 +353,19 @@ class TaskPredictorSelector(Selector):
             self.expert_ranker.init_clusters(kwargs["training_config"].library_id)
 
     @forward_with_cache
-    def forward(self, input, **kwargs) -> BatchModulesAndWeightsSelectorOutput:
+    def forward(self, input, **kwargs) -> BatchExpertsAndWeightsSelectorOutput:
         # get the sources_texts from routing_infos
         if hasattr(self.info_container["routing_infos"], "sources_texts"):
             sources_texts = self.info_container["routing_infos"].sources_texts
             self.expert_ranker.set_available_tasks(self.expert_names)
 
-            modules, weights = self.expert_ranker.predict_task(
+            experts, weights = self.expert_ranker.predict_task(
                 sources_texts, n=self.ranker_top_k
             )
-            logger.debug(f"Predicted tasks: {modules} with weights {weights}")
-            return BatchModulesAndWeightsSelectorOutput(modules, weights)
+            logger.debug(f"Predicted tasks: {experts} with weights {weights}")
+
+            weights = torch.tensor(weights, device=input.device)
+            return BatchExpertsAndWeightsSelectorOutput(experts, weights)
         else:
             raise ValueError(
                 "Routing infos does not contain sources_texts, cannot predict tasks."
@@ -361,25 +409,42 @@ class PolySelector(Selector):
                 "No task names found in the config. Using a single task for PolySelector."
             )
 
-    def _get_weights(self):
+    def _convert_task_names_to_ids(self, task_names: List[str]) -> torch.LongTensor:
+        """Converts task names to task ids (indices in the module_logits routing tensor)."""
+        return torch.LongTensor(
+            [
+                (
+                    self.config.task_names.index(t)
+                    if t in self.config.task_names
+                    else self.n_tasks
+                )
+                for t in task_names
+            ],
+            device=self.module_logits.device,
+        )
+
+    def _get_weights(self, task_names: List[str] = None) -> torch.Tensor:
+        """Gets the routing weights for the corresponding task names.
+
+        If `task_names` is None, read task names from the routing infos structure.
+        """
         # Poly used for finetuning a single task
         if self.n_tasks == 0:
             task_ids = [0]
         else:
-            # Poly for pretraining with multiple tasks
-            if hasattr(self.info_container["routing_infos"], "task_ids_from_name"):
-                task_ids = self.info_container["routing_infos"].task_ids_from_name
+            # if task names was specified, then we use that
+            if task_names is not None:
+                task_ids = self._convert_task_names_to_ids(task_names)
             else:
-                task_ids = [
-                    (
-                        self.config.task_names.index(t)
-                        if t in self.config.task_names
-                        else self.n_tasks
-                    )
-                    for t in self.info_container["routing_infos"].task_names
-                ]
-                task_ids = torch.LongTensor(task_ids).to(self.module_logits.device)
-                self.info_container["routing_infos"].task_ids_from_name = task_ids
+                routing_info: RoutingInfo = self.info_container.get["routing_infos"]
+
+                if hasattr(routing_info, "task_ids_from_name"):
+                    task_ids = routing_info.task_ids_from_name
+                else:
+                    task_ids = self._convert_task_names_to_ids(routing_info.task_names)
+                    # cache the computation for future use
+                    self.info_container["routing_infos"].task_ids_from_name = task_ids
+
             if task_ids.max() < self.n_tasks:
                 if PolySelector.avg_selector_warned:
                     logger.warning(
@@ -408,26 +473,34 @@ class PolySelector(Selector):
             module_logits.size(0), self.config.n_splits, self.n_experts
         )
         module_weights = module_logits / (module_logits.sum(dim=-1, keepdim=True) + EPS)
-
         return module_weights
 
     @forward_with_cache
-    def forward(self, input, **kwargs) -> ModulesAndWeightsSelectorOutput:
+    def forward(
+        self, input, **kwargs
+    ) -> Union[
+        BatchSequenceExpertsSplitsAndWeightsSelectorOutput,
+        BatchSequenceExpertsAndWeightsSelectorOutput,
+    ]:
+        """Returns the experts and weights for the task names used in the current batch.
+
+        If there is only one task, we return a ExpertsAndWeightsSelectorOutput. This is to show that the weights are shared across the batch,
+        and therefore can allow speedups in the forward pass.
+        """
         weights = self._get_weights()
-        modules = self.expert_names
+        experts = self.expert_names
+
         if self.n_tasks == 0:
-            # for single task we just return a single distribution that should be used for all examples
-            # so that weights.ndim == 1
-            weights = weights.squeeze()
-        return ModulesAndWeightsSelectorOutput(modules, weights)
+            return ExpertsAndSplitsAndWeightsSelectorOutput(experts, weights.squeeze(0))
+
+        return BatchSequenceExpertsSplitsAndWeightsSelectorOutput(experts, weights)
 
     def get_merging_weights(self, **selector_kwargs) -> Dict:
         return self.get_routing_weights(**selector_kwargs)
 
     def get_routing_weights(self, task_name, **selector_kwargs) -> Dict:
         assert task_name in self.config.task_names, f"Task {task_name} not found."
-        self.info_container["routing_infos"] = RoutingInfo(task_names=[task_name])
-        weights = self._get_weights()
+        weights = self._get_weights(task_names=[task_name])
         return {k: v.detach().item() for k, v in zip(self.expert_names, weights[0][0])}
 
     def add_expert(self, expert_name: str, **kwargs):
@@ -475,7 +548,7 @@ class MOERKHSSelector(Selector):
         return self.rkhs_hid(input_view).reshape(input.shape[0], input.shape[1], -1)
 
     @forward_with_cache
-    def forward(self, input, **kwargs) -> BatchSequenceModulesAndWeightsSelectorOutput:
+    def forward(self, input, **kwargs) -> BatchSequenceExpertsAndWeightsSelectorOutput:
         # do routing business on fp32
         input = input.to(dtype=self.rkhs_exp.weight.dtype)
 
@@ -499,8 +572,8 @@ class MOERKHSSelector(Selector):
         g.append(router_logits)
         self.info_container["routing_gates"] = g
 
-        return BatchSequenceModulesAndWeightsSelectorOutput(
-            modules=selected_experts, weights=routing_weights
+        return BatchSequenceExpertsAndWeightsSelectorOutput(
+            experts=selected_experts, weights=routing_weights
         )
 
     def get_merging_weights(self, **selector_kwargs) -> Dict:
@@ -671,7 +744,7 @@ class PerTokenSelector(TaskToExpertTracker):
             self.metric_logger.update(prefix=self.__layer_name__, value_dict=to_store)
 
     @forward_with_cache
-    def forward(self, input, **kwargs) -> BatchSequenceModulesAndWeightsSelectorOutput:
+    def forward(self, input, **kwargs) -> BatchSequenceExpertsAndWeightsSelectorOutput:
         # do routing business on fp32
         temp = (
             self.config.router_temp
@@ -701,7 +774,7 @@ class PerTokenSelector(TaskToExpertTracker):
 
         if self.config.moe_top_k > 0:
             # For now, we always renormalize the routing weights for hard routing
-            top_k_logits, modules = torch.topk(
+            top_k_logits, experts = torch.topk(
                 router_logits, self.config.moe_top_k, dim=-1
             )
             router_probs = F.softmax(top_k_logits, dim=-1)
@@ -709,18 +782,18 @@ class PerTokenSelector(TaskToExpertTracker):
             # Adjust router_logits accordingly for logging
             chosen = torch.zeros_like(router_logits, dtype=torch.bool)
             chosen.scatter_add_(
-                dim=-1, index=modules, src=torch.ones_like(modules).bool()
+                dim=-1, index=experts, src=torch.ones_like(experts).bool()
             )
             router_logits = router_logits.masked_fill(~chosen, -1e9)
         else:
-            modules = None
+            experts = None
             router_probs = F.softmax(router_logits, dim=-1, dtype=torch.float)
 
         self._log_entropy(router_logits)
         self._maybe_log_in_dist(router_logits)
 
-        return BatchSequenceModulesAndWeightsSelectorOutput(
-            modules=modules, weights=router_probs
+        return BatchSequenceExpertsAndWeightsSelectorOutput(
+            experts=experts, weights=router_probs
         )
 
     def add_expert(self, expert_name: str, expert_info: ExpertInfo = None, **kwargs):
@@ -797,7 +870,7 @@ class ZeroSelector(Selector):
     @forward_with_cache
     def forward(
         self, input, container, **kwargs
-    ) -> BatchModulesAndWeightsSelectorOutput:
+    ) -> BatchExpertsAndWeightsSelectorOutput:
         from mttl.models.modifiers.expert_containers.expert_containers import (
             CoalescedLoRAExpertContainer,
         )
@@ -835,8 +908,8 @@ class ZeroSelector(Selector):
         g.append(torch.log(routing_weights + 1e-6))
         self.info_container["routing_gates"] = g
 
-        return BatchModulesAndWeightsSelectorOutput(
-            modules=selected_experts, weights=routing_weights
+        return BatchExpertsAndWeightsSelectorOutput(
+            experts=selected_experts, weights=routing_weights
         )
 
     def get_merging_weights(self, **selector_kwargs) -> Dict:
@@ -871,7 +944,7 @@ class ZeroPerTokenSelector(Selector):
     @forward_with_cache
     def forward(
         self, input, container, **kwargs
-    ) -> BatchSequenceModulesAndWeightsSelectorOutput:
+    ) -> BatchSequenceExpertsAndWeightsSelectorOutput:
         # do routing business on fp32
         input = input.to(dtype=container.experts.lora_a.dtype)
 
@@ -898,8 +971,8 @@ class ZeroPerTokenSelector(Selector):
         g.append(torch.log(routing_weights + 1e-6))
         self.info_container["routing_gates"] = g
 
-        return BatchSequenceModulesAndWeightsSelectorOutput(
-            modules=selected_experts, weights=routing_weights
+        return BatchSequenceExpertsAndWeightsSelectorOutput(
+            experts=selected_experts, weights=routing_weights
         )
 
     def get_merging_weights(self, **selector_kwargs) -> Dict:
@@ -952,7 +1025,7 @@ class PhatgooseTrainerSelector(Selector):
         self.routing_gates = []  # for logging purposes at training time
 
     @forward_with_cache
-    def forward(self, input, **kwargs) -> BatchSequenceModulesAndWeightsSelectorOutput:
+    def forward(self, input, **kwargs) -> BatchSequenceExpertsAndWeightsSelectorOutput:
         # selectors for tasks are trained independently
         # all samples go through the same selector
         scores = self.gates[self.default_expert_name](input)
@@ -960,7 +1033,7 @@ class PhatgooseTrainerSelector(Selector):
         container = kwargs.get("container", None)
         if container is not None:
             self.routing_gates.append(scores.detach().cpu().float())
-        return BatchSequenceModulesAndWeightsSelectorOutput(
+        return BatchSequenceExpertsAndWeightsSelectorOutput(
             torch.zeros_like(scores, dtype=torch.int8), scores
         )
 
@@ -983,11 +1056,6 @@ class PhatgooseTrainerSelector(Selector):
 
 @dataclass
 class PolySelectorDirectConfig(PolySelectorConfig):
-    pass
-
-
-@dataclass
-class PolySelectorDirectConfigUniform(PolySelectorConfig):
     pass
 
 
@@ -1057,8 +1125,13 @@ class PolySelectorDirect(PolySelector):
     @forward_with_cache
     def forward(self, *args, **kwargs):
         weights = self._get_weights()
-        modules = list(self.module_logits_dict.keys())
-        return ModulesAndWeightsSelectorOutput(modules, weights)
+        experts = list(self.module_logits_dict.keys())
+        return ExpertsAndWeightsSelectorOutput(experts, weights)
+
+
+@dataclass
+class PolySelectorDirectConfigUniform(PolySelectorConfig):
+    pass
 
 
 @register_multi_expert_selector("uniform", PolySelectorDirectConfigUniform)
@@ -1078,38 +1151,6 @@ class PolyUniform(PolySelectorDirect):
 
 
 @dataclass
-class RoutingInfoContainerConfig(SelectorConfig):
-    pass
-
-
-@register_multi_expert_selector("info_selector", RoutingInfoContainerConfig)
-class RoutingInfosContainerSelector(Selector):
-    """A simple selector that looks for routing information in the info container."""
-
-    def __init__(self, info_container, **kwargs) -> None:
-        super().__init__(info_container)
-
-        self.default_expert_name = None
-
-    @forward_with_cache
-    def forward(self, input, **kwargs) -> BatchModulesAndWeightsSelectorOutput:
-        if not hasattr(self.routing_infos, "routing_modules"):
-            raise ValueError("routing_modules not in routing_infos")
-
-        if not hasattr(self.routing_infos, "routing_weights"):
-            raise ValueError("routing_weights not in routing_infos")
-
-        routing_mods = self.routing_infos.routing_modules
-        routing_weights = self.routing_infos.routing_weights
-        return BatchModulesAndWeightsSelectorOutput(routing_mods, routing_weights)
-
-    def get_merging_weights(self, **selector_kwargs) -> Dict:
-        raise NotImplementedError(
-            "Not implemented yet for RoutingInfosContainerSelector."
-        )
-
-
-@dataclass
 class TaskNameSelectorConfig(SelectorConfig):
     pass
 
@@ -1121,7 +1162,7 @@ class TaskNameSelector(TaskToExpertTracker):
         self.default_expert_name = None
 
     @forward_with_cache
-    def forward(self, input, **kwargs) -> ModulesSelectorOutput:
+    def forward(self, input, **kwargs) -> ExpertsSelectorOutput:
         if not self.routing_infos or not self.routing_infos.task_names:
             # try to infer batch size
             if "input_ids" in kwargs:
@@ -1132,7 +1173,7 @@ class TaskNameSelector(TaskToExpertTracker):
             if not self.default_expert_name:
                 raise ValueError("No default expert name set and no task names given!")
 
-            modules = [self.default_expert_name for _ in range(batch_size)]
+            experts = [self.default_expert_name for _ in range(batch_size)]
         else:
             task_names = self.routing_infos.task_names
 
@@ -1147,12 +1188,12 @@ class TaskNameSelector(TaskToExpertTracker):
                 raise ValueError(
                     "Experts for all tasks have not been loaded! Set a default expert?"
                 )
-            modules = [
+            experts = [
                 self.task_to_expert_name.get(task_name, self.default_expert_name)
                 for task_name in task_names
             ]
 
-        return ModulesSelectorOutput(modules)
+        return ExpertsSelectorOutput(experts)
 
     def get_merging_weights(self, **selector_kwargs) -> Dict:
         raise NotImplementedError(

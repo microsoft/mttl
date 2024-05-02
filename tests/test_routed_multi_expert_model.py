@@ -12,7 +12,7 @@ from mttl.models.modifiers.expert_containers import (
     CoalescedLoRAExpertContainer,
 )
 from mttl.models.modifiers.expert_containers.selectors import (
-    BatchSequenceModulesAndWeightsSelectorOutput,
+    BatchSequenceExpertsAndWeightsSelectorOutput,
     PolySelectorDirect,
     MOERKHSSelector,
     PerTokenSelector,
@@ -180,7 +180,7 @@ class TestMultiExpertModel:
         assert np.allclose(output.item(), 15.27, atol=0.1)
 
         # Now let's change the routing, to make sure the output also changes
-        for mod in module.modules():
+        for mod in module.experts():
             if isinstance(mod, PolySelector):
                 mod.module_logits.data.uniform_(-10, 10)
                 mod.module_logits.data[:, -1] = 999
@@ -316,8 +316,8 @@ class TestMultiExpertModel:
         assert container.selector.total_calls_per_forward == 1
 
         assert spy.call_count == 1
-        assert isinstance(spy.spy_return, BatchSequenceModulesAndWeightsSelectorOutput)
-        assert spy.spy_return.modules == None
+        assert isinstance(spy.spy_return, BatchSequenceExpertsAndWeightsSelectorOutput)
+        assert spy.spy_return.experts == None
         assert spy.spy_return.weights.shape == (2, 3, 8)
 
     def test_expert_selector_with_moe_routing_soft_granularity(
@@ -377,8 +377,8 @@ class TestMultiExpertModel:
         assert container.selector.total_calls_per_forward == 1
 
         assert spy.call_count == 1
-        assert isinstance(spy.spy_return, BatchSequenceModulesAndWeightsSelectorOutput)
-        assert spy.spy_return.modules == None
+        assert isinstance(spy.spy_return, BatchSequenceExpertsAndWeightsSelectorOutput)
+        assert spy.spy_return.experts == None
         assert spy.spy_return.weights.shape == (2, 3, 8)
 
     def test_expert_selector_with_moe_routing_hard(
@@ -406,8 +406,8 @@ class TestMultiExpertModel:
         assert container.selector.total_calls_per_forward == 1
 
         assert spy.call_count == 1
-        assert isinstance(spy.spy_return, BatchSequenceModulesAndWeightsSelectorOutput)
-        assert spy.spy_return.modules.shape == (2, 3, 2)
+        assert isinstance(spy.spy_return, BatchSequenceExpertsAndWeightsSelectorOutput)
+        assert spy.spy_return.experts.shape == (2, 3, 2)
         assert spy.spy_return.weights.shape == (2, 3, 2)
 
     def test_expert_selector_with_moe_clown_routing_soft_coalesced(

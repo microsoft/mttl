@@ -10,10 +10,12 @@ from mttl.models.modifiers.base import (
     ModifyMixin,
 )
 from mttl.models.modifiers.expert_containers.selectors import (
-    BatchModulesAndWeightsSelectorOutput,
-    BatchSequenceModulesAndWeightsSelectorOutput,
-    ModulesAndWeightsSelectorOutput,
-    ModulesSelectorOutput,
+    BatchExpertsAndWeightsSelectorOutput,
+    BatchExpertsSelectorOutput,
+    BatchSequenceExpertsAndWeightsSelectorOutput,
+    ExpertsAndWeightsSelectorOutput,
+    ExpertsSelectorOutput,
+    KVTaskNameSelector,
 )
 
 from mttl.utils import logger, warn_once
@@ -235,36 +237,45 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         """Depending on the selection output, we and merge differently."""
         from mttl.models.modifiers.lora import SkilledLoRA, SkilledLoRAView
 
-        if isinstance(selection, BatchModulesAndWeightsSelectorOutput):
+        if isinstance(selection, BatchExpertsAndWeightsSelectorOutput):
             skilled_loras = [
-                SkilledLoRAView.from_loras([self.get(x_name) for x_name in b_modules])
-                for b_modules in selection.modules
+                SkilledLoRAView.from_loras([self.get(x_name) for x_name in b_experts])
+                for b_experts in selection.experts
             ]
-            weights = [torch.tensor(x_weights) for x_weights in selection.weights]
             return SkilledLoRA.parallel_linear_weighted_forward(
-                input, skilled_loras, weights, merge_after=self.lora_merge_after
+                input,
+                skilled_loras,
+                selection.weights,
+                dim_names=selection.dim_names,
+                merge_after=self.lora_merge_after,
             )
-        elif isinstance(selection, ModulesAndWeightsSelectorOutput):
+        elif isinstance(selection, ExpertsAndWeightsSelectorOutput):
             skilled_lora = SkilledLoRAView.from_loras(
-                [self.get(module) for module in selection.modules]
+                [self.get(module) for module in selection.experts]
             )
             return SkilledLoRA.parallel_linear_weighted_forward(
                 input,
                 [skilled_lora],
-                [selection.weights],
+                selection.weights,
+                dim_names=selection.dim_names,
                 merge_after=self.lora_merge_after,
             )
-        elif isinstance(selection, ModulesSelectorOutput):
+        elif isinstance(selection, BatchExpertsSelectorOutput):
             return LoRA.parallel_linear_forward(
-                input, [self.get(module) for module in selection.modules]
+                input, [self.get(module) for module in selection.experts]
             )
-        elif isinstance(selection, BatchSequenceModulesAndWeightsSelectorOutput):
-            if selection.modules is not None:
+        elif isinstance(selection, BatchSequenceExpertsAndWeightsSelectorOutput):
+            if "splits" in selection.dim_names:
+                raise ValueError(
+                    "Splits are not supported for per token routing with Lo"
+                )
+
+            if selection.experts is not None:
                 assert isinstance(
-                    selection.modules, torch.Tensor
+                    selection.experts, torch.Tensor
                 ), "Tensor expected, return indices of selected experts!"
 
-                indices = selection.modules.reshape(-1, selection.modules.shape[-1])
+                indices = selection.experts.reshape(-1, selection.experts.shape[-1])
                 weights = selection.weights.reshape(-1, selection.weights.shape[-1])
 
                 # set of active indices
@@ -301,6 +312,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                     input.view(-1, input.size(-1)),
                     skilled_loras,
                     inverse_weights,
+                    dim_names=["batch", "experts"],  # assign new dimensions (faster)
                     merge_after=self.lora_merge_after,
                 )
             else:
@@ -326,7 +338,8 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
                 module_output = SkilledLoRA.parallel_linear_weighted_forward(
                     input.view(-1, input.size(-1)),
                     skilled_loras,
-                    [weights],
+                    weights,
+                    dim_names=["batch", "experts"],
                     merge_after=self.lora_merge_after,
                 )
             return module_output.view(input.shape[0], input.shape[1], -1)
@@ -409,12 +422,12 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
         raise ValueError("Cannot merge with layer for coalesced expert container.")
 
     def route(self, input, selection, **kwargs):
-        if isinstance(selection, ModulesAndWeightsSelectorOutput):
+        if isinstance(selection, ExpertsAndWeightsSelectorOutput):
             module_output = SkilledLoRA.parallel_linear_weighted_forward(
-                input, [self.experts], [selection.weights]
+                input, [self.experts], selection.weights, dim_names=selection.dim_names
             )
             return module_output
-        elif isinstance(selection, ModulesSelectorOutput):
+        elif isinstance(selection, BatchExpertsSelectorOutput):
             indices = torch.LongTensor(
                 [
                     (
@@ -422,57 +435,55 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                         if module in self.expert_names
                         else self.expert_names.index(self.default_expert_name)
                     )
-                    for module in selection.modules
+                    for module in selection.experts
                 ]
             ).unsqueeze(1)
             weights = (
                 torch.zeros(
-                    (len(selection.modules), self.experts.n_skills),
+                    (len(selection.experts), self.experts.n_skills),
                 )
-                .scatter_add(1, indices, torch.ones((len(selection.modules), 1)))
+                .scatter_add(1, indices, torch.ones((len(selection.experts), 1)))
                 .to(device=self.experts.lora_a.device, dtype=torch.float32)
             )
             module_output = SkilledLoRA.parallel_linear_weighted_forward(
-                input, [self.experts], [weights]
+                input, [self.experts], weights, dim_names=["batch", "experts"]
             )
             return module_output
         elif isinstance(
-            selection, BatchSequenceModulesAndWeightsSelectorOutput
-        ) or isinstance(selection, BatchModulesAndWeightsSelectorOutput):
+            selection, BatchSequenceExpertsAndWeightsSelectorOutput
+        ) or isinstance(selection, BatchExpertsAndWeightsSelectorOutput):
             # selection.weights can be 2 dim if sentence routing or 3 dim if per-token routing
-            # selection.modules can be 2 dim ... or 3 dim if ... or None if no top-k
-            if selection.modules is not None:
+            # selection.experts can be 2 dim ... or 3 dim if ... or None if no top-k
+            if selection.experts is not None:
                 assert isinstance(
-                    selection.modules, torch.Tensor
+                    selection.experts, torch.Tensor
                 ), "Tensor expected, return indices of selected experts!"
+                # we need to expand the weights to the full size of the expert set
                 weights = torch.zeros(
-                    (
-                        (
-                            selection.weights.shape[0],
-                            selection.weights.shape[1],
-                            self.experts.n_skills,
-                        )
-                        if selection.weights.ndim == 3
-                        else (selection.weights.shape[0], self.experts.n_skills)
-                    ),
+                    (selection.weights[:-1] + (self.experts.n_skills,)),
                     device=selection.weights.device,
                 ).scatter_add(
-                    selection.weights.ndim - 1, selection.modules, selection.weights
+                    selection.weights.ndim - 1, selection.experts, selection.weights
                 )
             else:
+                # weight have already the right shape
                 weights = selection.weights
+                assert weights.shape[-1] == self.experts.n_skills
 
-            if weights.ndim == 2:
+            if "sequence" not in selection.dim_names:
                 # only weights for each example
                 module_output = SkilledLoRA.parallel_linear_weighted_forward(
-                    input, [self.experts], [weights]
+                    input, [self.experts], weights, dim_names=selection.dim_names
                 )
                 return module_output
             else:
-                # weights for examples and sequence length
+                # reshape weights to be batch * sequence x experts (faster)
                 weights = weights.view(-1, weights.shape[-1])
                 module_output = SkilledLoRA.parallel_linear_weighted_forward(
-                    input.view(-1, input.shape[-1]), [self.experts], [weights]
+                    input.view(-1, input.shape[-1]),
+                    [self.experts],
+                    weights,
+                    dim_names=["batch", "experts"],
                 )
                 return module_output.view(input.shape[0], input.shape[1], -1)
 
