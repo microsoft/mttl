@@ -436,7 +436,7 @@ class PolySelector(Selector):
             if task_names is not None:
                 task_ids = self._convert_task_names_to_ids(task_names)
             else:
-                routing_info: RoutingInfo = self.info_container.get["routing_infos"]
+                routing_info: RoutingInfo = self.info_container["routing_infos"]
 
                 if hasattr(routing_info, "task_ids_from_name"):
                     task_ids = routing_info.task_ids_from_name
