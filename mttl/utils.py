@@ -11,7 +11,7 @@ import pytorch_lightning as pl
 from torch import Tensor
 from typing import Dict, Optional
 import hashlib
-from pytorch_lightning.utilities.rank_zero import rank_zero_info
+from pytorch_lightning.utilities.rank_zero import rank_zero_info, rank_zero_only
 from torch.autograd.function import Function
 from functools import lru_cache
 
@@ -521,5 +521,32 @@ def retry_with_exponential_backoff(
                     raise e
 
         return wrapper
+
+    return decorator
+
+
+# decorator like rank_zero_only but with a barrier at the end
+def rank_zero_only_and_wait(before=True, after=True):
+    def decorator(fn):
+        def wrapped_fn(*args, **kwargs):
+            output = None
+            if (
+                before
+                and torch.distributed.is_available()
+                and torch.distributed.is_initialized()
+            ):
+                torch.distributed.barrier()
+            if rank_zero_only.rank == 0:
+                output = fn(*args, **kwargs)
+            if (
+                after
+                and torch.distributed.is_available()
+                and torch.distributed.is_initialized()
+            ):
+                torch.distributed.barrier()
+
+            return output
+
+        return wrapped_fn
 
     return decorator

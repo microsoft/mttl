@@ -119,7 +119,7 @@ class OnLogCallback:
         # call on log on each callback
         for callback in self.trainer.callbacks:
             if hasattr(callback, "on_log"):
-                callback.on_log(self.trainer, self, name, value)
+                callback.on_log(self.trainer, self, name, value, **kwargs)
         return output
 
 
