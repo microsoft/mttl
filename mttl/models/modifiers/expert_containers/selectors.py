@@ -112,7 +112,7 @@ class SelectorConfig:
 
 @dataclass
 class SelectorOutput:
-    pass
+    ALL_EXPERTS = "all"
 
     def __post_init__(self):
         if hasattr(self, "weights") and self.weights.ndim != len(self.dim_names):
@@ -168,7 +168,7 @@ class BatchExpertsAndWeightsSelectorOutput(SelectorOutput):
 
 
 @dataclass
-class ExpertsAndSplitsAndWeightsSelectorOutput(BatchExpertsAndWeightsSelectorOutput):
+class ExpertsSplitsAndWeightsSelectorOutput(ExpertsAndWeightsSelectorOutput):
     """A selector output that contains a list of experts and weights for each split (MHR) and expert shared across the batch.
 
     experts: names of the selected experts
@@ -178,6 +178,19 @@ class ExpertsAndSplitsAndWeightsSelectorOutput(BatchExpertsAndWeightsSelectorOut
     @property
     def dim_names(self):
         return ["splits", "experts"]
+
+
+@dataclass
+class BatchExpertsSplitsAndWeightsSelectorOutput(BatchExpertsAndWeightsSelectorOutput):
+    """A selector output that contains a list of experts and weights for each split (MHR) and expert shared across the batch.
+
+    experts: names of the selected experts
+    weights: their weights
+    """
+
+    @property
+    def dim_names(self):
+        return ["batch", "splits", "experts"]
 
 
 @dataclass
@@ -479,8 +492,8 @@ class PolySelector(Selector):
     def forward(
         self, input, **kwargs
     ) -> Union[
-        BatchSequenceExpertsSplitsAndWeightsSelectorOutput,
-        BatchSequenceExpertsAndWeightsSelectorOutput,
+        BatchExpertsSplitsAndWeightsSelectorOutput,
+        ExpertsSplitsAndWeightsSelectorOutput,
     ]:
         """Returns the experts and weights for the task names used in the current batch.
 
@@ -488,12 +501,15 @@ class PolySelector(Selector):
         and therefore can allow speedups in the forward pass.
         """
         weights = self._get_weights()
-        experts = self.expert_names
 
         if self.n_tasks == 0:
-            return ExpertsAndSplitsAndWeightsSelectorOutput(experts, weights.squeeze(0))
+            return ExpertsSplitsAndWeightsSelectorOutput(
+                SelectorOutput.ALL_EXPERTS, weights.squeeze(0)
+            )
 
-        return BatchSequenceExpertsSplitsAndWeightsSelectorOutput(experts, weights)
+        return BatchExpertsSplitsAndWeightsSelectorOutput(
+            SelectorOutput.ALL_EXPERTS, weights
+        )
 
     def get_merging_weights(self, **selector_kwargs) -> Dict:
         return self.get_routing_weights(**selector_kwargs)
@@ -566,7 +582,7 @@ class MOERKHSSelector(Selector):
             routing_weights = routing_weights.to(input.dtype)
         else:
             # soft routing
-            selected_experts = None
+            selected_experts = SelectorOutput.ALL_EXPERTS
 
         g = self.info_container.get("routing_gates", [])
         g.append(router_logits)
@@ -965,7 +981,7 @@ class ZeroPerTokenSelector(Selector):
             routing_weights = routing_weights.to(input.dtype)
         else:
             # soft routing
-            selected_experts = None
+            selected_experts = SelectorOutput.ALL_EXPERTS
 
         g = self.info_container.get("routing_gates", [])
         g.append(torch.log(routing_weights + 1e-6))

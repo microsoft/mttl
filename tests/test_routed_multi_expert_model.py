@@ -180,7 +180,7 @@ class TestMultiExpertModel:
         assert np.allclose(output.item(), 15.27, atol=0.1)
 
         # Now let's change the routing, to make sure the output also changes
-        for mod in module.experts():
+        for mod in module.modules():
             if isinstance(mod, PolySelector):
                 mod.module_logits.data.uniform_(-10, 10)
                 mod.module_logits.data[:, -1] = 999

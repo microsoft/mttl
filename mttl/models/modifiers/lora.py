@@ -321,16 +321,6 @@ class SkilledLoRA(LoRA):
         return layer_out + adapter_out.to(input.dtype)
 
     @classmethod
-    def parallel_linear_weighted_forward_merge_after(
-        cls,
-        input: torch.Tensor,
-        skilled_loras: List["SkilledLoRAView"],
-        weights: torch.Tensor,
-        dim_names: List[str],
-    ):
-        pass
-
-    @classmethod
     def parallel_linear_weighted_forward(
         cls,
         input: torch.Tensor,
@@ -449,7 +439,7 @@ class SkilledLoRA(LoRA):
             # flatten the "splits" (q) dimension
             A, B = A.flatten(2, 3), B.flatten(3, 4)
 
-            partial_out = torch.einsum("bld,blrd->blr", (input_lora, A))
+            partial_out = torch.einsum("bld,bldr->blr", (input_lora, A))
             adapter_out = torch.einsum("blr,blrd->bld", (partial_out, B))
 
         adapter_out = adapter_out * scaling
