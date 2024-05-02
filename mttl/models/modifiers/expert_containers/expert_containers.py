@@ -14,7 +14,6 @@ from mttl.models.modifiers.expert_containers.selectors import (
     BatchExpertsSelectorOutput,
     BatchSequenceExpertsAndWeightsSelectorOutput,
     ExpertsAndWeightsSelectorOutput,
-    ExpertsSelectorOutput,
     KVTaskNameSelector,
 )
 

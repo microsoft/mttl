@@ -1162,7 +1162,7 @@ class TaskNameSelector(TaskToExpertTracker):
         self.default_expert_name = None
 
     @forward_with_cache
-    def forward(self, input, **kwargs) -> ExpertsSelectorOutput:
+    def forward(self, input, **kwargs) -> BatchExpertsSelectorOutput:
         if not self.routing_infos or not self.routing_infos.task_names:
             # try to infer batch size
             if "input_ids" in kwargs:
@@ -1193,7 +1193,7 @@ class TaskNameSelector(TaskToExpertTracker):
                 for task_name in task_names
             ]
 
-        return ExpertsSelectorOutput(experts)
+        return BatchExpertsSelectorOutput(experts)
 
     def get_merging_weights(self, **selector_kwargs) -> Dict:
         raise NotImplementedError(
