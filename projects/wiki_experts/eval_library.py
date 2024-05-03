@@ -238,7 +238,7 @@ def run_eval(args: ExpertConfig):
         train_cfg.router_selector = "uniform"
         train_cfg.lora_merge_after = True
         module = MultiExpertModel(**vars(train_cfg)).to("cuda")
-        module.load_from_library(library)
+        module.add_experts_from_library(library)
     elif args.merge_or_route == "base":
         module = ExpertModel(**vars(train_cfg))
 
@@ -251,7 +251,7 @@ def run_eval(args: ExpertConfig):
         module = MultiExpertModel(
             **vars(train_cfg), selector_config=selector_config
         ).to("cuda")
-        module.load_from_library(library)
+        module.add_experts_from_library(library)
         patch_prototypes(module, library, args)
 
     elif args.merge_or_route == "oracle":
@@ -262,7 +262,7 @@ def run_eval(args: ExpertConfig):
         module = MultiExpertModel(
             **vars(train_cfg), selector_config=selector_config
         ).to("cuda")
-        module.load_from_library(library)
+        module.add_experts_from_library(library)
     else:
         raise ValueError(f"Unknown merge_or_route {args.merge_or_route}")
 

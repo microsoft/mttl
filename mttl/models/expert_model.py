@@ -443,15 +443,6 @@ class MultiExpertModel(ExpertModel):
                 expert_instance = self.get_expert_instance(expert_instance.name)
             return expert_instance
 
-    def load_from_library(self, library, subsample_library_experts=0):
-        keys = list(library.keys())
-        if self.hparams.subsample_library_experts > 0:
-            keys = np.random.permutation(keys)[:subsample_library_experts]
-
-        for expert_name in tqdm.tqdm(keys, desc="Loading experts..."):
-            expert_dump = library.get_expert(expert_name, with_auxiliary_data=False)
-            self.add_expert_instance(expert_dump)
-
     def set_selector(
         self,
         modifier_type: str,
