@@ -104,7 +104,7 @@ def get_target_2_source_param_mapping(
         - tie_params should match the parameter and not the module, e.g. it should be "q_proj.lora_a|k_proj.lora_a" and not "q_proj|k_proj".
 
     Example for Llama like model:
-        - if tie_params = "q_proj.lora_a|k_proj.lora_a|v_proj.lora_a", lora_a will be tied across q_proj, k_proj, and v_proj within the same parent (attn_module).
+        - if tie_params = "q_proj.*\\.lora_a|k_proj.*\\.lora_a|v_proj.*\\.lora_a", lora_a will be tied across q_proj, k_proj, and v_proj within the same parent (attn_module).
         - if tie_params = ".*lora_a.*", nothing will be tied because lora_a is not within the same parent module.
 
     Args:
@@ -133,6 +133,8 @@ def get_target_2_source_param_mapping(
                     source_2_parameter[parent] = p_name
 
                     if expand_if_targets_are_missing:
+                        # we end up here because we are adding missing targets to target_2_source_param (probably called from expert.py)
+                        # we need to remove all regex specific syntax from the tie_params
                         params_to_add = (
                             tie_params.replace("\\", "").replace(".*", "").split("|")
                         )
