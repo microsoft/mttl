@@ -14,7 +14,7 @@ from typing import Union, Callable, List, Dict
 
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators.base import compute_task_aggregation
-from mttl.models.expert_model import ExpertModel
+from mttl.models.expert_model import ExpertModel, MultiExpertModel
 from mttl.utils import logger
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
 from mttl.evaluators import MMLUEvaluator
@@ -96,7 +96,7 @@ def default_l1_regularization(weights):
 class NGRoutingOptimizer:
     def __init__(
         self,
-        model: ExpertModel,
+        model: MultiExpertModel,
         expert_lib: ExpertLibrary,
         get_loss: Callable,  # function that takes model as input and returns loss
         budget=5,
@@ -108,7 +108,7 @@ class NGRoutingOptimizer:
         self.log = log
         self.regularizer_factor = regularizer_factor
         self.task_name = task_name
-        self.model: ExpertModel = model
+        self.model: MultiExpertModel = model
         self.K = len(expert_lib)
         # vars ordered in the same order as data in expert_lib
         init = [0] * self.K
@@ -132,21 +132,14 @@ class NGRoutingOptimizer:
     def optimize(
         self,
     ):
-        def get_score(weights, basemodel: ExpertModel, get_loss, get_regular):
+        def get_score(weights, basemodel: MultiExpertModel, get_loss, get_regular):
             config = WeightedLinearMergeConfig(
-                {exp_name: w for exp_name, w in zip(self.library.keys(), weights)}
+                weights={exp_name: w for exp_name, w in zip(self.library.keys(), weights)}
             )
             weighted_merge = WeightedLinearMerge(config)
             logger.info(f"Testing weights {weights}")
             expert = weighted_merge.transform(self.library)
-            assert all(
-                [
-                    key in basemodel.model.state_dict()
-                    for key in expert.expert_weights.keys()
-                ]
-            )
-            basemodel.model.load_state_dict(expert.expert_weights, strict=False)
-
+            basemodel.add_expert_instance(expert, is_default=True)
             # minimize the metric
             loss = get_loss(
                 model=basemodel,

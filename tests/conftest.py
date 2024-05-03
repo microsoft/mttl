@@ -126,8 +126,13 @@ def tmp_exp_config(tmp_path):
 
 
 @pytest.fixture
-def create_dummy_expert():
+def create_dummy_expert(make_tiny_llama):
     def _create_dummy_expert(config: ExpertConfig, exp_name, **kwargs) -> Expert:
+        if "model_object" not in kwargs and (
+            config["model"] is None or config["model"] == ""
+        ):
+            # use tiny llama by default
+            kwargs["model_object"] = make_tiny_llama()
         model = MultiExpertModel(**vars(config), **kwargs)
         expert = model.add_empty_expert(
             exp_name, ModifierConfig.from_training_config(config)
@@ -135,31 +140,6 @@ def create_dummy_expert():
         return expert
 
     return _create_dummy_expert
-
-
-@pytest.fixture
-def create_dummy_expert_(make_tiny_llama):
-    # works with tying for now, replace with create_dummy_expert once tying is fixed
-    from mttl.models.expert_model import ExpertModel
-    from mttl.models.expert_config import ExpertConfig
-    from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
-
-    def _create_dummy_expert(config: ExpertConfig, exp_name) -> Expert:
-        model_object = make_tiny_llama()
-        exp_trainer = ExpertModel(
-            tokenizer=None,
-            expert_info={},
-            **vars(config),
-            model_object=model_object,
-        )
-        dir = f"{config.output_dir}/{exp_name}"
-        os.makedirs(dir, exist_ok=True)
-        checkpoint = exp_trainer.save_pretrained(dir)
-        expert = load_expert(checkpoint, expert_name=exp_name)
-        return expert
-
-    return _create_dummy_expert
-
 
 def setup_mmlu(session):
     # setup_mmlu
