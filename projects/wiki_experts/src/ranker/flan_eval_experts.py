@@ -96,7 +96,7 @@ def run_eval(args):
     )
     if args.expert_library_path:
         library = ExpertLibrary.get_expert_library(args.expert_library_path)
-        module.load_from_library(library)
+        module.add_experts_from_library(library)
     elif args.load_module is not None:
         kwargs = parse_experts_to_load(args.load_module)
         for expert_kwargs in kwargs:

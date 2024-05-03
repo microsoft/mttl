@@ -9,7 +9,7 @@ from mttl.models.expert_config import ExpertConfig
 
 
 def parse_libname(libname):
-    parts = libname.split("||")
+    parts = libname.split("|")
     if len(parts) == 1:
         return libname, None
     else:

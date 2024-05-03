@@ -202,8 +202,9 @@ def run_eval(args: ExpertConfig):
     library = ExpertLibrary.get_expert_library(
         repo_id=args.library_id,
         token=args.remote_token,
-        exclude_selection=exclude_phi_tasks,
+        exclude_selection=exclude_phi_tasks if args.expert_selection is None else None,
         destination_id=args.destination_library_id,
+        selection=args.expert_selection,
     )
     an_expert = library[next(iter(library.keys()))]
     train_cfg = deepcopy(an_expert.training_config)
@@ -237,7 +238,7 @@ def run_eval(args: ExpertConfig):
         train_cfg.router_selector = "uniform"
         train_cfg.lora_merge_after = True
         module = MultiExpertModel(**vars(train_cfg)).to("cuda")
-        module.load_from_module_dict(library)
+        module.add_experts_from_library(library)
     elif args.merge_or_route == "base":
         module = ExpertModel(**vars(train_cfg))
 
@@ -250,7 +251,7 @@ def run_eval(args: ExpertConfig):
         module = MultiExpertModel(
             **vars(train_cfg), selector_config=selector_config
         ).to("cuda")
-        module.load_from_module_dict(library)
+        module.add_experts_from_library(library)
         patch_prototypes(module, library, args)
 
     elif args.merge_or_route == "oracle":
@@ -261,7 +262,7 @@ def run_eval(args: ExpertConfig):
         module = MultiExpertModel(
             **vars(train_cfg), selector_config=selector_config
         ).to("cuda")
-        module.load_from_module_dict(library)
+        module.add_experts_from_library(library)
     else:
         raise ValueError(f"Unknown merge_or_route {args.merge_or_route}")
 
@@ -289,6 +290,33 @@ def run_eval(args: ExpertConfig):
         train_cfg.eval_metric = args.eval_metric
         train_cfg.subsample_dev = args.subsample_dev
         scores = eval_in_distribution(module, train_cfg, tasks)
+    elif args.pipeline_eval_tasks in [
+        "task1356_xlsum_title_generation",
+        "task304_numeric_fused_head_resolution",
+        "task202_mnli_contradiction_classification",
+        "task035_winogrande_question_modification_person",
+        "task614_glucose_cause_event_detection",
+        "task362_spolin_yesand_prompt_response_sub_classification",
+        "task242_tweetqa_classification",
+        "task613_politifact_text_generation",
+        "task1728_web_nlg_data_to_text",
+        "task1153_bard_analogical_reasoning_affordance",
+        "task039_qasc_find_overlapping_words",
+        "task1557_jfleg_answer_generation",
+    ]:
+        logger.info(f"Evaluating SNI with Rouge: task {args.pipeline_eval_tasks}")
+        train_cfg.finetune_task_name = args.pipeline_eval_tasks
+        train_cfg.pipeline_eval_tasks = None
+        train_cfg.predict_batch_size = args.predict_batch_size
+        dm_for_gen = get_datamodule(train_cfg, for_generation=True)
+        rouge_evaluator = RougeEvaluator(dm_for_gen)
+        rouge = rouge_evaluator.evaluate(module, split="test", verbose=False)
+        logger.info(f"RougeL: {rouge}")
+        if wandb.run is not None:
+            if rouge is not None:
+                wandb.log({f"downstream/test_rougeL": rouge})
+
+        return
     else:
         if args.pipeline_eval_tasks == "all":
             args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"

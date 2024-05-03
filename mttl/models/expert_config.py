@@ -16,6 +16,7 @@ class ExpertConfig(Config):
 
         self.remote_token = None
         self.library_id = None
+        self.expert_selection = None # if set, will try to only load expert with this name from the library when evaluating
         self.destination_library_id = None
 
         self.do_train = True
