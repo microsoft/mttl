@@ -213,7 +213,7 @@ class ExpertModel(EfficientCheckpointModule):
         else:
             loss = self.forward(batch, reduction="none")
         mean_loss = loss.sum() / loss.shape[0]
-        self._inference_outputs += [(loss.detach().cpu(),)]
+        self._inference_outputs += [(loss.detach(),)]
         return mean_loss
 
     def get_loss_for_all(self, batch, batch_idx):
@@ -226,7 +226,7 @@ class ExpertModel(EfficientCheckpointModule):
         else:
             loss = self.forward(batch, reduction="none")
         mean_loss = loss.sum() / loss.shape[0]
-        self._inference_outputs += [(loss.detach().cpu(),)]
+        self._inference_outputs += [(loss.detach(),)]
         return mean_loss
 
     def log_loss(self, split="val"):
@@ -234,7 +234,11 @@ class ExpertModel(EfficientCheckpointModule):
         losses = torch.cat([out[0] for out in outputs], 0)
         self._inference_outputs.clear()
         self.log(
-            f"{self._log_pref}{split}/loss", losses.mean(), on_epoch=True, prog_bar=True
+            f"{self._log_pref}{split}/loss",
+            losses.mean(),
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
         )
 
         # log also the best val/loss sofar
@@ -284,6 +288,21 @@ class ExpertModel(EfficientCheckpointModule):
 
     def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
         return super().on_before_optimizer_step(optimizer)
+
+    def as_expert(self):
+        state_dict = self.state_dict()
+        self._delete_non_trainable_params(state_dict)
+        # inject expert info in the expert checkpoint
+        expert_info = ExpertInfo(
+            expert_name=self.hparams.expert_name,
+            expert_task_name=self.hparams.finetune_task_name,
+            expert_config=self.modifier_config,
+            training_config=self.training_config,
+        )
+        return Expert(
+            expert_info=expert_info,
+            expert_weights=state_dict,
+        )
 
 
 class MultiExpertModel(ExpertModel):
