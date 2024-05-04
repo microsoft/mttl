@@ -3,7 +3,7 @@ import os
 import torch
 
 from mttl.config import Config
-from mttl.utils import logger
+from mttl.utils import logger, warn_once
 
 
 class ExpertConfig(Config):
@@ -16,7 +16,7 @@ class ExpertConfig(Config):
 
         self.remote_token = None
         self.library_id = None
-        self.expert_selection = None # if set, will try to only load expert with this name from the library when evaluating
+        self.expert_selection = None  # if set, will try to only load expert with this name from the library when evaluating
         self.destination_library_id = None
 
         self.do_train = True
@@ -128,7 +128,7 @@ class ExpertConfig(Config):
 
         n_devices = torch.cuda.device_count()
         if n_devices > 1:
-            logger.warning(
+            warn_once(
                 "You have multiple GPUs, but your device count is not being taken "
                 + "into account when computing `gradient_accumulation_steps`."
             )

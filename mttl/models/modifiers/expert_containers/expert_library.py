@@ -831,6 +831,29 @@ class ExpertLibrary:
         self.data[metadata.expert_name] = metadata
         self._update_readme()
 
+    def list_auxiliary_data(self) -> Dict[str, Tuple[int, str]]:
+        """List auxiliary data in the library, returns a dictionary with the data type, the number of records, and a string representation of the config file."""
+        auxiliary_data = {}
+        list_of_files = [
+            f for f in self.list_repo_files(self.repo_id) if f.endswith(f".bin")
+        ]
+        for file in list_of_files:
+            try:
+                _, data_type, _ = os.path.basename(file).split(".")
+            except:
+                continue
+            if data_type in auxiliary_data:
+                auxiliary_data[data_type][0] += 1
+            else:
+                path = self.hf_hub_download(self.repo_id, filename=file)
+                try:
+                    config = repr(torch.load(path)["config"])
+                except:
+                    # old format
+                    config = "N/A"
+                auxiliary_data[data_type] = [1, config]
+        return auxiliary_data
+
     def get_auxiliary_data(
         self,
         data_type: str,
