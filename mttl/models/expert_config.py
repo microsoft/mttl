@@ -10,13 +10,15 @@ class ExpertConfig(Config):
     def _set_defaults(self):
         super()._set_defaults()
 
+        self.device_map = "cpu"
+        self.load_in_4bit = False
         self.load_in_8bit = False
         self.wandb_project = None
         self.tensorboard = False
 
         self.remote_token = None
         self.library_id = None
-        self.expert_selection = None # if set, will try to only load expert with this name from the library when evaluating
+        self.expert_selection = None  # if set, will try to only load expert with this name from the library when evaluating
         self.destination_library_id = None
 
         self.do_train = True
