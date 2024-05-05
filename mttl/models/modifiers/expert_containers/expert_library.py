@@ -772,14 +772,9 @@ class ExpertLibrary:
         expert_dump = self[expert_name]
 
         if with_auxiliary_data:
-            embeddings = self.get_auxiliary_data(
-                data_type="embeddings", expert_name=expert_name
-            )
             scores = self.get_auxiliary_data(
                 data_type="scores", expert_name=expert_name
             )
-            # inject auxiliary data into the expert
-            expert_dump.expert_info.embeddings = embeddings
             expert_dump.expert_info.scores = scores
         return expert_dump
 

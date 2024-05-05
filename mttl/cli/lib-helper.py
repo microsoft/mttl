@@ -32,7 +32,7 @@ def list_experts(name):
 def list_aux(name):
     library = ExpertLibrary.get_expert_library(name)
     table = Table(title="Auxiliary Data")
-    table.add_column("Hash", justify="left", style="cyan", no_wrap=True)
+    table.add_column("Data type", justify="left", style="cyan", no_wrap=True)
     table.add_column("# Elements", justify="left", style="magenta", no_wrap=True)
     table.add_column("Config", justify="left", style="magenta", no_wrap=False)
     aux_data = library.list_auxiliary_data()
@@ -43,10 +43,10 @@ def list_aux(name):
     console.print(table)
 
 
-@cli.command("laux")
+@cli.command("raux")
 @click.argument("name")
 @click.argument("data_type")
-def list_aux(name, data_type):
+def remove_aux(name, data_type):
     library = ExpertLibrary.get_expert_library(name)
     library.remove_auxiliary_data(data_type)
 
