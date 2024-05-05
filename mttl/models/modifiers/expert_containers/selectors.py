@@ -433,8 +433,7 @@ class PolySelector(Selector):
                 )
                 for t in task_names
             ],
-            device=self.module_logits.device,
-        )
+        ).to(self.module_logits.device)
 
     def _get_weights(self, task_names: List[str] = None) -> torch.Tensor:
         """Gets the routing weights for the corresponding task names.
