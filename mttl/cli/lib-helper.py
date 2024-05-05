@@ -51,5 +51,42 @@ def remove_aux(name, data_type):
     library.remove_auxiliary_data(data_type)
 
 
+@cli.command("diff")
+@click.argument("names", nargs=2)
+def list_experts(names):
+    """
+    Compare the experts of two libraries. Useful to check if experts are missing from one.
+    """
+    name_a, name_b = names
+    library_a = ExpertLibrary.get_expert_library(name_a)
+    library_b = ExpertLibrary.get_expert_library(name_b)
+
+    def init_table(name):
+        table = Table(title=name)
+        table.add_column("Expert", justify="left", style="magenta", no_wrap=True)
+        return table
+
+    table_a = init_table(name_a)
+    table_b = init_table(name_b)
+    common = init_table("Common Experts")
+
+    all_experts = set(library_a.keys()) | set(library_b.keys())
+
+    for i, expert_name in enumerate(list(all_experts)):
+        if expert_name in library_a.keys() and expert_name in library_b.keys():
+            common.add_row(expert_name)
+        elif expert_name in library_a.keys():
+            table_a.add_row(expert_name)
+        else:
+            table_b.add_row(expert_name)
+
+    console = Console()
+    console.print(common)
+    if len(table_a.rows) > 0:
+        console.print(table_a)
+    if len(table_b.rows) > 0:
+        console.print(table_b)
+
+
 if __name__ == "__main__":
     cli()
