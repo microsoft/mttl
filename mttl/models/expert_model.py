@@ -73,7 +73,8 @@ class ExpertModel(EfficientCheckpointModule):
         # log hyperparameters
         self.save_hyperparameters(kwargs)
 
-        self.load_in_8bit = kwargs.get("load_in_8bit", False)
+        self.load_in_4bit = kwargs.get("load_in_4bit", None) or False
+        self.load_in_8bit = kwargs.get("load_in_8bit", None) or False
         self.model: PreTrainedModel = None
         self.accumulate_metrics_batch = defaultdict(list)
 
@@ -82,6 +83,7 @@ class ExpertModel(EfficientCheckpointModule):
 
             model_object = model_loader_helper(
                 self.hparams.model,
+                load_in_4bit=self.load_in_4bit,
                 load_in_8bit=self.load_in_8bit,
                 device_map=getattr(self.hparams, "device_map", "cpu"),
             )

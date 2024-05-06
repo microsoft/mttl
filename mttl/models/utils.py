@@ -415,7 +415,9 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
     return model
 
 
-def model_loader_helper(model_name, device_map="auto", load_in_8bit=False):
+def model_loader_helper(
+    model_name, device_map="auto", load_in_4bit=False, load_in_8bit=False
+):
     from transformers import PreTrainedModel, LlamaForCausalLM, AutoModelForCausalLM
 
     if isinstance(model_name, PreTrainedModel):
@@ -424,6 +426,7 @@ def model_loader_helper(model_name, device_map="auto", load_in_8bit=False):
     if "llama" in model_name:
         model_object = LlamaForCausalLM.from_pretrained(
             model_name,
+            load_in_4bit=load_in_4bit,
             load_in_8bit=load_in_8bit,
             torch_dtype=torch.bfloat16,
             device_map=device_map,
@@ -446,6 +449,7 @@ def model_loader_helper(model_name, device_map="auto", load_in_8bit=False):
         model_object = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map=device_map,
+            load_in_4bit=load_in_4bit,
             load_in_8bit=load_in_8bit,
             trust_remote_code=True,
         )
