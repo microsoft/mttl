@@ -178,7 +178,7 @@ def run_multitask(args: ExpertConfig):
     )
 
     # initial validation only for a bunch of datasets... ?
-    if args.compute_strategy != "deepspeed":
+    if args.eval_before_training:
         # validating before training fails with deepspeed
         trainer.validate(module, dm)
 
