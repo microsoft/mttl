@@ -88,7 +88,7 @@ class SVDEmbeddingTransformConfig(LibraryTransformConfig):
 
 class SVDEmbeddingTransform(LibraryTransform):
     """Creates adapter embeddings by low-rank decomposition of a sparsified version
-    of the adapter modules.
+    of the adapter experts.
     """
 
     def __init__(self, config, random_state=None):
@@ -679,7 +679,7 @@ class PhatgooseTransform(HiddenStateComputer):
 
             # extract prototypes
             prototypes = {}
-            for name, module in model.named_modules():
+            for name, module in model.named_experts():
                 if isinstance(module, ExpertContainer) and hasattr(
                     module.selector, "get_prototypes"
                 ):
@@ -1173,7 +1173,7 @@ class CrossExpertNormComputer(HiddenStateComputer):
 
                 # Redo ExpertContainer forward
                 selector_out = module.selector(input[0])
-                selector_out.modules = random_tasks.tolist()
+                selector_out.experts = random_tasks.tolist()
                 random_out = module.route(input[0], selector_out)
 
                 norm_correct = (output * attn_mask.unsqueeze(-1)).pow(2).sum(
@@ -1191,7 +1191,7 @@ class CrossExpertNormComputer(HiddenStateComputer):
 
         hooks = []
         container = {}
-        for module_name, module in model.named_modules():
+        for module_name, module in model.named_experts():
             if isinstance(module, ExpertContainer):
                 hook = build_hook(module_name, container, model.model.task_id_container)
                 module.register_forward_hook(hook)

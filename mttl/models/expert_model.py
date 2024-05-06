@@ -361,7 +361,7 @@ class MultiExpertModel(ExpertModel):
 
             # Progress bar setup
             with tqdm.tqdm(
-                total=len(library), desc="Processing", unit="module"
+                total=len(library), desc="Adding experts...", unit="expert"
             ) as progress_bar:
                 for _ in concurrent.futures.as_completed(futures):
                     progress_bar.update(1)

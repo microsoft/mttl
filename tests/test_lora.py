@@ -85,14 +85,17 @@ def test_skilled_lora_parallel_merge_with_weights():
 
     input = torch.ones(2, 1)
     # the weights are interpolating the skills in ada1
-    output = SkilledLoRA.parallel_linear_forward(
-        input, [ada1], [torch.tensor([0.5, 0.5])]
+    output = SkilledLoRA.parallel_linear_weighted_forward(
+        input, [ada1], torch.tensor([0.5, 0.5]), dim_names=["experts"]
     )
     assert output[0, 0].item() == 1.5
     assert output.shape == (2, 2)
 
-    output = SkilledLoRA.parallel_linear_forward(
-        input, [ada1, ada2], [torch.tensor([0.5, 0.5]), torch.tensor([0.0, 1.0])]
+    output = SkilledLoRA.parallel_linear_weighted_forward(
+        input,
+        [ada1, ada2],
+        torch.tensor([[0.5, 0.5], [0.0, 1.0]]),
+        dim_names=["batch", "experts"],
     )
     assert output[0, 0].item() == 1.5
     assert output[1, 0].item() == 4.0
@@ -100,14 +103,17 @@ def test_skilled_lora_parallel_merge_with_weights():
 
     input = torch.ones(2, 3, 1)
     # the weights are interpolating the skills in ada1
-    output = SkilledLoRA.parallel_linear_forward(
-        input, [ada1], [torch.tensor([0.5, 0.5])]
+    output = SkilledLoRA.parallel_linear_weighted_forward(
+        input, [ada1], torch.tensor([0.5, 0.5]), dim_names=["experts"]
     )
     assert output[0, 0, 0].item() == 1.5
     assert output.shape == (2, 3, 2)
 
-    output = SkilledLoRA.parallel_linear_forward(
-        input, [ada1, ada2], [torch.tensor([0.5, 0.5]), torch.tensor([0.0, 1.0])]
+    output = SkilledLoRA.parallel_linear_weighted_forward(
+        input,
+        [ada1, ada2],
+        torch.tensor([[0.5, 0.5], [0.0, 1.0]]),
+        dim_names=["batch", "experts"],
     )
     assert output[0, 0, 0].item() == 1.5
     assert output[1, 0, 0].item() == 4.0
@@ -115,8 +121,11 @@ def test_skilled_lora_parallel_merge_with_weights():
 
     # one skilled lora with weights tied across batch
     input = torch.ones(2, 1)
-    output = SkilledLoRA.parallel_linear_forward(
-        input, [ada1], [torch.tensor([0.5, 0.5]), torch.tensor([0.0, 1.0])]
+    output = SkilledLoRA.parallel_linear_weighted_forward(
+        input,
+        [ada1],
+        torch.tensor([[0.5, 0.5], [0.0, 1.0]]),
+        dim_names=["batch", "experts"],
     )
     assert output[0, 0].item() == 1.5
     assert output[1, 0].item() == 2.0
@@ -135,7 +144,10 @@ def test_skilled_lora_parallel_merge_with_weights():
 
     weights = torch.tensor([[1.0, 0.0], [0.0, 1.0]])
     output_sk = SkilledLoRAView.parallel_linear_weighted_forward(
-        input, [SkilledLoRAView.from_loras([l1, l2])], weights
+        input,
+        [SkilledLoRAView.from_loras([l1, l2])],
+        weights,
+        dim_names=["batch", "experts"],
     )
     assert torch.allclose(output, output_sk)
 
@@ -165,30 +177,17 @@ def test_skilled_lora_parallel_merge_with_weights_and_merge_after():
     ada1.lora_b[1, :].fill_(2.0)
 
     input = torch.ones(2, 1)
-    # the weights are interpolating the skills in ada1
-    output = SkilledLoRA.parallel_linear_forward(
-        input, [ada1], [torch.tensor([0.5, 0.5])]
-    )
-    assert output[0, 0].item() == 2.25
-    assert output.shape == (2, 2)
-
     output = SkilledLoRA.parallel_linear_weighted_forward(
-        input, [ada1], [torch.tensor([0.5, 0.5])], merge_after=True
+        input, [ada1], torch.tensor([0.5, 0.5]), dim_names=["experts"], merge_after=True
     )
     assert output[0, 0].item() == 2.5
-    assert output.shape == (2, 2)
-
-    output = SkilledLoRA.parallel_linear_forward(
-        input, [ada1, ada2], [torch.tensor([0.5, 0.5]), torch.tensor([0.0, 1.0])]
-    )
-    assert output[0, 0].item() == 2.25
-    assert output[1, 0].item() == 4.0
     assert output.shape == (2, 2)
 
     output = SkilledLoRA.parallel_linear_weighted_forward(
         input,
         [ada1, ada2],
-        [torch.tensor([0.5, 0.5]), torch.tensor([0.0, 1.0])],
+        torch.tensor([[0.5, 0.5], [0.0, 1.0]]),
+        dim_names=["batch", "experts"],
         merge_after=True,
     )
     assert output[0, 0].item() == 2.5
@@ -196,15 +195,12 @@ def test_skilled_lora_parallel_merge_with_weights_and_merge_after():
     assert output.shape == (2, 2)
 
     input = torch.ones(2, 3, 1)
-    # the weights are interpolating the skills in ada1
-    output = SkilledLoRA.parallel_linear_forward(
-        input, [ada1], [torch.tensor([0.5, 0.5])]
-    )
-    assert output[0, 0, 0].item() == 2.25
-    assert output.shape == (2, 3, 2)
-
     output = SkilledLoRA.parallel_linear_weighted_forward(
-        input, [ada1], [torch.tensor([0.5, 0.5])], merge_after=True
+        input,
+        [ada1],
+        torch.tensor([0.5, 0.5]),
+        merge_after=True,
+        dim_names=["experts"],
     )
     assert output[0, 0, 0].item() == 2.5
     assert output.shape == (2, 3, 2)
@@ -212,24 +208,19 @@ def test_skilled_lora_parallel_merge_with_weights_and_merge_after():
     output = SkilledLoRA.parallel_linear_weighted_forward(
         input,
         [ada1],
-        [torch.tensor([0.5, 0.5]), torch.tensor([0.0, 1.0])],
+        torch.tensor([[0.5, 0.5], [0.0, 1.0]]),
+        dim_names=["batch", "experts"],
         merge_after=True,
     )
     assert output[0, 0, 0].item() == 2.5
     assert output[1, 0, 0].item() == 4.0
     assert output.shape == (2, 3, 2)
 
-    output = SkilledLoRA.parallel_linear_forward(
-        input, [ada1, ada2], [torch.tensor([0.5, 0.5]), torch.tensor([0.0, 1.0])]
-    )
-    assert output[0, 0, 0].item() == 2.25
-    assert output[1, 0, 0].item() == 4.0
-    assert output.shape == (2, 3, 2)
-
     output = SkilledLoRA.parallel_linear_weighted_forward(
         input,
         [ada1, ada2],
-        [torch.tensor([0.5, 0.5]), torch.tensor([0.0, 1.0])],
+        torch.tensor([[0.5, 0.5], [0.0, 1.0]]),
+        dim_names=["batch", "experts"],
         merge_after=True,
     )
     assert output[0, 0, 0].item() == 2.5
@@ -238,40 +229,16 @@ def test_skilled_lora_parallel_merge_with_weights_and_merge_after():
 
     # one skilled lora with weights tied across batch
     input = torch.ones(2, 1)
-    output = SkilledLoRA.parallel_linear_forward(
-        input, [ada1], [torch.tensor([0.5, 0.5]), torch.tensor([0.0, 1.0])]
-    )
-    assert output[0, 0].item() == 2.25
-    assert output[1, 0].item() == 4.0
-    assert output.shape == (2, 2)
-
-    input = torch.ones(2, 1)
     output = SkilledLoRA.parallel_linear_weighted_forward(
         input,
         [ada1],
-        [torch.tensor([0.5, 0.5]), torch.tensor([0.0, 1.0])],
+        torch.tensor([[0.5, 0.5], [0.0, 1.0]]),
+        dim_names=["batch", "experts"],
         merge_after=True,
     )
     assert output[0, 0].item() == 2.5
     assert output[1, 0].item() == 4.0
     assert output.shape == (2, 2)
-
-    lora_a = torch.randn(1, config.lora_rank)
-    lora_b = torch.ones(config.lora_rank, 2)
-    l1 = LoRAView(config, layer, lora_a, lora_b)
-
-    lora_a = torch.randn(1, config.lora_rank)
-    lora_b = torch.ones(config.lora_rank, 2)
-    l2 = LoRAView(config, layer, lora_a, lora_b)
-
-    input = torch.ones(2, 3, 1)
-    output = LoRA.parallel_linear_forward(input, [l1, l2])
-
-    weights = torch.tensor([[1.0, 0.0], [0.0, 1.0]])
-    output_sk = SkilledLoRAView.parallel_linear_weighted_forward(
-        input, [SkilledLoRAView.from_loras([l1, l2])], weights
-    )
-    assert torch.allclose(output, output_sk)
 
 
 def test_skilled_lora_view():

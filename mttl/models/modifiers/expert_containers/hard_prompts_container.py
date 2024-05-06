@@ -6,7 +6,7 @@ from mttl.models.modifiers.base import ModifyMixin
 from mttl.models.modifiers.expert_containers.selectors import (
     Selector,
     TaskNameSelector,
-    ModulesSelectorOutput,
+    BatchExpertsSelectorOutput,
 )
 from mttl.models.modifiers.expert_containers import ExpertContainer
 from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
@@ -139,9 +139,9 @@ class HardPromptExpertContainer(ExpertContainer):
         self.add_expert_to_selector(expert.name, expert_info=expert.expert_info)
 
     def route(self, input_ids, selection, attention_mask=None, labels=None):
-        if isinstance(selection, ModulesSelectorOutput):
+        if isinstance(selection, BatchExpertsSelectorOutput):
             return HardPrompt.parallel_forward(
-                [self.get(module) for module in selection.modules],
+                [self.get(module) for module in selection.experts],
                 input_ids,
                 attention_mask,
                 labels,
