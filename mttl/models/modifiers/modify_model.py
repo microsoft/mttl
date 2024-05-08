@@ -1,3 +1,5 @@
+import bitsandbytes as bnb
+
 # stores modifiers across the mttl lib
 MODIFIERS = {}
 # stores mapping from configs to modifiers
@@ -52,7 +54,8 @@ def modify_transformer(
     ):
         # set all params to require grad
         for param in transformer.parameters():
-            param.requires_grad = True
+            if not isinstance(param, bnb.nn.modules.Params4bit):
+                param.requires_grad = True
 
     model_modifier = get_modifier_type(modifier_config, model_modifier=model_modifier)
 
