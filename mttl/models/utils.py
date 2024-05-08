@@ -137,6 +137,9 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
         self.loss_plugins = {}
         self.save_if_loaded = kwargs.get("save_if_loaded", True)
 
+        if self.save_if_loaded and kwargs.get("compute_strategy", "") == "deepspeed": 
+            logger.warning('`save_if_loaded` is True. Because you are using deepspeed, you will be saving full model checkpoints.')
+
     def get_hash(self):
         model_hash = hashlib.sha256()
         model_hash.update(f"{self.hparams}".encode())
