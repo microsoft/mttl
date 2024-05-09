@@ -129,6 +129,7 @@ def produce_transfer_matrix(
     ]
 
     transfer_table = TableLogger()
+    args.device_map = "cpu"
 
     for task_eval_on in tasks:
         log_row = {}
@@ -137,10 +138,7 @@ def produce_transfer_matrix(
         evaluator: Evaluator = prepare_evaluator(
             args, args.dataset, tasks=task_eval_on, split=args.transfer_matrix_split
         )
-        module = ExpertModel(
-            **vars(args),
-            device_map="cpu",
-        )
+        module = ExpertModel(**vars(args))
 
         log_row_task = eval_all_experts_on_task(
             task_eval_on,
