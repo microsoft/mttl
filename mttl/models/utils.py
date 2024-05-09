@@ -139,7 +139,7 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
         # previous checkpoint, even if the parameters are not trainable.
         self.save_if_loaded_from_ckpt = kwargs.get("save_if_loaded_from_ckpt", True)
 
-        if self.save_if_loaded and kwargs.get("compute_strategy", "") == "deepspeed": 
+        if self.save_if_loaded_from_ckpt and kwargs.get("compute_strategy", "") == "deepspeed": 
             logger.warning('`save_if_loaded_from_ckpt` is True. Because you are using deepspeed, you will be saving full model checkpoints.')
 
     def get_hash(self):

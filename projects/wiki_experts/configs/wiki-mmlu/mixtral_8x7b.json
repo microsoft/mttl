@@ -24,7 +24,7 @@
     "truncation_side": "left",
     "pipeline_eval_tasks": "all", 
     "compute_strategy": "deepspeed",
-    "save_if_loaded": false,
+    "save_if_loaded_from_ckpt": false,
     "load_in_4bit": true,
     "device_map": "auto"
 }
