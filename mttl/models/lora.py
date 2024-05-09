@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import re
 import math
-import pennylane as qml
 
 
 class DoRALinear(nn.Module):
@@ -25,16 +24,28 @@ class DoRALinear(nn.Module):
         self.lora_a = nn.Parameter(torch.randn(rank, linear_layer.in_features))
         self.lora_b = nn.Parameter(torch.zeros(linear_layer.out_features, rank))
         # m = Magnitude column-wise across output dimension
-        self.magnitue = nn.Parameter(self.weight.norm(p=2, dim=0, keepdim=True))
+        self.weight_m_wdecomp = nn.Parameter(1, linear_layer.out_features)
+        self.lora_dropout = nn.Dropout(0.05)
 
         self.reset_parameters()
 
     def forward(self, x):
         adapted = self.weight + torch.matmul(self.lora_b, self.lora_a) / self.rank
-        column_norm = adapted.norm(p=2, dim=0, keepdim=True)
-        norm_adapted = adapted / column_norm
-        calc_weights = self.magnitue * norm_adapted
-        return F.linear(x, calc_weights, self.bias)
+        norm_scale = (
+            self.weight_m_wdecomp.view(-1)
+            / (torch.linalg.norm(adapted, dim=1)).detach()
+        )
+
+        org_result = F.linear(x, self.weight, self.bias)
+
+        dropout_x = self.lora_dropout(x)
+        result = org_result + (norm_scale - 1) * F.linear(
+            dropout_x, self.weight, self.bias
+        )
+        result += norm_scale * (
+            self.lora_b(self.lora_a(dropout_x.to(self.lora_a.weight.dtype)))
+        )
+        return result
 
     def reset_parameters(self):
         gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
@@ -140,32 +151,6 @@ class KronA(nn.Module):
         weight = weight + self.kronecker_product_einsum(self.lora_b, self.lora_a)
         return F.linear(input, weight, self.bias)
 
-
-class quantumIA3Linear(nn.Module):
-    def __init__(self, config, linear_layer):
-        super().__init__()
-
-        self.in_features = linear_layer.in_features
-        self.out_features = linear_layer.out_features
-        self.weight = linear_layer.weight
-        self.bias = linear_layer.bias
-        self.qubits = nn.Parameter(torch.ones(11))
-        self.quantum_weights = nn.Parameter(torch.randn(2, 11))
-        self.num_qubits = 11
-        self.quantum_layer = self.get_circuit()
-        # self.multi_lora_b = nn.Parameter(torch.ones(linear_layer.out_features))
-
-    def get_circuit(self):
-        dev = qml.device("default.qubit", wires=self.num_qubits)
-
-        @qml.qnode(dev, interface="torch")
-        def quantum_model(x, w):
-            qml.templates.AngleEmbedding(x, wires=range(self.num_qubits))
-            qml.templates.BasicEntanglerLayers(w, wires=range(self.num_qubits))
-            return qml.probs(wires=range(self.num_qubits))
-
-        return quantum_model
-
     def forward(self, input):
         hidden = F.linear(input, self.weight, self.bias)
         self.multi_lora_b = self.quantum_layer(self.qubits, self.quantum_weights)
@@ -188,22 +173,6 @@ class IA3Linear(nn.Module):
         hidden = F.linear(input, self.weight, self.bias)
         hidden = hidden * self.multi_lora_b
         return hidden
-
-
-def modify_with_quantumIA3Linear(transformer, config):
-    for m_name, module in dict(transformer.named_modules()).items():
-        if re.fullmatch(config.lora_modules, m_name):
-            for c_name, layer in dict(module.named_children()).items():
-                if re.fullmatch(config.lora_layers, c_name):
-                    assert isinstance(
-                        layer, nn.Linear
-                    ), f"kron can only be applied to torch.nn.Linear, but {layer} is {type(layer)}."
-                    setattr(
-                        module,
-                        c_name,
-                        quantumIA3Linear(config, layer),
-                    )
-    return transformer
 
 
 def modify_with_krona(transformer, config):
