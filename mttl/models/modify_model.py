@@ -2,7 +2,6 @@ from mttl.models.lora import (
     modify_with_lora,
     modify_with_ia3,
     modify_with_krona,
-    modify_with_quantumIA3Linear,
     modify_with_dora,
 )
 from mttl.models.poly import (
@@ -25,7 +24,6 @@ modifier_dict = {
     "tensororderpoly_lora": modify_with_tensororderpoly_lora,
     "tensorpoly_ia3": modify_with_tensorpoly_ia3,
     "tensororderpoly_ia3": modify_with_tensororderpoly_ia3,
-    "quantum_ia3": modify_with_quantumIA3Linear,
     "dora": modify_with_dora,
 }
 
