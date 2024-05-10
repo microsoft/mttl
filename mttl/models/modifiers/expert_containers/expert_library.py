@@ -1318,6 +1318,7 @@ class ExpertLibrary:
         destination: str,
         expert_library_type: Optional[Union["ExpertLibrary", str]] = None,
         create: bool = False,
+        force: bool = False,
     ):
         """
         Create a new ExpertLibrary object from a dictionary of experts.
@@ -1335,9 +1336,10 @@ class ExpertLibrary:
             expert_library_type=expert_library_type or cls,
             create=create,
         )
-        for name, expert in expert_dict.items():
-            if expert not in new_lib:
-                new_lib.add_expert(expert)
+        with new_lib.batched_commit():
+            for _, expert in expert_dict.items():
+                if expert.name not in new_lib or force:
+                    new_lib.add_expert(expert, force=force)
         return new_lib
 
     @staticmethod
