@@ -418,6 +418,9 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
 def model_loader_helper(
     model_name, device_map="auto", load_in_4bit=False, load_in_8bit=False
 ):
+    if load_in_4bit and load_in_8bit:
+        raise ValueError("Specify either 'load_in_4bit' or 'load_in_8bit' or neither.")
+
     from transformers import PreTrainedModel, LlamaForCausalLM, AutoModelForCausalLM
 
     if isinstance(model_name, PreTrainedModel):
