@@ -54,7 +54,10 @@ def modify_transformer(
     ):
         # set all params to require grad
         for param in transformer.parameters():
-            if not isinstance(param, bnb.nn.modules.Params4bit):
+            if not (
+                isinstance(param, bnb.nn.modules.Params4bit)
+                or isinstance(param, bnb.nn.Int8Params)
+            ):
                 param.requires_grad = True
 
     model_modifier = get_modifier_type(modifier_config, model_modifier=model_modifier)
