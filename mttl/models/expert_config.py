@@ -115,6 +115,7 @@ class ExpertConfig(Config):
         self.n_steps_pg = 2000
         self.learning_rate_pg = 0.01
 
+        self.save_if_loaded_from_ckpt = True
         self.save_each_epoch = False
         self.add_eos_to_downstream_targets = True
         self.flan_tasks_path = "projects/wiki_experts/task_sets/flan_tasks.json"

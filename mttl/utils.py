@@ -4,6 +4,7 @@ import logging
 import os
 import time
 import random
+import string
 import numpy as np
 import torch
 import torch.nn as nn
@@ -550,3 +551,6 @@ def rank_zero_only_and_wait(before=True, after=True):
         return wrapped_fn
 
     return decorator
+
+def generate_random_string(str_len=10):
+    return ''.join(random.choices(string.ascii_uppercase, k=str_len))

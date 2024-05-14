@@ -950,8 +950,8 @@ class ArrowTransform(LibraryTransform):
 
                 # Reshape As and Bs (needed for Poly / MHR weights)
                 rank = expert.expert_config.lora_rank
-                A = A.reshape(-1, rank)
-                B = B.reshape(rank, -1)
+                A = A.reshape(-1, rank).float()
+                B = B.reshape(rank, -1).float()
 
                 W = (A @ B).T  # out_features, in_features
 

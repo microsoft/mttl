@@ -99,6 +99,10 @@ class LiveCheckpointCallback(pl.Callback):
         if metric_name != self.monitor:
             return
 
+        if trainer.global_step == 0: 
+            # skip checkpoint before training (deepspeed fails checkpointing if optimizer non-existent
+            return
+
         last_step = trainer.global_step
 
         if last_step == self._last_step:

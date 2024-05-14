@@ -294,6 +294,10 @@ class ExpertModel(EfficientCheckpointModule):
     def as_expert(self):
         state_dict = self.state_dict()
         self._delete_non_trainable_params(state_dict)
+
+        # to use as an expert, we need to remove a `model.` prefix
+        state_dict = {k[len('model.'):] : v for k,v in state_dict.items()} 
+
         # inject expert info in the expert checkpoint
         expert_info = ExpertInfo(
             expert_name=self.hparams.expert_name,

@@ -135,7 +135,12 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
         PushToHubMixin.__init__(self)
 
         self.loss_plugins = {}
-        self.save_if_loaded = kwargs.get("save_if_loaded", True)
+        # If True, do not delete any parameters that were loaded in a
+        # previous checkpoint, even if the parameters are not trainable.
+        self.save_if_loaded_from_ckpt = kwargs.get("save_if_loaded_from_ckpt", True)
+
+        if self.save_if_loaded_from_ckpt and kwargs.get("compute_strategy", "") == "deepspeed": 
+            logger.warning('`save_if_loaded_from_ckpt` is True. Because you are using deepspeed, you will be saving full model checkpoints.')
 
     def get_hash(self):
         model_hash = hashlib.sha256()
@@ -271,7 +276,7 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
     def load_state_dict(self, ckpt, **kwargs):
         # store params that might have been loaded from a previous checkpoint
         self._params_from_checkpoint = (
-            set(ckpt.keys()) if self.save_if_loaded else set()
+            set(ckpt.keys()) if self.save_if_loaded_from_ckpt else set()
         )
         for name, _ in self.state_dict().items():
             if name in ckpt:

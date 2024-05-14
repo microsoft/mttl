@@ -250,6 +250,7 @@ class Config:
         self.eval_every_n_epoch = 1
         self.debug = False
         self.seed = 42
+        self.eval_before_training = True
 
         self.subsample_train = None
         self.subsample_dev = None
