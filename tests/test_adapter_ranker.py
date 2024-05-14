@@ -18,6 +18,7 @@ def test_clip_routing(tiny_flan_id):
     config.model = "EleutherAI/gpt-neo-125m"
     config.router_selector = "task_predictor_selector"
     config.router_granularity = "coarsegrained"
+    config.device_map = "cpu"
 
     finetune_task_name = "cot_gsm8k"
     data_module = FlanModule(
@@ -30,9 +31,7 @@ def test_clip_routing(tiny_flan_id):
         ),
         for_generation=True,
     )
-    module = MultiExpertModel(
-        **vars(config), device_map="cpu", tokenizer=data_module.tokenizer
-    )
+    module = MultiExpertModel(**vars(config), tokenizer=data_module.tokenizer)
     module.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
     module.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
     batch = next(iter(data_module.val_dataloader()))
@@ -65,9 +64,7 @@ def test_classifier_routing(tiny_flan_id):
         for_generation=True,
     )
 
-    module = MultiExpertModel(
-        **vars(config), device_map="cpu", tokenizer=data_module.tokenizer
-    )
+    module = MultiExpertModel(**vars(config), tokenizer=data_module.tokenizer)
 
     module.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
     module.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
@@ -83,9 +80,8 @@ def test_classifier_routing(tiny_flan_id):
 def test_expert_model_generate(tmp_path, create_dummy_expert, flan_data_module):
     config = ExpertConfig()
     config.model = "EleutherAI/gpt-neo-125m"
-    module = MultiExpertModel(
-        **vars(config), device_map="cpu", tokenizer=flan_data_module.tokenizer
-    )
+    config.device_map = "cpu"
+    module = MultiExpertModel(**vars(config), tokenizer=flan_data_module.tokenizer)
     config = ExpertConfig(
         kwargs={
             "model_modifier": "lora",

@@ -465,6 +465,7 @@ class TestMultiExpertModel:
         seed_everything(0)
         config: Config = tmp_exp_config
 
+        config.device_map = "cpu"
         config.router_selector = "task_predictor_selector"
         config.ranker_model = "classifier"
         config.ranker_path = "zhan1993/classifier_ranker_debug"
@@ -472,7 +473,7 @@ class TestMultiExpertModel:
         exp2_dest = self.create_dummy_expert(config, "exp2")
         module_dict = {"niv2_sentence_compression": exp1_dest, "niv2_misc": exp2_dest}
 
-        module = MultiExpertModel(**vars(config), device_map="cpu")
+        module = MultiExpertModel(**vars(config))
         module.load_from_module_dict(module_dict, action="route")
 
         bs, max_seq_len = 2, 100

@@ -10,6 +10,8 @@ class ExpertConfig(Config):
     def _set_defaults(self):
         super()._set_defaults()
 
+        self.device_map = "cpu"
+        self.load_in_4bit = False
         self.load_in_8bit = False
         self.wandb_project = None
         self.tensorboard = False
