@@ -15,6 +15,7 @@ from mttl.models.modifiers.base import (
     ModifyMixin,
     ModifierConfig,
 )
+from transformers import Cache
 from transformers.models.llama.modeling_llama import apply_rotary_pos_emb
 
 
@@ -187,12 +188,23 @@ def llama_self_attention(
     adapter: KVAdapter = None,
     attention_mask: Optional[torch.Tensor] = None,
     position_ids: Optional[torch.LongTensor] = None,
-    past_key_value: Optional[Tuple[torch.Tensor]] = None,
+    past_key_value: Optional[Cache] = None,
     output_attentions: bool = False,
     use_cache: bool = False,
-    padding_mask: Optional[torch.LongTensor] = None,
+    cache_position: Optional[torch.LongTensor] = None,
+    **kwargs,
 ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
+    """LlamaAttention forward with adapters. Based on:
+    https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/modeling_llama.py#L320
+
+    """
     bsz, q_len, _ = hidden_states.size()
+
+    if self.config.pretraining_tp != 1:
+        raise ValueError(
+            "Config pretraining_tp != 1 not supported."
+            "See `modeling_llama.py` to add support."
+        )
 
     query_states = self.q_proj(hidden_states)
     key_states = self.k_proj(hidden_states)
@@ -208,25 +220,23 @@ def llama_self_attention(
         bsz, q_len, self.num_key_value_heads, self.head_dim
     ).transpose(1, 2)
 
-    kv_seq_len = key_states.shape[-2]
-    if past_key_value is not None:
-        # `past_key_value` should always also cache the adapter k,v
-        past_k, past_v, adapter_k, adapter_v = past_key_value
-        kv_seq_len += past_k.size(-2)  #  + adapter_k.size(-2)
-    else:
-        adapter_k = adapter_v = None
+    past_key_value = getattr(self, "past_key_value", past_key_value)
 
-    cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
-    query_states, key_states = apply_rotary_pos_emb(
-        query_states, key_states, cos, sin, position_ids
-    )
+    adapter_k = adapter_v = None
+    past_idx = self.layer_idx - 1
+    if past_key_value is not None and past_idx >= 0:
+        adapter_k = past_key_value.adapter_k[past_idx]
+        adapter_v = past_key_value.adapter_v[past_idx]
+
+    cos, sin = self.rotary_emb(value_states, position_ids)
+    query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
 
     if past_key_value is not None:
-        key_states = torch.cat([past_k, key_states], dim=2)
-        value_states = torch.cat([past_v, value_states], dim=2)
-
-    # Typically saved here, before repeat_kv. if `num_key_value_groups` > 1, need to adjust
-    # past_key_value = (key_states, value_states) if use_cache else None
+        # sin and cos are specific to RoPE models; cache_position needed for the static cache
+        cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
+        key_states, value_states = past_key_value.update(
+            key_states, value_states, self.layer_idx, cache_kwargs
+        )
 
     assert self.num_key_value_groups == 1, "how to handle this for adapter?"
     # key_states = repeat_kv(key_states, self.num_key_value_groups)
@@ -236,25 +246,23 @@ def llama_self_attention(
         self.head_dim
     )
 
-    if attn_weights.size() != (bsz, self.num_heads, q_len, kv_seq_len):
-        raise ValueError(
-            f"Attention weights should be of size {(bsz, self.num_heads, q_len, kv_seq_len)}, but is"
-            f" {attn_weights.size()}"
-        )
-
-    if attention_mask is not None:
-        if attention_mask.size() != (bsz, 1, q_len, kv_seq_len):
-            raise ValueError(
-                f"Attention mask should be of size {(bsz, 1, q_len, kv_seq_len)}, but is {attention_mask.size()}"
-            )
-        attn_weights = attn_weights + attention_mask
+    if attention_mask is not None:  # no matter the length, we just slice it
+        # slice by query_states.shape[-2] was not in the original code, is this correct?
+        causal_mask = attention_mask[
+            :, :, : query_states.shape[-2], : key_states.shape[-2]
+        ]
+        attn_weights = attn_weights + causal_mask
 
     # upcast attention to fp32
-    attn_weights = F.softmax(attn_weights, dim=-1, dtype=torch.float32).to(
+    attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(
         query_states.dtype
+    )
+    attn_weights = nn.functional.dropout(
+        attn_weights, p=self.attention_dropout, training=self.training
     )
     attn_output = torch.matmul(attn_weights, value_states)
 
+    # with adapters last dim is `kv_seq_len` instead of `self.head_dim` as in the original
     if attn_output.size() != (bsz, self.num_heads, q_len, self.head_dim):
         raise ValueError(
             f"`attn_output` should be of size {(bsz, self.num_heads, q_len, self.head_dim)}, but is"
@@ -266,19 +274,21 @@ def llama_self_attention(
     if adapter_k is None:
         adapter_k, adapter_v = adapter.get_kv_weights(self.k_proj, self.v_proj)
     if use_cache:
-        past_key_value = (key_states, value_states, adapter_k, adapter_v)
+        # past_key_value.adapter_k = adapter_k
+        # past_key_value.adapter_v = adapter_v
+        past_key_value.adapter_k = getattr(past_key_value, "adapter_k", [])
+        past_key_value.adapter_k.append(adapter_k)
+        past_key_value.adapter_v = getattr(past_key_value, "adapter_v", [])
+        past_key_value.adapter_v.append(adapter_v)
 
     adapter_weights = adapter.route(query_states, adapter_k, self)
     adapter_output = adapter.aggregate(adapter_weights, adapter_v).type_as(attn_output)
+    attn_output = attn_output + adapter_output  # merge adapter output
     """ Adapter End  """
 
-    # merge and reshape
-    attn_output = attn_output + adapter_output
     attn_output = attn_output.transpose(1, 2).contiguous()
     attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)
 
-    # NOTE: not applying positional embedding on these ones.
-    assert self.config.pretraining_tp == 1, "see `modeling_llama.py` to add support"
     attn_output = self.o_proj(attn_output)
 
     if not output_attentions:

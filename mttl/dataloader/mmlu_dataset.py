@@ -146,6 +146,8 @@ class MMLUConfig(datasets.BuilderConfig):
     def __init__(
         self,
         *args,
+        name="default",
+        description="Default config for MMLU",
         data_dir=None,
         task_dir=None,
         max_num_instances_per_task=None,
@@ -154,7 +156,9 @@ class MMLUConfig(datasets.BuilderConfig):
         augment_with_option_permutations=False,
         **kwargs,
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(
+            name=name, description=description, data_dir=data_dir, *args, **kwargs
+        )
         self.data_dir: str = data_dir
         self.task_dir: str = task_dir if task_dir else data_dir
         self.max_num_instances_per_task: int = max_num_instances_per_task
@@ -167,9 +171,6 @@ class MMLUDataset(datasets.GeneratorBasedBuilder):
     """MMLU Dataset."""
 
     BUILDER_CONFIG_CLASS = MMLUConfig
-    BUILDER_CONFIGS = [
-        MMLUConfig(name="default", description="Default config for MMLU")
-    ]
     DEFAULT_CONFIG_NAME = "default"
 
     def _info(self):

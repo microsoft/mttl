@@ -1,3 +1,4 @@
+from importlib.resources import files
 import numpy as np
 import torch
 
@@ -9,7 +10,6 @@ import os
 import random
 import string
 from typing import Optional
-import pkg_resources
 from dataclasses import dataclass
 
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
@@ -351,9 +351,7 @@ class NiDataModule(DefaultDataModule):
         )
 
     def setup_dataset(self):
-        filename = pkg_resources.resource_filename(
-            __name__, "../dataloader/ni_dataset.py"
-        )
+        filename = str(files("mttl.dataloader").joinpath("ni_dataset.py"))
 
         # if we are fine-tuning, we have to load ~1000 instances,
         # in order to be able to select the ones in training and in the valid set.

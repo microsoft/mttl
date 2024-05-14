@@ -103,7 +103,7 @@ def test_llama_adapter(adapter_type, model_arg):
 
         # Test Modified Llama model
         output = new_model(**batch)
-        assert round(output.loss.item(), 4) == 6.0815
+        assert round(output.loss.item(), 4) == 6.0955
 
     if model_arg == "gpt-neo":
         # Test Base GPT neo model

@@ -35,10 +35,10 @@ _CITATION = """
 """
 
 _DESCRIPTION = """
-Natural-Instructions v2 is a benchmark of 1,600+ diverse language tasks and their expert-written instructions. 
-It covers 70+ distinct task types, such as tagging, in-filling, and rewriting. 
-These tasks are collected with contributions of NLP practitioners in the community and 
-through an iterative peer review process to ensure their quality. 
+Natural-Instructions v2 is a benchmark of 1,600+ diverse language tasks and their expert-written instructions.
+It covers 70+ distinct task types, such as tagging, in-filling, and rewriting.
+These tasks are collected with contributions of NLP practitioners in the community and
+through an iterative peer review process to ensure their quality.
 """
 
 
@@ -49,6 +49,8 @@ class NIConfig(datasets.BuilderConfig):
     def __init__(
         self,
         *args,
+        name="default",
+        description="Default config for NaturalInstructions",
         data_dir=None,
         task_dir=None,
         task_name=None,
@@ -56,7 +58,9 @@ class NIConfig(datasets.BuilderConfig):
         max_num_instances_per_eval_task=None,
         **kwargs,
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(
+            name=name, description=description, data_dir=data_dir, *args, **kwargs
+        )
         self.task_name: str = task_name
         self.data_dir: str = data_dir
         self.task_dir: str = task_dir
@@ -69,9 +73,6 @@ class NIOriginalDataset(datasets.GeneratorBasedBuilder):
 
     VERSION = datasets.Version("2.0.0")
     BUILDER_CONFIG_CLASS = NIConfig
-    BUILDER_CONFIGS = [
-        NIConfig(name="default", description="Default config for NaturalInstructions")
-    ]
     DEFAULT_CONFIG_NAME = "default"
 
     def _info(self):

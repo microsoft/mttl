@@ -1537,13 +1537,13 @@ class DatasetEngine(ABC):
     def delete_dataset(self) -> None:
         self.backend_engine.delete_repo(self.dataset_id, repo_type="dataset")
 
-    def _concat_paths(self, *args) -> Path:
+    def _concat_paths(self, *args) -> str:
         """Concatenate paths ordered as received. Ignore None values."""
         results_path = Path()
         for p in args:
             if p is not None:
                 results_path /= p
-        return results_path
+        return str(results_path)
 
 
 class HuggingfaceHubDatasetEngine(DatasetEngine):
@@ -1608,13 +1608,13 @@ class BlobStorageDatasetEngine(DatasetEngine):
         name: Optional[str] = None,
         split: Optional[str] = None,
     ) -> Dataset:
-        local_path = str(self._concat_paths(self.dataset_id, name, split))
-        download_filter = str(self._concat_paths(local_path, "*"))
+        local_path = self._concat_paths(self.dataset_id, name, split)
+        download_filter = self._concat_paths(local_path, "*")
         self.backend_engine.snapshot_download(self.dataset_id, download_filter)
         dataset_cache_dir = str(
             self.backend_engine.get_repository_cache_dir(self.dataset_id)
         )
-        dataset_cache_dir = str(self._concat_paths(dataset_cache_dir, name, split))
+        dataset_cache_dir = self._concat_paths(dataset_cache_dir, name, split)
         dataset = load_from_disk(dataset_cache_dir)
         return dataset
 
@@ -1633,7 +1633,7 @@ class BlobStorageDatasetEngine(DatasetEngine):
             self.backend_engine.get_repository_cache_dir(self.dataset_id)
         )
         # Name is a subset of the dataset. Save in its own directory
-        dataset_path = str(self._concat_paths(dataset_cache_dir, name))
+        dataset_path = self._concat_paths(dataset_cache_dir, name)
         dataset.save_to_disk(dataset_path)
 
         asyncio.run(

@@ -7,8 +7,6 @@ from mttl.datamodule.mt_seq_to_seq_module import (
     FlanConfig,
     FlatMultiTaskModule,
     FlatMultiTaskConfig,
-    T0FlatConfig,
-    T0FlatModule,
 )
 from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
 from mttl.datamodule.mbpp_datamodule import MBPPDataConfig, MBPPDataModule
@@ -145,36 +143,6 @@ def test_alpaca_for_gen():
     assert np.allclose(
         batch["input_ids"][0][: len(input_ids)].numpy().tolist(), input_ids
     )
-
-
-@pytest.mark.skip(reason="deleted dataset on remote :(")
-def test_t0_module():
-    t0 = T0FlatModule(
-        T0FlatConfig(
-            dataset="sordonia/t0-10k-flat",
-            model="t5-small",
-            model_family="seq2seq",
-            train_batch_size=4,
-            predict_batch_size=4,
-        ),
-        for_generation=False,
-        val_mixin=False,
-    )
-    assert len(t0.task_names) == 38
-
-    t0 = T0FlatModule(
-        T0FlatConfig(
-            dataset="sordonia/t0-10k-flat",
-            model="t5-small",
-            model_family="seq2seq",
-            train_batch_size=4,
-            predict_batch_size=4,
-            use_templates_as_tasks=True,
-        ),
-        for_generation=False,
-        val_mixin=False,
-    )
-    assert len(t0.task_names) == 313
 
 
 def test_truncation_side(tiny_flan_id):

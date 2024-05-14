@@ -1,5 +1,5 @@
 import pytorch_lightning as pl
-from projects.wiki_experts.src.ranker.classifier_ranker import (
+from mttl.models.ranker.classifier_ranker import (
     SentenceTransformerClassifier,
     ClassifierSmooth,
 )
@@ -7,7 +7,10 @@ from mttl.datamodule.mt_seq_to_seq_module import (
     FlanConfig,
     FlanModule,
 )
-from projects.wiki_experts.src.ranker.clip_ranker import CLIPRanker, CLIPTripletRanker
+from mttl.models.ranker.clip_ranker import (
+    CLIPRanker,
+    CLIPTripletRanker,
+)
 from projects.wiki_experts.src.ranker.clip_data_module import (
     CLIPExpertsDatamodule,
     CLIPExpertsConfig,

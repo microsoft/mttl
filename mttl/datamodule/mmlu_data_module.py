@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import os
-import pkg_resources
+from importlib.resources import files
 from torch.utils.data import DataLoader
 
 from transformers import AutoTokenizer
@@ -243,9 +243,7 @@ class MMLUDataModule(DefaultDataModule):
         )
 
     def setup_dataset(self, stage=None):
-        filename = pkg_resources.resource_filename(
-            __name__, "../dataloader/mmlu_dataset.py"
-        )
+        filename = str(files("mttl.dataloader").joinpath("mmlu_dataset.py"))
         dataset = DatasetLibrary.pull_dataset(
             filename,
             data_dir=os.environ[self.DATA_ENV],
