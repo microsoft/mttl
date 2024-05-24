@@ -32,11 +32,6 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             self.model = AutoModelForSeq2SeqLM.from_pretrained(
                 config.model, cache_dir=config.cache_dir
             )
-
-            # free up local space after loading in memory
-            if config.free_up_space:
-                os.system(f"rm -rf {config.cache_dir}")
-
             self.model = modify_transformer(self.model, config)
         else:
             self.model = kwargs["model_object"]

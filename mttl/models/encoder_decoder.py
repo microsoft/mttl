@@ -28,9 +28,6 @@ class EncoderDecoder(EfficientCheckpointModule):
             self.model = AutoModelForSeq2SeqLM.from_pretrained(
                 self.args.model, cache_dir=self.args.cache_dir
             )
-            # free-up temporary space
-            if self.args.free_up_space:
-                os.system(f"/bin/rm -rf {self.args.cache_dir}")
 
             if "t5" or "T0" in self.args.model:
                 self.pad_token_id = self.tokenizer.pad_token_id
@@ -73,7 +70,7 @@ class EncoderDecoder(EfficientCheckpointModule):
     def teacher_force_step(self, batch, reduction="mean"):
         input_ids, target_ids = batch["input_ids"], batch["labels"]
 
-        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
+        self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
 
         decoder_input_ids = self.model.prepare_decoder_input_ids_from_labels(target_ids)
         # need to transform -100 into padding tokens
@@ -174,7 +171,7 @@ class Finetuner(EncoderDecoder):
         input_ids = batch["input_ids"]
         attention_mask = batch["attention_mask"]
 
-        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
+        self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
 
         outputs = self.model.generate(
             input_ids=input_ids,

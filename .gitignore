@@ -1,4 +1,6 @@
 # Project related stuff
+*.yaml
+amlt/
 dataloader/*_data/processed/
 amlt*/
 amulet_*/
@@ -152,5 +154,16 @@ results/
 lm_cache/
 /tmp/
 
-# any file starting with _
+#
+projects/instr_routing/*
+
+# any file starting with __
 _*.*
+_*/*
+# any folder starting with __
+_*/
+!__init__.py
+!*/__init__.py
+*/my_configs/*
+my_configs
+gcr_configs

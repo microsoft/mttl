@@ -4,6 +4,19 @@ import math
 from torch.distributions import Bernoulli, Categorical
 from pytorch_lightning import Callback
 from mttl.utils import agg_dicts
+from typing import Any
+
+import pytorch_lightning as pl
+import matplotlib.pyplot as plt
+from pytorch_lightning import Callback
+
+from mttl.utils import agg_dicts, Averager
+from mttl.models.modifiers.expert_containers.selectors import Selector
+
+try:
+    import wandb
+except:
+    pass
 
 
 def get_monitors(config):
@@ -11,12 +24,15 @@ def get_monitors(config):
     if (
         config.model_modifier
         and "poly" in config.model_modifier
-        and config.router_selector
-        and "poly" in config.router_selector
+        and (
+            (config.router_selector and "poly" in config.router_selector)
+            or config.router_selector is None
+        )
     ):
         monitors += [PolytroponLog()]
-    if "llama_adapter" in config.model_modifier:
-        monitors += [AlphaLog()]
+
+    else:
+        monitors += [SelectorLog(config)]
 
     return monitors
 
@@ -26,6 +42,7 @@ class PolytroponLog(Callback):
 
     LOG_EVERY = 500
 
+    @torch.no_grad()
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:
         if trainer.global_step == 0 or trainer.global_step % self.LOG_EVERY > 0:
             return
@@ -50,11 +67,19 @@ class PolytroponLog(Callback):
             }
 
         # iterate over encoder and decoder layers
-        stats = {"encoder": [], "decoder": []}
+        model_family = getattr(pl_module.model.config, "model_family", "gpt")
+        if model_family == "encdec":
+            stats = {"encoder": [], "decoder": []}
+        elif model_family == "gpt":
+            stats = {"": []}
 
         seen = 0
         for coder in stats.keys():
-            mod = getattr(pl_module.model, coder)
+            if len(coder) > 0:
+                mod = getattr(pl_module.model, coder)
+            else:
+                mod = pl_module.model
+
             for module in mod.modules():
                 if hasattr(module, "module_logits"):
                     stats[coder] += [layer_stats(module.module_logits)]
@@ -70,27 +95,60 @@ class PolytroponLog(Callback):
                     )
 
 
-class AlphaLog(Callback):
-    LOG_EVERY = 5
+class SelectorLog(Callback):
+    def __init__(self, args):
+        self.plot_every = 10
+        self.log_per_layer = True
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:
-        if trainer.global_step == 0 or trainer.global_step % self.LOG_EVERY > 0:
-            return
-
-        gate_values = []
-        for mod in pl_module.modules():
-            if hasattr(mod, "adapter_gate"):
-                gate_values += [mod.adapter_gate.mean().item()]
-
-        to_log = {
-            "train/alpha_mean": sum(gate_values) / len(gate_values),
-            "train/alpha_max": max(gate_values),
-            "train/alpha_min": min(gate_values),
-        }
-
-        pl_module.log_dict(
-            to_log,
-            on_epoch=True,
-            on_step=True,
-            sync_dist=True,
+        self.aggregate_and_maybe_log(
+            trainer, pl_module, trainer.global_step, split="train"
         )
+
+    def on_validation_batch_end(
+        self,
+        trainer,
+        pl_module,
+        outputs,
+        batch: Any,
+        batch_idx: int,
+        dataloader_idx: int = 0,
+    ) -> None:
+        self.aggregate_and_maybe_log(trainer, pl_module, batch_idx, split="val")
+
+    def aggregate_and_maybe_log(self, trainer, pl_module, current_step, split) -> None:
+        # get routing attributes of all layers
+        if current_step % self.plot_every != 0:
+            return
+        all_routing_gates = []
+        for name, module in pl_module.named_modules():
+            if isinstance(module, Selector) and hasattr(module, "routing_gates"):
+                if isinstance(module.routing_gates, list):
+                    gates = np.mean([torch.mean(gate) for gate in module.routing_gates])
+                    all_routing_gates.append(gates.item())
+                    module.routing_gates = []
+                else:
+                    continue
+        if len(all_routing_gates) > 0:
+            # log and empty routing_gates
+            # we log averaged gates across samples and layers
+            if wandb.run is not None:
+                wandb_logger = [
+                    lgr
+                    for lgr in pl_module.loggers
+                    if isinstance(lgr, pl.loggers.wandb.WandbLogger)
+                ][0]
+                prefix = (
+                    f"{pl_module._log_pref}" if hasattr(pl_module, "_log_pref") else ""
+                )
+                wandb_logger.log_metrics(
+                    {f"{prefix}{split}/routing_gates": np.mean(all_routing_gates)}
+                )
+                if self.log_per_layer:
+                    plt.clf()
+                    _ = plt.plot(range(len(all_routing_gates)), all_routing_gates)
+                    wandb_logger.log_image(
+                        f"{prefix}{split}/routing_gates_per_layer",
+                        [wandb.Image(plt)],
+                        step=pl_module.global_step,
+                    )

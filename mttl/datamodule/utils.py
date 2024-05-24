@@ -1,43 +1,60 @@
+import os
+
 from transformers import AutoTokenizer, LlamaTokenizer
 from mttl.utils import logger
 
 
-def maybe_filter_hf_dataset_by_task(dataset, task_field, task_names: str = None):
+def maybe_filter_hf_dataset_by_task(
+    dataset, task_field, task_names: str = None, n_proc=16
+):
     """Filter a HuggingFace dataset by task names."""
+
     # get the tasks
-    all_tasks = set(dataset["train"][task_field])
+    all_tasks = set()
+    if "train" in dataset:
+        all_tasks = all_tasks.union(set(dataset["train"][task_field]))
     if "validation" in dataset:
         all_tasks = all_tasks.union(set(dataset["validation"][task_field]))
     if "test" in dataset:
         all_tasks = all_tasks.union(set(dataset["test"][task_field]))
 
     if task_names:
-        task_names = sorted(task_names.split(","))
+        task_names = (
+            sorted(task_names.split(","))
+            if isinstance(task_names, str)
+            else sorted(task_names)
+        )
         if not set(task_names).issubset(all_tasks):
-            raise ValueError("task_names must be a subset of the available tasks.")
+            raise ValueError(
+                "task_names must be a subset of the available tasks. Got {} and {}".format(
+                    task_names, all_tasks
+                )
+            )
 
     train_dataset, dev_dataset, test_dataset = None, None, None
 
     if task_names is not None:
-        train_dataset = dataset["train"].filter(
-            lambda x: x[task_field] in task_names,
-            num_proc=16,
-            desc="Filtering task names",
-        )
+        if "train" in dataset:
+            train_dataset = dataset["train"].filter(
+                lambda x: x[task_field] in task_names,
+                num_proc=n_proc,
+                desc="Filtering task names",
+            )
         if "validation" in dataset:
             dev_dataset = dataset["validation"].filter(
                 lambda x: x[task_field] in task_names,
-                num_proc=16,
+                num_proc=n_proc,
                 desc="Filtering task names",
             )
         if "test" in dataset:
             test_dataset = dataset["test"].filter(
                 lambda x: x[task_field] in task_names,
-                num_proc=16,
+                num_proc=n_proc,
                 desc="Filtering task names",
             )
     else:
-        train_dataset = dataset["train"]
+        if "train" in dataset:
+            train_dataset = dataset["train"]
         if "validation" in dataset:
             dev_dataset = dataset["validation"]
         if "test" in dataset:
@@ -93,7 +110,10 @@ def get_tokenizer_with_args(
     truncation_side="right",
     for_generation=False,
 ):
-    if "llama" in model_name:
+    if model_family is None:
+        raise ValueError("model_family is None, please fix your config!")
+
+    if "llama-2" in model_name:
         tokenizer = LlamaTokenizer.from_pretrained(model_name)
         tokenizer.pad_token_id = 0
         if not model_family == "gpt":
@@ -101,21 +121,26 @@ def get_tokenizer_with_args(
                 "We detected a Llama model, but model_family != 'gpt', fix your config!"
             )
     else:
+        if "phi-2" == model_name:
+            # local phi-2 version. use `microsoft/phi-2 for the official hf version`
+            model_name = os.environ["PHI_PATH"]
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         tokenizer.model_max_length = int(1e9)
 
     tokenizer.padding_side = padding_side
-    logger.warn("Padding side is {}".format(tokenizer.padding_side))
+    logger.warning("Padding side is {}".format(tokenizer.padding_side))
 
     tokenizer.truncation_side = truncation_side
-    logger.warn("Padding side is {}".format(tokenizer.padding_side))
+    logger.warning("Truncation side is {}".format(tokenizer.truncation_side))
 
     if model_family == "gpt":
         if for_generation:
             if padding_side == "right":
-                logger.warn("Padding side is 'right', but we are in generation mode!")
+                logger.warning(
+                    "Padding side is 'right', but we are in generation mode!"
+                )
 
-            logger.warn(
+            logger.warning(
                 "for_generation is True, setting padding_side for tokenizer to 'left'."
             )
 
@@ -125,7 +150,7 @@ def get_tokenizer_with_args(
         tokenizer.add_eos_token = False
 
         if tokenizer.pad_token_id is None:
-            logger.warn(
+            logger.warning(
                 "!!! Setting pad_token_id to eos_token_id, given that pad_token_id was not detected !!!"
             )
             tokenizer.pad_token_id = tokenizer.eos_token_id

@@ -1,31 +1,41 @@
 import pytest
 import numpy as np
-from mttl.datamodule.base import AutoDataModule
-from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
-from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
+from mttl.datamodule.base import DatasetConfig
+from mttl.datamodule.mt_seq_to_seq_module import (
+    FlanModule,
+    FlanConfig,
+    FlatMultiTaskModule,
+    FlatMultiTaskConfig,
+)
+from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
+from mttl.datamodule.mbpp_datamodule import MBPPDataConfig, MBPPDataModule
+from mttl.datamodule.platypus_module import PlatypusModule
 
 
-@pytest.mark.parametrize("task_name", [None, "huggingface_xsum"])
-def test_flan(task_name):
+@pytest.mark.parametrize(
+    "task_name, n_tasks, train, test",
+    [
+        (None, 18, 765, 73),
+        ("stream_aqua", 1, 46, 5),
+    ],
+)
+def test_flan(tiny_flan_id, task_name, n_tasks, train, test):
     flan = FlanModule(
         FlanConfig(
-            "sordonia/flan-debug-flat",
+            tiny_flan_id,
             model="t5-small",
             model_family="seq2seq",
             train_batch_size=4,
             predict_batch_size=4,
             finetune_task_name=task_name,
+            include_template_type="zs_opt",
+            include_task_source="CoT",
         )
     )
-    if task_name is None:
-        assert len(flan.train_dataset) == 559
-        assert len(flan.task_names) == 235
-        assert len(flan.test_dataset) == 63
-    else:
-        assert len(flan.train_dataset) == 2
-        assert len(flan.task_names) == 1
-        assert len(flan.test_dataset) == 1
+    assert len(flan.task_names) == n_tasks
+    assert len(flan.train_dataset) == train
+    assert len(flan.test_dataset) == test
 
     batch = next(iter(flan.train_dataloader()))
     assert "input_ids" in batch
@@ -37,13 +47,16 @@ def test_flan(task_name):
 
 
 def test_platypus():
-    platy = AutoDataModule.create(
-        "platypus",
-        model="yahma/llama-7b-hf",
-        max_input_length=4096,
-        model_family="gpt",
+    platy = PlatypusModule(
+        DatasetConfig(
+            dataset="platypus",
+            model="yahma/llama-7b-hf",
+            max_input_length=4096,
+            model_family="gpt",
+            validation_portion=0.05,
+        ),
         for_generation=False,
-        validation_portion=0.05,
+        val_mixin=False,
     )
     batch = next(iter(platy.val_dataloader()))
     assert "input_ids" in batch
@@ -52,9 +65,10 @@ def test_platypus():
     assert "sources_texts" in batch
     assert "labels_texts" in batch
     # there is no space added to the labels
+    assert batch["sources_texts"][0][-1] == "\n"
     assert batch["labels_texts"][0][0] != ""
     input_ids = platy.tokenizer(
-        batch["sources_texts"][0] + " " + batch["labels_texts"][0]
+        batch["sources_texts"][0] + batch["labels_texts"][0]
     ).input_ids
     assert np.allclose(
         batch["input_ids"][0][: len(input_ids)].numpy().tolist(), input_ids
@@ -62,12 +76,15 @@ def test_platypus():
 
 
 def test_alpaca():
-    alpaca = AutoDataModule.create(
-        "alpaca",
-        model="t5-small",
-        model_family="seq2seq",
+    alpaca = AlpacaDataModule(
+        DatasetConfig(
+            dataset="alpaca",
+            model="t5-small",
+            model_family="seq2seq",
+            validation_portion=0.05,
+        ),
         for_generation=False,
-        validation_portion=0.05,
+        val_mixin=False,
     )
     batch = next(iter(alpaca.train_dataloader()))
     assert "input_ids" in batch
@@ -81,12 +98,15 @@ def test_alpaca():
     # there is no space added to the labels
     assert labels_texts[0][0] != " "
 
-    alpaca = AutoDataModule.create(
-        "alpaca",
-        model="EleutherAI/gpt-neo-125m",
-        model_family="gpt",
+    alpaca = AlpacaDataModule(
+        DatasetConfig(
+            dataset="alpaca",
+            model="EleutherAI/gpt-neo-125m",
+            model_family="gpt",
+            validation_portion=0.05,
+        ),
         for_generation=False,
-        validation_portion=0.05,
+        val_mixin=False,
     )
     batch = next(iter(alpaca.val_dataloader()))
 
@@ -104,13 +124,16 @@ def test_alpaca():
 
 
 def test_alpaca_for_gen():
-    alpaca = AutoDataModule.create(
-        "alpaca",
-        model="EleutherAI/gpt-neo-125m",
-        model_family="gpt",
-        predict_batch_size=1,
+    alpaca = AlpacaDataModule(
+        DatasetConfig(
+            dataset="alpaca",
+            model="EleutherAI/gpt-neo-125m",
+            model_family="gpt",
+            predict_batch_size=1,
+            validation_portion=0.05,
+        ),
         for_generation=True,
-        validation_portion=0.05,
+        val_mixin=False,
     )
     batch = next(iter(alpaca.val_dataloader()))
 
@@ -122,36 +145,21 @@ def test_alpaca_for_gen():
     )
 
 
-def test_t0_module():
-    t0 = AutoDataModule.create(
-        "sordonia/t0-10k-flat",
-        model="t5-small",
-        model_family="seq2seq",
-        train_batch_size=4,
-        predict_batch_size=4,
-    )
-    assert len(t0.task_names) == 38
-
-    t0 = AutoDataModule.create(
-        "sordonia/t0-10k-flat",
-        model="t5-small",
-        model_family="seq2seq",
-        train_batch_size=4,
-        predict_batch_size=4,
-        use_templates_as_tasks=True,
-    )
-    assert len(t0.task_names) == 313
-
-
-def test_truncation_side():
-    flan = AutoDataModule.create(
-        "sordonia/flan-debug-flat",
-        model="EleutherAI/gpt-neo-125m",
-        model_family="gpt",
-        max_input_length=16,
-        train_batch_size=4,
-        predict_batch_size=100,
-        truncation_side="left",
+def test_truncation_side(tiny_flan_id):
+    flan = FlanModule(
+        FlanConfig(
+            dataset=tiny_flan_id,
+            model="EleutherAI/gpt-neo-125m",
+            model_family="gpt",
+            max_input_length=16,
+            train_batch_size=4,
+            predict_batch_size=100,
+            truncation_side="left",
+            include_template_type="zs_opt",
+            include_task_source="CoT",
+        ),
+        for_generation=False,
+        val_mixin=False,
     )
     dl = flan.val_dataloader()
     batch = next(iter(dl))
@@ -167,14 +175,20 @@ def test_truncation_side():
         else:
             assert true == dec
 
-    flan = AutoDataModule.create(
-        "sordonia/flan-debug-flat",
-        model="EleutherAI/gpt-neo-125m",
-        model_family="gpt",
-        max_input_length=4000,
-        train_batch_size=4,
-        predict_batch_size=100,
-        truncation_side="left",
+    flan = FlanModule(
+        FlanConfig(
+            dataset=tiny_flan_id,
+            model="EleutherAI/gpt-neo-125m",
+            model_family="gpt",
+            max_input_length=4000,
+            train_batch_size=4,
+            predict_batch_size=100,
+            truncation_side="left",
+            include_template_type="zs_opt",
+            include_task_source="CoT",
+        ),
+        for_generation=False,
+        val_mixin=False,
     )
     dl = flan.val_dataloader()
     batch = next(iter(dl))
@@ -188,28 +202,42 @@ def test_truncation_side():
         assert true[:10] == dec[:10]
 
 
-def test_auto_module():
-    flan = AutoDataModule.create(
-        "sordonia/flan-debug-flat",
-        model="t5-small",
-        model_family="seq2seq",
-        train_batch_size=4,
-        predict_batch_size=4,
+def test_auto_module(tiny_flan_id):
+    flan = FlanModule(
+        FlanConfig(
+            dataset=tiny_flan_id,
+            model="t5-small",
+            model_family="seq2seq",
+            train_batch_size=4,
+            predict_batch_size=4,
+            include_template_type="zs_opt",
+            include_task_source="CoT",
+        ),
+        for_generation=False,
+        val_mixin=False,
     )
-    assert len(flan.train_dataset) == 559
-    assert len(flan.task_names) == 235
+    assert len(flan.task_names) == 18
+    assert len(flan.train_dataset) == 765
+    assert len(flan.test_dataset) == 73
+    assert len(flan.dev_dataset) == 111
 
-    flan = AutoDataModule.create(
-        "sordonia/flan-debug-flat",
-        model="t5-small",
-        model_family="seq2seq",
-        train_batch_size=4,
-        predict_batch_size=4,
-        include_template_type="*",
-        include_task_source="*",
+    flan = FlanModule(
+        FlanConfig(
+            dataset=tiny_flan_id,
+            model="t5-small",
+            model_family="seq2seq",
+            train_batch_size=4,
+            predict_batch_size=4,
+            include_template_type="*",
+            include_task_source="*",
+        ),
+        for_generation=False,
+        val_mixin=False,
     )
-    assert len(flan.train_dataset) == 14560
-    assert len(flan.task_names) == 1820
+    assert len(flan.task_names) == 18
+    assert len(flan.train_dataset) == 1440
+    assert len(flan.test_dataset) == 144
+    assert len(flan.dev_dataset) == 216
 
 
 @pytest.mark.parametrize("task_name", [None, "high_school_government_and_politics"])
@@ -285,3 +313,82 @@ def test_mmlu_spaces_and_merges(task_name=None):
     assert np.allclose(
         batch["input_ids"][0][: len(input_ids)].numpy().tolist(), input_ids
     )
+
+
+def test_multichoice_collator():
+    from mttl.datamodule.base import MultipleChoiceCollator
+    from mttl.datamodule.utils import get_tokenizer_with_args
+
+    tokenizer = get_tokenizer_with_args(
+        "EleutherAI/gpt-neo-125m", "gpt", "left", "left", False
+    )
+    collator = MultipleChoiceCollator(
+        tokenizer=tokenizer,
+    )
+    batch = [
+        {"source": "a", "target": ["a1", "a2"], "task_name": "t1", "label_index": 1},
+        {"source": "b", "target": ["b1"], "task_name": "t2", "label_index": 0},
+    ]
+    output = collator(batch)
+    assert output["sources_texts"] == ["a", "a", "b"]
+    assert output["labels_texts"] == ["a1", "a2", "b1"]
+    assert output["labels_index"][0] == 1
+    assert output["labels_index"][1] == 0
+    assert output["num_options"] == [2, 1]
+    assert output["task_names"] == ["t1", "t1", "t2"]
+
+    collator = MultipleChoiceCollator(tokenizer=tokenizer, multisource=True)
+    batch = [
+        {"source": ["a1", "a2"], "target": "a", "task_name": "t1", "label_index": 1},
+        {"source": ["b1"], "target": "b", "task_name": "t2", "label_index": 0},
+    ]
+    output = collator(batch)
+    assert output["sources_texts"] == ["a1", "a2", "b1"]
+    assert output["labels_texts"] == ["a", "a", "b"]
+    assert output["num_options"] == [2, 1]
+    assert output["task_names"] == ["t1", "t1", "t2"]
+
+
+def test_mbpp():
+    config = MBPPDataConfig(
+        model="EleutherAI/gpt-neo-125m",
+        model_family="gpt",
+        max_input_length=4096,
+        train_batch_size=4,
+        predict_batch_size=4,
+    )
+
+    module = MBPPDataModule(config, for_generation=False)
+    assert len(module.train_dataset) == 120
+    # must be executable so that the model trains on valid code
+    for ex in module.train_dataset:
+        exec(ex["source"] + ex["target"])
+
+
+@pytest.mark.parametrize(
+    "subsample, subsample_per_task, train_size",
+    [
+        (None, None, 160),
+        (0.5, True, 80),
+        (5, False, 5),
+        (5, True, 10),
+    ],
+)
+def test_dst_subsample(tiny_flan_id, subsample, subsample_per_task, train_size):
+    common_kwargs = {
+        "model": "EleutherAI/gpt-neo-125m",
+        "train_batch_size": 4,
+        "predict_batch_size": 4,
+        "model_family": "gpt",
+        "truncation_side": "left",
+        "finetune_task_name": "cot_ecqa,stream_qed",
+        "dataset": tiny_flan_id,
+    }
+    if subsample is not None:
+        common_kwargs["subsample_train"] = subsample
+    if subsample_per_task is not None:
+        common_kwargs["subsample_per_task"] = subsample_per_task
+
+    config = FlatMultiTaskConfig(**common_kwargs)
+    dm = FlatMultiTaskModule(config)
+    assert len(dm.train_dataset) == train_size

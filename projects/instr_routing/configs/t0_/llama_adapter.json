@@ -1,9 +1,0 @@
-{
-    "n_splits": 1,
-    "model_modifier": "llama_adapter",
-    "adafactor_scale_parameter": false, 
-    "adapters_learning_rate" : 1e-3, 
-    "patch_last_k_layers": -1, 
-    "trainable_param_names": ".*adapter_query.*|.*adapter_gate.*", 
-    "soft_prompt_learn_kv": true 
-}

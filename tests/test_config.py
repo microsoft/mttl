@@ -1,7 +1,5 @@
 import json
-
 import pytest
-
 from mttl.config import Config
 
 
@@ -16,6 +14,7 @@ def ConfigTest(tmp_path):
             self.total_steps = 1000
             self.learning_rate = 1e-3
             self.output_dir = str(tmp_path / "output_dir")
+
     return SimpleConfig
 
 
@@ -45,11 +44,13 @@ def test_config_dict_like(tmp_path, ConfigTest):
 
 
 def test_config_was_override_from_kwargs(ConfigTest):
-    config = ConfigTest(kwargs={
-        "optimizer": "adafactor",
-        "dataset": "t0",
-        "model": "t5-small",
-    })
+    config = ConfigTest(
+        kwargs={
+            "optimizer": "adafactor",
+            "dataset": "t0",
+            "model": "t5-small",
+        }
+    )
     assert not config.was_overridden("train_dir")
     assert config.was_overridden("optimizer")
     assert config.was_overridden("dataset")
@@ -92,3 +93,51 @@ def test_config_was_default_from_file(tmp_path, ConfigTest):
     config = ConfigTest(filenames=str(config_file))
     assert not config.was_default("dataset")
     assert config.was_default("model")
+
+
+def test_auto_modifier_config():
+    from mttl.models.modifiers.base import ModifierConfig
+
+    config = Config()
+    config.model_modifier = "lora"
+    config.lora_rank = 12
+    config.lora_dropout = 0.52
+    config.modify_modules = ".*mlpU.*"
+
+    lora_config = ModifierConfig.from_training_config(config)
+
+    from mttl.models.modifiers.lora import LoRAConfig
+
+    assert type(lora_config) == LoRAConfig
+    assert lora_config.lora_rank == 12
+    assert lora_config.lora_dropout == 0.52
+    assert lora_config.modify_modules == ".*mlpU.*"
+
+
+def test_dump_load_lora_config():
+    from mttl.models.modifiers.base import ModifierConfig
+
+    data = {
+        "__model_modifier__": "lora",
+        "lora_rank": 12,
+        "lora_dropout": 0.52,
+    }
+    lora_config = ModifierConfig.fromdict(data)
+
+    from mttl.models.modifiers.lora import LoRAConfig
+
+    assert type(lora_config) == LoRAConfig
+    assert lora_config.lora_rank == 12
+    assert lora_config.lora_dropout == 0.52
+
+
+def test_dump_load_selector_config():
+    from mttl.models.modifiers.expert_containers.selectors import (
+        SelectorConfig,
+        MOERKHSSelectorConfig,
+    )
+
+    dump = MOERKHSSelectorConfig(emb_dim=12345).asdict()
+    test = SelectorConfig.fromdict(dump)
+    assert test.emb_dim == 12345
+    assert type(test) == MOERKHSSelectorConfig

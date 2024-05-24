@@ -1,5 +1,11 @@
+import bitsandbytes as bnb
+
+# stores modifiers across the mttl lib
 MODIFIERS = {}
+# stores mapping from configs to modifiers
 CONFIGS_TO_MODIFIERS = {}
+# stores mapping from modifiers to configs
+MODIFIERS_TO_CONFIGS = {}
 
 
 def register_modifier(name, config_cls=None):
@@ -12,31 +18,53 @@ def register_modifier(name, config_cls=None):
 
         if config_cls is not None:
             CONFIGS_TO_MODIFIERS[config_cls] = name
+            MODIFIERS_TO_CONFIGS[name] = config_cls
         return klass
 
     return _thunk
 
 
-def modify_transformer(transformer, modifier_config, model_modifier=None):
-    import mttl.models.modifiers.lora  # noqa: F401
-    import mttl.models.modifiers.poly  # noqa: F401
-    import mttl.models.modifiers.routing  # noqa: F401
-    import mttl.models.modifiers.prompt_tuning  # noqa: F401
-    import mttl.models.modifiers.llama_adapter  # noqa: F401
+def get_modifier_type(config, model_modifier=None):
+    model_modifier = model_modifier or getattr(config, "model_modifier", None)
+    try:
+        model_modifier = model_modifier or CONFIGS_TO_MODIFIERS.get(config, None)
+    except:
+        pass
+    model_modifier = model_modifier or CONFIGS_TO_MODIFIERS.get(type(config), None)
+    return model_modifier
 
-    # import mttl.models.modifiers.prefix_tuning # noqa: F401
+
+def modify_transformer(
+    transformer, modifier_config, model_modifier=None, **modifier_kwargs
+):
+    from mttl.utils import logger
 
     # create a shared container for the task id
-    transformer.task_id_container = {}
+    transformer.info_container = {}
+    # create a shared container for the possible routers
+    transformer.selectors = {}
+
+    # set all params to not require grad
+    for param in transformer.parameters():
+        param.requires_grad = False
+
+    if modifier_config is None or (
+        hasattr(modifier_config, "model_modifier")
+        and (modifier_config.model_modifier is None)
+    ):
+        # set all params to require grad
+        for param in transformer.parameters():
+            if not (
+                isinstance(param, bnb.nn.modules.Params4bit)
+                or isinstance(param, bnb.nn.Int8Params)
+            ):
+                param.requires_grad = True
+
+    model_modifier = get_modifier_type(modifier_config, model_modifier=model_modifier)
 
     if model_modifier is None:
-        model_modifier = getattr(modifier_config, "model_modifier", None)
-
-    if model_modifier is None:
-        model_modifier = CONFIGS_TO_MODIFIERS.get(type(modifier_config), None)
-
-    if model_modifier is None:
-        raise ValueError("Model modifier not set nor in config nor as an argument.")
+        logger.warning("Model modifier not set nor in config nor as an argument.")
+        return transformer
 
     if model_modifier:
         if model_modifier in MODIFIERS:

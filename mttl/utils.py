@@ -1,20 +1,54 @@
-from collections import defaultdict
 import glob
 import json
 import logging
 import os
+import time
+import random
+import string
 import numpy as np
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 from torch import Tensor
-from typing import Dict
+from typing import Dict, Optional
 import hashlib
-from pytorch_lightning.utilities.rank_zero import rank_zero_info
+from pytorch_lightning.utilities.rank_zero import rank_zero_info, rank_zero_only
 from torch.autograd.function import Function
+from functools import lru_cache
 
 
 logger = logging.getLogger("mttl")
+
+
+@lru_cache
+def warn_once(msg: str):
+    logger.warning(msg)
+
+
+def remote_login(token: Optional[str] = None):
+    """Caches the provided token and login to remote service: Azure Blob Storage or Hugging Face Hub.
+
+    Sets the environment variable "BLOB_SAS_TOKEN" for later use
+    if token is provided and it does not start with "hf_"
+
+    Otherwise, Hugging Face Hub login is performed. If no token is provided,
+    tries to login to Hugging Face Hub using HF_TOKEN environment variable.
+
+    Args:
+        token (str): The token to use for login.
+
+    Returns:
+        None
+    """
+
+    if token is not None and not token.startswith("hf_"):
+        os.environ["BLOB_SAS_TOKEN"] = token
+    else:
+        token = token or os.environ.get("HF_TOKEN", None)
+        if token is not None:
+            from huggingface_hub import login as hf_hub_login
+
+            hf_hub_login(token=token)
 
 
 def hash_example(example):
@@ -130,7 +164,9 @@ class Averager:
             if key not in self.total:
                 self.total[key] = value
             else:
-                self.total[key] = self.total[key] * self.weight + value * (1 - self.weight)
+                self.total[key] = self.total[key] * self.weight + value * (
+                    1 - self.weight
+                )
         return self.total
 
 
@@ -234,7 +270,50 @@ class CustomModelCheckpoint(pl.callbacks.ModelCheckpoint):
         self.last_model_score = current
 
 
-def get_mlf_logger():
+def get_pl_loggers(args):
+    loggers = []
+
+    add_simple_logger(loggers, args)
+    add_tb_logger(loggers, args)
+    add_wandb_logger(loggers, args)
+    add_mlf_logger(loggers)
+
+    return loggers
+
+
+def add_simple_logger(loggers, args):
+    from mttl.models.utils import SimpleLogger
+
+    loggers.append(SimpleLogger(args.output_dir))
+
+
+def add_tb_logger(loggers, args):
+    if args.tensorboard:
+        tb_logger = pl.loggers.TensorBoardLogger(save_dir=args.output_dir)
+        loggers.append(tb_logger)
+
+
+def add_wandb_logger(loggers, args) -> pl.loggers.WandbLogger:
+    if not os.environ.get("WANDB_API_KEY"):
+        return
+
+    import wandb
+
+    if not args.exp_name:
+        args.exp_name = os.environ.get("AMLT_JOB_NAME")
+    if not args.wandb_project:
+        args.wandb_project = os.environ.get("WANDB_PROJECT")
+
+    wandb_logger = pl.loggers.WandbLogger(
+        project=args.wandb_project,
+        name=args.exp_name,
+        settings=wandb.Settings(start_method="fork"),
+    )
+    wandb_logger.experiment.save("*.py")
+    loggers.append(wandb_logger)
+
+
+def add_mlf_logger(loggers):
     import pytorch_lightning as pl
     from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
@@ -253,14 +332,17 @@ def get_mlf_logger():
         from azureml.core.run import Run
 
         run = Run.get_context()
-        mlflow_url = run.experiment.workspace.get_mlflow_tracking_uri()
+
         mlf_logger = MLFlowLoggerCustom(
-            experiment_name=run.experiment.name, tracking_uri=mlflow_url
+            experiment_name=run.experiment.name,
         )
         mlf_logger._run_id = run.id
     except:
+        logger.warning("Couldn't instantiate MLFlowLogger!")
         mlf_logger = None
-    return mlf_logger
+
+    if mlf_logger is not None:
+        loggers.append(mlf_logger)
 
 
 def get_checkpoint_path(path, step=None, use_last=False):
@@ -268,61 +350,34 @@ def get_checkpoint_path(path, step=None, use_last=False):
         return path
 
     # use glob to avoid explicitly writing out long paths
-    match = glob.glob(f"{path}/*.ckpt", recursive=True)
+    matches = glob.glob(f"{path}/**/*.ckpt", recursive=True)
 
     if use_last:
         # search for last.ckpt
-        match = [m for m in match if "last.ckpt" in m]
+        match = [m for m in matches if "last.ckpt" in m]
         if len(match) != 1:
             raise ValueError(
                 "last.ckpt not found or found multiple (?) in the list of checkpoints!"
             )
-        return match[0]
+        path = match[0]
+    else:
+        # match the filename
+        match = [m for m in matches if "best" in m.split("/")[-1]]
+        if len(match) == 0:
+            logger.warning("No best checkpoints found! Defaulting to 'last'.")
 
-    if len(match) > 1:
-        logger.warning(
-            f"{len(match)} checkpoints found. "
-            + "taking the one with the lowest val loss"
-        )
-        losses = []
-        for x in match:
-            if "loss" in x:
-                loss = float(x.split("loss=")[-1].split(".ckpt")[0])
-            elif "zero_shot_perf" in x:
-                loss = -float(x.split("zero_shot_perf=")[-1].split(".ckpt")[0])
-            else:
-                continue
-            losses.append(loss)
-        idx = np.argmin(losses) if losses else 0
-        path = match[idx]
-    elif len(match) == 0:
-        match = glob.glob(f"{path}/*step*.pt", recursive=True)
-        if len(match) > 1:
+            match = [m for m in matches if "last" in m]
+            path = match[0]
+        elif len(match) > 1:
             logger.warning(
-                f"{len(match)} checkpoints found. "
-                + "taking the one with the lowest val loss"
+                "Multiple best checkpoints found! Taking the most recent one!"
             )
-            found = False
-            for m in match:
-                # take the one with the specified step
-                if str(step) in m:
-                    path = m
-                    found = True
-                    break
-            if not found and step is None:
-                # global_stepX.pt, take the one with the highest step
-                idx = np.argmax(
-                    [float(x.split("step")[-1].split(".pt")[0]) for x in match]
-                )
-                path = match[idx]
-        elif len(match) == 0:
-            raise FileNotFoundError(f"{path} had no `.ckpt` nor `.pt` files")
+            logger.warning(match)
+            path = max(match, key=os.path.getctime)
         else:
             path = match[0]
-    else:
-        path = match[0]
 
-    print("Found checkpoint", path)
+    logger.info(f"Found checkpoint at {path}.")
     return path
 
 
@@ -336,13 +391,22 @@ def setup_logging(log_dir: str = None):
     logging.getLogger("openai").setLevel(logging.WARNING)
 
     if log_dir:
+        log_file_path = os.path.join(log_dir, "log.txt")
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
-        logger.addHandler(logging.FileHandler(os.path.join(log_dir, "log.txt")))
-        logger.info(
-            "New experiment, log will be at %s",
-            os.path.join(log_dir, "log.txt"),
+
+        handler_exists = any(
+            isinstance(handler, logging.FileHandler)
+            and handler.baseFilename == log_file_path
+            for handler in logger.handlers
         )
+
+        if not handler_exists:
+            logger.addHandler(logging.FileHandler(log_file_path))
+            logger.info(
+                "New experiment, log will be at %s",
+                log_file_path,
+            )
 
 
 class MemEfficientLoRA(Function):
@@ -413,3 +477,80 @@ if __name__ == "__main__":
 
         pdb.set_trace()
         print(res)
+
+
+# define a retry decorator
+def retry_with_exponential_backoff(
+    initial_delay: float = 1,
+    exponential_base: float = 2,
+    jitter: bool = True,
+    max_retries: int = 5,
+    errors: tuple = (),
+):
+    """Retry a function with exponential backoff."""
+
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            # Initialize variables
+            num_retries = 0
+            delay = initial_delay
+
+            # Loop until a successful response or max_retries is hit or an exception is raised
+            while True:
+                try:
+                    return func(*args, **kwargs)
+
+                # Retry on specified errors
+                except errors as e:
+                    # Increment retries
+                    num_retries += 1
+
+                    # Check if max retries has been reached
+                    if num_retries > max_retries:
+                        raise Exception(
+                            f"Maximum number of retries ({max_retries}) exceeded."
+                        )
+
+                    # Increment the delay
+                    delay *= exponential_base * (1 + jitter * random.random())
+
+                    # Sleep for the delay
+                    time.sleep(delay)
+
+                # Raise exceptions for any errors not specified
+                except Exception as e:
+                    raise e
+
+        return wrapper
+
+    return decorator
+
+
+# decorator like rank_zero_only but with a barrier at the end
+def rank_zero_only_and_wait(before=True, after=True):
+    def decorator(fn):
+        def wrapped_fn(*args, **kwargs):
+            output = None
+            if (
+                before
+                and torch.distributed.is_available()
+                and torch.distributed.is_initialized()
+            ):
+                torch.distributed.barrier()
+            if rank_zero_only.rank == 0:
+                output = fn(*args, **kwargs)
+            if (
+                after
+                and torch.distributed.is_available()
+                and torch.distributed.is_initialized()
+            ):
+                torch.distributed.barrier()
+
+            return output
+
+        return wrapped_fn
+
+    return decorator
+
+def generate_random_string(str_len=10):
+    return ''.join(random.choices(string.ascii_uppercase, k=str_len))

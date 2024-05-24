@@ -1,22 +1,21 @@
+from importlib.resources import files
 import numpy as np
 import torch
 
-from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
-from datasets import load_dataset
 import json
 import tqdm
 import os
 import random
 import string
 from typing import Optional
-import pkg_resources
 from dataclasses import dataclass
 
-from mttl.datamodule.utils import get_tokenizer, maybe_filter_hf_dataset_by_task
+from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 from mttl.datamodule.base import DefaultCollator, DefaultDataModule, DatasetConfig
-from mttl.utils import hash_example, logger
+from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
+from mttl.utils import logger
 
 
 @dataclass
@@ -26,6 +25,7 @@ class NiDataConfig(DatasetConfig):
     num_pos_examples: int = 0
     num_neg_examples: int = 0
     add_explanation: bool = False
+    sep_by_eos_token: bool = False
     tk_instruct: bool = False
     max_num_instances_per_task: int = 100
 
@@ -41,6 +41,7 @@ class DataCollatorForNI(DefaultCollator):
     return_tensors: str = "pt"
     add_task_name: bool = False
     add_task_definition: bool = True
+    sep_by_eos_token: bool = False
     num_pos_examples: int = 0
     num_neg_examples: int = 0
     add_explanation: bool = False
@@ -147,7 +148,9 @@ class DataCollatorForNI(DefaultCollator):
                 if not pos_example_str[-1] in string.punctuation:
                     pos_example_str += "."
                 # add eos token
-                pos_example_str += " " + self.tokenizer.eos_token
+                pos_example_str += (
+                    (" " + self.tokenizer.eos_token) if self.sep_by_eos_token else ""
+                )
                 # end add eos token
                 pos_example_str += "\n"
                 if add_explanation and "explanation" in pos_example:
@@ -263,7 +266,6 @@ class DataCollatorForNI(DefaultCollator):
         output_batch["task_ids"] = torch.LongTensor(
             [self.task_to_id[task] for task in task_identifiers]
         )  # task ids potentially used in routing
-
         output_batch["sources_texts"] = sources
         output_batch["labels_texts"] = labels_rand
         output_batch["labels_full_seq"] = labels_full_seq
@@ -272,7 +274,7 @@ class DataCollatorForNI(DefaultCollator):
 
 
 class NiDataModule(DefaultDataModule):
-    def test_dataloader(self, subsample=-1):
+    def test_dataloader(self, subsample=-1, shuffle=False):
         if subsample > 0:
             from mttl.datamodule import take_n_examples_per_task
 
@@ -288,7 +290,7 @@ class NiDataModule(DefaultDataModule):
         return DataLoader(
             test_dataset,
             batch_size=self.config.predict_batch_size,
-            shuffle=False,
+            shuffle=shuffle,
             num_workers=16,
             pin_memory=True,
             persistent_workers=True,
@@ -308,7 +310,7 @@ class NiDataModule(DefaultDataModule):
         )
 
         if not os.path.exists(reference_file):
-            logger.warn("No test references found, skipping check.")
+            logger.warning("No test references found, skipping check.")
             return
 
         eval_instances = {}
@@ -339,7 +341,8 @@ class NiDataModule(DefaultDataModule):
             max_input_length=self.config.max_input_length,
             max_output_length=self.config.max_output_length,
             num_pos_examples=self.config.num_pos_examples,
-            add_task_definition=self.config.use_task_descriptions,
+            add_task_definition=self.config.add_task_definition,
+            sep_by_eos_token=self.config.sep_by_eos_token,
             pad_to_multiple_of=8,
             return_tensors="pt",
             model_family=self.config.model_family,
@@ -348,15 +351,14 @@ class NiDataModule(DefaultDataModule):
         )
 
     def setup_dataset(self):
-        filename = pkg_resources.resource_filename(
-            __name__, "../dataloader/ni_dataset.py"
-        )
+        filename = str(files("mttl.dataloader").joinpath("ni_dataset.py"))
 
         # if we are fine-tuning, we have to load ~1000 instances,
         # in order to be able to select the ones in training and in the valid set.
-        dataset = load_dataset(
+        dataset = DatasetLibrary.pull_dataset(
             filename,
             data_dir=os.environ["NI_DATA_DIR"],
+            task_name=self.config.finetune_task_name,
             max_num_instances_per_task=(
                 self.config.max_num_instances_per_task
                 if self.config.finetune_task_name is None
@@ -386,17 +388,4 @@ class NiDataModule(DefaultDataModule):
                 )
             )
 
-        self.print_infos()
         self._check_test_references()
-
-
-if __name__ == "__main__":
-    from mttl.config import Config
-
-    config = Config.parse()
-    config.task_dir = "/datadrive2/sni/tasks"
-    config.data_dir = "/datadrive2/sni/"
-    config.model = "EleutherAI/gpt-neo-125m"
-    datamodule = NiDataModule(config)
-    datamodule.setup()
-    print(next(iter(datamodule.train_dataloader())))

@@ -3,17 +3,19 @@ import os
 import ast
 import argparse
 from string import Template
-
-from mttl.utils import logger
+from typing import Dict
+from mttl.utils import logger, setup_logging
 
 
 class Config:
-    def __init__(self, filenames=None, kwargs=None, raise_error=True):
+    def __init__(self, filenames=None, kwargs=None, raise_error=True, silent=False):
         # Stores personalization of the config file in a dict (json serializable)
+
         self._updated_kwargs = {}
         self.filenames = filenames
         self._set_defaults()
 
+        overwrite_logs = []
         if filenames:
             for filename in filenames.split("+"):
                 if not os.path.exists(filename):
@@ -21,18 +23,48 @@ class Config:
                         os.getenv("CONFIG_PATH", default="configs"), filename
                     )
 
-                self.update_kwargs(
-                    json.load(open(filename)), eval=False, raise_error=raise_error
+                if not os.path.exists(filename) and ".json" not in filename:
+                    filename = filename + ".json"
+
+                overwrite_logs += self.update_kwargs(
+                    json.load(open(filename)),
+                    eval=False,
+                    raise_error=raise_error,
+                    silent=silent,
                 )
 
         if kwargs:
-            self.update_kwargs(kwargs, raise_error=raise_error)
+            overwrite_logs += self.update_kwargs(
+                kwargs, raise_error=raise_error, silent=silent
+            )
 
-        self.post_init()
-        self.save_config(self.output_dir)
+        # setup logging to the output dir
+        try:
+            setup_logging(self.output_dir)
+        except Exception as e:
+            if raise_error:
+                raise ValueError("Error setting up logging") from e
+            elif not silent:
+                logger.warning(f"Error setting up logging to {self.output_dir}")
 
-    def post_init(self):
+        # log the overwrites
+        for log in overwrite_logs:
+            logger.warning(log)
+
+        self.post_init(silent=silent)
+
+    def post_init(self, silent=False):
         pass
+
+    @classmethod
+    def fromdict(cls, data):
+        _ = data.pop("_updated_kwargs", None)
+        return cls(kwargs=data, raise_error=False, silent=True)
+
+    def asdict(self) -> Dict:
+        from mttl.models.utils import convert_hps_to_dict
+
+        return convert_hps_to_dict(self.__dict__)
 
     def was_overridden(self, key):
         return key in self._updated_kwargs
@@ -40,7 +72,8 @@ class Config:
     def was_default(self, key):
         return key not in self._updated_kwargs
 
-    def update_kwargs(self, kwargs, eval=True, raise_error=True):
+    def update_kwargs(self, kwargs, eval=True, raise_error=True, silent=False):
+        overwrites_log = []
         for k, v in kwargs.items():
             if eval:
                 try:
@@ -53,15 +86,16 @@ class Config:
             if not hasattr(self, k) and raise_error:
                 raise ValueError(f"{k} is not in the config")
 
-            if eval:
-                logger.warn("Overwriting {} to {}".format(k, v))
+            if eval and not silent:
+                overwrites_log.append(f"Overwriting {k} to {v}")
 
-            if k in ["data_dir", "output_dir"]:
+            if type(v) == str and "$" in v:
                 # this raises an error if the env. var does not exist
                 v = Template(v).substitute(os.environ)
 
             setattr(self, k, v)
             self._updated_kwargs[k] = v
+        return overwrites_log
 
     def __getitem__(self, item):
         return getattr(self, item, None)
@@ -113,12 +147,20 @@ class Config:
             args = argparse.Namespace()
             args.kwargs = None
             args.config_files = c
+
         kwargs = {}
         if args.kwargs:
             kwargs_opts = list(itertools.chain(*args.kwargs))
             for value in kwargs_opts:
                 key, _, value = value.partition("=")
-                kwargs[key] = value
+
+                # allows multiple values for a given option when specified in the command line!
+                if key in kwargs:
+                    if type(kwargs[key]) != list:
+                        kwargs[key] = [kwargs[key]]
+                    kwargs[key].append(value)
+                else:
+                    kwargs[key] = value
 
         args.kwargs = kwargs
         if extra_kwargs:
@@ -134,7 +176,6 @@ class Config:
 
     def _set_defaults(self):
         self.cache_dir = os.getenv("CACHE_DIR", "./cache")
-        self.free_up_space = False
 
         # Data config
         self.dataset = None
@@ -176,7 +217,8 @@ class Config:
 
         # Filtering configs, useful for flan flat, etc.
         self.include_template_type = "zs_noopt"
-        self.include_task_source = "P3,Flan2021"
+        self.include_task_source = "P3,Flan2021,CoT"
+        self.remove_phi_eval_tasks = False
 
         # Training config
         self.compute_strategy = None
@@ -205,8 +247,15 @@ class Config:
         self.num_tasks_per_batch = None
         self.save_every = None
         self.eval_every = None
+        self.eval_every_n_epoch = 1
         self.debug = False
         self.seed = 42
+        self.eval_before_training = True
+
+        self.subsample_train = None
+        self.subsample_dev = None
+        self.subsample_test = None
+        self.subsample_per_task = False
 
         self.ni_online_eval = False  # zero-shot online eval for ni
         self.t0_online_eval = False  # zero-shot eval for t0
@@ -249,10 +298,12 @@ class Config:
         # n-skills for router-based methods
         self.n_skills = 8
         self.n_tasks = None
+        self.task_names = None
 
         # which modules to modify and which layers for adapters
         self.modify_modules = None
         self.modify_layers = None
+        self.tie_params = None  #  "q_proj\\.lora_a|k_proj\\.lora_a|v_proj\\.lora_a" to share lora_a for q,k,v
 
         """
         router_granularity : how granular is the module selection
@@ -264,12 +315,17 @@ class Config:
         """
         self.router_granularity = "finegrained"  # router granularity
         self.router_selector = None  # router selector
+        self.router_weight_decay = None  # router weight decay
+        self.router_learning_rate = None
 
         # Polytropon related hyper-parameters
         self.n_splits = 1  # number of splits for poly-s
         self.router_selector_cluster_temp = 1.0  # temperature for the cluster selector
         self.poly_average_correction = False  # correct the poly average
         self.poly_use_shared_skill = False  # use one skill shared by all tasks
+        self.skip_unseen_tokens = (
+            True  # skip unseen tokens in PerTokenPoly during evaluation
+        )
 
         self.module_logits_relaxed_bernoulli = True
         self.module_logits_straight_through = False
@@ -279,10 +335,13 @@ class Config:
         self.module_logits_dropout = 0.0
         self.module_logits_l2_norm = False
 
+        self.augment_mmlu: bool = False
 
-class ParseKwargs(argparse.Action):
-    def __call__(self, parser, namespace, values, option_string=None):
-        setattr(namespace, self.dest, dict())
-        for value in values:
-            key, value = value.split("=")
-            getattr(namespace, self.dest)[key] = value
+        # soft prompts
+        self.soft_prompt_length: int = 10
+        self.patch_last_k_layers: int = -1
+        self.soft_prompt_mlp_dim: int = None
+        self.soft_prompt_hidden_dim: int = None
+        self.soft_prompt_learn_kv: bool = False
+        self.prompt_placement: str = "prefix"
+        self.add_routing_token: bool = False

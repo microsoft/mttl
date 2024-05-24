@@ -1,7 +1,0 @@
-{
-    "n_splits": 1,
-    "model_modifier": "alpha_prompt_tuning",
-    "adafactor_scale_parameter": false, 
-    "adapters_learning_rate" : 1e-3,
-    "trainable_param_names": ".*prompt_mixer.*" 
-}

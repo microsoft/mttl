@@ -35,10 +35,10 @@ _CITATION = """
 """
 
 _DESCRIPTION = """
-Natural-Instructions v2 is a benchmark of 1,600+ diverse language tasks and their expert-written instructions. 
-It covers 70+ distinct task types, such as tagging, in-filling, and rewriting. 
-These tasks are collected with contributions of NLP practitioners in the community and 
-through an iterative peer review process to ensure their quality. 
+Natural-Instructions v2 is a benchmark of 1,600+ diverse language tasks and their expert-written instructions.
+It covers 70+ distinct task types, such as tagging, in-filling, and rewriting.
+These tasks are collected with contributions of NLP practitioners in the community and
+through an iterative peer review process to ensure their quality.
 """
 
 
@@ -49,13 +49,19 @@ class NIConfig(datasets.BuilderConfig):
     def __init__(
         self,
         *args,
+        name="default",
+        description="Default config for NaturalInstructions",
         data_dir=None,
         task_dir=None,
+        task_name=None,
         max_num_instances_per_task=None,
         max_num_instances_per_eval_task=None,
         **kwargs,
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__(
+            name=name, description=description, data_dir=data_dir, *args, **kwargs
+        )
+        self.task_name: str = task_name
         self.data_dir: str = data_dir
         self.task_dir: str = task_dir
         self.max_num_instances_per_task: int = max_num_instances_per_task
@@ -67,9 +73,6 @@ class NIOriginalDataset(datasets.GeneratorBasedBuilder):
 
     VERSION = datasets.Version("2.0.0")
     BUILDER_CONFIG_CLASS = NIConfig
-    BUILDER_CONFIGS = [
-        NIConfig(name="default", description="Default config for NaturalInstructions")
-    ]
     DEFAULT_CONFIG_NAME = "default"
 
     def _info(self):
@@ -130,6 +133,7 @@ class NIOriginalDataset(datasets.GeneratorBasedBuilder):
                 gen_kwargs={
                     "path": os.path.join(data_dir, "train_tasks.txt"),
                     "task_dir": task_dir,
+                    "task_name": self.config.task_name,
                     "max_num_instances_per_task": self.config.max_num_instances_per_task,
                     "subset": "train",
                 },
@@ -139,6 +143,7 @@ class NIOriginalDataset(datasets.GeneratorBasedBuilder):
                 gen_kwargs={
                     "path": os.path.join(data_dir, "test_tasks.txt"),
                     "task_dir": task_dir,
+                    "task_name": self.config.task_name,
                     "max_num_instances_per_task": self.config.max_num_instances_per_task,
                     "subset": "validation",
                 },
@@ -148,6 +153,7 @@ class NIOriginalDataset(datasets.GeneratorBasedBuilder):
                 gen_kwargs={
                     "path": os.path.join(data_dir, "test_tasks.txt"),
                     "task_dir": task_dir,
+                    "task_name": self.config.task_name,
                     "max_num_instances_per_task": self.config.max_num_instances_per_eval_task,
                     "subset": "test",
                 },
@@ -155,14 +161,25 @@ class NIOriginalDataset(datasets.GeneratorBasedBuilder):
         ]
 
     def _generate_examples(
-        self, path=None, task_dir=None, max_num_instances_per_task=None, subset=None
+        self,
+        path=None,
+        task_dir=None,
+        task_name=None,
+        max_num_instances_per_task=None,
+        subset=None,
     ):
         """Yields examples."""
         logger.info(f"Generating tasks from = {path}")
 
         with open(path, encoding="utf-8") as split_f:
             for line in split_f:
-                task_name = line.strip()
+                task_name_ = line.strip()
+
+                if task_name is not None and task_name_ != task_name:
+                    continue
+                else:
+                    task_name = task_name_
+
                 task_path = os.path.join(task_dir, task_name + ".json")
 
                 with open(task_path, encoding="utf-8") as task_f:

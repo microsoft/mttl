@@ -1,0 +1,13 @@
+{
+    "type": "QATransformConfig",
+    "model_setting": "openai_batched",
+    "icl_examples": 0,
+    "icl_dataset": "lukaemon/mmlu",
+    "icl_split": "validation",
+    "icl_use_options": true,
+    "num_iterations": 1,
+    "max_context_length": 512,
+    "max_tokens_instruction": 2056,
+    "max_tokens_response": 2056,
+    "max_contexts_per_subject": 2000
+}

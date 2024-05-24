@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import os
-import pkg_resources
+from importlib.resources import files
 from torch.utils.data import DataLoader
 
 from transformers import AutoTokenizer
@@ -11,12 +11,15 @@ from typing import Union, Optional
 import re
 import copy
 
-from datasets import load_dataset
 from dataclasses import dataclass
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 
-from mttl.utils import logger
-from mttl.datamodule.base import DatasetConfig, DefaultCollator, DefaultDataModule
+from mttl.datamodule.base import (
+    DatasetConfig,
+    DefaultCollator,
+    DefaultDataModule,
+)
+from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
 
 
 #################################################
@@ -127,6 +130,7 @@ class DataCollatorForMMLU(DefaultCollator):
     for_generation: bool = False
     model_family: str = "seq2seq"
     task_to_id: dict = None
+    few_shot: bool = True
 
     def __call__(self, batch, return_tensors=None):
         if return_tensors is None:
@@ -135,27 +139,30 @@ class DataCollatorForMMLU(DefaultCollator):
         sources = []
 
         for instance in batch:
-            prompt = (
-                instance["Definition"]
-                + instance["Positive Examples"]
-                + instance["Instance"]["Input"]
-            )
-            input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids
-
-            while (
-                input_ids.shape[-1] > self.max_input_length
-                and len(instance["Positive Examples"].split("\n\n")) > 2
-            ):
-                instance["Positive Examples"] = (
-                    "\n\n".join(instance["Positive Examples"].split("\n\n")[:-2])
-                    + "\n\n"
-                )
+            if self.few_shot:
                 prompt = (
                     instance["Definition"]
                     + instance["Positive Examples"]
                     + instance["Instance"]["Input"]
                 )
                 input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids
+
+                while (
+                    input_ids.shape[-1] > self.max_input_length
+                    and len(instance["Positive Examples"].split("\n\n")) > 2
+                ):
+                    instance["Positive Examples"] = (
+                        "\n\n".join(instance["Positive Examples"].split("\n\n")[:-2])
+                        + "\n\n"
+                    )
+                    prompt = (
+                        instance["Definition"]
+                        + instance["Positive Examples"]
+                        + instance["Instance"]["Input"]
+                    )
+                    input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids
+            else:
+                prompt = instance["Definition"] + instance["Instance"]["Input"]
 
             sources.append(prompt)
 
@@ -180,8 +187,10 @@ class DataCollatorForMMLU(DefaultCollator):
         return output_batch
 
 
+@dataclass
 class MMLUDataConfig(DatasetConfig):
-    augment_dataset: bool = False
+    few_shot: bool = True
+    augment_mmlu: bool = False
 
 
 class MMLUDataModule(DefaultDataModule):
@@ -204,9 +213,9 @@ class MMLUDataModule(DefaultDataModule):
             test_dataset,
             batch_size=self.config.predict_batch_size,
             shuffle=shuffle,
-            num_workers=16,
+            num_workers=8,
             pin_memory=True,
-            persistent_workers=True,
+            persistent_workers=False,
             collate_fn=self.collate_fn,
         )
 
@@ -230,17 +239,16 @@ class MMLUDataModule(DefaultDataModule):
             model_family=self.config.model_family,
             for_generation=self.for_generation,
             task_to_id=self.task_to_id,
+            few_shot=self.config.few_shot,
         )
 
     def setup_dataset(self, stage=None):
-        filename = pkg_resources.resource_filename(
-            __name__, "../dataloader/mmlu_dataset.py"
-        )
-        dataset = load_dataset(
+        filename = str(files("mttl.dataloader").joinpath("mmlu_dataset.py"))
+        dataset = DatasetLibrary.pull_dataset(
             filename,
             data_dir=os.environ[self.DATA_ENV],
-            augment_with_prompts=self.config.augment_dataset,
-            augment_with_option_permutations=self.config.augment_dataset,
+            augment_with_prompts=self.config.augment_mmlu,
+            augment_with_option_permutations=self.config.augment_mmlu,
         )
 
         (
@@ -252,5 +260,3 @@ class MMLUDataModule(DefaultDataModule):
         ) = maybe_filter_hf_dataset_by_task(
             dataset, "Task", self.config.finetune_task_name
         )
-
-        self.print_infos()

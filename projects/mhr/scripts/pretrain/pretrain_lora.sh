@@ -1,1 +1,0 @@
-python pl_train.py -c t0/xl-lm-adapt.json+t0/pretrain.json+t0/poly_lora.json -k n_skills=1 eval_every=20_000 $*

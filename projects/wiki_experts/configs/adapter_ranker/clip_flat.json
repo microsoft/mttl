@@ -1,0 +1,7 @@
+{
+    "dataset": "sordonia/adauni-v1-flat",
+    "train_batch_size": 1024,
+    "model": "EleutherAI/gpt-neo-125m",
+    "predict_batch_size": 1024,
+    "ranker_model": "clip"
+}
