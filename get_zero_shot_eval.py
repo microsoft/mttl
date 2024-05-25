@@ -6,7 +6,7 @@ import pandas as pd
 
 
 for result in sys.argv[1:]:
-    files = glob.glob(result + "/**/*.jsonl", recursive=True)
+    files = glob.glob(result + "/**/test_scores.jsonl", recursive=True)
     results = []
 
     for file in files:
