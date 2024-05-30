@@ -19,7 +19,13 @@ from mttl.models.modifiers.expert_containers.selectors import (
 )
 
 from mttl.utils import logger, warn_once
-from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
+from mttl.models.modifiers.lora import (
+    LoRA,
+    LoRAConfig,
+    SkilledLoRA,
+    SkilledLoRAView,
+    SkilledLoRAConfig,
+)
 from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
 from mttl.models.modifiers.expert_containers.expert import Expert
 from mttl.models.modifiers.modify_model import get_modifier_type
@@ -496,6 +502,10 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                 input, [self.experts], weights, dim_names=selection.dim_names
             )
             return module_output
+        elif isinstance(selection, ExpertsAndWeightsSelectorOutput):
+            raise NotImplementedError("Cannot select a subset of experts.")
+        else:
+            raise ValueError("Unknown selection type.")
 
     def forward(self, input, **kwargs):
         if len(self.experts) > 0:
