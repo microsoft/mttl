@@ -450,7 +450,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                     selection.experts,
                     use_default_expert=self.default_expert_name is not None,
                 )
-            ).to(selection.weights.device)
+            )
 
             # one-hot encode the indices
             weights = (
