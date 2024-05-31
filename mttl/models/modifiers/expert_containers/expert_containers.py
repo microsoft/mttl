@@ -473,9 +473,11 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                 input, [self.experts], weights, dim_names=["batch", "experts"]
             )
             return module_output
-        elif isinstance(
-            selection, BatchSequenceExpertsAndWeightsSelectorOutput
-        ) or isinstance(selection, BatchExpertsAndWeightsSelectorOutput):
+        elif (
+            isinstance(selection, BatchSequenceExpertsAndWeightsSelectorOutput)
+            or isinstance(selection, BatchExpertsAndWeightsSelectorOutput)
+            or isinstance(selection, ExpertsAndWeightsSelectorOutput)
+        ):
             if selection.experts is not SelectorOutput.ALL_EXPERTS:
                 # we are in top-k or sparse selection mode
                 if not isinstance(selection.experts, torch.Tensor):
