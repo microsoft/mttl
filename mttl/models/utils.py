@@ -441,7 +441,7 @@ def model_loader_helper(
         )
     elif "phi-2" == model_name:
         # local phi-2 version. use `microsoft/phi-2 for the official hf version`
-        logger.info(f"Loading phi-2 model from {os.getenv("PHI_PATH", "microsoft/phi-2")}")
+        logger.info(f"Loading phi-2 model from {os.getenv('PHI_PATH', 'microsoft/phi-2')}")
         model_object = AutoModelForCausalLM.from_pretrained(
             os.getenv("PHI_PATH", "microsoft/phi-2"),
             load_in_8bit=load_in_8bit,
