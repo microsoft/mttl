@@ -119,7 +119,7 @@ class ExpertConfig(Config):
         self.save_each_epoch = False
         self.add_eos_to_downstream_targets = True
         self.flan_tasks_path = "projects/wiki_experts/task_sets/flan_tasks.json"
-        self.tie_params_phi2translater = True # if 'True', when translating old phi2 lib to be compatibale with the new HF version, the q k v share same routins (just as it is the case in the old phi2 implementation)
+        self.tie_params_phi2translater = True # if 'True', when translating old phi2 lib to be compatibale with the new HF version, the q k v will share the same routings (just as it is the case in the old phi2 implementation)
 
     def post_init(self, silent=False):
         if self.micro_batch_size is None:
