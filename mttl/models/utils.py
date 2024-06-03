@@ -442,7 +442,7 @@ def model_loader_helper(
     elif "phi-2" == model_name:
         # local phi-2 version. use `microsoft/phi-2 for the official hf version`
         model_object = AutoModelForCausalLM.from_pretrained(
-            os.environ["PHI_PATH"],
+            os.getenv("PHI_PATH", "microsoft/phi-2"),
             load_in_8bit=load_in_8bit,
             torch_dtype=torch.bfloat16,
             device_map=device_map,
