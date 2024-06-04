@@ -2,7 +2,6 @@ import os
 import sys
 import torch
 import wandb
-import re
 import numpy as np
 from copy import deepcopy
 import torch.nn.functional as F
@@ -11,17 +10,13 @@ import json
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.models.modifiers.expert_containers.expert_library import (
-    ExpertLibrary,
-    LocalExpertLibrary,
-)
+from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 from mttl.models.modifiers.expert_containers.selectors import (
     PerTokenSelector,
     Selector,
     SelectorConfig,
 )
 from mttl.models.modifiers.lora import LoRAConfig
-from mttl.models.modifiers.expert_containers.expert import Expert
 
 from mttl.utils import logger, remote_login, setup_logging
 from mttl.models.expert_model import MultiExpertModel, ExpertModel
@@ -66,7 +61,7 @@ def get_arrow_embeddings(library, args):
     cfg = ArrowConfig(
         name=args.expert_embeds_save_name,
         ab_only=args.ab_only,
-        tie_params=args.tie_params,
+        tie_params=args.tie_params or "default",
         tie_op=args.tie_op,
     )
     return ArrowTransform(cfg).transform(
@@ -121,66 +116,6 @@ def patch_prototypes(module, library, args, proto_inits=None):
             )
             prototypes = torch.stack(prototypes)
             mod.overwrite_prototypes(prototypes)
-
-
-def translate_lib_to_hf_phi(
-    args: ExpertConfig, library: ExpertLibrary, tie_params=False
-) -> ExpertLibrary:
-    """
-    The new version of phi-2 on hugging face seperates W_qkv into k_proj, v_proj, q_proj, the previous version was using a single Wqkv matrix.
-    This function transforms the library to be compatible with the new version of phi-2 by:
-    - splitting W_qkv into k_proj, v_proj, q_proj: results in k_proj.lora_a, v_proj.lora_a, q_proj.lora_a being the same.
-    - making sure layer count matches (it starts at 0 in the new version)
-    - renames mixer into self_attn
-    - renames out_proj into dense
-    """
-    if tie_params:
-        args.tie_params = "q_proj.*\\.lora_a|k_proj.*\\.lora_a|v_proj.*\\.lora_a"
-    path = "/tmp/" + args.library_id.split("/")[-1] + f"_hf-phi-2_tie{int(tie_params)}"
-    if os.path.exists(path):
-        logger.info(
-            f"Library already exists at {path}, skipping transformation of library."
-        )
-        return LocalExpertLibrary(path, create=False)
-    loc_library = LocalExpertLibrary(
-        path,
-        create=True,
-    )
-    for expert_name in library.keys():
-        expert_dump = library[expert_name]
-        expert_dump.expert_config.modify_layers = (
-            ".*k_proj.*|.*v_proj.*|.*q_proj.*|.*dense.*"
-        )
-        expert_dump.training_config.modify_layers = (
-            ".*k_proj.*|.*v_proj.*|.*q_proj.*|.*dense.*"
-        )
-        # 1. split Wqkv into k_proj, v_proj, q_proj
-        expert_weights = expert_dump.expert_weights
-        new_expert_weights = {}
-        for k, v in expert_weights.items():
-            new_k = "model." + k
-            new_k = new_k.replace("mixer", "self_attn")
-            new_k = new_k.replace("out_proj", "dense")
-            # regex to decrease the layer number by one
-            new_k = re.sub(r"\d+", lambda m: str(int(m.group()) - 1), new_k)
-            if "Wqkv.lora_a" in k:
-                lora_a = v
-                lora_b = expert_weights[k.replace("lora_a", "lora_b")]
-                in_d = lora_a.shape[0]
-                for i, attn_key in enumerate(["q_proj", "k_proj", "v_proj"]):
-                    module_name = new_k.split(".Wqkv.lora_a")[0]
-                    new_expert_weights[f"{module_name}.{attn_key}.lora_a"] = lora_a
-                    new_expert_weights[f"{module_name}.{attn_key}.lora_b"] = lora_b[
-                        :, i * in_d : (i + 1) * in_d
-                    ]
-            elif "Wqkv.lora_b" in k:
-                continue
-            else:
-                new_expert_weights[new_k] = v
-        expert_dump.expert_weights = new_expert_weights
-        loc_library.add_expert(expert_name=expert_name, expert_dump=expert_dump)
-        # make sure arrow routing uses same routing for q, k, v as in older version of phi-2 implementation.
-    return loc_library
 
 
 def eval_in_distribution(module, args: ExpertConfig, tasks: list):
@@ -317,15 +252,7 @@ def run_eval(args: ExpertConfig):
         module = MultiExpertModel(
             **vars(train_cfg), selector_config=selector_config
         ).to("cuda")
-        if (
-            train_cfg.model == "phi-2"
-            and module.model.__class__.__name__ == "PhiForCausalLM"
-            and "mixer" in list(an_expert.expert_weights.keys())[0]
-        ):
-            logger.info(
-                "You are using library trained with old phi-2 version on a new backbone (presumably retriever from HF). This code will tranform the library into local libary with experts compatible with the new phi-2 implementation."
-            )
-            library = translate_lib_to_hf_phi(args, library, tie_params=args.tie_params_phi2translater)
+
         module.add_experts_from_library(library)
         patch_prototypes(module, library, args)
 
