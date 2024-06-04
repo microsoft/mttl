@@ -88,13 +88,11 @@ def translate_lib_to_hf_phi(
 )  # e.g. hf://ostapeno/library-phi_2-v3-10-flan-clusters-fromlucas_transformed
 @click.option("--remote_token", default=None)
 @click.option(
-    "--tie-params-phi2translater",
+    "--tie_params",
     default=True,
-    help="Whether to tie the parameters of the phi2translater model.",
+    help="If 'True' sets tie_params argument of experts to 'q_proj.*\\.lora_a|k_proj.*\\.lora_a|v_proj.*\\.lora_a'. This makes sure that later same arrow routing is computed for q,k,v.",
 )
-def main(
-    library_id_source, library_id_target, remote_token, tie_params_phi2translater=True
-):
+def main(library_id_source, library_id_target, remote_token, tie_params=True):
     library = ExpertLibrary.get_expert_library(
         repo_id=library_id_source,
         token=remote_token if remote_token else None,
@@ -106,7 +104,7 @@ def main(
         "mixer" in list(an_expert.expert_weights.keys())[0]
     ), "This script is only for converting old phi-2 versions using mixer."
     new_library = translate_lib_to_hf_phi(
-        library, library_id_target, tie_params=tie_params_phi2translater
+        library, library_id_target, tie_params=tie_params
     )
     assert len(new_library) == len(library), "The number of experts should be the same."
 
