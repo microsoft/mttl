@@ -504,8 +504,6 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                 input, [self.experts], weights, dim_names=selection.dim_names
             )
             return module_output
-        elif isinstance(selection, ExpertsAndWeightsSelectorOutput):
-            raise NotImplementedError("Cannot select a subset of experts.")
         else:
             raise ValueError("Unknown selection type.")
 

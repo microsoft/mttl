@@ -160,6 +160,9 @@ class LoRA(MergeableAdapter, ModifyMixin):
         if len(set([lora.layer for lora in loras])) > 1:
             raise ValueError("Cannot parallelize loras applied to different layers.")
 
+        if len(loras) not in [1, input.shape[0]]:
+            raise ValueError("Needed either 1 lora or as many batch examples.")
+
         # (batch, in_features, rank)
         lora_a = torch.stack([lora.lora_a for lora in loras], dim=0)
         # (batch, rank, out_features)
@@ -175,16 +178,19 @@ class LoRA(MergeableAdapter, ModifyMixin):
         input_lora = input.to(loras[0].lora_a.dtype)
         input_lora = loras[0].dropout_layer(input_lora)
 
-        # sometimes lora_a and lora_b's batch dimension is 1
-        factor = input_lora.size(0) // lora_a.size(0)
-        if factor > 1:
-            exp_dims = lora_a.ndim - 1
-            lora_a = lora_a.expand(factor, *(-1,) * exp_dims)
-            lora_b = lora_b.expand(factor, *(-1,) * exp_dims)
+        if lora_a.size(0) == 1:
+            lora_a, lora_b = lora_a.squeeze(0), lora_b.squeeze(0)
+            adapter_out = torch.einsum("bsi,ir->bsr", (input_lora, lora_a))
+            adapter_out = (
+                torch.einsum("bsr,ro->bso", (adapter_out, lora_b))
+                * scaling[:, None, None]
+            )
+        else:
+            adapter_out = (
+                torch.bmm(torch.bmm(input_lora, lora_a), lora_b)
+                * scaling[:, None, None]
+            )
 
-        adapter_out = (
-            torch.bmm(torch.bmm(input_lora, lora_a), lora_b) * scaling[:, None, None]
-        )
         return layer_out + adapter_out.to(dtype=input.dtype)
 
     def reset_parameters(self):
