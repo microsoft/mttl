@@ -1,7 +1,6 @@
 import os
 import sys
 import torch
-import copy
 import wandb
 import numpy as np
 from copy import deepcopy
@@ -62,7 +61,7 @@ def get_arrow_embeddings(library, args):
     cfg = ArrowConfig(
         name=args.expert_embeds_save_name,
         ab_only=args.ab_only,
-        tie_params=args.tie_params,
+        tie_params=args.tie_params or "default",
         tie_op=args.tie_op,
     )
     return ArrowTransform(cfg).transform(
@@ -209,6 +208,8 @@ def run_eval(args: ExpertConfig):
     an_expert = library[next(iter(library.keys()))]
     train_cfg = deepcopy(an_expert.training_config)
     train_cfg.device_map = "cpu"
+    train_cfg.subsample_dev = args.subsample_dev
+    train_cfg.subsample_test = args.subsample_test
 
     # For starts, always overwrite the following arguments
     for arg_name in [
@@ -251,6 +252,7 @@ def run_eval(args: ExpertConfig):
         module = MultiExpertModel(
             **vars(train_cfg), selector_config=selector_config
         ).to("cuda")
+
         module.add_experts_from_library(library)
         patch_prototypes(module, library, args)
 
@@ -288,7 +290,6 @@ def run_eval(args: ExpertConfig):
         # make sure we evaluate each task seperately (so the mean is over tasks at the end)
         tasks = ",".join(tasks).split(",")
         train_cfg.eval_metric = args.eval_metric
-        train_cfg.subsample_dev = args.subsample_dev
         scores = eval_in_distribution(module, train_cfg, tasks)
     elif args.pipeline_eval_tasks in [
         "task1356_xlsum_title_generation",

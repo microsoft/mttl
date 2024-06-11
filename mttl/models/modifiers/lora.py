@@ -160,6 +160,9 @@ class LoRA(MergeableAdapter, ModifyMixin):
         if len(set([lora.layer for lora in loras])) > 1:
             raise ValueError("Cannot parallelize loras applied to different layers.")
 
+        if len(loras) not in [1, input.shape[0]]:
+            raise ValueError("Needed either 1 lora or as many batch examples.")
+
         # (batch, in_features, rank)
         lora_a = torch.stack([lora.lora_a for lora in loras], dim=0)
         # (batch, rank, out_features)
@@ -175,9 +178,19 @@ class LoRA(MergeableAdapter, ModifyMixin):
         input_lora = input.to(loras[0].lora_a.dtype)
         input_lora = loras[0].dropout_layer(input_lora)
 
-        adapter_out = (
-            torch.bmm(torch.bmm(input_lora, lora_a), lora_b) * scaling[:, None, None]
-        )
+        if lora_a.size(0) == 1:
+            lora_a, lora_b = lora_a.squeeze(0), lora_b.squeeze(0)
+            adapter_out = torch.einsum("bsi,ir->bsr", (input_lora, lora_a))
+            adapter_out = (
+                torch.einsum("bsr,ro->bso", (adapter_out, lora_b))
+                * scaling[:, None, None]
+            )
+        else:
+            adapter_out = (
+                torch.bmm(torch.bmm(input_lora, lora_a), lora_b)
+                * scaling[:, None, None]
+            )
+
         return layer_out + adapter_out.to(dtype=input.dtype)
 
     def reset_parameters(self):
@@ -319,6 +332,25 @@ class SkilledLoRA(LoRA):
             adapter_out = torch.einsum("blr,blrd->bld", (adapter_out, B)) * self.scaling
 
         return layer_out + adapter_out.to(input.dtype)
+
+    def to_loras(self):
+        """
+        Create a list of loras from a skilled lora
+        """
+        if self.n_splits > 1:
+            raise ValueError("Cannot convert a skilled lora with n_splits > 1.")
+
+        loras = []
+        for i in range(self.n_skills):
+            # squeeze n_splits if any
+            lora = LoRAView(
+                self.config,
+                self.layer,
+                self.lora_a[i].squeeze(),
+                self.lora_b[i].squeeze(),
+            )
+            loras.append(lora)
+        return loras
 
     @classmethod
     def parallel_linear_weighted_forward(
@@ -491,25 +523,6 @@ class SkilledLoRAView(SkilledLoRA):
 
     def reset_parameters(self):
         pass
-
-    def to_loras(self):
-        """
-        Create a list of loras from a skilled lora
-        """
-        if self.n_splits > 1:
-            raise ValueError("Cannot convert a skilled lora with n_splits > 1.")
-
-        loras = []
-        for i in range(self.n_skills):
-            # squeeze n_splits if any
-            lora = LoRAView(
-                self.config,
-                self.layer,
-                self.lora_a[i].squeeze(),
-                self.lora_b[i].squeeze(),
-            )
-            loras.append(lora)
-        return loras
 
     @classmethod
     def from_loras(cls, loras):

@@ -19,7 +19,13 @@ from mttl.models.modifiers.expert_containers.selectors import (
 )
 
 from mttl.utils import logger, warn_once
-from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
+from mttl.models.modifiers.lora import (
+    LoRA,
+    LoRAConfig,
+    SkilledLoRA,
+    SkilledLoRAView,
+    SkilledLoRAConfig,
+)
 from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
 from mttl.models.modifiers.expert_containers.expert import Expert
 from mttl.models.modifiers.modify_model import get_modifier_type
@@ -450,7 +456,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                     selection.experts,
                     use_default_expert=self.default_expert_name is not None,
                 )
-            ).to(selection.weights.device)
+            )
 
             # one-hot encode the indices
             weights = (
@@ -467,9 +473,11 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                 input, [self.experts], weights, dim_names=["batch", "experts"]
             )
             return module_output
-        elif isinstance(
-            selection, BatchSequenceExpertsAndWeightsSelectorOutput
-        ) or isinstance(selection, BatchExpertsAndWeightsSelectorOutput):
+        elif (
+            isinstance(selection, BatchSequenceExpertsAndWeightsSelectorOutput)
+            or isinstance(selection, BatchExpertsAndWeightsSelectorOutput)
+            or isinstance(selection, ExpertsAndWeightsSelectorOutput)
+        ):
             if selection.experts is not SelectorOutput.ALL_EXPERTS:
                 # we are in top-k or sparse selection mode
                 if not isinstance(selection.experts, torch.Tensor):
@@ -496,6 +504,8 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                 input, [self.experts], weights, dim_names=selection.dim_names
             )
             return module_output
+        else:
+            raise ValueError("Unknown selection type.")
 
     def forward(self, input, **kwargs):
         if len(self.experts) > 0:
