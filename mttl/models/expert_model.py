@@ -606,7 +606,7 @@ class MultiExpertModel(ExpertModel):
         self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
 
 
-class MoEModelTrainer(MultiExpertModel):
+class MoEModel(MultiExpertModel):
     def __init__(self, expert_library: ExpertLibrary = None, **kwargs):
         kwargs["top_k"] = kwargs["moe_top_k"]
         kwargs["emb_dim"] = kwargs["moe_emb_dim"]
