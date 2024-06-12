@@ -2,10 +2,8 @@ from functools import partial
 import math
 import re
 import threading
-from typing import Dict, List, Union
-import numpy as np
+from typing import Dict, List
 import torch
-import tqdm
 from transformers import PreTrainedModel
 
 from mttl.models.modifiers.expert_containers.library_transforms import (
@@ -21,7 +19,6 @@ from mttl.utils import logger
 from mttl.models.modifiers.expert_containers.expert import Expert, ExpertInfo
 from mttl.models.modifiers.expert_containers.expert_containers import (
     ExpertContainer,
-    LoRAExpertContainer,
 )
 from mttl.models.modifiers.expert_containers.selectors import Selector, SelectorConfig
 
@@ -39,6 +36,7 @@ from mttl.models.modifiers.expert_containers.selectors import SelectorConfig
 from mttl.models.modifiers.routing import RoutingInfo
 from mttl.models.utils import (
     EfficientCheckpointModule,
+    model_loader_helper,
     prepare_model_for_kbit_training,
 )
 from mttl.models.expert_config import ExpertConfig
@@ -46,21 +44,6 @@ from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
 
 
 torch.set_float32_matmul_precision("high")
-
-
-class ArgmaxWeightedLoss(torch.nn.Module):
-    def forward(self, logits, labels) -> float:
-        pass
-
-
-class XEntLoss(torch.nn.Module):
-    def forward(self, logits, labels) -> float:
-        pass
-
-
-class UnlikelihoodLoss(torch.nn.Module):
-    def forward(self, logits, labels) -> float:
-        pass
 
 
 class ExpertModel(EfficientCheckpointModule):
@@ -296,7 +279,7 @@ class ExpertModel(EfficientCheckpointModule):
         self._delete_non_trainable_params(state_dict)
 
         # to use as an expert, we need to remove a `model.` prefix
-        state_dict = {k[len('model.'):] : v for k,v in state_dict.items()} 
+        state_dict = {k[len("model.") :]: v for k, v in state_dict.items()}
 
         # inject expert info in the expert checkpoint
         expert_info = ExpertInfo(
@@ -565,7 +548,7 @@ class MultiExpertModel(ExpertModel):
                     f"{container.layer_name}.{k}": v for k, v in expert_weights.items()
                 }
                 expert_params.update(expert_weights)
-                # can we break here? or do we need to check all containers?
+
         retrieved_expert = Expert(expert_info=expert_info, expert_weights=expert_params)
         return retrieved_expert
 
@@ -593,7 +576,7 @@ class MultiExpertModel(ExpertModel):
         expert_params = {}
         assert (
             modifier_type in self.selectors
-        ), f"Modifie type {modifier_type} not in model."
+        ), f"Modifier type {modifier_type} not in model."
         for container in self.experts_containers:
             if not get_modifier_type(container.config) == modifier_type:
                 logger.info(
