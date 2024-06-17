@@ -14,7 +14,7 @@ from mttl.models.expert_model import MultiExpertModel
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.expert_containers.expert import Expert
 from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
-from projects.wiki_experts.cli_dataset_create import download_flan
+from projects.modular_llm.cli_dataset_create import download_flan
 
 
 @pytest.fixture(scope="session")
@@ -140,6 +140,7 @@ def create_dummy_expert(make_tiny_llama):
         return expert
 
     return _create_dummy_expert
+
 
 def setup_mmlu(session):
     # setup_mmlu

@@ -11,12 +11,12 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
 
 from mttl.models.expert_config import ExpertConfig
-from projects.wiki_experts.src.utils.utils import (
+from projects.modular_llm.src.utils.utils import (
     init_wandb_logger,
     TableLogger,
 )
 
-from projects.wiki_experts.src.utils.evaluators import Evaluator, prepare_evaluator
+from projects.modular_llm.src.utils.evaluators import Evaluator, prepare_evaluator
 from mttl.utils import remote_login, setup_logging, logger
 
 # register models

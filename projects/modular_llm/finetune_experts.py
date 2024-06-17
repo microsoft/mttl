@@ -38,13 +38,13 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
 )
 from typing import Callable
 
-from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
+from projects.modular_llm.src.callbacks import DownstreamEvalCallback
 from mttl.models.expert_model import MoEModel as MoETrainer
 from mttl.models.expert_model import ExpertModel as ExpertTrainer
 from mttl.models.expert_model import MultiExpertModel
 from mttl.models.expert_config import ExpertConfig
-from projects.wiki_experts.utils import get_datamodule
-from projects.wiki_experts.src.retrievers import (
+from projects.modular_llm.utils import get_datamodule
+from projects.modular_llm.src.retrievers import (
     RandomRetriever,
     SVDEmbeddingRetriever,
 )
@@ -174,7 +174,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
         # log args to wandb
         wandb.config.update(args)
 
-    from projects.wiki_experts.src.nevergrad_opt import NGRoutingOptimizer
+    from projects.modular_llm.src.nevergrad_opt import NGRoutingOptimizer
     from mttl.evaluators.rouge_evaluator import RougeEvaluator
 
     library = retrieve(args, args.finetune_task_name, args.sk, retrieve_with="random")
@@ -220,7 +220,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
         # log args to wandb
         wandb.config.update(args)
 
-    from projects.wiki_experts.src.nevergrad_opt import NGRoutingOptimizer
+    from projects.modular_llm.src.nevergrad_opt import NGRoutingOptimizer
     from mttl.evaluators.rouge_evaluator import RougeEvaluator
 
     lib_location = f"/tmp/{args.library_id}"
@@ -252,7 +252,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
     module.add_expert_instance(expert, expert_name="nevergrad", is_default=True)
     rouge = rouge_evaluator.evaluate(module, split="test", verbose=False)
     if wandb.run is not None:
-        wandb.log({"test/rougeL": rouge})    
+        wandb.log({"test/rougeL": rouge})
     return expert
 
 
@@ -458,7 +458,7 @@ def finetune_joint(args: ExpertConfig, dm):
     """
     Finetunes a pretrained shared model
     """
-    
+
     library = HFExpertLibrary(args.library_id)
     expert: Expert = library[args.expert_selection]
     pretrain_args = expert.training_config
@@ -466,6 +466,7 @@ def finetune_joint(args: ExpertConfig, dm):
     module.load_state_dict(expert.expert_weights)
 
     return train_module(args, module, dm)
+
 
 def run_multitask(args: ExpertConfig):
     seed_everything(args.seed, workers=True)

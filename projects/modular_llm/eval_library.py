@@ -39,7 +39,7 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
 from mttl.callbacks import LossCallback
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
-from projects.wiki_experts.src.utils.utils import TableLogger
+from projects.modular_llm.src.utils.utils import TableLogger
 
 
 def get_hidden_states(library, args):

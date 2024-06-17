@@ -11,7 +11,7 @@ from mttl.models.ranker.clip_ranker import (
     CLIPRanker,
     CLIPTripletRanker,
 )
-from projects.wiki_experts.src.ranker.clip_data_module import (
+from projects.modular_llm.src.ranker.clip_data_module import (
     CLIPExpertsDatamodule,
     CLIPExpertsConfig,
     CLIPTripleDataModule,
@@ -281,7 +281,7 @@ def train_classifier_smooth(args):
 
 
 if __name__ == "__main__":
-    from projects.wiki_experts.src.ranker.config import RankerConfig
+    from projects.modular_llm.src.ranker.config import RankerConfig
 
     args = RankerConfig.parse()
     if args.ranker_model == "classifier":

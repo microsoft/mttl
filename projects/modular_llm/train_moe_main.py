@@ -16,7 +16,7 @@ from mttl.utils import (
 )
 from mttl.datamodule.base import get_datamodule
 
-from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
+from projects.modular_llm.src.callbacks import DownstreamEvalCallback
 from mttl.models.expert_model import MoEModel
 from mttl.models.expert_config import ExpertConfig
 

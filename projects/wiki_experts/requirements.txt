@@ -1,2 +1,0 @@
-python-terrier
-apache_beam

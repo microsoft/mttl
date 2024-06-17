@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from projects.wiki_experts.src.nevergrad_opt import NGRoutingOptimizer
+from projects.modular_llm.src.nevergrad_opt import NGRoutingOptimizer
 from mttl.models.expert_model import ExpertModel as ExpertTrainer, MultiExpertModel
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.modifiers.expert_containers.expert_library import LocalExpertLibrary

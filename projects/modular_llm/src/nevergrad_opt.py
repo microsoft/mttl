@@ -134,7 +134,9 @@ class NGRoutingOptimizer:
     ):
         def get_score(weights, basemodel: MultiExpertModel, get_loss, get_regular):
             config = WeightedLinearMergeConfig(
-                weights={exp_name: w for exp_name, w in zip(self.library.keys(), weights)}
+                weights={
+                    exp_name: w for exp_name, w in zip(self.library.keys(), weights)
+                }
             )
             weighted_merge = WeightedLinearMerge(config)
             logger.info(f"Testing weights {weights}")
