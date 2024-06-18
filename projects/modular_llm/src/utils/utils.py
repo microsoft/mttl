@@ -13,7 +13,7 @@ import pytorch_lightning as pl
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
 from mttl.utils import setup_logging, logger
-from projects.wiki_experts.src.utils.evaluators import (
+from projects.modular_llm.src.utils.evaluators import (
     TestLossEvaluator,
     ExtendedMMLUEvaluator,
     Evaluator,

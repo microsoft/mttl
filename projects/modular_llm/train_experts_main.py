@@ -23,11 +23,11 @@ from mttl.utils import (
     setup_logging,
     rank_zero_only_and_wait,
     logger,
-    generate_random_string
+    generate_random_string,
 )
 from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
-from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
-from projects.wiki_experts.src.transfer_matrix import (
+from projects.modular_llm.src.callbacks import DownstreamEvalCallback
+from projects.modular_llm.src.transfer_matrix import (
     TransferMatrixConfig,
     run_eval as produce_transfer_matrix,
 )
@@ -224,7 +224,11 @@ def run_multitask(args: ExpertConfig):
                             expert_library.add_expert(expert, expert_name)
                 elif isinstance(module, ExpertModel):
                     expert = module.as_expert()
-                    expert_name = args.expert_name or args.finetune_task_name or generate_random_string()
+                    expert_name = (
+                        args.expert_name
+                        or args.finetune_task_name
+                        or generate_random_string()
+                    )
                     expert_library.add_expert(expert, expert_name)
                 else:
                     raise ValueError("Model class not recognized")

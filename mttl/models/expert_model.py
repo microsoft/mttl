@@ -643,7 +643,7 @@ class MoEModel(MultiExpertModel):
             if isinstance(
                 self.selector_config, (ArrowConfig, HiddenStateComputerConfig)
             ):
-                from projects.wiki_experts.eval_library import patch_prototypes
+                from projects.modular_llm.eval_library import patch_prototypes
 
                 patch_prototypes(self, expert_library, self.selector_config)
 

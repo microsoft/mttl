@@ -1,5 +1,0 @@
-{
-    "type": "FactsTransformConfig",
-    "max_context_length": 128,
-    "max_contexts_per_subject": 25
-}
