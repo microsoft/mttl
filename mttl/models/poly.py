@@ -979,6 +979,149 @@ class PolyIA3Linear(PolytroponAdapter):
             self.n_skills, self.in_features, self.out_features, self.bias is not None
         )
 
+class PolyLoRATensorTrain(PolytroponAdapter):
+    def __init__(self, config, task_id_ptr, linear_layer, selector=None):
+        super().__init__()
+
+        self.n_tasks = config.n_tasks
+        self.n_skills = config.n_skills
+        self.n_splits = config.n_splits
+        self.in_features = linear_layer.in_features
+        self.out_features = linear_layer.out_features
+        self.use_warmup = config.lora_warmup
+        self.rank = config.lora_rank
+        self.weight = linear_layer.weight
+        self.bias = linear_layer.bias
+        self.kaiming_init = config.lora_kaiming_init
+        self.lora_randb_init = config.lora_randb_init
+        self.task_id_ptr = task_id_ptr
+        self.training_steps = 0.0
+
+        # In this case, the order is exactly the number of splits. Note that we cann't use
+        # the config.order here, because polytropon selection use the n_splits as its'weight.
+        # Number of routing matrices
+        # Equals (number of tensors in the train)
+        self.order = self.n_splits
+
+        self.tensor_rank = self.n_skills
+        if selector is None:
+            self.selector = get_selector(config)
+        else:
+            self.selector = selector
+
+        self.embedding_dim_leaf = math.ceil((self.in_features) ** (1 / self.order))
+
+        # self.embedding_dim_leaf_b = math.ceil((self.out_features) ** (1 / self.order))
+
+        self.output_dim_times = math.ceil(self.out_features / self.in_features)
+
+        tensor_weights = [nn.Parameter(torch.rand(self.embedding_dim_leaf,self.tensor_rank,self.embedding_dim_leaf,self.tensor_rank))]*(self.order-1)\
+                    + [nn.Parameter(torch.rand(self.embedding_dim_leaf,self.tensor_rank,self.embedding_dim_leaf,self.output_dim_times))]
+        self.tensor_weights = nn.ParameterList(tensor_weights)
+        self.get_einsum_expr(tensor_weights)
+        self.reset_parameters()
+
+    def get_einsum_expr(self, tensor_weights):
+        einsum_in = []
+        einsum_out = ['','']
+        routing_in = []
+        
+        in_current= 'a'
+        out_current = 'i'
+        r_begin = 'u'
+        r_current = r_begin
+        for _ in range(len(tensor_weights)):
+            einsum_out[0] = einsum_out[0] + in_current
+            einsum_out[1] = einsum_out[1] + out_current
+            r_next = chr(ord(r_current) + 1)
+            einsum_in.append(f'{in_current}{r_current}{out_current}{r_next}')
+            in_current =  chr(ord(in_current) + 1)
+            out_current = chr(ord(out_current) + 1)
+            
+            routing_in.append('s'+r_current)
+            r_current = r_next
+
+
+        einsum_in_expr = ','.join(einsum_in+routing_in)
+        einsum_out_expr= 's'+einsum_out[0] + einsum_out[1] + r_current
+        self.einsum_expr = f'{einsum_in_expr}->{einsum_out_expr}'
+        # [a, b, c, d] -> in-dims
+        # [i, j, k, l] -> out-dims
+        # [u, v, w, x, y] -> bond-dims
+        # s -> batch-size
+        #       a   b   c   d
+        #       |   |   |   |
+        #     u- -v- -w- -x- -y
+        #       |   |   |   |  
+        #       i   j   k   l
+        # self.einsum_expr = 'auiv,bvjw,cwkx,dxly,su,sv,sw,sx->sabcdijkly'
+        # su,sv,sw,sx are routing weights for experts in a batch 
+
+    def reset_parameters(self):
+        import math
+
+        if self.kaiming_init:
+            # for skill in range(self.n_skills):
+            #     for split in range(self.order):
+            #         param = torch.empty((self.rank, self.in_features // self.order))
+            #         torch.nn.init.kaiming_uniform_(param, a=math.sqrt(5))
+            #         self.lora_a.data[split, skill, :, :] = param.T
+            pass
+        else:
+            gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
+            std = gain / math.sqrt(self.in_features)
+
+            with torch.no_grad():
+                # self.weight_leafs_a.uniform_(-std, std)
+                # torch.nn.init.xavier_uniform_(self.weight_leafs_a)
+                for w in self.tensor_weights:
+                    torch.nn.init.xavier_uniform_(w)
+        # ensure that initially, adding the adapter does not change the output
+            if self.use_warmup or self.lora_randb_init:
+                with torch.no_grad():
+                # self.weight_leafs_a.uniform_(-std, std)
+                # torch.nn.init.xavier_uniform_(self.weight_leafs_a)
+                    for w in self.tensor_weights:
+                        w.uniform_(-std, std)
+                # with torch.no_grad():
+                #     self.weight_leafs_b.uniform_(-std, std)
+            # else:
+            #     # torch.nn.init.zeros_(self.weight_leafs_b)
+            #     torch.nn.init.xavier_uniform_(self.weight_leafs_b)
+    
+    # TensorPoly-IV
+    # Routing every small tensor before conducting tensor product
+    # delta_W <- routing(A1)routing(A2)...routing(B1)routing(B2)...
+
+    def forward(self, input):
+        if self.training:
+            self.training_steps += 1
+
+        task_id = self.routing_infos.task_ids
+
+        repeat = input.size(0) // task_id.size(0)
+
+        # this repeat follows the patten in `model.predict()` line 152
+        if repeat:
+            self.routing_infos.repeat_interleave(repeat)
+
+        # (batch_size, order, tensor_rank)
+        mixing_weights = self.selector(self.routing_infos).to(dtype=input.dtype)
+
+        # Big tensor, should be reshaped
+        tensor_weight = torch.einsum(self.einsum_expr, *self.tensor_weights, *mixing_weights.transpose(0,1))
+        
+        # Reshape to (batch_size, in_dim, out_dim)
+        tensor_weight = tensor_weight.flatten(start_dim=1, end_dim=len(self.tensor_weights)).flatten(start_dim=2, end_dim=-1)
+        
+        tensor_weight = tensor_weight[:, :self.in_features, :self.out_features]
+        adapter_out = input.bmm(tensor_weight)/ self.rank
+      
+        warmup = min(self.training_steps / 10_000, 1)
+        if self.use_warmup:
+            adapter_out = adapter_out * warmup
+
+        return F.linear(input, self.weight, self.bias) + adapter_out
 
 def modify_with_poly(transformer, config, PolyLayer):
 
@@ -1063,3 +1206,6 @@ def modify_with_tensorpoly_lora(transformer, config):
 
 def modify_with_tensororderpoly_lora(transformer, config):
     return modify_with_poly(transformer, config, PolyLoRATensorOrder)
+
+def modeify_with_tensortrainpoly_lora(transformer, config):
+    return modify_with_poly(transformer, config, PolyLoRATensorTrain)
