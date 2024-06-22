@@ -33,7 +33,10 @@ class Config(object):
         self.append_another_bos = False
         self.do_lowercase = False
         self.freeze_embeds = False
+
+        # tensor poly params
         self.order = 2
+        self.variant = "tensor_poly" # select tensor poly II, III, IV.
 
         self.use_t0_templates_as_tasks = (
             False  # if True, then t0 consists of 313 tasks, otherwise 38

@@ -466,6 +466,7 @@ class PolyLoRATensorOrder(PolytroponAdapter):
         self.lora_randb_init = config.lora_randb_init
         self.task_id_ptr = task_id_ptr
         self.training_steps = 0.0
+        self.variant = config.variant
 
         # In this case, the order is exactly the number of splits. Note that we cann't use
         # the config.order here, because polytropon selection use the n_splits as its'weight.
@@ -631,6 +632,17 @@ class PolyLoRATensorOrder(PolytroponAdapter):
         A = torch.einsum("bos,osrl->borl", (mixing_weights, self.weight_leafs_a))
         B = torch.einsum("bos,osrl->borl", (mixing_weights, self.weight_leafs_b))
 
+        if self.variant == "tensorpoly-II":
+            # Behavior: Weighting tensors using; TensorPolyII, first line
+            A = torch.einsum("bo, borl->borl", (mixing_weights.sum(dim=-1),A) )
+            B = torch.einsum("bo, borl->borl", (mixing_weights.sum(dim=-1),B) )
+        elif self.variant == "tensorpoly-III":
+            # Behavior: Take Element-wise power with routing weights 
+            A = torch.einsum("bo, borl->borl", (mixing_weights.sum(dim=-1),A.log()) ).exp()
+            B = torch.einsum("bo, borl->borl", (mixing_weights.sum(dim=-1),B.log()) ).exp()
+        else:
+            pass
+            
         A = self.tensor_product_construct(A, self.in_features, "up")  # [brd]
         A = A.transpose(2, 1)  # [bdr]
         B = self.tensor_product_construct(B, self.out_features, "down")  # [brd]
