@@ -1,170 +1,133 @@
-# Wiki Expert
+# Expert Library
 
-The `wiki-experts` library enables users to
+The MTTL Expert Library enables:
 
-1. train different kinds of adapters (LoRA, soft prompts, …) over LLMs
-2. build MoE models from these adapters, with custom routing strategies (task routing, SMEAR-style routing, … )
-3. maintain a collection of experts on HuggingFace or Azure Blob Storage, which can later be used to transfer
-to new tasks, or update existing ones, brining us one step closer to seamless continual development of adapters.
+1. Train different kinds of adapters over LLMs;
+2. Build MoE models from these adapters, with custom routing strategies;
+3. Maintain a collection of experts, which can later be used to transfer to new tasks or update existing ones.
 
-## Quick Demo
 
-1. Training Experts, and adding them to the library
+## Setup
 
-```python
-# Create e.g. LoRA wrapped LLM
-expert_trainer = ExpertModel(**vars(args))
+MTTL supports `Python >=3.8, <3.12`. Create a virtual environment using `virtualenv` or `conda`, then install the required Python packages:
 
-print(expert_trainer)
-"""
-You will see something like
-...
-(k_proj): LoRA(
-   (layer): Linear(in_features=768, out_features=768, bias=False)
-)
-...
-"""
+```bash
+conda create -n mttl python=3.11
+conda activate mttl
 
-# Train it
-pl_trainer = pl.Trainer(....)
-ckpt_callback = ...
-pl_trainer.train(expert_trainer, ckpt_callback, ...)
-expert_ckpt = ckpt_callback.gest_model_path
-
-# After training, upload it to huggingface
-expert_lib = HFExpertLibrary('<your_hf_usename>/<my_lora_library>')
-library.add_expert(load_expert(expert_ckpt), expert_name=<task_name>)
-
+pip install -e .
 ```
 
-1. Loading experts from the library, and using them to transfer to new tasks
+
+## Expert Library
+
+### Important Abstractions
+
+#### **`Expert` class**
+
+The `Expert` class encapsulates information about the modules, aka experts, represented with LoRA adapters in the paper. Each expert instance contains expert’s configuration (stored in `expert_info` attribute) and the state dictionary of expert’s weights (stored in `_expert_weights` attribute). It provides methods to manage and retrieve this information, ensuring compatibility with different versions of the model's training and configuration data.
+
+#### **`ExpertInfo` class**
+
+The `ExpertInfo` class encapsulates metadata and configuration information for a model's expert. This includes the expert's name, name of the task expert was trained on, configuration details, and the associated base model name. It provides methods to create instances from dictionaries and to convert instances back into dictionaries. Expert instances are stored in **`ExpertLibrary`** as detailed next.
+
+#### **`ExpertLibrary` class**
+
+Central to our research is creating and handling collections of expert models tailored to specific tasks. To aid research and development, we’ve created an `ExpertLibrary` class, which allows you to load trained expert models, and upload new experts in a straightforward way.`ExpertLibrary` provides methods for adding, retrieving, listing, and removing experts within the library. The library can interface with different storage backends such as local filesystem, Azure Blob Storage, and Hugging Face Hub.
+the hub.
+
+### ExpertLibrary Backend
+
+Wiki-experts supports Hugging Face, Azure Blob Storage, Local and Virtual backends for storing and retrieving experts. Use  `ExpertLibrary.get_expert_library` to get the appropriate library instance based on a repository id (`repo_id (str)`). The repository id is formed by a prefix that identify the backend type, plus the expert library location. You can also use the `destination_id` parameter to create a copy of any kind of the library.
+
+#### Prefixes
+
+- `hf://` - Hugging Face Hub: Indicates the library is stored in the Hugging Face Hub.
+- `az://` - Azure Blob Storage: Indicates the library is stored in Azure Blob Storage.
+- `local://` - Local Filesystem: Indicates the library is stored on the local filesystem.
+- `virtual://` - Virtual Local Library: Indicates a temporary library stored in memory.
+
+#### Repository id format
+
+When specifying repository IDs, use the following formats:
+- For Hugging Face: `"hf://<user_id>/<lib_id>"`
+- For Azure Blob Storage: `"az://<storage_account>/<lib_id>"`
+- For local and virtual locations: `"[local|virtual]://<path_to_library>"`, where `<path_to_library>` refers to either absolute or relative paths. Note that virtual locations will not be written to the filesystem.
 
 ```python
-# Create a Multi Expert Model (MoE like model which can hold multiple expert instances)
-moe = MultiExpertModel(**vars(args))
+# Loading an expert library using az, hf, local (filesystem), or virtual (in memory)
 
-# Instantiate Our Library
-expert_lib = HFExpertLibrary('<your_hf_usename>/<my_lora_library>')
-moe.add_experts_from_library(library)
-
-print(moe)
-"""
-(k_proj): LoRAExpertContainer(
-  (layer): Linear(in_features=768, out_features=768, bias=False)
-  (selector): TaskNameSelector()
-    (experts): ModuleDict(
-        (expert_task_a): LoRA(
-            (layer): Linear(in_features=768, out_features=768, bias=False)
-         )
-         (expert_task_b): LoRA(
-            (layer): Linear(in_features=768, out_features=768, bias=False)
-         )
-      )
-   )
-"""
-# Train it
-pl_trainer = pl.Trainer(....)
-pl_trainer.train(moe, ckpt_callback, ...)
-expert_ckpt = ckpt_callback.gest_model_path
-
-# After training, you can still upload this new task to HF
-# [TODO: how to convert this to an "uploadable" expert ?
-expert_lib = HFExpertLibrary('<your_hf_usename>/<my_lora_library>')
-library.add_expert(load_expert(expert_ckpt), expert_name=<task_name>)
-```
-
-# Important Abstractions
-
-We will describe below some key object classes that will be useful when developing and training experts.
-
-### Adapter-style Classes
-
-1. **Adapter** : base class for modifiying a base model. Describe key args like `model_modifier` and such … . This includes `LoRA`, `PrefixTuning`, …
-2. **Expert :**  this class “wraps” the `Adapter` class, encapsulating both the adapter weights, as well as the required `Config` for said expert and the params used during training
-3. **ExpertContainer** : this class contains a collection of `Expert` and a routing mechanism (called `Selector` described below), and takes care of routing the inputs and aggregating the outputs across its collection of experts.
-
-### Model Wrapper (Lightning) Classes
-
-1. **ExpertModel** : is your base pytorch lightning wrapper taking care of (i) backbone model creation, (ii) adapter / expert insertion, and (iii) a potential routing mechanism (from the `Selector` class)
-2. **MultiExpertModel** : generalizes `ExpertModel` to multiple experts; that is, it contains `ExpertContainers`, and can be used for inference across multiple experts, (and also to train a router ?)
-3. **MoeModel** : TODO
-
-
-### Routers
-
-1. `Selector` (in `expert_containers` ) : TODO (please describe what goes in the selectors, and the `Output` classes. What info is needed to create new selectors ?
-
-
-## ExpertLibrary Backend
-
-
-Wiki-experts supports HuggingFace and Azure Blob Storage for storing and retrieving experts. Use the `HFExpertLibrary` for HuggingFace integration and `BlobExpertLibrary` for Azure Blob Storage. Alternatively, you can use the `ExpertLibrary.get_expert_library` to get the appropriate library instance based on the repository id. In this case, the repository id should follow the format `"hf://<user_id_>/<lib_id>"` for HuggingFace and `"az://<storage_account>/<lib_id>"` for Azure Blob Storage.
-You can also use the `destination_id` parameter to create a copy of any kind of the library.
-
-```python
-# For HuggingFace
+# HuggingFace
 token = "<your_hf_token>"
-repo_id = "<your_hf_usename>/<my_lora_library>"
-hf_export_lib = HFExpertLibrary(repo_id, token=token)
-# or
 repo_id = "hf://<your_hf_usename>/<my_lora_library>"
 hf_export_lib = ExpertLibrary.get_expert_library(repo_id, token)
+# or
+repo_id = "<your_hf_usename>/<my_lora_library>"
+hf_export_lib = HFExpertLibrary(repo_id, token=token)
+
+# Azure Blob Storage
+token = "<your_sas_token>"
+repo_id = "az://<storage_account>/<my_lora_library>"
+blob_export_lib = ExpertLibrary.get_expert_library(repo_id, token)
+# or
+repo_id = "<storage_account>/<my_lora_library>"
+blob_export_lib = BlobExpertLibrary(repo_id, token=token)
 
 # making a copy of the library using the `destination_id` parameter
 local_expert_lib = ExpertLibrary.get_expert_library(
    repo_id, token, destination_id="local://my_local_library"
 )
-
-# For Azure Blob Storage
-token = "<your_sas_token>"
-repo_id = "<storage_account>/<my_lora_library>"
-blob_export_lib = BlobExpertLibrary(repo_id, token=token)
-# or
-repo_id = "az://<storage_account>/<my_lora_library>"
-blob_export_lib = ExpertLibrary.get_expert_library(repo_id, token)
-# or
-az_expert_lib = ExpertLibrary.get_expert_library(
-   repo_id, token, expert_library_type="az"
-) # az, hf, local (filesystem), or virtual (in memory)
 ```
 
-Note that the `repo_id` for HuggingFace should include your username, while for Azure Blob Storage, it should include the storage account name.
+### ExpertLibrary Basic Usage:
 
-To avoid managing tokens each time you instantiate an `ExpertLibrary`, set the `HF_TOKEN` for HuggingFace or `BLOB_SAS_TOKEN` for Azure Blob Storage as environment variables.
+```python
+# Create an ExpertLibrary instance
+expert_lib = ExpertLibrary(
+    repo_id="my_repo", token="my_token", create=True
+)
 
+# Add an expert to the library
+expert_info = ExpertInfo(
+    expert_name="example_expert", expert_task_name="example_task"
+)
+expert = Expert(expert_info=expert_info)
+expert_lib.add_expert(expert)
 
-### Getting a HuggingFace API token
+# Retrieve an expert from the library
+retrieved_expert = expert_lib.get_expert("example_expert")
 
-1. Navigate to your HuggingFace account settings.
-2. Select the "Access Tokens" tab.
-3. Click "New token".
-4. Copy the generated token.
+# Remove an expert from the library
+expert_lib.remove_expert("example_expert")
+```
 
+### Dataset Preparation
 
-### Getting an Azure Blob Storage SAS Token
+Download and prepare [FLANv2](https://github.com/google-research/FLAN/tree/main/flan/v2) dataset:
 
-1. Open the Azure Portal.
-2. Locate and select your storage account.
-3. Click "Shared access signature" from the left-side menu.
-4. Ensure 'Blob' is the selected resource type.
-5. Check necessary permissions and set an expiration date.
-6. Click "Generate SAS".
-7. Copy the "SAS token".
+```bash
+python projects/modular_llm/cli_dataset_create.py flan --dataset_library_id=local://mttldata/flan-flat
+```
 
+To cite FLAN. please use:
 
-### Cache directory
+```
+@article{longpre2023flan,
+  title={The Flan Collection: Designing Data and Methods for Effective Instruction Tuning},
+  author={Longpre, Shayne and Hou, Le and Vu, Tu and Webson, Albert and Chung, Hyung Won and Tay, Yi and Zhou, Denny and Le, Quoc V and Zoph, Barret and Wei, Jason and others},
+  journal={arXiv preprint arXiv:2301.13688},
+  year={2023}
+}
+```
 
-The `HFExpertLibrary` and `BlobExpertLibrary` classes use a cache directory to store the experts.
+### Training Experts
 
-  - For `HFExpertLibrary`, it defaults to `HF_HUB_CACHE="$HF_HOME/hub"` where `HF_HOME="~/.cache/huggingface"`.
+```bash
+python train_experts_main.py -c configs/wiki-mmlu/gptneo_125m_flan.json -k finetune_task_name=ai2_arc_ARC_Easy_1_0_0 num_train_epochs=1 output_dir=an_expert/ library_id=local://mttldata/mttladapters-predictor pipeline_eval_tasks='arc-easy' expert_name=predictor
+```
 
-  - For `BlobExpertLibrary`, the default cache directory is set to `BLOB_CACHE_DIR="~/.cache/mttl"`.
+### Evaluating Experts
 
-
-You can alter the cache location by setting the corresponding environment variable.
-
-
-# TODO:
-
-1. How do update an existing expert ? A code snippet would be very useful.
-2. Regarding the code, there seems to be a lot of redundancies and deprecated methods. Let’s try to schedule some cleanup time.
+```bash
+python eval_library.py -k output_dir=an_expert_eval/ library_id=local://mttldata/mttladapters-predictor pipeline_eval_tasks='arc-easy' merge_or_route='uniform'
+```
