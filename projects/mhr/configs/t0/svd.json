@@ -1,6 +1,0 @@
-{
-    "model_modifier": "svd",
-    "patch_modules": ".*SelfAttention|.*EncDecAttention|.*DenseReluDense",
-    "patch_layers": "k|v|wi_1.*",
-    "trainable_param_names": ".*svd_v.*|.*svd_s.*|.*svd_d.*|.*svd_alpha.*"
-}

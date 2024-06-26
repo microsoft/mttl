@@ -1,0 +1,18 @@
+{
+    "num_train_epochs": 1,
+    "learning_rate": 3e-5,
+    "micro_batch_size": 2,
+    "train_batch_size": 16,
+    "predict_batch_size": 4,
+    "precision": "bf16",
+    "dataset": "sordonia/flan-10k-flat",
+    "model": "phi-2",
+    "compute_strategy": "ddp",
+    "model_family": "gpt",
+    "load_in_8bit": false,
+    "optimizer": "adamw",
+    "warmup_proportion": 0.06,
+    "max_input_length": 2048,
+    "max_output_length": 128,
+    "truncation_side": "left"
+}

@@ -1,7 +1,0 @@
-{
-    "model": "google/t5-xl-lm-adapt",
-    "train_batch_size": 1,
-    "gradient_accumulation_steps": 8,
-    "predict_batch_size": 4,
-    "precision": "bf16"
-}
