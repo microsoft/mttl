@@ -7,7 +7,7 @@ name = "mttl"
 version = "0.0.1"
 description = "Multi-Task Transfer Learning with Adapters"
 readme = "README.md"
-requires-python = ">=3.8, <3.12"  # ray don't support 3.12
+requires-python = ">=3.9, <3.12"  # ray don't support 3.12
 dynamic = ["dependencies"]
 
 classifiers = [
