@@ -8,6 +8,7 @@ from torch.distributions.relaxed_bernoulli import RelaxedBernoulli
 from mttl.models.utils import RoutingInfo
 from mttl.models.cluster_reader import ClusterResult
 import math
+import opt_einsum as oe
 
 EPS = 1e-12
 
@@ -634,15 +635,19 @@ class PolyLoRATensorOrder(PolytroponAdapter):
 
         if self.variant == "tensorpoly-II":
             # Behavior: Weighting tensors using; TensorPolyII, first line
-            A = torch.einsum("bo, borl->borl", (mixing_weights.sum(dim=-1),A) )
-            B = torch.einsum("bo, borl->borl", (mixing_weights.sum(dim=-1),B) )
+            A = torch.einsum("bo, borl->borl", (mixing_weights.sum(dim=-1), A))
+            B = torch.einsum("bo, borl->borl", (mixing_weights.sum(dim=-1), B))
         elif self.variant == "tensorpoly-III":
-            # Behavior: Take Element-wise power with routing weights 
-            A = torch.einsum("bo, borl->borl", (mixing_weights.sum(dim=-1),A.log()) ).exp()
-            B = torch.einsum("bo, borl->borl", (mixing_weights.sum(dim=-1),B.log()) ).exp()
+            # Behavior: Take Element-wise power with routing weights
+            A = torch.einsum(
+                "bo, borl->borl", (mixing_weights.sum(dim=-1), A.log())
+            ).exp()
+            B = torch.einsum(
+                "bo, borl->borl", (mixing_weights.sum(dim=-1), B.log())
+            ).exp()
         else:
             pass
-            
+
         A = self.tensor_product_construct(A, self.in_features, "up")  # [brd]
         A = A.transpose(2, 1)  # [bdr]
         B = self.tensor_product_construct(B, self.out_features, "down")  # [brd]
@@ -979,6 +984,7 @@ class PolyIA3Linear(PolytroponAdapter):
             self.n_skills, self.in_features, self.out_features, self.bias is not None
         )
 
+
 class PolyLoRATensorTrain(PolytroponAdapter):
     def __init__(self, config, task_id_ptr, linear_layer, selector=None):
         super().__init__()
@@ -1015,36 +1021,52 @@ class PolyLoRATensorTrain(PolytroponAdapter):
 
         self.output_dim_times = math.ceil(self.out_features / self.in_features)
 
-        tensor_weights = [nn.Parameter(torch.rand(self.embedding_dim_leaf,self.tensor_rank,self.embedding_dim_leaf,self.tensor_rank))]*(self.order-1)\
-                    + [nn.Parameter(torch.rand(self.embedding_dim_leaf,self.tensor_rank,self.embedding_dim_leaf,self.output_dim_times))]
+        tensor_weights = [
+            nn.Parameter(
+                torch.rand(
+                    self.embedding_dim_leaf,
+                    self.tensor_rank,
+                    self.embedding_dim_leaf,
+                    self.tensor_rank,
+                )
+            )
+        ] * (self.order - 1) + [
+            nn.Parameter(
+                torch.rand(
+                    self.embedding_dim_leaf,
+                    self.tensor_rank,
+                    self.embedding_dim_leaf,
+                    self.output_dim_times,
+                )
+            )
+        ]
         self.tensor_weights = nn.ParameterList(tensor_weights)
         self.get_einsum_expr(tensor_weights)
         self.reset_parameters()
 
     def get_einsum_expr(self, tensor_weights):
         einsum_in = []
-        einsum_out = ['','']
+        einsum_out = ["", ""]
         routing_in = []
-        
-        in_current= 'a'
-        out_current = 'i'
-        r_begin = 'u'
+
+        in_current = "a"
+        out_current = "i"
+        r_begin = "u"
         r_current = r_begin
         for _ in range(len(tensor_weights)):
             einsum_out[0] = einsum_out[0] + in_current
             einsum_out[1] = einsum_out[1] + out_current
             r_next = chr(ord(r_current) + 1)
-            einsum_in.append(f'{in_current}{r_current}{out_current}{r_next}')
-            in_current =  chr(ord(in_current) + 1)
+            einsum_in.append(f"{in_current}{r_current}{out_current}{r_next}")
+            in_current = chr(ord(in_current) + 1)
             out_current = chr(ord(out_current) + 1)
-            
-            routing_in.append('s'+r_current)
+
+            routing_in.append("s" + r_current)
             r_current = r_next
 
-
-        einsum_in_expr = ','.join(einsum_in+routing_in)
-        einsum_out_expr= 's'+einsum_out[0] + einsum_out[1] + r_current
-        self.einsum_expr = f'{einsum_in_expr}->{einsum_out_expr}'
+        einsum_in_expr = ",".join(einsum_in + routing_in)
+        einsum_out_expr = "s" + einsum_out[0] + einsum_out[1] + r_current
+        self.einsum_expr = f"{einsum_in_expr}->{einsum_out_expr}"
         # [a, b, c, d] -> in-dims
         # [i, j, k, l] -> out-dims
         # [u, v, w, x, y] -> bond-dims
@@ -1052,10 +1074,10 @@ class PolyLoRATensorTrain(PolytroponAdapter):
         #       a   b   c   d
         #       |   |   |   |
         #     u- -v- -w- -x- -y
-        #       |   |   |   |  
+        #       |   |   |   |
         #       i   j   k   l
         # self.einsum_expr = 'auiv,bvjw,cwkx,dxly,su,sv,sw,sx->sabcdijkly'
-        # su,sv,sw,sx are routing weights for experts in a batch 
+        # su,sv,sw,sx are routing weights for experts in a batch
 
     def reset_parameters(self):
         import math
@@ -1076,11 +1098,11 @@ class PolyLoRATensorTrain(PolytroponAdapter):
                 # torch.nn.init.xavier_uniform_(self.weight_leafs_a)
                 for w in self.tensor_weights:
                     torch.nn.init.xavier_uniform_(w)
-        # ensure that initially, adding the adapter does not change the output
+            # ensure that initially, adding the adapter does not change the output
             if self.use_warmup or self.lora_randb_init:
                 with torch.no_grad():
-                # self.weight_leafs_a.uniform_(-std, std)
-                # torch.nn.init.xavier_uniform_(self.weight_leafs_a)
+                    # self.weight_leafs_a.uniform_(-std, std)
+                    # torch.nn.init.xavier_uniform_(self.weight_leafs_a)
                     for w in self.tensor_weights:
                         w.uniform_(-std, std)
                 # with torch.no_grad():
@@ -1088,7 +1110,7 @@ class PolyLoRATensorTrain(PolytroponAdapter):
             # else:
             #     # torch.nn.init.zeros_(self.weight_leafs_b)
             #     torch.nn.init.xavier_uniform_(self.weight_leafs_b)
-    
+
     # TensorPoly-IV
     # Routing every small tensor before conducting tensor product
     # delta_W <- routing(A1)routing(A2)...routing(B1)routing(B2)...
@@ -1109,19 +1131,30 @@ class PolyLoRATensorTrain(PolytroponAdapter):
         mixing_weights = self.selector(self.routing_infos).to(dtype=input.dtype)
 
         # Big tensor, should be reshaped
-        tensor_weight = torch.einsum(self.einsum_expr, *self.tensor_weights, *mixing_weights.transpose(0,1))
-        
+        tensor_weight = torch.einsum(
+            self.einsum_expr, *self.tensor_weights, *mixing_weights.transpose(0, 1)
+        )
+        tensor_weight = oe.contract(
+            self.einsum_expr,
+            *self.tensor_weights,
+            *mixing_weights.transpose(0, 1),
+            backend="torch",
+        )
+
         # Reshape to (batch_size, in_dim, out_dim)
-        tensor_weight = tensor_weight.flatten(start_dim=1, end_dim=len(self.tensor_weights)).flatten(start_dim=2, end_dim=-1)
-        
-        tensor_weight = tensor_weight[:, :self.in_features, :self.out_features]
-        adapter_out = input.bmm(tensor_weight)/ self.rank
-      
+        tensor_weight = tensor_weight.flatten(
+            start_dim=1, end_dim=len(self.tensor_weights)
+        ).flatten(start_dim=2, end_dim=-1)
+
+        tensor_weight = tensor_weight[:, : self.in_features, : self.out_features]
+        adapter_out = input.bmm(tensor_weight) / self.rank
+
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup
 
         return F.linear(input, self.weight, self.bias) + adapter_out
+
 
 def modify_with_poly(transformer, config, PolyLayer):
 
@@ -1206,6 +1239,7 @@ def modify_with_tensorpoly_lora(transformer, config):
 
 def modify_with_tensororderpoly_lora(transformer, config):
     return modify_with_poly(transformer, config, PolyLoRATensorOrder)
+
 
 def modeify_with_tensortrainpoly_lora(transformer, config):
     return modify_with_poly(transformer, config, PolyLoRATensorTrain)
