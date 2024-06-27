@@ -1,4 +1,0 @@
-{
-    "model": "google/t5-large-lm-adapt",
-    "precision": "bf16"
-}

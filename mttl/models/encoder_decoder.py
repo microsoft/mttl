@@ -7,8 +7,9 @@ from transformers import AutoModelForSeq2SeqLM
 
 from mttl.models.get_optimizer import get_optimizer
 from mttl.models.get_scheduler import get_scheduler
-from mttl.models.modify_model import modify_transformer
-from mttl.models.utils import EfficientCheckpointModule, RoutingInfo, get_global_batch_size
+from mttl.models.utils import EfficientCheckpointModule, get_global_batch_size
+from mttl.models.modifiers import modify_transformer
+from mttl.models.modifiers.routing import RoutingInfo
 from mttl.utils import freeze_embeds, label_smoothed_nll_loss
 
 
@@ -23,11 +24,10 @@ class EncoderDecoder(EfficientCheckpointModule):
         self.tokenizer = kwargs["tokenizer"]
         self.pad_token_id = self.tokenizer.pad_token_id
 
-        if kwargs.get('model_object') is None:
-            self.model = AutoModelForSeq2SeqLM.from_pretrained(self.args.model, cache_dir=self.args.cache_dir)
-            # free-up temporary space
-            if self.args.free_up_space:
-                os.system(f"/bin/rm -rf {self.args.cache_dir}")
+        if kwargs.get("model_object") is None:
+            self.model = AutoModelForSeq2SeqLM.from_pretrained(
+                self.args.model, cache_dir=self.args.cache_dir
+            )
 
             if "t5" or "T0" in self.args.model:
                 self.pad_token_id = self.tokenizer.pad_token_id
@@ -53,10 +53,11 @@ class EncoderDecoder(EfficientCheckpointModule):
                 print("Freezing embeddings")
                 freeze_embeds(self.model)
         else:
-            self.model = kwargs.get('model_object')
+            self.model = kwargs.get("model_object")
         self.loss_plugins = nn.ModuleDict({})
 
         self._inference_outputs = []
+        self._inference_references = []
         self.test_results = []
         self.best_val_result = None
 
@@ -66,24 +67,27 @@ class EncoderDecoder(EfficientCheckpointModule):
         else:
             self.loss_plugins = nn.ModuleDict({plugin.name: plugin})
 
-    def teacher_force_step(self, batch, reduction='mean'):
-        input_ids, target_ids = batch["input_ids"], batch["target_ids"]
+    def teacher_force_step(self, batch, reduction="mean"):
+        input_ids, target_ids = batch["input_ids"], batch["labels"]
 
-        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
+        self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
 
         decoder_input_ids = self.model.prepare_decoder_input_ids_from_labels(target_ids)
+        # need to transform -100 into padding tokens
+        decoder_input_ids[decoder_input_ids == -100] = self.tokenizer.pad_token_id
+
         outputs = self.model.forward(
             input_ids,
             decoder_input_ids=decoder_input_ids,
-            attention_mask=(input_ids != self.pad_token_id).float(),
+            attention_mask=batch["attention_mask"],
             decoder_attention_mask=torch.ones_like(decoder_input_ids).float(),
         )
         loss, _ = label_smoothed_nll_loss(
             F.log_softmax(outputs.logits, dim=-1),
             target_ids,
             epsilon=0.1,
-            ignore_index=self.pad_token_id,
-            reduction=reduction
+            ignore_index=-100,
+            reduction=reduction,
         )
         return loss
 
@@ -103,11 +107,11 @@ class EncoderDecoder(EfficientCheckpointModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss = self.teacher_force_step(batch, reduction='none')
+        loss = self.teacher_force_step(batch, reduction="none")
         mean_loss = loss.sum() / loss.size(0)
         self.log("val/loss", mean_loss, on_epoch=True, prog_bar=True)
         self._inference_outputs.append((loss, batch["task_ids"]))
-        return loss, batch['task_ids']
+        return loss, batch["task_ids"]
 
     def on_validation_epoch_end(self):
         outputs = self._inference_outputs
@@ -115,7 +119,9 @@ class EncoderDecoder(EfficientCheckpointModule):
         task_ids = torch.cat([out[1] for out in outputs], 0)
 
         # compute the loss per task id
-        with open(os.path.join(self.args.output_dir, "val_loss_by_task.txt"), "a+") as f:
+        with open(
+            os.path.join(self.args.output_dir, "val_loss_by_task.txt"), "a+"
+        ) as f:
             task_losses = {}
             for task_id in torch.unique(task_ids):
                 task_losses[task_id.item()] = losses[task_ids == task_id].mean().item()
@@ -129,7 +135,9 @@ class EncoderDecoder(EfficientCheckpointModule):
         optimizer, self.trainable_param_names = get_optimizer(
             self, args, no_decay=["bias", "LayerNorm.weight"]
         )
-        global_bs = get_global_batch_size(args.train_batch_size, args.gradient_accumulation_steps)
+        global_bs = get_global_batch_size(
+            args.train_batch_size, args.gradient_accumulation_steps
+        )
 
         if args.total_steps == -1:
             args.total_steps = (
@@ -153,7 +161,7 @@ class EncoderDecoder(EfficientCheckpointModule):
 
 class Finetuner(EncoderDecoder):
     def add_missing_args(self, args):
-        for (name, value) in args.items():
+        for name, value in args.items():
             if name not in self.hparams or self.hparams[name] in ["", None]:
                 self.hparams[name] = value
                 setattr(self.args, name, value)
@@ -161,12 +169,13 @@ class Finetuner(EncoderDecoder):
     def inference_step(self, batch):
         """used for both validation and testing"""
         input_ids = batch["input_ids"]
+        attention_mask = batch["attention_mask"]
 
-        self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
+        self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
 
         outputs = self.model.generate(
             input_ids=input_ids,
-            attention_mask=(input_ids != self.pad_token_id).float(),
+            attention_mask=attention_mask,
             num_beams=self.args.num_beams,
             max_length=self.args.max_output_length,
             decoder_start_token_id=self.model.config.bos_token_id,
@@ -182,33 +191,40 @@ class Finetuner(EncoderDecoder):
             self.log(f"train/lr_{i}", pg["lr"])
         return loss
 
-    def inference_end(self, inf_step_outputs, data_wrapper, split):
-        all_predictions = [
-            data_wrapper.decode(out) for output in inf_step_outputs for out in output
-        ]
-        predictions = all_predictions
+    def inference_end(self, inference_outputs, inference_labels, split):
+        import itertools
+        from mttl.evaluators.ni_evaluator import decode, compute_metrics
 
-        metrics = data_wrapper.evaluate(predictions, split)
+        inference_outputs = list(
+            itertools.chain(
+                *[decode(outputs, self.tokenizer) for outputs in inference_outputs]
+            )
+        )
+        inference_labels = list(itertools.chain(*inference_labels))
+        metrics = compute_metrics(
+            inference_outputs, [[r] for r in inference_labels], reduction="mean"
+        )
 
         to_log = {}
-        for metric_name, metric in zip(["em", "metric"], metrics):
-            to_log[f"{split}/{metric_name}_perf"] = metric
+        to_log[f"{split}/em_perf"] = metrics["exact_match"]
+        to_log[f"{split}/metric_perf"] = metrics["rougeL"]
 
         self.log_dict(to_log, on_epoch=True, prog_bar=True)
 
-        test_examples = data_wrapper.test_examples
-
-        for test_example, prediction in zip(test_examples, predictions):
-            test_example["prediction"] = prediction
-
         with open(self.hparams.output_dir + f"/{split}_predictions.json", "w") as f:
-            json.dump(test_examples, f)
+            data = [
+                {"prediction": p, "reference": r}
+                for p, r in zip(inference_outputs, inference_labels)
+            ]
+            json.dump(data, f)
 
-        metrics = {f"{split}/em": metrics[0], f"{split}/metric_perf": metrics[1]}
+        metrics = {
+            f"{split}/em": metrics["exact_match"],
+            f"{split}/metric_perf": metrics["rougeL"],
+        }
         metrics["split"] = split
         metrics["epoch"] = self.current_epoch
         metrics["step"] = self.global_step
-        metrics["metric"] = data_wrapper.metric
         metrics["seed"] = self.hparams.seed
 
         result_str = json.dumps(metrics) + "\n"
@@ -229,22 +245,30 @@ class Finetuner(EncoderDecoder):
 
     def validation_step(self, batch, batch_idx):
         output = self.inference_step(batch)
-        self._inference_outputs.append(output)
+        self._inference_references.append(batch["labels_texts"])
+        self._inference_outputs.append(output.cpu())
         return output
 
     def test_step(self, batch, batch_idx):
         output = self.inference_step(batch)
-        self._inference_outputs.append(output)
+        self._inference_references.append(batch["labels_texts"])
+        self._inference_outputs.append(output.cpu())
         return output
 
     def on_validation_epoch_end(self):
-        outputs = self.inference_end(self._validation_outputs, self.trainer.datamodule.dataset_reader, "val")
+        outputs = self.inference_end(
+            self._inference_outputs, self._inference_references, "val"
+        )
         self._inference_outputs.clear()
+        self._inference_references.clear()
         return outputs
 
-    def on_test_epoch_end(self, outputs):
-        outputs = self.inference_end(self._test_outputs, self.trainer.datamodule.dataset_reader, "test")
+    def on_test_epoch_end(self):
+        outputs = self.inference_end(
+            self._inference_outputs, self._inference_references, "test"
+        )
         self._inference_outputs.clear()
+        self._inference_references.clear()
         return outputs
 
     def on_training_epoch_end(self, losses):

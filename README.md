@@ -1,82 +1,37 @@
-# MTTL
-
-MTTL - Multi-Task Transfer Learning
-
-## Setup
-
-MTTL supports `Python 3.8` and `Python 3.9`. It is recommended to create a virtual environment for MTTL using `virtualenv` or `conda`. For example, with `conda`:
-
-    conda create -n mttl python=3.9
-    conda activate mttl
-
-Install the required Python packages:
-
-    pip install -e .
+[![Tests](https://github.com/microsoft/mttl/actions/workflows/tests.yml/badge.svg)](https://github.com/microsoft/mttl/actions/workflows/tests.yml)
 
 
+# MTTL - Multi-Task Transfer Learning
 
-## Multi-Head Adapter Routing
+MTTL is a repository focusing on multi-task Natural Language Processing (NLP) methods that emphasize model reusability, model recombination, and parameter-efficient fine-tuning (PEFT) techniques, particularly in the context of few-shot and zero-shot learning.
 
-Please ensure that you have navigated to the `projects/mhr` directory before running the Multi-Head Adapter Routing scripts:
+Check out our papers on ArXiv:
 
-    cd projects/mhr
-
-
-### Data Preparation
-
-Download and prepare the datasets for the experiments using the following script:
-
-    bash datasets/create_datasets.sh
+- [Towards Modular LLMs by Building and Reusing a Library of LoRAs](https://arxiv.org/abs/2405.11157)
+- [Multi-Head Adapter Routing for Cross-Task Generalization](https://arxiv.org/abs/2211.03831)
 
 
-### Environment Variables
+Refer to the [Expert Library README](projects/modular_llm/README.md) for more details on training and evaluating experts.
 
-Based on your experiments, you may need to export one or more of the following environment variables:
-
-    T0_DATA_DIR:  `data/t0_data/processed` if you ran the `create_datasets.sh`
-    NI_DATA_DIR: `data/ni_data/processed` if you ran the `create_datasets.sh`
-    XFIT_DATA_DIR: `data/ni_data/processed` if you ran the `create_datasets.sh`
-    CHECKPOINT_DIR
-    OUTPUT_DIR
-    CACHE_DIR
-    STORYCLOZE_DIR: path to your downloaded `.csv` files. See [the storycloze official website](https://cs.rochester.edu/nlp/rocstories/)
+For the code that accompanies the paper [Multi-Head Adapter Routing for Cross-Task Generalization](https://arxiv.org/abs/2211.03831), please refer to [MHR-camera-ready](https://github.com/microsoft/mttl/tree/mhr-camera-ready).
 
 
-### Multi-task Pre-training
+## Intended uses
 
-The general command for pre-training a model is:
+MTTL is intended for research use as described in the paper [Toward Modular LLMs by Building and Reusing a Library of LoRAs](https://arxiv.org/abs/2405.11157). MTTL performance in production environments has not been tested. Considerable testing and verification are needed before the concepts and code shared are used in production environments.
 
-    python pl_train.py -c $CONFIG_FILES -k $KWARGS
+## Evaluations
 
-Multiple `CONFIG_FILES` can be concatenated as `file1+file2`. To modify defaults, `KWARGS` can be expressed as `key=value`.
-You can check [scripts/pretrain](scripts/pretrain) for examples.
+MTTL was evaluated on a selected set of standard NLP tasks, mostly on English data. Among these tasks are common-sense reasoning, question answering, and coding. The evaluation focused on zero-shot performance, supervised adaptation, and the effectiveness of different routing strategies and library constructions using models such as Phi-2 and Mistral. Complete details on evaluations can be found in the paper.
 
-### Test Fine-Tuning
+## Limitations
 
-To perform finetuning for a test task, use the script `pl_finetune.py`
+MTTL is built on top of existing language models and LoRAs. MTTL is likely to inherit any biases, risks, or limitations of the constituent parts. For example, LLMs may inadvertently propagate biases present in their training data or produce harmful or inaccurate content. MTTL has been tested for English tasks and has not yet evaluated performance multilingual scenarios. Performance for multilingual or non-English tasks is not yet known. Since MTTL was evaluated on a selected set of standard NLP tasks, performance on tasks outside of evaluated tasks covered in the paper is not yet known
 
-### Hyper-parameter Search for Test Fine-Tuning
+## Safe and responsible use
 
-To perform an hyperparameter search for a test task, use the script `pl_finetune_tune.py`.
-The script will just call the functions in `pl_finetune.py` in a loop. The script itself defines hp ranges for different fine-tuning types.
+Given that MTTL is used with LoRAs chosen or built by the user, it’s important for users to fully understand the behavior and safety of the LoRAs that they use. Users should verify both the accuracy and the safety for their specific configuration and scenario.
 
-
-### Pre-Configured Scripts
-
-Alternatively, you can run the pre-configured scripts from the `scripts` folder. For example:
-
-    bash scripts/mhr_pretrain.sh
-
-### Know Issues
-If you run into issues with protoc `TypeError: Descriptors cannot not be created directly.`, you can try to downgrade protobuf to 3.20.*:
-
-    pip install protobuf==3.20.*
-
-
-## Running Tests
-
-    pip install -e ".[test]"
-    pytest -vv tests
 
 
 ## Contributing
@@ -96,8 +51,8 @@ contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additio
 
 ## Trademarks
 
-This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft 
-trademarks or logos is subject to and must follow 
+This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft
+trademarks or logos is subject to and must follow
 [Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general).
 Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
 Any use of third-party trademarks or logos are subject to those third-party's policies.

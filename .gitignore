@@ -1,5 +1,8 @@
 # Project related stuff
+*.yaml
+amlt/
 dataloader/*_data/processed/
+amlt*/
 amulet_*/
 wandb
 .amltconfig
@@ -140,6 +143,27 @@ venv.bak/
 .mypy_cache/
 .dmypy.json
 dmypy.json
-
+     
 # Pyre type checker
-.pyre/
+.pyre/     
+**/eval/alpaca_eval/*
+**/eval/alpaca_eval/**/*.csv
+**/eval/alpaca_eval/**/*.json
+**/eval/mmlu/**/*.csv
+results/
+lm_cache/
+/tmp/
+
+#
+projects/instr_routing/*
+
+# any file starting with __
+_*.*
+_*/*
+# any folder starting with __
+_*/
+!__init__.py
+!*/__init__.py
+*/my_configs/*
+my_configs
+gcr_configs
