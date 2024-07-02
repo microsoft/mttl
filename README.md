@@ -3,17 +3,20 @@
 
 # MTTL - Multi-Task Transfer Learning
 
-MTTL is a repository focusing on multi-task Natural Language Processing (NLP) methods that emphasize model reusability, model recombination, and parameter-efficient fine-tuning (PEFT) techniques, particularly in the context of few-shot and zero-shot learning.
+MTTL is a repository focusing on building LLMs that focus on model reusability, model recombination, and parameter-efficient fine-tuning (PEFT) techniques, particularly in the context of few-shot and zero-shot learning.
 
 Check out our papers on ArXiv:
 
 - [Towards Modular LLMs by Building and Reusing a Library of LoRAs](https://arxiv.org/abs/2405.11157)
 - [Multi-Head Adapter Routing for Cross-Task Generalization](https://arxiv.org/abs/2211.03831)
 
+## Towards Modular LLMs by Building and Reusing a Library of LoRAs (aka Arrow & MBC)
 
-Refer to the [Expert Library README](projects/modular_llm/README.md) for more details on training and evaluating experts.
+For the code that accompanies the paper _Towards Modular LLMs by Building and Reusing a Library of LoRAs_, please refer to the [Expert Library README](projects/modular_llm/README.md). This contains details on training and evaluating experts with Arrow.
 
-For the code that accompanies the paper [Multi-Head Adapter Routing for Cross-Task Generalization](https://arxiv.org/abs/2211.03831), please refer to [MHR-camera-ready](https://github.com/microsoft/mttl/tree/mhr-camera-ready).
+## Multi-Head Adapter Routing for Cross-Task Generalization (aka MHR)
+
+For the code that accompanies the paper _Multi-Head Adapter Routing for Cross-Task Generalization_, please refer to [MHR-camera-ready](https://github.com/microsoft/mttl/tree/mhr-camera-ready).
 
 
 ## Intended uses
@@ -31,8 +34,6 @@ MTTL is built on top of existing language models and LoRAs. MTTL is likely to in
 ## Safe and responsible use
 
 Given that MTTL is used with LoRAs chosen or built by the user, it’s important for users to fully understand the behavior and safety of the LoRAs that they use. Users should verify both the accuracy and the safety for their specific configuration and scenario.
-
-
 
 ## Contributing
 
