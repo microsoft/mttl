@@ -32,7 +32,7 @@ def main(args: ClusteringConfig):
         )
         transform = MBCWithCosSimTransform(cfg)
         clusters = transform.transform(library, recompute=True)
-        filename = f"{args.num_clusters}MBC.json"
+        filename = f"{args.num_clusters}_mbc.json"
     elif args.cluster_mode == "random":
         cfg = RandomClustersConfig(k=args.num_clusters, random_state=42)
         transform = RandomClustersTransform(cfg)
