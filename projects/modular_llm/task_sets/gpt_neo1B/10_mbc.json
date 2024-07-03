@@ -1,5 +1,5 @@
 {   
-    "description": "10 clusters obrained by clsutering gpt neo embeddings into 10 clusters, threshold 0.5, 2 epochs, from lib ostapeno/library-gptneo_1B_flan_2ep",
+    "description": "10 clusters obtained by clustering gpt neo embeddings into 10 clusters, threshold 0.5, 2 epochs, from lib ostapeno/library-gptneo_1B_flan_2ep",
     "c4o10_2e": [
         "glue_sst2_2_0_0",
         "dream_read_the_following_conversation_and_answer_the_question",
