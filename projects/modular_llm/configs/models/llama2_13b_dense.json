@@ -1,9 +1,0 @@
-{
-    "lora_alpha": 16,
-    "lora_rank": 4,
-    "n_skills": 1,
-    "model_modifier": "lora",
-    "modify_modules": ".*mlp.*",
-    "modify_layers": "gate_proj|down_proj|up_proj",
-    "trainable_param_names": ".*lora_[ab].*"
-}
