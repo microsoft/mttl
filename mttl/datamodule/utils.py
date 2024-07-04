@@ -123,7 +123,8 @@ def get_tokenizer_with_args(
     else:
         if "phi-2" == model_name:
             # local phi-2 version. use `microsoft/phi-2 for the official hf version`
-            model_name = os.environ["PHI_PATH"]
+            model_name = os.getenv("PHI_PATH", "microsoft/phi-2")
+
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         tokenizer.model_max_length = int(1e9)
 
