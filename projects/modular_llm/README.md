@@ -86,7 +86,7 @@ python eval_library.py \
   merge_or_route='uniform'
 ```
 
-`merge_or_route='uniform'` means that we will just uniformly average all the experts in the library before performing inference. To run `Arrow`, run:
+`merge_or_route='uniform'` means that we will just uniformly average all the experts in the library before performing inference. To run `Arrow`, use `merge_or_route='arrow'` instead:
 
 ```bash
 python eval_library.py \
