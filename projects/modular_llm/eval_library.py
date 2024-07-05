@@ -279,6 +279,10 @@ def run_eval(args: ExpertConfig):
         # update config
         wandb.config.update({f"cmd_args_{k}": v for k, v in vars(args).items()})
 
+    if args.pipeline_eval_tasks is None:
+        logger.info("`pipeline_eval_tasks` was not set, setting pipeline_eval_tasks='all'...")
+        args.pipeline_eval_tasks = "all"
+
     if args.pipeline_eval_tasks in [
         "in_distribution",
     ]:
