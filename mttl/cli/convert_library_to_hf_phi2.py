@@ -67,10 +67,8 @@ def translate_lib_to_hf_phi(
             else:
                 new_expert_weights[new_k] = v
         expert_dump.expert_weights = new_expert_weights
-        if tie_params:
-            expert_dump.expert_config.tie_params = (
-                "q_proj.*\\.lora_a|k_proj.*\\.lora_a|v_proj.*\\.lora_a"
-            )
+        if tie_params:            
+            # makes sure that params are tied for arrow prototype calculation: q,k and v should get the same prototype.
             expert_dump.training_config.tie_params = (
                 "q_proj.*\\.lora_a|k_proj.*\\.lora_a|v_proj.*\\.lora_a"
             )
