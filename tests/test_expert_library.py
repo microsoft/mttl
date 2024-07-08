@@ -448,9 +448,9 @@ def test_copy_library_blob_to_local(tmp_path, build_meta_ckpt, setup_repo, repo_
 
 def test_copy_library_local_to_local(tmp_path, build_meta_ckpt, setup_repo, repo_id):
     # Create a library with two experts
-    local_path = repo_id = tmp_path / "base_repo"
-    repo_id.mkdir()
-    repo_id = str(repo_id)
+    local_path = tmp_path / "base_repo"
+    local_path.mkdir()
+    repo_id = f"local://{local_path}"
     engine = LocalFSEngine()
     setup_repo(engine, repo_id)
     filenames = build_meta_ckpt(local_path, 2)
@@ -459,8 +459,9 @@ def test_copy_library_local_to_local(tmp_path, build_meta_ckpt, setup_repo, repo
     library = ExpertLibrary.get_expert_library(repo_id)
 
     # Create a new library from the first one
-    new_repo_id = tmp_path / "new_repo"
-    new_repo_id.mkdir()
+    new_repo_path = tmp_path / "new_repo"
+    new_repo_path.mkdir()
+    new_repo_id = f"local://{new_repo_path}"
     new_lib = LocalExpertLibrary.from_expert_library(library, new_repo_id)
     # drop the path and keep the filenames
     base_files = {f.split("/")[-1] for f in library.list_repo_files(repo_id)}
@@ -470,9 +471,9 @@ def test_copy_library_local_to_local(tmp_path, build_meta_ckpt, setup_repo, repo
 
 def test_get_expert_library_copy(tmp_path, build_meta_ckpt, setup_repo, repo_id):
     # Create a library with two experts
-    local_path = repo_id = tmp_path / "base_repo"
-    repo_id.mkdir()
-    repo_id = str(repo_id)
+    local_path = tmp_path / "base_repo"
+    local_path.mkdir()
+    repo_id = f"local://{local_path}"
     engine = LocalFSEngine()
     setup_repo(engine, repo_id)
     filenames = build_meta_ckpt(local_path, 2)
@@ -481,7 +482,7 @@ def test_get_expert_library_copy(tmp_path, build_meta_ckpt, setup_repo, repo_id)
     library = ExpertLibrary.get_expert_library(repo_id)
 
     # Get the expert library creating a copy of the original
-    new_repo_id = str(tmp_path / "new_repo")
+    new_repo_id = f"local://{tmp_path / 'new_repo'}"
     new_lib = ExpertLibrary.get_expert_library(repo_id, destination_id=new_repo_id)
 
     # drop the path and keep the filenames
@@ -492,9 +493,9 @@ def test_get_expert_library_copy(tmp_path, build_meta_ckpt, setup_repo, repo_id)
 
 def test_virtual_library_is_in_memory(tmp_path, build_meta_ckpt, setup_repo, repo_id):
     # Create a library with two experts
-    local_path = repo_id = tmp_path / "base_repo"
-    repo_id.mkdir()
-    repo_id = str(repo_id)
+    local_path = tmp_path / "base_repo"
+    local_path.mkdir()
+    repo_id = f"local://{local_path}"
     engine = LocalFSEngine()
     setup_repo(engine, repo_id)
     filenames = build_meta_ckpt(local_path, 2)
@@ -502,8 +503,6 @@ def test_virtual_library_is_in_memory(tmp_path, build_meta_ckpt, setup_repo, rep
     local_library = ExpertLibrary.get_expert_library(repo_id)
 
     # Create a new library from the first one
-    virtual_repo_id = tmp_path / "virtual_repo"
-    virtual_repo_id.mkdir()
     virtual_lib = VirtualLocalLibrary.from_expert_library(
         local_library, local_library.repo_id
     )
@@ -521,7 +520,7 @@ def test_virtual_library_is_in_memory(tmp_path, build_meta_ckpt, setup_repo, rep
         "expert_2.meta",
         "expert_2.ckpt",
     }
-    assert set(os.listdir(repo_id)) == {
+    assert set(os.listdir(local_path)) == {
         "README.md",
         "expert_1.meta",
         "expert_1.ckpt",

@@ -122,6 +122,13 @@ def retry(max_retries=10, wait_seconds=60):
     return decorator
 
 
+def _remove_protocol(repo_id):
+    """Remove the protocol from the repo_id. Ex:
+    az://storage_account/container -> storage_account/container
+    """
+    return str(repo_id).split("://")[-1]
+
+
 class BackendEngine(ABC):
     @abstractmethod
     def snapshot_download(self, repo_id, allow_patterns=None):
@@ -612,7 +619,8 @@ class LocalFSEngine(BackendEngine):
     def list_repo_files(self, repo_id):
         import glob
 
-        return list(glob.glob(os.path.join(repo_id, "*")))
+        _repo_id = _remove_protocol(repo_id)
+        return list(glob.glob(os.path.join(_repo_id, "*")))
 
 
 class ExpertLibrary:
@@ -628,7 +636,7 @@ class ExpertLibrary:
     ):
         super().__init__()
 
-        self.repo_id = self._remove_protocol(repo_id)
+        self.repo_id = _remove_protocol(repo_id)
         self._sliced = False
         self.selection = selection
         self.exclude_selection = exclude_selection
@@ -661,12 +669,6 @@ class ExpertLibrary:
     @property
     def sliced(self):
         return self._sliced and not self.ignore_sliced
-
-    def _remove_protocol(self, repo_id):
-        """Remove the protocol from the repo_id. Ex:
-        az://storage_account/container -> storage_account/container
-        """
-        return str(repo_id).split("://")[-1]
 
     def _build_lib(self):
         self._sliced = False
