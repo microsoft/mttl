@@ -1363,7 +1363,7 @@ class ExpertLibrary:
                 expert_library_type = prefix[0]
                 repo_id = prefix[1]
             else:
-                expert_library_type = "local"
+                expert_library_type = "hf"
         try:
             expert_lib_class = available_libraries[expert_library_type]
         except KeyError:
@@ -1686,7 +1686,7 @@ class DatasetLibrary:
         if prefix[0] in engines:
             engine_id = prefix[0]
             dataset_id = prefix[1]
-        else:  # Default to Hugging Face Hub to help with the transition
+        else:
             engine_id = "hf"
         try:
             engine = engines[engine_id](dataset_id=dataset_id, token=token)
