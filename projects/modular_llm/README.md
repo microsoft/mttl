@@ -38,8 +38,10 @@ python cli_dataset_create.py flan --dataset_library_id=local://modular_artifacts
 A *private* library consists of one expert per task in Flan. To train one expert starting from Phi-2, we can use the following command:
 
 ```bash
-python train_experts_main.py -c configs/models/phi-2_hf.json \
-  -k finetune_task_name=ai2_arc_ARC_Easy_1_0_0 \
+python train_experts_main.py \
+  -c configs/models/phi-2_hf.json \
+  -k remove_phi_eval_tasks=False \
+  finetune_task_name=ai2_arc_ARC_Easy_1_0_0 \
   output_dir=arc_easy_expert/ \
   dataset=local://modular_artifacts/flan-flat \
   library_id=local://modular_artifacts/library \
@@ -58,7 +60,7 @@ bash train_private_library.sh
 
 To start, you can run `train_private_library_fast.sh` which trains only 2 experts using a small LM (gpt-neo 125M).
 
-After this, to analyze the content of your expert library, you can use the script in `mttl/cli/show_library.py` by providing the path to the library. 
+After this, to analyze the content of your expert library, you can use the script in `mttl/cli/show_library.py` by providing the path to the library.
 
 ## Training an MBC library
 
@@ -76,7 +78,7 @@ The file `mbc_10.json` will contain the task names falling into each cluster. Th
 
 ## Evaluating the Modular LLM
 
-Once we built a library, we can load it into the base model and apply a given merging or routing mechanism, such as Arrow. To evaluate the resulting modular LLM on, for example, arc-easy, you can run:  
+Once we built a library, we can load it into the base model and apply a given merging or routing mechanism, such as Arrow. To evaluate the resulting modular LLM on, for example, arc-easy, you can run:
 
 ```bash
 python eval_library.py \
