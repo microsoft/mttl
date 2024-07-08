@@ -287,3 +287,9 @@ class FlanModule(DefaultDataModule):
                 num_proc=n_proc,
                 desc="Filtering phi-2 eval tasks from training mixture.",
             )
+            if not self.train_dataset.num_rows:
+                logger.warning(
+                    "No training examples left after filtering. "
+                    "Please set `remove_phi_eval_tasks=False` "
+                    "if you want to train on phi-2 eval tasks."
+                )

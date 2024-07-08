@@ -35,9 +35,6 @@ def main():
     pool.starmap(copy_repo, expert_repos)
     pool.close()
     pool.join()
-    # sync version
-    # for origin_repo_id, target_repo_id in expert_repos:
-    #     copy_repo(origin_repo_id, target_repo_id)
 
 
 if __name__ == "__main__":

@@ -63,7 +63,7 @@ class ExpertConfig(Config):
         self.eval_mmlu_few_shot = True  # use few-shot for mmlu, default
         self.eval_mmlu_flag = False  # eval mmlu performance during training
         self.eval_rouge_flag = False  # eval rouge during training
-        self.pipeline_eval_tasks = "all"
+        self.pipeline_eval_tasks = None
 
         self.eval_metric = "loss"
         self.use_vllm = False

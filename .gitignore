@@ -13,6 +13,7 @@ output/
 data/
 **/data
 .vscode/
+**/modular_artifacts/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -143,9 +144,9 @@ venv.bak/
 .mypy_cache/
 .dmypy.json
 dmypy.json
-     
+
 # Pyre type checker
-.pyre/     
+.pyre/
 **/eval/alpaca_eval/*
 **/eval/alpaca_eval/**/*.csv
 **/eval/alpaca_eval/**/*.json

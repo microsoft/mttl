@@ -17,13 +17,16 @@ class ClusteringConfig(ExpertConfig):
         # for MBC
         self.num_clusters = 10  # number of clusters
         self.cluster_mode = "mbc"  # clustering mode: mbc, random
+        self.output_file = None
 
 
 def main(args: ClusteringConfig):
+    if args.output_file is None:
+        raise ValueError("Please provide an output file.")
+
     library = ExpertLibrary.get_expert_library(
         repo_id=args.library_id,
         create=False,
-        destination_id=args.destination_library_id,
     )
 
     if args.cluster_mode == "mbc":
@@ -32,27 +35,22 @@ def main(args: ClusteringConfig):
         )
         transform = MBCWithCosSimTransform(cfg)
         clusters = transform.transform(library, recompute=True)
-        filename = f"{args.num_clusters}MBC.json"
     elif args.cluster_mode == "random":
         cfg = RandomClustersConfig(k=args.num_clusters, random_state=42)
         transform = RandomClustersTransform(cfg)
         clusters = transform.transform(library)
-        filename = f"{args.num_clusters}_random.json"
     else:
         raise ValueError(f"Unknown cluster mode {args.cluster_mode}")
 
-    output_json_file = (
-        f"{os.path.dirname(os.path.realpath(__file__))}/task_sets/{args.library_id}/"
-    )
-    os.makedirs(output_json_file, exist_ok=True)
+    os.makedirs(os.path.basedir(args.output_file), exist_ok=True)
     cluster_dict = {}
     for c, l in clusters.items():
         print(f"Cluster {c} has {len(l)} elements")
         print(f"c{c}o{args.num_clusters} = {l}")
         cluster_dict[f"c{c}o{args.num_clusters}"] = l
-    with open(output_json_file + f"/{filename}", "w") as f:
+    with open(args.output_file, "w") as f:
         json.dump(cluster_dict, f, indent=4)
-    logger.info(f"Saved clusters to {output_json_file}/{filename}")
+    logger.info(f"Saved clusters to {args.output_file}")
 
 
 if __name__ == "__main__":
