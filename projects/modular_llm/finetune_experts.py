@@ -6,7 +6,7 @@ from pytorch_lightning import Trainer, seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.models.modifiers.expert_containers.expert_library import (
+from mttl.models.library.expert_library import (
     HFExpertLibrary,
     ExpertLibrary,
     LocalExpertLibrary,
@@ -15,11 +15,11 @@ from mttl.models.modifiers.expert_containers.expert_library import (
 )
 from mttl.callbacks import LiveCheckpointCallback
 from mttl.models.monitors import get_monitors
-from mttl.models.modifiers.expert_containers.expert import (
+from mttl.models.library.expert import (
     load_expert,
     Expert,
 )
-from mttl.models.modifiers.expert_containers.library_transforms import (
+from mttl.models.library.library_transforms import (
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
 )
@@ -32,7 +32,7 @@ from mttl.utils import (
     setup_logging,
     logger,
 )
-from mttl.models.modifiers.expert_containers.library_transforms import (
+from mttl.models.library.library_transforms import (
     SVDEmbeddingTransform,
     SVDEmbeddingTransformConfig,
 )

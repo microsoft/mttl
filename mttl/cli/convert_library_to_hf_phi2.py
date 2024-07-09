@@ -6,7 +6,7 @@ from copy import deepcopy
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.models.modifiers.expert_containers.expert_library import (
+from mttl.models.library.expert_library import (
     ExpertLibrary,
 )
 

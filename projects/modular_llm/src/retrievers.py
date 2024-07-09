@@ -1,12 +1,12 @@
-from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
-from mttl.models.modifiers.expert_containers.library_transforms import LibraryTransform
+from mttl.models.library.expert import Expert, load_expert
+from mttl.models.library.library_transforms import LibraryTransform
 
 from mttl.models.expert_config import ExpertConfig
 import copy
 import torch
 import numpy as np
 from mttl.utils import setup_logging, logger
-from mttl.models.modifiers.expert_containers.expert_library import (
+from mttl.models.library.expert_library import (
     VirtualLocalLibrary,
 )
 from mttl.models.expert_model import MultiExpertModel

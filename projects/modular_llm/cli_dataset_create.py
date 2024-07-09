@@ -4,7 +4,7 @@ import click
 import numpy as np
 from datasets import Dataset, concatenate_datasets
 
-from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
+from mttl.models.library.expert_library import DatasetLibrary
 
 
 def gen_from_iterable_dataset(iterable_ds):

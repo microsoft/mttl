@@ -12,7 +12,7 @@ from huggingface_hub import (
 
 import torch
 
-from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
+from mttl.models.library.expert_library import DatasetLibrary
 from mttl.utils import logger, remote_login
 from mttl.models.ranker.adapter_ranker import AdapterRanker
 

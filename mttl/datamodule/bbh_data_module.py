@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import os
 
 from mttl.datamodule.mt_seq_to_seq_module import augment_few_shot_task
-from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
+from mttl.models.library.expert_library import DatasetLibrary
 
 
 @dataclass

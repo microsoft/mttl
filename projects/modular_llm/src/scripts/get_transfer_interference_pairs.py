@@ -6,11 +6,11 @@ from functools import partial
 from matplotlib import pyplot as plt
 from tempfile import TemporaryDirectory
 from pytorch_lightning import seed_everything
-from mttl.models.modifiers.expert_containers.expert_library import (
+from mttl.models.library.expert_library import (
     ExpertLibrary,
     LocalExpertLibrary,
 )
-from mttl.models.modifiers.expert_containers.library_transforms import (
+from mttl.models.library.library_transforms import (
     SVDEmbeddingTransform,
     SVDEmbeddingTransformConfig,
 )

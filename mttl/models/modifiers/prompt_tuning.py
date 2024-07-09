@@ -8,7 +8,7 @@ from mttl.models.modifiers.base import Adapter, ModifierConfig, ModifyMixin
 from transformers.modeling_utils import PreTrainedModel
 from mttl.models.modifiers.kv_adapter import KVAdapterConfig
 
-# from mttl.models.modifiers.expert_containers.selectors import PolySelectorConfig
+# from mttl.models.containers.selectors import PolySelectorConfig
 
 from mttl.models.modifiers.debug_utils import check_if_align, monitor_transformer
 

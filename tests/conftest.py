@@ -12,8 +12,8 @@ from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import MultiExpertModel
 from mttl.models.modifiers.base import ModifierConfig
-from mttl.models.modifiers.expert_containers.expert import Expert
-from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
+from mttl.models.library.expert import Expert
+from mttl.models.library.expert_library import DatasetLibrary
 from projects.modular_llm.cli_dataset_create import download_flan
 
 

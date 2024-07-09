@@ -7,11 +7,11 @@ import numpy as np
 from pytorch_lightning import seed_everything
 
 from mttl.models.expert_config import ExpertConfig
-from mttl.models.modifiers.expert_containers.expert_library import (
+from mttl.models.library.expert_library import (
     HFExpertLibrary,
     LocalExpertLibrary,
 )
-from mttl.models.modifiers.expert_containers.library_transforms import (
+from mttl.models.library.library_transforms import (
     TiesMerge,
     TiesMergeConfig,
     WeightedLinearMerge,
@@ -107,7 +107,7 @@ def test_arrow_with_tiedlora(tmp_path, create_dummy_expert):
 
 
 def test_compute_svd_embeddings():
-    from mttl.models.modifiers.expert_containers.library_transforms import (
+    from mttl.models.library.library_transforms import (
         SVDEmbeddingTransform,
         SVDEmbeddingTransformConfig,
     )

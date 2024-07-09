@@ -1,7 +1,7 @@
 import os
 import json
-from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
-from mttl.models.modifiers.expert_containers.library_transforms import (
+from mttl.models.library.expert_library import ExpertLibrary
+from mttl.models.library.library_transforms import (
     MBClusteringTransformConfig,
     MBCWithCosSimTransform,
     RandomClustersTransform,

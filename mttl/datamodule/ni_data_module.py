@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 from mttl.datamodule.base import DefaultCollator, DefaultDataModule, DatasetConfig
-from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
+from mttl.models.library.expert_library import DatasetLibrary
 from mttl.utils import logger
 
 

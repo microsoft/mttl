@@ -4,9 +4,9 @@ from pytorch_lightning import seed_everything
 from transformers import AutoModelForCausalLM
 
 from mttl.models.expert_model import MultiExpertModel
-from mttl.models.modifiers.expert_containers import get_modules_to_modify_trie
+from mttl.models.containers import get_modules_to_modify_trie
 from mttl.models.modifiers.lora import LoRAConfig
-from mttl.models.modifiers.expert_containers.selectors import (
+from mttl.models.containers.selectors import (
     PolySelector,
     PolySelectorConfig,
     TaskNameSelectorConfig,

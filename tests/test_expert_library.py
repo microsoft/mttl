@@ -14,7 +14,7 @@ from huggingface_hub import (
     CommitOperationCopy,
 )
 
-from mttl.models.modifiers.expert_containers.expert_library import (
+from mttl.models.library.expert_library import (
     BlobExpertLibrary,
     LocalExpertLibrary,
     BlobStorageEngine,
@@ -70,7 +70,7 @@ def test_expert_lib(mocker):
 
 
 def test_soft_delete(mocker):
-    from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+    from mttl.models.library.expert_library import HFExpertLibrary
 
     # read the stored embeddings
     library = HFExpertLibrary("sordonia/new-test-library", create=False)
@@ -91,7 +91,7 @@ def test_soft_delete(mocker):
 
 
 def test_read_embeddings():
-    from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+    from mttl.models.library.expert_library import HFExpertLibrary
 
     # read the stored embeddings
     embeddings = HFExpertLibrary("sordonia/new-test-library").get_auxiliary_data(
@@ -102,7 +102,7 @@ def test_read_embeddings():
 
 
 def test_add_auxiliary_data(mocker, tmp_path):
-    from mttl.models.modifiers.expert_containers.expert_library import (
+    from mttl.models.library.expert_library import (
         HFExpertLibrary,
         LocalExpertLibrary,
     )
@@ -543,7 +543,7 @@ def test_virtual_library_is_in_memory(tmp_path, build_meta_ckpt, setup_repo, rep
 def test_get_expert_library(expert_lib_class, repo_id):
     class_name = expert_lib_class.__name__
     with patch(
-        f"mttl.models.modifiers.expert_containers.expert_library.{class_name}"
+        f"mttl.models.library.expert_library.{class_name}"
     ) as mock_expert_lib:
         expert_library = ExpertLibrary.get_expert_library(repo_id)
         mock_expert_lib.assert_called_once()

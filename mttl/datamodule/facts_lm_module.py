@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from mttl.datamodule.platypus_module import PlatypusConfig
 from mttl.datamodule.base import DefaultDataModule
 
-from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
+from mttl.models.library.expert_library import DatasetLibrary
 from mttl.utils import logger
 
 

@@ -28,7 +28,7 @@ def transfer_batch_to_device(batch, device):
 
 def download_from_hub(repo_id) -> str:
     """Download checkpoint from hub."""
-    from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
+    from mttl.models.library.expert_library import ExpertLibrary
 
     return ExpertLibrary.get_expert_library(repo_id).hf_hub_download(
         repo_id=repo_id, filename=CHECKPOINT_PATH_IN_HUB

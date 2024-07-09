@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import os
 import numpy
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
-from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
+from mttl.models.library.expert_library import DatasetLibrary
 
 
 @dataclass

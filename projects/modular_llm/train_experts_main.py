@@ -9,7 +9,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.models.expert_model import ExpertModel, MoEModel
 from mttl.models.expert_config import ExpertConfig
-from mttl.models.modifiers.expert_containers.expert_library import (
+from mttl.models.library.expert_library import (
     ExpertLibrary,
     LocalExpertLibrary,
 )
@@ -25,7 +25,7 @@ from mttl.utils import (
     logger,
     generate_random_string,
 )
-from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
+from mttl.models.library.expert import Expert, load_expert
 from projects.modular_llm.src.callbacks import DownstreamEvalCallback
 from projects.modular_llm.src.transfer_matrix import (
     TransferMatrixConfig,

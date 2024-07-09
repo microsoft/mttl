@@ -6,12 +6,12 @@ from pytorch_lightning import seed_everything
 from mttl.models.expert_config import ExpertConfig
 
 from mttl.models.modifiers.base import ModifierConfig
-from mttl.models.modifiers.expert_containers.expert import Expert
-from mttl.models.modifiers.expert_containers import (
+from mttl.models.library.expert import Expert
+from mttl.models.containers import (
     LoRAExpertContainer,
     CoalescedLoRAExpertContainer,
 )
-from mttl.models.modifiers.expert_containers.selectors import (
+from mttl.models.containers.selectors import (
     BatchSequenceExpertsAndWeightsSelectorOutput,
     SelectorOutput,
     PolySelectorDirect,

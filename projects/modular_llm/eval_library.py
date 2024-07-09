@@ -10,8 +10,8 @@ import json
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
-from mttl.models.modifiers.expert_containers.selectors import (
+from mttl.models.library.expert_library import ExpertLibrary
+from mttl.models.containers.selectors import (
     PerTokenSelector,
     Selector,
     SelectorConfig,
@@ -23,7 +23,7 @@ from mttl.models.expert_model import MultiExpertModel, ExpertModel
 from mttl.models.expert_config import ExpertConfig
 
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
-from mttl.models.modifiers.expert_containers.library_transforms import (
+from mttl.models.library.library_transforms import (
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
     HiddenStateComputer,

@@ -5,7 +5,7 @@ from mttl.models.expert_model import (
     MultiExpertModel,
 )
 from mttl.models.modifiers.lora import LoRAConfig
-from mttl.models.modifiers.expert_containers.selectors import TaskPredictorSelector
+from mttl.models.containers.selectors import TaskPredictorSelector
 from mttl.models.ranker.classifier_ranker import SentenceTransformerClassifier
 from mttl.models.ranker.clip_ranker import CLIPRanker
 from mttl.models.expert_config import ExpertConfig
