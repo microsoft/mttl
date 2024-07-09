@@ -6,7 +6,7 @@ from datasets import (
 )
 import numpy as np
 
-from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
+from mttl.models.library.expert_library import DatasetLibrary
 
 
 class PlatypusTemplate:

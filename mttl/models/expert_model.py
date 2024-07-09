@@ -6,21 +6,21 @@ from typing import Dict, List
 import torch
 from transformers import PreTrainedModel
 
-from mttl.models.modifiers.expert_containers.library_transforms import (
+from mttl.models.library.library_transforms import (
     ArrowConfig,
     HiddenStateComputerConfig,
 )
 from mttl.models.modifiers.lora import SkilledLoRAConfig
 
-from mttl.models.modifiers.expert_containers import add_expert_to_transformer
-from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
+from mttl.models.containers import add_expert_to_transformer
+from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.modifiers.routing import RoutingInfo
 from mttl.utils import logger
-from mttl.models.modifiers.expert_containers.expert import Expert, ExpertInfo
-from mttl.models.modifiers.expert_containers.expert_containers import (
+from mttl.models.library.expert import Expert, ExpertInfo
+from mttl.models.containers.expert_containers import (
     ExpertContainer,
 )
-from mttl.models.modifiers.expert_containers.selectors import Selector, SelectorConfig
+from mttl.models.containers.selectors import Selector, SelectorConfig
 
 
 import torch
@@ -31,16 +31,14 @@ from mttl.models.llama_patch import replace_attn_with_flash_attn
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.base import ModifierConfig
 
-from mttl.models.modifiers.expert_containers.expert import ExpertInfo
-from mttl.models.modifiers.expert_containers.selectors import SelectorConfig
+from mttl.models.library.expert import ExpertInfo
+from mttl.models.containers.selectors import SelectorConfig
 from mttl.models.modifiers.routing import RoutingInfo
 from mttl.models.utils import (
     EfficientCheckpointModule,
-    model_loader_helper,
     prepare_model_for_kbit_training,
 )
 from mttl.models.expert_config import ExpertConfig
-from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
 
 
 torch.set_float32_matmul_precision("high")
@@ -397,7 +395,7 @@ class MultiExpertModel(ExpertModel):
         is_default: bool = False,
         expert_library: ExpertLibrary = None,
     ):
-        from mttl.models.modifiers.expert_containers.expert import load_expert
+        from mttl.models.library.expert import load_expert
 
         expert = load_expert(
             expert_path,
@@ -457,7 +455,7 @@ class MultiExpertModel(ExpertModel):
         selector_config: SelectorConfig,
         selector_weights: dict = None,
     ):
-        from mttl.models.modifiers.expert_containers import (
+        from mttl.models.containers import (
             replace_selector_for_container,
         )
 

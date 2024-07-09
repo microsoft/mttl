@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from pytorch_lightning import Callback
 
 from mttl.utils import agg_dicts, Averager
-from mttl.models.modifiers.expert_containers.selectors import Selector
+from mttl.models.containers.selectors import Selector
 
 try:
     import wandb

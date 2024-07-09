@@ -132,7 +132,7 @@ def test_dump_load_lora_config():
 
 
 def test_dump_load_selector_config():
-    from mttl.models.modifiers.expert_containers.selectors import (
+    from mttl.models.containers.selectors import (
         SelectorConfig,
         MOERKHSSelectorConfig,
     )

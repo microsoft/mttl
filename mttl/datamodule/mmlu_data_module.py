@@ -19,7 +19,7 @@ from mttl.datamodule.base import (
     DefaultCollator,
     DefaultDataModule,
 )
-from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
+from mttl.models.library.expert_library import DatasetLibrary
 
 
 #################################################

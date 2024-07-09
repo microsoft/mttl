@@ -1,6 +1,6 @@
 import multiprocessing
 
-from mttl.models.modifiers.expert_containers.expert_library import (
+from mttl.models.library.expert_library import (
     BlobExpertLibrary,
     ExpertLibrary,
 )

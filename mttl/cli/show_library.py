@@ -4,7 +4,7 @@ A basic CLI for displaying contents of a library of experts.
 """
 
 import click
-from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
+from mttl.models.library.expert_library import ExpertLibrary
 from rich.console import Console
 from rich.table import Table
 

@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 from transformers import T5Tokenizer, T5ForConditionalGeneration
 from sentence_transformers import SentenceTransformer
-from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
+from mttl.models.library.expert_library import DatasetLibrary
 from mttl.models.utils import EfficientCheckpointModule
 from mttl.models.ranker.adapter_ranker import AdapterRanker
 
@@ -323,7 +323,7 @@ class ClusterPredictor(SentenceTransformerClassifier):
 
     @torch.no_grad()
     def init_clusters(self, hf_lib_id):
-        from mttl.models.modifiers.expert_containers.expert_library import (
+        from mttl.models.library.expert_library import (
             HFExpertLibrary,
         )
 

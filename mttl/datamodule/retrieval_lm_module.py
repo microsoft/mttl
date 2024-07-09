@@ -9,7 +9,7 @@ from typing import Union, Optional
 from dataclasses import dataclass
 
 from mttl.datamodule.utils import get_tokenizer
-from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
+from mttl.models.library.expert_library import DatasetLibrary
 from mttl.utils import logger
 
 

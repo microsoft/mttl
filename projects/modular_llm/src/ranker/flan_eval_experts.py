@@ -5,7 +5,7 @@ from pytorch_lightning import seed_everything
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
-from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
+from mttl.models.library.expert_library import ExpertLibrary
 from mttl.utils import setup_logging, logger
 
 # register models

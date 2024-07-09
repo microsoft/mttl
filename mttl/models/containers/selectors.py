@@ -7,7 +7,7 @@ import wandb
 import numpy as np
 from torch import nn
 import torch.nn.functional as F
-from mttl.models.modifiers.expert_containers.expert import ExpertInfo
+from mttl.models.library.expert import ExpertInfo
 from mttl.models.modifiers.routing import RoutingInfo
 from torch.distributions import Bernoulli, Categorical
 from mttl.models.utils import MetricLogger

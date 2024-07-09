@@ -2,7 +2,7 @@ import pytest
 
 
 def test_load_selectors_from_config():
-    from mttl.models.modifiers.expert_containers.selectors import (
+    from mttl.models.containers.selectors import (
         MOERKHSSelectorConfig,
         get_selector,
         MOERKHSSelector,

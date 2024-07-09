@@ -21,12 +21,12 @@ from projects.modular_llm.src.utils.evaluators import (
 )
 
 from mttl.utils import logger
-from mttl.models.modifiers.expert_containers.expert_library import (
+from mttl.models.library.expert_library import (
     HFExpertLibrary,
     get_best_expert_for_score,
     get_best_expert_for_task,
 )
-from mttl.models.modifiers.expert_containers.expert import Expert
+from mttl.models.library.expert import Expert
 
 
 class TableLogger:

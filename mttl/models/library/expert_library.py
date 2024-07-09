@@ -43,7 +43,7 @@ from azure.core.exceptions import (
 )
 
 from mttl.utils import logger, remote_login
-from mttl.models.modifiers.expert_containers.expert import (
+from mttl.models.library.expert import (
     Expert,
     load_expert,
     ExpertInfo,

@@ -15,9 +15,9 @@ from sklearn.metrics.pairwise import cosine_similarity
 from collections import defaultdict
 
 from mttl.models.modifiers.base import get_target_2_source_param_mapping
-from mttl.models.modifiers.expert_containers.expert import Expert
-from mttl.models.modifiers.expert_containers.expert_containers import ExpertContainer
-from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
+from mttl.models.library.expert import Expert
+from mttl.models.containers.expert_containers import ExpertContainer
+from mttl.models.library.expert_library import ExpertLibrary
 from mttl.utils import logger
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
 from mttl.datamodule.base import get_datamodule
@@ -558,7 +558,10 @@ class PhatgooseTransform(HiddenStateComputer):
         recompute: bool = False,
         expert_names: list = None,
         default_args=None,
-    ):
+    ):        
+        from mttl.models.library.utils import train_module
+        from mttl.models.expert_model import MultiExpertModel
+
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
 
@@ -630,9 +633,6 @@ class PhatgooseTransform(HiddenStateComputer):
 
             logger.info("Training config: {}".format(vars(training_config)))
 
-            # init model
-            from mttl.models.expert_model import MultiExpertModel
-
             model = MultiExpertModel(**vars(training_config)).to("cuda")
             model.add_expert_instance(expert, is_default=True)
 
@@ -648,7 +648,6 @@ class PhatgooseTransform(HiddenStateComputer):
                     frozen_sum += value.sum()
                     value.requires_grad = False
 
-            from mttl.models.modifiers.expert_containers.utils import train_module
 
             checkpoint = train_module(training_config, model, dm)
 
@@ -1146,7 +1145,7 @@ class CrossExpertNormComputer(HiddenStateComputer):
             ]
         )
 
-        from mttl.models.modifiers.expert_containers import ExpertContainer
+        from mttl.models.containers import ExpertContainer
 
         from mttl.models.expert_model import MoEModel
 

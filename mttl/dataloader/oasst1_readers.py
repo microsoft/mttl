@@ -1,5 +1,5 @@
 import torch
-from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
+from mttl.models.library.expert_library import DatasetLibrary
 from mttl.utils import hash_example, logger
 
 

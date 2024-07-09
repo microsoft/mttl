@@ -1,16 +1,16 @@
 import re
 from mttl.config import Config
-from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
-from mttl.models.modifiers.expert_containers.selectors import (
+from mttl.models.library.expert_library import ExpertLibrary
+from mttl.models.containers.selectors import (
     Selector,
     SelectorConfig,
     SelectorView,
     get_selector,
 )
-from mttl.models.modifiers.expert_containers.expert_containers import *
+from mttl.models.containers.expert_containers import *
 from mttl.models.modifiers.modify_model import CONFIGS_TO_MODIFIERS
 from mttl.utils import logger
-from mttl.models.modifiers.expert_containers.expert import Expert
+from mttl.models.library.expert import Expert
 
 
 def _extract_identifier(string, match_on="finegrained"):
@@ -307,7 +307,7 @@ def add_expert_to_transformer(
         raise ValueError("Expert name cannot be empty!")
 
     from mttl.models.modifiers.modify_model import get_modifier_type
-    from mttl.models.modifiers.expert_containers.hard_prompts_container import (
+    from mttl.models.containers.hard_prompts_container import (
         add_hard_prompt_to_transformer,
     )
 

@@ -2,7 +2,7 @@ from functools import partial
 import os
 import numpy
 from mttl.datamodule.base import DefaultDataModule, DatasetConfig
-from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
+from mttl.models.library.expert_library import DatasetLibrary
 
 
 class CodexDataConfig(DatasetConfig):

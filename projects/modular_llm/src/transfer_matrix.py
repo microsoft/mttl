@@ -8,7 +8,7 @@ from pytorch_lightning import seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
-from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
+from mttl.models.library.expert_library import ExpertLibrary
 
 from mttl.models.expert_config import ExpertConfig
 from projects.modular_llm.src.utils.utils import (
@@ -23,7 +23,7 @@ from mttl.utils import remote_login, setup_logging, logger
 from mttl.models.expert_model import ExpertModel
 
 from mttl.vllm_engines.engines import free_memory
-from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
+from mttl.models.library.expert import Expert, load_expert
 
 DEBUG = False
 if "AMLT_OUTPUT_DIR" in os.environ:
