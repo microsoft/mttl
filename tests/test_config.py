@@ -1,5 +1,7 @@
 import json
+
 import pytest
+
 from mttl.config import Config
 
 
@@ -132,10 +134,7 @@ def test_dump_load_lora_config():
 
 
 def test_dump_load_selector_config():
-    from mttl.models.containers.selectors import (
-        SelectorConfig,
-        MOERKHSSelectorConfig,
-    )
+    from mttl.models.containers.selectors import MOERKHSSelectorConfig, SelectorConfig
 
     dump = MOERKHSSelectorConfig(emb_dim=12345).asdict()
     test = SelectorConfig.fromdict(dump)

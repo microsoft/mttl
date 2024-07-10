@@ -1,18 +1,15 @@
-import re
 import json
-import tqdm
-import torch
-import numpy as np
-import pytorch_lightning as pl
+import re
 from pathlib import Path
 
-from mttl.dataloader.ni_metrics import compute_metrics, compute_grouped_metrics
+import numpy as np
+import pytorch_lightning as pl
+import torch
+import tqdm
+
+from mttl.dataloader.ni_metrics import compute_grouped_metrics, compute_metrics
+from mttl.evaluators.base import GenerativeEvaluator, mean_stderr, switch_to_eval_mode
 from mttl.models.utils import transfer_batch_to_device
-from mttl.evaluators.base import (
-    mean_stderr,
-    switch_to_eval_mode,
-    GenerativeEvaluator,
-)
 
 
 def compute_aggregation_and_maybe_save(

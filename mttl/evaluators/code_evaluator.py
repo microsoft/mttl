@@ -1,12 +1,10 @@
 import json
-import tqdm
 import os
+
+import tqdm
 from evaluate import load
 
-from mttl.evaluators.base import (
-    GenerativeEvaluator,
-    switch_to_eval_mode,
-)
+from mttl.evaluators.base import GenerativeEvaluator, switch_to_eval_mode
 from mttl.utils import logger
 
 

@@ -1,16 +1,17 @@
-from dataclasses import dataclass
 import itertools
-from pytorch_lightning import LightningDataModule
-from transformers import AutoTokenizer
-from transformers.tokenization_utils_base import PaddingStrategy
-from typing import Any, Dict, Union, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, Optional, Union
 
 import torch
+from datasets import Dataset as ArrowDataset
+from datasets import concatenate_datasets
+from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader, Dataset
+from transformers import AutoTokenizer
+from transformers.tokenization_utils_base import PaddingStrategy
 
-from mttl.utils import logger
 from mttl.datamodule.utils import get_tokenizer
-from datasets import Dataset as ArrowDataset, concatenate_datasets
+from mttl.utils import logger
 
 
 @dataclass
@@ -624,11 +625,19 @@ class MultiChoiceSourceDataModule(DefaultDataModule):
 
 
 def get_datamodule(args, for_generation=False, dataset_override=None):
+    from mttl.datamodule.arc_data_module import ArcDataConfig, ArcMultiChoiceDataModule
+    from mttl.datamodule.codex_data_module import CodexDataConfig, CodexDataModule
     from mttl.datamodule.hellaswag_data_module import (
         HellaswagDataConfig,
         HellaswagMultiChoiceDataModule,
     )
-
+    from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
+    from mttl.datamodule.mt_seq_to_seq_module import (
+        FlanConfig,
+        FlanModule,
+        FlatMultiTaskConfig,
+        FlatMultiTaskModule,
+    )
     from mttl.datamodule.openbookqa_data_module import (
         OpenbookQADataConfig,
         OpenbookQAMultiChoiceDataModule,
@@ -644,16 +653,6 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
     from mttl.datamodule.winogrande_data_module import (
         WinograndeDataConfig,
         WinograndeMultiChoiceDataModule,
-    )
-
-    from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
-    from mttl.datamodule.arc_data_module import ArcDataConfig, ArcMultiChoiceDataModule
-    from mttl.datamodule.codex_data_module import CodexDataConfig, CodexDataModule
-    from mttl.datamodule.mt_seq_to_seq_module import (
-        FlanConfig,
-        FlanModule,
-        FlatMultiTaskConfig,
-        FlatMultiTaskModule,
     )
 
     # refactor all the common arguments below into a dict common kwargs

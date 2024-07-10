@@ -1,15 +1,14 @@
 import os
-import numpy as np
-import seaborn as sns
 from dataclasses import replace
 from functools import partial
-from matplotlib import pyplot as plt
 from tempfile import TemporaryDirectory
+
+import numpy as np
+import seaborn as sns
+from matplotlib import pyplot as plt
 from pytorch_lightning import seed_everything
-from mttl.models.library.expert_library import (
-    ExpertLibrary,
-    LocalExpertLibrary,
-)
+
+from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
 from mttl.models.library.library_transforms import (
     SVDEmbeddingTransform,
     SVDEmbeddingTransformConfig,

@@ -1,13 +1,12 @@
 import os
-import torch
+
 import pytest
+import torch
 from pytorch_lightning import seed_everything
-from mttl.models.modifiers.routing import RoutingInfo
+
 from mttl.models.modifiers import modify_transformer
-from mttl.models.modifiers.kv_adapter import (
-    KVAdapter,
-    KVAdapterConfig,
-)
+from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
+from mttl.models.modifiers.routing import RoutingInfo
 
 
 @pytest.mark.parametrize("adapter_type", ["kv_adapter"])
@@ -41,8 +40,8 @@ def test_llama_adapter(adapter_type, model_arg):
 
         model = LlamaForCausalLM(small_config)
     elif model_arg == "gpt-neo":
-        from transformers.models.gpt_neo.modeling_gpt_neo import GPTNeoForCausalLM
         from transformers.models.gpt_neo.configuration_gpt_neo import GPTNeoConfig
+        from transformers.models.gpt_neo.modeling_gpt_neo import GPTNeoForCausalLM
 
         adapter_config.modify_layers = ".*attention.*"
 

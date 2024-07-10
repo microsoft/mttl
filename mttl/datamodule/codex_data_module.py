@@ -1,7 +1,9 @@
-from functools import partial
 import os
+from functools import partial
+
 import numpy
-from mttl.datamodule.base import DefaultDataModule, DatasetConfig
+
+from mttl.datamodule.base import DatasetConfig, DefaultDataModule
 from mttl.models.library.expert_library import DatasetLibrary
 
 

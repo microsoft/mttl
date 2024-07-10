@@ -1,24 +1,18 @@
 import os
 import sys
+
 import torch
 from pytorch_lightning import Trainer, seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.callbacks import LiveCheckpointCallback
-from mttl.models.monitors import get_monitors
-from mttl.callbacks import NanoMMLUCallback, RougeCallback
-from mttl.utils import (
-    get_pl_loggers,
-    remote_login,
-    setup_logging,
-    logger,
-)
+from mttl.callbacks import LiveCheckpointCallback, NanoMMLUCallback, RougeCallback
 from mttl.datamodule.base import get_datamodule
-
-from projects.modular_llm.src.callbacks import DownstreamEvalCallback
-from mttl.models.expert_model import MoEModel
 from mttl.models.expert_config import ExpertConfig
+from mttl.models.expert_model import MoEModel
+from mttl.models.monitors import get_monitors
+from mttl.utils import get_pl_loggers, logger, remote_login, setup_logging
+from projects.modular_llm.src.callbacks import DownstreamEvalCallback
 
 
 def run_multitask(args: ExpertConfig):
@@ -107,9 +101,9 @@ def run_multitask(args: ExpertConfig):
         log_every_n_steps=args.gradient_accumulation_steps,
         accumulate_grad_batches=args.gradient_accumulation_steps,
         strategy=args.compute_strategy if args.compute_strategy else "auto",
-        precision=int(args.precision)
-        if args.precision in ["16", "32"]
-        else args.precision,
+        precision=(
+            int(args.precision) if args.precision in ["16", "32"] else args.precision
+        ),
         val_check_interval=val_check_interval,
     )
 

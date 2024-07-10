@@ -1,27 +1,28 @@
-from abc import abstractmethod
 import abc
-import re
-from dataclasses import dataclass
-import dataclasses
 import copy
+import dataclasses
+import re
+from abc import abstractmethod
+from collections import defaultdict
+from dataclasses import dataclass
 from typing import Dict, List
-import torch
-import torch.nn.functional as F
-from tqdm import tqdm
+
 import numpy as np
 import sklearn.decomposition
+import torch
+import torch.nn.functional as F
 from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
-from collections import defaultdict
+from tqdm import tqdm
 
-from mttl.models.modifiers.base import get_target_2_source_param_mapping
-from mttl.models.library.expert import Expert
-from mttl.models.containers.expert_containers import ExpertContainer
-from mttl.models.library.expert_library import ExpertLibrary
-from mttl.utils import logger
-from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
 from mttl.datamodule.base import get_datamodule
+from mttl.models.containers.expert_containers import ExpertContainer
 from mttl.models.expert_config import ExpertConfig
+from mttl.models.library.expert import Expert
+from mttl.models.library.expert_library import ExpertLibrary
+from mttl.models.modifiers.base import get_target_2_source_param_mapping
+from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
+from mttl.utils import logger
 
 
 class LibraryTransform(abc.ABC):
@@ -334,7 +335,9 @@ class HiddenStateComputerConfig(LibraryTransformConfig):
     use_base_model_only: bool = (
         False  # This computes sentence embeddings without the adapter
     )
-    model: str = None  # If `use_base_model_only`, can pass a specific model to compute embeddings with
+    model: str = (
+        None  # If `use_base_model_only`, can pass a specific model to compute embeddings with
+    )
     max_samples_per_task: int = 10
     track: str = "each_layer"  # last layer, or each layer
     pool: str = "last"  # last, or mean
@@ -558,9 +561,9 @@ class PhatgooseTransform(HiddenStateComputer):
         recompute: bool = False,
         expert_names: list = None,
         default_args=None,
-    ):        
-        from mttl.models.library.utils import train_module
+    ):
         from mttl.models.expert_model import MultiExpertModel
+        from mttl.models.library.utils import train_module
 
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
@@ -648,7 +651,6 @@ class PhatgooseTransform(HiddenStateComputer):
                     frozen_sum += value.sum()
                     value.requires_grad = False
 
-
             checkpoint = train_module(training_config, model, dm)
 
             if (
@@ -709,7 +711,9 @@ class PhatgooseTransform(HiddenStateComputer):
 class ArrowConfig(LibraryTransformConfig):
     ab_only: bool = True
     scale: bool = False  # If True, scale by eigenvalue
-    tie_params: str = "default"  # If default, ties the same params as during training. If a regex, processed the same way as during training
+    tie_params: str = (
+        "default"  # If default, ties the same params as during training. If a regex, processed the same way as during training
+    )
     tie_op: str = "concat"  # or "sum"
 
 
@@ -1017,7 +1021,9 @@ class ArrowTransform(LibraryTransform):
 
 @dataclass
 class ExpertProjectorConfig:
-    granularity: str = "finegrained"  # whether to use the same coefficients for all parameters or per `nn.Parameter` instance
+    granularity: str = (
+        "finegrained"  # whether to use the same coefficients for all parameters or per `nn.Parameter` instance
+    )
     project_over_all_experts: bool = (
         False  # whether to project over all experts or just the ones in the cluster
     )
@@ -1146,7 +1152,6 @@ class CrossExpertNormComputer(HiddenStateComputer):
         )
 
         from mttl.models.containers import ExpertContainer
-
         from mttl.models.expert_model import MoEModel
 
         model = MoEModel(**vars(training_config)).to("cuda")

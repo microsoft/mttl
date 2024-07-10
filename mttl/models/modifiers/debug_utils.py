@@ -1,6 +1,7 @@
+from copy import deepcopy as dc
+
 import torch
 import torch.nn.functional as F
-from copy import deepcopy as dc
 
 
 def check_if_align(transformer, old_kw, new_kw, max_len, up_to=None):

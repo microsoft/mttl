@@ -1,12 +1,12 @@
-from functools import partial
 import os
-import numpy
-from datasets import concatenate_datasets
-from datasets import Dataset
-from mttl.datamodule.base import DefaultDataModule, DatasetConfig
-from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task, logger
 from dataclasses import dataclass
+from functools import partial
 
+import numpy
+from datasets import Dataset, concatenate_datasets
+
+from mttl.datamodule.base import DatasetConfig, DefaultDataModule
+from mttl.datamodule.utils import logger, maybe_filter_hf_dataset_by_task
 from mttl.models.library.expert_library import DatasetLibrary
 
 

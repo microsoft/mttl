@@ -1,54 +1,45 @@
 import os
-import sys
 import shutil
+import sys
+
 import torch
 from pytorch_lightning import Trainer, seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
+from typing import Callable
+
+from mttl.callbacks import LiveCheckpointCallback, RougeCallback
+from mttl.models.expert_config import ExpertConfig
+from mttl.models.expert_model import ExpertModel as ExpertTrainer
+from mttl.models.expert_model import MoEModel as MoETrainer
+from mttl.models.expert_model import MultiExpertModel
+from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import (
-    HFExpertLibrary,
     ExpertLibrary,
+    HFExpertLibrary,
     LocalExpertLibrary,
     VirtualLocalLibrary,
     retry,
 )
-from mttl.callbacks import LiveCheckpointCallback
-from mttl.models.monitors import get_monitors
-from mttl.models.library.expert import (
-    load_expert,
-    Expert,
-)
 from mttl.models.library.library_transforms import (
+    SVDEmbeddingTransform,
+    SVDEmbeddingTransformConfig,
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
 )
 from mttl.models.modifiers.base import ModifierConfig
-from mttl.callbacks import RougeCallback
+from mttl.models.monitors import get_monitors
 from mttl.utils import (
     get_checkpoint_path,
     get_pl_loggers,
+    logger,
     remote_login,
     setup_logging,
-    logger,
 )
-from mttl.models.library.library_transforms import (
-    SVDEmbeddingTransform,
-    SVDEmbeddingTransformConfig,
-)
-from typing import Callable
-
 from projects.modular_llm.src.callbacks import DownstreamEvalCallback
-from mttl.models.expert_model import MoEModel as MoETrainer
-from mttl.models.expert_model import ExpertModel as ExpertTrainer
-from mttl.models.expert_model import MultiExpertModel
-from mttl.models.expert_config import ExpertConfig
+from projects.modular_llm.src.retrievers import RandomRetriever, SVDEmbeddingRetriever
 from projects.modular_llm.utils import get_datamodule
-from projects.modular_llm.src.retrievers import (
-    RandomRetriever,
-    SVDEmbeddingRetriever,
-)
-
 
 FINETUNE_FUNCTIONS: dict[str, Callable] = {}
 
@@ -174,8 +165,8 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
         # log args to wandb
         wandb.config.update(args)
 
-    from projects.modular_llm.src.nevergrad_opt import NGRoutingOptimizer
     from mttl.evaluators.rouge_evaluator import RougeEvaluator
+    from projects.modular_llm.src.nevergrad_opt import NGRoutingOptimizer
 
     library = retrieve(args, args.finetune_task_name, args.sk, retrieve_with="random")
     assert (
@@ -220,8 +211,8 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
         # log args to wandb
         wandb.config.update(args)
 
-    from projects.modular_llm.src.nevergrad_opt import NGRoutingOptimizer
     from mttl.evaluators.rouge_evaluator import RougeEvaluator
+    from projects.modular_llm.src.nevergrad_opt import NGRoutingOptimizer
 
     lib_location = f"/tmp/{args.library_id}"
     os.makedirs(lib_location, exist_ok=True)

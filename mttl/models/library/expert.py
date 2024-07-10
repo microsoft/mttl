@@ -1,16 +1,14 @@
 from dataclasses import dataclass
-
-import torch
 from typing import Dict, Union
 
-from mttl.models.modifiers.base import ModifierConfig
-from mttl.models.modifiers.modify_model import CONFIGS_TO_MODIFIERS
-from mttl.models.expert_config import ExpertConfig
+import torch
 
-from mttl.models.utils import download_from_hub
-from mttl.models.modifiers.base import get_target_2_source_param_mapping
-from mttl.utils import get_checkpoint_path, logger
 from mttl.config import Config
+from mttl.models.expert_config import ExpertConfig
+from mttl.models.modifiers.base import ModifierConfig, get_target_2_source_param_mapping
+from mttl.models.modifiers.modify_model import CONFIGS_TO_MODIFIERS
+from mttl.models.utils import download_from_hub
+from mttl.utils import get_checkpoint_path, logger
 
 
 @dataclass

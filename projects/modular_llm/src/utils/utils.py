@@ -1,32 +1,31 @@
+import copy
 import glob
-import sys
 import os
 import re
-import copy
-import wandb
-import prettytable
+import sys
+from functools import partial
+
 import numpy as np
 import pandas as pd
-from functools import partial
+import prettytable
 import pytorch_lightning as pl
+import wandb
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
-from mttl.utils import setup_logging, logger
-from projects.modular_llm.src.utils.evaluators import (
-    TestLossEvaluator,
-    ExtendedMMLUEvaluator,
-    Evaluator,
-    ExtendedRougeEvaluator,
-)
-
-from mttl.utils import logger
+from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import (
     HFExpertLibrary,
     get_best_expert_for_score,
     get_best_expert_for_task,
 )
-from mttl.models.library.expert import Expert
+from mttl.utils import logger, setup_logging
+from projects.modular_llm.src.utils.evaluators import (
+    Evaluator,
+    ExtendedMMLUEvaluator,
+    ExtendedRougeEvaluator,
+    TestLossEvaluator,
+)
 
 
 class TableLogger:

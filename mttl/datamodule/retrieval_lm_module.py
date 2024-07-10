@@ -1,12 +1,13 @@
-import torch
 import os
+from dataclasses import dataclass
+from typing import Optional, Union
+
 import numpy as np
+import torch
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PaddingStrategy
-from typing import Union, Optional
-from dataclasses import dataclass
 
 from mttl.datamodule.utils import get_tokenizer
 from mttl.models.library.expert_library import DatasetLibrary
@@ -211,6 +212,7 @@ class RetrievalLMDataModule(LightningDataModule):
 
 if __name__ == "__main__":
     import os
+
     from mttl.config import Config
     from mttl.utils import setup_logging
 

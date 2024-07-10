@@ -1,20 +1,19 @@
-import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
 from collections import Counter
 
-from sklearn.utils.extmath import safe_sparse_dot
+import numpy as np
+import torch
 from huggingface_hub import (
-    create_repo,
     CommitOperationAdd,
     create_commit,
+    create_repo,
     preupload_lfs_files,
 )
-
-import torch
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.utils.extmath import safe_sparse_dot
 
 from mttl.models.library.expert_library import DatasetLibrary
-from mttl.utils import logger, remote_login
 from mttl.models.ranker.adapter_ranker import AdapterRanker
+from mttl.utils import logger, remote_login
 
 try:
     import faiss
@@ -100,6 +99,7 @@ class TFIDFRanker(AdapterRanker):
     @classmethod
     def from_pretrained(cls, repo_id):
         import os
+
         from huggingface_hub import hf_hub_download
 
         if not os.path.exists(repo_id):
@@ -202,6 +202,7 @@ class KATERanker(AdapterRanker):
 
     def save_pretrained(self, path, repo_id=None):
         import os
+
         from faiss import write_index
 
         os.makedirs(path, exist_ok=True)
@@ -221,8 +222,9 @@ class KATERanker(AdapterRanker):
     @classmethod
     def from_pretrained(cls, path):
         import os
-        from huggingface_hub import hf_hub_download
+
         from faiss import read_index
+        from huggingface_hub import hf_hub_download
 
         if not os.path.exists(path):
             ckpt_file = hf_hub_download(path, filename="model.ckpt")

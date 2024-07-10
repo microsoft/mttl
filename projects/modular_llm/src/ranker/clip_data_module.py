@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
 
-from mttl.datamodule.base import DefaultDataModule, DatasetConfig, DefaultCollator
+from mttl.datamodule.base import DatasetConfig, DefaultCollator, DefaultDataModule
 from mttl.models.library.expert_library import DatasetLibrary
 
 

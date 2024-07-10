@@ -1,9 +1,10 @@
+import argparse
+import ast
 import json
 import os
-import ast
-import argparse
 from string import Template
 from typing import Dict
+
 from mttl.utils import logger, setup_logging
 
 

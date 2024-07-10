@@ -1,20 +1,21 @@
-from enum import Enum
 import hashlib
+import json
 import os
 import re
 from collections import defaultdict, deque
+from enum import Enum
 from typing import Any, Callable, Optional, Union
-import pytorch_lightning as pl
-from pytorch_lightning import LightningModule
-import torch
-import json
+
 import prettytable
-from transformers.utils import cached_file
+import pytorch_lightning as pl
+import torch
+from pytorch_lightning import LightningModule
 from transformers.file_utils import PushToHubMixin
-from mttl.utils import logger, get_checkpoint_path
+from transformers.utils import cached_file
+
 from mttl.models.get_optimizer import get_optimizer
 from mttl.models.get_scheduler import get_scheduler
-
+from mttl.utils import get_checkpoint_path, logger
 
 CHECKPOINT_PATH_IN_HUB = "checkpoint.ckpt"
 
@@ -139,8 +140,13 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
         # previous checkpoint, even if the parameters are not trainable.
         self.save_if_loaded_from_ckpt = kwargs.get("save_if_loaded_from_ckpt", True)
 
-        if self.save_if_loaded_from_ckpt and kwargs.get("compute_strategy", "") == "deepspeed": 
-            logger.warning('`save_if_loaded_from_ckpt` is True. Because you are using deepspeed, you will be saving full model checkpoints.')
+        if (
+            self.save_if_loaded_from_ckpt
+            and kwargs.get("compute_strategy", "") == "deepspeed"
+        ):
+            logger.warning(
+                "`save_if_loaded_from_ckpt` is True. Because you are using deepspeed, you will be saving full model checkpoints."
+            )
 
     def get_hash(self):
         model_hash = hashlib.sha256()
@@ -426,7 +432,7 @@ def model_loader_helper(
     if load_in_4bit and load_in_8bit:
         raise ValueError("Specify either 'load_in_4bit' or 'load_in_8bit' or neither.")
 
-    from transformers import PreTrainedModel, LlamaForCausalLM, AutoModelForCausalLM
+    from transformers import AutoModelForCausalLM, LlamaForCausalLM, PreTrainedModel
 
     if isinstance(model_name, PreTrainedModel):
         return model_name
@@ -441,7 +447,9 @@ def model_loader_helper(
         )
     elif "phi-2" == model_name:
         # local phi-2 version. use `microsoft/phi-2 for the official hf version`
-        logger.info(f"Loading phi-2 model from {os.getenv('PHI_PATH', 'microsoft/phi-2')}")
+        logger.info(
+            f"Loading phi-2 model from {os.getenv('PHI_PATH', 'microsoft/phi-2')}"
+        )
         model_object = AutoModelForCausalLM.from_pretrained(
             os.getenv("PHI_PATH", "microsoft/phi-2"),
             load_in_8bit=load_in_8bit,

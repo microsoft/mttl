@@ -1,10 +1,6 @@
-import torch
-from datasets import (
-    concatenate_datasets,
-    get_dataset_config_names,
-    Dataset,
-)
 import numpy as np
+import torch
+from datasets import Dataset, concatenate_datasets, get_dataset_config_names
 
 from mttl.models.library.expert_library import DatasetLibrary
 

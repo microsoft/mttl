@@ -3,19 +3,14 @@ import sys
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.callbacks import LiveCheckpointCallback
-
-from mttl.models.monitors import get_monitors
-from mttl.utils import (
-    get_checkpoint_path,
-    get_pl_loggers,
-    setup_logging,
-    logger,
-)
 import torch
-from mttl.models.expert_model import ExpertModel as ExpertTrainer
-from mttl.models.expert_config import ExpertConfig
 from pytorch_lightning import Trainer, seed_everything
+
+from mttl.callbacks import LiveCheckpointCallback
+from mttl.models.expert_config import ExpertConfig
+from mttl.models.expert_model import ExpertModel as ExpertTrainer
+from mttl.models.monitors import get_monitors
+from mttl.utils import get_checkpoint_path, get_pl_loggers, logger, setup_logging
 
 
 def train_module(args: ExpertConfig, module: ExpertTrainer, dm):

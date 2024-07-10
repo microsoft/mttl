@@ -1,26 +1,19 @@
+import copy
+import os
+import re
+from dataclasses import dataclass
+from importlib.resources import files
+from typing import Optional, Union
+
 import numpy as np
 import torch
-import os
-from importlib.resources import files
 from torch.utils.data import DataLoader
-
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PaddingStrategy
-from typing import Union, Optional
 
-import re
-import copy
-
-from dataclasses import dataclass
+from mttl.datamodule.base import DatasetConfig, DefaultCollator, DefaultDataModule
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
-
-from mttl.datamodule.base import (
-    DatasetConfig,
-    DefaultCollator,
-    DefaultDataModule,
-)
 from mttl.models.library.expert_library import DatasetLibrary
-
 
 #################################################
 # Dataset aumgentation, implemented in the MMLU dataset

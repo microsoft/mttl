@@ -1,21 +1,21 @@
 import glob
+import hashlib
 import json
 import logging
 import os
-import time
 import random
 import string
+import time
+from functools import lru_cache
+from typing import Dict, Optional
+
 import numpy as np
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-import pytorch_lightning as pl
-from torch import Tensor
-from typing import Dict, Optional
-import hashlib
 from pytorch_lightning.utilities.rank_zero import rank_zero_info, rank_zero_only
+from torch import Tensor
 from torch.autograd.function import Function
-from functools import lru_cache
-
 
 logger = logging.getLogger("mttl")
 
@@ -552,5 +552,6 @@ def rank_zero_only_and_wait(before=True, after=True):
 
     return decorator
 
+
 def generate_random_string(str_len=10):
-    return ''.join(random.choices(string.ascii_uppercase, k=str_len))
+    return "".join(random.choices(string.ascii_uppercase, k=str_len))

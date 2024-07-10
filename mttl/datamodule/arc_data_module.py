@@ -1,12 +1,8 @@
+import os
+from dataclasses import dataclass
 from functools import partial
 
-from mttl.datamodule.base import (
-    MultiChoiceDataModule,
-    DatasetConfig,
-)
-from dataclasses import dataclass
-import os
-
+from mttl.datamodule.base import DatasetConfig, MultiChoiceDataModule
 from mttl.models.library.expert_library import DatasetLibrary
 
 
