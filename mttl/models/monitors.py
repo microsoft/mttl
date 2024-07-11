@@ -1,17 +1,15 @@
-import torch
-import numpy as np
 import math
-from torch.distributions import Bernoulli, Categorical
-from pytorch_lightning import Callback
-from mttl.utils import agg_dicts
 from typing import Any
 
-import pytorch_lightning as pl
 import matplotlib.pyplot as plt
+import numpy as np
+import pytorch_lightning as pl
+import torch
 from pytorch_lightning import Callback
+from torch.distributions import Bernoulli, Categorical
 
-from mttl.utils import agg_dicts, Averager
 from mttl.models.containers.selectors import Selector
+from mttl.utils import Averager, agg_dicts
 
 try:
     import wandb

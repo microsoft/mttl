@@ -1,17 +1,17 @@
+import math
+import os
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
-import math
-import os
 from typing import List
+
 import numpy as np
 import torch
+from transformers import StoppingCriteria, StoppingCriteriaList
 
-from transformers import StoppingCriteriaList, StoppingCriteria
-
-from mttl.utils import logger
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
+from mttl.utils import logger
 
 
 def decode(preds, tokenizer, clean_up_tokenization_spaces=True):
@@ -375,7 +375,9 @@ class EvaluatorRunner:
 
     def run(self, module, verbose=False):
         import json
+
         import prettytable
+
         from mttl.utils import logger
 
         if self.output_path:
@@ -425,26 +427,27 @@ def setup_evaluators(
     add_eos_to_targets=True,
 ) -> EvaluatorRunner:
     import copy
+
+    from mttl.datamodule.arc_data_module import ArcDataConfig
+    from mttl.datamodule.bbh_data_module import BBHConfig
+    from mttl.datamodule.hellaswag_data_module import HellaswagDataConfig
+    from mttl.datamodule.humaneval_module import HumanEvalConfig
+    from mttl.datamodule.mbpp_datamodule import MBPPDataConfig
     from mttl.datamodule.mmlu_data_module import MMLUDataConfig
-    from mttl.evaluators.mmlu_evaluator import MMLUEvaluator, MMLUEvaluatorFast
-    from mttl.evaluators.piqa_evaluator import PiqaEvaluator
+    from mttl.datamodule.openbookqa_data_module import OpenbookQADataConfig
+    from mttl.datamodule.piqa_data_module import PiqaDataConfig
+    from mttl.datamodule.superglue_data_module import SuperGLUEDataConfig
+    from mttl.datamodule.winogrande_data_module import WinograndeDataConfig
+    from mttl.evaluators.arc_evaluator import ArcEvaluator
+    from mttl.evaluators.bbh_evaluator import DirectBBHEvaluator, DirectBBHEvaluatorFast
     from mttl.evaluators.hellaswag_evaluator import HellaswagEvaluator
     from mttl.evaluators.humaneval_evaluator import HumanEvalEvaluator
     from mttl.evaluators.mbpp_evaluator import MBPPEvaluator
-    from mttl.evaluators.bbh_evaluator import DirectBBHEvaluator, DirectBBHEvaluatorFast
-    from mttl.evaluators.superglue_evaluators import BoolQEvaluator
-    from mttl.evaluators.arc_evaluator import ArcEvaluator
+    from mttl.evaluators.mmlu_evaluator import MMLUEvaluator, MMLUEvaluatorFast
     from mttl.evaluators.openbookqa_evaluator import OpenbookQAEvaluator
+    from mttl.evaluators.piqa_evaluator import PiqaEvaluator
+    from mttl.evaluators.superglue_evaluators import BoolQEvaluator
     from mttl.evaluators.winogrande_evaluator import WinograndeEvaluator
-    from mttl.datamodule.winogrande_data_module import WinograndeDataConfig
-    from mttl.datamodule.openbookqa_data_module import OpenbookQADataConfig
-    from mttl.datamodule.arc_data_module import ArcDataConfig
-    from mttl.datamodule.piqa_data_module import PiqaDataConfig
-    from mttl.datamodule.hellaswag_data_module import HellaswagDataConfig
-    from mttl.datamodule.superglue_data_module import SuperGLUEDataConfig
-    from mttl.datamodule.bbh_data_module import BBHConfig
-    from mttl.datamodule.mbpp_datamodule import MBPPDataConfig
-    from mttl.datamodule.humaneval_module import HumanEvalConfig
 
     evaluators = {}
     common_kwargs_ = {

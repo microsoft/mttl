@@ -1,29 +1,24 @@
 import os
 import sys
-import wandb
+from typing import Callable, Dict, Union
+
 import seaborn as sns
-from typing import Dict, Union, Callable
+import wandb
 from matplotlib import pyplot as plt
 from pytorch_lightning import seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
-from mttl.models.library.expert_library import ExpertLibrary
-
 from mttl.models.expert_config import ExpertConfig
-from projects.modular_llm.src.utils.utils import (
-    init_wandb_logger,
-    TableLogger,
-)
-
-from projects.modular_llm.src.utils.evaluators import Evaluator, prepare_evaluator
-from mttl.utils import remote_login, setup_logging, logger
 
 # register models
 from mttl.models.expert_model import ExpertModel
-
-from mttl.vllm_engines.engines import free_memory
 from mttl.models.library.expert import Expert, load_expert
+from mttl.models.library.expert_library import ExpertLibrary
+from mttl.utils import logger, remote_login, setup_logging
+from mttl.vllm_engines.engines import free_memory
+from projects.modular_llm.src.utils.evaluators import Evaluator, prepare_evaluator
+from projects.modular_llm.src.utils.utils import TableLogger, init_wandb_logger
 
 DEBUG = False
 if "AMLT_OUTPUT_DIR" in os.environ:

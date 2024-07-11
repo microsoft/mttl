@@ -1,6 +1,7 @@
 import re
-import torch.optim as optim
 from collections import defaultdict
+
+import torch.optim as optim
 from transformers import Adafactor
 
 from mttl.utils import logger

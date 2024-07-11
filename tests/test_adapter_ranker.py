@@ -1,14 +1,13 @@
 # unit test for adapter_ranker
 import pytest
-from mttl.datamodule.mt_seq_to_seq_module import FlanModule, FlanConfig
-from mttl.models.expert_model import (
-    MultiExpertModel,
-)
-from mttl.models.modifiers.lora import LoRAConfig
+
+from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
 from mttl.models.containers.selectors import TaskPredictorSelector
+from mttl.models.expert_config import ExpertConfig
+from mttl.models.expert_model import MultiExpertModel
+from mttl.models.modifiers.lora import LoRAConfig
 from mttl.models.ranker.classifier_ranker import SentenceTransformerClassifier
 from mttl.models.ranker.clip_ranker import CLIPRanker
-from mttl.models.expert_config import ExpertConfig
 
 
 def test_clip_routing(tiny_flan_id):

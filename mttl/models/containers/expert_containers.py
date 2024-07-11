@@ -1,14 +1,10 @@
-from pyparsing import abstractmethod
-import torch
-from torch import nn
 from typing import Dict, List, Union
+
+import torch
+from pyparsing import abstractmethod
+from torch import nn
+
 from mttl.config import Config
-from mttl.models.modifiers.base import (
-    ModifierConfig,
-    MergeableAdapter,
-    ModifierConfig,
-    ModifyMixin,
-)
 from mttl.models.containers.selectors import (
     BatchExpertsAndWeightsSelectorOutput,
     BatchExpertsSelectorOutput,
@@ -17,18 +13,18 @@ from mttl.models.containers.selectors import (
     KVTaskNameSelector,
     SelectorOutput,
 )
-
-from mttl.utils import logger, warn_once
+from mttl.models.library.expert import Expert
+from mttl.models.modifiers.base import MergeableAdapter, ModifierConfig, ModifyMixin
+from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
 from mttl.models.modifiers.lora import (
     LoRA,
     LoRAConfig,
     SkilledLoRA,
-    SkilledLoRAView,
     SkilledLoRAConfig,
+    SkilledLoRAView,
 )
-from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
-from mttl.models.library.expert import Expert
 from mttl.models.modifiers.modify_model import get_modifier_type
+from mttl.utils import logger, warn_once
 
 
 class ExpertContainer:

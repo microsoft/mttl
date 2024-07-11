@@ -1,22 +1,19 @@
-from dataclasses import dataclass
-import types
 import math
+import types
+from dataclasses import dataclass
+from functools import partial
+from typing import Optional, Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mttl.models.modifiers import register_modifier
-from functools import partial
-from typing import Optional, Tuple
-from mttl.utils import logger
 from einops import rearrange, repeat
-from mttl.models.modifiers.base import (
-    Adapter,
-    ModifierConfig,
-    ModifyMixin,
-    ModifierConfig,
-)
 from transformers import Cache
 from transformers.models.llama.modeling_llama import apply_rotary_pos_emb
+
+from mttl.models.modifiers import register_modifier
+from mttl.models.modifiers.base import Adapter, ModifierConfig, ModifyMixin
+from mttl.utils import logger
 
 
 @dataclass

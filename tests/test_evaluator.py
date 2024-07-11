@@ -1,13 +1,12 @@
-import pytest
-import numpy as np
 import os
+
+import numpy as np
+import pytest
+from transformers import AutoModelForCausalLM
 
 from mttl.datamodule.mmlu_data_module import MMLUDataConfig
 from mttl.datamodule.ni_data_module import NiDataConfig
-from mttl.evaluators import MMLUEvaluator
-from mttl.evaluators import NIEvaluator
-from mttl.evaluators import RougeEvaluator
-from transformers import AutoModelForCausalLM
+from mttl.evaluators import MMLUEvaluator, NIEvaluator, RougeEvaluator
 
 
 def test_rouge_eval(mocker, flan_data_module):
@@ -112,8 +111,8 @@ def test_ni_eval():
 
 
 def test_loglike_eval():
-    from mttl.evaluators.hellaswag_evaluator import HellaswagEvaluator
     from mttl.datamodule.hellaswag_data_module import HellaswagDataConfig
+    from mttl.evaluators.hellaswag_evaluator import HellaswagEvaluator
 
     evaluator = HellaswagEvaluator(
         HellaswagDataConfig(
@@ -130,10 +129,10 @@ def test_loglike_eval():
 
 
 def test_code_evaluator(mocker):
-    from mttl.evaluators.mbpp_evaluator import MBPPEvaluator
-    from mttl.evaluators.humaneval_evaluator import HumanEvalEvaluator
-    from mttl.datamodule.mbpp_datamodule import MBPPDataConfig
     from mttl.datamodule.humaneval_module import HumanEvalConfig
+    from mttl.datamodule.mbpp_datamodule import MBPPDataConfig
+    from mttl.evaluators.humaneval_evaluator import HumanEvalEvaluator
+    from mttl.evaluators.mbpp_evaluator import MBPPEvaluator
 
     evaluator = MBPPEvaluator(
         MBPPDataConfig(

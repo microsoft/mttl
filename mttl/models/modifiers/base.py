@@ -1,10 +1,11 @@
-from abc import ABC, abstractmethod
-from typing import Dict, Union
-from torch import nn
 import re
-from mttl.utils import logger
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Dict, Iterable, Union
+
+from torch import nn
+
+from mttl.utils import logger
 
 
 class Adapter(nn.Module):
@@ -37,6 +38,7 @@ class ModifierConfig(object):
     def asdict(self) -> Dict:
         """Dump the config to a string."""
         from dataclasses import asdict
+
         from mttl.models.modifiers.modify_model import CONFIGS_TO_MODIFIERS
 
         data = asdict(self)

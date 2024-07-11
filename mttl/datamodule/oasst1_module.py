@@ -1,6 +1,7 @@
-from mttl.dataloader.oasst1_readers import InverseOasst1Dataset, Oasst1Dataset
-from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 from dataclasses import dataclass
+
+from mttl.dataloader.oasst1_readers import InverseOasst1Dataset, Oasst1Dataset
+from mttl.datamodule.base import DatasetConfig, DefaultDataModule
 
 
 @dataclass

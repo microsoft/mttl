@@ -1,6 +1,7 @@
 from collections import defaultdict
-from torch.utils.data.dataset import ConcatDataset
+
 import numpy as np
+from torch.utils.data.dataset import ConcatDataset
 
 
 def take_n_examples_per_task(task_names, n, rng=None):

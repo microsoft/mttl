@@ -1,17 +1,18 @@
+from typing import Any, Dict
+
 import torch
 from torch import nn
-from typing import Any, Dict
-from mttl.models.modifiers.base import ModifyMixin
 
+from mttl.models.containers import ExpertContainer
 from mttl.models.containers.selectors import (
+    BatchExpertsSelectorOutput,
     Selector,
     TaskNameSelector,
-    BatchExpertsSelectorOutput,
 )
-from mttl.models.containers import ExpertContainer
+from mttl.models.library.expert import Expert
+from mttl.models.modifiers.base import ModifyMixin
 from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
 from mttl.models.modifiers.modify_model import register_modifier
-from mttl.models.library.expert import Expert
 
 
 class HardPromptDecoderWrapper(nn.Module):

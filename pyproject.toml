@@ -28,8 +28,16 @@ dev = [
     "pytest-mock>=3.13",
     "pytest-xdist",
     "pre-commit",
+    "black",
+    "isort",
 ]
 
 [project.urls]
 "Homepage" = "https://github.com/microsoft/mttl"
 "Bug Tracker" = "https://github.com/microsoft/mttl/issues"
+
+[tool.black]
+line-length = 88
+
+[tool.isort]
+profile = "black"

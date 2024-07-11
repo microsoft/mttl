@@ -1,25 +1,22 @@
-import torch
-import pytest
 import numpy as np
-from mttl.config import Config
+import pytest
+import torch
 from pytorch_lightning import seed_everything
-from mttl.models.expert_config import ExpertConfig
 
-from mttl.models.modifiers.base import ModifierConfig
-from mttl.models.library.expert import Expert
-from mttl.models.containers import (
-    LoRAExpertContainer,
-    CoalescedLoRAExpertContainer,
-)
+from mttl.config import Config
+from mttl.models.containers import CoalescedLoRAExpertContainer, LoRAExpertContainer
 from mttl.models.containers.selectors import (
     BatchSequenceExpertsAndWeightsSelectorOutput,
-    SelectorOutput,
-    PolySelectorDirect,
     MOERKHSSelector,
     PerTokenSelector,
     PolySelector,
+    PolySelectorDirect,
+    SelectorOutput,
 )
+from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import MoEModel, MultiExpertModel
+from mttl.models.library.expert import Expert
+from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.lora import LoRA
 
 

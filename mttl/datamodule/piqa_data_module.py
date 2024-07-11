@@ -1,10 +1,7 @@
-from mttl.datamodule.base import (
-    DatasetConfig,
-    MultiChoiceDataModule,
-)
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 
+from mttl.datamodule.base import DatasetConfig, MultiChoiceDataModule
 from mttl.models.library.expert_library import DatasetLibrary
 
 

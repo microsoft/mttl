@@ -1,23 +1,19 @@
+import os
+
 import pytorch_lightning as pl
+from pytorch_lightning import seed_everything
+
+from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
 from mttl.models.ranker.classifier_ranker import (
-    SentenceTransformerClassifier,
     ClassifierSmooth,
+    SentenceTransformerClassifier,
 )
-from mttl.datamodule.mt_seq_to_seq_module import (
-    FlanConfig,
-    FlanModule,
-)
-from mttl.models.ranker.clip_ranker import (
-    CLIPRanker,
-    CLIPTripletRanker,
-)
+from mttl.models.ranker.clip_ranker import CLIPRanker, CLIPTripletRanker
 from projects.modular_llm.src.ranker.clip_data_module import (
-    CLIPExpertsDatamodule,
     CLIPExpertsConfig,
+    CLIPExpertsDatamodule,
     CLIPTripleDataModule,
 )
-import os
-from pytorch_lightning import seed_everything
 
 
 def train_triplet_clip(args):

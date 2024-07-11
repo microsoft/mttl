@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
 
-from mttl.datamodule.base import DefaultDataModule, DatasetConfig
+from mttl.datamodule.base import DatasetConfig, DefaultDataModule
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 from mttl.models.library.expert_library import DatasetLibrary
 
@@ -63,9 +63,11 @@ class HumanEvalDataModule(DefaultDataModule):
         )
 
         dataset = dataset.map(
-            instruct_template
-            if self.config.use_instruct_template
-            else completion_template,
+            (
+                instruct_template
+                if self.config.use_instruct_template
+                else completion_template
+            ),
             num_proc=n_proc,
             remove_columns=["prompt", "test", "entry_point", "task_id"],
         )

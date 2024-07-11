@@ -1,20 +1,21 @@
+import math
 from dataclasses import dataclass
 from typing import Dict, List, Union
-from pyparsing import abstractmethod
-import torch
-import math
-import wandb
+
 import numpy as np
-from torch import nn
+import torch
 import torch.nn.functional as F
+import wandb
+from pyparsing import abstractmethod
+from torch import nn
+from torch.distributions import Bernoulli, Categorical
+
 from mttl.models.library.expert import ExpertInfo
 from mttl.models.modifiers.routing import RoutingInfo
-from torch.distributions import Bernoulli, Categorical
-from mttl.models.utils import MetricLogger
 from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
 from mttl.models.ranker.classifier_ranker import ClusterPredictor
+from mttl.models.utils import MetricLogger
 from mttl.utils import logger
-
 
 SELECTORS_NAME_TO_KLASS = {}
 SELECTORS_CONFIG_TO_NAME = {}
@@ -488,9 +489,7 @@ class PolySelector(Selector):
         return module_weights
 
     @forward_with_cache
-    def forward(
-        self, input, **kwargs
-    ) -> Union[
+    def forward(self, input, **kwargs) -> Union[
         BatchExpertsSplitsAndWeightsSelectorOutput,
         ExpertsSplitsAndWeightsSelectorOutput,
     ]:

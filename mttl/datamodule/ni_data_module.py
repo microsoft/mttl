@@ -1,19 +1,19 @@
-from importlib.resources import files
-import numpy as np
-import torch
-
-from torch.utils.data import DataLoader
-from transformers import AutoTokenizer
 import json
-import tqdm
 import os
 import random
 import string
-from typing import Optional
 from dataclasses import dataclass
+from importlib.resources import files
+from typing import Optional
 
+import numpy as np
+import torch
+import tqdm
+from torch.utils.data import DataLoader
+from transformers import AutoTokenizer
+
+from mttl.datamodule.base import DatasetConfig, DefaultCollator, DefaultDataModule
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
-from mttl.datamodule.base import DefaultCollator, DefaultDataModule, DatasetConfig
 from mttl.models.library.expert_library import DatasetLibrary
 from mttl.utils import logger
 
@@ -259,9 +259,9 @@ class DataCollatorForNI(DefaultCollator):
         )
 
         output_batch["task_names"] = task_identifiers
-        output_batch[
-            "task_identifiers"
-        ] = task_identifiers  # sni task id like e.g. task1356_xlsum_title_generation
+        output_batch["task_identifiers"] = (
+            task_identifiers  # sni task id like e.g. task1356_xlsum_title_generation
+        )
         output_batch["task_categories"] = task_categories
         output_batch["task_ids"] = torch.LongTensor(
             [self.task_to_id[task] for task in task_identifiers]

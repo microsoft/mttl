@@ -1,15 +1,13 @@
 import os
-import sys
 import re
-import click
+import sys
 from copy import deepcopy
+
+import click
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.models.library.expert_library import (
-    ExpertLibrary,
-)
-
+from mttl.models.library.expert_library import ExpertLibrary
 from mttl.utils import logger
 
 
