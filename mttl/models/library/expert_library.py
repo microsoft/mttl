@@ -1,53 +1,41 @@
-from abc import ABC, abstractmethod
+import asyncio
 import datetime
-from contextlib import contextmanager
-from dataclasses import dataclass, replace
-from fnmatch import fnmatch
 import glob
 import io
 import logging
-import sys
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
-import torch
 import os
+import sys
 import time
-import asyncio
+from abc import ABC, abstractmethod
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
+from fnmatch import fnmatch
+from functools import total_ordering, wraps
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import numpy as np
-
-from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
-
-from huggingface_hub import (
-    hf_hub_download,
-    CommitOperationAdd,
-    CommitOperationDelete,
-    CommitOperationCopy,
-    create_commit,
-    snapshot_download,
-    preupload_lfs_files,
-    create_repo,
-    delete_repo,
-    HfApi,
-)
-from functools import total_ordering, wraps
-from huggingface_hub.utils._errors import RepositoryNotFoundError
-
-from huggingface_hub import HfApi
-from mttl.utils import logger
+import torch
+from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.storage.blob import BlobServiceClient
 from azure.storage.blob.aio import BlobServiceClient as AsyncBlobServiceClient
-from azure.core.exceptions import (
-    ResourceExistsError,
-    ResourceNotFoundError,
+from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
+from huggingface_hub import (
+    CommitOperationAdd,
+    CommitOperationCopy,
+    CommitOperationDelete,
+    HfApi,
+    create_commit,
+    create_repo,
+    delete_repo,
+    hf_hub_download,
+    preupload_lfs_files,
+    snapshot_download,
 )
+from huggingface_hub.utils._errors import RepositoryNotFoundError
 
+from mttl.models.library.expert import Expert, ExpertInfo, load_expert
 from mttl.utils import logger, remote_login
-from mttl.models.library.expert import (
-    Expert,
-    load_expert,
-    ExpertInfo,
-)
 
 
 @total_ordering
@@ -122,14 +110,14 @@ def retry(max_retries=10, wait_seconds=60):
     return decorator
 
 
-def _remove_protocol(repo_id):
-    """Remove the protocol from the repo_id. Ex:
-    az://storage_account/container -> storage_account/container
-    """
-    return str(repo_id).split("://")[-1]
-
-
 class BackendEngine(ABC):
+    """The backend engine classes implement the methods for
+    interacting with the different storage backends. It should
+    NOT be used directly. Use the ExpertLibrary classes instead.
+    The parameter `repo_id` in BackendEngine is the repository ID
+    without any prefix (az://, hf://, etc.).
+    """
+
     @abstractmethod
     def snapshot_download(self, repo_id, allow_patterns=None):
         raise NotImplementedError
@@ -619,8 +607,7 @@ class LocalFSEngine(BackendEngine):
     def list_repo_files(self, repo_id):
         import glob
 
-        _repo_id = _remove_protocol(repo_id)
-        return list(glob.glob(os.path.join(_repo_id, "*")))
+        return list(glob.glob(os.path.join(repo_id, "*")))
 
 
 class ExpertLibrary:
@@ -636,7 +623,7 @@ class ExpertLibrary:
     ):
         super().__init__()
 
-        self.repo_id = _remove_protocol(repo_id)
+        self.repo_id = self._remove_protocol(repo_id)
         self._sliced = False
         self.selection = selection
         self.exclude_selection = exclude_selection
@@ -665,6 +652,13 @@ class ExpertLibrary:
 
         self._build_lib()
         logger.info("Loaded %s experts from remote storage", len(self.data))
+
+    @staticmethod
+    def _remove_protocol(repo_id):
+        """Remove the protocol from the repo_id. Ex:
+        az://storage_account/container -> storage_account/container
+        """
+        return str(repo_id).split("://")[-1]
 
     @property
     def sliced(self):
