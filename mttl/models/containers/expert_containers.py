@@ -379,9 +379,17 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
 
     __supports_configs__ = [SkilledLoRAConfig, LoRAConfig]
 
-    def __init__(self, config, info_container, layer, selector=None, **kwargs):
+    def __init__(
+        self,
+        config,
+        info_container,
+        layer,
+        selector=None,
+        lora_merge_after=False,
+        **kwargs,
+    ):
         MergeableAdapter.__init__(self)
-        super().__init__(config, info_container, layer, selector)
+        super().__init__(config, info_container, layer, selector, lora_merge_after)
 
         if not isinstance(self.layer, nn.Linear):
             raise ValueError(
@@ -466,7 +474,11 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             )
 
             module_output = SkilledLoRA.parallel_linear_weighted_forward(
-                input, [self.experts], weights, dim_names=["batch", "experts"]
+                input,
+                [self.experts],
+                weights,
+                dim_names=["batch", "experts"],
+                merge_after=self.lora_merge_after,
             )
             return module_output
         elif (
@@ -497,7 +509,11 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                 assert weights.shape[-1] == self.experts.n_skills
 
             module_output = SkilledLoRA.parallel_linear_weighted_forward(
-                input, [self.experts], weights, dim_names=selection.dim_names
+                input,
+                [self.experts],
+                weights,
+                dim_names=selection.dim_names,
+                merge_after=self.lora_merge_after,
             )
             return module_output
         else:
