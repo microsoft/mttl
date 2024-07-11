@@ -1,15 +1,11 @@
-from pyparsing import abstractmethod
-import torch
-from torch import nn
 from typing import Dict, List, Union
+
+import torch
+from pyparsing import abstractmethod
+from torch import nn
+
 from mttl.config import Config
-from mttl.models.modifiers.base import (
-    ModifierConfig,
-    MergeableAdapter,
-    ModifierConfig,
-    ModifyMixin,
-)
-from mttl.models.modifiers.expert_containers.selectors import (
+from mttl.models.containers.selectors import (
     BatchExpertsAndWeightsSelectorOutput,
     BatchExpertsSelectorOutput,
     BatchSequenceExpertsAndWeightsSelectorOutput,
@@ -17,25 +13,25 @@ from mttl.models.modifiers.expert_containers.selectors import (
     KVTaskNameSelector,
     SelectorOutput,
 )
-
-from mttl.utils import logger, warn_once
+from mttl.models.library.expert import Expert
+from mttl.models.modifiers.base import MergeableAdapter, ModifierConfig, ModifyMixin
+from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
 from mttl.models.modifiers.lora import (
     LoRA,
     LoRAConfig,
     SkilledLoRA,
-    SkilledLoRAView,
     SkilledLoRAConfig,
+    SkilledLoRAView,
 )
-from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
-from mttl.models.modifiers.expert_containers.expert import Expert
 from mttl.models.modifiers.modify_model import get_modifier_type
+from mttl.utils import logger, warn_once
 
 
 class ExpertContainer:
     __supports_configs__ = []
 
     def __init__(self, config, info_container, layer, selector=None):
-        from mttl.models.modifiers.expert_containers.selectors import TaskNameSelector
+        from mttl.models.containers.selectors import TaskNameSelector
 
         self.config = config
         self.layer = layer
@@ -184,7 +180,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         action="merge",
         is_default=False,
     ) -> None:
-        from mttl.models.modifiers.expert_containers import filter_expert_weights
+        from mttl.models.containers import filter_expert_weights
 
         if expert.name in self.expert_infos:
             raise ValueError(
@@ -593,7 +589,7 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
         is_default=False,
         **kwargs,
     ) -> None:
-        from mttl.models.modifiers.expert_containers import filter_expert_weights
+        from mttl.models.containers import filter_expert_weights
 
         expert_weights = filter_expert_weights(
             self.__layer_name__, expert.expert_weights

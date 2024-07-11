@@ -1,18 +1,19 @@
-import sys, os
 import copy
-import torch
-import tqdm
+import os
 import shutil
+import sys
 
 import pytorch_lightning as pl
-from pytorch_lightning import LightningModule, Trainer, callbacks as cb
+import torch
+import tqdm
+from pytorch_lightning import LightningModule, Trainer
+from pytorch_lightning import callbacks as cb
 from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch.optim import Optimizer
 
-from mttl.utils import logger
 from mttl.models.utils import transfer_batch_to_device
-
+from mttl.utils import logger
 
 DEBUG = False
 
@@ -99,7 +100,7 @@ class LiveCheckpointCallback(pl.Callback):
         if metric_name != self.monitor:
             return
 
-        if trainer.global_step == 0: 
+        if trainer.global_step == 0:
             # skip checkpoint before training (deepspeed fails checkpointing if optimizer non-existent
             return
 
@@ -418,8 +419,8 @@ class MMLUCallback(cb.Callback):
             )
 
     def eval_mmlu(self, pl_module):
-        from mttl.evaluators import MMLUEvaluator
         from mttl.datamodule.mmlu_data_module import MMLUDataConfig
+        from mttl.evaluators import MMLUEvaluator
 
         if DEBUG:
             self.eval_mmlu_count += 1

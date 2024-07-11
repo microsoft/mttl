@@ -1,10 +1,10 @@
 import os
 import sys
+
 from mttl.datamodule.hellaswag_data_module import (
     HellaswagDataConfig,
     HellaswagMultiChoiceDataModule,
 )
-
 from mttl.datamodule.openbookqa_data_module import (
     OpenbookQADataConfig,
     OpenbookQAMultiChoiceDataModule,
@@ -18,9 +18,9 @@ from mttl.datamodule.winogrande_data_module import (
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
 from mttl.datamodule.arc_data_module import ArcDataConfig, ArcMultiChoiceDataModule
 from mttl.datamodule.codex_data_module import CodexDataConfig, CodexDataModule
+from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
 from mttl.datamodule.mt_seq_to_seq_module import (
     FlanConfig,
     FlanModule,

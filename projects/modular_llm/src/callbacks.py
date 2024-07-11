@@ -1,17 +1,18 @@
-import os
-import tqdm
 import copy
-from torch.optim import Optimizer
+import os
+
 import pytorch_lightning as pl
+import tqdm
+from pytorch_lightning import LightningModule, Trainer
+from pytorch_lightning import callbacks as cb
 from pytorch_lightning.utilities.types import LRSchedulerConfig
-from pytorch_lightning import LightningModule, Trainer, callbacks as cb
+from torch.optim import Optimizer
 
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
+from mttl.evaluators.rouge_evaluator import RougeEvaluator
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import ExpertModel as ExpertTrainer
 from mttl.utils import logger
-from mttl.evaluators.rouge_evaluator import RougeEvaluator
-
 
 DEBUG = False
 

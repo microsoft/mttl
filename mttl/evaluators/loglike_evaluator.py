@@ -1,6 +1,6 @@
-import tqdm
-import torch
 import numpy as np
+import torch
+import tqdm
 
 from mttl.evaluators.base import Evaluator, switch_to_eval_mode
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device

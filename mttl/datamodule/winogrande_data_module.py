@@ -1,11 +1,8 @@
-from mttl.datamodule.base import (
-    MultiChoiceSourceDataModule,
-    DatasetConfig,
-)
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 
-from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
+from mttl.datamodule.base import DatasetConfig, MultiChoiceSourceDataModule
+from mttl.models.library.expert_library import DatasetLibrary
 
 
 def doc_to_text(doc):

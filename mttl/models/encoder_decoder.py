@@ -1,5 +1,6 @@
 import json
 import os
+
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -7,9 +8,9 @@ from transformers import AutoModelForSeq2SeqLM
 
 from mttl.models.get_optimizer import get_optimizer
 from mttl.models.get_scheduler import get_scheduler
-from mttl.models.utils import EfficientCheckpointModule, get_global_batch_size
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.routing import RoutingInfo
+from mttl.models.utils import EfficientCheckpointModule, get_global_batch_size
 from mttl.utils import freeze_embeds, label_smoothed_nll_loss
 
 
@@ -193,7 +194,8 @@ class Finetuner(EncoderDecoder):
 
     def inference_end(self, inference_outputs, inference_labels, split):
         import itertools
-        from mttl.evaluators.ni_evaluator import decode, compute_metrics
+
+        from mttl.evaluators.ni_evaluator import compute_metrics, decode
 
         inference_outputs = list(
             itertools.chain(

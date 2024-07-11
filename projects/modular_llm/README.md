@@ -1,15 +1,14 @@
-# Expert Library
+# Towards Modular LLM by Building and Reusing a Library of LoRAs
 
-The MTTL Expert Library enables:
+The code in this folder allows to reproduce the experiments in our paper. Mainly, the code contains scripts that use the MTTL library to:
 
 1. Train different kinds of adapters over LLMs;
 2. Build MoE models from these adapters, with custom routing strategies;
 3. Maintain a collection of experts, which can later be used to transfer to new tasks or update existing ones.
 
-
 ## Setup
 
-MTTL supports `Python >=3.8, <3.12`. Create a virtual environment using `virtualenv` or `conda`, then install the required Python packages:
+Before starting, make sure to install all the requirements going with MTTL. MTTL supports `Python >=3.8, <3.12`. Create a virtual environment using `virtualenv` or `conda`, then install the required Python packages from the root directory of this repository:
 
 ```bash
 conda create -n mttl python=3.11
@@ -18,8 +17,91 @@ conda activate mttl
 pip install -e .
 ```
 
+Alternatively:
 
-## Expert Library
+```
+pip install -r requirements.txt
+export PYTHONPATH=$PWD
+```
+
+## Dataset Preparation
+
+First of all, download and prepare [FLANv2](https://github.com/google-research/FLAN/tree/main/flan/v2) dataset. We limit each task to having 10000 examples for computational reasons. We provide a simple script to do all the preprocessing as below:
+
+```bash
+python cli_dataset_create.py flan --dataset_library_id=local://modular_artifacts/flan-flat
+```
+
+
+## Training a Private Library
+
+A *private* library consists of one expert per task in Flan. To train one expert starting from Phi-2, we can use the following command:
+
+```bash
+python train_experts_main.py \
+  -c configs/models/phi-2_hf.json \
+  -k remove_phi_eval_tasks=False \
+  finetune_task_name=ai2_arc_ARC_Easy_1_0_0 \
+  output_dir=arc_easy_expert/ \
+  dataset=local://modular_artifacts/flan-flat \
+  library_id=local://modular_artifacts/library \
+  expert_name=arc_easy
+```
+
+The expert will be automatically added to an *Expert Library* stored under `modular_artifacts/library`. To know more about the Expert Library concept, continue reading :).
+
+We provide a bash script that loops over all Flan tasks and trains one expert on each:
+
+```bash
+export LIBRARY_PATH=local://modular_artifacts/library
+export DATASET_PATH=local://modular_artifacts/flan-flat
+bash train_private_library.sh
+```
+
+To start, you can run `train_private_library_fast.sh` which trains only 2 experts using a small LM (gpt-neo 125M).
+
+After this, to analyze the content of your expert library, you can use the script in `mttl/cli/show_library.py` by providing the path to the library.
+
+## Training an MBC library
+
+To train an MBC library, we need to cluster a private library. To do so:
+
+```bash
+python run_mbc_clustering.py -k \
+  library_id=local://modular_artifacts/library \
+  num_clusters=10 \
+  output_file=modular_artifacts/mbc_10.json
+```
+
+The file `mbc_10.json` will contain the task names falling into each cluster. These task names can then be used to train experts by just passing `finetune_task_name=task_name1,task_name2` to the `train_experts_main.py` script.
+
+
+## Evaluating the Modular LLM
+
+Once we built a library, we can load it into the base model and apply a given merging or routing mechanism, such as Arrow. To evaluate the resulting modular LLM on, for example, arc-easy, you can run:
+
+```bash
+python eval_library.py \
+  -k output_dir=an_expert_eval/ \
+  library_id=local://modular_artifacts/library \
+  pipeline_eval_tasks='arc-easy' \
+  merge_or_route='uniform'
+```
+
+`merge_or_route='uniform'` means that we will just uniformly average all the experts in the library before performing inference. To run `Arrow`, use `merge_or_route='arrow'` instead:
+
+```bash
+python eval_library.py \
+  -k output_dir=an_expert_eval/ \
+  library_id=local://modular_artifacts/library \
+  pipeline_eval_tasks='arc-easy' \
+  merge_or_route='arrow' \
+  topk=4
+```
+
+At first, this will compute Arrow prototypes (thus will be a bit slower) but then the prototypes will be stored inside the library as additional artifacts, therefore subsequent calls will be much faster.
+
+## Additional Documentation around Expert Library
 
 ### Important Abstractions
 
@@ -99,35 +181,4 @@ retrieved_expert = expert_lib.get_expert("example_expert")
 
 # Remove an expert from the library
 expert_lib.remove_expert("example_expert")
-```
-
-### Dataset Preparation
-
-Download and prepare [FLANv2](https://github.com/google-research/FLAN/tree/main/flan/v2) dataset:
-
-```bash
-python projects/modular_llm/cli_dataset_create.py flan --dataset_library_id=local://mttldata/flan-flat
-```
-
-To cite FLAN. please use:
-
-```
-@article{longpre2023flan,
-  title={The Flan Collection: Designing Data and Methods for Effective Instruction Tuning},
-  author={Longpre, Shayne and Hou, Le and Vu, Tu and Webson, Albert and Chung, Hyung Won and Tay, Yi and Zhou, Denny and Le, Quoc V and Zoph, Barret and Wei, Jason and others},
-  journal={arXiv preprint arXiv:2301.13688},
-  year={2023}
-}
-```
-
-### Training Experts
-
-```bash
-python train_experts_main.py -c configs/wiki-mmlu/gptneo_125m_flan.json -k finetune_task_name=ai2_arc_ARC_Easy_1_0_0 num_train_epochs=1 output_dir=an_expert/ library_id=local://mttldata/mttladapters-predictor pipeline_eval_tasks='arc-easy' expert_name=predictor
-```
-
-### Evaluating Experts
-
-```bash
-python eval_library.py -k output_dir=an_expert_eval/ library_id=local://mttldata/mttladapters-predictor pipeline_eval_tasks='arc-easy' merge_or_route='uniform'
 ```

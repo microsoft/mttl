@@ -1,15 +1,17 @@
 import os
 import sys
+
 import torch
 import torch.nn.functional as F
 from pytorch_lightning import seed_everything
-from mttl.models.modifiers.routing import RoutingInfo
+
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.prompt_tuning import (
+    ExtendedEmbedding,
     PromptTuning,
     PromptTuningConfig,
-    ExtendedEmbedding,
 )
+from mttl.models.modifiers.routing import RoutingInfo
 
 
 def test_prefix_prompt_tuning():

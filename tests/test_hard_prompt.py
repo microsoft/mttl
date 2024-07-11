@@ -1,13 +1,13 @@
 import pytest
 import torch
-from transformers import AutoModelForCausalLM
 from datasets import Dataset
+from transformers import AutoModelForCausalLM
 
+from mttl.datamodule.base import DatasetConfig, DefaultDataModule
 from mttl.datamodule.utils import get_tokenizer_with_args
-from mttl.models.modifiers.expert_containers import add_expert_to_transformer
+from mttl.models.containers import add_expert_to_transformer
+from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
-from mttl.models.modifiers.expert_containers.expert import Expert, ExpertInfo
-from mttl.datamodule.base import DefaultDataModule, DatasetConfig
 
 
 class DummyDataModule(DefaultDataModule):

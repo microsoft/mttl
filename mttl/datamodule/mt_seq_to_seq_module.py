@@ -1,13 +1,13 @@
-from functools import partial
 import os
-import numpy
-from datasets import concatenate_datasets
-from datasets import Dataset
-from mttl.datamodule.base import DefaultDataModule, DatasetConfig
-from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task, logger
 from dataclasses import dataclass
+from functools import partial
 
-from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
+import numpy
+from datasets import Dataset, concatenate_datasets
+
+from mttl.datamodule.base import DatasetConfig, DefaultDataModule
+from mttl.datamodule.utils import logger, maybe_filter_hf_dataset_by_task
+from mttl.models.library.expert_library import DatasetLibrary
 
 
 def is_phi2_eval_task(task):
@@ -287,3 +287,9 @@ class FlanModule(DefaultDataModule):
                 num_proc=n_proc,
                 desc="Filtering phi-2 eval tasks from training mixture.",
             )
+            if not self.train_dataset.num_rows:
+                logger.warning(
+                    "No training examples left after filtering. "
+                    "Please set `remove_phi_eval_tasks=False` "
+                    "if you want to train on phi-2 eval tasks."
+                )

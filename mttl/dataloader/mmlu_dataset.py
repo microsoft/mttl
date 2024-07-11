@@ -1,11 +1,12 @@
 """MMLU Dataset."""
 
-import pandas as pd
-import os
-import datasets
 import copy
-from mttl.utils import logger
+import os
 
+import datasets
+import pandas as pd
+
+from mttl.utils import logger
 
 _CITATION = """\
 @article{hendryckstest2021,
@@ -226,9 +227,11 @@ class MMLUDataset(datasets.GeneratorBasedBuilder):
     ):
         subjects = sorted(
             [
-                fn.split(f"_{subset}.csv")[0]
-                if f"_{subset}.csv" in fn
-                else fn.split(".csv")[0]
+                (
+                    fn.split(f"_{subset}.csv")[0]
+                    if f"_{subset}.csv" in fn
+                    else fn.split(".csv")[0]
+                )
                 for fn in os.listdir(os.path.join(data_dir, subset))
             ]
         )
