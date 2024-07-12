@@ -27,6 +27,8 @@ from mttl.models.modifiers.routing import RoutingInfo
 from mttl.models.utils import EfficientCheckpointModule, prepare_model_for_kbit_training
 from mttl.utils import logger
 
+import torch.nn.functional as F
+
 torch.set_float32_matmul_precision("high")
 
 
@@ -587,6 +589,98 @@ class MultiExpertModel(ExpertModel):
 
     def set_routing_infos(self, batch, generate=False):
         self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
+
+
+def calculate_DPO_loss(
+    original_prefered_logprob,
+    original_disprefered_logprob,
+    ref_prefered_logprob,
+    ref_disprefered_logprob,
+    beta=0.5,
+):
+    """
+    Calculate the DPO loss.
+    original_prefered_logprob: the logprob of the prefered expert in the original model
+    original_disprefered_logprob: the logprob of the disprefered expert in the original model
+    ref_prefered_logprob: the logprob of the prefered expert in the reference model
+    ref_disprefered_logprob: the logprob of the disprefered expert in the reference model
+    """
+
+    original_prefered_relative_logprob = (
+        original_prefered_logprob - ref_prefered_logprob
+    )
+    disprefered_relative_logprob = (
+        original_disprefered_logprob - ref_disprefered_logprob
+    )
+
+    reward_accuracies = (
+        (original_prefered_relative_logprob > disprefered_relative_logprob)
+        .float()
+        .mean(dim=-1)
+    )
+    reward_margins = (
+        original_prefered_relative_logprob - disprefered_relative_logprob
+    ).mean(dim=-1)
+
+    loss = -F.logsigmoid(
+        beta * (original_prefered_relative_logprob - disprefered_relative_logprob)
+    ).mean(dim=-1)
+    return loss, reward_accuracies, reward_margins
+
+
+def get_log_prob(logits, labels):
+    log_probs = F.log_softmax(logits, dim=-1)
+    return torch.gather(log_probs, -1, labels.unsqueeze(-1)).squeeze(-1).mean(-1)
+
+
+class MultiExpertModelDPO(ExpertModel):
+
+    def __init__(self, **kwargs):
+        self.multi_model = MultiExpertModel(**kwargs)
+        self.ref_multi_model = MultiExpertModel(**kwargs)
+
+    def training_step(self, batch, _):
+
+        prompt_prefered_ids = batch["prompt_prefered_ids"]
+        prompt_disprefered_ids = batch["prompt_disprefered_ids"]
+
+        prompt_prefered_mask = batch["prompt_prefered_mask"]
+        prompt_disprefered_mask = batch["prompt_disprefered_mask"]
+
+        # original model
+        model_prefered_log_prob = get_log_prob(
+            self.multi_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits
+        )
+
+        model_disprefered_log_prob = get_log_prob(
+            self.multi_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits
+        )
+
+        # reference model
+        ref_prefered_log_prob = get_log_prob(
+            self.ref_multi_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits
+        )
+
+        ref_disprefered_log_prob = get_log_prob(
+            self.ref_multi_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits
+        )
+
+        loss = calculate_DPO_loss(
+            model_prefered_log_prob,
+            model_disprefered_log_prob,
+            ref_prefered_log_prob,
+            ref_disprefered_log_prob,
+            beta=0.1,
+        )
+        return loss
 
 
 class MoEModel(MultiExpertModel):
