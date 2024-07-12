@@ -625,7 +625,8 @@ def calculate_DPO_loss(
     loss = -F.logsigmoid(
         beta * (original_prefered_relative_logprob - disprefered_relative_logprob)
     ).mean(dim=-1)
-    return loss, reward_accuracies, reward_margins
+
+    return loss
 
 
 def get_log_prob(logits, labels):
@@ -633,11 +634,16 @@ def get_log_prob(logits, labels):
     return torch.gather(log_probs, -1, labels.unsqueeze(-1)).squeeze(-1).mean(-1)
 
 
-class MultiExpertModelDPO(ExpertModel):
+class ExpertModelDPO(EfficientCheckpointModule):
 
-    def __init__(self, **kwargs):
-        self.multi_model = MultiExpertModel(**kwargs)
-        self.ref_multi_model = MultiExpertModel(**kwargs)
+    def __init__(self, expert_model, ref_expert_model, **kwargs):
+        super().__init__(**kwargs)
+        self.expert_model = expert_model
+        self.ref_expert_model = ref_expert_model
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+        return optimizer
 
     def training_step(self, batch, _):
 
@@ -649,28 +655,124 @@ class MultiExpertModelDPO(ExpertModel):
 
         # original model
         model_prefered_log_prob = get_log_prob(
-            self.multi_model.model.forward(
+            self.expert_model.model.forward(
                 prompt_prefered_ids, attention_mask=prompt_prefered_mask
-            ).logits
+            ).logits,
+            labels=prompt_prefered_ids,
         )
 
         model_disprefered_log_prob = get_log_prob(
-            self.multi_model.model.forward(
+            self.expert_model.model.forward(
                 prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
-            ).logits
+            ).logits,
+            labels=prompt_disprefered_ids,
         )
 
         # reference model
         ref_prefered_log_prob = get_log_prob(
-            self.ref_multi_model.model.forward(
+            self.ref_expert_model.model.forward(
                 prompt_prefered_ids, attention_mask=prompt_prefered_mask
-            ).logits
+            ).logits,
+            labels=prompt_prefered_ids,
         )
 
         ref_disprefered_log_prob = get_log_prob(
-            self.ref_multi_model.model.forward(
+            self.ref_expert_model.model.forward(
                 prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
-            ).logits
+            ).logits,
+            labels=prompt_disprefered_ids,
+        )
+
+        loss = calculate_DPO_loss(
+            model_prefered_log_prob,
+            model_disprefered_log_prob,
+            ref_prefered_log_prob,
+            ref_disprefered_log_prob,
+            beta=0.1,
+        )
+        return loss
+
+    def validation_step(self, batch, _):
+        prompt_prefered_ids = batch["prompt_prefered_ids"]
+        prompt_disprefered_ids = batch["prompt_disprefered_ids"]
+
+        prompt_prefered_mask = batch["prompt_prefered_mask"]
+        prompt_disprefered_mask = batch["prompt_disprefered_mask"]
+
+        # original model
+        model_prefered_log_prob = get_log_prob(
+            self.expert_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits,
+            labels=prompt_prefered_ids,
+        )
+
+        model_disprefered_log_prob = get_log_prob(
+            self.expert_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits,
+            labels=prompt_disprefered_ids,
+        )
+
+        # reference model
+        ref_prefered_log_prob = get_log_prob(
+            self.ref_expert_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits,
+            labels=prompt_prefered_ids,
+        )
+
+        ref_disprefered_log_prob = get_log_prob(
+            self.ref_expert_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits,
+            labels=prompt_disprefered_ids,
+        )
+
+        loss = calculate_DPO_loss(
+            model_prefered_log_prob,
+            model_disprefered_log_prob,
+            ref_prefered_log_prob,
+            ref_disprefered_log_prob,
+            beta=0.1,
+        )
+        return loss
+
+    def test_step(self, batch, _):
+        prompt_prefered_ids = batch["prompt_prefered_ids"]
+        prompt_disprefered_ids = batch["prompt_disprefered_ids"]
+
+        prompt_prefered_mask = batch["prompt_prefered_mask"]
+        prompt_disprefered_mask = batch["prompt_disprefered_mask"]
+
+        # original model
+        model_prefered_log_prob = get_log_prob(
+            self.expert_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits,
+            labels=prompt_prefered_ids,
+        )
+
+        model_disprefered_log_prob = get_log_prob(
+            self.expert_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits,
+            labels=prompt_disprefered_ids,
+        )
+
+        # reference model
+        ref_prefered_log_prob = get_log_prob(
+            self.ref_expert_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits,
+            labels=prompt_prefered_ids,
+        )
+
+        ref_disprefered_log_prob = get_log_prob(
+            self.ref_expert_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits,
+            labels=prompt_disprefered_ids,
         )
 
         loss = calculate_DPO_loss(

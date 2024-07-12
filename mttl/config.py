@@ -346,3 +346,6 @@ class Config:
         self.soft_prompt_learn_kv: bool = False
         self.prompt_placement: str = "prefix"
         self.add_routing_token: bool = False
+
+        # rl training
+        self.rl_training = "dpo"
