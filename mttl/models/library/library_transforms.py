@@ -579,6 +579,19 @@ class PhatgooseTransform(HiddenStateComputer):
     def __init__(self, config: PhatgooseConfig = None):
         super().__init__(config or PhatgooseConfig())
 
+    @torch.no_grad()
+    def fetch(self, library: Union[str, ExpertLibrary]):
+        if isinstance(library, str):
+            library = ExpertLibrary.get_expert_library(library)
+
+        # try to fetch auxiliary data
+        output = library.get_auxiliary_data(data_type=self.config.save_name)
+
+        if len(output) != len(library):
+            logger.warn("Found {} precomputed Phatgoose prototypes. Some experts might not have prototypes.".format(len(output)))
+
+        return output
+
     def transform(
         self,
         library,
@@ -602,20 +615,12 @@ class PhatgooseTransform(HiddenStateComputer):
             expert: Expert = library[expert_name]
             logger.info("Phatgoose save name : {}".format(self.config.save_name))
 
-            if not recompute:
-                if len(loaded_output) > 0 and expert_name in loaded_output:
-                    logger.info("Found {} precomputed gates".format(len(loaded_output)))
+            if not recompute and expert_name in loaded_output:
+                logger.info("Loading precomputed gates for {}".format(expert_name))
 
-                    # format is dict[layer_name] = embedding, layer_name ends with selector.{task_name}.v
-                    outputs[expert_name] = (
-                        loaded_output
-                        if not expert_name in loaded_output
-                        else loaded_output[expert_name]
-                    )
-                    continue
-                else:
-                    # we error out if we are missing some data
-                    raise ValueError("PhatGoose prototypes are missing or corrupted, please recompute them.")
+                # format is dict[layer_name] = embedding, layer_name ends with selector.{task_name}.v
+                outputs[expert_name] = loaded_output[expert_name]
+                continue
 
             training_config: ExpertConfig = expert.training_config
             training_config.router_selector = "phatgoose_trainer_selector"
@@ -849,7 +854,7 @@ class ArrowTransform(LibraryTransform):
         return dict_keys
 
     @torch.no_grad()
-    def fetch(self, library: Union[str, ExpertLibrary]):
+    def fetch(self, library: Union[str, ExpertLibrary], scale=True):
         """Fetch arrow prototypes from the library, raises ValueError if they are not computed.
         """
         if isinstance(library, str):
@@ -862,14 +867,9 @@ class ArrowTransform(LibraryTransform):
         eigvals = library.get_auxiliary_data(
             data_type=self.config.save_name + "_eigvals"
         )
-
-        len_v = len(vectors) - (1 if "base_model" in vectors else 0)
-        len_e = len(eigvals) - (1 if "base_model" in vectors else 0)
-
-        if not (len_v == len_e == len(library)):
-            raise ValueError("Arrow prototypes are missing or corrupted, please recompute them.")
-
-        return self._maybe_scale(vectors, eigvals)
+        if scale:
+            return self._maybe_scale(vectors, eigvals)
+        return vectors, eigvals
 
     @torch.no_grad()
     def transform(
@@ -880,18 +880,15 @@ class ArrowTransform(LibraryTransform):
         if isinstance(library, str):
             library = ExpertLibrary.get_expert_library(library)
 
-        try:
-            protos = self.fetch(library)
-
-            if not recompute:
-                logger.info("Found {} precomputed centroids".format(len(protos)))
-                return protos
-        except ValueError:
-            pass
-
         base_model = None
-        vectors, eigvals = {}, {}
+
+        vectors, eigvals = self.fetch(library, scale=False)
+        
         for expert_name, expert in library.items():
+            if expert_name in vectors and not recompute:
+                logger.info("Found precomputed Arrow prototypes for expert {}".format(expert_name))
+                continue
+
             logger.info(f"Computing SVD for expert {expert_name}")
             vectors[expert_name] = {}
             eigvals[expert_name] = {}
