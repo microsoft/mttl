@@ -4,12 +4,10 @@ from pyparsing import abstractmethod
 from abc import ABC
 import torch
 import math
-import wandb
 import numpy as np
 from torch import nn
 import torch.nn.functional as F
 from mttl.models.library.expert import ExpertInfo
-from mttl.models.modifiers.routing import RoutingInfo
 from torch.distributions import Categorical
 from mttl.models.utils import MetricLogger
 from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
@@ -109,6 +107,14 @@ class SelectorConfig:
             if train_cfg_value is not None:
                 kwargs[key] = getattr(training_config, key)
         return config_klass(**kwargs)
+
+
+@dataclass
+class LoadableSelectorConfig(SelectorConfig):
+    """Adds support for library_id and prototypes_id."""
+
+    library_id: str = None
+    prototypes_id: str = None
 
 
 @dataclass
@@ -503,15 +509,12 @@ class TaskToExpertTracker(Selector):
 
 
 @dataclass
-class PerTokenSelectorConfig(SelectorConfig):
+class PerTokenSelectorConfig(LoadableSelectorConfig):
     router_temp: float = None
     moe_top_k: int = None
     proto_init: str = None
     input_norm_fn: str = None
     proto_norm_fn: str = None
-    # when loading prototypes from a library
-    library_id: str = None
-    prototypes_id: str = None
 
 
 class LoadableLibrarySelector(ABC):

@@ -9,15 +9,6 @@ from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.library.library_transforms import ArrowTransform, ArrowConfig
 
 
-def fetch_embeddings(config: ArrowConfig, library: Union[ExpertLibrary, str] = None):
-    """Fetches Arrow embeddings for the given library."""
-    from mttl.models.library.library_transforms import (
-        ArrowTransform,
-    )
-
-    return ArrowTransform(config).fetch(library)
-
-
 def compute_arrow_embeddings(
     library,
     ab_only=True,

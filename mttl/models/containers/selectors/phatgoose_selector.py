@@ -16,15 +16,6 @@ from mttl.models.containers.selectors import (
 from mttl.models.library.library_transforms import PhatgooseConfig
 
 
-def fetch_phatgoose_embeddings(library, config):
-    """Fetches Phatgoose embeddings for the given library."""
-    from mttl.models.library.library_transforms import (
-        PhatgooseTransform,
-    )
-
-    return PhatgooseTransform(config).fetch(library)
-
-
 def compute_phatgoose_embeddings(
     library,
     n_steps_pg,

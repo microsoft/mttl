@@ -1,51 +1,32 @@
-from functools import partial
 import math
 import re
 import threading
-from typing import Dict, List
+from collections import defaultdict
+from functools import partial
+from typing import Dict, List, Union
+
 import torch
+from torch.optim.optimizer import Optimizer
 from transformers import PreTrainedModel
 
+from mttl.models.containers import add_expert_to_transformer
+from mttl.models.containers.expert_containers import ExpertContainer
+from mttl.models.containers.selectors import Selector, SelectorConfig
+from mttl.models.containers.selectors.base_selectors import LoadableSelectorConfig
+from mttl.models.expert_config import ExpertConfig
+from mttl.models.library.expert import Expert, ExpertInfo
+from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.library.library_transforms import (
     ArrowConfig,
     HiddenStateComputerConfig,
 )
-from mttl.models.modifiers.lora import SkilledLoRAConfig
-
-from mttl.models.containers import add_expert_to_transformer
-from mttl.models.library.expert_library import ExpertLibrary
-from mttl.models.modifiers.routing import RoutingInfo
-from mttl.utils import logger
-from mttl.models.library.expert import Expert, ExpertInfo
-from mttl.models.containers.expert_containers import (
-    ExpertContainer,
-)
-
-from mttl.models.containers.selectors import (
-    PerTokenSelectorConfig,
-    ArrowSelectorConfig,
-    Selector,
-    SelectorConfig,
-)
-
-
-import torch
-from collections import defaultdict
-from torch.optim.optimizer import Optimizer
-
 from mttl.models.llama_patch import replace_attn_with_flash_attn
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.base import ModifierConfig
-
-from mttl.models.library.expert import ExpertInfo
-from mttl.models.containers.selectors.selectors import SelectorConfig
+from mttl.models.modifiers.lora import SkilledLoRAConfig
 from mttl.models.modifiers.routing import RoutingInfo
-from mttl.models.utils import (
-    EfficientCheckpointModule,
-    prepare_model_for_kbit_training,
-)
-from mttl.models.expert_config import ExpertConfig
-
+from mttl.models.utils import EfficientCheckpointModule, prepare_model_for_kbit_training
+from mttl.utils import logger
 
 torch.set_float32_matmul_precision("high")
 
@@ -310,17 +291,20 @@ class MultiExpertModel(ExpertModel):
     @classmethod
     def from_pretrained_library(
         cls,
-        library_id: str,
+        library_id: Union[str, ExpertLibrary],
         selector_config: SelectorConfig = None,
         remote_token: str = None,
         **kwargs,
     ):
         from copy import deepcopy
 
-        library = ExpertLibrary.get_expert_library(
-            repo_id=library_id,
-            token=remote_token,
-        )
+        if not isinstance(library_id, ExpertLibrary):
+            library = ExpertLibrary.get_expert_library(
+                repo_id=library_id,
+                token=remote_token,
+            )
+        else:
+            library = library_id
 
         # get a config file from the library, and initialize the expert model
         an_expert = library[next(iter(library.keys()))]
@@ -335,7 +319,7 @@ class MultiExpertModel(ExpertModel):
         if selector_config is not None:
             # inject the library id if it is None
             if (
-                isinstance(selector_config, PerTokenSelectorConfig)
+                isinstance(selector_config, LoadableSelectorConfig)
                 and selector_config.library_id is None
             ):
                 selector_config.library_id = library_id
@@ -375,8 +359,9 @@ class MultiExpertModel(ExpertModel):
         self.experts_names.clear()
 
     def add_experts_from_library(self, library):
-        import tqdm
         import concurrent.futures
+
+        import tqdm
 
         def add_module(self, module_name):
             expert_dump = library[module_name]
@@ -498,9 +483,7 @@ class MultiExpertModel(ExpertModel):
         modifier_type: str,
         selector_config: SelectorConfig,
     ):
-        from mttl.models.containers import (
-            replace_selector_for_container,
-        )
+        from mttl.models.containers import replace_selector_for_container
 
         n_selectors, n_selectors_views = replace_selector_for_container(
             self.model,
@@ -591,6 +574,19 @@ class MultiExpertModel(ExpertModel):
 
         retrieved_expert = Expert(expert_info=expert_info, expert_weights=expert_params)
         return retrieved_expert
+
+    def save_to_library(self, library_id):
+        """
+        Saves the current loaded experts to the specified library.
+
+        Args:
+            library_id (str): The ID of the library to save the experts to.
+        """
+        library = ExpertLibrary.get_expert_library(library_id, create=True)
+        for expert_name in self.experts_names:
+            expert = self.get_expert_instance(expert_name)
+            library.add_expert(expert)
+        return library
 
     def get_merged_expert(
         self, modifier_type: str = "lora", with_global_names=True, **kwargs

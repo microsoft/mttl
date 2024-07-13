@@ -35,7 +35,7 @@ class ExpertContainer:
     __supports_configs__ = []
 
     def __init__(self, config, info_container, layer, selector=None):
-        from mttl.models.containers.selectors.selectors import TaskNameSelector
+        from mttl.models.containers.selectors import TaskNameSelector
 
         self.config = config
         self.layer = layer

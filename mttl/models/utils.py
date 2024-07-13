@@ -446,11 +446,12 @@ def model_loader_helper(
         )
     elif "phi-2" == model_name:
         # local phi-2 version. use `microsoft/phi-2 for the official hf version`
-        logger.info(
-            f"Loading phi-2 model from {os.getenv('PHI_PATH', 'microsoft/phi-2')}"
-        )
+        if "PHI_PATH" not in os.environ:
+            raise ValueError("PHI_PATH is not set in the environment variables.")
+
+        logger.info(f"Loading phi-2 model from {os['PHI_PATH']}")
         model_object = AutoModelForCausalLM.from_pretrained(
-            os.getenv("PHI_PATH", "microsoft/phi-2"),
+            os.environ["PHI_PATH"],
             load_in_8bit=load_in_8bit,
             torch_dtype=torch.bfloat16,
             device_map=device_map,

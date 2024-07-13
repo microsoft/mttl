@@ -6,7 +6,7 @@ from transformers import AutoModelForCausalLM
 from mttl.models.expert_model import MultiExpertModel
 from mttl.models.containers import get_modules_to_modify_trie
 from mttl.models.modifiers.lora import LoRAConfig
-from mttl.models.containers.selectors.selectors import (
+from mttl.models.containers.selectors import (
     PolySelector,
     PolySelectorConfig,
     TaskNameSelectorConfig,
@@ -47,6 +47,55 @@ def test_expert_model():
 
     assert len(model.selectors["lora"]) == 12
     assert isinstance(next(iter(model.selectors["lora"].values())), TaskNameSelector)
+
+
+def test_from_pretrained():
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        # create a dummy library
+        model = MultiExpertModel(model="EleutherAI/gpt-neo-125m", device_map="cpu")
+        model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
+        model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
+        library = model.save_to_library(f"local://{tmpdirname}")
+
+        # from pretrained library
+        model = MultiExpertModel.from_pretrained_library(library)
+        assert len(model.experts_names) == 2
+        # the order might be different due to multi-threading in adding experts in parallel
+        assert "a" in model.experts_names
+        assert "b" in model.experts_names
+
+
+def test_from_pretrained_with_arrow():
+    import tempfile
+    from mttl.models.library.library_transforms import ArrowConfig, ArrowTransform
+    from mttl.models.containers.selectors import ArrowSelectorConfig
+
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        # create a dummy library
+        model = MultiExpertModel(model="EleutherAI/gpt-neo-125m", device_map="cpu")
+        model.add_empty_expert(
+            "a", LoRAConfig(modify_layers=".*out_proj.*", lora_init_b_random=True)
+        )
+        model.add_empty_expert(
+            "b", LoRAConfig(modify_layers=".*out_proj.*", lora_init_b_random=True)
+        )
+        library = model.save_to_library(f"local://{tmpdirname}")
+
+        # store arrow experts
+        ArrowTransform(ArrowConfig()).transform(library, persist=True)
+
+        # from pretrained library
+        selector_config = ArrowSelectorConfig(moe_top_k=4)
+        model = MultiExpertModel.from_pretrained_library(
+            library, selector_config=selector_config
+        )
+        assert len(model.experts_names) == 2
+        # the order might be different due to multi-threading in adding experts in parallel
+        assert "a" in model.experts_names
+        assert "b" in model.experts_names
+        assert model.selectors["lora"].config == selector_config
 
 
 def test_get_modules_to_modify_trie():
