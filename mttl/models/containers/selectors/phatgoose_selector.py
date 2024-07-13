@@ -1,9 +1,9 @@
-from typing import Any, Dict
-import dataclass
+from typing import Dict
+from dataclasses import dataclass
 import torch
 from torch import nn
 
-from mttl.base import logger
+from mttl.utils import logger
 from mttl.models.containers.selectors import (
     BatchSequenceExpertsAndWeightsSelectorOutput,
     PerTokenSelectorConfig,
