@@ -396,10 +396,10 @@ class ClusterPredictor(SentenceTransformerClassifier):
         # get the cluster distribution
         cluster_distribution = torch.zeros(logits.shape[0], len(self.cluster_names))
         for cluster_name in self.cluster_names_to_ids:
-            cluster_distribution[
-                :, self.cluster_names_to_ids[cluster_name]
-            ] = torch.sum(
-                logits[:, self.cluster_names_to_expert_ids[cluster_name]], dim=-1
+            cluster_distribution[:, self.cluster_names_to_ids[cluster_name]] = (
+                torch.sum(
+                    logits[:, self.cluster_names_to_expert_ids[cluster_name]], dim=-1
+                )
             )
 
         # get the topk clusters

@@ -226,9 +226,11 @@ class MMLUDataset(datasets.GeneratorBasedBuilder):
     ):
         subjects = sorted(
             [
-                fn.split(f"_{subset}.csv")[0]
-                if f"_{subset}.csv" in fn
-                else fn.split(".csv")[0]
+                (
+                    fn.split(f"_{subset}.csv")[0]
+                    if f"_{subset}.csv" in fn
+                    else fn.split(".csv")[0]
+                )
                 for fn in os.listdir(os.path.join(data_dir, subset))
             ]
         )

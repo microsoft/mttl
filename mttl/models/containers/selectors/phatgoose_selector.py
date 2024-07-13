@@ -16,14 +16,12 @@ from mttl.models.containers.selectors import (
 from mttl.models.library.library_transforms import PhatgooseConfig
 
 
-def fetch_phatgoose_embeddings(
-    library, config
-):
-    """Fetches Phatgoose embeddings for the given library.
-    """
+def fetch_phatgoose_embeddings(library, config):
+    """Fetches Phatgoose embeddings for the given library."""
     from mttl.models.library.library_transforms import (
         PhatgooseTransform,
     )
+
     return PhatgooseTransform(config).fetch(library)
 
 
@@ -33,7 +31,7 @@ def compute_phatgoose_embeddings(
     learning_rate_pg,
     expert_embeds_save_name=None,
     recompute_prototypes=False,
-    default_args=None
+    default_args=None,
 ):
     """Computes Phatgoose embeddings for the given library."""
     from mttl.models.library.library_transforms import (
@@ -73,11 +71,12 @@ class PhatgooseSelector(PerTokenSelector):
             logger.warning("PhatgooseSelector should have lora_merge_after=True")
 
     def _fetch_prototypes_from_library(self):
-        """Fetches prototypes from the library.
-        """
+        """Fetches prototypes from the library."""
         from mttl.models.library.library_transforms import (
-            PhatgooseTransform, PhatgooseConfig
+            PhatgooseTransform,
+            PhatgooseConfig,
         )
+
         return PhatgooseTransform(PhatgooseConfig(name=self.config.prototype_id)).fetch(
             self.config.library_id
         )

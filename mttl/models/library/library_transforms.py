@@ -107,7 +107,9 @@ class SVDEmbeddingTransform(LibraryTransform):
             logger.info("Found {} precomputed SVD Embeddings".format(len(output)))
             return output
 
-        raise ValueError("SVD embeddings are missing or corrupted, please recompute them.")
+        raise ValueError(
+            "SVD embeddings are missing or corrupted, please recompute them."
+        )
 
     def transform(self, library, persist=True, recompute=False):
         if type(library) == str:
@@ -346,7 +348,9 @@ class HiddenStateComputerConfig(LibraryTransformConfig):
     use_base_model_only: bool = (
         False  # This computes sentence embeddings without the adapter
     )
-    model: str = None  # If `use_base_model_only`, can pass a specific model to compute embeddings with
+    model: str = (
+        None  # If `use_base_model_only`, can pass a specific model to compute embeddings with
+    )
     max_samples_per_task: int = 10
     track: str = "each_layer"  # last layer, or each layer
     pool: str = "last"  # last, or mean
@@ -440,7 +444,9 @@ class HiddenStateComputer(LibraryTransform):
             logger.info("Found {} precomputed centroids".format(len(output)))
             return output
 
-        raise ValueError("Hidden states are missing or corrupted, please recompute them.")
+        raise ValueError(
+            "Hidden states are missing or corrupted, please recompute them."
+        )
 
     @torch.no_grad()
     def transform(
@@ -588,7 +594,11 @@ class PhatgooseTransform(HiddenStateComputer):
         output = library.get_auxiliary_data(data_type=self.config.save_name)
 
         if len(output) != len(library):
-            logger.warn("Found {} precomputed Phatgoose prototypes. Some experts might not have prototypes.".format(len(output)))
+            logger.warn(
+                "Found {} precomputed Phatgoose prototypes. Some experts might not have prototypes.".format(
+                    len(output)
+                )
+            )
 
         return output
 
@@ -599,7 +609,7 @@ class PhatgooseTransform(HiddenStateComputer):
         recompute: bool = False,
         expert_names: list = None,
         default_args=None,
-    ):        
+    ):
         from mttl.models.library.utils import train_module
         from mttl.models.expert_model import MultiExpertModel
 
@@ -681,7 +691,6 @@ class PhatgooseTransform(HiddenStateComputer):
                     frozen_sum += value.sum()
                     value.requires_grad = False
 
-
             checkpoint = train_module(training_config, model, dm)
 
             if (
@@ -742,7 +751,9 @@ class PhatgooseTransform(HiddenStateComputer):
 class ArrowConfig(LibraryTransformConfig):
     ab_only: bool = True
     scale: bool = False  # If True, scale by eigenvalue
-    tie_params: str = "default"  # If default, ties the same params as during training. If a regex, processed the same way as during training
+    tie_params: str = (
+        "default"  # If default, ties the same params as during training. If a regex, processed the same way as during training
+    )
     tie_op: str = "concat"  # or "sum"
 
 
@@ -887,10 +898,14 @@ class ArrowTransform(LibraryTransform):
         base_model = None
 
         vectors, eigvals = self.fetch(library, scale=False)
-        
+
         for expert_name, expert in library.items():
             if expert_name in vectors and not recompute:
-                logger.info("Found precomputed Arrow prototypes for expert {}".format(expert_name))
+                logger.info(
+                    "Found precomputed Arrow prototypes for expert {}".format(
+                        expert_name
+                    )
+                )
                 continue
 
             logger.info(f"Computing SVD for expert {expert_name}")
@@ -1061,7 +1076,9 @@ class ArrowTransform(LibraryTransform):
 
 @dataclass
 class ExpertProjectorConfig:
-    granularity: str = "finegrained"  # whether to use the same coefficients for all parameters or per `nn.Parameter` instance
+    granularity: str = (
+        "finegrained"  # whether to use the same coefficients for all parameters or per `nn.Parameter` instance
+    )
     project_over_all_experts: bool = (
         False  # whether to project over all experts or just the ones in the cluster
     )

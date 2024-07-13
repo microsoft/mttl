@@ -139,8 +139,13 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
         # previous checkpoint, even if the parameters are not trainable.
         self.save_if_loaded_from_ckpt = kwargs.get("save_if_loaded_from_ckpt", True)
 
-        if self.save_if_loaded_from_ckpt and kwargs.get("compute_strategy", "") == "deepspeed": 
-            logger.warning('`save_if_loaded_from_ckpt` is True. Because you are using deepspeed, you will be saving full model checkpoints.')
+        if (
+            self.save_if_loaded_from_ckpt
+            and kwargs.get("compute_strategy", "") == "deepspeed"
+        ):
+            logger.warning(
+                "`save_if_loaded_from_ckpt` is True. Because you are using deepspeed, you will be saving full model checkpoints."
+            )
 
     def get_hash(self):
         model_hash = hashlib.sha256()
@@ -441,7 +446,9 @@ def model_loader_helper(
         )
     elif "phi-2" == model_name:
         # local phi-2 version. use `microsoft/phi-2 for the official hf version`
-        logger.info(f"Loading phi-2 model from {os.getenv('PHI_PATH', 'microsoft/phi-2')}")
+        logger.info(
+            f"Loading phi-2 model from {os.getenv('PHI_PATH', 'microsoft/phi-2')}"
+        )
         model_object = AutoModelForCausalLM.from_pretrained(
             os.getenv("PHI_PATH", "microsoft/phi-2"),
             load_in_8bit=load_in_8bit,

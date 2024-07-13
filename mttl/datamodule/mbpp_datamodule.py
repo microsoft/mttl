@@ -91,9 +91,11 @@ class MBPPDataModule(DefaultDataModule):
         dataset = DatasetLibrary.pull_dataset("mbpp", name=self.config.name)
 
         dataset = dataset.map(
-            instruct_template
-            if self.config.use_instruct_template
-            else partial(completion_template, self.for_generation),
+            (
+                instruct_template
+                if self.config.use_instruct_template
+                else partial(completion_template, self.for_generation)
+            ),
             num_proc=n_proc,
         )
 

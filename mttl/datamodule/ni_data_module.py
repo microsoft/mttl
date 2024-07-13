@@ -259,9 +259,9 @@ class DataCollatorForNI(DefaultCollator):
         )
 
         output_batch["task_names"] = task_identifiers
-        output_batch[
-            "task_identifiers"
-        ] = task_identifiers  # sni task id like e.g. task1356_xlsum_title_generation
+        output_batch["task_identifiers"] = (
+            task_identifiers  # sni task id like e.g. task1356_xlsum_title_generation
+        )
         output_batch["task_categories"] = task_categories
         output_batch["task_ids"] = torch.LongTensor(
             [self.task_to_id[task] for task in task_identifiers]

@@ -552,5 +552,6 @@ def rank_zero_only_and_wait(before=True, after=True):
 
     return decorator
 
+
 def generate_random_string(str_len=10):
-    return ''.join(random.choices(string.ascii_uppercase, k=str_len))
+    return "".join(random.choices(string.ascii_uppercase, k=str_len))

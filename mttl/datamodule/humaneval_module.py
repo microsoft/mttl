@@ -63,9 +63,11 @@ class HumanEvalDataModule(DefaultDataModule):
         )
 
         dataset = dataset.map(
-            instruct_template
-            if self.config.use_instruct_template
-            else completion_template,
+            (
+                instruct_template
+                if self.config.use_instruct_template
+                else completion_template
+            ),
             num_proc=n_proc,
             remove_columns=["prompt", "test", "entry_point", "task_id"],
         )

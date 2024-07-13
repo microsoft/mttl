@@ -80,15 +80,27 @@ def compute_metrics(predictions, references, xlingual=False, reduction="mean"):
     exact_match, rouge1, rougeL = [], [], []
     for pred, gold in zip(predictions, references):
         assert isinstance(gold, list)
-        exact_match.append(100. * metric_max_over_ground_truths(
-            exact_match_score, prediction=pred, ground_truths=gold, xlingual=xlingual
-        ))
-        rouge1.append(100. * metric_max_over_ground_truths(
-            rouge1_score, prediction=pred, ground_truths=gold, xlingual=xlingual
-        ))
-        rougeL.append(100. * metric_max_over_ground_truths(
-            rougeL_score, prediction=pred, ground_truths=gold, xlingual=xlingual
-        ))
+        exact_match.append(
+            100.0
+            * metric_max_over_ground_truths(
+                exact_match_score,
+                prediction=pred,
+                ground_truths=gold,
+                xlingual=xlingual,
+            )
+        )
+        rouge1.append(
+            100.0
+            * metric_max_over_ground_truths(
+                rouge1_score, prediction=pred, ground_truths=gold, xlingual=xlingual
+            )
+        )
+        rougeL.append(
+            100.0
+            * metric_max_over_ground_truths(
+                rougeL_score, prediction=pred, ground_truths=gold, xlingual=xlingual
+            )
+        )
 
     if reduction == "mean":
         exact_match = sum(exact_match) / len(references)
