@@ -89,7 +89,7 @@ def test_from_pretrained_with_arrow():
         # from pretrained library
         selector_config = ArrowSelectorConfig(moe_top_k=4)
         model = MultiExpertModel.from_pretrained_library(
-            library, selector_config=selector_config
+            library, selector_configs={"lora": selector_config}
         )
         assert len(model.experts_names) == 2
         # the order might be different due to multi-threading in adding experts in parallel

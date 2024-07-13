@@ -292,7 +292,7 @@ class MultiExpertModel(ExpertModel):
     def from_pretrained_library(
         cls,
         library_id: Union[str, ExpertLibrary],
-        selector_config: SelectorConfig = None,
+        selector_configs: Dict[str, SelectorConfig] = None,
         remote_token: str = None,
         **kwargs,
     ):
@@ -316,15 +316,16 @@ class MultiExpertModel(ExpertModel):
         model.add_experts_from_library(library)
 
         # set selector for the added experts
-        if selector_config is not None:
-            # inject the library id if it is None
-            if (
-                isinstance(selector_config, LoadableSelectorConfig)
-                and selector_config.library_id is None
-            ):
-                selector_config.library_id = library_id
+        if selector_configs is not None:
+            for modifier_type, selector_config in selector_configs.items():
+                # inject the library id if it is None
+                if (
+                    isinstance(selector_config, LoadableSelectorConfig)
+                    and selector_config.library_id is None
+                ):
+                    selector_config.library_id = library_id
 
-            model.set_selector(train_cfg.model_modifier, selector_config)
+                model.set_selector(modifier_type, selector_config)
         else:
             logger.info("No selector config provided, assuming expert name selector!")
         return model
