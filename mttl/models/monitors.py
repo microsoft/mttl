@@ -10,7 +10,7 @@ import pytorch_lightning as pl
 import matplotlib.pyplot as plt
 from pytorch_lightning import Callback
 
-from mttl.utils import agg_dicts, Averager
+from mttl.utils import agg_dicts
 from mttl.models.containers.selectors import Selector
 
 try:

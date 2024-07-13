@@ -856,6 +856,10 @@ class ArrowTransform(LibraryTransform):
     @torch.no_grad()
     def fetch(self, library: Union[str, ExpertLibrary], scale=True):
         """Fetch arrow prototypes from the library, raises ValueError if they are not computed.
+
+        Args:
+            library (Union[str, ExpertLibrary]): ExpertLibrary object or its name
+            scale (bool): If True, scale the output by the eigenvalue
         """
         if isinstance(library, str):
             library = ExpertLibrary.get_expert_library(library)

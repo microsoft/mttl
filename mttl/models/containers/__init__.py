@@ -137,6 +137,9 @@ def create_selector_for_container(
         # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
         selector.total_calls_per_forward += 1
         selector = selector.create_view()
+
+    # assign this selector to the container, propagates expert informations, etc.
+    container.assign_selector(selector)
     return selector
 
 
@@ -195,10 +198,6 @@ def replace_selector_for_container(
             selector_config,
             training_config,
         )
-        if selector is None:
-            continue
-
-        container.assign_selector(selector)
         n_selectors += isinstance(selector, Selector)
         n_selectors_views += isinstance(selector, SelectorView)
 
@@ -206,8 +205,8 @@ def replace_selector_for_container(
         raise NotImplementedError(
             "Support for `selector_weights` is not implemented yet."
         )
-    else:
-        return n_selectors, n_selectors_views
+
+    return n_selectors, n_selectors_views
 
 
 class TrieNode:

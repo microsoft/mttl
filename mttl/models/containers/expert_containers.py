@@ -35,7 +35,7 @@ class ExpertContainer:
     __supports_configs__ = []
 
     def __init__(self, config, info_container, layer, selector=None):
-        from mttl.models.containers.selectors import TaskNameSelector
+        from mttl.models.containers.selectors.selectors import TaskNameSelector
 
         self.config = config
         self.layer = layer
@@ -50,8 +50,11 @@ class ExpertContainer:
     def assign_selector(self, selector):
         del self.selector
         self._modules.pop("selector", None)
+
         # propagate experts to the selector
         self.selector = selector
+        self.selector.__layer_name__ = self.layer_name
+
         for expert_name, expert_info in self.expert_infos.items():
             self.add_expert_to_selector(expert_name, expert_info=expert_info)
 

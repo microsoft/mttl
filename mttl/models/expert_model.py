@@ -20,7 +20,13 @@ from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.containers.expert_containers import (
     ExpertContainer,
 )
-from mttl.models.containers.selectors import Selector, SelectorConfig
+
+from mttl.models.containers.selectors import (
+    PerTokenSelectorConfig,
+    ArrowSelectorConfig,
+    Selector,
+    SelectorConfig,
+)
 
 
 import torch
@@ -32,7 +38,7 @@ from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.base import ModifierConfig
 
 from mttl.models.library.expert import ExpertInfo
-from mttl.models.containers.selectors import SelectorConfig
+from mttl.models.containers.selectors.selectors import SelectorConfig
 from mttl.models.modifiers.routing import RoutingInfo
 from mttl.models.utils import (
     EfficientCheckpointModule,
@@ -301,6 +307,44 @@ class MultiExpertModel(ExpertModel):
 
         self.experts_names = []
 
+    @classmethod
+    def from_pretrained_library(
+        cls,
+        library_id: str,
+        selector_config: SelectorConfig = None,
+        remote_token: str = None,
+        **kwargs,
+    ):
+        from copy import deepcopy
+
+        library = ExpertLibrary.get_expert_library(
+            repo_id=library_id,
+            token=remote_token,
+        )
+
+        # get a config file from the library, and initialize the expert model
+        an_expert = library[next(iter(library.keys()))]
+
+        train_cfg = deepcopy(an_expert.training_config)
+        train_cfg.device_map = "cpu"
+
+        model = cls(**vars(train_cfg))
+        model.add_experts_from_library(library)
+
+        # set selector for the added experts
+        if selector_config is not None:
+            # inject the library id if it is None
+            if (
+                isinstance(selector_config, PerTokenSelectorConfig)
+                and selector_config.library_id is None
+            ):
+                selector_config.library_id = library_id
+
+            model.set_selector(train_cfg.model_modifier, selector_config)
+        else:
+            logger.info("No selector config provided, assuming expert name selector!")
+        return model
+
     @property
     def lock(self):
         if not hasattr(self, "_lock"):
@@ -453,7 +497,6 @@ class MultiExpertModel(ExpertModel):
         self,
         modifier_type: str,
         selector_config: SelectorConfig,
-        selector_weights: dict = None,
     ):
         from mttl.models.containers import (
             replace_selector_for_container,
@@ -463,7 +506,6 @@ class MultiExpertModel(ExpertModel):
             self.model,
             modifier_type,
             selector_config,
-            selector_weights,
             force_replace=True,
         )
         assert self.model.selectors[modifier_type]
