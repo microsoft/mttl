@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Dict, List, Union
 from pyparsing import abstractmethod
+from abc import ABC
 import torch
 import math
 import wandb
@@ -513,10 +514,58 @@ class PerTokenSelectorConfig(SelectorConfig):
     prototypes_id: str = None
 
 
-@register_multi_expert_selector("per_token_router", PerTokenSelectorConfig)
-class PerTokenSelector(TaskToExpertTracker):
+class LoadableLibrarySelector(ABC):
+    """Selectors that can load prototypes from a library.
+
+    We store the prototypes read from the library in a class attribute, so that they are shared
+    across all instances of the selector (avoids reloading for each instance of a selector across layers).
+    """
+
     __library_prototypes = None
 
+    def __init__(self, config):
+        if self.__library_prototypes and config.library_id is not None:
+            # load prototypes from library, these will be used as the initial prototypes
+            # whenever a new expert is added
+            self.__library_prototypes = self._fetch_prototypes_from_library()
+            if not self.__library_prototypes:
+                raise ValueError(
+                    "You specified a library_id but no prototypes found in the library."
+                )
+
+    @abstractmethod
+    def _fetch_prototypes_from_library(self):
+        pass
+
+    def load_prototypes_for_expert(self, expert_name: str):
+        if self.__library_prototypes is not None:
+            patched_layer_name = self.layer_name.replace(".selector", "")
+
+            if expert_name not in self.__library_prototypes:
+                raise ValueError(
+                    f"Cannot load prototypes for expert `{expert_name}`, was not found in library.\n"
+                    f"Please recompute selector prototypes with the correct library transform."
+                )
+
+            layer_names = self.__library_prototypes[expert_name].keys()
+            valid_layer_names = [
+                k
+                for k in layer_names
+                if patched_layer_name in k  # k.startswith(patched_layer_name)
+            ]
+            if len(valid_layer_names) <= 2:
+                raise ValueError("No valid layer names found in library.")
+
+            key = sorted(valid_layer_names)[0]
+            proto = self.__library_prototypes[expert_name][key]
+            if isinstance(proto, np.ndarray):
+                proto = torch.from_numpy(proto)
+
+            self.prototypes.data = torch.cat(self.prototypes, proto.squeeze())
+
+
+@register_multi_expert_selector("per_token_router", PerTokenSelectorConfig)
+class PerTokenSelector(TaskToExpertTracker, LoadableLibrarySelector):
     def __init__(self, info_container, config, **kwargs) -> None:
         super().__init__(info_container, config, **kwargs)
 
@@ -562,10 +611,7 @@ class PerTokenSelector(TaskToExpertTracker):
         self.input_norm = _get_norm_layer(self.config.input_norm_fn)
         self.proto_norm = _get_norm_layer(self.config.proto_norm_fn)
 
-        if self.__library_prototypes and self.config.library_id is not None:
-            # load prototypes from library, these will be used as the initial prototypes
-            # whenever a new expert is added
-            self.__library_prototypes = self._fetch_prototypes_from_library()
+        LoadableLibrarySelector.__init__(self, self.config)
 
     @safe_logging
     def _log_angle(self, angle):
@@ -684,33 +730,6 @@ class PerTokenSelector(TaskToExpertTracker):
         return BatchSequenceExpertsAndWeightsSelectorOutput(
             experts=experts, weights=router_probs
         )
-
-    def _fetch_prototypes_from_library(self):
-        """Fetches prototypes from the library.
-        """
-        pass
-
-    def load_prototypes_for_expert(self, expert_name: str):
-        if self.__library_prototypes is not None:
-            patched_layer_name = self.layer_name.replace(".selector", "")
-            layer_names = self.__library_prototypes[expert_name].keys()
-            valid_layer_names = [
-                k
-                for k in layer_names
-                if patched_layer_name in k  # k.startswith(patched_layer_name)
-            ]
-            if len(valid_layer_names) <= 2:
-                raise ValueError("No valid layer names found in library.")
-
-            key = sorted(valid_layer_names)[0]
-            proto = self.__library_prototypes[expert_name][key]
-            if isinstance(proto, np.ndarray):
-                proto = torch.from_numpy(proto)
-
-            self.prototypes.data = torch.cat(
-                self.prototypes,
-                proto.squeeze()
-            )
 
     def add_expert(self, expert_name: str, expert_info: ExpertInfo = None, **kwargs):
         super().add_expert(expert_name, expert_info, **kwargs)
