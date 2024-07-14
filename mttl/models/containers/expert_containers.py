@@ -384,7 +384,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
     in memory in a single parameter.
     """
 
-    __supports_configs__ = [SkilledLoRAConfig, LoRAConfig]
+    __supports_configs__ = [LoRAConfig, SkilledLoRAConfig]
 
     def __init__(self, config, info_container, layer, selector=None, **kwargs):
         MergeableAdapter.__init__(self)

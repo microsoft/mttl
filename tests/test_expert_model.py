@@ -1,3 +1,4 @@
+from mttl.models.containers.selectors.arrow_selector import ArrowSelector
 import pytest
 import numpy as np
 from pytorch_lightning import seed_everything
@@ -95,7 +96,8 @@ def test_from_pretrained_with_arrow():
         # the order might be different due to multi-threading in adding experts in parallel
         assert "a" in model.experts_names
         assert "b" in model.experts_names
-        assert model.selectors["lora"].config == selector_config
+        assert model.selectors["lora"][0].config == selector_config
+        assert isinstance(model.selectors["lora"][0], ArrowSelector)
 
 
 def test_get_modules_to_modify_trie():
