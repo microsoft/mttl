@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+from typing import Dict
+import torch
 from mttl.models.containers.selectors import (
     PerTokenSelector,
     PerTokenSelectorConfig,
@@ -17,7 +19,7 @@ class AverageActivationSelectorConfig(PerTokenSelectorConfig):
 
 @register_multi_expert_selector("avg_act_router", AverageActivationSelectorConfig)
 class AverageActivationSelector(PerTokenSelector):
-    def _fetch_prototypes_from_library(self):
+    def _load_from_library(self):
         """Fetches prototypes from the library."""
         from mttl.models.library.library_transforms import (
             HiddenStateComputer,
@@ -25,5 +27,5 @@ class AverageActivationSelector(PerTokenSelector):
         )
 
         return HiddenStateComputer(
-            HiddenStateComputerConfig(name=self.config.prototype_id)
+            HiddenStateComputerConfig(name=self.config.selector_data_id)
         ).fetch(self.config.library_id)

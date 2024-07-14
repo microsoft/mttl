@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from typing import Union
+from typing import Dict, Union
+import torch
 from mttl.models.containers.selectors import (
     PerTokenSelector,
     PerTokenSelectorConfig,
@@ -41,10 +42,10 @@ class ArrowSelectorConfig(PerTokenSelectorConfig):
 
 @register_multi_expert_selector("arrow_router", ArrowSelectorConfig)
 class ArrowSelector(PerTokenSelector):
-    def _fetch_prototypes_from_library(self):
+    def _load_from_library(self):
         """Fetches prototypes from the library."""
         from mttl.models.library.library_transforms import ArrowConfig, ArrowTransform
 
-        return ArrowTransform(ArrowConfig(name=self.config.prototype_id)).fetch(
+        return ArrowTransform(ArrowConfig(name=self.config.selector_data_id)).fetch(
             self.config.library_id
         )

@@ -9,7 +9,7 @@ from torch import nn
 import torch.nn.functional as F
 from mttl.models.library.expert import ExpertInfo
 from torch.distributions import Categorical
-from mttl.models.utils import MetricLogger
+from mttl.models.utils import MetricLogger, Singleton
 from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
 from mttl.models.ranker.classifier_ranker import ClusterPredictor
 from mttl.utils import logger
@@ -43,10 +43,10 @@ def register_multi_expert_selector(name, config_cls):
     return _thunk
 
 
-def get_selector(routing_config: "SelectorConfig", info_container: Dict, **kwargs):
+def get_selector(selector_config: "SelectorConfig", info_container: Dict, **kwargs):
     """Returns a selector object for the given routing_config."""
-    return SELECTORS_NAME_TO_KLASS[SELECTORS_CONFIG_TO_NAME[routing_config.__class__]](
-        info_container, config=routing_config, **kwargs
+    return SELECTORS_NAME_TO_KLASS[SELECTORS_CONFIG_TO_NAME[selector_config.__class__]](
+        info_container, config=selector_config, **kwargs
     )
 
 
@@ -111,10 +111,10 @@ class SelectorConfig:
 
 @dataclass
 class LoadableSelectorConfig(SelectorConfig):
-    """Adds support for library_id and prototypes_id."""
+    """Adds support for library_id and data_id, which specifies the unique identifier to load."""
 
     library_id: str = None
-    prototypes_id: str = None
+    selector_data_id: str = None
 
 
 @dataclass
@@ -518,53 +518,49 @@ class PerTokenSelectorConfig(LoadableSelectorConfig):
 
 
 class LoadableLibrarySelector(ABC):
-    """Selectors that can load prototypes from a library.
-
-    We store the prototypes read from the library in a class attribute, so that they are shared
-    across all instances of the selector (avoids reloading for each instance of a selector across layers).
-    """
-
-    __library_prototypes = None
-
-    def __init__(self, config):
-        if self.__library_prototypes and config.library_id is not None:
-            # load prototypes from library, these will be used as the initial prototypes
-            # whenever a new expert is added
-            self.__library_prototypes = self._fetch_prototypes_from_library()
-            if not self.__library_prototypes:
-                raise ValueError(
-                    "You specified a library_id but no prototypes found in the library."
-                )
+    library_artifacts: Dict = None
 
     @abstractmethod
-    def _fetch_prototypes_from_library(self):
+    def _load_from_library(self):
         pass
 
-    def load_prototypes_for_expert(self, expert_name: str):
-        if self.__library_prototypes is not None:
-            patched_layer_name = self.layer_name.replace(".selector", "")
+    def load_from_library(self):
+        if self.library_artifacts is None:
+            self.library_artifacts = self._load_from_library()
 
-            if expert_name not in self.__library_prototypes:
-                raise ValueError(
-                    f"Cannot load prototypes for expert `{expert_name}`, was not found in library.\n"
-                    f"Please recompute selector prototypes with the correct library transform."
-                )
+            if not self.library_artifacts:
+                raise ValueError(f"Could not load library artifacts for selector.")
 
-            layer_names = self.__library_prototypes[expert_name].keys()
-            valid_layer_names = [
-                k
-                for k in layer_names
-                if patched_layer_name in k  # k.startswith(patched_layer_name)
-            ]
-            if len(valid_layer_names) <= 2:
-                raise ValueError("No valid layer names found in library.")
 
-            key = sorted(valid_layer_names)[0]
-            proto = self.__library_prototypes[expert_name][key]
-            if isinstance(proto, np.ndarray):
-                proto = torch.from_numpy(proto)
+def get_expert_prototype_from_library_artifacts(
+    expert_name: str, layer_name: str, library_artifacts: Dict
+) -> torch.Tensor:
+    """Utils function that returns the expert prototype stored in the library.
 
-            self.prototypes.data = torch.cat(self.prototypes, proto.squeeze())
+    This is used by Arrow, PhatGoose and Avg Activation selectors.
+    """
+    import numpy as np
+
+    patched_layer_name = layer_name.replace(".selector", "")
+
+    if expert_name not in library_artifacts:
+        raise ValueError(
+            f"Cannot load prototypes for expert `{expert_name}`, was not found in library.\n"
+            f"Please recompute selector prototypes with the correct library transform."
+        )
+
+    layer_names = library_artifacts[expert_name].keys()
+    valid_layer_names = [
+        k
+        for k in layer_names
+        if patched_layer_name in k  # k.startswith(patched_layer_name)
+    ]
+
+    key = sorted(valid_layer_names)[0]
+    proto = library_artifacts[expert_name][key]
+    if isinstance(proto, np.ndarray):
+        proto = torch.from_numpy(proto)
+    return proto
 
 
 @register_multi_expert_selector("per_token_router", PerTokenSelectorConfig)
@@ -614,7 +610,9 @@ class PerTokenSelector(TaskToExpertTracker, LoadableLibrarySelector):
         self.input_norm = _get_norm_layer(self.config.input_norm_fn)
         self.proto_norm = _get_norm_layer(self.config.proto_norm_fn)
 
-        LoadableLibrarySelector.__init__(self, self.config)
+        # init selector from library if needed
+        if self.config.library_id is not None:
+            self.load_from_library()
 
     @safe_logging
     def _log_angle(self, angle):
@@ -737,7 +735,19 @@ class PerTokenSelector(TaskToExpertTracker, LoadableLibrarySelector):
     def add_expert(self, expert_name: str, expert_info: ExpertInfo = None, **kwargs):
         super().add_expert(expert_name, expert_info, **kwargs)
 
-        self.load_prototypes_for_expert(expert_name)
+        if self.library_artifacts is not None:
+            proto = get_expert_prototype_from_library_artifacts(
+                expert_name, self.layer_name, self.library_artifacts
+            ).unsqueeze(0)
+        else:
+            proto = torch.zeros(
+                1,
+                self.prototypes.size(1),
+                dtype=self.prototypes.dtype,
+                device=self.prototypes.device,
+            )
+
+        self.prototypes.data = torch.cat([self.prototypes.data, proto])
         self.expert_names.append(expert_name)
 
 

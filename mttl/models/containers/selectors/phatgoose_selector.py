@@ -61,16 +61,16 @@ class PhatgooseSelector(PerTokenSelector):
         if not self.config.lora_merge_after:
             logger.warning("PhatgooseSelector should have lora_merge_after=True")
 
-    def _fetch_prototypes_from_library(self):
+    def _load_from_library(self):
         """Fetches prototypes from the library."""
         from mttl.models.library.library_transforms import (
             PhatgooseTransform,
             PhatgooseConfig,
         )
 
-        return PhatgooseTransform(PhatgooseConfig(name=self.config.prototype_id)).fetch(
-            self.config.library_id
-        )
+        return PhatgooseTransform(
+            PhatgooseConfig(name=self.config.selector_data_id)
+        ).fetch(self.config.library_id)
 
 
 @dataclass

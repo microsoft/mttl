@@ -872,7 +872,7 @@ class ArrowTransform(LibraryTransform):
             library (Union[str, ExpertLibrary]): ExpertLibrary object or its name
             scale (bool): If True, scale the output by the eigenvalue
         """
-        if isinstance(library, str):
+        if not isinstance(library, ExpertLibrary):
             library = ExpertLibrary.get_expert_library(library)
 
         # try to fetch auxiliary data

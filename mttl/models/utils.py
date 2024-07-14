@@ -19,6 +19,13 @@ from mttl.models.get_scheduler import get_scheduler
 CHECKPOINT_PATH_IN_HUB = "checkpoint.ckpt"
 
 
+class Singleton(object):
+    def __new__(cls):
+        if not hasattr(cls, "instance"):
+            cls.instance = super(Singleton, cls).__new__(cls)
+        return cls.instance
+
+
 def transfer_batch_to_device(batch, device):
     for key in batch:
         if isinstance(batch[key], torch.Tensor):
