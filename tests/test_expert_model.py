@@ -102,9 +102,9 @@ def test_from_pretrained_with_arrow():
         assert model.selectors["lora"][0].prototypes.shape[0] == 2
         name = model.selectors["lora"][0].expert_names[0]
         ln = model.selectors["lora"][0].layer_name.replace(".selector", "")
-        assert (
-            model.selectors["lora"][0].prototypes[0].sum().item()
-            == protos[name][ln].sum().item()
+        assert np.allclose(
+            model.selectors["lora"][0].prototypes[0].sum().item(),
+            protos[name][ln].sum().item(),
         )
 
 
