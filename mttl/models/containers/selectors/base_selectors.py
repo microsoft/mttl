@@ -79,9 +79,9 @@ class SelectorConfig:
         name = dumped.pop("__selector_name__")
         return SELECTORS_NAME_TO_CONFIG[name](**dumped)
 
-    @staticmethod
+    @classmethod
     def from_training_config(
-        training_config: Union["Config", "SelectorConfig"]
+        cls, training_config: Union["Config", "SelectorConfig"]
     ) -> Union["SelectorConfig", None]:
         """Build modifier config from the training config.
 
@@ -91,15 +91,20 @@ class SelectorConfig:
             # nothing to do here
             return training_config
 
-        if training_config.router_selector is None:
-            return None
+        if cls == type(SelectorConfig):
+            # if called on the base class, we need to find the correct subclass
+            if training_config.router_selector is None:
+                return None
 
-        if training_config.router_selector not in SELECTORS_NAME_TO_KLASS:
-            raise ValueError(
-                f"Selector '{training_config.router_selector}' not found, has it been registered?"
-            )
+            if training_config.router_selector not in SELECTORS_NAME_TO_KLASS:
+                raise ValueError(
+                    f"Selector '{training_config.router_selector}' not found, has it been registered?"
+                )
 
-        config_klass = SELECTORS_NAME_TO_CONFIG[training_config.router_selector]
+            config_klass = SELECTORS_NAME_TO_CONFIG[training_config.router_selector]
+        else:
+            config_klass = cls
+
         kwargs = {}
         for key in config_klass.__dataclass_fields__.keys():
             # only overwrite default if value exists and is not None
