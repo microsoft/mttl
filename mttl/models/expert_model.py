@@ -11,7 +11,11 @@ from transformers import PreTrainedModel
 
 from mttl.models.containers import add_expert_to_transformer
 from mttl.models.containers.expert_containers import ExpertContainer
-from mttl.models.containers.selectors import Selector, SelectorConfig
+from mttl.models.containers.selectors import (
+    Selector,
+    SelectorConfig,
+    ArrowSelectorConfig,
+)
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.library.expert_library import ExpertLibrary
@@ -640,9 +644,23 @@ class ExpertModelDPO(EfficientCheckpointModule):
         super().__init__(**kwargs)
         self.expert_model = expert_model
         self.ref_expert_model = ref_expert_model
+        self.trainable_param_names = kwargs.get("trainable_param_names", None)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+        params = []
+        # for param_name, param in self.named_parameters():
+        #     param.requires_grad = False
+        #     if self.trainable_param_names and re.fullmatch(
+        #         self.trainable_param_names, param_name
+        #     ):
+        #         param.requires_grad = True
+        #         params.append(param)
+
+        #         logger.info(f"Setting {param_name} to trainable.")
+        optimizer = torch.optim.Adam(
+            filter(lambda p: p.requires_grad, self.parameters()), lr=1e-3
+        )
+
         return optimizer
 
     def training_step(self, batch, _):
@@ -865,15 +883,14 @@ class MoEModel(MultiExpertModel):
                     self.hparams.library_id
                 )
             for i, expert in enumerate(sorted(list(expert_library.keys()))):
-                self.add_expert_instance(expert_library[expert], expert_name=f"e{i}")
-
+                self.add_expert_instance(expert_library[expert], expert_name=expert)
             self.moe_num_experts = i + 1
             if isinstance(
-                self.selector_config, (ArrowConfig, HiddenStateComputerConfig)
+                self.selector_config, (ArrowSelectorConfig, HiddenStateComputerConfig)
             ):
                 from projects.modular_llm.eval_library import patch_prototypes
 
-                patch_prototypes(self, expert_library, self.selector_config)
+                patch_prototypes(self, expert_library, self.hparams)
 
     def training_step(self, batch, _):
         loss = super().training_step(batch, _)

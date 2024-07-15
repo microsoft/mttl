@@ -2,17 +2,22 @@ import os
 import shutil
 import sys
 from tempfile import TemporaryDirectory
-
+import copy
 import torch
 from pytorch_lightning import Trainer, seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.callbacks import LiveCheckpointCallback, NanoMMLUCallback, RougeCallback
+from mttl.callbacks import LiveCheckpointCallback
 
 # from mttl.datamodule.base import get_datamodule
 from mttl.models.expert_config import ExpertConfig
-from mttl.models.expert_model import ExpertModel, MoEModel, ExpertModelDPO
+from mttl.models.expert_model import (
+    ExpertModel,
+    MultiExpertModel,
+    MoEModel,
+    ExpertModelDPO,
+)
 from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
 from mttl.models.monitors import get_monitors
@@ -24,10 +29,11 @@ from mttl.utils import (
     remote_login,
     setup_logging,
 )
-from mttl.datamodule.base import DatasetConfig, DefaultCollator, DefaultDataModule
+from mttl.datamodule.base import DatasetConfig
 from mttl.datamodule.preference_data_module import Preferencemodule
 from projects.modular_llm.src.transfer_matrix import TransferMatrixConfig
 from projects.modular_llm.src.transfer_matrix import run_eval as produce_transfer_matrix
+from projects.modular_llm.eval_library import patch_prototypes
 
 
 def create_transfer_matrix(args, checkpoint):
@@ -83,23 +89,34 @@ def run_multitask(args: ExpertConfig):
     loggers = get_pl_loggers(args)
     # select dataloader
     if args.model_modifier == "poly":
-        args.init_from_scratch = True
         model_class = MoEModel
     else:
         model_class = ExpertModel
-
     config = DatasetConfig(model=args.model)
     dm = Preferencemodule(config)
 
     # dm = get_datamodule(args)
     # args.n_tasks = len(dm._task_names)
     # args.task_names = dm._task_names
-
-    model = model_class(**vars(args), tokenizer=dm.tokenizer)
+    # if args.router_selector == "arrow_router":
+    args.trainable_param_names = None
+    ref_model = model_class(
+        **vars(args), tokenizer=dm.tokenizer, expert_library=expert_library
+    )
 
     if args.rl_training == "dpo":
-        ref_model = model_class(**vars(args), tokenizer=dm.tokenizer)
-        module = ExpertModelDPO(model, ref_model)
+        args.trainable_param_names = ".*prototypes.*"
+        model = model_class(
+            **vars(args), tokenizer=dm.tokenizer, expert_library=expert_library
+        )
+        # if args.library_id:
+        #     model.add_experts_from_library(expert_library)
+        #     patch_prototypes(model, expert_library, args)
+
+        #     # ref_model = copy.deepcopy(model)
+        #     ref_model.add_experts_from_library(expert_library)
+        #     patch_prototypes(ref_model, expert_library, args)
+        module = ExpertModelDPO(model, ref_model, **vars(args))
 
     # get metric monitors for models
     callbacks = get_monitors(args)
@@ -130,8 +147,8 @@ def run_multitask(args: ExpertConfig):
             val_check_interval = args.total_steps
 
     trainer = Trainer(
-        # devices=-1,
-        # accelerator="gpu",
+        devices=-1,
+        accelerator="gpu",
         logger=loggers,
         num_sanity_val_steps=0,
         default_root_dir=args.output_dir,
