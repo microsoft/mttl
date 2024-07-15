@@ -456,7 +456,7 @@ def model_loader_helper(
         if "PHI_PATH" not in os.environ:
             raise ValueError("PHI_PATH is not set in the environment variables.")
 
-        logger.info(f"Loading phi-2 model from {os['PHI_PATH']}")
+        logger.info(f"Loading phi-2 model from {os.environ['PHI_PATH']}")
         model_object = AutoModelForCausalLM.from_pretrained(
             os.environ["PHI_PATH"],
             load_in_8bit=load_in_8bit,

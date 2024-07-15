@@ -530,8 +530,8 @@ class LoadableLibrarySelector(ABC):
         pass
 
     def load_from_library(self):
-        if self.library_artifacts is None:
-            self.library_artifacts = self._load_from_library()
+        if LoadableLibrarySelector.library_artifacts is None:
+            LoadableLibrarySelector.library_artifacts = self._load_from_library()
 
             if not self.library_artifacts:
                 raise ValueError(f"Could not load library artifacts for selector.")
@@ -745,6 +745,7 @@ class PerTokenSelector(TaskToExpertTracker, LoadableLibrarySelector):
                 expert_name, self.layer_name, self.library_artifacts
             ).unsqueeze(0)
         else:
+            logger.warning(f"no protoypes for {expert_name} in library")
             proto = torch.zeros(
                 1,
                 self.prototypes.size(1),
@@ -752,7 +753,8 @@ class PerTokenSelector(TaskToExpertTracker, LoadableLibrarySelector):
                 device=self.prototypes.device,
             )
 
-        self.prototypes.data = torch.cat([self.prototypes.data, proto])
+        dev = self.prototypes.device
+        self.prototypes.data = torch.cat([self.prototypes.data, proto.to(dev)])
         self.expert_names.append(expert_name)
 
 
