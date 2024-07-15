@@ -626,7 +626,7 @@ def calculate_DPO_loss(
         beta * (original_prefered_relative_logprob - disprefered_relative_logprob)
     ).mean(dim=-1)
 
-    return loss
+    return loss, reward_accuracies, reward_margins
 
 
 def get_log_prob(logits, labels):
@@ -683,13 +683,30 @@ class ExpertModelDPO(EfficientCheckpointModule):
             labels=prompt_disprefered_ids,
         )
 
-        loss = calculate_DPO_loss(
+        loss, reward_accuracies, reward_margins = calculate_DPO_loss(
             model_prefered_log_prob,
             model_disprefered_log_prob,
             ref_prefered_log_prob,
             ref_disprefered_log_prob,
             beta=0.1,
         )
+        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+
+        self.log(
+            "train/reward_accuracies",
+            reward_accuracies,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "train/reward_margins",
+            reward_margins,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+
         return loss
 
     def validation_step(self, batch, _):
@@ -729,13 +746,30 @@ class ExpertModelDPO(EfficientCheckpointModule):
             labels=prompt_disprefered_ids,
         )
 
-        loss = calculate_DPO_loss(
+        loss, reward_accuracies, reward_margins = calculate_DPO_loss(
             model_prefered_log_prob,
             model_disprefered_log_prob,
             ref_prefered_log_prob,
             ref_disprefered_log_prob,
             beta=0.1,
         )
+
+        self.log("val/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log(
+            "val/reward_accuracies",
+            reward_accuracies,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "val/reward_margins",
+            reward_margins,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+
         return loss
 
     def test_step(self, batch, _):
@@ -775,12 +809,27 @@ class ExpertModelDPO(EfficientCheckpointModule):
             labels=prompt_disprefered_ids,
         )
 
-        loss = calculate_DPO_loss(
+        loss, reward_accuracies, reward_margins = calculate_DPO_loss(
             model_prefered_log_prob,
             model_disprefered_log_prob,
             ref_prefered_log_prob,
             ref_disprefered_log_prob,
             beta=0.1,
+        )
+        self.log("test/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log(
+            "test/reward_accuracies",
+            reward_accuracies,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "test/reward_margins",
+            reward_margins,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
         )
         return loss
 
