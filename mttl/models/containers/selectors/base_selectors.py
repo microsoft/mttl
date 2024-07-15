@@ -91,19 +91,16 @@ class SelectorConfig:
             # nothing to do here
             return training_config
 
-        if cls == type(SelectorConfig):
-            # if called on the base class, we need to find the correct subclass
-            if training_config.router_selector is None:
-                return None
+        # if called on the base class, we need to find the correct subclass
+        if training_config.router_selector is None:
+            return None
 
-            if training_config.router_selector not in SELECTORS_NAME_TO_KLASS:
-                raise ValueError(
-                    f"Selector '{training_config.router_selector}' not found, has it been registered?"
-                )
+        if training_config.router_selector not in SELECTORS_NAME_TO_KLASS:
+            raise ValueError(
+                f"Selector '{training_config.router_selector}' not found, has it been registered?"
+            )
 
-            config_klass = SELECTORS_NAME_TO_CONFIG[training_config.router_selector]
-        else:
-            config_klass = cls
+        config_klass = SELECTORS_NAME_TO_CONFIG[training_config.router_selector]
 
         kwargs = {}
         for key in config_klass.__dataclass_fields__.keys():
