@@ -390,7 +390,10 @@ class MultiExpertModel(ExpertModel):
             with tqdm.tqdm(
                 total=len(library), desc="Adding experts...", unit="expert"
             ) as progress_bar:
-                for _ in concurrent.futures.as_completed(futures):
+                for result in concurrent.futures.as_completed(futures):
+                    # raise exception
+                    if result.exception():
+                        raise result.exception()
                     progress_bar.update(1)
 
     def load_from_module_dict(self, module_dict, action="route"):
