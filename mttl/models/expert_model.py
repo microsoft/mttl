@@ -68,14 +68,6 @@ class ExpertModel(EfficientCheckpointModule):
         # init the transformer just with the modifier config, this avoids
         # passing the whole training config to the modify_transformer func
         self.modifier_config = ModifierConfig.from_training_config(self.training_config)
-        # config about the routing
-        if "selector_config" in kwargs:
-            self.selector_config = kwargs.pop("selector_config")
-        else:
-            self.selector_config = SelectorConfig.from_training_config(
-                self.training_config
-            )
-
         self.model = modify_transformer(model_object, self.modifier_config)
 
         # replace w flash attn!
@@ -285,6 +277,14 @@ class MultiExpertModel(ExpertModel):
     def __init__(self, **config_kwargs):
         config_kwargs["model_modifier"] = None
         super().__init__(**config_kwargs)
+
+        # config about the routing
+        if "selector_config" in config_kwargs:
+            self.selector_config = config_kwargs.pop("selector_config")
+        else:
+            self.selector_config = SelectorConfig.from_training_config(
+                self.training_config
+            )
 
         self.experts_names = []
 
