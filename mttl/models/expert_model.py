@@ -6,15 +6,16 @@ from functools import partial
 from typing import Dict, List
 
 import torch
+import torch.nn.functional as F
 from torch.optim.optimizer import Optimizer
 from transformers import PreTrainedModel
 
 from mttl.models.containers import add_expert_to_transformer
 from mttl.models.containers.expert_containers import ExpertContainer
 from mttl.models.containers.selectors import (
+    ArrowSelectorConfig,
     Selector,
     SelectorConfig,
-    ArrowSelectorConfig,
 )
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.library.expert import Expert, ExpertInfo
@@ -30,8 +31,6 @@ from mttl.models.modifiers.lora import SkilledLoRAConfig
 from mttl.models.modifiers.routing import RoutingInfo
 from mttl.models.utils import EfficientCheckpointModule, prepare_model_for_kbit_training
 from mttl.utils import logger
-
-import torch.nn.functional as F
 
 torch.set_float32_matmul_precision("high")
 

@@ -1,22 +1,25 @@
+import copy
 import os
 import shutil
 import sys
 from tempfile import TemporaryDirectory
-import copy
+
 import torch
 from pytorch_lightning import Trainer, seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.callbacks import LiveCheckpointCallback
+from mttl.datamodule.base import DatasetConfig
+from mttl.datamodule.preference_data_module import Preferencemodule
 
 # from mttl.datamodule.base import get_datamodule
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import (
     ExpertModel,
-    MultiExpertModel,
-    MoEModel,
     ExpertModelDPO,
+    MoEModel,
+    MultiExpertModel,
 )
 from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
@@ -29,11 +32,9 @@ from mttl.utils import (
     remote_login,
     setup_logging,
 )
-from mttl.datamodule.base import DatasetConfig
-from mttl.datamodule.preference_data_module import Preferencemodule
+from projects.modular_llm.eval_library import patch_prototypes
 from projects.modular_llm.src.transfer_matrix import TransferMatrixConfig
 from projects.modular_llm.src.transfer_matrix import run_eval as produce_transfer_matrix
-from projects.modular_llm.eval_library import patch_prototypes
 
 
 def create_transfer_matrix(args, checkpoint):
