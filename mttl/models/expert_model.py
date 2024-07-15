@@ -292,7 +292,7 @@ class MultiExpertModel(ExpertModel):
     def from_pretrained_library(
         cls,
         library_id: Union[str, ExpertLibrary],
-        selector_configs: Dict[str, SelectorConfig] = None,
+        selector_configs: Union[SelectorConfig, Dict[str, SelectorConfig]] = None,
         remote_token: str = None,
         **kwargs,
     ):
@@ -317,6 +317,13 @@ class MultiExpertModel(ExpertModel):
 
         # set selector for the added experts
         if selector_configs is not None:
+            # assume "lora" is the default modifier type
+            if type(selector_configs) is SelectorConfig:
+                logger.info(
+                    "Assuming provided selector config is for `lora` modifier type."
+                )
+                selector_configs = {"lora": selector_configs}
+
             for modifier_type, selector_config in selector_configs.items():
                 # inject the library id if it is None
                 if (
