@@ -23,10 +23,16 @@ from mttl.models.expert_config import ExpertConfig
 
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.models.library.library_transforms import (
-    WeightedLinearMerge,
-    WeightedLinearMergeConfig,
+    ArrowConfig,
+    ArrowTransform,
+    HiddenStateComputer,
+    HiddenStateComputerConfig,
+    PhatgooseConfig,
+    PhatgooseTransform,
     TiesMerge,
     TiesMergeConfig,
+    WeightedLinearMerge,
+    WeightedLinearMergeConfig,
 )
 
 from mttl.callbacks import LossCallback
@@ -95,6 +101,58 @@ def eval_in_distribution(module, args: ExpertConfig, tasks: list):
     transfer_table.log_final_table()
 
 
+def get_hidden_states(library, args):
+    cfg = HiddenStateComputerConfig(
+        use_base_model_only=args.use_base_model_only,
+        max_samples_per_task=args.max_samples_per_task,
+        name=args.selector_data_id,
+        track=args.track,
+        pool=args.pool,
+    )
+    HiddenStateComputer(cfg).transform(
+        library, recompute=args.recompute_prototypes, default_args=args
+    )
+    return cfg.save_name
+
+
+def get_arrow_embeddings(library, args):
+    cfg = ArrowConfig(
+        name=args.selector_data_id,
+        ab_only=args.ab_only,
+        tie_params=args.tie_params or "default",
+        tie_op=args.tie_op,
+    )
+    ArrowTransform(cfg).transform(
+        library,
+        recompute=args.recompute_prototypes,
+        add_base_proto=args.base_model_proto,
+    )
+    return cfg.save_name
+
+
+def get_phatgoose_embeddings(library, args):
+    cfg = PhatgooseConfig(
+        n_steps=args.n_steps_pg,
+        learning_rate=args.learning_rate_pg,
+        name=args.selector_data_id,
+    )
+    PhatgooseTransform(cfg).transform(
+        library, default_args=args, recompute=args.recompute_prototypes
+    )
+    return cfg.save_name
+
+
+def fetch_prototypes(args: ExpertConfig, library: ExpertLibrary):
+    if args.merge_or_route == "phatgoose":
+        get_phatgoose_embeddings(library, args)
+    elif args.merge_or_route == "arrow":
+        get_arrow_embeddings(library, args)
+    elif args.merge_or_route == "hidden":
+        get_hidden_states(library, args)
+    else:
+        raise ValueError(f"Unknown merge_or_route {args.merge_or_route}")
+
+
 def run_eval(args: ExpertConfig):
     seed_everything(args.seed, workers=True)
 
@@ -124,7 +182,7 @@ def run_eval(args: ExpertConfig):
     )
     an_expert = library[next(iter(library.keys()))]
     train_cfg = deepcopy(an_expert.training_config)
-    train_cfg.device_map = "cpu"
+    # train_cfg.device_map = "cpu"
     train_cfg.subsample_dev = args.subsample_dev
     train_cfg.subsample_test = args.subsample_test
 
@@ -165,7 +223,10 @@ def run_eval(args: ExpertConfig):
         args.router_selector = f"{args.merge_or_route}_router"
 
         selector_config = SelectorConfig.from_training_config(args)
+        if not args.selector_data_id:
+            args.selector_data_id = fetch_prototypes(args, library)
 
+        breakpoint()
         module = MultiExpertModel(
             **vars(train_cfg), selector_config=selector_config
         ).to("cuda")
