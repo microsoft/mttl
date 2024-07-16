@@ -11,7 +11,7 @@ import torch
 import math
 import bitsandbytes as bnb
 
-from mttl.utils import logger
+from mttl.utils import logger, warn_once
 from mttl.models.modifiers import register_modifier
 from mttl.models.modifiers.base import (
     MergeableAdapter,
@@ -397,10 +397,8 @@ class SkilledLoRA(LoRA):
         assert np.all(skl.n_skills == n_skills for skl in skilled_loras)
 
         if n_skills == 1:
-            # this is basically standard lora forward, we are here by accident
-            # !!!warning!!!! this ignores the weights
-            return LoRA.parallel_linear_forward(
-                input, [sk_lora.to_loras()[0] for sk_lora in skilled_loras]
+            warn_once(
+                f"You are using Skilled LoRA with only one skill. Make sure this is needed"
             )
 
         num_skilled_loras = len(skilled_loras)
