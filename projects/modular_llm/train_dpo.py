@@ -99,14 +99,13 @@ def run_multitask(args: ExpertConfig):
     # dm = get_datamodule(args)
     # args.n_tasks = len(dm._task_names)
     # args.task_names = dm._task_names
-    # if args.router_selector == "arrow_router":
-    args.trainable_param_names = None
+    # args.trainable_param_names = ".*prototypes.*"
     ref_model = model_class(
         **vars(args), tokenizer=dm.tokenizer, expert_library=expert_library
     )
 
     if args.rl_training == "dpo":
-        args.trainable_param_names = ".*prototypes.*"
+        # args.trainable_param_names = ".*prototypes.*"
         model = model_class(
             **vars(args), tokenizer=dm.tokenizer, expert_library=expert_library
         )
@@ -117,7 +116,9 @@ def run_multitask(args: ExpertConfig):
         #     # ref_model = copy.deepcopy(model)
         #     ref_model.add_experts_from_library(expert_library)
         #     patch_prototypes(ref_model, expert_library, args)
-        module = ExpertModelDPO(model, ref_model, **vars(args))
+        module = ExpertModelDPO(
+            **vars(args), expert_model=model, ref_expert_model=ref_model
+        )
 
     # get metric monitors for models
     callbacks = get_monitors(args)
