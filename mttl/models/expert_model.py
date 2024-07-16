@@ -644,23 +644,8 @@ class ExpertModelDPO(EfficientCheckpointModule):
         self.expert_model = expert_model
         self.ref_expert_model = ref_expert_model
         self.trainable_param_names = kwargs.get("trainable_param_names", None)
-
-    def configure_optimizers(self):
-        params = []
-        # for param_name, param in self.named_parameters():
-        #     param.requires_grad = False
-        #     if self.trainable_param_names and re.fullmatch(
-        #         self.trainable_param_names, param_name
-        #     ):
-        #         param.requires_grad = True
-        #         params.append(param)
-
-        #         logger.info(f"Setting {param_name} to trainable.")
-        optimizer = torch.optim.Adam(
-            filter(lambda p: p.requires_grad, self.parameters()), lr=1e-3
-        )
-
-        return optimizer
+        # log hyperparameters
+        self.save_hyperparameters(kwargs)
 
     def training_step(self, batch, _):
 
