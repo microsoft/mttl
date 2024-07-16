@@ -144,11 +144,11 @@ def get_phatgoose_embeddings(library, args):
 
 def fetch_prototypes(args: ExpertConfig, library: ExpertLibrary):
     if args.merge_or_route == "phatgoose":
-        get_phatgoose_embeddings(library, args)
+        return get_phatgoose_embeddings(library, args)
     elif args.merge_or_route == "arrow":
-        get_arrow_embeddings(library, args)
+        return get_arrow_embeddings(library, args)
     elif args.merge_or_route == "hidden":
-        get_hidden_states(library, args)
+        return get_hidden_states(library, args)
     else:
         raise ValueError(f"Unknown merge_or_route {args.merge_or_route}")
 
@@ -226,7 +226,6 @@ def run_eval(args: ExpertConfig):
         if not args.selector_data_id:
             args.selector_data_id = fetch_prototypes(args, library)
 
-        breakpoint()
         module = MultiExpertModel(
             **vars(train_cfg), selector_config=selector_config
         ).to("cuda")

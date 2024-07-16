@@ -898,7 +898,7 @@ class ArrowTransform(LibraryTransform):
         base_model = None
 
         vectors, eigvals = self.fetch(library, scale=False)
-
+        already_computed = []
         for expert_name, expert in library.items():
             if expert_name in vectors and not recompute:
                 logger.info(
@@ -906,6 +906,7 @@ class ArrowTransform(LibraryTransform):
                         expert_name
                     )
                 )
+                already_computed.append(expert_name)
                 continue
 
             logger.info(f"Computing SVD for expert {expert_name}")
@@ -1045,10 +1046,11 @@ class ArrowTransform(LibraryTransform):
                     vectors[expert_name][parent] = top_vector.real.cpu().numpy()
                     eigvals[expert_name][parent] = top_value.item()
 
-        if persist:
+        to_upload = [x for x in library.keys() if x not in already_computed]
+        if persist and len(to_upload) > 0:
             # add embeddings to the library
             with library.batched_commit():
-                for expert_name in library.keys():
+                for expert_name in to_upload:
                     logger.info(
                         f"Uploading centroids to the library for expert {expert_name}"
                     )

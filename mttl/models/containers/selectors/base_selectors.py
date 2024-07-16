@@ -576,7 +576,7 @@ class PerTokenSelector(TaskToExpertTracker, LoadableLibrarySelector):
             )
 
         layer = kwargs["layer"]
-        self.output_dim, self.input_dim = layer.weight.data.shape
+        self.output_dim, self.input_dim = layer.out_features, layer.in_features
 
         self.prototypes = nn.Parameter(
             torch.empty((0, self.input_dim), device=layer.weight.device)
