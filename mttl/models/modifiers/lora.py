@@ -397,6 +397,7 @@ class SkilledLoRA(LoRA):
         assert np.all(skl.n_skills == n_skills for skl in skilled_loras)
 
         if n_skills == 1:
+            # For Phatgoose, we have a single skill, but we still need a selector
             warn_once(
                 f"You are using Skilled LoRA with only one skill. Make sure this is needed"
             )
