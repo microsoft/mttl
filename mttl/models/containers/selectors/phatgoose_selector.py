@@ -123,7 +123,7 @@ class PhatgooseTrainerSelector(Selector):
         if container is not None:
             self.routing_gates.append(scores.detach().cpu().float())
         return BatchSequenceExpertsAndWeightsSelectorOutput(
-            torch.zeros_like(scores, dtype=torch.int8), scores
+            torch.zeros_like(scores, dtype=torch.long), scores
         )
 
     def add_expert(self, expert_name: str, **kwargs):

@@ -740,7 +740,7 @@ class PerTokenSelector(TaskToExpertTracker, LoadableLibrarySelector):
         if self.library_artifacts is not None:
             proto = get_expert_prototype_from_library_artifacts(
                 expert_name, self.layer_name, self.library_artifacts
-            ).unsqueeze(0)
+            ).view(1, -1)
         else:
             logger.warning(f"no protoypes for {expert_name} in library")
             proto = torch.zeros(

@@ -495,6 +495,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                 weights = torch.zeros(
                     (selection.weights.shape[:-1] + (self.experts.n_skills,)),
                     device=selection.weights.device,
+                    dtype=selection.weights.dtype,
                 ).scatter_add(
                     selection.weights.ndim - 1, selection.experts, selection.weights
                 )
