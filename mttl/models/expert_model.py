@@ -637,6 +637,120 @@ def get_log_prob(logits, labels):
     return torch.gather(log_probs, -1, labels.unsqueeze(-1)).squeeze(-1).mean(-1)
 
 
+class ExpertModelSimPO(EfficientCheckpointModule):
+    def __init__(self, preference_model, **kwargs):
+        super().__init__(**kwargs)
+        self.preference_model = preference_model
+        self.trainable_param_names = kwargs.get("trainable_param_names", None)
+        self.beta = kwargs.get("beta", 0.5)
+        self.loss_type = kwargs.get("loss_type", "sigmoid")
+        self.label_smoothing = kwargs.get("label_smoothing", 0.1)
+        # log hyperparameters
+        self.save_hyperparameters(kwargs)
+
+    def simpo_loss(
+        self, original_prefered_logprob, original_disprefered_logprob, gamma_beta_ratio
+    ):
+        """
+        Compute the SIMPO loss.
+
+        ref: https://github.com/princeton-nlp/SimPO/blob/main/scripts/simpo_trainer.py
+
+        args: original_prefered_logps: log probabiliteis of the prefered expert in the original model
+              original_disprefered_logps: log probabiliteis of the disprefered expert in the original model
+        """
+
+        pi_logratios = original_prefered_logprob - original_disprefered_logprob
+        logits = pi_logratios - gamma_beta_ratio
+
+        if self.loss_type == "sigmoid":
+            losses = (
+                -F.logsigmoid(self.beta * logits) * (1 - self.label_smoothing)
+                - F.logsigmoid(-self.beta * logits) * self.label_smoothing
+            )
+        elif self.loss_type == "hinge":
+            losses = torch.relu(1 - self.beta * logits)
+        else:
+            raise ValueError(
+                f"Loss type {self.loss_type} not supported. Choose from ['sigmoid', 'hinge']"
+            )
+
+        chosen_rewards = (
+            self.beta * original_prefered_logprob.to(self.accelerator.device).detach()
+        )
+
+        reject_rewards = (
+            -self.beta
+            * original_disprefered_logprob.to(self.accelerator.device).detach()
+        )
+
+        return losses, chosen_rewards, reject_rewards
+
+    def training_step(self, batch, _):
+        prompt_prefered_ids = batch["prompt_prefered_ids"]
+        prompt_disprefered_ids = batch["prompt_disprefered_ids"]
+
+        prompt_prefered_mask = batch["prompt_prefered_mask"]
+        prompt_disprefered_mask = batch["prompt_disprefered_mask"]
+
+        # original model
+        model_prefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits,
+            labels=prompt_prefered_ids,
+        )
+
+        model_disprefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits,
+            labels=prompt_disprefered_ids,
+        )
+
+        loss, chosen_rewards, rejected_rewards = self.simpo_loss(
+            model_prefered_log_prob, model_disprefered_log_prob, gamma_beta_ratio=0.1
+        )
+        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train/chosen_rewards", chosen_rewards, on_step=True, on_epoch=True)
+        self.log(
+            "train/rejected_rewards", rejected_rewards, on_step=True, on_epoch=True
+        )
+
+        return loss
+
+    def validation_step(self, batch, _):
+        prompt_prefered_ids = batch["prompt_prefered_ids"]
+        prompt_disprefered_ids = batch["prompt_disprefered_ids"]
+
+        prompt_prefered_mask = batch["prompt_prefered_mask"]
+        prompt_disprefered_mask = batch["prompt_disprefered_mask"]
+
+        # original model
+        model_prefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits,
+            labels=prompt_prefered_ids,
+        )
+
+        model_disprefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits,
+            labels=prompt_disprefered_ids,
+        )
+
+        loss, chosen_rewards, rejected_rewards = self.simpo_loss(
+            model_prefered_log_prob, model_disprefered_log_prob, gamma_beta_ratio=0.1
+        )
+        self.log("val/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("val/chosen_rewards", chosen_rewards, on_step=True, on_epoch=True)
+        self.log("val/rejected_rewards", rejected_rewards, on_step=True, on_epoch=True)
+
+        return loss
+
+
 class ExpertModelDPO(EfficientCheckpointModule):
 
     def __init__(self, preference_model, ref_expert_model, **kwargs):

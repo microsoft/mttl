@@ -19,7 +19,7 @@ from mttl.models.expert_model import (
     ExpertModel,
     ExpertModelDPO,
     MoEModel,
-    MultiExpertModel,
+    ExpertModelSimPO,
 )
 from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
@@ -99,15 +99,15 @@ def run_multitask(args: ExpertConfig):
     # dm = get_datamodule(args)
     # args.n_tasks = len(dm._task_names)
     # args.task_names = dm._task_names
-    ref_model = model_class(
+    model = model_class(
         **vars(args), tokenizer=dm.tokenizer, expert_library=expert_library
     )
-
     if args.rl_training == "dpo":
         args.trainable_param_names = "^(?=.*preference_model)(?=.*prototypes).*"
-        model = model_class(
+        ref_model = model_class(
             **vars(args), tokenizer=dm.tokenizer, expert_library=expert_library
         )
+
         # if args.library_id:
         #     model.add_experts_from_library(expert_library)
         #     patch_prototypes(model, expert_library, args)
@@ -118,7 +118,14 @@ def run_multitask(args: ExpertConfig):
         module = ExpertModelDPO(
             **vars(args), preference_model=model, ref_expert_model=ref_model
         )
-
+    elif args.rl_training == "simpo":
+        args.trainable_param_names = "^(?=.*preference_model)(?=.*prototypes).*"
+        model = model_class(
+            **vars(args), tokenizer=dm.tokenizer, expert_library=expert_library
+        )
+        module = ExpertModelSimPO(**vars(args), preference_model=model)
+    else:
+        module = model
     # get metric monitors for models
     callbacks = get_monitors(args)
     if "mbpp" in args.dataset:
