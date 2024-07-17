@@ -28,6 +28,7 @@ def compute_arrow_embeddings(
         library,
         recompute=recompute_prototypes,
         add_base_proto=base_model_proto,
+        persist=True,
     )
     return cfg.save_name
 

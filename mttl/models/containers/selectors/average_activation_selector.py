@@ -30,7 +30,10 @@ def compute_hidden_states(
         pool=pool,
     )
     HiddenStateComputer(cfg).transform(
-        library, recompute=recompute_prototypes, default_args=default_args
+        library,
+        recompute=recompute_prototypes,
+        default_args=default_args,
+        persist=True,
     )
     return cfg.save_name
 

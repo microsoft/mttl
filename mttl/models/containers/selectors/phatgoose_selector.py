@@ -38,7 +38,10 @@ def compute_phatgoose_embeddings(
 
     phatgoose_transform = PhatgooseTransform(cfg)
     phatgoose_transform.transform(
-        library, default_args=default_args, recompute=recompute_prototypes
+        library,
+        default_args=default_args,
+        recompute=recompute_prototypes,
+        persist=True,
     )
     return cfg.save_name
 
