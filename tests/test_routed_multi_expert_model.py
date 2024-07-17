@@ -259,9 +259,8 @@ class TestMultiExpertModel:
 
         # check the get_router_weights function
         weights = {}
-        for _, selector_dict in module.selectors.items():
-            for _, selector in selector_dict.items():
-                weights[selector.layer_name] = selector.get_routing_weights()
+        for selector in module.selectors:
+            weights[selector.layer_name] = selector.get_routing_weights()
         assert (
             "mod1" in weights["shared.selector"]
             and "mod2" in weights["shared.selector"]
