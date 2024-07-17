@@ -222,7 +222,6 @@ def run_eval(args: ExpertConfig):
         ).to("cuda")
 
         module.add_experts_from_library(library)
-        # patch_prototypes(module, library, args)
 
     elif args.merge_or_route == "oracle":
         """TaskNameSelector"""
