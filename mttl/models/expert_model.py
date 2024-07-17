@@ -711,10 +711,10 @@ class ExpertModelSimPO(EfficientCheckpointModule):
         loss, chosen_rewards, rejected_rewards = self.simpo_loss(
             model_prefered_log_prob, model_disprefered_log_prob, gamma_beta_ratio=0.1
         )
-        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log("train/chosen_rewards", chosen_rewards, on_step=True, on_epoch=True)
+        self.log("train/loss", loss.mean(), on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train/chosen_rewards", chosen_rewards.mean(), on_step=True, on_epoch=True)
         self.log(
-            "train/rejected_rewards", rejected_rewards, on_step=True, on_epoch=True
+            "train/rejected_rewards", rejected_rewards.mean(), on_step=True, on_epoch=True
         )
 
         return loss
@@ -744,9 +744,9 @@ class ExpertModelSimPO(EfficientCheckpointModule):
         loss, chosen_rewards, rejected_rewards = self.simpo_loss(
             model_prefered_log_prob, model_disprefered_log_prob, gamma_beta_ratio=0.1
         )
-        self.log("val/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log("val/chosen_rewards", chosen_rewards, on_step=True, on_epoch=True)
-        self.log("val/rejected_rewards", rejected_rewards, on_step=True, on_epoch=True)
+        self.log("val/loss", loss.mean(), on_step=True, on_epoch=True, prog_bar=True)
+        self.log("val/chosen_rewards", chosen_rewards.mean(), on_step=True, on_epoch=True)
+        self.log("val/rejected_rewards", rejected_rewards.mean(), on_step=True, on_epoch=True)
 
         return loss
 
