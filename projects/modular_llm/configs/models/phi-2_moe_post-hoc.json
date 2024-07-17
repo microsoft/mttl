@@ -10,7 +10,7 @@
     "train_batch_size": 16,
     "predict_batch_size": 4,
     "precision": "bf16",
-    "dataset": "sordonia/flan-10k-flat",
+    "dataset": null,
     "model": "phi-2",
     "model_family": "gpt",
     "load_in_8bit": false,

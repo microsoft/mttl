@@ -14,7 +14,7 @@
     "load_in_8bit": 0,
     "predict_batch_size": 10,
     "precision": "bf16",
-    "dataset": "sordonia/flan-10k-flat",
+    "dataset": null,
     "model": "mistralai/Mistral-7B-v0.1",
     "model_family": "gpt",
     "optimizer": "adamw",
