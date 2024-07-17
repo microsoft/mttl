@@ -128,7 +128,6 @@ def create_selector_for_container(
             layer=container.layer,
             training_config=training_config,
         )
-        selector.__layer_name__ = identifier + ".selector"
         transformer.selectors[modifier_type][identifier] = selector
 
         # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache

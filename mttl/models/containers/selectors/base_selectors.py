@@ -617,6 +617,16 @@ class PerTokenSelector(TaskToExpertTracker, LoadableLibrarySelector):
         if self.config.library_id is not None:
             self.load_from_library()
 
+    def overwrite_prototypes(self, prototypes: torch.tensor):
+        """Overwrites the prototypes with the given tensor."""
+        if (
+            prototypes.shape[0] != self.prototypes.shape[0]
+            or self.prototypes.shape[1] != prototypes.shape[1]
+        ):
+            raise ValueError("Prototypes shape are mismatched!")
+
+        self.prototypes.data = prototypes.astype(self.prototypes.dtype)
+
     @safe_logging
     def _log_angle(self, angle):
         bs, sq, n_exp = angle.size()

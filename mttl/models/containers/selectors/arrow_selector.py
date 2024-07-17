@@ -7,7 +7,7 @@ from mttl.models.containers.selectors.base_selectors import (
 )
 
 
-def comput_arrow_embeddings(
+def compute_arrow_embeddings(
     library,
     selector_data_id=None,
     ab_only=True,
