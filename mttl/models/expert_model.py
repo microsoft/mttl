@@ -676,12 +676,12 @@ class ExpertModelSimPO(EfficientCheckpointModule):
             )
 
         chosen_rewards = (
-            self.beta * original_prefered_logprob.to(self.accelerator.device).detach()
+            self.beta * original_prefered_logprob.detach()
         )
 
         reject_rewards = (
             -self.beta
-            * original_disprefered_logprob.to(self.accelerator.device).detach()
+            * original_disprefered_logprob.detach()
         )
 
         return losses, chosen_rewards, reject_rewards
