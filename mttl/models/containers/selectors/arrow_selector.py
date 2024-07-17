@@ -1,18 +1,13 @@
 from dataclasses import dataclass
-from typing import Dict, Union
-
-import torch
 
 from mttl.models.containers.selectors import (
     PerTokenSelector,
     PerTokenSelectorConfig,
     register_multi_expert_selector,
 )
-from mttl.models.library.expert_library import ExpertLibrary
-from mttl.models.library.library_transforms import ArrowConfig, ArrowTransform
 
 
-def get_arrow_embeddings(
+def comput_arrow_embeddings(
     library,
     selector_data_id=None,
     ab_only=True,
@@ -20,7 +15,9 @@ def get_arrow_embeddings(
     tie_op="concat",
     base_model_proto=False,
     recompute_prototypes=False,
-):
+) -> str:
+    from mttl.models.library.library_transforms import ArrowConfig, ArrowTransform
+
     cfg = ArrowConfig(
         name=selector_data_id,
         ab_only=ab_only,

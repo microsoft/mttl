@@ -13,18 +13,17 @@ from mttl.models.containers.selectors import (
     forward_with_cache,
     register_multi_expert_selector,
 )
-from mttl.models.library.library_transforms import PhatgooseConfig
 from mttl.utils import logger
 
 
-def get_phatgoose_embeddings(
+def compute_phatgoose_embeddings(
     library,
     selector_data_id=None,
     n_steps_pg=100,
     learning_rate_pg=0.001,
     recompute_prototypes=False,
     default_args=None,
-):
+) -> str:
     """Computes Phatgoose embeddings for the given library."""
     from mttl.models.library.library_transforms import (
         PhatgooseConfig,

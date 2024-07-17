@@ -100,10 +100,10 @@ def fetch_prototypes(args: ExpertConfig, library: ExpertLibrary) -> str:
     """Returns the unique hash storing the saved prototypes."""
     if args.merge_or_route == "phatgoose":
         from mttl.models.containers.selectors.phatgoose_selector import (
-            get_phatgoose_embeddings,
+            compute_phatgoose_embeddings,
         )
 
-        return get_phatgoose_embeddings(
+        return compute_phatgoose_embeddings(
             library,
             selector_data_id=args.selector_data_id,
             n_steps_pg=args.n_steps_pg,
@@ -112,9 +112,11 @@ def fetch_prototypes(args: ExpertConfig, library: ExpertLibrary) -> str:
             default_args=args,
         )
     elif args.merge_or_route == "arrow":
-        from mttl.models.containers.selectors.arrow_selector import get_arrow_embeddings
+        from mttl.models.containers.selectors.arrow_selector import (
+            compute_arrow_embeddings,
+        )
 
-        return get_arrow_embeddings(
+        return compute_arrow_embeddings(
             library,
             selector_data_id=args.selector_data_id,
             ab_only=args.ab_only,
@@ -125,10 +127,10 @@ def fetch_prototypes(args: ExpertConfig, library: ExpertLibrary) -> str:
         )
     elif args.merge_or_route == "hidden":
         from mttl.models.containers.selectors.average_activation_selector import (
-            get_hidden_states,
+            compute_hidden_states,
         )
 
-        return get_hidden_states(
+        return compute_hidden_states(
             library,
             selector_data_id=args.selector_data_id,
             use_base_model_only=args.use_base_model_only,

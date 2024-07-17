@@ -1,20 +1,13 @@
 from dataclasses import dataclass
-from typing import Dict
-
-import torch
 
 from mttl.models.containers.selectors import (
     PerTokenSelector,
     PerTokenSelectorConfig,
     register_multi_expert_selector,
 )
-from mttl.models.library.library_transforms import (
-    HiddenStateComputer,
-    HiddenStateComputerConfig,
-)
 
 
-def get_hidden_states(
+def compute_hidden_states(
     library,
     selector_data_id=None,
     use_base_model_only=False,
@@ -23,7 +16,12 @@ def get_hidden_states(
     track="each_layer",
     pool="last",
     default_args=None,
-):
+) -> str:
+    from mttl.models.library.library_transforms import (
+        HiddenStateComputer,
+        HiddenStateComputerConfig,
+    )
+
     cfg = HiddenStateComputerConfig(
         name=selector_data_id,
         use_base_model_only=use_base_model_only,
