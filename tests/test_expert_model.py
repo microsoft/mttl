@@ -50,7 +50,6 @@ def test_expert_model():
 
 
 def test_from_pretrained(tmp_path):
-
     # create a dummy library
     model = MultiExpertModel(model="EleutherAI/gpt-neo-125m", device_map="cpu")
     model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
