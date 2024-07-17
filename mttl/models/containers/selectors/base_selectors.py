@@ -14,7 +14,7 @@ from mttl.models.library.expert import ExpertInfo
 from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
 from mttl.models.ranker.classifier_ranker import ClusterPredictor
 from mttl.models.utils import MetricLogger
-from mttl.utils import logger
+from mttl.utils import logger, warn_once
 
 SELECTORS_NAME_TO_KLASS = {}
 SELECTORS_CONFIG_TO_NAME = {}
@@ -743,7 +743,9 @@ class PerTokenSelector(TaskToExpertTracker, LoadableLibrarySelector):
                 expert_name, self.layer_name, self.library_artifacts
             ).view(1, -1)
         else:
-            logger.warning(f"no protoypes for {expert_name} in library")
+            warn_once(
+                f"Library artifacts not loaded for {self.__class__}, using zero initialization."
+            )
             proto = torch.zeros(
                 1,
                 self.prototypes.size(1),
