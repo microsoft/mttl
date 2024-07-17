@@ -11,13 +11,13 @@ if [ -z "${DATASET_PATH}" ]; then
 fi
 
 for task_name in "race_middle_Select_the_best_answer_no_instructions_"  "drop_2_0_0"; do
-    CUDA_VISIBLE_DEVICES=0 python train_experts_main.py \
+    python train_experts_main.py \
         -c configs/models/gptneo_125m.json \
         -k \
         output_dir=output/${task_name}/ \
         finetune_task_name=${task_name} \
         expert_name=${task_name} \
-        dataset=$DATASET_PATH \
+        dataset=${DATASET_PATH} \
         num_train_epochs=1 \
-        library_id=$LIBRARY_PATH
+        library_id=${LIBRARY_PATH}
 done
