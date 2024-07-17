@@ -6,12 +6,17 @@ from functools import partial
 from typing import Dict, List
 
 import torch
+import torch.nn.functional as F
 from torch.optim.optimizer import Optimizer
 from transformers import PreTrainedModel
 
 from mttl.models.containers import add_expert_to_transformer
 from mttl.models.containers.expert_containers import ExpertContainer
-from mttl.models.containers.selectors import Selector, SelectorConfig
+from mttl.models.containers.selectors import (
+    ArrowSelectorConfig,
+    Selector,
+    SelectorConfig,
+)
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.library.expert_library import ExpertLibrary
@@ -589,6 +594,362 @@ class MultiExpertModel(ExpertModel):
         self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
 
 
+def calculate_DPO_loss(
+    original_prefered_logprob,
+    original_disprefered_logprob,
+    ref_prefered_logprob,
+    ref_disprefered_logprob,
+    beta=0.5,
+):
+    """
+    Calculate the DPO loss.
+    original_prefered_logprob: the logprob of the prefered expert in the original model
+    original_disprefered_logprob: the logprob of the disprefered expert in the original model
+    ref_prefered_logprob: the logprob of the prefered expert in the reference model
+    ref_disprefered_logprob: the logprob of the disprefered expert in the reference model
+    """
+
+    original_prefered_relative_logprob = (
+        original_prefered_logprob - ref_prefered_logprob
+    )
+    disprefered_relative_logprob = (
+        original_disprefered_logprob - ref_disprefered_logprob
+    )
+
+    reward_accuracies = (
+        (original_prefered_relative_logprob > disprefered_relative_logprob)
+        .float()
+        .mean(dim=-1)
+    )
+    reward_margins = (
+        original_prefered_relative_logprob - disprefered_relative_logprob
+    ).mean(dim=-1)
+
+    loss = -F.logsigmoid(
+        beta * (original_prefered_relative_logprob - disprefered_relative_logprob)
+    ).mean(dim=-1)
+
+    return loss, reward_accuracies, reward_margins
+
+
+def get_log_prob(logits, labels):
+    log_probs = F.log_softmax(logits, dim=-1)
+    return torch.gather(log_probs, -1, labels.unsqueeze(-1)).squeeze(-1).mean(-1)
+
+
+class ExpertModelSimPO(EfficientCheckpointModule):
+    def __init__(self, preference_model, **kwargs):
+        super().__init__(**kwargs)
+        self.preference_model = preference_model
+        self.trainable_param_names = kwargs.get("trainable_param_names", None)
+        self.beta = kwargs.get("beta", 0.5)
+        self.loss_type = kwargs.get("loss_type", "sigmoid")
+        self.label_smoothing = kwargs.get("label_smoothing", 0.1)
+        # log hyperparameters
+        self.save_hyperparameters(kwargs)
+
+    def simpo_loss(
+        self, original_prefered_logprob, original_disprefered_logprob, gamma_beta_ratio
+    ):
+        """
+        Compute the SIMPO loss.
+
+        ref: https://github.com/princeton-nlp/SimPO/blob/main/scripts/simpo_trainer.py
+
+        args: original_prefered_logps: log probabiliteis of the prefered expert in the original model
+              original_disprefered_logps: log probabiliteis of the disprefered expert in the original model
+        """
+
+        pi_logratios = original_prefered_logprob - original_disprefered_logprob
+        logits = pi_logratios - gamma_beta_ratio
+
+        if self.loss_type == "sigmoid":
+            losses = (
+                -F.logsigmoid(self.beta * logits) * (1 - self.label_smoothing)
+                - F.logsigmoid(-self.beta * logits) * self.label_smoothing
+            )
+        elif self.loss_type == "hinge":
+            losses = torch.relu(1 - self.beta * logits)
+        else:
+            raise ValueError(
+                f"Loss type {self.loss_type} not supported. Choose from ['sigmoid', 'hinge']"
+            )
+
+        chosen_rewards = (
+            self.beta * original_prefered_logprob.detach()
+        )
+
+        reject_rewards = (
+            -self.beta
+            * original_disprefered_logprob.detach()
+        )
+
+        return losses, chosen_rewards, reject_rewards
+
+    def training_step(self, batch, _):
+        prompt_prefered_ids = batch["prompt_prefered_ids"]
+        prompt_disprefered_ids = batch["prompt_disprefered_ids"]
+
+        prompt_prefered_mask = batch["prompt_prefered_mask"]
+        prompt_disprefered_mask = batch["prompt_disprefered_mask"]
+
+        # original model
+        model_prefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits,
+            labels=prompt_prefered_ids,
+        )
+
+        model_disprefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits,
+            labels=prompt_disprefered_ids,
+        )
+
+        loss, chosen_rewards, rejected_rewards = self.simpo_loss(
+            model_prefered_log_prob, model_disprefered_log_prob, gamma_beta_ratio=0.1
+        )
+        self.log("train/loss", loss.mean(), on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train/chosen_rewards", chosen_rewards.mean(), on_step=True, on_epoch=True)
+        self.log(
+            "train/rejected_rewards", rejected_rewards.mean(), on_step=True, on_epoch=True
+        )
+
+        return loss.mean()
+
+    def validation_step(self, batch, _):
+        prompt_prefered_ids = batch["prompt_prefered_ids"]
+        prompt_disprefered_ids = batch["prompt_disprefered_ids"]
+
+        prompt_prefered_mask = batch["prompt_prefered_mask"]
+        prompt_disprefered_mask = batch["prompt_disprefered_mask"]
+
+        # original model
+        model_prefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits,
+            labels=prompt_prefered_ids,
+        )
+
+        model_disprefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits,
+            labels=prompt_disprefered_ids,
+        )
+
+        loss, chosen_rewards, rejected_rewards = self.simpo_loss(
+            model_prefered_log_prob, model_disprefered_log_prob, gamma_beta_ratio=0.1
+        )
+        self.log("val/loss", loss.mean(), on_step=True, on_epoch=True, prog_bar=True)
+        self.log("val/chosen_rewards", chosen_rewards.mean(), on_step=True, on_epoch=True)
+        self.log("val/rejected_rewards", rejected_rewards.mean(), on_step=True, on_epoch=True)
+
+        return loss.mean()
+
+
+class ExpertModelDPO(EfficientCheckpointModule):
+
+    def __init__(self, preference_model, ref_expert_model, **kwargs):
+        super().__init__(**kwargs)
+        self.preference_model = preference_model
+        self.ref_expert_model = ref_expert_model
+        self.trainable_param_names = kwargs.get("trainable_param_names", None)
+        # log hyperparameters
+        self.save_hyperparameters(kwargs)
+
+    def training_step(self, batch, _):
+
+        prompt_prefered_ids = batch["prompt_prefered_ids"]
+        prompt_disprefered_ids = batch["prompt_disprefered_ids"]
+
+        prompt_prefered_mask = batch["prompt_prefered_mask"]
+        prompt_disprefered_mask = batch["prompt_disprefered_mask"]
+
+        # original model
+        model_prefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits,
+            labels=prompt_prefered_ids,
+        )
+
+        model_disprefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits,
+            labels=prompt_disprefered_ids,
+        )
+
+        # reference model
+        ref_prefered_log_prob = get_log_prob(
+            self.ref_expert_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits,
+            labels=prompt_prefered_ids,
+        )
+
+        ref_disprefered_log_prob = get_log_prob(
+            self.ref_expert_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits,
+            labels=prompt_disprefered_ids,
+        )
+
+        loss, reward_accuracies, reward_margins = calculate_DPO_loss(
+            model_prefered_log_prob,
+            model_disprefered_log_prob,
+            ref_prefered_log_prob,
+            ref_disprefered_log_prob,
+            beta=0.1,
+        )
+        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+
+        self.log(
+            "train/reward_accuracies",
+            reward_accuracies,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "train/reward_margins",
+            reward_margins,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+
+        return loss
+
+    def validation_step(self, batch, _):
+        prompt_prefered_ids = batch["prompt_prefered_ids"]
+        prompt_disprefered_ids = batch["prompt_disprefered_ids"]
+
+        prompt_prefered_mask = batch["prompt_prefered_mask"]
+        prompt_disprefered_mask = batch["prompt_disprefered_mask"]
+
+        # original model
+        model_prefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits,
+            labels=prompt_prefered_ids,
+        )
+
+        model_disprefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits,
+            labels=prompt_disprefered_ids,
+        )
+
+        # reference model
+        ref_prefered_log_prob = get_log_prob(
+            self.ref_expert_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits,
+            labels=prompt_prefered_ids,
+        )
+
+        ref_disprefered_log_prob = get_log_prob(
+            self.ref_expert_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits,
+            labels=prompt_disprefered_ids,
+        )
+
+        loss, reward_accuracies, reward_margins = calculate_DPO_loss(
+            model_prefered_log_prob,
+            model_disprefered_log_prob,
+            ref_prefered_log_prob,
+            ref_disprefered_log_prob,
+            beta=0.1,
+        )
+
+        self.log("val/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log(
+            "val/reward_accuracies",
+            reward_accuracies,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "val/reward_margins",
+            reward_margins,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+
+        return loss
+
+    def test_step(self, batch, _):
+        prompt_prefered_ids = batch["prompt_prefered_ids"]
+        prompt_disprefered_ids = batch["prompt_disprefered_ids"]
+
+        prompt_prefered_mask = batch["prompt_prefered_mask"]
+        prompt_disprefered_mask = batch["prompt_disprefered_mask"]
+
+        # original model
+        model_prefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits,
+            labels=prompt_prefered_ids,
+        )
+
+        model_disprefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits,
+            labels=prompt_disprefered_ids,
+        )
+
+        # reference model
+        ref_prefered_log_prob = get_log_prob(
+            self.ref_expert_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits,
+            labels=prompt_prefered_ids,
+        )
+
+        ref_disprefered_log_prob = get_log_prob(
+            self.ref_expert_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits,
+            labels=prompt_disprefered_ids,
+        )
+
+        loss, reward_accuracies, reward_margins = calculate_DPO_loss(
+            model_prefered_log_prob,
+            model_disprefered_log_prob,
+            ref_prefered_log_prob,
+            ref_disprefered_log_prob,
+            beta=0.1,
+        )
+        self.log("test/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log(
+            "test/reward_accuracies",
+            reward_accuracies,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "test/reward_margins",
+            reward_margins,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        return loss
+
+
 class MoEModel(MultiExpertModel):
     def __init__(self, expert_library: ExpertLibrary = None, **kwargs):
         kwargs["top_k"] = kwargs["moe_top_k"]
@@ -620,15 +981,14 @@ class MoEModel(MultiExpertModel):
                     self.hparams.library_id
                 )
             for i, expert in enumerate(sorted(list(expert_library.keys()))):
-                self.add_expert_instance(expert_library[expert], expert_name=f"e{i}")
-
+                self.add_expert_instance(expert_library[expert], expert_name=expert)
             self.moe_num_experts = i + 1
             if isinstance(
-                self.selector_config, (ArrowConfig, HiddenStateComputerConfig)
+                self.selector_config, (ArrowSelectorConfig, HiddenStateComputerConfig)
             ):
                 from projects.modular_llm.eval_library import patch_prototypes
 
-                patch_prototypes(self, expert_library, self.selector_config)
+                patch_prototypes(self, expert_library, self.hparams)
 
     def training_step(self, batch, _):
         loss = super().training_step(batch, _)
