@@ -173,7 +173,6 @@ def run_eval(args: ExpertConfig):
     )
     an_expert = library[next(iter(library.keys()))]
     train_cfg = deepcopy(an_expert.training_config)
-    # train_cfg.device_map = "cpu"
     train_cfg.subsample_dev = args.subsample_dev
     train_cfg.subsample_test = args.subsample_test
 
