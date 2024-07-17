@@ -1,30 +1,40 @@
 from dataclasses import dataclass
 from typing import Dict
-from mttl.models.library.library_transforms import (
-    HiddenStateComputer,
-    HiddenStateComputerConfig,
-)
+
 import torch
+
 from mttl.models.containers.selectors import (
     PerTokenSelector,
     PerTokenSelectorConfig,
     register_multi_expert_selector,
 )
+from mttl.models.library.library_transforms import (
+    HiddenStateComputer,
+    HiddenStateComputerConfig,
+)
 
 
-def get_hidden_states(library, args):
+def get_hidden_states(
+    library,
+    selector_data_id=None,
+    use_base_model_only=False,
+    max_samples_per_task=10,
+    recompute_prototypes=False,
+    track="each_layer",
+    pool="last",
+    default_args=None,
+):
     cfg = HiddenStateComputerConfig(
-        use_base_model_only=args.use_base_model_only,
-        max_samples_per_task=args.max_samples_per_task,
-        name=args.expert_embeds_save_name,
-        track=args.track,
-        pool=args.pool,
+        name=selector_data_id,
+        use_base_model_only=use_base_model_only,
+        max_samples_per_task=max_samples_per_task,
+        track=track,
+        pool=pool,
     )
-    output = HiddenStateComputer(cfg).transform(
-        library, recompute=args.recompute_prototypes, default_args=args
+    HiddenStateComputer(cfg).transform(
+        library, recompute=recompute_prototypes, default_args=default_args
     )
-
-    return output
+    return cfg.save_name
 
 
 @dataclass

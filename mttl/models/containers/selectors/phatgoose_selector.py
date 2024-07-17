@@ -1,46 +1,47 @@
-from typing import Dict
 from dataclasses import dataclass
+from typing import Dict
+
 import torch
 from torch import nn
 
-from mttl.utils import logger
 from mttl.models.containers.selectors import (
     BatchSequenceExpertsAndWeightsSelectorOutput,
-    PerTokenSelectorConfig,
     PerTokenSelector,
+    PerTokenSelectorConfig,
     Selector,
     SelectorConfig,
     forward_with_cache,
     register_multi_expert_selector,
 )
 from mttl.models.library.library_transforms import PhatgooseConfig
+from mttl.utils import logger
 
 
-def compute_phatgoose_embeddings(
+def get_phatgoose_embeddings(
     library,
-    n_steps_pg,
-    learning_rate_pg,
-    expert_embeds_save_name=None,
+    selector_data_id=None,
+    n_steps_pg=100,
+    learning_rate_pg=0.001,
     recompute_prototypes=False,
     default_args=None,
 ):
     """Computes Phatgoose embeddings for the given library."""
     from mttl.models.library.library_transforms import (
-        PhatgooseTransform,
         PhatgooseConfig,
+        PhatgooseTransform,
     )
 
-    phatgoose_transform = PhatgooseTransform(
-        PhatgooseConfig(
-            n_steps=n_steps_pg,
-            learning_rate=learning_rate_pg,
-            name=expert_embeds_save_name,
-        )
+    cfg = PhatgooseConfig(
+        n_steps=n_steps_pg,
+        learning_rate=learning_rate_pg,
+        name=selector_data_id,
     )
 
-    return phatgoose_transform.transform(
+    phatgoose_transform = PhatgooseTransform(cfg)
+    phatgoose_transform.transform(
         library, default_args=default_args, recompute=recompute_prototypes
     )
+    return cfg.save_name
 
 
 @dataclass
@@ -64,8 +65,8 @@ class PhatgooseSelector(PerTokenSelector):
     def _load_from_library(self):
         """Fetches prototypes from the library."""
         from mttl.models.library.library_transforms import (
-            PhatgooseTransform,
             PhatgooseConfig,
+            PhatgooseTransform,
         )
 
         return PhatgooseTransform(
