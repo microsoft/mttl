@@ -1,19 +1,20 @@
 from dataclasses import dataclass
 from typing import Dict, List, Union
-from torch import nn
-import torch
 
-from mttl.utils import logger
+import torch
+from torch import nn
+
 from mttl.models.containers.selectors.base_selectors import (
-    SelectorConfig,
-    Selector,
-    register_multi_expert_selector,
-    ExpertsAndWeightsSelectorOutput,
     BatchExpertsSplitsAndWeightsSelectorOutput,
+    ExpertsAndWeightsSelectorOutput,
     ExpertsSplitsAndWeightsSelectorOutput,
+    Selector,
+    SelectorConfig,
     SelectorOutput,
     forward_with_cache,
+    register_multi_expert_selector,
 )
+from mttl.utils import logger
 
 
 @dataclass
