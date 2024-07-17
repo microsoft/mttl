@@ -625,7 +625,9 @@ class PerTokenSelector(TaskToExpertTracker, LoadableLibrarySelector):
         ):
             raise ValueError("Prototypes shape are mismatched!")
 
-        self.prototypes.data = prototypes.astype(self.prototypes.dtype)
+        self.prototypes.data = prototypes.to(
+            dtype=self.prototypes.dtype, device=self.prototypes.device
+        )
 
     @safe_logging
     def _log_angle(self, angle):
