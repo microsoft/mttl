@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from mttl.models.containers.selectors import (
+from mttl.models.containers.selectors.base_selectors import (
     PerTokenSelector,
     PerTokenSelectorConfig,
     register_multi_expert_selector,

@@ -4,7 +4,7 @@ from typing import Dict
 import torch
 from torch import nn
 
-from mttl.models.containers.selectors import (
+from mttl.models.containers.selectors.base_selectors import (
     BatchSequenceExpertsAndWeightsSelectorOutput,
     PerTokenSelector,
     PerTokenSelectorConfig,
