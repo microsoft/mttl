@@ -13,7 +13,6 @@
     "train_batch_size": 16,
     "predict_batch_size": 8,
     "precision": "16",
-    "dataset": null,
     "model": "EleutherAI/gpt-neo-125m",
     "model_family": "gpt",
     "optimizer": "adamw",
