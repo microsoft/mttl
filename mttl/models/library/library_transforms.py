@@ -5,7 +5,7 @@ import re
 from abc import abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Union
 
 import numpy as np
 import sklearn.decomposition
@@ -96,20 +96,34 @@ class SVDEmbeddingTransform(LibraryTransform):
         super().__init__(config)
         self.random_state = random_state
 
-    def transform(self, library, persist=True, recompute=False):
-        if type(library) == str:
+    @torch.no_grad()
+    def fetch(self, library: Union[str, ExpertLibrary]):
+        if isinstance(library, str):
             library = ExpertLibrary.get_expert_library(library)
 
         # try to fetch auxiliary data
         output = library.get_auxiliary_data(data_type=self.config.save_name)
 
-        if len(output) > 0 and not recompute:
+        if len(output) == len(library):
             logger.info("Found {} precomputed SVD Embeddings".format(len(output)))
+            return output
 
-            return (
-                np.stack([output[expert_name] for expert_name in library.keys()]),
-                None,
-            )
+        raise ValueError(
+            "SVD embeddings are missing or corrupted, please recompute them."
+        )
+
+    def transform(self, library, persist=True, recompute=False):
+        if type(library) == str:
+            library = ExpertLibrary.get_expert_library(library)
+
+        try:
+            output = self.fetch(library)
+
+            if not recompute:
+                logger.info("Found {} precomputed SVD Embeddings".format(len(output)))
+                return output
+        except ValueError:
+            pass
 
         logger.info("Computing SVD Embeddings for %s experts", len(library))
         logger.info("Saving to: %s", self.config.save_name)
@@ -166,7 +180,7 @@ class SVDEmbeddingTransform(LibraryTransform):
                         data=experts_embeddings[i],
                         force=True,  # make sure we overwrite
                     )
-        return dict(zip(names, experts_embeddings)), svd
+        return dict(zip(names, experts_embeddings))
 
 
 @dataclass
@@ -420,6 +434,22 @@ class HiddenStateComputer(LibraryTransform):
         return {k: v for k, v in zip(keys, values)}
 
     @torch.no_grad()
+    def fetch(self, library: Union[str, ExpertLibrary]):
+        if isinstance(library, str):
+            library = ExpertLibrary.get_expert_library(library)
+
+        # try to fetch auxiliary data
+        output = library.get_auxiliary_data(data_type=self.config.save_name)
+
+        if len(output) > 0:
+            logger.info("Found {} precomputed centroids".format(len(output)))
+            return output
+
+        raise ValueError(
+            "Hidden states are missing or corrupted, please recompute them."
+        )
+
+    @torch.no_grad()
     def transform(
         self,
         library: ExpertLibrary,
@@ -428,17 +458,19 @@ class HiddenStateComputer(LibraryTransform):
         default_args=None,
         device="cpu",
     ) -> Expert:
-        if type(library) == str:
-            library = ExpertLibrary.get_expert_library(library)
         from mttl.models.expert_model import MultiExpertModel
 
-        logger.info(f"Hidden state computer dumps to: {self.config.save_name}")
+        if isinstance(library, str):
+            library = ExpertLibrary.get_expert_library(library)
 
-        output = library.get_auxiliary_data(data_type=self.config.save_name)
+        try:
+            protos = self.fetch(library)
 
-        if len(output) == len(library) and not recompute:
-            logger.info("Found {} precomputed centroids".format(len(output)))
-            return output
+            if not recompute:
+                logger.info("Found {} precomputed centroids".format(len(protos)))
+                return protos
+        except ValueError:
+            pass
 
         logger.info("Computing centroids for {} experts".format(len(library)))
         output = {}
@@ -554,6 +586,23 @@ class PhatgooseTransform(HiddenStateComputer):
     def __init__(self, config: PhatgooseConfig = None):
         super().__init__(config or PhatgooseConfig())
 
+    @torch.no_grad()
+    def fetch(self, library: Union[str, ExpertLibrary]):
+        if isinstance(library, str):
+            library = ExpertLibrary.get_expert_library(library)
+
+        # try to fetch auxiliary data
+        output = library.get_auxiliary_data(data_type=self.config.save_name)
+
+        if len(output) != len(library):
+            logger.warn(
+                "Found {} precomputed Phatgoose prototypes. Some experts might not have prototypes.".format(
+                    len(output)
+                )
+            )
+
+        return output
+
     def transform(
         self,
         library,
@@ -577,19 +626,11 @@ class PhatgooseTransform(HiddenStateComputer):
             expert: Expert = library[expert_name]
             logger.info("Phatgoose save name : {}".format(self.config.save_name))
 
-            if (
-                not recompute
-                and len(loaded_output) > 0
-                and expert_name
-                in loaded_output  # cause loaded_output loads all experts
-            ):
-                logger.info("Found {} precomputed gates".format(len(loaded_output)))
+            if not recompute and expert_name in loaded_output:
+                logger.info("Loading precomputed gates for {}".format(expert_name))
+
                 # format is dict[layer_name] = embedding, layer_name ends with selector.{task_name}.v
-                outputs[expert_name] = (
-                    loaded_output
-                    if not expert_name in loaded_output
-                    else loaded_output[expert_name]
-                )
+                outputs[expert_name] = loaded_output[expert_name]
                 continue
 
             training_config: ExpertConfig = expert.training_config
@@ -726,8 +767,10 @@ class ArrowTransform(LibraryTransform):
         super().__init__(config or ArrowConfig())
 
     def _maybe_scale(self, vectors, eigvals):
-        """Post Processing of the retrieved outputs,
-        scales the output by the eigenvalue if needed"""
+        """
+        Post Processing of the retrieved outputs,
+        scales the output by the eigenvalue if needed.
+        """
         output = {}
         for expert_name, expert_data in vectors.items():
             output[expert_name] = {}
@@ -735,7 +778,6 @@ class ArrowTransform(LibraryTransform):
                 if self.config.scale:
                     vector = vector * eigvals[expert_name][layer_name]
                 output[expert_name][layer_name] = torch.from_numpy(vector)
-
         return output
 
     def _low_rank_svd(self, A, B):
@@ -824,10 +866,14 @@ class ArrowTransform(LibraryTransform):
         return dict_keys
 
     @torch.no_grad()
-    def transform(
-        self, library, persist=True, recompute=False, add_base_proto=False
-    ) -> Expert:
-        if isinstance(library, str):
+    def fetch(self, library: Union[str, ExpertLibrary], scale=True):
+        """Fetch arrow prototypes from the library, raises ValueError if they are not computed.
+
+        Args:
+            library (Union[str, ExpertLibrary]): ExpertLibrary object or its name
+            scale (bool): If True, scale the output by the eigenvalue
+        """
+        if not isinstance(library, ExpertLibrary):
             library = ExpertLibrary.get_expert_library(library)
 
         # try to fetch auxiliary data
@@ -837,22 +883,33 @@ class ArrowTransform(LibraryTransform):
         eigvals = library.get_auxiliary_data(
             data_type=self.config.save_name + "_eigvals"
         )
+        if scale:
+            return self._maybe_scale(vectors, eigvals)
+        return vectors, eigvals
 
+    @torch.no_grad()
+    def transform(
+        self, library, persist=True, recompute=False, add_base_proto=False
+    ) -> Expert:
         logger.info("Arrow save name : {}".format(self.config.save_name))
 
-        if len(vectors) == len(eigvals) == len(library) and not recompute:
-            logger.info("Found {} precomputed centroids".format(len(vectors)))
-
-            if add_base_proto:
-                base_vec, base_val = self._compute_base_proto(library, persist=persist)
-                vectors.update({"base_model": base_vec})
-                eigvals.update({"base_model": base_val})
-
-            return self._maybe_scale(vectors, eigvals)
+        if isinstance(library, str):
+            library = ExpertLibrary.get_expert_library(library)
 
         base_model = None
-        vectors, eigvals = {}, {}
+
+        vectors, eigvals = self.fetch(library, scale=False)
+        already_computed = []
         for expert_name, expert in library.items():
+            if expert_name in vectors and not recompute:
+                logger.info(
+                    "Found precomputed Arrow prototypes for expert {}".format(
+                        expert_name
+                    )
+                )
+                already_computed.append(expert_name)
+                continue
+
             logger.info(f"Computing SVD for expert {expert_name}")
             vectors[expert_name] = {}
             eigvals[expert_name] = {}
@@ -990,10 +1047,11 @@ class ArrowTransform(LibraryTransform):
                     vectors[expert_name][parent] = top_vector.real.cpu().numpy()
                     eigvals[expert_name][parent] = top_value.item()
 
-        if persist:
+        to_upload = [x for x in library.keys() if x not in already_computed]
+        if persist and len(to_upload) > 0:
             # add embeddings to the library
             with library.batched_commit():
-                for expert_name in library.keys():
+                for expert_name in to_upload:
                     logger.info(
                         f"Uploading centroids to the library for expert {expert_name}"
                     )
@@ -1269,15 +1327,15 @@ class MBCWithCosSimTransform(LibraryTransform):
                 svd_config,
                 random_state=self.config.random_state,
             )
-            embeddings, svd = svd_embedder.transform(library, persist=persist)
+            embeddings = svd_embedder.transform(library, persist=persist)
             del svd_embedder
-            return embeddings, svd
+            return embeddings
 
         embeddings = library.get_auxiliary_data(svd_config.save_name)
 
         if len(embeddings) != len(library) or recompute:
             logger.info("Recomputing embeddings for clustering.")
-            embeddings, _ = create_embeddings()
+            embeddings = create_embeddings()
 
         # Extract the embeddings as a numpy array
         expert_names, embeddings = zip(*sorted(embeddings.items()))

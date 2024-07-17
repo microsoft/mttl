@@ -14,7 +14,6 @@
     "load_in_8bit": 0,
     "predict_batch_size": 10,
     "precision": "bf16",
-    "dataset": "sordonia/flan-10k-flat",
     "model": "meta-llama/Meta-Llama-3-8B-Instruct",
     "model_family": "gpt",
     "optimizer": "adamw",

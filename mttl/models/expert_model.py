@@ -3,7 +3,7 @@ import re
 import threading
 from collections import defaultdict
 from functools import partial
-from typing import Dict, List
+from typing import Dict, List, Union
 
 import torch
 from torch.optim.optimizer import Optimizer
@@ -12,6 +12,7 @@ from transformers import PreTrainedModel
 from mttl.models.containers import add_expert_to_transformer
 from mttl.models.containers.expert_containers import ExpertContainer
 from mttl.models.containers.selectors import Selector, SelectorConfig
+from mttl.models.containers.selectors.base_selectors import LoadableSelectorConfig
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.library.expert_library import ExpertLibrary
@@ -67,14 +68,6 @@ class ExpertModel(EfficientCheckpointModule):
         # init the transformer just with the modifier config, this avoids
         # passing the whole training config to the modify_transformer func
         self.modifier_config = ModifierConfig.from_training_config(self.training_config)
-        # config about the routing
-        if "selector_config" in kwargs:
-            self.selector_config = kwargs.pop("selector_config")
-        else:
-            self.selector_config = SelectorConfig.from_training_config(
-                self.training_config
-            )
-
         self.model = modify_transformer(model_object, self.modifier_config)
 
         # replace w flash attn!
@@ -285,7 +278,64 @@ class MultiExpertModel(ExpertModel):
         config_kwargs["model_modifier"] = None
         super().__init__(**config_kwargs)
 
+        # config about the routing
+        if "selector_config" in config_kwargs:
+            self.selector_config = config_kwargs.pop("selector_config")
+        else:
+            self.selector_config = SelectorConfig.from_training_config(
+                self.training_config
+            )
+
         self.experts_names = []
+
+    @classmethod
+    def from_pretrained_library(
+        cls,
+        library_id: Union[str, ExpertLibrary],
+        selector_configs: Union[SelectorConfig, Dict[str, SelectorConfig]] = None,
+        remote_token: str = None,
+        **kwargs,
+    ):
+        from copy import deepcopy
+
+        if not isinstance(library_id, ExpertLibrary):
+            library = ExpertLibrary.get_expert_library(
+                repo_id=library_id,
+                token=remote_token,
+            )
+        else:
+            library = library_id
+
+        # get a config file from the library, and initialize the expert model
+        an_expert = library[next(iter(library.keys()))]
+
+        train_cfg = deepcopy(an_expert.training_config)
+        train_cfg.device_map = "cpu"
+
+        model = cls(**vars(train_cfg))
+        model.add_experts_from_library(library)
+
+        # set selector for the added experts
+        if selector_configs is not None:
+            # assume "lora" is the default modifier type
+            if type(selector_configs) is SelectorConfig:
+                logger.info(
+                    "Assuming provided selector config is for `lora` modifier type."
+                )
+                selector_configs = {"lora": selector_configs}
+
+            for modifier_type, selector_config in selector_configs.items():
+                # inject the library id if it is None
+                if (
+                    isinstance(selector_config, LoadableSelectorConfig)
+                    and selector_config.library_id is None
+                ):
+                    selector_config.library_id = library_id
+
+                model.set_selector(modifier_type, selector_config)
+        else:
+            logger.info("No selector config provided, assuming expert name selector!")
+        return model
 
     @property
     def lock(self):
@@ -303,8 +353,13 @@ class MultiExpertModel(ExpertModel):
         return containers
 
     @property
-    def selectors(self) -> Dict[str, Selector]:
-        return self.model.selectors
+    def selectors(self) -> Dict[str, List[Selector]]:
+        selectors = defaultdict(list)
+        for modifier, selectors_dict in self.model.selectors.items():
+            for selector in selectors_dict.values():
+                if isinstance(selector, Selector):
+                    selectors[modifier].append(selector)
+        return selectors
 
     def delete_expert_container(self):
         """
@@ -335,7 +390,10 @@ class MultiExpertModel(ExpertModel):
             with tqdm.tqdm(
                 total=len(library), desc="Adding experts...", unit="expert"
             ) as progress_bar:
-                for _ in concurrent.futures.as_completed(futures):
+                for result in concurrent.futures.as_completed(futures):
+                    # raise exception
+                    if result.exception():
+                        raise result.exception()
                     progress_bar.update(1)
 
     def load_from_module_dict(self, module_dict, action="route"):
@@ -440,7 +498,6 @@ class MultiExpertModel(ExpertModel):
         self,
         modifier_type: str,
         selector_config: SelectorConfig,
-        selector_weights: dict = None,
     ):
         from mttl.models.containers import replace_selector_for_container
 
@@ -448,7 +505,6 @@ class MultiExpertModel(ExpertModel):
             self.model,
             modifier_type,
             selector_config,
-            selector_weights,
             force_replace=True,
         )
         assert self.model.selectors[modifier_type]
@@ -534,6 +590,19 @@ class MultiExpertModel(ExpertModel):
 
         retrieved_expert = Expert(expert_info=expert_info, expert_weights=expert_params)
         return retrieved_expert
+
+    def save_to_library(self, library_id):
+        """
+        Saves the current loaded experts to the specified library.
+
+        Args:
+            library_id (str): The ID of the library to save the experts to.
+        """
+        library = ExpertLibrary.get_expert_library(library_id, create=True)
+        for expert_name in self.experts_names:
+            expert = self.get_expert_instance(expert_name)
+            library.add_expert(expert)
+        return library
 
     def get_merged_expert(
         self, modifier_type: str = "lora", with_global_names=True, **kwargs
@@ -623,12 +692,6 @@ class MoEModel(MultiExpertModel):
                 self.add_expert_instance(expert_library[expert], expert_name=f"e{i}")
 
             self.moe_num_experts = i + 1
-            if isinstance(
-                self.selector_config, (ArrowConfig, HiddenStateComputerConfig)
-            ):
-                from projects.modular_llm.eval_library import patch_prototypes
-
-                patch_prototypes(self, expert_library, self.selector_config)
 
     def training_step(self, batch, _):
         loss = super().training_step(batch, _)

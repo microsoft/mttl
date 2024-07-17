@@ -104,7 +104,7 @@ class ExpertConfig(Config):
         self.es_metric = "loss"
         self.n_ng_iterations = 30  # number of iterations for LoraHub
         self.recompute_prototypes = False
-        self.expert_embeds_save_name = None
+        self.selector_data_id = None
         self.selector_logging = (
             True  # If false, routing specific stats are not computed
         )

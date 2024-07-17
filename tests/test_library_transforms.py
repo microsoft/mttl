@@ -113,7 +113,7 @@ def test_compute_svd_embeddings():
     )
 
     library = HFExpertLibrary("sordonia/new-test-library")
-    embeddings, svd = SVDEmbeddingTransform(
+    embeddings = SVDEmbeddingTransform(
         SVDEmbeddingTransformConfig(n_components=2)
     ).transform(library=library, persist=False)
 

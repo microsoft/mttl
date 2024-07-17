@@ -9,7 +9,7 @@ from pytorch_lightning import Callback
 from torch.distributions import Bernoulli, Categorical
 
 from mttl.models.containers.selectors import Selector
-from mttl.utils import Averager, agg_dicts
+from mttl.utils import agg_dicts
 
 try:
     import wandb

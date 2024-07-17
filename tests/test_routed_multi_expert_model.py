@@ -259,13 +259,15 @@ class TestMultiExpertModel:
 
         # check the get_router_weights function
         weights = {}
-        for _, selector_dict in module.selectors.items():
-            for _, selector in selector_dict.items():
+        for _, selector_list in module.selectors.items():
+            for selector in selector_list:
                 weights[selector.layer_name] = selector.get_routing_weights()
+        assert len(weights) == 1
         assert (
-            "mod1" in weights["shared.selector"]
-            and "mod2" in weights["shared.selector"]
+            "mod1" in weights["transformer.h.0.attn.attention.k_proj.selector"]
+            and "mod2" in weights["transformer.h.0.attn.attention.k_proj.selector"]
         )
+        assert "shared" in module.model.selectors["lora"]
 
         assert isinstance(
             module.model.transformer.h[0].attn.attention.k_proj.selector,
@@ -286,6 +288,12 @@ class TestMultiExpertModel:
         module.load_from_module_dict(module_dict)
         output = module(batch)
         assert np.allclose(output.item(), 10.15, atol=0.1)
+
+        weights = {}
+        for _, selector_list in module.selectors.items():
+            for selector in selector_list:
+                weights[selector.layer_name] = selector.get_routing_weights()
+        assert len(weights) > 1
 
         expert = module.get_merged_expert()
         assert isinstance(expert, Expert)
@@ -430,15 +438,10 @@ class TestMultiExpertModel:
         # Test Base Llama model
         spy = mocker.spy(container.selector, "forward")
 
-        # Prototypes not initialized
-        with pytest.raises(ValueError):
-            output = module(bigger_dummy_batch)
-
         # Initialize the prototypes
         def init_proto(fill_value=0.0, random=False):
             for sub_mod in module.modules():
                 if isinstance(sub_mod, PerTokenSelector):
-                    print("overwriting")
                     protos = torch.full(
                         (len(sub_mod.expert_names), sub_mod.input_dim), fill_value
                     )

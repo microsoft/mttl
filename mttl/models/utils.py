@@ -4,7 +4,7 @@ import os
 import re
 from collections import defaultdict, deque
 from enum import Enum
-from typing import Any, Callable, Optional, Union
+from typing import Callable, Optional, Union
 
 import prettytable
 import pytorch_lightning as pl
@@ -18,6 +18,13 @@ from mttl.models.get_scheduler import get_scheduler
 from mttl.utils import get_checkpoint_path, logger
 
 CHECKPOINT_PATH_IN_HUB = "checkpoint.ckpt"
+
+
+class Singleton(object):
+    def __new__(cls):
+        if not hasattr(cls, "instance"):
+            cls.instance = super(Singleton, cls).__new__(cls)
+        return cls.instance
 
 
 def transfer_batch_to_device(batch, device):
@@ -447,11 +454,12 @@ def model_loader_helper(
         )
     elif "phi-2" == model_name:
         # local phi-2 version. use `microsoft/phi-2 for the official hf version`
-        logger.info(
-            f"Loading phi-2 model from {os.getenv('PHI_PATH', 'microsoft/phi-2')}"
-        )
+        if "PHI_PATH" not in os.environ:
+            raise ValueError("PHI_PATH is not set in the environment variables.")
+
+        logger.info(f"Loading phi-2 model from {os.environ['PHI_PATH']}")
         model_object = AutoModelForCausalLM.from_pretrained(
-            os.getenv("PHI_PATH", "microsoft/phi-2"),
+            os.environ["PHI_PATH"],
             load_in_8bit=load_in_8bit,
             torch_dtype=torch.bfloat16,
             device_map=device_map,

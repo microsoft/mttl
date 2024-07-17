@@ -1,21 +1,20 @@
 import math
+from abc import ABC
 from dataclasses import dataclass
 from typing import Dict, List, Union
 
 import numpy as np
 import torch
 import torch.nn.functional as F
-import wandb
 from pyparsing import abstractmethod
 from torch import nn
-from torch.distributions import Bernoulli, Categorical
+from torch.distributions import Categorical
 
 from mttl.models.library.expert import ExpertInfo
-from mttl.models.modifiers.routing import RoutingInfo
 from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
 from mttl.models.ranker.classifier_ranker import ClusterPredictor
 from mttl.models.utils import MetricLogger
-from mttl.utils import logger
+from mttl.utils import logger, warn_once
 
 SELECTORS_NAME_TO_KLASS = {}
 SELECTORS_CONFIG_TO_NAME = {}
@@ -45,10 +44,10 @@ def register_multi_expert_selector(name, config_cls):
     return _thunk
 
 
-def get_selector(routing_config: "SelectorConfig", info_container: Dict, **kwargs):
+def get_selector(selector_config: "SelectorConfig", info_container: Dict, **kwargs):
     """Returns a selector object for the given routing_config."""
-    return SELECTORS_NAME_TO_KLASS[SELECTORS_CONFIG_TO_NAME[routing_config.__class__]](
-        info_container, config=routing_config, **kwargs
+    return SELECTORS_NAME_TO_KLASS[SELECTORS_CONFIG_TO_NAME[selector_config.__class__]](
+        info_container, config=selector_config, **kwargs
     )
 
 
@@ -81,9 +80,9 @@ class SelectorConfig:
         name = dumped.pop("__selector_name__")
         return SELECTORS_NAME_TO_CONFIG[name](**dumped)
 
-    @staticmethod
+    @classmethod
     def from_training_config(
-        training_config: Union["Config", "SelectorConfig"]
+        cls, training_config: Union["Config", "SelectorConfig"]
     ) -> Union["SelectorConfig", None]:
         """Build modifier config from the training config.
 
@@ -93,6 +92,7 @@ class SelectorConfig:
             # nothing to do here
             return training_config
 
+        # if called on the base class, we need to find the correct subclass
         if training_config.router_selector is None:
             return None
 
@@ -102,6 +102,7 @@ class SelectorConfig:
             )
 
         config_klass = SELECTORS_NAME_TO_CONFIG[training_config.router_selector]
+
         kwargs = {}
         for key in config_klass.__dataclass_fields__.keys():
             # only overwrite default if value exists and is not None
@@ -109,6 +110,14 @@ class SelectorConfig:
             if train_cfg_value is not None:
                 kwargs[key] = getattr(training_config, key)
         return config_klass(**kwargs)
+
+
+@dataclass
+class LoadableSelectorConfig(SelectorConfig):
+    """Adds support for library_id and data_id, which specifies the unique identifier to load."""
+
+    library_id: str = None
+    selector_data_id: str = None
 
 
 @dataclass
@@ -264,6 +273,8 @@ class Selector(nn.Module):
         self.total_calls_per_forward = 0
         self._calls_counter = 0
         self.info_container = info_container
+        # dependency injection filled from ExpertContainer
+        self.__layer_name__ = None
 
     @property
     def clear_cache(self):
@@ -395,139 +406,6 @@ class TaskPredictorSelector(Selector):
 
 
 @dataclass
-class PolySelectorConfig(SelectorConfig):
-    n_splits: int = 1
-    task_names: List[str] = None
-
-
-@register_multi_expert_selector("poly_router", PolySelectorConfig)
-class PolySelector(Selector):
-    """
-    Implements routing at a per-layer or per-model level
-    """
-
-    avg_selector_warned: bool = False
-
-    def __init__(self, info_container, **kwargs) -> None:
-        super().__init__(info_container, **kwargs)
-
-        self.n_tasks = len(self.config.task_names) if self.config.task_names else 0
-
-        # We add an extra task for the default (average) expert if not found
-        self.module_logits = nn.Parameter(
-            torch.empty(self.n_tasks + 1, self.config.n_splits).uniform_(-1e-3, 1e-3)
-        )
-
-        if self.n_tasks == 0:
-            logger.warning(
-                "No task names found in the config. Using a single task for PolySelector."
-            )
-
-    def _convert_task_names_to_ids(self, task_names: List[str]) -> torch.LongTensor:
-        """Converts task names to task ids (indices in the module_logits routing tensor)."""
-        return torch.LongTensor(
-            [
-                (
-                    self.config.task_names.index(t)
-                    if t in self.config.task_names
-                    else self.n_tasks
-                )
-                for t in task_names
-            ],
-        ).to(self.module_logits.device)
-
-    def _get_weights(self, task_names: List[str] = None) -> torch.Tensor:
-        """Gets the routing weights for the corresponding task names.
-
-        If `task_names` is None, read task names from the routing infos structure.
-        """
-        # Poly used for finetuning a single task
-        if self.n_tasks == 0:
-            task_ids = [0]
-        else:
-            # if task names was specified, then we use that
-            if task_names is not None:
-                task_ids = self._convert_task_names_to_ids(task_names)
-            else:
-                routing_info: RoutingInfo = self.info_container["routing_infos"]
-
-                if hasattr(routing_info, "task_ids_from_name"):
-                    task_ids = routing_info.task_ids_from_name
-                else:
-                    task_ids = self._convert_task_names_to_ids(routing_info.task_names)
-                    # cache the computation for future use
-                    self.info_container["routing_infos"].task_ids_from_name = task_ids
-
-            if task_ids.max() < self.n_tasks:
-                if PolySelector.avg_selector_warned:
-                    logger.warning(
-                        f"Task ids were found. Reverting to default task-based routing"
-                    )
-
-                PolySelector.avg_selector_warned = False
-            else:
-                if not PolySelector.avg_selector_warned:
-                    not_found_tasks = set(
-                        [
-                            t
-                            for t in self.info_container["routing_infos"].task_names
-                            if t not in self.config.task_names
-                        ]
-                    )
-                    logger.warning(
-                        f"Tasks {not_found_tasks} not in taining tasks. Defaulting to average selector."
-                    )
-                    PolySelector.avg_selector_warned = True
-
-                assert not self.training, "Unknown tasks during training"
-
-        module_logits = torch.sigmoid(self.module_logits[task_ids])
-        module_logits = module_logits.view(
-            module_logits.size(0), self.config.n_splits, self.n_experts
-        )
-        module_weights = module_logits / (module_logits.sum(dim=-1, keepdim=True) + EPS)
-        return module_weights
-
-    @forward_with_cache
-    def forward(self, input, **kwargs) -> Union[
-        BatchExpertsSplitsAndWeightsSelectorOutput,
-        ExpertsSplitsAndWeightsSelectorOutput,
-    ]:
-        """Returns the experts and weights for the task names used in the current batch.
-
-        If there is only one task, we return a ExpertsAndWeightsSelectorOutput. This is to show that the weights are shared across the batch,
-        and therefore can allow speedups in the forward pass.
-        """
-        weights = self._get_weights()
-
-        if self.n_tasks == 0:
-            return ExpertsSplitsAndWeightsSelectorOutput(
-                SelectorOutput.ALL_EXPERTS, weights.squeeze(0)
-            )
-
-        return BatchExpertsSplitsAndWeightsSelectorOutput(
-            SelectorOutput.ALL_EXPERTS, weights
-        )
-
-    def get_merging_weights(self, **selector_kwargs) -> Dict:
-        return self.get_routing_weights(**selector_kwargs)
-
-    def get_routing_weights(self, task_name, **selector_kwargs) -> Dict:
-        assert task_name in self.config.task_names, f"Task {task_name} not found."
-        weights = self._get_weights(task_names=[task_name])
-        return {k: v.detach().item() for k, v in zip(self.expert_names, weights[0][0])}
-
-    def add_expert(self, expert_name: str, **kwargs):
-        self.expert_names.append(expert_name)
-        self.module_logits.data = torch.empty(
-            self.n_tasks + 1, self.config.n_splits * len(self.expert_names)
-        ).uniform_(-1e-3, 1e-3)
-
-        # Last expert is exactly uniform
-        self.module_logits.data[-1] = 0.0
-
-
-@dataclass
 class MOERKHSSelectorConfig(SelectorConfig):
     rkhs_dim: int = 512
     emb_dim: int = 128
@@ -634,7 +512,7 @@ class TaskToExpertTracker(Selector):
 
 
 @dataclass
-class PerTokenSelectorConfig(SelectorConfig):
+class PerTokenSelectorConfig(LoadableSelectorConfig):
     router_temp: float = None
     moe_top_k: int = None
     proto_init: str = None
@@ -642,8 +520,54 @@ class PerTokenSelectorConfig(SelectorConfig):
     proto_norm_fn: str = None
 
 
+class LoadableLibrarySelector(ABC):
+    library_artifacts: Dict = None
+
+    @abstractmethod
+    def _load_from_library(self):
+        pass
+
+    def load_from_library(self):
+        if LoadableLibrarySelector.library_artifacts is None:
+            LoadableLibrarySelector.library_artifacts = self._load_from_library()
+
+            if not self.library_artifacts:
+                raise ValueError(f"Could not load library artifacts for selector.")
+
+
+def get_expert_prototype_from_library_artifacts(
+    expert_name: str, layer_name: str, library_artifacts: Dict
+) -> torch.Tensor:
+    """Utils function that returns the expert prototype stored in the library.
+
+    This is used by Arrow, PhatGoose and Avg Activation selectors.
+    """
+    import numpy as np
+
+    patched_layer_name = layer_name.replace(".selector", "")
+
+    if expert_name not in library_artifacts:
+        raise ValueError(
+            f"Cannot load prototypes for expert `{expert_name}`, was not found in library.\n"
+            f"Please recompute selector prototypes with the correct library transform."
+        )
+
+    layer_names = library_artifacts[expert_name].keys()
+    valid_layer_names = [
+        k
+        for k in layer_names
+        if patched_layer_name in k  # k.startswith(patched_layer_name)
+    ]
+
+    key = sorted(valid_layer_names)[0]
+    proto = library_artifacts[expert_name][key]
+    if isinstance(proto, np.ndarray):
+        proto = torch.from_numpy(proto)
+    return proto
+
+
 @register_multi_expert_selector("per_token_router", PerTokenSelectorConfig)
-class PerTokenSelector(TaskToExpertTracker):
+class PerTokenSelector(TaskToExpertTracker, LoadableLibrarySelector):
     def __init__(self, info_container, config, **kwargs) -> None:
         super().__init__(info_container, config, **kwargs)
 
@@ -653,7 +577,7 @@ class PerTokenSelector(TaskToExpertTracker):
             )
 
         layer = kwargs["layer"]
-        self.output_dim, self.input_dim = layer.weight.data.shape
+        self.output_dim, self.input_dim = layer.out_features, layer.in_features
 
         self.prototypes = nn.Parameter(
             torch.empty((0, self.input_dim), device=layer.weight.device)
@@ -689,8 +613,21 @@ class PerTokenSelector(TaskToExpertTracker):
         self.input_norm = _get_norm_layer(self.config.input_norm_fn)
         self.proto_norm = _get_norm_layer(self.config.proto_norm_fn)
 
-    def overwrite_prototypes(self, prototypes):
-        self.prototypes.data = prototypes.type_as(self.prototypes)
+        # init selector from library if needed
+        if self.config.library_id is not None:
+            self.load_from_library()
+
+    def overwrite_prototypes(self, prototypes: torch.tensor):
+        """Overwrites the prototypes with the given tensor."""
+        if (
+            prototypes.shape[0] != self.prototypes.shape[0]
+            or self.prototypes.shape[1] != prototypes.shape[1]
+        ):
+            raise ValueError("Prototypes shape are mismatched!")
+
+        self.prototypes.data = prototypes.to(
+            dtype=self.prototypes.dtype, device=self.prototypes.device
+        )
 
     @safe_logging
     def _log_angle(self, angle):
@@ -812,219 +749,25 @@ class PerTokenSelector(TaskToExpertTracker):
 
     def add_expert(self, expert_name: str, expert_info: ExpertInfo = None, **kwargs):
         super().add_expert(expert_name, expert_info, **kwargs)
-        self.expert_names.append(expert_name)
 
-
-@dataclass
-class ArrowSelectorConfig(PerTokenSelectorConfig):
-    router_temp: float = 1.0
-    moe_top_k: int = -1
-    proto_init: str = "arrow"
-    input_norm_fn: str = "id"
-    proto_norm_fn: str = "id"
-
-
-@register_multi_expert_selector("arrow_router", ArrowSelectorConfig)
-class ArrowSelector(PerTokenSelector):
-    pass
-
-
-@dataclass
-class PhatgooseSelectorConfig(PerTokenSelectorConfig):
-    router_temp: float = -1
-    moe_top_k: int = 2
-    proto_init: str = "phatgoose"
-    input_norm_fn: str = "norm_d"
-    proto_norm_fn: str = "norm_d"
-    lora_merge_after: bool = True
-
-
-@register_multi_expert_selector("phatgoose_router", PhatgooseSelectorConfig)
-class PhatgooseSelector(PerTokenSelector):
-    def __init__(self, info_container, config, **kwargs) -> None:
-        super().__init__(info_container, config, **kwargs)
-        if not self.config.lora_merge_after:
-            logger.warning("PhatgooseSelector should have lora_merge_after=True")
-
-
-@dataclass
-class AverageActivationSelectorConfig(PerTokenSelectorConfig):
-    router_temp: float = -1
-    moe_top_k: int = -1
-    proto_init: str = "avg_act"
-    input_norm_fn: str = "id"
-    proto_norm_fn: str = "id"
-
-
-@register_multi_expert_selector("avg_act_router", AverageActivationSelectorConfig)
-class AverageActivationSelector(PerTokenSelector):
-    pass
-
-
-@dataclass
-class PhatgooseTrainerSelectorConfig(SelectorConfig):
-    pass
-
-
-class SigmoidGate(nn.Module):
-    def __init__(self, input_dim, output_dim=1, **kwargs):
-        super().__init__()
-        self.v = nn.Parameter(torch.zeros(output_dim, input_dim))
-
-    def forward(self, x):
-        return torch.sigmoid(F.linear(x, self.v, bias=None))
-
-
-@register_multi_expert_selector(
-    "phatgoose_trainer_selector", PhatgooseTrainerSelectorConfig
-)
-class PhatgooseTrainerSelector(Selector):
-    """
-    Selector from https://arxiv.org/abs/2402.05859
-    """
-
-    def __init__(
-        self, info_container, config: PhatgooseTrainerSelectorConfig, **kwargs
-    ) -> None:
-        super().__init__(info_container, config)
-
-        if "layer" not in kwargs:
-            raise ValueError(
-                "PhatgooseSelector requires a layer to be passed in kwargs to infer the input dimension."
+        if self.library_artifacts is not None:
+            proto = get_expert_prototype_from_library_artifacts(
+                expert_name, self.layer_name, self.library_artifacts
+            ).view(1, -1)
+        else:
+            warn_once(
+                f"Library artifacts not loaded for {self.__class__}, using zero initialization."
+            )
+            proto = torch.zeros(
+                1,
+                self.prototypes.size(1),
+                dtype=self.prototypes.dtype,
+                device=self.prototypes.device,
             )
 
-        self.input_dim = kwargs["layer"].weight.data.shape[-1]
-        self.device = kwargs["layer"].weight.device
-
-        self.gates = nn.ParameterDict()
-        self.layer = kwargs["layer"]
-        self.default_expert_name = None
-        self.routing_gates = []  # for logging purposes at training time
-
-    @forward_with_cache
-    def forward(self, input, **kwargs) -> BatchSequenceExpertsAndWeightsSelectorOutput:
-        # selectors for tasks are trained independently
-        # all samples go through the same selector
-        scores = self.gates[self.default_expert_name](input)
-        # log the scores
-        container = kwargs.get("container", None)
-        if container is not None:
-            self.routing_gates.append(scores.detach().cpu().float())
-        return BatchSequenceExpertsAndWeightsSelectorOutput(
-            torch.zeros_like(scores, dtype=torch.int8), scores
-        )
-
-    def add_expert(self, expert_name: str, **kwargs):
+        dev = self.prototypes.device
+        self.prototypes.data = torch.cat([self.prototypes.data, proto.to(dev)])
         self.expert_names.append(expert_name)
-        expert_info = kwargs["expert_info"]
-        self.default_expert_name = expert_name
-        self.gates[expert_name] = SigmoidGate(self.input_dim)
-
-    def get_merging_weights(self, **selector_kwargs) -> Dict:
-        raise ValueError(
-            f"Not supported for {self.__class__}  since routing depends on input."
-        )
-
-    def get_prototypes(self):
-        return {
-            k: gate.v.detach().float().cpu().numpy() for k, gate in self.gates.items()
-        }
-
-
-@dataclass
-class PolySelectorDirectConfig(PolySelectorConfig):
-    pass
-
-
-@register_multi_expert_selector("poly_router_dir", PolySelectorDirectConfig)
-class PolySelectorDirect(PolySelector):
-    def __init__(self, info_container, **kwargs) -> None:
-        super().__init__(info_container, **kwargs)
-
-        self.module_logits_dict = nn.ParameterDict()
-        self.training_config = kwargs["training_config"]
-        self.init_gap = [-1e-3, 1e-3]
-
-        self.device = kwargs["layer"].weight.device
-
-    def _get_weights(self):
-        weights = torch.cat(
-            [self.module_logits_dict[k] for k in self.module_logits_dict.keys()]
-        )
-        return weights
-
-    def get_merging_weights(self, **selector_kwargs) -> Dict:
-        return self.get_routing_weights(**selector_kwargs)
-
-    def get_routing_weights(self):
-        return {k: v.detach().item() for k, v in self.module_logits_dict.items()}
-
-    def add_expert(self, expert_name: str, **kwargs):
-        """
-        Assume:
-        expert_task_name -- task name expert is pecialized at
-        self.config.finetune_task_name -- name of the task the model is currently trained on
-
-        If we encounter a module for the current task, we init it with one hot, otherwise with uniform.
-        """
-        main_m = 1
-
-        expert_task_name = kwargs["expert_info"].expert_task_name
-        if expert_name not in self.module_logits_dict:
-            if self.training_config.finetune_task_name == expert_task_name:
-                self.init_gap = [
-                    0,
-                    0,
-                ]  # encountered module for current task, init one hot
-                self.module_logits_dict[expert_name] = torch.nn.Parameter(
-                    torch.ones(1).to(self.device)
-                )
-                self.init_logits_uniform()
-                self.module_logits_dict[expert_name].data *= main_m
-
-            else:
-                self.module_logits_dict[expert_name] = torch.nn.Parameter(
-                    torch.empty(1).uniform_(*self.init_gap).to(self.device)
-                )
-
-    def load_state_dict(self, state_dict, strict=True):
-        self._initialized = True
-        return super().load_state_dict(state_dict, strict=strict)
-
-    def init_logits_uniform(self):
-        if sum([p for p in self.module_logits_dict.values()]) == 0:
-            for name, param in self.module_logits_dict.items():
-                self.module_logits_dict[name].data = (
-                    torch.empty(1).uniform_(-1e-3, 1e-3).to(self.device)
-                )
-        self._initialized = True
-
-    @forward_with_cache
-    def forward(self, *args, **kwargs):
-        weights = self._get_weights()
-        experts = list(self.module_logits_dict.keys())
-        return ExpertsAndWeightsSelectorOutput(experts, weights)
-
-
-@dataclass
-class PolySelectorDirectConfigUniform(PolySelectorConfig):
-    pass
-
-
-@register_multi_expert_selector("uniform", PolySelectorDirectConfigUniform)
-class PolyUniform(PolySelectorDirect):
-    """
-    Currently only used for uniform merging of experts.
-    """
-
-    def add_expert(self, expert_name: str, **kwargs):
-        if expert_name not in self.module_logits_dict:
-            self.module_logits_dict[expert_name] = torch.nn.Parameter(
-                torch.ones(1).to(self.device)
-            )
-            for name in self.module_logits_dict.keys():
-                self.module_logits_dict[name].data = torch.ones(1).to(self.device)
-                self.module_logits_dict[name].data /= len(self.module_logits_dict)
 
 
 @dataclass

@@ -5,6 +5,7 @@ from transformers import AutoModelForCausalLM
 
 from mttl.models.containers import get_modules_to_modify_trie
 from mttl.models.containers.selectors import (
+    ArrowSelector,
     PolySelector,
     PolySelectorConfig,
     TaskNameSelector,
@@ -24,7 +25,7 @@ def test_expert_model():
     # plug a poly selector
     model.set_selector("lora", PolySelectorConfig(task_names=["t1", "t2", "t3"]))
     assert len(model.selectors["lora"]) == 12
-    assert isinstance(next(iter(model.selectors["lora"].values())), PolySelector)
+    assert isinstance(model.selectors["lora"][0], PolySelector)
 
     expert_a: Expert = model.get_expert_instance("a")
     assert len(expert_a.expert_weights) == 24
@@ -45,7 +46,65 @@ def test_expert_model():
         model.get_merged_expert()
 
     assert len(model.selectors["lora"]) == 12
-    assert isinstance(next(iter(model.selectors["lora"].values())), TaskNameSelector)
+    assert isinstance(model.selectors["lora"][0], TaskNameSelector)
+
+
+def test_from_pretrained(tmp_path):
+    # create a dummy library
+    model = MultiExpertModel(model="EleutherAI/gpt-neo-125m", device_map="cpu")
+    model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
+    model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
+    library = model.save_to_library(f"local://{tmp_path}")
+
+    # from pretrained library
+    model = MultiExpertModel.from_pretrained_library(library)
+    assert len(model.experts_names) == 2
+    # the order might be different due to multi-threading in adding experts in parallel
+    assert "a" in model.experts_names
+    assert "b" in model.experts_names
+
+
+def test_from_pretrained_with_arrow(tmp_path):
+    from mttl.models.containers.selectors import ArrowSelectorConfig
+    from mttl.models.library.library_transforms import ArrowConfig, ArrowTransform
+
+    # create a dummy library
+    model = MultiExpertModel(model="EleutherAI/gpt-neo-125m", device_map="cpu")
+    model.add_empty_expert(
+        "a", LoRAConfig(modify_layers=".*out_proj.*", lora_init_b_random=True)
+    )
+    model.add_empty_expert(
+        "b", LoRAConfig(modify_layers=".*out_proj.*", lora_init_b_random=True)
+    )
+    library = model.save_to_library(f"local://{tmp_path}")
+
+    # store arrow experts
+    protos = ArrowTransform(ArrowConfig()).transform(library, persist=True)
+
+    # from pretrained library
+    selector_config = ArrowSelectorConfig(moe_top_k=4)
+    model = MultiExpertModel.from_pretrained_library(
+        library, selector_configs={"lora": selector_config}
+    )
+    assert len(model.experts_names) == 2
+    # the order might be different due to multi-threading in adding experts in parallel
+    assert "a" in model.experts_names
+    assert "b" in model.experts_names
+    assert model.selectors["lora"][0].config == selector_config
+    assert isinstance(model.selectors["lora"][0], ArrowSelector)
+    # loaded two experts
+    assert model.selectors["lora"][0].prototypes.shape[0] == 2
+    name1 = model.selectors["lora"][0].expert_names[0]
+    name2 = model.selectors["lora"][0].expert_names[1]
+    ln = model.selectors["lora"][0].layer_name.replace(".selector", "")
+    assert np.allclose(
+        model.selectors["lora"][0].prototypes[0].sum().item(),
+        protos[name1][ln].sum().item(),
+    )
+    assert np.allclose(
+        model.selectors["lora"][0].prototypes[1].sum().item(),
+        protos[name2][ln].sum().item(),
+    )
 
 
 def test_get_modules_to_modify_trie():

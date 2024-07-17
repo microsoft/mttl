@@ -46,8 +46,12 @@ class ExpertContainer:
     def assign_selector(self, selector):
         del self.selector
         self._modules.pop("selector", None)
+
         # propagate experts to the selector
         self.selector = selector
+        # dependency injection on layer name
+        self.selector.__layer_name__ = self.layer_name + ".selector"
+
         for expert_name, expert_info in self.expert_infos.items():
             self.add_expert_to_selector(expert_name, expert_info=expert_info)
 
@@ -377,7 +381,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
     in memory in a single parameter.
     """
 
-    __supports_configs__ = [SkilledLoRAConfig, LoRAConfig]
+    __supports_configs__ = [LoRAConfig, SkilledLoRAConfig]
 
     def __init__(
         self,
@@ -500,6 +504,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                 weights = torch.zeros(
                     (selection.weights.shape[:-1] + (self.experts.n_skills,)),
                     device=selection.weights.device,
+                    dtype=selection.weights.dtype,
                 ).scatter_add(
                     selection.weights.ndim - 1, selection.experts, selection.weights
                 )
