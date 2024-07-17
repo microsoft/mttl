@@ -1,9 +1,6 @@
 import multiprocessing
 
-from mttl.models.library.expert_library import (
-    BlobExpertLibrary,
-    ExpertLibrary,
-)
+from mttl.models.library.expert_library import BlobExpertLibrary, ExpertLibrary
 
 
 def copy_repo(origin_repo_id, target_repo_id):

@@ -1,24 +1,17 @@
-from dataclasses import dataclass
+import math
 import os
 import re
+from dataclasses import dataclass
 from typing import List, Union
+
+import bitsandbytes as bnb
 import numpy as np
 import torch
 from torch import nn
-import math
-from torch import nn
-import torch
-import math
-import bitsandbytes as bnb
 
-from mttl.utils import logger, warn_once
 from mttl.models.modifiers import register_modifier
-from mttl.models.modifiers.base import (
-    MergeableAdapter,
-    ModifyMixin,
-    ModifierConfig,
-    Adapter,
-)
+from mttl.models.modifiers.base import MergeableAdapter, ModifierConfig, ModifyMixin
+from mttl.utils import warn_once
 
 
 @dataclass

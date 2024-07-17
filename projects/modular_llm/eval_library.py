@@ -1,27 +1,24 @@
+import json
 import os
 import sys
-import torch
-import wandb
-import numpy as np
 from copy import deepcopy
+
+import numpy as np
+import torch
 import torch.nn.functional as F
+import wandb
 from pytorch_lightning import seed_everything
-import json
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.models.library.expert_library import ExpertLibrary
-from mttl.models.containers.selectors import (
-    Selector,
-    SelectorConfig,
-)
-from mttl.models.modifiers.lora import LoRAConfig
-
-from mttl.utils import logger, remote_login, setup_logging
-from mttl.models.expert_model import MultiExpertModel, ExpertModel
-from mttl.models.expert_config import ExpertConfig
-
+from mttl.callbacks import LossCallback
+from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
+from mttl.evaluators.rouge_evaluator import RougeEvaluator
+from mttl.models.containers.selectors import Selector, SelectorConfig
+from mttl.models.expert_config import ExpertConfig
+from mttl.models.expert_model import ExpertModel, MultiExpertModel
+from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.library.library_transforms import (
     ArrowConfig,
     ArrowTransform,
@@ -34,10 +31,8 @@ from mttl.models.library.library_transforms import (
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
 )
-
-from mttl.callbacks import LossCallback
-from mttl.datamodule.base import get_datamodule
-from mttl.evaluators.rouge_evaluator import RougeEvaluator
+from mttl.models.modifiers.lora import LoRAConfig
+from mttl.utils import logger, remote_login, setup_logging
 from projects.modular_llm.src.utils.utils import TableLogger
 
 

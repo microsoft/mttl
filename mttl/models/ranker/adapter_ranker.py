@@ -1,6 +1,6 @@
-import torch
-
 from abc import ABC, abstractmethod
+
+import torch
 
 
 class AdapterRanker(ABC):
@@ -20,13 +20,10 @@ class AdapterRankerHelper:
     def get_ranker_instance(ranker_model, ranker_path, device="cuda"):
         from mttl.models.ranker.baseline_rankers import KATERanker
         from mttl.models.ranker.classifier_ranker import (
-            SentenceTransformerClassifier,
             ClusterPredictor,
+            SentenceTransformerClassifier,
         )
-        from mttl.models.ranker.clip_ranker import (
-            CLIPRanker,
-            CLIPTripletRanker,
-        )
+        from mttl.models.ranker.clip_ranker import CLIPRanker, CLIPTripletRanker
 
         if not torch.cuda.is_available() and device == "cuda":
             device = "cpu"

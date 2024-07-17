@@ -1,12 +1,12 @@
-from dataclasses import dataclass
-import readline
-import os
 import glob
+import os
+import readline
 import sys
+from dataclasses import dataclass
 from typing import List
 
+from mttl.evaluators.base import StoppingCriteriaList, StoppingCriteriaSub
 from mttl.models.library.expert_library import ExpertLibrary
-from mttl.evaluators.base import StoppingCriteriaSub, StoppingCriteriaList
 
 
 def path_completer(text, state):
@@ -86,11 +86,12 @@ class ConversationNoTemplate(Conversation):
 
 
 def main():
+    import torch
+
+    from mttl.datamodule.utils import get_tokenizer_with_args
     from mttl.models.expert_config import ExpertConfig
     from mttl.models.expert_model import MultiExpertModel
-    from mttl.datamodule.utils import get_tokenizer_with_args
     from mttl.utils import setup_logging
-    import torch
 
     setup_autocomplete()
     setup_logging()

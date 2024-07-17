@@ -1,11 +1,12 @@
 """MMLU Dataset."""
 
-import pandas as pd
-import os
-import datasets
 import copy
-from mttl.utils import logger
+import os
 
+import datasets
+import pandas as pd
+
+from mttl.utils import logger
 
 _CITATION = """\
 @article{hendryckstest2021,

@@ -1,27 +1,28 @@
-from abc import abstractmethod
 import abc
-import re
-from dataclasses import dataclass
-import dataclasses
 import copy
+import dataclasses
+import re
+from abc import abstractmethod
+from collections import defaultdict
+from dataclasses import dataclass
 from typing import Dict, List, Union
-import torch
-import torch.nn.functional as F
-from tqdm import tqdm
+
 import numpy as np
 import sklearn.decomposition
+import torch
+import torch.nn.functional as F
 from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
-from collections import defaultdict
+from tqdm import tqdm
 
-from mttl.models.modifiers.base import get_target_2_source_param_mapping
-from mttl.models.library.expert import Expert
-from mttl.models.containers.expert_containers import ExpertContainer
-from mttl.models.library.expert_library import ExpertLibrary
-from mttl.utils import logger
-from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
 from mttl.datamodule.base import get_datamodule
+from mttl.models.containers.expert_containers import ExpertContainer
 from mttl.models.expert_config import ExpertConfig
+from mttl.models.library.expert import Expert
+from mttl.models.library.expert_library import ExpertLibrary
+from mttl.models.modifiers.base import get_target_2_source_param_mapping
+from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
+from mttl.utils import logger
 
 
 class LibraryTransform(abc.ABC):
@@ -610,8 +611,8 @@ class PhatgooseTransform(HiddenStateComputer):
         expert_names: list = None,
         default_args=None,
     ):
-        from mttl.models.library.utils import train_module
         from mttl.models.expert_model import MultiExpertModel
+        from mttl.models.library.utils import train_module
 
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
@@ -1209,7 +1210,6 @@ class CrossExpertNormComputer(HiddenStateComputer):
         )
 
         from mttl.models.containers import ExpertContainer
-
         from mttl.models.expert_model import MoEModel
 
         model = MoEModel(**vars(training_config)).to("cuda")

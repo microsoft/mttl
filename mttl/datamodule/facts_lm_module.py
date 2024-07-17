@@ -1,11 +1,11 @@
-import torch
 import os
-
-from datasets import get_dataset_split_names, concatenate_datasets
 from dataclasses import dataclass
-from mttl.datamodule.platypus_module import PlatypusConfig
-from mttl.datamodule.base import DefaultDataModule
 
+import torch
+from datasets import concatenate_datasets, get_dataset_split_names
+
+from mttl.datamodule.base import DefaultDataModule
+from mttl.datamodule.platypus_module import PlatypusConfig
 from mttl.models.library.expert_library import DatasetLibrary
 from mttl.utils import logger
 
@@ -93,6 +93,7 @@ class FactsLMDataModule(DefaultDataModule):
 
 if __name__ == "__main__":
     import os
+
     from mttl.config import Config
     from mttl.utils import setup_logging
 

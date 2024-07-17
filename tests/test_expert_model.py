@@ -1,19 +1,18 @@
-from mttl.models.containers.selectors.arrow_selector import ArrowSelector
-import pytest
 import numpy as np
+import pytest
 from pytorch_lightning import seed_everything
 from transformers import AutoModelForCausalLM
 
-from mttl.models.expert_model import MultiExpertModel
 from mttl.models.containers import get_modules_to_modify_trie
-from mttl.models.modifiers.lora import LoRAConfig
 from mttl.models.containers.selectors import (
+    ArrowSelector,
     PolySelector,
     PolySelectorConfig,
-    TaskNameSelectorConfig,
     TaskNameSelector,
+    TaskNameSelectorConfig,
 )
-from mttl.models.expert_model import Expert
+from mttl.models.expert_model import Expert, MultiExpertModel
+from mttl.models.modifiers.lora import LoRAConfig
 
 
 def test_expert_model():
@@ -70,8 +69,9 @@ def test_from_pretrained():
 
 def test_from_pretrained_with_arrow():
     import tempfile
-    from mttl.models.library.library_transforms import ArrowConfig, ArrowTransform
+
     from mttl.models.containers.selectors import ArrowSelectorConfig
+    from mttl.models.library.library_transforms import ArrowConfig, ArrowTransform
 
     with tempfile.TemporaryDirectory() as tmpdirname:
         # create a dummy library

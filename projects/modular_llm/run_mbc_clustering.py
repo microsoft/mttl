@@ -1,14 +1,15 @@
-import os
 import json
+import os
+
+from mttl.models.expert_config import ExpertConfig
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.library.library_transforms import (
     MBClusteringTransformConfig,
     MBCWithCosSimTransform,
-    RandomClustersTransform,
     RandomClustersConfig,
+    RandomClustersTransform,
 )
 from mttl.utils import logger
-from mttl.models.expert_config import ExpertConfig
 
 
 class ClusteringConfig(ExpertConfig):

@@ -1,14 +1,14 @@
 import numpy as np
-import torch
 import pytorch_lightning as pl
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-from transformers import T5Tokenizer, T5ForConditionalGeneration
 from sentence_transformers import SentenceTransformer
+from transformers import T5ForConditionalGeneration, T5Tokenizer
+
 from mttl.models.library.expert_library import DatasetLibrary
-from mttl.models.utils import EfficientCheckpointModule
 from mttl.models.ranker.adapter_ranker import AdapterRanker
+from mttl.models.utils import EfficientCheckpointModule
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -323,9 +323,7 @@ class ClusterPredictor(SentenceTransformerClassifier):
 
     @torch.no_grad()
     def init_clusters(self, hf_lib_id):
-        from mttl.models.library.expert_library import (
-            HFExpertLibrary,
-        )
+        from mttl.models.library.expert_library import HFExpertLibrary
 
         library = HFExpertLibrary(hf_lib_id)
         self.cluster_names = {}

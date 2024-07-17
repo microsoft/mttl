@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
 
-from mttl.datamodule.base import DefaultDataModule, DatasetConfig
+from mttl.datamodule.base import DatasetConfig, DefaultDataModule
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 from mttl.models.library.expert_library import DatasetLibrary
 

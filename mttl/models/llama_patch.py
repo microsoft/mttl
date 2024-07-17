@@ -1,27 +1,24 @@
+import math
+import warnings
 from typing import Optional, Tuple
 
 import torch
-from torch import nn
-import warnings
-
+import torch.nn.functional as F
 import transformers
+from torch import nn
 from transformers.models.llama.modeling_llama import (
+    LlamaAttention,
     apply_rotary_pos_emb,
     repeat_kv,
-    LlamaAttention,
 )
-import math
-import torch
-import torch.nn.functional as F
-
 
 try:
-    from flash_attn.flash_attn_interface import (
-        flash_attn_varlen_qkvpacked_func,
-        flash_attn_func,
-    )
-    from flash_attn.bert_padding import unpad_input, pad_input
     from einops import rearrange
+    from flash_attn.bert_padding import pad_input, unpad_input
+    from flash_attn.flash_attn_interface import (
+        flash_attn_func,
+        flash_attn_varlen_qkvpacked_func,
+    )
 
     flash_attn_disabled = False
 except Exception:
@@ -229,8 +226,9 @@ def llama_forward_with_flash_attn(
 
 
 def replace_attn_with_flash_attn(module):
-    from mttl.utils import logger
     import os
+
+    from mttl.utils import logger
 
     if os.environ.get("DISABLE_FLASH_ATTN", "0") == "1":
         return
@@ -240,8 +238,9 @@ def replace_attn_with_flash_attn(module):
             "FlashAttention not found, skipping replacing attn with flash attn."
         )
     else:
-        from flash_attn.modules.mha import FlashSelfAttention
         from functools import partial
+
+        from flash_attn.modules.mha import FlashSelfAttention
 
         cuda_major, cuda_minor = torch.cuda.get_device_capability()
         if cuda_major < 8:

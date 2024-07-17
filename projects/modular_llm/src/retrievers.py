@@ -1,15 +1,14 @@
-from mttl.models.library.expert import Expert, load_expert
-from mttl.models.library.library_transforms import LibraryTransform
+import copy
+
+import numpy as np
+import torch
 
 from mttl.models.expert_config import ExpertConfig
-import copy
-import torch
-import numpy as np
-from mttl.utils import setup_logging, logger
-from mttl.models.library.expert_library import (
-    VirtualLocalLibrary,
-)
 from mttl.models.expert_model import MultiExpertModel
+from mttl.models.library.expert import Expert, load_expert
+from mttl.models.library.expert_library import VirtualLocalLibrary
+from mttl.models.library.library_transforms import LibraryTransform
+from mttl.utils import logger, setup_logging
 from projects.modular_llm.src.utils.utils import get_svd_embedding
 
 RETRIEVERS = {}

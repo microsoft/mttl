@@ -1,11 +1,13 @@
+from dataclasses import dataclass
+
+import torch
+
 from mttl.dataloader.platypus_dataset_reader import (
     InversePlatypusDataset,
     PlatypusDataset,
     PlatypusQADataset,
 )
-from mttl.datamodule.base import DefaultDataModule, DatasetConfig
-from dataclasses import dataclass
-import torch
+from mttl.datamodule.base import DatasetConfig, DefaultDataModule
 
 
 @dataclass

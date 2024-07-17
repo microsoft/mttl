@@ -1,20 +1,21 @@
-from enum import Enum
 import hashlib
+import json
 import os
 import re
 from collections import defaultdict, deque
-from typing import Any, Callable, Optional, Union
-import pytorch_lightning as pl
-from pytorch_lightning import LightningModule
-import torch
-import json
+from enum import Enum
+from typing import Callable, Optional, Union
+
 import prettytable
-from transformers.utils import cached_file
+import pytorch_lightning as pl
+import torch
+from pytorch_lightning import LightningModule
 from transformers.file_utils import PushToHubMixin
-from mttl.utils import logger, get_checkpoint_path
+from transformers.utils import cached_file
+
 from mttl.models.get_optimizer import get_optimizer
 from mttl.models.get_scheduler import get_scheduler
-
+from mttl.utils import get_checkpoint_path, logger
 
 CHECKPOINT_PATH_IN_HUB = "checkpoint.ckpt"
 
@@ -438,7 +439,7 @@ def model_loader_helper(
     if load_in_4bit and load_in_8bit:
         raise ValueError("Specify either 'load_in_4bit' or 'load_in_8bit' or neither.")
 
-    from transformers import PreTrainedModel, LlamaForCausalLM, AutoModelForCausalLM
+    from transformers import AutoModelForCausalLM, LlamaForCausalLM, PreTrainedModel
 
     if isinstance(model_name, PreTrainedModel):
         return model_name
@@ -475,6 +476,7 @@ def model_loader_helper(
             device_map=device_map,
             load_in_4bit=load_in_4bit,
             load_in_8bit=load_in_8bit,
+            torch_dtype=torch.bfloat16,
             trust_remote_code=True,
         )
     return model_object

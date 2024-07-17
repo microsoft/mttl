@@ -1,19 +1,20 @@
+import math
+from abc import ABC
 from dataclasses import dataclass
 from typing import Dict, List, Union
-from pyparsing import abstractmethod
-from abc import ABC
-import torch
-import math
+
 import numpy as np
-from torch import nn
+import torch
 import torch.nn.functional as F
-from mttl.models.library.expert import ExpertInfo
+from pyparsing import abstractmethod
+from torch import nn
 from torch.distributions import Categorical
-from mttl.models.utils import MetricLogger, Singleton
+
+from mttl.models.library.expert import ExpertInfo
 from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
 from mttl.models.ranker.classifier_ranker import ClusterPredictor
+from mttl.models.utils import MetricLogger
 from mttl.utils import logger
-
 
 SELECTORS_NAME_TO_KLASS = {}
 SELECTORS_CONFIG_TO_NAME = {}
