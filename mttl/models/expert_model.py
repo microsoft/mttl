@@ -639,9 +639,9 @@ def get_log_prob(logits, labels):
 
 class ExpertModelDPO(EfficientCheckpointModule):
 
-    def __init__(self, expert_model, ref_expert_model, **kwargs):
+    def __init__(self, preference_model, ref_expert_model, **kwargs):
         super().__init__(**kwargs)
-        self.expert_model = expert_model
+        self.preference_model = preference_model
         self.ref_expert_model = ref_expert_model
         self.trainable_param_names = kwargs.get("trainable_param_names", None)
         # log hyperparameters
@@ -657,14 +657,14 @@ class ExpertModelDPO(EfficientCheckpointModule):
 
         # original model
         model_prefered_log_prob = get_log_prob(
-            self.expert_model.model.forward(
+            self.preference_model.model.forward(
                 prompt_prefered_ids, attention_mask=prompt_prefered_mask
             ).logits,
             labels=prompt_prefered_ids,
         )
 
         model_disprefered_log_prob = get_log_prob(
-            self.expert_model.model.forward(
+            self.preference_model.model.forward(
                 prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
             ).logits,
             labels=prompt_disprefered_ids,
@@ -720,14 +720,14 @@ class ExpertModelDPO(EfficientCheckpointModule):
 
         # original model
         model_prefered_log_prob = get_log_prob(
-            self.expert_model.model.forward(
+            self.preference_model.model.forward(
                 prompt_prefered_ids, attention_mask=prompt_prefered_mask
             ).logits,
             labels=prompt_prefered_ids,
         )
 
         model_disprefered_log_prob = get_log_prob(
-            self.expert_model.model.forward(
+            self.preference_model.model.forward(
                 prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
             ).logits,
             labels=prompt_disprefered_ids,
@@ -783,14 +783,14 @@ class ExpertModelDPO(EfficientCheckpointModule):
 
         # original model
         model_prefered_log_prob = get_log_prob(
-            self.expert_model.model.forward(
+            self.preference_model.model.forward(
                 prompt_prefered_ids, attention_mask=prompt_prefered_mask
             ).logits,
             labels=prompt_prefered_ids,
         )
 
         model_disprefered_log_prob = get_log_prob(
-            self.expert_model.model.forward(
+            self.preference_model.model.forward(
                 prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
             ).logits,
             labels=prompt_disprefered_ids,

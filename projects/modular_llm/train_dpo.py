@@ -99,13 +99,12 @@ def run_multitask(args: ExpertConfig):
     # dm = get_datamodule(args)
     # args.n_tasks = len(dm._task_names)
     # args.task_names = dm._task_names
-    # args.trainable_param_names = ".*prototypes.*"
     ref_model = model_class(
         **vars(args), tokenizer=dm.tokenizer, expert_library=expert_library
     )
 
     if args.rl_training == "dpo":
-        # args.trainable_param_names = ".*prototypes.*"
+        args.trainable_param_names = "^(?=.*preference_model)(?=.*prototypes).*"
         model = model_class(
             **vars(args), tokenizer=dm.tokenizer, expert_library=expert_library
         )
@@ -117,7 +116,7 @@ def run_multitask(args: ExpertConfig):
         #     ref_model.add_experts_from_library(expert_library)
         #     patch_prototypes(ref_model, expert_library, args)
         module = ExpertModelDPO(
-            **vars(args), expert_model=model, ref_expert_model=ref_model
+            **vars(args), preference_model=model, ref_expert_model=ref_model
         )
 
     # get metric monitors for models
@@ -223,7 +222,7 @@ def run_multitask(args: ExpertConfig):
                 else:
                     raise ValueError("Model class not recognized")
 
-        upload_library(expert_library, module)
+        # upload_library(expert_library, module)
 
         if args.create_transfer_matrix:
             create_transfer_matrix(args, checkpoint)
