@@ -476,7 +476,6 @@ def model_loader_helper(
             device_map=device_map,
             load_in_4bit=load_in_4bit,
             load_in_8bit=load_in_8bit,
-            torch_dtype=torch.bfloat16,
             trust_remote_code=True,
         )
     return model_object

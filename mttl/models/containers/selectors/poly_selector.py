@@ -5,6 +5,7 @@ import torch
 from torch import nn
 
 from mttl.models.containers.selectors.base_selectors import (
+    EPS,
     BatchExpertsSplitsAndWeightsSelectorOutput,
     ExpertsAndWeightsSelectorOutput,
     ExpertsSplitsAndWeightsSelectorOutput,
