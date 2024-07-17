@@ -717,7 +717,7 @@ class ExpertModelSimPO(EfficientCheckpointModule):
             "train/rejected_rewards", rejected_rewards.mean(), on_step=True, on_epoch=True
         )
 
-        return loss
+        return loss.mean()
 
     def validation_step(self, batch, _):
         prompt_prefered_ids = batch["prompt_prefered_ids"]
@@ -748,7 +748,7 @@ class ExpertModelSimPO(EfficientCheckpointModule):
         self.log("val/chosen_rewards", chosen_rewards.mean(), on_step=True, on_epoch=True)
         self.log("val/rejected_rewards", rejected_rewards.mean(), on_step=True, on_epoch=True)
 
-        return loss
+        return loss.mean()
 
 
 class ExpertModelDPO(EfficientCheckpointModule):
