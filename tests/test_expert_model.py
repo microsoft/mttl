@@ -46,7 +46,7 @@ def test_expert_model():
         model.get_merged_expert()
 
     assert len(model.selectors["lora"]) == 12
-    assert isinstance(next(iter(model.selectors["lora"][0])), TaskNameSelector)
+    assert isinstance(model.selectors["lora"][0], TaskNameSelector)
 
 
 def test_from_pretrained():
