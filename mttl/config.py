@@ -181,6 +181,11 @@ class Config:
         # Data config
         self.dataset = None
         self.custom_tasks_splits = None
+        self.subsample_train = None
+        self.subsample_dev = None
+        self.subsample_test = None
+        self.subsample_per_task = False
+        self.pack_sequences = False
 
         self.data_dir = os.getenv("TRAIN_DIR", "/tmp/")
         self.output_dir = os.getenv("OUTPUT_DIR", "./output")
@@ -252,11 +257,6 @@ class Config:
         self.debug = False
         self.seed = 42
         self.eval_before_training = True
-
-        self.subsample_train = None
-        self.subsample_dev = None
-        self.subsample_test = None
-        self.subsample_per_task = False
 
         self.ni_online_eval = False  # zero-shot online eval for ni
         self.t0_online_eval = False  # zero-shot eval for t0

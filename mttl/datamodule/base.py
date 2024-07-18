@@ -1,4 +1,5 @@
 import itertools
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Union
 
@@ -6,6 +7,7 @@ import torch
 from datasets import Dataset as ArrowDataset
 from datasets import concatenate_datasets
 from pytorch_lightning import LightningDataModule
+from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PaddingStrategy
@@ -35,6 +37,7 @@ class DatasetConfig:
     subsample_test: int = None
     subsample_per_task: bool = False  # Changing default to False
     subsample: int = -1
+    pack_sequences: bool = False  # True
 
 
 @dataclass
@@ -261,7 +264,45 @@ class DefaultCollator:
         output_batch["labels"] = targets
         return output_batch
 
+    def _get_nested_type(self, item):
+        while isinstance(item, (list, tuple)):
+            item = item[0]
+        return type(item)
+
+    def _tensor_dtype(self, item):
+        dtype = self._get_nested_type(item)
+        return {"int": torch.int64, "float": torch.float32, "bool": torch.bool}.get(
+            dtype.__name__, None
+        )
+
     def __call__(self, batch: Dict):
+        # is our input already tokenized ?
+        # trim according to the attention mask and return
+        if "input_ids" in batch[0]:
+            output_batch = defaultdict(list)
+            for batch_item in batch:
+                for key, value in batch_item.items():
+                    dtype = self._tensor_dtype(value)
+                    if dtype:
+                        output_batch[key].append(torch.Tensor(value).to(dtype))
+                    else:
+                        output_batch[key].append(value)
+
+            # create proper containers
+            for key, value in output_batch.items():
+                if isinstance(value[0], torch.Tensor):
+                    pad_token = {
+                        "input_ids": self.tokenizer.pad_token_id,
+                        "labels": self.label_pad_token_id,
+                    }.get(key, 0)
+                    value = pad_sequence(
+                        value, batch_first=True, padding_value=pad_token
+                    )
+                    output_batch[key] = value
+
+            return dict(output_batch)
+
+        # Otherwise process as expected
         sources = [b["source"] for b in batch]
         labels = [b["target"] for b in batch]
         task_ids = [b.get("task_id", None) for b in batch]
@@ -565,19 +606,133 @@ class DefaultDataModule(LightningDataModule):
     def setup_dataset(self):
         pass
 
+    def tokenize_dataset(self, dataset):
+        padding = self.collate_fn.padding
+        self.collate_fn.padding = "do_not_pad"
+        return_tensors = self.collate_fn.return_tensors
+        self.collate_fn.return_tensors = "pt"
+
+        def collate_fn_wrapper(batch):
+            out = self.collate_fn([batch])
+            return {k: v[0] for k, v in out.items()}
+
+        # remove `rng` before mapping, as it's not pickleable
+        rng = self.rng
+        self.rng = None
+        dataset = dataset.map(collate_fn_wrapper, batched=False, num_proc=20)
+        self.rng = rng
+
+        # NOTE : `map` ignores these two arguments :(
+        self.collate_fn.padding = padding
+        self.collate_fn.return_tensors = return_tensors
+
+        return dataset
+
+    def pack_sequences(self, dataset):
+        """
+        Combine sequences together in larger chunks closer to `max_input_length`
+        """
+        # first, let's shuffle the dataset
+        dataset = dataset.shuffle(seed=42)
+
+        # TODO: first partition dataset according to `task_name`, and
+        # pack each task individually to ensure that we don't mix tasks
+
+        # Very basic code that will iterate over sequences one by one,
+        # and merge together until the max_input_length is reached
+        # This is not optimal, but it's a start
+
+        max_length = self.config.max_input_length
+
+        def group(examples):
+
+            def new_container():
+                # for when starting a new packed batch
+                # return {k: [] if type(v[0]) in [list, int] else "" for k, v in examples.items()}
+                return {k: [] for k, _ in examples.items()}
+
+            grouped_samples = {k: [] for k, _ in examples.items()}
+
+            def append_to_running_seq(container, example):
+                for k, v in example.items():
+                    if isinstance(v, int):
+                        container[k] += [v]
+                    elif isinstance(v, list):
+                        container[k] += v
+                    elif type(v) == str:
+                        container[k] += [v]
+                        # container[k] += ("<SPLIT>" if len(container[k]) > 0 else "") + v
+                        # container[k] += ("<SPLIT>" if len(container[k]) > 0 else "") + v
+                    else:
+                        raise ValueError(f"Unknown type {type(v)}")
+
+            def add_finished_sequence(container, example):
+                for k, v in example.items():
+                    container[k].append(v)
+
+            def trim_ex(ex):
+                for key in ex.keys():
+                    value = ex[key]
+                    if isinstance(value, list):
+                        ex[key] = value[:max_length]
+
+            def dict_get_item(ex, i):
+                return {k: v[i] for k, v in ex.items()}
+
+            num_examples = len(examples["input_ids"])
+            packed = new_container()
+            current_len = 0
+            for i in range(num_examples):
+                ex = dict_get_item(examples, i)
+                ex_len = len(ex["input_ids"])
+                # can pack
+                if current_len + ex_len <= max_length:
+                    append_to_running_seq(packed, ex)
+                    current_len += ex_len
+                else:
+                    if current_len > 0:
+                        add_finished_sequence(grouped_samples, packed)
+                    packed = new_container()
+                    current_len = 0
+                    trim_ex(ex)
+                    append_to_running_seq(packed, ex)
+                    current_len += ex_len
+
+            if current_len > 0:
+                add_finished_sequence(grouped_samples, packed)
+
+            return grouped_samples
+
+        dataset = dataset.map(
+            group,
+            num_proc=20,
+            batched=True,
+            batch_size=10_000,
+            remove_columns=list(dataset.features),
+        )
+        return dataset
+
     def post_setup_dataset(self):
         for split in ["train", "dev", "test"]:
-            subsample = getattr(self.config, f"subsample_{split}", None)
 
+            dataset = getattr(self, f"{split}_dataset")
+            # TODO: put this back after packing
+            subsample = getattr(self.config, f"subsample_{split}", None)
             if subsample and subsample > 0:
                 logger.warning(
                     f"subsampling the {split} dataset to {subsample} samples"
                 )
-                dataset = getattr(self, f"{split}_dataset")
                 sub_dataset = self.subsample_dataset(
                     dataset, subsample, per_task=self.config.subsample_per_task
                 )
+
                 setattr(self, f"{split}_dataset", sub_dataset)
+
+            if self.config.pack_sequences and split == "train":
+                logger.info(f"Packing sequences for {split} dataset")
+                dataset = self.tokenize_dataset(dataset)
+                dataset = self.pack_sequences(dataset)
+                setattr(self, f"{split}_dataset", dataset)
 
         self.print_infos()
 
@@ -735,6 +890,7 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
             **common_kwargs,
             source_template=args.source_template,
             augment_few_shot=args.augment_few_shot,
+            pack_sequences=args.pack_sequences,
         )
         dm = FlatMultiTaskModule(config, for_generation=for_generation)
     elif "mmlu" in dataset:
