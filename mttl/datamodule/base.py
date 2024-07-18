@@ -883,6 +883,7 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
             **common_kwargs,
             remove_phi_eval_tasks=args.remove_phi_eval_tasks,
             include_task_source=args.include_task_source,
+            pack_sequences=args.pack_sequences,
         )
         dm = FlanModule(config, for_generation=for_generation)
     elif "flat" in dataset:
