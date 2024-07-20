@@ -85,7 +85,6 @@ def add_hard_prompt_to_transformer(
     if not isinstance(transformer, HardPromptDecoderWrapper):
         expert_container = HardPromptExpertContainer(
             expert_config,
-            transformer.info_container,
             selector=None,
         )
         # patch the decoder
@@ -101,11 +100,11 @@ def add_hard_prompt_to_transformer(
 
 
 class HardPromptExpertContainer(ExpertContainer):
-    def __init__(self, config, info_container, selector=None):
-        super().__init__(config, info_container, layer=None)
+    def __init__(self, config, selector=None):
+        super().__init__(config, layer=None)
 
         self.config = config
-        self.selector: Selector = selector or TaskNameSelector(info_container)
+        self.selector: Selector = selector or TaskNameSelector()
 
         self.default_expert_name = None
         self.merged_expert_names = []

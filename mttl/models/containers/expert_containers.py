@@ -30,13 +30,12 @@ from mttl.utils import logger, warn_once
 class ExpertContainer:
     __supports_configs__ = []
 
-    def __init__(self, config, info_container, layer, selector=None):
+    def __init__(self, config, layer, selector=None):
         from mttl.models.containers.selectors import TaskNameSelector
 
         self.config = config
         self.layer = layer
-        self.info_container = info_container
-        self.selector = selector or TaskNameSelector(info_container)
+        self.selector = selector or TaskNameSelector()
 
         self.experts: dict = None
         self.expert_infos = {}
@@ -159,13 +158,12 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
     def __init__(
         self,
         config: LoRAConfig,
-        info_container,
         layer,
         selector=None,
         lora_merge_after=False,
     ):
         MergeableAdapter.__init__(self)
-        super().__init__(config, info_container, layer, selector)
+        super().__init__(config, layer, selector)
         self.lora_merge_after = lora_merge_after
 
         if not isinstance(self.layer, nn.Linear):
@@ -386,14 +384,13 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
     def __init__(
         self,
         config,
-        info_container,
         layer,
         selector=None,
         lora_merge_after=False,
         **kwargs,
     ):
         MergeableAdapter.__init__(self)
-        super().__init__(config, info_container, layer, selector, lora_merge_after)
+        super().__init__(config, layer, selector, lora_merge_after)
 
         if not isinstance(self.layer, nn.Linear):
             raise ValueError(
@@ -542,12 +539,11 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
 
     __supports_configs__ = [KVAdapterConfig]
 
-    def __init__(self, config, info_container, layer, selector=None, **kwargs):
+    def __init__(self, config, layer, selector=None, **kwargs):
         super().__init__(
             config,
-            info_container,
             layer,
-            selector or KVTaskNameSelector(info_container),
+            selector or KVTaskNameSelector(),
         )
 
         # Check if layer is an attention layer :

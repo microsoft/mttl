@@ -58,8 +58,8 @@ class PhatgooseSelectorConfig(PerTokenSelectorConfig):
 
 @register_multi_expert_selector("phatgoose_router", PhatgooseSelectorConfig)
 class PhatgooseSelector(PerTokenSelector):
-    def __init__(self, info_container, config, **kwargs) -> None:
-        super().__init__(info_container, config, **kwargs)
+    def __init__(self, config, **kwargs) -> None:
+        super().__init__(config, **kwargs)
 
         if not self.config.lora_merge_after:
             logger.warning("PhatgooseSelector should have lora_merge_after=True")
@@ -98,10 +98,8 @@ class PhatgooseTrainerSelector(Selector):
     Selector from https://arxiv.org/abs/2402.05859
     """
 
-    def __init__(
-        self, info_container, config: PhatgooseTrainerSelectorConfig, **kwargs
-    ) -> None:
-        super().__init__(info_container, config)
+    def __init__(self, config: PhatgooseTrainerSelectorConfig, **kwargs) -> None:
+        super().__init__(config)
 
         if "layer" not in kwargs:
             raise ValueError(

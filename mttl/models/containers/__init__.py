@@ -10,7 +10,6 @@ from mttl.models.containers.selectors import (
 )
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
-from mttl.models.modifiers.modify_model import CONFIGS_TO_MODIFIERS
 from mttl.utils import logger
 
 
@@ -124,7 +123,6 @@ def create_selector_for_container(
         # Special case when you have a decoder layer in an enc-dec model
         selector = get_selector(
             selector_config,
-            info_container=transformer.info_container,
             layer=container.layer,
             training_config=training_config,
         )
@@ -312,9 +310,6 @@ def add_expert_to_transformer(
 
     model_modifier = get_modifier_type(expert_config)
 
-    if not hasattr(transformer, "info_container"):
-        transformer.info_container = {}
-
     if model_modifier == "hard_prompt":
         return add_hard_prompt_to_transformer(
             transformer,
@@ -338,7 +333,6 @@ def add_expert_to_transformer(
                         CONTAINER_CLASS = get_container_class(model_modifier)
                         expert_container = CONTAINER_CLASS(
                             expert_config,
-                            transformer.info_container,
                             layer,
                             lora_merge_after=(
                                 routing_config.lora_merge_after
