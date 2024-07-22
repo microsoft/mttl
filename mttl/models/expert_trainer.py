@@ -11,13 +11,6 @@ from mttl.logging import logger
 from mttl.models.get_scheduler import get_scheduler_with_args
 
 
-def transfer_batch_to_device(batch, device):
-    for key in batch:
-        if isinstance(batch[key], torch.Tensor):
-            batch[key] = batch[key].to(device)
-    return batch
-
-
 class EfficientCheckpointHfModel(nn.Module, PushToHubMixin):
     _keys_to_ignore_on_save = None
 

@@ -10,7 +10,6 @@ import torch.nn as nn
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from mttl.logging import logger
-from projects.modular_llm.src.utils.evaluators import Evaluator
 
 
 def remote_login(token: Optional[str] = None):
@@ -201,7 +200,8 @@ def generate_random_string(str_len=10):
     return "".join(random.choices(string.ascii_uppercase, k=str_len))
 
 
-def get_loss(model, evaluator: Evaluator, **kwargs):
+# from projects.modular_llm.src.utils.evaluators import Evaluator
+def get_loss(model, evaluator: "Evaluator", **kwargs):
     return evaluator.get_loss(model, **kwargs)
 
 
