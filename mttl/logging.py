@@ -5,6 +5,7 @@ from functools import lru_cache
 import numpy as np
 import pandas as pd
 import prettytable
+import pytorch_lightning as pl
 import wandb
 
 logger = logging.getLogger("mttl")
@@ -41,6 +42,19 @@ def setup_logging(log_dir: str = None):
                 "New experiment, log will be at %s",
                 log_file_path,
             )
+
+
+def init_wandb_logger(args):
+    if args.wandb_project is None:
+        args.wandb_project = os.environ.get("WANDB_PROJECT", "MMLU_ninja_merge")
+    if args.wandb_project:
+        exp_name = os.getenv("AMLT_JOB_NAME", f"{args.exp_name}")
+        pl_logger = pl.loggers.WandbLogger(
+            project=args.wandb_project,
+            name=exp_name,
+            config=args,
+        )
+    return pl_logger
 
 
 class TableLogger:

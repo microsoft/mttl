@@ -9,14 +9,14 @@ from pytorch_lightning import seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
-from mttl.logging import TableLogger, logger, setup_logging
+from mttl.logging import TableLogger, init_wandb_logger, logger, setup_logging
 from mttl.models.expert_config import ExpertConfig
 
 # register models
 from mttl.models.expert_model import ExpertModel
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
-from mttl.utils import init_wandb_logger, remote_login
+from mttl.utils import remote_login
 from mttl.vllm_engines.engines import free_memory
 from projects.modular_llm.src.utils.evaluators import Evaluator, prepare_evaluator
 

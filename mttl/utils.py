@@ -296,19 +296,6 @@ def get_svd_embedding(lib, expert_name: str):
     return embeddings["svd"]["embeddings"]
 
 
-def init_wandb_logger(args):
-    if args.wandb_project is None:
-        args.wandb_project = os.environ.get("WANDB_PROJECT", "MMLU_ninja_merge")
-    if args.wandb_project:
-        exp_name = os.getenv("AMLT_JOB_NAME", f"{args.exp_name}")
-        logger = pl.loggers.WandbLogger(
-            project=args.wandb_project,
-            name=exp_name,
-            config=args,
-        )
-    return logger
-
-
 def get_task_expert(task, expert_lib, default_score):
     """
     Get the best expert for a given task.
