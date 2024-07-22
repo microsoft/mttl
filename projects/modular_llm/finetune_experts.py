@@ -10,6 +10,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from typing import Callable
 
 from mttl.callbacks import LiveCheckpointCallback, RougeCallback
+from mttl.datamodule.base import get_datamodule
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import ExpertModel as ExpertTrainer
 from mttl.models.expert_model import MoEModel as MoETrainer
@@ -39,7 +40,6 @@ from mttl.utils import (
 )
 from projects.modular_llm.src.callbacks import DownstreamEvalCallback
 from projects.modular_llm.src.retrievers import RandomRetriever, SVDEmbeddingRetriever
-from projects.modular_llm.utils import get_datamodule
 
 FINETUNE_FUNCTIONS: dict[str, Callable] = {}
 
