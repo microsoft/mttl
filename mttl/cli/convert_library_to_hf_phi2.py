@@ -8,7 +8,6 @@ import click
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.models.library.expert_library import ExpertLibrary
-from mttl.utils import logger
 
 
 def translate_lib_to_hf_phi(

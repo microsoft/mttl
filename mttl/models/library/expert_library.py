@@ -34,8 +34,9 @@ from huggingface_hub import (
 )
 from huggingface_hub.utils._errors import RepositoryNotFoundError
 
+from mttl.logging import logger
 from mttl.models.library.expert import Expert, ExpertInfo, load_expert
-from mttl.utils import logger, remote_login
+from mttl.utils import remote_login
 
 
 @total_ordering

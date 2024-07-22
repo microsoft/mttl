@@ -9,7 +9,7 @@ import wandb
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
-from abc import ABC, abstractmethod, abstractproperty
+from abc import ABC, abstractmethod
 
 from mttl.callbacks import LossCallback
 from mttl.datamodule.base import DefaultDataModule, get_datamodule
@@ -111,7 +111,8 @@ class Evaluator(ABC):
     def get_loss(self, model):
         pass
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def tasks(self):
         pass
 

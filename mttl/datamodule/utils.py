@@ -2,7 +2,7 @@ import os
 
 from transformers import AutoTokenizer, LlamaTokenizer
 
-from mttl.utils import logger
+from mttl.logging import logger
 
 
 def maybe_filter_hf_dataset_by_task(

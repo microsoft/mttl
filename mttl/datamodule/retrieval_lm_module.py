@@ -10,8 +10,8 @@ from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PaddingStrategy
 
 from mttl.datamodule.utils import get_tokenizer
+from mttl.logging import logger, setup_logging
 from mttl.models.library.expert_library import DatasetLibrary
-from mttl.utils import logger
 
 
 @dataclass
@@ -211,10 +211,7 @@ class RetrievalLMDataModule(LightningDataModule):
 
 
 if __name__ == "__main__":
-    import os
-
     from mttl.config import Config
-    from mttl.utils import setup_logging
 
     setup_logging()
 

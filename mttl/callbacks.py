@@ -12,8 +12,8 @@ from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch.optim import Optimizer
 
+from mttl.logging import logger
 from mttl.models.utils import transfer_batch_to_device
-from mttl.utils import logger
 
 DEBUG = False
 

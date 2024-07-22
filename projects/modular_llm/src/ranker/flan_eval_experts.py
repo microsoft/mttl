@@ -7,12 +7,12 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
+from mttl.logging import logger, setup_logging
 from mttl.models.expert_config import ExpertConfig
 
 # register models
 from mttl.models.expert_model import MultiExpertModelRanker
 from mttl.models.library.expert_library import ExpertLibrary
-from mttl.utils import logger, setup_logging
 
 
 def parse_experts_to_load(experts_to_load):

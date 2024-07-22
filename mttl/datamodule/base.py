@@ -11,7 +11,7 @@ from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PaddingStrategy
 
 from mttl.datamodule.utils import get_tokenizer
-from mttl.utils import logger
+from mttl.logging import logger
 
 
 @dataclass
@@ -442,8 +442,6 @@ class DefaultDataModule(LightningDataModule):
         )
 
     def print_infos(self):
-        from mttl.utils import logger
-
         logger.info("Dataset name: %s", self.config.dataset)
         logger.info("Reader class: %s", self.__class__.__name__)
         if self.train_dataset is not None and len(self.train_dataset) > 0:
