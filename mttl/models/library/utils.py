@@ -6,10 +6,10 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from pytorch_lightning import Trainer
 
 from mttl.callbacks import LiveCheckpointCallback
+from mttl.logging import get_pl_loggers
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import ExpertModel as ExpertTrainer
 from mttl.models.monitors import get_monitors
-from mttl.utils import get_pl_loggers
 
 
 def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
