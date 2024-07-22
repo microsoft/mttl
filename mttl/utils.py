@@ -198,13 +198,3 @@ def rank_zero_only_and_wait(before=True, after=True):
 
 def generate_random_string(str_len=10):
     return "".join(random.choices(string.ascii_uppercase, k=str_len))
-
-
-def get_svd_embedding(lib, expert_name: str):
-    try:
-        embeddings = lib.get_auxiliary_data(
-            data_type="embeddings", expert_name=expert_name
-        )
-    except ValueError:
-        return None
-    return embeddings["svd"]["embeddings"]

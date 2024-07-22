@@ -8,7 +8,8 @@ from mttl.models.expert_model import MultiExpertModel
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import VirtualLocalLibrary
 from mttl.models.library.library_transforms import LibraryTransform
-from mttl.utils import get_svd_embedding, logger
+from mttl.models.library.utils import get_svd_embedding
+from mttl.utils import logger
 
 RETRIEVERS = {}
 

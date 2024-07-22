@@ -13,7 +13,8 @@ from mttl.models.library.library_transforms import (
     SVDEmbeddingTransform,
     SVDEmbeddingTransformConfig,
 )
-from mttl.utils import get_svd_embedding, remote_login
+from mttl.models.library.utils import get_svd_embedding
+from mttl.utils import remote_login
 
 remote_login()
 
