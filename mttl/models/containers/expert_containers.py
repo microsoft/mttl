@@ -5,6 +5,7 @@ from pyparsing import abstractmethod
 from torch import nn
 
 from mttl.config import Config
+from mttl.logging import warn_once
 from mttl.models.containers.selectors import (
     BatchExpertsAndWeightsSelectorOutput,
     BatchExpertsSelectorOutput,
@@ -18,7 +19,6 @@ from mttl.models.modifiers.base import MergeableAdapter, ModifierConfig, ModifyM
 from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
 from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
 from mttl.models.modifiers.modify_model import get_modifier_type
-from mttl.utils import warn_once
 
 
 class ExpertContainer:

@@ -1,7 +1,13 @@
 import logging
 import os
+from functools import lru_cache
 
 logger = logging.getLogger("mttl")
+
+
+@lru_cache
+def warn_once(msg: str):
+    logger.warning(msg)
 
 
 def setup_logging(log_dir: str = None):

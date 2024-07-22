@@ -3,7 +3,6 @@ import hashlib
 import os
 import random
 import string
-from functools import lru_cache
 from typing import Optional
 
 import numpy as np
@@ -22,11 +21,6 @@ from mttl.models.library.expert_library import (
     get_best_expert_for_task,
 )
 from projects.modular_llm.src.utils.evaluators import Evaluator
-
-
-@lru_cache
-def warn_once(msg: str):
-    logger.warning(msg)
 
 
 def remote_login(token: Optional[str] = None):
