@@ -13,7 +13,7 @@ from mttl.callbacks import LossCallback
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
-from mttl.logging import logger, setup_logging
+from mttl.logging import TableLogger, logger, setup_logging
 from mttl.models.containers.selectors import Selector, SelectorConfig
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import ExpertModel, MultiExpertModel
@@ -25,7 +25,7 @@ from mttl.models.library.library_transforms import (
     WeightedLinearMergeConfig,
 )
 from mttl.models.modifiers.lora import LoRAConfig
-from mttl.utils import TableLogger, remote_login
+from mttl.utils import remote_login
 
 
 def eval_in_distribution(module, args: ExpertConfig, tasks: list):
