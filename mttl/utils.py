@@ -10,11 +10,6 @@ import torch.nn as nn
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from mttl.logging import logger
-from mttl.models.library.expert import Expert
-from mttl.models.library.expert_library import (
-    get_best_expert_for_score,
-    get_best_expert_for_task,
-)
 from projects.modular_llm.src.utils.evaluators import Evaluator
 
 
@@ -218,25 +213,3 @@ def get_svd_embedding(lib, expert_name: str):
     except ValueError:
         return None
     return embeddings["svd"]["embeddings"]
-
-
-def get_task_expert(task, expert_lib, default_score):
-    """
-    Get the best expert for a given task.
-
-    Args:
-        task (str): The task for which to find the expert.
-        expert_lib (ExpertLibrary): The library of available experts.
-        default_score (Score): Score to use for expert retrieval.
-
-    Returns:
-        Expert: The best expert for the given task according to the score.
-    Raises:
-        ValueError: If no default score is provided.
-    """
-    if default_score is None:
-        raise ValueError("No default score provided")
-    parent_exp: Expert = get_best_expert_for_score(expert_lib, default_score.hash)
-    if parent_exp is None and task in expert_lib.tasks:
-        parent_exp = get_best_expert_for_task(expert_lib, task, default_score.hash)
-    return parent_exp

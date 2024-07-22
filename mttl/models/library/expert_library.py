@@ -1499,6 +1499,28 @@ def get_best_expert_for_task(library: HFExpertLibrary, task, hash) -> Expert:
     return library[best_expert.expert_name]
 
 
+def get_task_expert(task, expert_lib, default_score):
+    """
+    Get the best expert for a given task.
+
+    Args:
+        task (str): The task for which to find the expert.
+        expert_lib (ExpertLibrary): The library of available experts.
+        default_score (Score): Score to use for expert retrieval.
+
+    Returns:
+        Expert: The best expert for the given task according to the score.
+    Raises:
+        ValueError: If no default score is provided.
+    """
+    if default_score is None:
+        raise ValueError("No default score provided")
+    parent_exp: Expert = get_best_expert_for_score(expert_lib, default_score.hash)
+    if parent_exp is None and task in expert_lib.tasks:
+        parent_exp = get_best_expert_for_task(expert_lib, task, default_score.hash)
+    return parent_exp
+
+
 class DatasetEngine(ABC):
     def __init__(self, dataset_id: str, token: Optional[str] = None):
         self.dataset_id = dataset_id
