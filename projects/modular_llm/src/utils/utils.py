@@ -1,9 +1,5 @@
-import copy
-import glob
 import os
-import re
 import sys
-from functools import partial
 
 import numpy as np
 import pandas as pd
@@ -15,17 +11,11 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import (
-    HFExpertLibrary,
     get_best_expert_for_score,
     get_best_expert_for_task,
 )
-from mttl.utils import logger, setup_logging
-from projects.modular_llm.src.utils.evaluators import (
-    Evaluator,
-    ExtendedMMLUEvaluator,
-    ExtendedRougeEvaluator,
-    TestLossEvaluator,
-)
+from mttl.utils import logger
+from projects.modular_llm.src.utils.evaluators import Evaluator
 
 
 class TableLogger:
@@ -71,19 +61,6 @@ def get_loss(model, evaluator: Evaluator, **kwargs):
     return evaluator.get_loss(model, **kwargs)
 
 
-def save_new_module(output_dir, module, task_name, postfix=""):
-    module_copy = copy.deepcopy(module)
-    # make Loras trainable so that they are saved
-    module_copy.trainable_param_names = [
-        n for n, p in module_copy.named_parameters() if re.match(".*lora.*", n)
-    ]
-    dest = output_dir + f"/{task_name}_{postfix}"
-    os.makedirs(dest, exist_ok=True)
-    ckpt_path = module_copy.save_pretrained(dest)
-    del module_copy
-    return ckpt_path
-
-
 def get_svd_embedding(lib, expert_name: str):
     try:
         embeddings = lib.get_auxiliary_data(
@@ -99,23 +76,12 @@ def init_wandb_logger(args):
         args.wandb_project = os.environ.get("WANDB_PROJECT", "MMLU_ninja_merge")
     if args.wandb_project:
         exp_name = os.getenv("AMLT_JOB_NAME", f"{args.exp_name}")
-        # wandb.init(
-        #     project=args.wandb_project,
-        #     name=exp_name,
-        #     config=args,
-        # )
         logger = pl.loggers.WandbLogger(
             project=args.wandb_project,
             name=exp_name,
             config=args,
         )
     return logger
-
-
-def log_wandb(scores, prefix):
-    if wandb.run is not None:
-        for t, v in scores.items():
-            wandb.log({f"{prefix}_on_{t}_test_mmlu": v["mean"]})
 
 
 def get_task_expert(task, expert_lib, default_score):
