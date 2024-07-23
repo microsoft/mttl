@@ -4,11 +4,12 @@ from typing import Dict, Union
 import torch
 
 from mttl.config import Config
+from mttl.logging import logger
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.modifiers.base import ModifierConfig, get_target_2_source_param_mapping
 from mttl.models.modifiers.modify_model import CONFIGS_TO_MODIFIERS
 from mttl.models.utils import download_from_hub
-from mttl.utils import get_checkpoint_path, logger
+from mttl.utils import get_checkpoint_path
 
 
 @dataclass

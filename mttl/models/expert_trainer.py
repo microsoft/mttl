@@ -1,7 +1,4 @@
 import os
-import re
-from collections import defaultdict
-from enum import Enum
 from typing import Any, Mapping
 
 import torch
@@ -10,15 +7,8 @@ from transformers.file_utils import WEIGHTS_NAME
 from transformers.trainer import Trainer
 from transformers.utils import PushToHubMixin
 
+from mttl.logging import logger
 from mttl.models.get_scheduler import get_scheduler_with_args
-from mttl.utils import logger
-
-
-def transfer_batch_to_device(batch, device):
-    for key in batch:
-        if isinstance(batch[key], torch.Tensor):
-            batch[key] = batch[key].to(device)
-    return batch
 
 
 class EfficientCheckpointHfModel(nn.Module, PushToHubMixin):
@@ -96,7 +86,6 @@ class MttlTrainer(Trainer):
         from transformers.utils import is_sagemaker_mp_enabled
 
         from mttl.models.get_optimizer import get_optimizer
-        from mttl.utils import logger
 
         if is_sagemaker_mp_enabled():
             raise NotImplementedError(

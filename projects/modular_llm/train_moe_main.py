@@ -8,10 +8,11 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.callbacks import LiveCheckpointCallback, NanoMMLUCallback, RougeCallback
 from mttl.datamodule.base import get_datamodule
+from mttl.logging import get_pl_loggers, logger, setup_logging
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import MoEModel
 from mttl.models.monitors import get_monitors
-from mttl.utils import get_pl_loggers, logger, remote_login, setup_logging
+from mttl.utils import remote_login
 from projects.modular_llm.src.callbacks import DownstreamEvalCallback
 
 

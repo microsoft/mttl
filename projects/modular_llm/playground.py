@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import List
 
 from mttl.evaluators.base import StoppingCriteriaList, StoppingCriteriaSub
+from mttl.logging import setup_logging
 from mttl.models.library.expert_library import ExpertLibrary
 
 
@@ -86,12 +87,9 @@ class ConversationNoTemplate(Conversation):
 
 
 def main():
-    import torch
-
     from mttl.datamodule.utils import get_tokenizer_with_args
     from mttl.models.expert_config import ExpertConfig
     from mttl.models.expert_model import MultiExpertModel
-    from mttl.utils import setup_logging
 
     setup_autocomplete()
     setup_logging()

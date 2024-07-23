@@ -1,7 +1,8 @@
 import torch
 
+from mttl.logging import logger
 from mttl.models.library.expert_library import DatasetLibrary
-from mttl.utils import hash_example, logger
+from mttl.utils import hash_example
 
 
 class Oasst1Template:

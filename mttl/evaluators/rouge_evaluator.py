@@ -4,10 +4,10 @@ import os
 import numpy as np
 import tqdm
 
-from mttl.evaluators.base import GenerativeEvaluator, decode, switch_to_eval_mode
+from mttl.evaluators.base import GenerativeEvaluator, switch_to_eval_mode
 from mttl.evaluators.mmlu_evaluator import swap_model
 from mttl.evaluators.ni_evaluator import compute_metrics
-from mttl.utils import logger
+from mttl.logging import logger
 from mttl.vllm_engines.engines import LLMEngineRouge, free_memory
 
 

@@ -228,7 +228,7 @@ def llama_forward_with_flash_attn(
 def replace_attn_with_flash_attn(module):
     import os
 
-    from mttl.utils import logger
+    from mttl.logging import logger
 
     if os.environ.get("DISABLE_FLASH_ATTN", "0") == "1":
         return

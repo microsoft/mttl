@@ -5,7 +5,7 @@ import os
 from string import Template
 from typing import Dict
 
-from mttl.utils import logger, setup_logging
+from mttl.logging import logger, setup_logging
 
 
 class Config:

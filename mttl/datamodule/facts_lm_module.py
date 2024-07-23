@@ -6,8 +6,8 @@ from datasets import concatenate_datasets, get_dataset_split_names
 
 from mttl.datamodule.base import DefaultDataModule
 from mttl.datamodule.platypus_module import PlatypusConfig
+from mttl.logging import logger, setup_logging
 from mttl.models.library.expert_library import DatasetLibrary
-from mttl.utils import logger
 
 
 @dataclass
@@ -92,10 +92,7 @@ class FactsLMDataModule(DefaultDataModule):
 
 
 if __name__ == "__main__":
-    import os
-
     from mttl.config import Config
-    from mttl.utils import setup_logging
 
     setup_logging()
 
