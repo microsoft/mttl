@@ -652,6 +652,10 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         WinograndeDataConfig,
         WinograndeMultiChoiceDataModule,
     )
+    from mttl.datamodule.chat_data_module import (
+        ChatDataConfig,
+        ChatDataModule,
+    )
 
     # refactor all the common arguments below into a dict common kwargs
     dataset = args.dataset if not dataset_override else dataset_override
@@ -721,6 +725,11 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         assert not for_generation
         config = dataset_to_klass_map[dataset][0]
         dm = dataset_to_klass_map[dataset][1](config)
+    elif "chat" in dataset:
+        config = ChatDataConfig(
+            **common_kwargs,
+        )
+        dm = ChatDataModule(config, for_generation=for_generation)
     elif "flan" in dataset:
         config = FlanConfig(
             **common_kwargs,
