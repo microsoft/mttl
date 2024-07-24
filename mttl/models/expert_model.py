@@ -573,7 +573,7 @@ class MultiExpertModel(ExpertModel):
         for container in self.experts_containers:
             if expert_name in container.expert_infos:
                 expert_info = container.expert_infos[expert_name]
-                expert_weights = container._get_expert_weights(expert_name)
+                expert_weights = container[expert_name].state_dict()
                 expert_weights = {
                     f"{container.layer_name}.{k}": v for k, v in expert_weights.items()
                 }
