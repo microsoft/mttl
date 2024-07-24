@@ -232,6 +232,13 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         self.experts.clear()
 
     def __setitem__(self, name, value: LoRA):
+        if not isinstance(value, LoRA):
+            raise ValueError(
+                "Expert container only supports LoRA modules, got {}".format(
+                    value.__class__.__name__
+                )
+            )
+
         self.experts[name] = value
 
     def __getitem__(self, name):
