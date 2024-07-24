@@ -268,9 +268,11 @@ class Selector(nn.Module):
         nn.Module.__init__(self)
 
         self.config = config
+        self.expert_infos = {}
         self.expert_names = []
         self.selector_views = []
         self.forward_cache = None
+        self.default_expert_name = None
         self.total_calls_per_forward = 0
         self._calls_counter = 0
         # dependency injection filled from ExpertContainer
@@ -321,15 +323,28 @@ class Selector(nn.Module):
 
     @property
     def routing_infos(self):
-        return self.info_container.routing_infos
-
-    @property
-    def info_container(self):
-        return InfoContainer.get()
+        info_container = InfoContainer.get()
+        if not info_container:
+            return None
+        return info_container.routing_infos
 
     @abstractmethod
-    def add_expert(self, expert_name: str, **kwargs):
+    def _add_expert(
+        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+    ):
         pass
+
+    def add_expert(
+        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+    ):
+        self._add_expert(expert_name, expert_info, is_default)
+
+        # standard bookkeeping for all selectors
+        if is_default:
+            self.default_expert_name = expert_name
+
+        self.expert_infos[expert_name] = expert_info
+        self.expert_names.append(expert_name)
 
 
 class SelectorView:
@@ -355,7 +370,13 @@ class SelectorView:
     def get_merging_weights(self, **selector_kwargs) -> Dict:
         return self.selector_instance.get_merging_weights(**selector_kwargs)
 
-    def add_expert(self, expert_name: str, **kwargs):
+    def add_expert(
+        self,
+        expert_name: str,
+        expert_info: ExpertInfo = None,
+        is_default=False,
+        **kwargs,
+    ):
         pass
 
 
@@ -384,8 +405,10 @@ class TaskPredictorSelector(Selector):
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchExpertsAndWeightsSelectorOutput:
         # get the sources_texts from routing_infos
-        if hasattr(self.routing_infos, "sources_texts"):
-            sources_texts = self.routing_infos.sources_texts
+        routing_infos = self.routing_infos
+
+        if hasattr(routing_infos, "sources_texts"):
+            sources_texts = routing_infos.sources_texts
             self.expert_ranker.set_available_tasks(self.expert_names)
 
             experts, weights = self.expert_ranker.predict_task(
@@ -405,8 +428,10 @@ class TaskPredictorSelector(Selector):
             f"Not supported for {self.__class__} since routing depends on input."
         )
 
-    def add_expert(self, expert_name: str, **kwargs):
-        self.expert_names.append(expert_name)
+    def _add_expert(
+        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+    ):
+        pass
 
 
 @dataclass
@@ -480,9 +505,10 @@ class MOERKHSSelector(Selector):
     def get_routing_weights(self):
         raise ValueError("Not supported for MOESelector.")
 
-    def add_expert(self, expert_name: str, **kwargs):
-        """It is important to guard against multiple calls as this can be called multiple times."""
-        self.expert_names.append(expert_name)
+    def _add_expert(
+        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+    ):
+        # just initialize the expert embeddings
         self.rkhs_embeddings.data = torch.cat(
             [
                 self.rkhs_embeddings.data,
@@ -494,25 +520,35 @@ class MOERKHSSelector(Selector):
         )
 
 
-class TaskToExpertTracker(Selector):
+class TaskToExpertMixin:
     """
-    Abstract Class which builds `task_to_expert_name` mapping. Can be used for
-    Routing (as in TaskNameSelector) or for logging in-dist stats (PerTokenSelector)
+    Builds `task_to_expert_name` mapping on add_expert, useful for
+    routing (as in TaskNameSelector) or for logging in-distribution stats (PerTokenSelector)
     """
 
-    def __init__(self, config=None, **kwargs) -> None:
-        super().__init__(config=config)
-        self.task_to_expert_name = {}
+    @property
+    def task_to_expert_name(self):
+        return getattr(self, "_task_to_expert_name", {})
 
-    def add_expert(self, expert_name: str, expert_info: ExpertInfo = None, **kwargs):
+    def _add_expert(
+        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+    ):
+        _task_to_expert_name = self.task_to_expert_name
+
         if expert_info is None or expert_info.expert_task_name is None:
             logger.warning(
                 "Expert's task_name not set, assume task name corresponds to expert name!"
             )
-            self.task_to_expert_name[expert_name] = expert_name
+            _task_to_expert_name[expert_name] = expert_name
         else:
             for task_name in expert_info.expert_task_name.split(","):
-                self.task_to_expert_name[task_name] = expert_name
+                if task_name in _task_to_expert_name:
+                    logger.warning(
+                        f"Task name {task_name} already assigned to expert {_task_to_expert_name[task_name]}"
+                    )
+            _task_to_expert_name[task_name] = expert_name
+
+        self._task_to_expert_name = _task_to_expert_name
 
 
 @dataclass
@@ -524,7 +560,7 @@ class PerTokenSelectorConfig(LoadableSelectorConfig):
     proto_norm_fn: str = None
 
 
-class LoadableLibrarySelector(ABC):
+class LoadableLibraryMixin(ABC):
     library_artifacts: Dict = None
 
     @abstractmethod
@@ -532,8 +568,8 @@ class LoadableLibrarySelector(ABC):
         pass
 
     def load_from_library(self):
-        if LoadableLibrarySelector.library_artifacts is None:
-            LoadableLibrarySelector.library_artifacts = self._load_from_library()
+        if LoadableLibraryMixin.library_artifacts is None:
+            LoadableLibraryMixin.library_artifacts = self._load_from_library()
 
             if not self.library_artifacts:
                 raise ValueError(f"Could not load library artifacts for selector.")
@@ -571,7 +607,7 @@ def get_expert_prototype_from_library_artifacts(
 
 
 @register_multi_expert_selector("per_token_router", PerTokenSelectorConfig)
-class PerTokenSelector(TaskToExpertTracker, LoadableLibrarySelector):
+class PerTokenSelector(Selector, TaskToExpertMixin, LoadableLibraryMixin):
     def __init__(self, config, **kwargs) -> None:
         super().__init__(config, **kwargs)
 
@@ -675,11 +711,14 @@ class PerTokenSelector(TaskToExpertTracker, LoadableLibrarySelector):
         probs = F.softmax(logits, dim=-1)
         bs, seq_len, _ = probs.size()
         task_names = self.routing_infos.task_names
+
         if all([t in self.task_to_expert_name for t in task_names]):
             expert_names = [self.task_to_expert_name[t] for t in task_names]
+
             expert_ids = torch.LongTensor(
                 [self.expert_names.index(e) for e in expert_names]
             ).to(logits.device)
+
             expert_p = torch.gather(
                 probs, index=expert_ids.view(bs, 1, 1).expand(-1, seq_len, -1), dim=-1
             )
@@ -751,9 +790,9 @@ class PerTokenSelector(TaskToExpertTracker, LoadableLibrarySelector):
             experts=experts, weights=router_probs
         )
 
-    def add_expert(self, expert_name: str, expert_info: ExpertInfo = None, **kwargs):
-        super().add_expert(expert_name, expert_info, **kwargs)
-
+    def _add_expert(
+        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+    ):
         if self.library_artifacts is not None:
             proto = get_expert_prototype_from_library_artifacts(
                 expert_name, self.layer_name, self.library_artifacts
@@ -771,7 +810,6 @@ class PerTokenSelector(TaskToExpertTracker, LoadableLibrarySelector):
 
         dev = self.prototypes.device
         self.prototypes.data = torch.cat([self.prototypes.data, proto.to(dev)])
-        self.expert_names.append(expert_name)
 
 
 @dataclass
@@ -780,10 +818,9 @@ class TaskNameSelectorConfig(SelectorConfig):
 
 
 @register_multi_expert_selector("task_selector", TaskNameSelectorConfig)
-class TaskNameSelector(TaskToExpertTracker):
+class TaskNameSelector(Selector, TaskToExpertMixin):
     def __init__(self, **kwargs) -> None:
         super().__init__()
-        self.default_expert_name = None
 
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchExpertsSelectorOutput:
@@ -854,6 +891,11 @@ class KVSelector(Selector):
             f"Not supported for {self.__class__}  since routing depends on input."
         )
 
+    def _add_expert(
+        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+    ):
+        pass
+
 
 @dataclass
 class KVTaskNameSelectorConfig(SelectorConfig):
@@ -867,10 +909,10 @@ class KVTaskNameSelector(KVSelector):
     def __init__(self, **kwargs) -> None:
         super().__init__()
 
-        self.default_expert_name = None
-
     def get_kv_weights(self, experts, k_proj, v_proj):
-        task_names = self.routing_infos.task_names
+        routing_infos = self.routing_infos
+
+        task_names = routing_infos.task_names
 
         if task_names is None:
             task_names = [self.default_expert_name]
@@ -887,7 +929,9 @@ class KVTaskNameSelector(KVSelector):
         return out
 
     def get_gate(self, experts, adapter_weights):
-        task_names = self.routing_infos.task_names
+        routing_infos = self.routing_infos
+
+        task_names = routing_infos.task_names
 
         if task_names is None:
             task_names = [self.default_expert_name]

@@ -237,7 +237,7 @@ class PolyUniform(PolySelectorDirect):
     Currently only used for uniform merging of experts.
     """
 
-    def add_expert(self, expert_name: str, **kwargs):
+    def _add_expert(self, expert_name: str, **kwargs):
         if expert_name not in self.module_logits_dict:
             self.module_logits_dict[expert_name] = torch.nn.Parameter(
                 torch.ones(1).to(self.device)
