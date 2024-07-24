@@ -18,7 +18,7 @@ from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.utils import remote_login
 from mttl.vllm_engines.engines import free_memory
-from projects.modular_llm.src.utils.evaluators import Evaluator, prepare_evaluator
+from mttl.evaluators.evaluators import Evaluator, prepare_evaluator
 
 DEBUG = False
 if "AMLT_OUTPUT_DIR" in os.environ:

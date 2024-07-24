@@ -4,7 +4,6 @@ from functools import partial
 
 import torch
 
-from mttl.callbacks import TestLossEvaluator
 from mttl.datamodule.base import DefaultDataModule, get_datamodule
 from mttl.evaluators import MMLUEvaluator, RougeEvaluator
 from mttl.models.expert_config import ExpertConfig
@@ -18,6 +17,7 @@ def prepare_evaluator(
     subsample=-1,
     for_generation=None,
 ):
+    from mttl.callbacks import TestLossEvaluator
     if args.eval_metric == "loss":
         EVAL_CLASS = TestLossEvaluator
         for_generation = for_generation if for_generation is not None else False
