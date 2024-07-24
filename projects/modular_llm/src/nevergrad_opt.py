@@ -10,20 +10,20 @@ from torch.utils.data import DataLoader
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
-from typing import Callable, Dict, List, Union
+from typing import Callable
 
 import wandb
 
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators import MMLUEvaluator
 from mttl.evaluators.base import compute_task_aggregation
+from mttl.logging import logger
 from mttl.models.expert_model import ExpertModel, MultiExpertModel
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.library.library_transforms import (
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
 )
-from mttl.utils import logger
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
 
 

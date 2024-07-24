@@ -3,14 +3,13 @@ import sys
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-import torch
-from pytorch_lightning import Trainer, seed_everything
+from pytorch_lightning import Trainer
 
 from mttl.callbacks import LiveCheckpointCallback
+from mttl.logging import get_pl_loggers
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import ExpertModel as ExpertTrainer
 from mttl.models.monitors import get_monitors
-from mttl.utils import get_checkpoint_path, get_pl_loggers, logger, setup_logging
 
 
 def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
@@ -72,3 +71,13 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
         checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
     )
     return checkpoint
+
+
+def get_svd_embedding(lib, expert_name: str):
+    try:
+        embeddings = lib.get_auxiliary_data(
+            data_type="embeddings", expert_name=expert_name
+        )
+    except ValueError:
+        return None
+    return embeddings["svd"]["embeddings"]

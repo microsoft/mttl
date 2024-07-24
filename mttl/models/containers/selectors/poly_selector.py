@@ -4,6 +4,7 @@ from typing import Dict, List, Union
 import torch
 from torch import nn
 
+from mttl.logging import logger
 from mttl.models.containers.selectors.base_selectors import (
     EPS,
     BatchExpertsSplitsAndWeightsSelectorOutput,
@@ -15,7 +16,6 @@ from mttl.models.containers.selectors.base_selectors import (
     forward_with_cache,
     register_multi_expert_selector,
 )
-from mttl.utils import logger
 
 
 @dataclass

@@ -10,12 +10,12 @@ from pyparsing import abstractmethod
 from torch import nn
 from torch.distributions import Categorical
 
+from mttl.logging import logger, warn_once
 from mttl.models.expert_context import InfoContainer
 from mttl.models.library.expert import ExpertInfo
 from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
 from mttl.models.ranker.classifier_ranker import ClusterPredictor
 from mttl.models.utils import MetricLogger
-from mttl.utils import logger, warn_once
 
 SELECTORS_NAME_TO_KLASS = {}
 SELECTORS_CONFIG_TO_NAME = {}

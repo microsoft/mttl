@@ -16,13 +16,13 @@ from sklearn.metrics.pairwise import cosine_similarity
 from tqdm import tqdm
 
 from mttl.datamodule.base import get_datamodule
+from mttl.logging import logger
 from mttl.models.containers.expert_containers import ExpertContainer
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.modifiers.base import get_target_2_source_param_mapping
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
-from mttl.utils import logger
 
 
 class LibraryTransform(abc.ABC):

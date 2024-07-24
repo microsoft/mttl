@@ -4,7 +4,7 @@ from collections import defaultdict
 import torch.optim as optim
 from transformers import Adafactor
 
-from mttl.utils import logger
+from mttl.logging import logger
 
 
 def get_optimizer(model, args, no_decay=None):

@@ -3,8 +3,8 @@ import torch
 import tqdm
 
 from mttl.evaluators.base import Evaluator, switch_to_eval_mode
+from mttl.logging import logger
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
-from mttl.utils import logger
 
 
 def compute_loglike_loss(logits, labels, reduction="none"):

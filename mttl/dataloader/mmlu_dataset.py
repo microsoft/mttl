@@ -1,12 +1,11 @@
 """MMLU Dataset."""
 
-import copy
 import os
 
 import datasets
 import pandas as pd
 
-from mttl.utils import logger
+from mttl.logging import logger
 
 _CITATION = """\
 @article{hendryckstest2021,

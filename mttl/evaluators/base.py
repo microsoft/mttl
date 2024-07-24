@@ -10,8 +10,8 @@ import numpy as np
 import torch
 from transformers import StoppingCriteria, StoppingCriteriaList
 
+from mttl.logging import logger
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
-from mttl.utils import logger
 
 
 def decode(preds, tokenizer, clean_up_tokenization_spaces=True):
@@ -377,8 +377,6 @@ class EvaluatorRunner:
         import json
 
         import prettytable
-
-        from mttl.utils import logger
 
         if self.output_path:
             os.makedirs(self.output_path, exist_ok=True)

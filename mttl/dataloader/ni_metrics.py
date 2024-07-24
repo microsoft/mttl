@@ -1,14 +1,11 @@
 import argparse
 import json
-import logging
 import os
 import string
 
 import numpy as np
 from torchmetrics.text.rouge import ROUGEScore
 from transformers import AutoTokenizer
-
-from mttl.utils import logger
 
 
 class GPTTokenizer:
