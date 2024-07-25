@@ -270,7 +270,6 @@ class Selector(nn.Module):
 
         self.config = config
         self.expert_infos = {}
-        self.expert_names = []
         self.selector_views = []
         self.forward_cache = None
         self.default_expert_name = None
@@ -278,6 +277,10 @@ class Selector(nn.Module):
         self._calls_counter = 0
         # dependency injection filled from ExpertContainer
         self.__layer_name__ = None
+
+    @property
+    def expert_names(self) -> list:
+        return list(self.expert_infos.keys())
 
     @property
     def clear_cache(self):
@@ -345,7 +348,6 @@ class Selector(nn.Module):
             self.default_expert_name = expert_name
 
         self.expert_infos[expert_name] = expert_info
-        self.expert_names.append(expert_name)
 
 
 class SelectorView:

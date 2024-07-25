@@ -3,7 +3,7 @@ from typing import Dict, List, Union
 
 import torch
 from pyparsing import abstractmethod
-from torch import nn
+from torch import Tensor, nn
 
 from mttl.config import Config
 from mttl.logging import warn_once
@@ -44,7 +44,6 @@ class ExpertContainer(Container):
         self.selector = selector or TaskNameSelector()
 
         self.expert_infos = {}
-        self.expert_names = []
         self.default_expert_name = None
 
     def assign_selector(self, selector: Selector) -> None:
@@ -80,13 +79,16 @@ class ExpertContainer(Container):
         self.on_add_expert(expert, action=action, is_default=is_default)
 
         self.expert_infos[expert.name] = expert_info
-        self.expert_names.append(expert.name)
         self.default_expert_name: str | None = (
             expert.name if is_default else self.default_expert_name
         )
         self.selector.add_expert(
             expert.name, expert_info=expert_info, is_default=is_default
         )
+
+    @property
+    def expert_names(self) -> list:
+        return list(self.expert_infos.keys())
 
     def _check_config(self, expert_config: Union[Config, ModifierConfig]):
         """Checks if the config is supported and converts it to the supported config type if needed."""
@@ -423,8 +425,8 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
         Arrow adds lora modules to the container, while MHR adds
         skilled lora modules to the container.
         """
-        index_of = self.expert_names.index(name)
-        weights = self.experts.get_skill_weights(index_of)
+        index_of: int = self.expert_names.index(name)
+        weights: dict[str, Tensor] = self.experts.get_skill_weights(index_of)
 
         config = self.expert_infos[name].expert_config
         modifier_type = get_modifier_type(config)
