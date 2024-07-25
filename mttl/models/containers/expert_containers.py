@@ -77,7 +77,7 @@ class ExpertContainer(Container):
                 "Cannot set is_default if this expert is merged, change to 'route'."
             )
 
-        self._add_expert(expert, action=action, is_default=is_default)
+        self.on_add_expert(expert, action=action, is_default=is_default)
         self.expert_infos[expert.name] = expert_info
         self.expert_names.append(expert.name)
         self.selector.add_expert(
@@ -112,7 +112,7 @@ class ExpertContainer(Container):
         return experts
 
     @abstractmethod
-    def _add_expert(
+    def on_add_expert(
         self,
         expert: Expert,
         action="merge",
@@ -191,7 +191,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         self.merged_expert_names = []
         self.experts = nn.ModuleDict({})
 
-    def _add_expert(
+    def on_add_expert(
         self,
         expert: Expert,
         action="merge",
@@ -580,7 +580,7 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
     def get_gate(self, adapter_weights):
         return self.selector.get_gate(self.experts, adapter_weights)
 
-    def _add_expert(
+    def on_add_expert(
         self,
         expert: Expert,
         action="route",

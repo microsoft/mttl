@@ -108,7 +108,7 @@ class HardPromptExpertContainer(ExpertContainer):
         self.merged_expert_names = []
         self.experts = nn.ModuleDict({})
 
-    def _add_expert(
+    def on_add_expert(
         self,
         expert: Expert,
         action="route",

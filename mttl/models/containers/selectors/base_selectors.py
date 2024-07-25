@@ -329,7 +329,7 @@ class Selector(nn.Module):
         return info_container.routing_infos
 
     @abstractmethod
-    def _add_expert(
+    def on_add_expert(
         self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
     ):
         pass
@@ -337,7 +337,7 @@ class Selector(nn.Module):
     def add_expert(
         self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
     ):
-        self._add_expert(expert_name, expert_info, is_default)
+        self.on_add_expert(expert_name, expert_info, is_default)
 
         # standard bookkeeping for all selectors
         if is_default:
@@ -428,7 +428,7 @@ class TaskPredictorSelector(Selector):
             f"Not supported for {self.__class__} since routing depends on input."
         )
 
-    def _add_expert(
+    def on_add_expert(
         self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
     ):
         pass
@@ -505,7 +505,7 @@ class MOERKHSSelector(Selector):
     def get_routing_weights(self):
         raise ValueError("Not supported for MOESelector.")
 
-    def _add_expert(
+    def on_add_expert(
         self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
     ):
         # just initialize the expert embeddings
@@ -530,7 +530,7 @@ class TaskToExpertMixin:
     def task_to_expert_name(self):
         return getattr(self, "_task_to_expert_name", {})
 
-    def _add_expert(
+    def on_add_expert(
         self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
     ):
         _task_to_expert_name = self.task_to_expert_name
@@ -790,7 +790,7 @@ class PerTokenSelector(Selector, TaskToExpertMixin, LoadableLibraryMixin):
             experts=experts, weights=router_probs
         )
 
-    def _add_expert(
+    def on_add_expert(
         self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
     ):
         if self.library_artifacts is not None:
@@ -891,7 +891,7 @@ class KVSelector(Selector):
             f"Not supported for {self.__class__}  since routing depends on input."
         )
 
-    def _add_expert(
+    def on_add_expert(
         self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
     ):
         pass
