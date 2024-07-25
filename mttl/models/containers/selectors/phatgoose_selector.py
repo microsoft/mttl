@@ -119,10 +119,8 @@ class PhatgooseTrainerSelector(Selector):
         # selectors for tasks are trained independently
         # all samples go through the same selector
         scores = self.gates[self.default_expert_name](input)
-        # log the scores
-        container = kwargs.get("container", None)
-        if container is not None:
-            self.routing_gates.append(scores.detach().cpu().float())
+        self.routing_gates.append(scores.detach().cpu().float())
+
         return BatchSequenceExpertsAndWeightsSelectorOutput(
             torch.zeros_like(scores, dtype=torch.long), scores
         )
