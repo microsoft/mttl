@@ -60,9 +60,12 @@ class LoRA(MergeableAdapter, ModifyMixin):
         self.reset_parameters()
         self.merged_with_layer = False
 
-    def state_dict(self):
+    def state_dict(self, *args, destination=None, prefix="", keep_vars=False):
         """Override state dict for this adapter to avoid saving layer weights."""
-        return {n: v for n, v in super().state_dict().items() if "lora" in n}
+        state_dict = super().state_dict(
+            *args, destination=destination, prefix=prefix, keep_vars=keep_vars
+        )
+        return {n: v for n, v in state_dict.items() if "lora" in n}
 
     def load_lora_weights(self, state_dict):
         self.lora_a.data.copy_(state_dict["lora_a"])
