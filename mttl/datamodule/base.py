@@ -624,6 +624,7 @@ class MultiChoiceSourceDataModule(DefaultDataModule):
 
 def get_datamodule(args, for_generation=False, dataset_override=None):
     from mttl.datamodule.arc_data_module import ArcDataConfig, ArcMultiChoiceDataModule
+    from mttl.datamodule.chat_data_module import ChatDataConfig, ChatDataModule
     from mttl.datamodule.codex_data_module import CodexDataConfig, CodexDataModule
     from mttl.datamodule.hellaswag_data_module import (
         HellaswagDataConfig,
@@ -651,10 +652,6 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
     from mttl.datamodule.winogrande_data_module import (
         WinograndeDataConfig,
         WinograndeMultiChoiceDataModule,
-    )
-    from mttl.datamodule.chat_data_module import (
-        ChatDataConfig,
-        ChatDataModule,
     )
 
     # refactor all the common arguments below into a dict common kwargs
