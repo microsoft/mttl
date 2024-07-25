@@ -288,7 +288,7 @@ def add_expert_to_transformer(
     expert: Expert,
     action: str = "route",
     is_default: bool = False,
-    routing_config: SelectorConfig = None,
+    routing_config: Dict[str, SelectorConfig] = None,
     training_config: Config = None,
 ) -> None:
     """
@@ -370,7 +370,6 @@ def add_expert_to_transformer(
         transformer.named_parameters(), expert_config.tie_params
     )
     tie_params(transformer, expert_config, target_2_source_param)
-    ####################
 
     if not added_layers:
         raise ValueError(
@@ -379,10 +378,13 @@ def add_expert_to_transformer(
         )
 
     if routing_config is not None:
+        if model_modifier not in routing_config:
+            raise ValueError("No routing config was specified for the model modifier.")
+
         replace_selector_for_container(
             transformer,
             model_modifier,
-            routing_config,
+            routing_config[model_modifier],
             training_config,
         )
 

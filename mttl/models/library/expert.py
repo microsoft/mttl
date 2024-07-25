@@ -109,7 +109,11 @@ class Expert:
         self._tied_expert_weights = None
 
     @property
-    def expert_weights(self):
+    def expert_weights(self) -> Dict[str, torch.Tensor]:
+        """
+        Returns the expert weights. If the expert config has tied params, it will
+        tie them and return the full state dict with tied weights.
+        """
         if (
             self.expert_info.expert_config is not None
             and hasattr(self.expert_info.expert_config, "tie_params")
@@ -137,7 +141,7 @@ class Expert:
         return self._expert_weights
 
     @expert_weights.setter
-    def expert_weights(self, weights):
+    def expert_weights(self, weights: Dict[str, torch.Tensor]):
         self._expert_weights = weights
 
     def clone(self):
@@ -176,7 +180,7 @@ class Expert:
         return self.expert_info.expert_name
 
     @name.setter
-    def name(self, name):
+    def name(self, name: str):
         self.expert_info.expert_name = name
 
 

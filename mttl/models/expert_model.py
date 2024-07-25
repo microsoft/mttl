@@ -22,59 +22,43 @@ from mttl.models.llama_patch import replace_attn_with_flash_attn
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.lora import SkilledLoRAConfig
-from mttl.models.utils import EfficientCheckpointModule, prepare_model_for_kbit_training
+from mttl.models.utils import (
+    EfficientCheckpointModule,
+    model_loader_helper,
+    prepare_model_for_kbit_training,
+)
 
 torch.set_float32_matmul_precision("high")
 
 
-class ExpertModel(EfficientCheckpointModule):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+class SingleExpertModel(torch.nn.Module):
+    """Base model to load a single model from HF and modify it with a modifier config."""
 
-        self.tokenizer = kwargs.pop("tokenizer", None)
-        model_object = kwargs.pop("model_object", None)
-
-        # log hyperparameters
-        self.save_hyperparameters(kwargs)
+    def __init__(
+        self, base_model_name, modifier_config: ModifierConfig = None, **kwargs
+    ):
+        super().__init__()
 
         self.load_in_4bit = kwargs.get("load_in_4bit", None) or False
         self.load_in_8bit = kwargs.get("load_in_8bit", None) or False
         self.model: PreTrainedModel = None
+        self.base_model_name = base_model_name
         self.accumulate_metrics_batch = defaultdict(list)
 
-        if model_object is None:
-            from mttl.models.utils import model_loader_helper
-
-            model_object = model_loader_helper(
-                self.hparams.model,
-                load_in_4bit=self.load_in_4bit,
-                load_in_8bit=self.load_in_8bit,
-                device_map=getattr(self.hparams, "device_map", "cpu"),
-            )
-
-        if self.load_in_8bit:
-            model_object = prepare_model_for_kbit_training(model_object)
-
-        # rebuild the training config, a bit cumbersome, but that's life
-        self.training_config = ExpertConfig.fromdict(kwargs)
-        self.training_config.vocab_size = (
-            model_object.get_input_embeddings().num_embeddings
+        self.model = model_loader_helper(
+            base_model_name,
+            load_in_4bit=self.load_in_4bit,
+            load_in_8bit=self.load_in_8bit,
+            device_map=kwargs.get("device_map", "cpu"),
         )
+        if modifier_config is not None:
+            self.model = modify_transformer(self.model, modifier_config)
 
-        # init the transformer just with the modifier config, this avoids
-        # passing the whole training config to the modify_transformer func
-        self.modifier_config = ModifierConfig.from_training_config(self.training_config)
-        self.model = modify_transformer(model_object, self.modifier_config)
+    @property
+    def generation_config(self):
+        return self.model.generation_config
 
-        # replace w flash attn!
-        replace_attn_with_flash_attn(self.model)
-
-        self.test_results = []
-        self.best_val_result = None
-        self._inference_outputs = []
-        self._log_pref = kwargs.get("logging_prefix", "")
-
-    @InfoContainer.wrap
+    @InfoContainer.wrap_forward
     def forward(self, batch, reduction="mean"):
         input_ids = batch["input_ids"]
         labels = batch["labels"]
@@ -109,114 +93,7 @@ class ExpertModel(EfficientCheckpointModule):
         del outputs, shift_logits, shift_labels
         return loss
 
-    def compute_unlikelihood_loss(self, batch, reduction="mean"):
-        # compute lm losses for all the options
-        loss = self.forward(batch, reduction="none")
-
-        num = 0
-        lm_loss, mc_loss = [], []
-        for i, num_options in enumerate(batch["num_options"]):
-            loss_slice = loss[num : num + num_options]
-            lm_loss.append(loss_slice[batch["labels_index"][i]])
-            mc_loss.append(
-                -torch.nn.functional.log_softmax(-loss_slice, dim=0)[
-                    batch["labels_index"][i]
-                ]
-            )
-            num += num_options
-
-        lm_loss = torch.stack(lm_loss)
-        mc_loss = torch.stack(mc_loss)
-        if reduction == "mean":
-            lm_loss = lm_loss.mean()
-            mc_loss = mc_loss.mean()
-        return lm_loss, mc_loss
-
-    def training_step(self, batch, _):
-        if "num_options" in batch:
-            loss, mc_loss = self.compute_unlikelihood_loss(batch)
-            self.log(
-                f"{self._log_pref}train/mc_loss", loss, on_step=True, prog_bar=True
-            )
-            total_loss = loss + mc_loss
-        else:
-            loss = self.forward(batch)
-            total_loss = loss
-
-        self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
-        self.log(
-            f"{self._log_pref}train/total_loss", total_loss, on_step=True, prog_bar=True
-        )
-
-        for i, pg in enumerate(self.optimizers().optimizer.param_groups):
-            self.log(f"train/lr_{i}", pg["lr"])
-        return total_loss
-
-    def on_validation_epoch_start(self) -> None:
-        self._inference_outputs.clear()
-
-    def on_test_epoch_start(self) -> None:
-        self._inference_outputs.clear()
-
-    def on_validation_epoch_end(self) -> None:
-        self.log_loss(split="val")
-
-    def on_test_epoch_end(self) -> None:
-        self.log_loss(split="test")
-
-    def test_step(self, batch, batch_idx):
-        if "num_options" in batch:
-            loss, _ = self.compute_unlikelihood_loss(batch, reduction="none")
-        else:
-            loss = self.forward(batch, reduction="none")
-        mean_loss = loss.sum() / loss.shape[0]
-        self._inference_outputs += [(loss.detach(),)]
-        return mean_loss
-
-    def get_loss_for_all(self, batch, batch_idx):
-        loss = self.forward(batch, reduction="none")
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        if "num_options" in batch:
-            loss, _ = self.compute_unlikelihood_loss(batch, reduction="none")
-        else:
-            loss = self.forward(batch, reduction="none")
-        mean_loss = loss.sum() / loss.shape[0]
-        self._inference_outputs += [(loss.detach(),)]
-        return mean_loss
-
-    def log_loss(self, split="val"):
-        outputs = self._inference_outputs
-        losses = torch.cat([out[0] for out in outputs], 0)
-        self._inference_outputs.clear()
-        self.log(
-            f"{self._log_pref}{split}/loss",
-            losses.mean(),
-            on_epoch=True,
-            prog_bar=True,
-            sync_dist=True,
-        )
-
-        # log also the best val/loss sofar
-        if split == "val":
-            if self.best_val_result is None:
-                self.best_val_result = losses.mean()
-            else:
-                if losses.mean() < self.best_val_result:
-                    self.best_val_result = losses.mean()
-                    self.log(
-                        f"{self._log_pref}{split}/best_loss",
-                        losses.mean(),
-                        on_epoch=True,
-                        prog_bar=True,
-                    )
-
-    @property
-    def generation_config(self):
-        return self.model.generation_config
-
-    @InfoContainer.wrap
+    @InfoContainer.wrap_forward
     def generate(
         self,
         batch,
@@ -227,56 +104,115 @@ class ExpertModel(EfficientCheckpointModule):
         )
         return generations
 
-    def on_save_checkpoint(self, ckpt):
-        super().on_save_checkpoint(ckpt)
+    @classmethod
+    def from_pretrained(
+        cls,
+        pretrained_model_name_or_path: Optional[Union[str, os.PathLike]],
+        *model_args,
+        **kwargs,
+    ):
+        # Load model
+        instantiate_model = kwargs.pop("instantiate_model", True)
+        cache_dir = kwargs.pop("cache_dir", None)
+        force_download = kwargs.pop("force_download", None)
+        force_download = kwargs.pop("force_download", False)
+        resume_download = kwargs.pop("resume_download", False)
+        proxies = kwargs.pop("proxies", None)
+        local_files_only = kwargs.pop("local_files_only", False)
+        use_auth_token = kwargs.pop("use_auth_token", None)
 
-        # inject expert info in the expert checkpoint
-        expert_info = ExpertInfo(
-            expert_name=self.hparams.expert_name,
-            expert_task_name=self.hparams.finetune_task_name,
-            expert_config=self.modifier_config,
-            training_config=self.training_config,
-        )
-        ckpt["expert_info"] = expert_info.asdict()
+        user_agent = {
+            "file_type": "model",
+            "framework": "pytorch",
+            "from_auto_class": False,
+        }
 
-    def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
-        return super().on_before_optimizer_step(optimizer)
+        if pretrained_model_name_or_path is not None:
+            pretrained_model_name_or_path = str(pretrained_model_name_or_path)
 
-    def as_expert(self):
-        state_dict = self.state_dict()
-        self._delete_non_trainable_params(state_dict)
+            if os.path.isfile(pretrained_model_name_or_path) or os.path.isdir(
+                pretrained_model_name_or_path
+            ):
+                resolved_archive_file = get_checkpoint_path(
+                    pretrained_model_name_or_path
+                )
+            else:
+                try:
+                    # Load from URL or cache if already cached
+                    resolved_archive_file = cached_file(
+                        pretrained_model_name_or_path,
+                        CHECKPOINT_PATH_IN_HUB,
+                        cache_dir=cache_dir,
+                        force_download=force_download,
+                        proxies=proxies,
+                        resume_download=resume_download,
+                        local_files_only=local_files_only,
+                        use_auth_token=use_auth_token,
+                        user_agent=user_agent,
+                    )
+                except EnvironmentError as err:
+                    logger.error(err)
+                    msg = (
+                        f"Can't load weights for '{pretrained_model_name_or_path}'. Make sure that:\n\n"
+                        f"- '{pretrained_model_name_or_path}' is a correct model identifier listed on 'https://huggingface.co/models'\n\n"
+                        f"- or '{pretrained_model_name_or_path}' is the correct path to a directory containing a file named one of checkpoint.ckpt\n\n"
+                    )
+                    raise EnvironmentError(msg)
 
-        # to use as an expert, we need to remove a `model.` prefix
-        state_dict = {k[len("model.") :]: v for k, v in state_dict.items()}
+                if resolved_archive_file == pretrained_model_name_or_path:
+                    logger.info(f"loading weights file {resolved_archive_file}")
+                else:
+                    logger.info(
+                        f"loading weights file {pretrained_model_name_or_path} from cache at {resolved_archive_file}"
+                    )
+        else:
+            resolved_archive_file = None
 
-        # inject expert info in the expert checkpoint
-        expert_info = ExpertInfo(
-            expert_name=self.hparams.expert_name,
-            expert_task_name=self.hparams.finetune_task_name,
-            expert_config=self.modifier_config,
-            training_config=self.training_config,
-        )
-        return Expert(
-            expert_info=expert_info,
-            expert_weights=state_dict,
-        )
+        if instantiate_model:
+            ckpt = torch.load(checkpoint_path, map_location="cpu")
+            model = ckpt["hyper_parameters"].get("model_base_name", "model")
+
+            if tokenizer is None and "model" in ckpt["hyper_parameters"]:
+                tokenizer = get_tokenizer_with_args(
+                    model_name=ckpt["hyper_parameters"]["model"],
+                    model_family=ckpt["hyper_parameters"]["model_family"],
+                    padding_side=ckpt["hyper_parameters"]["padding_side"],
+                )
+
+            model = cls()
+            model.load_state_dict(ckpt["state_dict"], strict=False)
+            return model
+        else:
+            ckpt = torch.load(resolved_archive_file, map_location="cpu")
+
+            return ckpt["state_dict"], ckpt["hyper_parameters"]
+
+    def from_pretrained_library(self, library_path: str, expert_name: str):
+        pass
 
 
-class MultiExpertModel(ExpertModel):
+class MultiExpertModel(SingleExpertModel):
     """Adds all functions and properties for a multi-expert model."""
 
-    def __init__(self, **config_kwargs):
-        config_kwargs["model_modifier"] = None
-        super().__init__(**config_kwargs)
+    def __init__(
+        self,
+        base_model_name,
+        selector_configs: Union[SelectorConfig, Dict[str, SelectorConfig]] = None,
+        **kwargs,
+    ):
+        super().__init__(base_model_name, modifier_config=None, **kwargs)
 
         # config about the routing
-        if "selector_config" in config_kwargs:
-            self.selector_config = config_kwargs.pop("selector_config")
+        if selector_configs is not None:
+            if type(selector_configs) is SelectorConfig:
+                logger.info(
+                    "Assuming provided selector config is for `lora` modifier type."
+                )
+                selector_configs = {"lora": selector_configs}
         else:
-            self.selector_config = SelectorConfig.from_training_config(
-                self.training_config
-            )
+            selector_configs = None
 
+        self.selector_configs = selector_configs
         self.experts_names = []
 
     @classmethod
@@ -327,6 +263,11 @@ class MultiExpertModel(ExpertModel):
         else:
             logger.info("No selector config provided, assuming expert name selector!")
         return model
+
+    @property
+    def experts(self):
+        for expert_name in self.experts_names:
+            yield self.get_expert_instance(expert_name)
 
     @property
     def lock(self):
@@ -414,12 +355,13 @@ class MultiExpertModel(ExpertModel):
             expert_info=ExpertInfo(
                 expert_name,
                 expert_config=expert_config,
-                expert_model=self.hparams.model,
-                training_config=self.training_config,
+                expert_model=self.base_model_name,
+                training_config=None,
             ),
         )
 
         new_expert = self.add_expert_instance(new_expert)
+
         logger.info("Added empty expert: {}".format(expert_name))
         return new_expert
 
@@ -439,11 +381,11 @@ class MultiExpertModel(ExpertModel):
             expert_library=expert_library,
         )
 
-        if self.hparams.model != expert.training_config.model:
+        if self.base_model_name != expert.training_config.model:
             raise ValueError(
                 "The expert has been trained on top of a different model!"
                 " Detected: {} - Expected: {}".format(
-                    expert.training_config.model, self.hparams.model
+                    expert.training_config.model, self.base_model_name
                 )
             )
 
@@ -469,14 +411,19 @@ class MultiExpertModel(ExpertModel):
             expert_instance = expert_instance.clone()
             expert_instance.name = expert_name
 
+        if expert_instance.name in self.experts_names:
+            raise ValueError(
+                f"Expert with name {expert_instance.name} already exists in the model!"
+            )
+
         with self.lock:
             add_expert_to_transformer(
                 self.model,
                 expert_instance,
                 action=action,
-                is_default=expert_instance.name == "default" or is_default,
-                routing_config=self.selector_config,
-                training_config=self.training_config,
+                is_default=is_default,
+                routing_config=self.selector_configs,
+                training_config=expert_instance.training_config,
             )
 
             if action != "merge":
@@ -612,7 +559,7 @@ class MultiExpertModel(ExpertModel):
 
         Example:
             model = ExpertModel()
-            expert = model.to_expert(weights={'expert1': 0.5, 'expert2': 0.5}, with_global_names=True)
+            expert = model.get_merged_expert(weights={'expert1': 0.5, 'expert2': 0.5}, with_global_names=True)
         """
         from mttl.models.modifiers.modify_model import get_modifier_type
 
@@ -647,30 +594,38 @@ class MultiExpertModel(ExpertModel):
 
 
 class MoEModel(MultiExpertModel):
-    def __init__(self, expert_library: ExpertLibrary = None, **kwargs):
-        kwargs["top_k"] = kwargs["moe_top_k"]
-        kwargs["emb_dim"] = kwargs["moe_emb_dim"]
-        kwargs["rkhs_dim"] = kwargs["moe_rkhs_dim"]
-        init_from_scratch = kwargs.get("init_from_scratch", False)
+    def __init__(
+        self,
+        base_model_name,
+        moe_num_experts: int = None,
+        moe_top_k: int = None,
+        moe_emb_dim: int = None,
+        moe_rkhs_dim: int = None,
+        modifier_config: SkilledLoRAConfig = None,
+        expert_library: ExpertLibrary = None,
+        **kwargs,
+    ):
+        super().__init__(base_model_name=base_model_name)
 
-        super().__init__(**kwargs)
+        if expert_library is None:
+            if not modifier_config:
+                raise ValueError("Modifier config is required for MoE model.")
 
-        if not self.hparams.library_id and expert_library is None or init_from_scratch:
-            for i in range(self.hparams.moe_num_experts):
+            for i in range(moe_num_experts):
                 # Adding a Skilled LoRA with 1 skill.
                 exp_config = SkilledLoRAConfig(
                     n_skills=1,
-                    modify_layers=self.hparams.modify_layers,
-                    modify_modules=self.hparams.modify_modules,
-                    lora_alpha=self.hparams.lora_alpha,
-                    lora_dropout=self.hparams.lora_dropout,
-                    lora_rank=self.hparams.lora_rank,
+                    modify_layers=modifier_config.modify_layers,
+                    modify_modules=modifier_config.modify_modules,
+                    lora_alpha=modifier_config.lora_alpha,
+                    lora_dropout=modifier_config.lora_dropout,
+                    lora_rank=modifier_config.lora_rank,
                     lora_init_b_random=True,
-                    n_splits=self.hparams.n_splits,
-                    phi_2_align_heads=self.hparams.phi_2_align_heads,
+                    n_splits=modifier_config.n_splits,
+                    phi_2_align_heads=modifier_config.phi_2_align_heads,
                 )
                 self.add_empty_expert(f"e{i}", exp_config)
-            self.moe_num_experts = kwargs["moe_num_experts"]
+            self.moe_num_experts = moe_num_experts
         else:
             if expert_library is None:
                 expert_library = ExpertLibrary.get_expert_library(
@@ -680,66 +635,3 @@ class MoEModel(MultiExpertModel):
                 self.add_expert_instance(expert_library[expert], expert_name=f"e{i}")
 
             self.moe_num_experts = i + 1
-
-    def training_step(self, batch, _):
-        loss = super().training_step(batch, _)
-        total_loss = loss.clone()
-
-        info_container = InfoContainer.get()
-
-        if getattr(info_container, "routing_gates", []):
-            num = 0.0
-            entropy_of_avg = 0.0
-            entropy_of_route = 0.0
-
-            for values in info_container.routing_gates:
-                # compute MI loss
-                values = values.to(torch.float32)
-                values = values.view(-1, values.shape[-1])
-                probs = torch.softmax(values, -1)
-                entropy_of_avg += -(
-                    probs.mean(0) * torch.log(probs.mean(0) + 1e-6)
-                ).sum(-1)
-                entropy_of_route += -(probs * torch.log(probs + 1e-6)).sum(-1).mean(0)
-                num += 1.0
-
-            entropy_of_avg = entropy_of_avg / num
-            entropy_of_route = entropy_of_route / num
-            mi_loss = -entropy_of_avg + entropy_of_route
-
-            self.log(
-                f"{self._log_pref}train/entropy_of_route",
-                entropy_of_route,
-                on_step=True,
-                prog_bar=True,
-            )
-            self.log(
-                f"{self._log_pref}train/entropy_of_avg",
-                entropy_of_avg,
-                on_step=True,
-                prog_bar=True,
-            )
-            self.log(
-                f"{self._log_pref}train/mi_loss",
-                mi_loss,
-                on_step=True,
-                prog_bar=True,
-            )
-
-            if self.hparams.moe_ent_reg > 0.0:
-                total_loss += self.hparams.moe_ent_reg * mi_loss
-
-            elif self.hparams.moe_ent_free_bits > 0.0:
-                normalized_entropy = entropy_of_route / math.log(self.moe_num_experts)
-                total_loss += (
-                    (1.0 - normalized_entropy) >= self.hparams.moe_ent_free_bits
-                ) * -entropy_of_route
-
-        self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
-        self.log(
-            f"{self._log_pref}train/total_loss", total_loss, on_step=True, prog_bar=True
-        )
-
-        for i, pg in enumerate(self.optimizers().optimizer.param_groups):
-            self.log(f"train/lr_{i}", pg["lr"])
-        return total_loss
