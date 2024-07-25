@@ -835,6 +835,7 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         "subsample_test": args.subsample_test,
         "subsample_per_task": args.subsample_per_task,
         "pad_to_multiple_of": args.pad_to_multiple_of,
+        "padding_side": args.padding_side,
     }
 
     if dataset in [
