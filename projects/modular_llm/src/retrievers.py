@@ -3,13 +3,13 @@ import copy
 import numpy as np
 import torch
 
+from mttl.logging import logger
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import MultiExpertModel
-from mttl.models.library.expert import Expert, load_expert
+from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import VirtualLocalLibrary
 from mttl.models.library.library_transforms import LibraryTransform
-from mttl.utils import logger, setup_logging
-from projects.modular_llm.src.utils.utils import get_svd_embedding
+from mttl.models.library.utils import get_svd_embedding
 
 RETRIEVERS = {}
 

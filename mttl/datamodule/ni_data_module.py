@@ -14,8 +14,8 @@ from transformers import AutoTokenizer
 
 from mttl.datamodule.base import DatasetConfig, DefaultCollator, DefaultDataModule
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
+from mttl.logging import logger
 from mttl.models.library.expert_library import DatasetLibrary
-from mttl.utils import logger
 
 
 @dataclass

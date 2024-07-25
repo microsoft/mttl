@@ -1,5 +1,6 @@
 # unit test for adapter_ranker
 import copy
+import logging
 from collections import OrderedDict
 
 import numpy as np
@@ -7,6 +8,7 @@ import pytest
 import torch
 from pytorch_lightning import seed_everything
 
+from mttl.logging import logger
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.library.expert_library import HFExpertLibrary, LocalExpertLibrary
 from mttl.models.library.library_transforms import (
@@ -33,10 +35,6 @@ def test_config():
 
 
 def test_arrow():
-    import logging
-
-    from mttl.utils import logger
-
     logger.setLevel(logging.DEBUG)
 
     library = HFExpertLibrary("sordonia/new-test-library")
@@ -56,12 +54,7 @@ def test_arrow():
 
 
 def test_arrow_with_tiedlora(tmp_path, create_dummy_expert):
-    import logging
-
-    from mttl.utils import logger
-
     seed_everything(0)
-
     logger.setLevel(logging.DEBUG)
 
     def patch_expert_weights(expert):
@@ -168,10 +161,6 @@ def test_weighted_merge():
 
 
 def test_ties_merge():
-    import logging
-
-    from mttl.utils import logger
-
     logger.setLevel(logging.DEBUG)
 
     top_k = 0.2

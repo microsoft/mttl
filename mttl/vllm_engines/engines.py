@@ -8,8 +8,8 @@ import torch
 import tqdm
 from torch.utils.data import DataLoader
 
+from mttl.logging import logger
 from mttl.models.modifiers.base import MergeableAdapter
-from mttl.utils import logger
 
 try:
     from vllm import LLM, SamplingParams

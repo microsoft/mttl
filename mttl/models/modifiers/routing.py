@@ -1,14 +1,7 @@
-import re
-from dataclasses import dataclass, field, fields
-from types import MethodType
+from dataclasses import dataclass, field
 from typing import Dict, List
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-from mttl.models.modifiers.base import Adapter, ModifyMixin
-from mttl.utils import logger
 
 
 @dataclass

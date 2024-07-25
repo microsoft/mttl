@@ -4,7 +4,7 @@ import os
 import torch
 
 from mttl.config import Config
-from mttl.utils import logger, warn_once
+from mttl.logging import warn_once
 
 
 class ExpertConfig(Config):

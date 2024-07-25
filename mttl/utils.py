@@ -1,28 +1,15 @@
 import glob
 import hashlib
-import json
-import logging
 import os
 import random
 import string
-import time
-from functools import lru_cache
-from typing import Dict, Optional
+from typing import Optional
 
-import numpy as np
-import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-from pytorch_lightning.utilities.rank_zero import rank_zero_info, rank_zero_only
-from torch import Tensor
-from torch.autograd.function import Function
+from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
-logger = logging.getLogger("mttl")
-
-
-@lru_cache
-def warn_once(msg: str):
-    logger.warning(msg)
+from mttl.logging import logger
 
 
 def remote_login(token: Optional[str] = None):
@@ -53,14 +40,6 @@ def remote_login(token: Optional[str] = None):
 
 def hash_example(example):
     return hashlib.md5(example.encode("utf-8")).hexdigest()
-
-
-def template_to_string(template):
-    return template.jinja + (
-        (" answer_choices: " + template.answer_choices)
-        if template.answer_choices
-        else ""
-    )
 
 
 def label_smoothed_nll_loss(
@@ -119,57 +98,6 @@ def freeze_embeds(model):
             freeze_params(d.embed_tokens)
 
 
-def trim_batch(
-    input_ids,
-    pad_token_id,
-    attention_mask=None,
-):
-    """Remove columns that are populated exclusively by pad_token_id"""
-    keep_column_mask = input_ids.ne(pad_token_id).any(dim=0)
-    if attention_mask is None:
-        return input_ids[:, keep_column_mask]
-    else:
-        return (input_ids[:, keep_column_mask], attention_mask[:, keep_column_mask])
-
-
-def get_tasks_list(filename, split_name):
-    with open(filename, "r") as fin:
-        split_dict = json.load(fin)
-    return split_dict[split_name]
-
-
-def get_ni_tasks_from_file(filename):
-    with open(filename, "r") as f:
-        tasks = f.readlines()
-        tasks = [task.strip() for task in tasks]
-    task2id = {task: idx for idx, task in enumerate(tasks)}
-    return tasks, task2id
-
-
-def get_example_to_ids(filename):
-    import pickle
-
-    with open(filename, "rb") as f:
-        package = pickle.load(f)
-    return package
-
-
-class Averager:
-    def __init__(self, weight: float = 1):
-        self.weight = weight
-        self.total = {}
-
-    def update(self, stats):
-        for key, value in stats.items():
-            if key not in self.total:
-                self.total[key] = value
-            else:
-                self.total[key] = self.total[key] * self.weight + value * (
-                    1 - self.weight
-                )
-        return self.total
-
-
 def agg_dicts(list_of_dicts, agg="mean", tag=False):
     """Aggregate a list of dicts by taking the aggregate of each key.
 
@@ -203,146 +131,6 @@ def agg_dicts(list_of_dicts, agg="mean", tag=False):
         for k, v in out.items():
             out[k] = v / len(list_of_dicts)
     return out
-
-
-class CustomModelCheckpoint(pl.callbacks.ModelCheckpoint):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.last_model_score = None
-
-    def _update_best_and_save(
-        self,
-        current: Tensor,
-        trainer: "pl.Trainer",
-        monitor_candidates: Dict[str, Tensor],
-    ) -> None:
-        """First remove checkpoint, THEN save it."""
-        import os
-
-        k = len(self.best_k_models) + 1 if self.save_top_k == -1 else self.save_top_k
-
-        del_filepath = None
-        if len(self.best_k_models) == k and k > 0:
-            del_filepath = self.kth_best_model_path
-            self.best_k_models.pop(del_filepath)
-
-        # do not save nan, replace with +/- inf
-        if isinstance(current, Tensor) and torch.isnan(current):
-            current = torch.tensor(
-                float("inf" if self.mode == "min" else "-inf"), device=current.device
-            )
-
-        filepath = self._get_metric_interpolated_filepath_name(
-            monitor_candidates, trainer, del_filepath
-        )
-
-        # save the current score
-        self.current_score = current
-        self.best_k_models[filepath] = current
-
-        if len(self.best_k_models) == k:
-            # monitor dict has reached k elements
-            _op = max if self.mode == "min" else min
-            self.kth_best_model_path = _op(self.best_k_models, key=self.best_k_models.get)  # type: ignore[arg-type]
-            self.kth_value = self.best_k_models[self.kth_best_model_path]
-
-        _op = min if self.mode == "min" else max
-        self.best_model_path = _op(self.best_k_models, key=self.best_k_models.get)  # type: ignore[arg-type]
-        self.best_model_score = self.best_k_models[self.best_model_path]
-
-        if self.verbose:
-            epoch = monitor_candidates["epoch"]
-            step = monitor_candidates["step"]
-            rank_zero_info(
-                f"Epoch {epoch:d}, global step {step:d}: {self.monitor!r} reached {current:0.5f}"
-                f" (best {self.best_model_score:0.5f}), saving model to {filepath!r} as top {k}"
-            )
-
-        if del_filepath is not None and filepath != del_filepath:
-            print(f"Removing checkpoint... {del_filepath}")
-            trainer.strategy.remove_checkpoint(del_filepath)
-
-        print(f"Saving checkpoint... {filepath}")
-        self._save_checkpoint(trainer, filepath)
-        os.system("df")
-        os.system(f"ls -al {filepath}")
-
-        self.last_model_score = current
-
-
-def get_pl_loggers(args):
-    loggers = []
-
-    add_simple_logger(loggers, args)
-    add_tb_logger(loggers, args)
-    add_wandb_logger(loggers, args)
-    add_mlf_logger(loggers)
-
-    return loggers
-
-
-def add_simple_logger(loggers, args):
-    from mttl.models.utils import SimpleLogger
-
-    loggers.append(SimpleLogger(args.output_dir))
-
-
-def add_tb_logger(loggers, args):
-    if args.tensorboard:
-        tb_logger = pl.loggers.TensorBoardLogger(save_dir=args.output_dir)
-        loggers.append(tb_logger)
-
-
-def add_wandb_logger(loggers, args) -> pl.loggers.WandbLogger:
-    if not os.environ.get("WANDB_API_KEY"):
-        return
-
-    import wandb
-
-    if not args.exp_name:
-        args.exp_name = os.environ.get("AMLT_JOB_NAME")
-    if not args.wandb_project:
-        args.wandb_project = os.environ.get("WANDB_PROJECT")
-
-    wandb_logger = pl.loggers.WandbLogger(
-        project=args.wandb_project,
-        name=args.exp_name,
-        settings=wandb.Settings(start_method="fork"),
-    )
-    wandb_logger.experiment.save("*.py")
-    loggers.append(wandb_logger)
-
-
-def add_mlf_logger(loggers):
-    import pytorch_lightning as pl
-    from pytorch_lightning.utilities.rank_zero import rank_zero_only
-
-    class MLFlowLoggerCustom(pl.loggers.MLFlowLogger):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-
-        @rank_zero_only
-        def log_hyperparams(self, *args, **kwargs) -> None:
-            try:
-                super().log_hyperparams(*args, **kwargs)
-            except:
-                pass
-
-    try:
-        from azureml.core.run import Run
-
-        run = Run.get_context()
-
-        mlf_logger = MLFlowLoggerCustom(
-            experiment_name=run.experiment.name,
-        )
-        mlf_logger._run_id = run.id
-    except:
-        logger.warning("Couldn't instantiate MLFlowLogger!")
-        mlf_logger = None
-
-    if mlf_logger is not None:
-        loggers.append(mlf_logger)
 
 
 def get_checkpoint_path(path, step=None, use_last=False):
@@ -379,151 +167,6 @@ def get_checkpoint_path(path, step=None, use_last=False):
 
     logger.info(f"Found checkpoint at {path}.")
     return path
-
-
-def setup_logging(log_dir: str = None):
-    logging.basicConfig(
-        format="%(asctime)s %(levelname)s --> %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        level=logging.INFO,
-    )
-    logger.setLevel(logging.INFO)
-    logging.getLogger("openai").setLevel(logging.WARNING)
-
-    if log_dir:
-        log_file_path = os.path.join(log_dir, "log.txt")
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
-
-        handler_exists = any(
-            isinstance(handler, logging.FileHandler)
-            and handler.baseFilename == log_file_path
-            for handler in logger.handlers
-        )
-
-        if not handler_exists:
-            logger.addHandler(logging.FileHandler(log_file_path))
-            logger.info(
-                "New experiment, log will be at %s",
-                log_file_path,
-            )
-
-
-class MemEfficientLoRA(Function):
-    @staticmethod
-    # bias is an optional argument
-    def forward(ctx, input, A, B, skills):
-        ctx.save_for_backward(input, A, B, skills)
-
-        bs, L, I = input.size()
-        bs, n_skills = skills.size()
-        n_skills, I, R = A.size()
-        n_skills, R, O = B.size()
-
-        output = torch.einsum("BLI,BS,SIR,SRO->BLO", (input, skills, A, B))
-
-        return output
-
-    @staticmethod
-    def backward(ctx, O_grad):
-        bs, L, O = O_grad.size()
-
-        input, A, B, skills = ctx.saved_tensors
-
-        bs, S, I = input.size()
-        bs, n_skills = skills.size()
-        n_skills, I, R = A.size()
-        n_skills, R, O = B.size()
-
-        # option A)
-        W = torch.einsum("BS,SIR,SRO->BIO", (skills, A, B))
-        I_grad = torch.einsum("BLO,BIO->BLI", (O_grad, W))
-
-        # option B) [OOM]
-        # I_grad = torch.einsum('BLO,BS,SIR,SRO->BLI', (O_grad, skills, A, B))
-
-        W_grad = torch.einsum("BLO,BLI->BIO", (O_grad, input))
-
-        tmp = torch.einsum("BIO,BS->SIO", (W_grad, skills))
-        A_grad = torch.einsum("SIO,SRO->SIR", (tmp, B))
-        B_grad = torch.einsum("SIO,SIR->SRO", (tmp, A))
-        S_grad = torch.einsum("BIO,SIR,SRO->BS", (W_grad, A, B))
-
-        return I_grad, A_grad, B_grad, S_grad
-
-
-if __name__ == "__main__":
-    B, L, S, I, O, R = 3, 5, 8, 3, 12, 4
-    fn = MemEfficientLoRA.apply
-
-    for i in range(10):
-        input = torch.randn(B, L, I, dtype=torch.double).cuda()
-        Am = torch.randn(S, I, R, dtype=torch.double).cuda()
-        Bm = torch.randn(S, R, O, dtype=torch.double).cuda()
-        skill = torch.randn(B, S, dtype=torch.double).cuda()
-        idx1 = torch.multinomial(torch.ones(S, I * O).cuda(), num_samples=10)
-        idx2 = torch.arange(S).repeat_interleave(10).cuda()
-        idx = torch.stack([idx1.flatten(), idx2.flatten()])
-        val = torch.randn(size=idx.shape[1:]).cuda().double()
-        W = torch.sparse_coo_tensor(idx, val, (I * O, S)).coalesce()
-
-        # coll = [input, Am, Bm, skill]
-        coll = [input, W, skill]
-        for x in coll:
-            x.requires_grad = True
-
-        res = torch.autograd.gradcheck(fn, coll, check_sparse_nnz=True)
-        import pdb
-
-        pdb.set_trace()
-        print(res)
-
-
-# define a retry decorator
-def retry_with_exponential_backoff(
-    initial_delay: float = 1,
-    exponential_base: float = 2,
-    jitter: bool = True,
-    max_retries: int = 5,
-    errors: tuple = (),
-):
-    """Retry a function with exponential backoff."""
-
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            # Initialize variables
-            num_retries = 0
-            delay = initial_delay
-
-            # Loop until a successful response or max_retries is hit or an exception is raised
-            while True:
-                try:
-                    return func(*args, **kwargs)
-
-                # Retry on specified errors
-                except errors as e:
-                    # Increment retries
-                    num_retries += 1
-
-                    # Check if max retries has been reached
-                    if num_retries > max_retries:
-                        raise Exception(
-                            f"Maximum number of retries ({max_retries}) exceeded."
-                        )
-
-                    # Increment the delay
-                    delay *= exponential_base * (1 + jitter * random.random())
-
-                    # Sleep for the delay
-                    time.sleep(delay)
-
-                # Raise exceptions for any errors not specified
-                except Exception as e:
-                    raise e
-
-        return wrapper
-
-    return decorator
 
 
 # decorator like rank_zero_only but with a barrier at the end

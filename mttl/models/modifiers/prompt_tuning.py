@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers.modeling_utils import PreTrainedModel
 
+from mttl.models.expert_context import InfoContainer
 from mttl.models.modifiers import register_modifier
 from mttl.models.modifiers.base import Adapter, ModifierConfig, ModifyMixin
 from mttl.models.modifiers.debug_utils import check_if_align, monitor_transformer
@@ -150,7 +151,8 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
         ), "expected right-padded input"
 
         # Assumes ExpertTrainer here. Removing the labels so as to not trigger an automatic loss computation
-        labels = self.info_container["routing_infos"].labels
+        info_container = InfoContainer.get()
+        labels = info_container.routing_infos.labels
 
         # preprend the soft prompt
         if self.config.prompt_placement == "prefix":
@@ -302,11 +304,10 @@ def modify_with_prompt_tuning(soft_prompt_cls, embed_cls, transformer, config):
     for param in transformer.parameters():
         param.requires_grad = False
 
-    info_container = transformer.info_container
     input_embeds = transformer.get_input_embeddings()
 
     # Create new embeddings and assign to transformer, replacing existing one
-    ext_embeds = embed_cls(config, input_embeds, info_container=info_container)
+    ext_embeds = embed_cls(config, input_embeds)
     transformer.set_input_embeddings(ext_embeds)
 
     # Replace in the original model
@@ -314,7 +315,6 @@ def modify_with_prompt_tuning(soft_prompt_cls, embed_cls, transformer, config):
 
     soft_prompt = soft_prompt_cls(
         config=config,
-        info_container=info_container,
         base_input_embeddings=input_embeds,
     )
 

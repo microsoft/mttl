@@ -10,11 +10,12 @@ from pyparsing import abstractmethod
 from torch import nn
 from torch.distributions import Categorical
 
+from mttl.logging import logger, warn_once
+from mttl.models.expert_context import InfoContainer
 from mttl.models.library.expert import ExpertInfo
 from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
 from mttl.models.ranker.classifier_ranker import ClusterPredictor
 from mttl.models.utils import MetricLogger
-from mttl.utils import logger, warn_once
 
 SELECTORS_NAME_TO_KLASS = {}
 SELECTORS_CONFIG_TO_NAME = {}
@@ -44,10 +45,10 @@ def register_multi_expert_selector(name, config_cls):
     return _thunk
 
 
-def get_selector(selector_config: "SelectorConfig", info_container: Dict, **kwargs):
+def get_selector(selector_config: "SelectorConfig", **kwargs):
     """Returns a selector object for the given routing_config."""
     return SELECTORS_NAME_TO_KLASS[SELECTORS_CONFIG_TO_NAME[selector_config.__class__]](
-        info_container, config=selector_config, **kwargs
+        config=selector_config, **kwargs
     )
 
 
@@ -263,16 +264,17 @@ def safe_logging(func):
 class Selector(nn.Module):
     metric_logger: MetricLogger = MetricLogger()
 
-    def __init__(self, info_container, config=None, **kwargs):
+    def __init__(self, config=None, **kwargs):
         nn.Module.__init__(self)
 
         self.config = config
+        self.expert_infos = {}
         self.expert_names = []
         self.selector_views = []
         self.forward_cache = None
+        self.default_expert_name = None
         self.total_calls_per_forward = 0
         self._calls_counter = 0
-        self.info_container = info_container
         # dependency injection filled from ExpertContainer
         self.__layer_name__ = None
 
@@ -321,11 +323,28 @@ class Selector(nn.Module):
 
     @property
     def routing_infos(self):
-        return self.info_container.get("routing_infos", None)
+        info_container = InfoContainer.get()
+        if not info_container:
+            return None
+        return info_container.routing_infos
 
     @abstractmethod
-    def add_expert(self, expert_name: str, **kwargs):
+    def _add_expert(
+        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+    ):
         pass
+
+    def add_expert(
+        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+    ):
+        self._add_expert(expert_name, expert_info, is_default)
+
+        # standard bookkeeping for all selectors
+        if is_default:
+            self.default_expert_name = expert_name
+
+        self.expert_infos[expert_name] = expert_info
+        self.expert_names.append(expert_name)
 
 
 class SelectorView:
@@ -351,7 +370,13 @@ class SelectorView:
     def get_merging_weights(self, **selector_kwargs) -> Dict:
         return self.selector_instance.get_merging_weights(**selector_kwargs)
 
-    def add_expert(self, expert_name: str, **kwargs):
+    def add_expert(
+        self,
+        expert_name: str,
+        expert_info: ExpertInfo = None,
+        is_default=False,
+        **kwargs,
+    ):
         pass
 
 
@@ -364,8 +389,8 @@ class TaskPredictorSelectorConfig(SelectorConfig):
 
 @register_multi_expert_selector("task_predictor_selector", TaskPredictorSelectorConfig)
 class TaskPredictorSelector(Selector):
-    def __init__(self, info_container, **kwargs) -> None:
-        super().__init__(info_container, **kwargs)
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
         self.ranker_top_k = self.config.ranker_top_k
         # get the routing model
 
@@ -380,8 +405,10 @@ class TaskPredictorSelector(Selector):
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchExpertsAndWeightsSelectorOutput:
         # get the sources_texts from routing_infos
-        if hasattr(self.info_container["routing_infos"], "sources_texts"):
-            sources_texts = self.info_container["routing_infos"].sources_texts
+        routing_infos = self.routing_infos
+
+        if hasattr(routing_infos, "sources_texts"):
+            sources_texts = routing_infos.sources_texts
             self.expert_ranker.set_available_tasks(self.expert_names)
 
             experts, weights = self.expert_ranker.predict_task(
@@ -401,8 +428,10 @@ class TaskPredictorSelector(Selector):
             f"Not supported for {self.__class__} since routing depends on input."
         )
 
-    def add_expert(self, expert_name: str, **kwargs):
-        self.expert_names.append(expert_name)
+    def _add_expert(
+        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+    ):
+        pass
 
 
 @dataclass
@@ -414,8 +443,8 @@ class MOERKHSSelectorConfig(SelectorConfig):
 
 @register_multi_expert_selector("moe_rkhs_router", MOERKHSSelectorConfig)
 class MOERKHSSelector(Selector):
-    def __init__(self, info_container, config, **kwargs) -> None:
-        super().__init__(info_container, config)
+    def __init__(self, config, **kwargs) -> None:
+        super().__init__(config)
 
         if "layer" not in kwargs:
             raise ValueError(
@@ -460,9 +489,9 @@ class MOERKHSSelector(Selector):
             # soft routing
             selected_experts = SelectorOutput.ALL_EXPERTS
 
-        g = self.info_container.get("routing_gates", [])
+        g = getattr(self.info_container, "routing_gates", [])
         g.append(router_logits)
-        self.info_container["routing_gates"] = g
+        self.info_container.routing_gates = g
 
         return BatchSequenceExpertsAndWeightsSelectorOutput(
             experts=selected_experts, weights=routing_weights
@@ -476,9 +505,10 @@ class MOERKHSSelector(Selector):
     def get_routing_weights(self):
         raise ValueError("Not supported for MOESelector.")
 
-    def add_expert(self, expert_name: str, **kwargs):
-        """It is important to guard against multiple calls as this can be called multiple times."""
-        self.expert_names.append(expert_name)
+    def _add_expert(
+        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+    ):
+        # just initialize the expert embeddings
         self.rkhs_embeddings.data = torch.cat(
             [
                 self.rkhs_embeddings.data,
@@ -490,25 +520,35 @@ class MOERKHSSelector(Selector):
         )
 
 
-class TaskToExpertTracker(Selector):
+class TaskToExpertMixin:
     """
-    Abstract Class which builds `task_to_expert_name` mapping. Can be used for
-    Routing (as in TaskNameSelector) or for logging in-dist stats (PerTokenSelector)
+    Builds `task_to_expert_name` mapping on add_expert, useful for
+    routing (as in TaskNameSelector) or for logging in-distribution stats (PerTokenSelector)
     """
 
-    def __init__(self, info_container, config=None, **kwargs) -> None:
-        super().__init__(info_container, config=config)
-        self.task_to_expert_name = {}
+    @property
+    def task_to_expert_name(self):
+        return getattr(self, "_task_to_expert_name", {})
 
-    def add_expert(self, expert_name: str, expert_info: ExpertInfo = None, **kwargs):
+    def _add_expert(
+        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+    ):
+        _task_to_expert_name = self.task_to_expert_name
+
         if expert_info is None or expert_info.expert_task_name is None:
             logger.warning(
                 "Expert's task_name not set, assume task name corresponds to expert name!"
             )
-            self.task_to_expert_name[expert_name] = expert_name
+            _task_to_expert_name[expert_name] = expert_name
         else:
             for task_name in expert_info.expert_task_name.split(","):
-                self.task_to_expert_name[task_name] = expert_name
+                if task_name in _task_to_expert_name:
+                    logger.warning(
+                        f"Task name {task_name} already assigned to expert {_task_to_expert_name[task_name]}"
+                    )
+            _task_to_expert_name[task_name] = expert_name
+
+        self._task_to_expert_name = _task_to_expert_name
 
 
 @dataclass
@@ -520,7 +560,7 @@ class PerTokenSelectorConfig(LoadableSelectorConfig):
     proto_norm_fn: str = None
 
 
-class LoadableLibrarySelector(ABC):
+class LoadableLibraryMixin(ABC):
     library_artifacts: Dict = None
 
     @abstractmethod
@@ -528,8 +568,8 @@ class LoadableLibrarySelector(ABC):
         pass
 
     def load_from_library(self):
-        if LoadableLibrarySelector.library_artifacts is None:
-            LoadableLibrarySelector.library_artifacts = self._load_from_library()
+        if LoadableLibraryMixin.library_artifacts is None:
+            LoadableLibraryMixin.library_artifacts = self._load_from_library()
 
             if not self.library_artifacts:
                 raise ValueError(f"Could not load library artifacts for selector.")
@@ -567,9 +607,9 @@ def get_expert_prototype_from_library_artifacts(
 
 
 @register_multi_expert_selector("per_token_router", PerTokenSelectorConfig)
-class PerTokenSelector(TaskToExpertTracker, LoadableLibrarySelector):
-    def __init__(self, info_container, config, **kwargs) -> None:
-        super().__init__(info_container, config, **kwargs)
+class PerTokenSelector(Selector, TaskToExpertMixin, LoadableLibraryMixin):
+    def __init__(self, config, **kwargs) -> None:
+        super().__init__(config, **kwargs)
 
         if "layer" not in kwargs:
             raise ValueError(
@@ -634,12 +674,12 @@ class PerTokenSelector(TaskToExpertTracker, LoadableLibrarySelector):
         bs, sq, n_exp = angle.size()
 
         if sq > 1:
-            attn_mask = self.info_container["routing_infos"].attention_mask == 1.0
+            attn_mask = self.routing_infos.attention_mask == 1.0
             mean_angle = angle[attn_mask].sum() / attn_mask.sum() / n_exp
         else:
             mean_angle = angle.mean()
 
-        task = self.info_container["routing_infos"].task_sources[0]
+        task = self.routing_infos.task_sources[0]
         to_store = {"angle": mean_angle.item()}
         self.metric_logger.update(prefix=f"task_{task}", value_dict=to_store)
         self.metric_logger.update(prefix=self.__layer_name__, value_dict=to_store)
@@ -653,12 +693,12 @@ class PerTokenSelector(TaskToExpertTracker, LoadableLibrarySelector):
         entropy = dist.entropy()
 
         if sq > 1:
-            attn_mask = self.info_container["routing_infos"].attention_mask == 1.0
+            attn_mask = self.routing_infos.attention_mask == 1.0
             mean_entropy = entropy[attn_mask].sum() / attn_mask.sum()
         else:
             mean_entropy = entropy.mean()
 
-        task = self.info_container["routing_infos"].task_sources[0]
+        task = self.routing_infos.task_sources[0]
         to_store = {"ent_routing": mean_entropy.item()}
         self.metric_logger.update(prefix=f"task_{task}", value_dict=to_store)
         self.metric_logger.update(prefix=self.__layer_name__, value_dict=to_store)
@@ -670,17 +710,20 @@ class PerTokenSelector(TaskToExpertTracker, LoadableLibrarySelector):
     def _maybe_log_in_dist(self, logits):
         probs = F.softmax(logits, dim=-1)
         bs, seq_len, _ = probs.size()
-        task_names = self.info_container["routing_infos"].task_names
+        task_names = self.routing_infos.task_names
+
         if all([t in self.task_to_expert_name for t in task_names]):
             expert_names = [self.task_to_expert_name[t] for t in task_names]
+
             expert_ids = torch.LongTensor(
                 [self.expert_names.index(e) for e in expert_names]
             ).to(logits.device)
+
             expert_p = torch.gather(
                 probs, index=expert_ids.view(bs, 1, 1).expand(-1, seq_len, -1), dim=-1
             )
 
-            attn_mask = self.info_container["routing_infos"].attention_mask == 1.0
+            attn_mask = self.routing_infos.attention_mask == 1.0
 
             # are we teacher forcing or generating ?
             if seq_len == 1:
@@ -747,9 +790,9 @@ class PerTokenSelector(TaskToExpertTracker, LoadableLibrarySelector):
             experts=experts, weights=router_probs
         )
 
-    def add_expert(self, expert_name: str, expert_info: ExpertInfo = None, **kwargs):
-        super().add_expert(expert_name, expert_info, **kwargs)
-
+    def _add_expert(
+        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+    ):
         if self.library_artifacts is not None:
             proto = get_expert_prototype_from_library_artifacts(
                 expert_name, self.layer_name, self.library_artifacts
@@ -767,7 +810,6 @@ class PerTokenSelector(TaskToExpertTracker, LoadableLibrarySelector):
 
         dev = self.prototypes.device
         self.prototypes.data = torch.cat([self.prototypes.data, proto.to(dev)])
-        self.expert_names.append(expert_name)
 
 
 @dataclass
@@ -776,10 +818,9 @@ class TaskNameSelectorConfig(SelectorConfig):
 
 
 @register_multi_expert_selector("task_selector", TaskNameSelectorConfig)
-class TaskNameSelector(TaskToExpertTracker):
-    def __init__(self, info_container, **kwargs) -> None:
-        super().__init__(info_container)
-        self.default_expert_name = None
+class TaskNameSelector(Selector, TaskToExpertMixin):
+    def __init__(self, **kwargs) -> None:
+        super().__init__()
 
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchExpertsSelectorOutput:
@@ -850,6 +891,11 @@ class KVSelector(Selector):
             f"Not supported for {self.__class__}  since routing depends on input."
         )
 
+    def _add_expert(
+        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+    ):
+        pass
+
 
 @dataclass
 class KVTaskNameSelectorConfig(SelectorConfig):
@@ -860,13 +906,13 @@ class KVTaskNameSelectorConfig(SelectorConfig):
 class KVTaskNameSelector(KVSelector):
     """Selects KVAdapters based on the task name."""
 
-    def __init__(self, info_container=None, **kwargs) -> None:
-        super().__init__(info_container)
-
-        self.default_expert_name = None
+    def __init__(self, **kwargs) -> None:
+        super().__init__()
 
     def get_kv_weights(self, experts, k_proj, v_proj):
-        task_names = self.routing_infos.task_names
+        routing_infos = self.routing_infos
+
+        task_names = routing_infos.task_names
 
         if task_names is None:
             task_names = [self.default_expert_name]
@@ -883,7 +929,9 @@ class KVTaskNameSelector(KVSelector):
         return out
 
     def get_gate(self, experts, adapter_weights):
-        task_names = self.routing_infos.task_names
+        routing_infos = self.routing_infos
+
+        task_names = routing_infos.task_names
 
         if task_names is None:
             task_names = [self.default_expert_name]
@@ -909,8 +957,8 @@ class KVConcatSelector(KVSelector, nn.Module):
     model's internal attention mechanism take care of routing in a task agnostic way
     """
 
-    def __init__(self, info_container=None, **kwargs) -> None:
-        super().__init__(info_container)
+    def __init__(self, **kwargs) -> None:
+        super().__init__()
 
         self.default_expert_name = None
 

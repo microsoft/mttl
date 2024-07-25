@@ -37,10 +37,8 @@ def get_modifier_type(config, model_modifier=None):
 def modify_transformer(
     transformer, modifier_config, model_modifier=None, **modifier_kwargs
 ):
-    from mttl.utils import logger
+    from mttl.logging import logger
 
-    # create a shared container for the task id
-    transformer.info_container = {}
     # create a shared container for the possible routers
     transformer.selectors = {}
 

@@ -34,8 +34,9 @@ from huggingface_hub import (
 )
 from huggingface_hub.utils._errors import RepositoryNotFoundError
 
+from mttl.logging import logger
 from mttl.models.library.expert import Expert, ExpertInfo, load_expert
-from mttl.utils import logger, remote_login
+from mttl.utils import remote_login
 
 
 @total_ordering
@@ -1496,6 +1497,28 @@ def get_best_expert_for_task(library: HFExpertLibrary, task, hash) -> Expert:
             best_expert = metadata
     assert best_expert is not None
     return library[best_expert.expert_name]
+
+
+def get_task_expert(task, expert_lib, default_score):
+    """
+    Get the best expert for a given task.
+
+    Args:
+        task (str): The task for which to find the expert.
+        expert_lib (ExpertLibrary): The library of available experts.
+        default_score (Score): Score to use for expert retrieval.
+
+    Returns:
+        Expert: The best expert for the given task according to the score.
+    Raises:
+        ValueError: If no default score is provided.
+    """
+    if default_score is None:
+        raise ValueError("No default score provided")
+    parent_exp: Expert = get_best_expert_for_score(expert_lib, default_score.hash)
+    if parent_exp is None and task in expert_lib.tasks:
+        parent_exp = get_best_expert_for_task(expert_lib, task, default_score.hash)
+    return parent_exp
 
 
 class DatasetEngine(ABC):

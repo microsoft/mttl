@@ -13,7 +13,6 @@ from transformers.models.llama.modeling_llama import apply_rotary_pos_emb
 
 from mttl.models.modifiers import register_modifier
 from mttl.models.modifiers.base import Adapter, ModifierConfig, ModifyMixin
-from mttl.utils import logger
 
 
 @dataclass
