@@ -38,6 +38,7 @@ class DatasetConfig:
     subsample_per_task: bool = False  # Changing default to False
     subsample: int = -1
     pack_sequences: bool = False  # True
+    pad_to_multiple_of: int = 8
 
 
 @dataclass
@@ -427,7 +428,7 @@ class DefaultDataModule(LightningDataModule):
         return DataLoader(
             train_dataset,
             batch_size=self.config.train_batch_size,
-            shuffle=True,
+            shuffle=False,
             num_workers=8,
             pin_memory=True,
             persistent_workers=False,
@@ -473,7 +474,7 @@ class DefaultDataModule(LightningDataModule):
             padding="longest",
             max_input_length=self.config.max_input_length,
             max_output_length=self.config.max_output_length,
-            pad_to_multiple_of=8,
+            pad_to_multiple_of=self.config.pad_to_multiple_of,
             return_tensors="pt",
             model_family=self.config.model_family,
             for_generation=self.for_generation,
@@ -607,24 +608,24 @@ class DefaultDataModule(LightningDataModule):
         pass
 
     def tokenize_dataset(self, dataset):
-        padding = self.collate_fn.padding
-        self.collate_fn.padding = "do_not_pad"
-        return_tensors = self.collate_fn.return_tensors
-        self.collate_fn.return_tensors = "pt"
+
+        # NOTE: padding is hardcoded to `longest` already.
+        # return tensors is harcoded to `pt`, but tokenizer in dataset.map overwrites this
+        # TODO: write a test for this
+        pad_to_multiple = self.config.pad_to_multiple_of
+        self.config.pad_to_multiple_of = 1
+
+        # remove `rng` before mapping, as it's not pickleable
+        rng = self.rng
+        self.rng = None
 
         def collate_fn_wrapper(batch):
             out = self.collate_fn([batch])
             return {k: v[0] for k, v in out.items()}
 
-        # remove `rng` before mapping, as it's not pickleable
-        rng = self.rng
-        self.rng = None
         dataset = dataset.map(collate_fn_wrapper, batched=False, num_proc=20)
         self.rng = rng
-
-        # NOTE : `map` ignores these two arguments :(
-        self.collate_fn.padding = padding
-        self.collate_fn.return_tensors = return_tensors
+        self.collate_fn.pad_to_multiple_of = pad_to_multiple
 
         return dataset
 
@@ -633,7 +634,7 @@ class DefaultDataModule(LightningDataModule):
         Combine sequences together in larger chunks closer to `max_input_length`
         """
         # first, let's shuffle the dataset
-        dataset = dataset.shuffle(seed=42)
+        # dataset = dataset.shuffle(seed=42)
 
         # TODO: first partition dataset according to `task_name`, and
         # pack each task individually to ensure that we don't mix tasks
@@ -648,21 +649,16 @@ class DefaultDataModule(LightningDataModule):
 
             def new_container():
                 # for when starting a new packed batch
-                # return {k: [] if type(v[0]) in [list, int] else "" for k, v in examples.items()}
-                return {k: [] for k, _ in examples.items()}
+                return {k: [] for k in examples.keys()}
 
-            grouped_samples = {k: [] for k, _ in examples.items()}
+            grouped_samples = new_container()
 
             def append_to_running_seq(container, example):
                 for k, v in example.items():
-                    if isinstance(v, int):
+                    if isinstance(v, int) or isinstance(v, str):
                         container[k] += [v]
                     elif isinstance(v, list):
                         container[k] += v
-                    elif type(v) == str:
-                        container[k] += [v]
-                        # container[k] += ("<SPLIT>" if len(container[k]) > 0 else "") + v
-                        # container[k] += ("<SPLIT>" if len(container[k]) > 0 else "") + v
                     else:
                         raise ValueError(f"Unknown type {type(v)}")
 
@@ -715,10 +711,9 @@ class DefaultDataModule(LightningDataModule):
     def post_setup_dataset(self):
         for split in ["train", "dev", "test"]:
 
-            dataset = getattr(self, f"{split}_dataset")
-            # TODO: put this back after packing
             subsample = getattr(self.config, f"subsample_{split}", None)
             if subsample and subsample > 0:
+                dataset = getattr(self, f"{split}_dataset")
                 logger.warning(
                     f"subsampling the {split} dataset to {subsample} samples"
                 )
@@ -728,7 +723,8 @@ class DefaultDataModule(LightningDataModule):
 
                 setattr(self, f"{split}_dataset", sub_dataset)
 
-            if self.config.pack_sequences and split == "train":
+            if self.config.pack_sequences:  # and split == "train":
+                dataset = getattr(self, f"{split}_dataset")
                 logger.info(f"Packing sequences for {split} dataset")
                 dataset = self.tokenize_dataset(dataset)
                 dataset = self.pack_sequences(dataset)
@@ -745,7 +741,7 @@ class MultiChoiceDataModule(DefaultDataModule):
             padding="longest",
             max_input_length=self.config.max_input_length,
             max_output_length=self.config.max_output_length,
-            pad_to_multiple_of=8,
+            pad_to_multiple_of=self.config.pad_to_multiple_of,
             return_tensors="pt",
             model_family=self.config.model_family,
             for_generation=self.for_generation,
@@ -830,6 +826,7 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         "subsample_dev": args.subsample_dev,
         "subsample_test": args.subsample_test,
         "subsample_per_task": args.subsample_per_task,
+        "pad_to_multiple_of": args.pad_to_multiple_of,
     }
 
     if dataset in [

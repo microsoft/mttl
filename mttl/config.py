@@ -186,6 +186,7 @@ class Config:
         self.subsample_test = None
         self.subsample_per_task = False
         self.pack_sequences = False
+        self.pad_to_multiple_of = 8
 
         self.data_dir = os.getenv("TRAIN_DIR", "/tmp/")
         self.output_dir = os.getenv("OUTPUT_DIR", "./output")
