@@ -6,6 +6,7 @@ from transformers import AutoModelForCausalLM
 from mttl.datamodule.base import DatasetConfig, DefaultDataModule
 from mttl.datamodule.utils import get_tokenizer_with_args
 from mttl.models.containers import add_expert_to_transformer
+from mttl.models.expert_context import InfoContainer
 from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
 
@@ -213,6 +214,7 @@ def test_hard_prompt_eval(dm_batch):
     )
     assert model.expert_container.experts["prefix"].prompt == weight
 
+    InfoContainer.create(flan_batch_for_generation)
     outputs_with_prompt = model.generate(
         inputs=flan_batch_for_generation["input_ids"],
         attention_mask=flan_batch_for_generation["attention_mask"],

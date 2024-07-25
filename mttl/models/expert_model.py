@@ -349,6 +349,7 @@ class MultiExpertModel(SingleExpertModel):
         self,
         expert_name,
         expert_config=None,
+        is_default=False,
     ) -> Expert:
         """Adds a new empty expert to the model."""
         new_expert = Expert(
@@ -360,8 +361,7 @@ class MultiExpertModel(SingleExpertModel):
             ),
         )
 
-        new_expert = self.add_expert_instance(new_expert)
-
+        new_expert = self.add_expert_instance(new_expert, is_default=is_default)
         logger.info("Added empty expert: {}".format(expert_name))
         return new_expert
 

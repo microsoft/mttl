@@ -11,6 +11,7 @@ from mttl.models.containers.selectors import (
 )
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
+from mttl.utils import logger
 
 
 def _extract_identifier(string, match_on="finegrained"):

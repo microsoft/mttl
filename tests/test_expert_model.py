@@ -19,8 +19,13 @@ def test_expert_model():
     seed_everything(0)
     model = MultiExpertModel(model="EleutherAI/gpt-neo-125m", device_map="cpu")
     model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
-    model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
+    assert model.experts_containers[0].default_expert_name is None
+
+    model.add_empty_expert(
+        "b", LoRAConfig(modify_layers=".*out_proj.*"), is_default=True
+    )
     assert len(model.selectors) == 0
+    assert model.experts_containers[0].default_expert_name == "b"
 
     # plug a poly selector
     model.set_selector("lora", PolySelectorConfig(task_names=["t1", "t2", "t3"]))
