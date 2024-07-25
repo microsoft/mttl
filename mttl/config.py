@@ -282,6 +282,7 @@ class Config:
 
         self.model = None
         self.model_family = None  # model family, either "gpt" or "encdec"
+        self.use_flash_attn = False
 
         self.precision = "32"
         self.monitor_grad_alignment_on = None

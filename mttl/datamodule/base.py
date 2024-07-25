@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Union
 
 import torch
+import torch.nn.functional as F
 from datasets import Dataset as ArrowDataset
 from datasets import concatenate_datasets
 from pytorch_lightning import LightningDataModule
@@ -284,6 +285,7 @@ class DefaultCollator:
             for batch_item in batch:
                 for key, value in batch_item.items():
                     dtype = self._tensor_dtype(value)
+
                     if dtype:
                         output_batch[key].append(torch.Tensor(value).to(dtype))
                     else:
@@ -300,6 +302,11 @@ class DefaultCollator:
                         value, batch_first=True, padding_value=pad_token
                     )
                     output_batch[key] = value
+
+            packed_seq_lens = output_batch["seq_lens"].flatten().cumsum(0)
+            output_batch["packed_seq_lens"] = F.pad(packed_seq_lens, (1, 0)).to(
+                torch.int32
+            )
 
             return dict(output_batch)
 
@@ -647,7 +654,7 @@ class DefaultDataModule(LightningDataModule):
 
             def new_container():
                 # for when starting a new packed batch
-                return {k: [] for k in examples.keys()}
+                return {k: [] for k in list(examples.keys()) + ["seq_lens"]}
 
             grouped_samples = new_container()
 
@@ -659,6 +666,9 @@ class DefaultDataModule(LightningDataModule):
                         container[k] += v
                     else:
                         raise ValueError(f"Unknown type {type(v)}")
+
+                # TODO: THis is SOMEHOW WRONG. CHECK.
+                container["seq_lens"] += [len(example["input_ids"])]
 
             def add_finished_sequence(container, example):
                 for k, v in example.items():
@@ -721,7 +731,7 @@ class DefaultDataModule(LightningDataModule):
 
                 setattr(self, f"{split}_dataset", sub_dataset)
 
-            if self.config.pack_sequences:  # and split == "train":
+            if self.config.pack_sequences and split == "train":
                 dataset = getattr(self, f"{split}_dataset")
                 logger.info(f"Packing sequences for {split} dataset")
                 dataset = self.tokenize_dataset(dataset)
