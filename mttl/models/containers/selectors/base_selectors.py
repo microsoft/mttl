@@ -561,14 +561,14 @@ class PerTokenSelectorConfig(LoadableSelectorConfig):
     proto_norm_fn: str = None
 
 
-class LoadableLibrarySelector(ABC):
+class LoadableLibraryMixin(ABC):
 
     cache = threading.local()
     cache.library_artifacts = None
 
     @property
     def library_artifacts(self) -> Optional[Dict]:
-        return LoadableLibrarySelector.cache.library_artifacts
+        return LoadableLibraryMixin.cache.library_artifacts
 
     @abstractmethod
     def _load_from_library(self):
@@ -576,10 +576,10 @@ class LoadableLibrarySelector(ABC):
 
     def load_from_library(self):
 
-        if LoadableLibrarySelector.cache.library_artifacts is None:
-            LoadableLibrarySelector.cache.library_artifacts = self._load_from_library()
+        if LoadableLibraryMixin.cache.library_artifacts is None:
+            LoadableLibraryMixin.cache.library_artifacts = self._load_from_library()
 
-            if not LoadableLibrarySelector.cache.library_artifacts:
+            if not LoadableLibraryMixin.cache.library_artifacts:
                 raise ValueError(f"Could not load library artifacts for selector.")
 
 
