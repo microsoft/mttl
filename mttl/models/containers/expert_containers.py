@@ -78,8 +78,12 @@ class ExpertContainer(Container):
             )
 
         self.on_add_expert(expert, action=action, is_default=is_default)
+
         self.expert_infos[expert.name] = expert_info
         self.expert_names.append(expert.name)
+        self.default_expert_name: str | None = (
+            expert.name if is_default else self.default_expert_name
+        )
         self.selector.add_expert(
             expert.name, expert_info=expert_info, is_default=is_default
         )
@@ -545,7 +549,6 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
                 )
             )
 
-        self.default_expert_name = None
         self.experts = nn.ModuleDict({})
 
     # skip creating the adapter weights
@@ -598,5 +601,5 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
 
         self._check_config(expert.expert_config)
 
-        expert_module = KVAdapter(expert_config, self.attn_layer)
+        expert_module = KVAdapter(expert.expert_config, self.attn_layer)
         expert_module.load_adapter_weights(expert_weights)
