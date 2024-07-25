@@ -1,11 +1,10 @@
-import json
 import os
 
 import tqdm
 from evaluate import load
 
 from mttl.evaluators.base import GenerativeEvaluator, switch_to_eval_mode
-from mttl.utils import logger
+from mttl.logging import logger
 
 
 # reference: https://github.com/declare-lab/instruct-eval/blob/main/human_eval/main.py#L35

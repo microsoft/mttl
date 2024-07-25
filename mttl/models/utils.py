@@ -13,9 +13,10 @@ from pytorch_lightning import LightningModule
 from transformers.file_utils import PushToHubMixin
 from transformers.utils import cached_file
 
+from mttl.logging import logger
 from mttl.models.get_optimizer import get_optimizer
 from mttl.models.get_scheduler import get_scheduler
-from mttl.utils import get_checkpoint_path, logger
+from mttl.utils import get_checkpoint_path
 
 CHECKPOINT_PATH_IN_HUB = "checkpoint.ckpt"
 

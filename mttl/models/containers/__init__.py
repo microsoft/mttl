@@ -1,6 +1,7 @@
 import re
 
 from mttl.config import Config
+from mttl.logging import logger
 from mttl.models.containers.expert_containers import *
 from mttl.models.containers.selectors import (
     Selector,

@@ -1,61 +1,12 @@
 import copy
-import os
-import sys
+from abc import ABC, abstractmethod
 from functools import partial
 
 import torch
-import wandb
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-
-from abc import ABC, abstractmethod, abstractproperty
-
-from mttl.callbacks import LossCallback
 from mttl.datamodule.base import DefaultDataModule, get_datamodule
 from mttl.evaluators import MMLUEvaluator, RougeEvaluator
 from mttl.models.expert_config import ExpertConfig
-
-
-class EvalCallback(ABC):
-    @abstractmethod
-    def evaluate_model(self, model, prefix=""):
-        pass
-
-
-class MMLUEvalCallback(MMLUEvaluator, EvalCallback):
-    def __init__(
-        self,
-        config,
-        name="mmlu_test_callback",
-        split="test",
-        subsample=-1,
-        use_vllm=False,
-    ):
-        self.split = split
-        from mttl.datamodule.mmlu_data_module import MMLUDataConfig
-
-        assert split in ["test"]
-        self.use_vllm = use_vllm
-        mmlu_config = MMLUDataConfig(
-            **{
-                k: v
-                for k, v in config.__dict__.items()
-                if k in MMLUDataConfig.__dataclass_fields__.keys()
-            }
-        )
-        super().__init__(mmlu_config, use_vllm=use_vllm)
-        self.subsample = subsample
-        self.name = name
-
-    def evaluate_model(self, model, prefix=""):
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        model.to(device)
-        score = self.evaluate(model, self.split, self.subsample)["all"]["mean"]
-        # log
-        if wandb.run is not None:
-            wandb.log({f"{prefix}{self.name}_{self.split}": score})
-        return score
 
 
 def prepare_evaluator(
@@ -66,6 +17,8 @@ def prepare_evaluator(
     subsample=-1,
     for_generation=None,
 ):
+    from mttl.callbacks import TestLossEvaluator
+
     if args.eval_metric == "loss":
         EVAL_CLASS = TestLossEvaluator
         for_generation = for_generation if for_generation is not None else False
@@ -111,7 +64,8 @@ class Evaluator(ABC):
     def get_loss(self, model):
         pass
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def tasks(self):
         pass
 
@@ -141,54 +95,6 @@ class ExtendedRougeEvaluator(RougeEvaluator, Evaluator):
     @property
     def tasks(self):
         return self.datamodule.task_names
-
-
-class TestLossEvaluator(LossCallback, Evaluator):
-    def __init__(
-        self,
-        datamodule: DefaultDataModule,
-        name="test",
-        split="test",
-        subsample=-1,
-        **kwargs,
-    ):
-        self.split = split
-        if split == "test":
-            dataloader = datamodule.test_dataloader(subsample=subsample)
-        elif split in ["val", "valid", "validation"]:
-            dataloader = datamodule.val_dataloader(subsample=subsample)
-        elif split == "train":
-            dataloader = datamodule.train_dataloader(subsample=subsample)
-        super().__init__(
-            dataloader=dataloader,
-            name=name,
-            output_dir=None,
-            eval_every_opt_step=0,
-            checkpoint_oracle=False,
-        )
-        self.datamodule = datamodule
-
-    @property
-    def tasks(self):
-        return self.datamodule.task_names
-
-    def evaluate(self, model):
-        # return something that should be maximized
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        model.to(device)
-        loss = self.test(model)
-        loss *= -1.0
-        return {"all": {"mean": loss.item()}, f"{self.name}": {"mean": loss.item()}}
-
-    def get_loss(self, model, **kwargs):
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        model.to(device)
-        loss = self.test(model, **kwargs)
-        return loss.item()
-
-    @property
-    def tokenizer(self):
-        return self.datamodule.tokenizer
 
 
 class ExtendedMMLUEvaluator(MMLUEvaluator, Evaluator):

@@ -1,7 +1,8 @@
 import math
+import threading
 from abc import ABC
 from dataclasses import dataclass
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 import torch
@@ -10,12 +11,12 @@ from pyparsing import abstractmethod
 from torch import nn
 from torch.distributions import Categorical
 
+from mttl.logging import logger, warn_once
 from mttl.models.expert_context import InfoContainer
 from mttl.models.library.expert import ExpertInfo
 from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
 from mttl.models.ranker.classifier_ranker import ClusterPredictor
 from mttl.models.utils import MetricLogger
-from mttl.utils import logger, warn_once
 
 SELECTORS_NAME_TO_KLASS = {}
 SELECTORS_CONFIG_TO_NAME = {}
@@ -525,17 +526,23 @@ class PerTokenSelectorConfig(LoadableSelectorConfig):
 
 
 class LoadableLibrarySelector(ABC):
-    library_artifacts: Dict = None
+
+    cache = threading.local()
+    cache.library_artifacts = None
+
+    @property
+    def library_artifacts(self) -> Optional[Dict]:
+        return LoadableLibrarySelector.cache.library_artifacts
 
     @abstractmethod
     def _load_from_library(self):
         pass
 
     def load_from_library(self):
-        if LoadableLibrarySelector.library_artifacts is None:
-            LoadableLibrarySelector.library_artifacts = self._load_from_library()
+        if LoadableLibrarySelector.cache.library_artifacts is None:
+            LoadableLibrarySelector.cache.library_artifacts = self._load_from_library()
 
-            if not self.library_artifacts:
+            if not LoadableLibrarySelector.cache.library_artifacts:
                 raise ValueError(f"Could not load library artifacts for selector.")
 
 

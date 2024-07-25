@@ -5,7 +5,7 @@ from typing import Dict, Iterable, Union
 
 from torch import nn
 
-from mttl.utils import logger
+from mttl.logging import logger
 
 
 class Adapter(nn.Module):

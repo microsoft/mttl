@@ -6,7 +6,8 @@ import numpy
 from datasets import Dataset, concatenate_datasets
 
 from mttl.datamodule.base import DatasetConfig, DefaultDataModule
-from mttl.datamodule.utils import logger, maybe_filter_hf_dataset_by_task
+from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
+from mttl.logging import logger
 from mttl.models.library.expert_library import DatasetLibrary
 
 

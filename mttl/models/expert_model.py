@@ -9,6 +9,7 @@ import torch
 from torch.optim.optimizer import Optimizer
 from transformers import PreTrainedModel
 
+from mttl.logging import logger
 from mttl.models.containers import add_expert_to_transformer
 from mttl.models.containers.expert_containers import ExpertContainer
 from mttl.models.containers.selectors import Selector, SelectorConfig
@@ -22,7 +23,6 @@ from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.lora import SkilledLoRAConfig
 from mttl.models.utils import EfficientCheckpointModule, prepare_model_for_kbit_training
-from mttl.utils import logger
 
 torch.set_float32_matmul_precision("high")
 
