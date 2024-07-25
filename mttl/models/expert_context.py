@@ -1,5 +1,4 @@
 import functools
-import threading
 
 from mttl.models.modifiers.routing import RoutingInfo
 
@@ -40,6 +39,11 @@ class InfoContainer:
 
         @functools.wraps(f)
         def wrapper_func(model, *args, **kwargs):
+            if not isinstance(args[0], dict) and "input_ids" not in args[0]:
+                raise ValueError(
+                    "The first argument of the function to wrap must be a dictionary with 'input_ids' key."
+                )
+
             InfoContainer.create(model, RoutingInfo.from_batch(args[0]))
             results = f(model, *args, **kwargs)
             return results

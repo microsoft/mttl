@@ -141,10 +141,9 @@ class PolySelector(Selector):
         weights = self._get_weights(task_names=[task_name])
         return {k: v.detach().item() for k, v in zip(self.expert_names, weights[0][0])}
 
-    def add_expert(self, expert_name: str, **kwargs):
-        self.expert_names.append(expert_name)
+    def on_add_expert(self, expert_name: str, **kwargs):
         self.module_logits.data = torch.empty(
-            self.n_tasks + 1, self.config.n_splits * len(self.expert_names)
+            self.n_tasks + 1, self.config.n_splits * (self.n_experts + 1)
         ).uniform_(-1e-3, 1e-3)
 
         # Last expert is exactly uniform
@@ -179,7 +178,7 @@ class PolySelectorDirect(PolySelector):
     def get_routing_weights(self):
         return {k: v.detach().item() for k, v in self.module_logits_dict.items()}
 
-    def add_expert(self, expert_name: str, **kwargs):
+    def on_add_expert(self, expert_name: str, **kwargs):
         """
         Assume:
         expert_task_name -- task name expert is pecialized at
@@ -237,7 +236,7 @@ class PolyUniform(PolySelectorDirect):
     Currently only used for uniform merging of experts.
     """
 
-    def add_expert(self, expert_name: str, **kwargs):
+    def on_add_expert(self, expert_name: str, **kwargs):
         if expert_name not in self.module_logits_dict:
             self.module_logits_dict[expert_name] = torch.nn.Parameter(
                 torch.ones(1).to(self.device)
