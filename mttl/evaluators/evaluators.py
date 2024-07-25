@@ -18,6 +18,7 @@ def prepare_evaluator(
     for_generation=None,
 ):
     from mttl.callbacks import TestLossEvaluator
+
     if args.eval_metric == "loss":
         EVAL_CLASS = TestLossEvaluator
         for_generation = for_generation if for_generation is not None else False
