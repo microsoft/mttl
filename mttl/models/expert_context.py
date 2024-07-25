@@ -1,19 +1,20 @@
 import functools
+import threading
 
 from mttl.models.modifiers.routing import RoutingInfo
 
 
 class InfoContainer:
-    local = None
+    local = threading.local()
+    local.context = None
 
-    # thread-local storage that holds a stack of active contexts
     def __init__(self, model, routing_infos=None, **kwargs):
         self.model = model
         self._routing_infos = routing_infos
 
     @classmethod
     def get(cls):
-        return cls.local
+        return cls.local.context
 
     @property
     def routing_infos(self):
@@ -28,8 +29,8 @@ class InfoContainer:
         """
         Creates a new context and sets it as the active context.
         """
-        cls.local = cls(model, routing_infos)
-        return cls.local
+        cls.local.context = cls(model, routing_infos)
+        return cls.local.context
 
     @classmethod
     def wrap(cls, f):
