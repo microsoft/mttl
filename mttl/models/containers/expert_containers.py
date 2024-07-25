@@ -29,7 +29,7 @@ class Container(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def __setitem__(self, key, value):
+    def __len__(self):
         pass
 
 
@@ -124,6 +124,7 @@ class ExpertContainer(Container):
     def layer_name(self):
         if not hasattr(self, "__layer_name__"):
             raise ValueError("Dependency injection for layer name has not been done.")
+
         return self.__layer_name__
 
     @abstractmethod
@@ -230,19 +231,6 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
 
         self.merged_expert_names.extend(self.experts)
         self.experts.clear()
-
-    def __setitem__(self, name, value: LoRA):
-        if not isinstance(value, LoRA):
-            raise ValueError(
-                "Expert container only supports LoRA modules, got {}".format(
-                    value.__class__.__name__
-                )
-            )
-
-        self.experts[name] = value
-
-    def __getitem__(self, name):
-        return self.experts[name]
 
     def _convert_expert_names_to_indices(
         self, expert_names, use_default_expert=True
@@ -380,6 +368,9 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
             return self.route(input, selection, **kwargs)
         return self.layer(input)
 
+    def __getitem__(self, name):
+        return self.experts[name]
+
 
 class CoalescedLoRAExpertContainer(LoRAExpertContainer):
     """A coalesced version of the LoRA expert container, where the experts are kept
@@ -406,8 +397,6 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                 )
             )
 
-        self.merged_expert_names = []
-
         # create a skilled lora config with 0 skills
         self.dummy_config = SkilledLoRAConfig(
             lora_alpha=config.lora_alpha,
@@ -424,10 +413,12 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
         )
         self.experts = SkilledLoRA(self.dummy_config, layer)
 
-    def __setitem__(self, name, value: Union[LoRA, SkilledLoRA]):
-        self.experts.set_skill(value, self.expert_names.index(name))
-
     def __getitem__(self, name) -> Union[LoRA, SkilledLoRA]:
+        """Returns either a LoRA or a SkilledLoRA module.
+
+        Arrow adds lora modules to the container, while MHR adds
+        skilled lora modules to the container.
+        """
         index_of = self.expert_names.index(name)
         weights = self.experts.get_skill_weights(index_of)
 
@@ -446,14 +437,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             skilled_lora.load_lora_weights(weights)
             return skilled_lora
         else:
-            raise ValueError("Unknown modifier type.")
-
-    def get_merged_weights(self, with_global_names=True, **merger_kwargs):
-        """
-        Merges experts to one expert according to weights, if weights are not given, it uses the selector to get the weights.
-        Does not merge the layer.
-        """
-        raise NotImplementedError()
+            raise ValueError("Unknown modifier type, expected LoRA or SkilledLoRA.")
 
     def merge_with_layer(self):
         raise NotImplementedError()
@@ -587,8 +571,8 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
     def __getitem__(self, key):
         raise NotImplementedError()
 
-    def __setitem__(self, key, value):
-        raise NotImplementedError()
+    def __len__(self):
+        return len(self.expert_names)
 
     def get_kv_weights(self, k_proj, v_proj):
         return self.selector.get_kv_weights(self.experts, k_proj, v_proj)
@@ -596,7 +580,7 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
     def get_gate(self, adapter_weights):
         return self.selector.get_gate(self.experts, adapter_weights)
 
-    def add_expert(
+    def _add_expert(
         self,
         expert: Expert,
         action="route",
@@ -609,21 +593,10 @@ class KVExpertContainer(KVAdapter, ExpertContainer):
             self.__layer_name__, expert.expert_weights
         )
 
-        if expert.name in self.experts:
-            raise ValueError(
-                "An expert with name {} already exists.".format(expert.name)
-            )
-
         if action == "merge":
             raise ValueError("Merging is not supported for `KVAdapters`.")
 
-        expert_config = ModifierConfig.from_training_config(expert.expert_config)
-        self._check_config(expert_config)
+        self._check_config(expert.expert_config)
 
         expert_module = KVAdapter(expert_config, self.attn_layer)
         expert_module.load_adapter_weights(expert_weights)
-
-        if is_default:
-            self.default_expert_name = expert.name
-
-        self._add_expert(expert.name, expert.expert_info, expert_module)
