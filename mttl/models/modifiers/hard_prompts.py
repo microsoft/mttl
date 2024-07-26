@@ -3,7 +3,6 @@ from dataclasses import dataclass
 import torch
 
 from mttl.models.modifiers.base import Modifier
-from mttl.models.modifiers.modify_model import register_modifier
 
 
 @dataclass
@@ -13,7 +12,7 @@ class HardPromptConfig:
     model_family: str = None
 
 
-@register_modifier("hard_prompt", config_cls=HardPromptConfig)
+@Modifier.register("hard_prompt", config_cls=HardPromptConfig)
 class HardPrompt(Modifier):
     def __init__(self, config, prompt_init=None):
         if config.model_family is None or config.tokenizer is None:

@@ -11,7 +11,6 @@ from einops import rearrange, repeat
 from transformers import Cache
 from transformers.models.llama.modeling_llama import apply_rotary_pos_emb
 
-from mttl.models.modifiers import register_modifier
 from mttl.models.modifiers.base import Modifier, ModifierConfig
 
 

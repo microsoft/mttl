@@ -8,7 +8,6 @@ import torch
 from torch import nn
 from transformers.activations import ACT2FN
 
-from mttl.models.modifiers import register_modifier
 from mttl.models.modifiers.base import Modifier, ModifierConfig
 
 

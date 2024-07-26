@@ -11,7 +11,6 @@ from mttl.models.containers.selectors import (
 )
 from mttl.models.library.expert import Expert
 from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
-from mttl.models.modifiers.modify_model import register_modifier
 
 
 class HardPromptDecoderWrapper(nn.Module):
