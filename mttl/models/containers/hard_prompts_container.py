@@ -10,9 +10,7 @@ from mttl.models.containers.selectors import (
     TaskNameSelector,
 )
 from mttl.models.library.expert import Expert
-from mttl.models.modifiers.base import ModifyMixin
 from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
-from mttl.models.modifiers.modify_model import register_modifier
 
 
 class HardPromptDecoderWrapper:
@@ -115,12 +113,12 @@ class HardPromptExpertContainer(ExpertContainer):
         action="route",
         is_default=False,
     ) -> None:
-        from mttl.models.modifiers.modify_model import get_modifier_type
+        from mttl.models.modifiers.modify_model import get_modifier_name
 
         if action == "merge":
             raise ValueError("Merging is not supported for hard prompts.")
 
-        if get_modifier_type(expert.expert_config) == "hard_prompt":
+        if get_modifier_name(expert.expert_config) == "hard_prompt":
             expert_module = HardPrompt(
                 expert.expert_config, prompt_init=expert.expert_weights
             )

@@ -10,10 +10,9 @@ import torch
 from torch import nn
 
 from mttl.logging import warn_once
-from mttl.models.modifiers import register_modifier
 from mttl.models.modifiers.base import (
-    Adapter,
-    MergeableAdapterMixin,
+    MergeableModifierMixin,
+    Modifier,
     ModifierConfig,
     ModifyMixin,
 )
@@ -27,8 +26,8 @@ class LoRAConfig(ModifierConfig):
     lora_init_b_random: bool = False
 
 
-@register_modifier("lora", config_cls=LoRAConfig)
-class LoRA(Adapter, MergeableAdapterMixin, ModifyMixin):
+@Modifier.register("lora", config_cls=LoRAConfig)
+class LoRA(Modifier, MergeableModifierMixin, ModifyMixin):
     def __init__(
         self,
         config: LoRAConfig,
@@ -222,7 +221,7 @@ class SkilledLoRAConfig(LoRAConfig):
     phi_2_align_heads: bool = False
 
 
-@register_modifier("skilled_lora", config_cls=SkilledLoRAConfig)
+@Modifier.register("skilled_lora", config_cls=SkilledLoRAConfig)
 class SkilledLoRA(LoRA):
     def __init__(
         self,
