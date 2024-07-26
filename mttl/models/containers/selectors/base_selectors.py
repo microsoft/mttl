@@ -492,9 +492,8 @@ class MOERKHSSelector(Selector):
             # soft routing
             selected_experts = SelectorOutput.ALL_EXPERTS
 
-        g = getattr(self.info_container, "routing_gates", [])
-        g.append(router_logits)
-        self.info_container.routing_gates = g
+        routing_gates = InfoContainer.get().routing_gates
+        routing_gates.append(router_logits)
 
         return BatchSequenceExpertsAndWeightsSelectorOutput(
             experts=selected_experts, weights=routing_weights
