@@ -55,7 +55,7 @@ class PhatgooseSelectorConfig(PerTokenSelectorConfig):
     lora_merge_after: bool = True
 
 
-@register_multi_expert_selector("phatgoose_router", PhatgooseSelectorConfig)
+@Selector.register("phatgoose_router", PhatgooseSelectorConfig)
 class PhatgooseSelector(PerTokenSelector):
     def __init__(self, config, **kwargs) -> None:
         super().__init__(config, **kwargs)
