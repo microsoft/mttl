@@ -11,7 +11,7 @@ from torch import nn
 
 from mttl.logging import warn_once
 from mttl.models.modifiers import register_modifier
-from mttl.models.modifiers.base import MergeableAdapter, ModifierConfig, ModifyMixin
+from mttl.models.modifiers.base import MergeableModifier, Modifier, ModifierConfig
 
 
 @dataclass
@@ -22,8 +22,8 @@ class LoRAConfig(ModifierConfig):
     lora_init_b_random: bool = False
 
 
-@register_modifier("lora", config_cls=LoRAConfig)
-class LoRA(MergeableAdapter, ModifyMixin):
+@Modifier.register("lora", config_cls=LoRAConfig)
+class LoRA(MergeableModifier):
     def __init__(
         self,
         config: LoRAConfig,

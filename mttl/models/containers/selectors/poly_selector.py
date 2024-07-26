@@ -14,7 +14,6 @@ from mttl.models.containers.selectors.base_selectors import (
     SelectorConfig,
     SelectorOutput,
     forward_with_cache,
-    register_multi_expert_selector,
 )
 from mttl.models.library.expert import ExpertInfo
 
@@ -25,7 +24,7 @@ class PolySelectorConfig(SelectorConfig):
     task_names: List[str] = None
 
 
-@register_multi_expert_selector("poly_router", PolySelectorConfig)
+@Selector.register("poly_router", PolySelectorConfig)
 class PolySelector(Selector):
     """
     Implements routing at a per-layer or per-model level
@@ -39,9 +38,8 @@ class PolySelector(Selector):
         self.n_tasks = len(self.config.task_names) if self.config.task_names else 0
 
         # We add an extra task for the default (average) expert if not found
-        self.module_logits = nn.Parameter(
-            torch.empty(self.n_tasks + 1, self.config.n_splits).uniform_(-1e-3, 1e-3)
-        )
+        shape = (self.n_tasks + 1, self.config.n_splits, self.config.num_experts)
+        self.module_logits = nn.Parameter(torch.empty(*shape).uniform_(-1e-3, 1e-3))
 
         if self.n_tasks == 0:
             logger.warning(
@@ -145,12 +143,14 @@ class PolySelector(Selector):
     def on_add_expert(
         self, expert_name: str, expert_info: ExpertInfo, is_default=False
     ):
-        self.module_logits.data = torch.empty(
-            self.n_tasks + 1, self.config.n_splits * (self.n_experts + 1)
-        ).uniform_(-1e-3, 1e-3)
+        if self.n_experts == self.module_logits.shape[-1]:
+            # we need additional space in the routing to accomodate the incoming expert
+            self.module_logits.data = torch.empty(
+                self.n_tasks + 1, self.config.n_splits * (self.n_experts + 1)
+            ).uniform_(-1e-3, 1e-3)
 
-        # Last expert is exactly uniform
-        self.module_logits.data[-1] = 0.0
+            # Last expert is exactly uniform
+            self.module_logits.data[-1] = 0.0
 
 
 @dataclass
@@ -158,7 +158,7 @@ class PolySelectorDirectConfig(PolySelectorConfig):
     pass
 
 
-@register_multi_expert_selector("poly_router_dir", PolySelectorDirectConfig)
+@Selector.register("poly_router_dir", PolySelectorDirectConfig)
 class PolySelectorDirect(PolySelector):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -166,7 +166,6 @@ class PolySelectorDirect(PolySelector):
         self.module_logits_dict = nn.ParameterDict()
         self.training_config = kwargs["training_config"]
         self.init_gap = [-1e-3, 1e-3]
-
         self.device = kwargs["layer"].weight.device
 
     def _get_weights(self):
@@ -193,7 +192,7 @@ class PolySelectorDirect(PolySelector):
         """
         main_m = 1
 
-        expert_task_name = kwargs["expert_info"].expert_task_name
+        expert_task_name = expert_info.expert_task_name
         if expert_name not in self.module_logits_dict:
             if self.training_config.finetune_task_name == expert_task_name:
                 self.init_gap = [
@@ -235,7 +234,7 @@ class PolySelectorDirectConfigUniform(PolySelectorConfig):
     pass
 
 
-@register_multi_expert_selector("uniform", PolySelectorDirectConfigUniform)
+@Selector.register("uniform", PolySelectorDirectConfigUniform)
 class PolyUniform(PolySelectorDirect):
     """
     Currently only used for uniform merging of experts.

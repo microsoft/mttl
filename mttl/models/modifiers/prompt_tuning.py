@@ -8,7 +8,7 @@ from transformers.modeling_utils import PreTrainedModel
 
 from mttl.models.expert_context import InfoContainer
 from mttl.models.modifiers import register_modifier
-from mttl.models.modifiers.base import Adapter, ModifierConfig, ModifyMixin
+from mttl.models.modifiers.base import Modifier, ModifierConfig
 from mttl.models.modifiers.debug_utils import check_if_align, monitor_transformer
 from mttl.models.modifiers.kv_adapter import KVAdapterConfig
 
@@ -328,8 +328,8 @@ class PromptTuningConfig(KVAdapterConfig):
     prompt_placement: str = "prefix"
 
 
-@register_modifier("prompt_tuning", config_cls=PromptTuningConfig)
-class PromptTuning(Adapter, ModifyMixin):
+@Modifier.register("prompt_tuning", config_cls=PromptTuningConfig)
+class PromptTuning(Modifier):
     def __init__(self, base_input_embeddings, config, *args, **kwargs):
         super().__init__()
 

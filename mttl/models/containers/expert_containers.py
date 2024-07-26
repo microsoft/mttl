@@ -17,7 +17,7 @@ from mttl.models.containers.selectors import (
     SelectorOutput,
 )
 from mttl.models.library.expert import Expert
-from mttl.models.modifiers.base import MergeableAdapter, ModifierConfig, ModifyMixin
+from mttl.models.modifiers.base import MergeableModifier, ModifierConfig
 from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
 from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
 from mttl.models.modifiers.modify_model import get_modifier_type
@@ -173,7 +173,7 @@ class ExpertContainer(Container):
         return len(self.expert_names)
 
 
-class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
+class LoRAExpertContainer(MergeableModifier, ExpertContainer):
     __supports_configs__ = [LoRAConfig]
 
     def __init__(
@@ -183,7 +183,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         selector=None,
         lora_merge_after=False,
     ):
-        MergeableAdapter.__init__(self)
+        MergeableModifier.__init__(self)
         super().__init__(config, layer, selector)
         self.lora_merge_after = lora_merge_after
 
@@ -393,7 +393,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
         lora_merge_after=False,
         **kwargs,
     ):
-        MergeableAdapter.__init__(self)
+        MergeableModifier.__init__(self)
         super().__init__(config, layer, selector, lora_merge_after)
 
         if not isinstance(self.layer, nn.Linear):

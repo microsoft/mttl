@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from mttl.models.containers.selectors.base_selectors import (
     PerTokenSelector,
     PerTokenSelectorConfig,
-    register_multi_expert_selector,
+    Selector,
 )
 
 
@@ -42,7 +42,7 @@ class ArrowSelectorConfig(PerTokenSelectorConfig):
     proto_norm_fn: str = "id"
 
 
-@register_multi_expert_selector("arrow_router", ArrowSelectorConfig)
+@Selector.register("arrow_router", ArrowSelectorConfig)
 class ArrowSelector(PerTokenSelector):
     def _load_from_library(self):
         """Fetches prototypes from the library."""

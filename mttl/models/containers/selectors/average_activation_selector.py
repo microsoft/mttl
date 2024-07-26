@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from mttl.models.containers.selectors.base_selectors import (
     PerTokenSelector,
     PerTokenSelectorConfig,
-    register_multi_expert_selector,
+    Selector,
 )
 
 
@@ -47,7 +47,7 @@ class AverageActivationSelectorConfig(PerTokenSelectorConfig):
     proto_norm_fn: str = "id"
 
 
-@register_multi_expert_selector("avg_act_router", AverageActivationSelectorConfig)
+@Selector.register("avg_act_router", AverageActivationSelectorConfig)
 class AverageActivationSelector(PerTokenSelector):
     def _load_from_library(self):
         """Fetches prototypes from the library."""

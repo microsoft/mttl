@@ -12,7 +12,6 @@ from mttl.models.containers.selectors.base_selectors import (
     Selector,
     SelectorConfig,
     forward_with_cache,
-    register_multi_expert_selector,
 )
 
 
@@ -90,9 +89,7 @@ class SigmoidGate(nn.Module):
         return torch.sigmoid(torch.nn.functional.linear(x, self.v, bias=None))
 
 
-@register_multi_expert_selector(
-    "phatgoose_trainer_selector", PhatgooseTrainerSelectorConfig
-)
+@Selector.register("phatgoose_trainer_selector", PhatgooseTrainerSelectorConfig)
 class PhatgooseTrainerSelector(Selector):
     """
     Selector from https://arxiv.org/abs/2402.05859
