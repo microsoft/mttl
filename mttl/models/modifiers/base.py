@@ -19,7 +19,7 @@ class Adapter(nn.Module):
         return self.__layer_name__
 
 
-class MergeableAdapter(ABC, Adapter):
+class MergeableAdapterMixin(ABC):
     @abstractmethod
     def merge_with_layer(self):
         pass
@@ -87,7 +87,7 @@ class ModifierConfig(object):
         return config_klass(**kwargs)
 
 
-class ModifyMixin(nn.Module):
+class ModifyMixin:
     @classmethod
     def modify_transformer(cls, transformer, config):
         return modify_with_adapter(transformer, config, cls)

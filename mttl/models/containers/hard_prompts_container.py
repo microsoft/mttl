@@ -15,10 +15,8 @@ from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
 from mttl.models.modifiers.modify_model import register_modifier
 
 
-class HardPromptDecoderWrapper(nn.Module):
+class HardPromptDecoderWrapper:
     def __init__(self, transformer, expert_container):
-        super().__init__()
-
         self.transformer = transformer
         self.expert_container = expert_container
         self.transformer_prepare_inputs_for_generation = (
@@ -35,6 +33,9 @@ class HardPromptDecoderWrapper(nn.Module):
             return super().__getattr__(name)
         else:
             return getattr(self.transformer, name)
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
 
     def forward(self, *args, **kwargs):
         # Should be padded (**right**)
@@ -108,7 +109,7 @@ class HardPromptExpertContainer(ExpertContainer):
         self.merged_expert_names = []
         self.experts = nn.ModuleDict({})
 
-    def _add_expert(
+    def on_add_expert(
         self,
         expert: Expert,
         action="route",

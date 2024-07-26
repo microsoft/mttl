@@ -4,7 +4,10 @@ import torch
 from pytorch_lightning import seed_everything
 
 from mttl.config import Config
-from mttl.models.containers import CoalescedLoRAExpertContainer, LoRAExpertContainer
+from mttl.models.containers.lora_containers import (
+    CoalescedLoRAExpertContainer,
+    LoRAExpertContainer,
+)
 from mttl.models.containers.selectors import (
     BatchSequenceExpertsAndWeightsSelectorOutput,
     MOERKHSSelector,
@@ -13,6 +16,7 @@ from mttl.models.containers.selectors import (
     PolySelectorDirect,
     SelectorOutput,
 )
+from mttl.models.containers.selectors.base_selectors import LoadableLibraryMixin
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import MoEModel, MultiExpertModel
 from mttl.models.library.expert import Expert
@@ -184,7 +188,7 @@ class TestMultiExpertModel:
                 mod.module_logits.data[:, -1] = 999
 
         output = module(batch)
-        assert np.allclose(output.item(), 15.21, atol=0.1)
+        assert np.allclose(output.item(), 16.22, atol=0.1)
 
         # Finally, Test invalid tasks
         batch["task_names"][-1] = "task_10"

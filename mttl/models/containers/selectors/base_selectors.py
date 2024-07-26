@@ -1,7 +1,8 @@
 import math
+import threading
 from abc import ABC
 from dataclasses import dataclass
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 import torch
@@ -119,6 +120,11 @@ class LoadableSelectorConfig(SelectorConfig):
 
     library_id: str = None
     selector_data_id: str = None
+
+    @property
+    def artifacts_hash(self):
+        """Returns an unique key identifying the artifacts for this selector."""
+        return f"{self.library_id}_{self.selector_data_id}"
 
 
 @dataclass
@@ -269,7 +275,6 @@ class Selector(nn.Module):
 
         self.config = config
         self.expert_infos = {}
-        self.expert_names = []
         self.selector_views = []
         self.forward_cache = None
         self.default_expert_name = None
@@ -277,6 +282,10 @@ class Selector(nn.Module):
         self._calls_counter = 0
         # dependency injection filled from ExpertContainer
         self.__layer_name__ = None
+
+    @property
+    def expert_names(self) -> list:
+        return list(self.expert_infos.keys())
 
     @property
     def clear_cache(self):
@@ -329,7 +338,7 @@ class Selector(nn.Module):
         return info_container.routing_infos
 
     @abstractmethod
-    def _add_expert(
+    def on_add_expert(
         self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
     ):
         pass
@@ -337,14 +346,13 @@ class Selector(nn.Module):
     def add_expert(
         self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
     ):
-        self._add_expert(expert_name, expert_info, is_default)
+        self.on_add_expert(expert_name, expert_info, is_default)
 
         # standard bookkeeping for all selectors
         if is_default:
             self.default_expert_name = expert_name
 
         self.expert_infos[expert_name] = expert_info
-        self.expert_names.append(expert_name)
 
 
 class SelectorView:
@@ -428,7 +436,7 @@ class TaskPredictorSelector(Selector):
             f"Not supported for {self.__class__} since routing depends on input."
         )
 
-    def _add_expert(
+    def on_add_expert(
         self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
     ):
         pass
@@ -489,9 +497,8 @@ class MOERKHSSelector(Selector):
             # soft routing
             selected_experts = SelectorOutput.ALL_EXPERTS
 
-        g = getattr(self.info_container, "routing_gates", [])
-        g.append(router_logits)
-        self.info_container.routing_gates = g
+        routing_gates = InfoContainer.get().routing_gates
+        routing_gates.append(router_logits)
 
         return BatchSequenceExpertsAndWeightsSelectorOutput(
             experts=selected_experts, weights=routing_weights
@@ -505,7 +512,7 @@ class MOERKHSSelector(Selector):
     def get_routing_weights(self):
         raise ValueError("Not supported for MOESelector.")
 
-    def _add_expert(
+    def on_add_expert(
         self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
     ):
         # just initialize the expert embeddings
@@ -530,7 +537,7 @@ class TaskToExpertMixin:
     def task_to_expert_name(self):
         return getattr(self, "_task_to_expert_name", {})
 
-    def _add_expert(
+    def on_add_expert(
         self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
     ):
         _task_to_expert_name = self.task_to_expert_name
@@ -561,17 +568,33 @@ class PerTokenSelectorConfig(LoadableSelectorConfig):
 
 
 class LoadableLibraryMixin(ABC):
-    library_artifacts: Dict = None
+    cache = threading.local()
+    cache.library_artifacts = {}
+
+    @classmethod
+    def clear(cls):
+        cls.cache.library_artifacts = {}
+
+    @property
+    def library_artifacts(self) -> Optional[Dict]:
+        return LoadableLibraryMixin.cache.library_artifacts.get(
+            self.config.artifacts_hash, None
+        )
 
     @abstractmethod
     def _load_from_library(self):
         pass
 
     def load_from_library(self):
-        if LoadableLibraryMixin.library_artifacts is None:
-            LoadableLibraryMixin.library_artifacts = self._load_from_library()
+        if (
+            self.config.artifacts_hash
+            not in LoadableLibraryMixin.cache.library_artifacts
+        ):
+            LoadableLibraryMixin.cache.library_artifacts[self.config.artifacts_hash] = (
+                self._load_from_library()
+            )
 
-            if not self.library_artifacts:
+            if not LoadableLibraryMixin.cache.library_artifacts:
                 raise ValueError(f"Could not load library artifacts for selector.")
 
 
@@ -790,7 +813,7 @@ class PerTokenSelector(Selector, TaskToExpertMixin, LoadableLibraryMixin):
             experts=experts, weights=router_probs
         )
 
-    def _add_expert(
+    def on_add_expert(
         self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
     ):
         if self.library_artifacts is not None:
@@ -891,7 +914,7 @@ class KVSelector(Selector):
             f"Not supported for {self.__class__}  since routing depends on input."
         )
 
-    def _add_expert(
+    def on_add_expert(
         self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
     ):
         pass

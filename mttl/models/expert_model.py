@@ -11,9 +11,12 @@ from transformers import PreTrainedModel
 
 from mttl.logging import logger
 from mttl.models.containers import add_expert_to_transformer
-from mttl.models.containers.expert_containers import ExpertContainer
+from mttl.models.containers.base import ExpertContainer
 from mttl.models.containers.selectors import Selector, SelectorConfig
-from mttl.models.containers.selectors.base_selectors import LoadableSelectorConfig
+from mttl.models.containers.selectors.base_selectors import (
+    LoadableLibraryMixin,
+    LoadableSelectorConfig,
+)
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_context import InfoContainer
 from mttl.models.library.expert import Expert, ExpertInfo
@@ -409,6 +412,7 @@ class MultiExpertModel(ExpertModel):
         self,
         expert_name,
         expert_config=None,
+        is_default=False,
     ) -> Expert:
         """Adds a new empty expert to the model."""
         new_expert = Expert(
@@ -420,7 +424,7 @@ class MultiExpertModel(ExpertModel):
             ),
         )
 
-        new_expert = self.add_expert_instance(new_expert)
+        new_expert = self.add_expert_instance(new_expert, is_default=is_default)
         logger.info("Added empty expert: {}".format(expert_name))
         return new_expert
 

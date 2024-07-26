@@ -2,7 +2,12 @@ import re
 
 from mttl.config import Config
 from mttl.logging import logger
-from mttl.models.containers.expert_containers import *
+from mttl.models.containers.base import ExpertContainer
+from mttl.models.containers.kv_containers import KVExpertContainer
+from mttl.models.containers.lora_containers import (
+    CoalescedLoRAExpertContainer,
+    LoRAExpertContainer,
+)
 from mttl.models.containers.selectors import (
     Selector,
     SelectorConfig,
@@ -11,6 +16,7 @@ from mttl.models.containers.selectors import (
 )
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
+from mttl.utils import logger
 
 
 def _extract_identifier(string, match_on="finegrained"):
