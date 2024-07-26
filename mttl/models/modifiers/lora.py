@@ -10,7 +10,13 @@ import torch
 from torch import nn
 
 from mttl.logging import warn_once
-from mttl.models.modifiers.base import MergeableModifier, Modifier, ModifierConfig
+from mttl.models.modifiers import register_modifier
+from mttl.models.modifiers.base import (
+    Adapter,
+    MergeableAdapterMixin,
+    ModifierConfig,
+    ModifyMixin,
+)
 
 
 @dataclass
@@ -21,8 +27,8 @@ class LoRAConfig(ModifierConfig):
     lora_init_b_random: bool = False
 
 
-@Modifier.register("lora", config_cls=LoRAConfig)
-class LoRA(MergeableModifier):
+@register_modifier("lora", config_cls=LoRAConfig)
+class LoRA(Adapter, MergeableAdapterMixin, ModifyMixin):
     def __init__(
         self,
         config: LoRAConfig,
@@ -216,7 +222,7 @@ class SkilledLoRAConfig(LoRAConfig):
     phi_2_align_heads: bool = False
 
 
-@Modifier.register("skilled_lora", config_cls=SkilledLoRAConfig)
+@register_modifier("skilled_lora", config_cls=SkilledLoRAConfig)
 class SkilledLoRA(LoRA):
     def __init__(
         self,
@@ -241,7 +247,8 @@ class SkilledLoRA(LoRA):
         }
 
     def set_skill(self, lora: Union[LoRA, "SkilledLoRA"], skill_index):
-        if skill_index >= self.n_skills:
+        """Copy the weights of the given lora to the given skill index."""
+        if skill_index >= self.lora_a.data.shape[0]:
             raise ValueError(f"Skill index {skill_index} out of bounds.")
 
         self.lora_a.data[skill_index] = lora.lora_a.data.reshape(
@@ -252,15 +259,25 @@ class SkilledLoRA(LoRA):
             1, self.rank, self.n_splits, self.out_features // self.n_splits
         ).to(device=self.lora_a.device, dtype=self.lora_a.dtype)
 
-    def add_skill(self, lora: Union[LoRA, "SkilledLoRA"]):
+    def add_skill(self, lora: Union[LoRA, "SkilledLoRA"]) -> None:
+        """Adds a skill to the skilled lora by copying the weights of the given lora."""
         self.lora_a.data = torch.cat(
-            [self.lora_a.data, torch.zeros_like(self.lora_a.data[:1])],
-            dim=0,
+            [
+                self.lora_a.data,
+                torch.zeros(1, *self.lora_a.data.shape[1:]).to(
+                    device=self.lora_a.device, dtype=self.lora_a.dtype
+                ),
+            ]
         )
         self.lora_b.data = torch.cat(
-            [self.lora_b.data, torch.zeros_like(self.lora_b.data[:1])],
-            dim=0,
+            [
+                self.lora_b.data,
+                torch.zeros(1, *self.lora_b.data.shape[1:]).to(
+                    device=self.lora_b.device, dtype=self.lora_b.dtype
+                ),
+            ]
         )
+
         self.set_skill(lora, self.n_skills)
         self.n_skills += 1
 

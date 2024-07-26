@@ -9,7 +9,7 @@ import tqdm
 from torch.utils.data import DataLoader
 
 from mttl.logging import logger
-from mttl.models.modifiers.base import MergeableModifier
+from mttl.models.modifiers.base import MergeableAdapterMixin
 
 try:
     from vllm import LLM, SamplingParams
@@ -57,7 +57,7 @@ def save_merged_model(model, model_path, hf_path="/tmp/merged"):
 
     for name, module in model_copy.named_modules():
         for c_name, child in module.named_children():
-            if isinstance(child, MergeableModifier):
+            if isinstance(child, MergeableAdapterMixin):
                 child.merge_with_layer()
                 setattr(
                     module,

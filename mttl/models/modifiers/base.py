@@ -4,10 +4,25 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, Union
 
 from torch import nn
-from transformers import PreTrainedModel
 
 from mttl.logging import logger
-from mttl.registrable import Registrable
+
+
+class Adapter(nn.Module):
+    @property
+    def layer_name(self):
+        if not hasattr(self, "__layer_name__"):
+            raise ValueError(
+                "Layer name not set, dependency injection not done properly?"
+            )
+
+        return self.__layer_name__
+
+
+class MergeableAdapterMixin(ABC):
+    @abstractmethod
+    def merge_with_layer(self):
+        pass
 
 
 @dataclass
@@ -24,9 +39,11 @@ class ModifierConfig(object):
         """Dump the config to a string."""
         from dataclasses import asdict
 
+        from mttl.models.modifiers.modify_model import CONFIGS_TO_MODIFIERS
+
         data = asdict(self)
         # store the model modifier for easy loading
-        data["__model_modifier__"] = Modifier.get_name_by_config_class(type(self))
+        data["__model_modifier__"] = CONFIGS_TO_MODIFIERS[type(self)]
         return data
 
     @classmethod
@@ -40,32 +57,29 @@ class ModifierConfig(object):
         mod = dumped.pop("__model_modifier__")
         return MODIFIERS_TO_CONFIGS[mod](**dumped)
 
-    @classmethod
+    @staticmethod
     def from_training_config(
-        cls, training_config: Union["Config", "ModifierConfig"]
+        training_config: Union["Config", "ModifierConfig"]
     ) -> Union["ModifierConfig", None]:
         """Build modifier config from the training config.
 
         Returns None if no modifier is set.
         """
+        from mttl.models.modifiers.modify_model import MODIFIERS_TO_CONFIGS
+
         if isinstance(training_config, ModifierConfig):
             # nothing to do here
             return training_config
 
-        if cls != ModifierConfig:
-            model_modifier = Modifier.get_name_by_config_class(cls)
-        else:
-            if training_config.model_modifier is None:
-                return None
+        if training_config.model_modifier is None:
+            return None
 
-            model_modifier = training_config.model_modifier
-
-        if model_modifier not in Modifier.registered_names():
+        if training_config.model_modifier not in MODIFIERS_TO_CONFIGS:
             raise ValueError(
-                f"Model modifier '{model_modifier}' not found, has it been registered?"
+                f"Model modifier '{training_config.model_modifier}' not found, has it been registered?"
             )
 
-        config_klass = Modifier.get_config_class_by_name(model_modifier)
+        config_klass = MODIFIERS_TO_CONFIGS[training_config.model_modifier]
         kwargs = {}
         for key, _ in config_klass.__dataclass_fields__.items():
             if hasattr(training_config, key):
@@ -73,46 +87,10 @@ class ModifierConfig(object):
         return config_klass(**kwargs)
 
 
-class Modifier(nn.Module, Registrable):
-    @property
-    def layer_name(self):
-        if not hasattr(self, "__layer_name__"):
-            raise ValueError(
-                "Layer name not set, dependency injection not done properly?"
-            )
-
-        return self.__layer_name__
-
+class ModifyMixin:
     @classmethod
-    def modify_transformer(
-        cls, transformer: PreTrainedModel, modifier_config: ModifierConfig
-    ) -> PreTrainedModel:
-        """Applies the modifier to the transformer."""
-        for m_name, module in dict(transformer.named_modules()).items():
-            if re.fullmatch(modifier_config.modify_modules, m_name):
-                for c_name, layer in dict(module.named_children()).items():
-                    if re.fullmatch(modifier_config.modify_layers, c_name):
-                        logger.info(f"Patching {m_name}.{c_name}...")
-
-                        setattr(
-                            module,
-                            c_name,
-                            cls(modifier_config, layer),
-                        )
-
-        # handle parameter tying if necessary
-        target_2_source_param = get_target_2_source_param_mapping(
-            transformer.named_parameters(), modifier_config.tie_params
-        )
-
-        tie_params(transformer, modifier_config, target_2_source_param)
-        return transformer
-
-
-class MergeableModifier(ABC, Modifier):
-    @abstractmethod
-    def merge_with_layer(self):
-        pass
+    def modify_transformer(cls, transformer, config):
+        return modify_with_adapter(transformer, config, cls)
 
 
 def get_target_2_source_param_mapping(
@@ -201,3 +179,24 @@ def tie_params(transformer, config, target_2_source_param):
         assert len(transformer.state_dict().keys()) > len(
             list(transformer.named_parameters())
         ), "Some parameters are not tied."
+
+
+def modify_with_adapter(transformer, config, adapter_klass):
+    for m_name, module in dict(transformer.named_modules()).items():
+        if re.fullmatch(config.modify_modules, m_name):
+            for c_name, layer in dict(module.named_children()).items():
+                if re.fullmatch(config.modify_layers, c_name):
+                    logger.info(f"Patching {m_name}.{c_name}...")
+
+                    setattr(
+                        module,
+                        c_name,
+                        adapter_klass(config, layer),
+                    )
+
+    target_2_source_param = get_target_2_source_param_mapping(
+        transformer.named_parameters(), config.tie_params
+    )
+
+    tie_params(transformer, config, target_2_source_param)
+    return transformer

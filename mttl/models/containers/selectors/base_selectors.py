@@ -17,14 +17,38 @@ from mttl.models.library.expert import ExpertInfo
 from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
 from mttl.models.ranker.classifier_ranker import ClusterPredictor
 from mttl.models.utils import MetricLogger
-from mttl.registrable import Registrable
+
+SELECTORS_NAME_TO_KLASS = {}
+SELECTORS_CONFIG_TO_NAME = {}
+SELECTORS_NAME_TO_CONFIG = {}
+
 
 EPS = 1e-8
 
 
+def register_multi_expert_selector(name, config_cls):
+    print("Registering muti-expert selector..." + name)
+
+    def _thunk(fn):
+        if name in SELECTORS_NAME_TO_KLASS:
+            raise ValueError(
+                f"Cannot register duplicate multi-expert selector ({name})."
+            )
+
+        if config_cls in SELECTORS_CONFIG_TO_NAME:
+            raise ValueError(f"Cannot register with config class ({config_cls}).")
+
+        SELECTORS_NAME_TO_KLASS[name] = fn
+        SELECTORS_CONFIG_TO_NAME[config_cls] = name
+        SELECTORS_NAME_TO_CONFIG[name] = config_cls
+        return fn
+
+    return _thunk
+
+
 def get_selector(selector_config: "SelectorConfig", **kwargs):
     """Returns a selector object for the given routing_config."""
-    return Selector.get_class_by_config_class(type(selector_config))(
+    return SELECTORS_NAME_TO_KLASS[SELECTORS_CONFIG_TO_NAME[selector_config.__class__]](
         config=selector_config, **kwargs
     )
 
@@ -33,7 +57,6 @@ def get_selector(selector_config: "SelectorConfig", **kwargs):
 class SelectorConfig:
     # the granularity of the selector (which layers use the same selectors)
     router_granularity: str = "*"
-    num_experts: int = 0  # if 0, automatically inferred
     lora_merge_after: bool = False
     selector_logging: bool = True
 
@@ -47,7 +70,7 @@ class SelectorConfig:
 
         data = asdict(self)
         # store the model modifier for easy loading
-        data["__selector_name__"] = Selector.get_name_by_config_class(type(self))
+        data["__selector_name__"] = SELECTORS_CONFIG_TO_NAME[type(self)]
         return data
 
     @classmethod
@@ -57,7 +80,7 @@ class SelectorConfig:
                 "Cannot load SelectorConfig from dict, missing '__selector_name__' key."
             )
         name = dumped.pop("__selector_name__")
-        return Selector.get_config_class_by_name(name)(**dumped)
+        return SELECTORS_NAME_TO_CONFIG[name](**dumped)
 
     @classmethod
     def from_training_config(
@@ -75,14 +98,12 @@ class SelectorConfig:
         if training_config.router_selector is None:
             return None
 
-        if training_config.router_selector not in Selector.registered_names():
+        if training_config.router_selector not in SELECTORS_NAME_TO_KLASS:
             raise ValueError(
                 f"Selector '{training_config.router_selector}' not found, has it been registered?"
             )
 
-        config_klass = Selector.get_config_class_by_name(
-            training_config.router_selector
-        )
+        config_klass = SELECTORS_NAME_TO_CONFIG[training_config.router_selector]
 
         kwargs = {}
         for key in config_klass.__dataclass_fields__.keys():
@@ -99,6 +120,11 @@ class LoadableSelectorConfig(SelectorConfig):
 
     library_id: str = None
     selector_data_id: str = None
+
+    @property
+    def artifacts_hash(self):
+        """Returns an unique key identifying the artifacts for this selector."""
+        return f"{self.library_id}_{self.selector_data_id}"
 
 
 @dataclass
@@ -241,7 +267,7 @@ def safe_logging(func):
     return wrapper
 
 
-class Selector(nn.Module, Registrable):
+class Selector(nn.Module):
     metric_logger: MetricLogger = MetricLogger()
 
     def __init__(self, config=None, **kwargs):
@@ -369,7 +395,7 @@ class TaskPredictorSelectorConfig(SelectorConfig):
     ranker_top_k: int = 1
 
 
-@Selector.register("task_predictor_selector", TaskPredictorSelectorConfig)
+@register_multi_expert_selector("task_predictor_selector", TaskPredictorSelectorConfig)
 class TaskPredictorSelector(Selector):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -416,6 +442,91 @@ class TaskPredictorSelector(Selector):
         pass
 
 
+@dataclass
+class MOERKHSSelectorConfig(SelectorConfig):
+    rkhs_dim: int = 512
+    emb_dim: int = 128
+    top_k: int = -1
+
+
+@register_multi_expert_selector("moe_rkhs_router", MOERKHSSelectorConfig)
+class MOERKHSSelector(Selector):
+    def __init__(self, config, **kwargs) -> None:
+        super().__init__(config)
+
+        if "layer" not in kwargs:
+            raise ValueError(
+                "MOERKHSSelector requires a layer to be passed in kwargs to infer the input dimension."
+            )
+
+        self.top_k = config.top_k
+        self.input_dim = kwargs["layer"].weight.data.shape[-1]
+        self.rkhs_dim = config.rkhs_dim
+        self.emb_dim = config.emb_dim
+
+        device = kwargs["layer"].weight.device
+
+        self.rkhs_exp = nn.Linear(self.emb_dim, self.rkhs_dim, device=device)
+        self.rkhs_hid = nn.Linear(self.input_dim, self.rkhs_dim, device=device)
+        self.rkhs_embeddings = nn.Parameter(
+            torch.empty((0, self.emb_dim), device=device)
+        )
+
+    def _get_weights(self, input):
+        input_view = input.view(-1, input.shape[-1])
+        return self.rkhs_hid(input_view).reshape(input.shape[0], input.shape[1], -1)
+
+    @forward_with_cache
+    def forward(self, input, **kwargs) -> BatchSequenceExpertsAndWeightsSelectorOutput:
+        # do routing business on fp32
+        input = input.to(dtype=self.rkhs_exp.weight.dtype)
+
+        rkhs_enc = self._get_weights(input)
+        rkhs_emb = self.rkhs_exp(self.rkhs_embeddings)
+
+        router_logits = torch.matmul(rkhs_enc, rkhs_emb.T)
+        routing_weights = F.softmax(router_logits, dim=-1, dtype=torch.float)
+
+        if self.top_k > 0:
+            routing_weights, selected_experts = torch.topk(
+                routing_weights, self.top_k, dim=-1
+            )
+            # we cast back to the input dtype
+            routing_weights = routing_weights.to(input.dtype)
+        else:
+            # soft routing
+            selected_experts = SelectorOutput.ALL_EXPERTS
+
+        routing_gates = InfoContainer.get().routing_gates
+        routing_gates.append(router_logits)
+
+        return BatchSequenceExpertsAndWeightsSelectorOutput(
+            experts=selected_experts, weights=routing_weights
+        )
+
+    def get_merging_weights(self, **selector_kwargs) -> Dict:
+        raise ValueError(
+            f"Not supported for {self.__class__} since routing depends on input."
+        )
+
+    def get_routing_weights(self):
+        raise ValueError("Not supported for MOESelector.")
+
+    def on_add_expert(
+        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+    ):
+        # just initialize the expert embeddings
+        self.rkhs_embeddings.data = torch.cat(
+            [
+                self.rkhs_embeddings.data,
+                torch.zeros(
+                    1, self.emb_dim, device=self.rkhs_embeddings.device
+                ).uniform_(-0.02, 0.02),
+            ],
+            dim=0,
+        )
+
+
 class TaskToExpertMixin:
     """
     Builds `task_to_expert_name` mapping on add_expert, useful for
@@ -457,22 +568,31 @@ class PerTokenSelectorConfig(LoadableSelectorConfig):
 
 
 class LoadableLibraryMixin(ABC):
-
     cache = threading.local()
-    cache.library_artifacts = None
+    cache.library_artifacts = {}
+
+    @classmethod
+    def clear(cls):
+        cls.cache.library_artifacts = {}
 
     @property
     def library_artifacts(self) -> Optional[Dict]:
-        return LoadableLibraryMixin.cache.library_artifacts
+        return LoadableLibraryMixin.cache.library_artifacts.get(
+            self.config.artifacts_hash, None
+        )
 
     @abstractmethod
     def _load_from_library(self):
         pass
 
     def load_from_library(self):
-
-        if LoadableLibraryMixin.cache.library_artifacts is None:
-            LoadableLibraryMixin.cache.library_artifacts = self._load_from_library()
+        if (
+            self.config.artifacts_hash
+            not in LoadableLibraryMixin.cache.library_artifacts
+        ):
+            LoadableLibraryMixin.cache.library_artifacts[self.config.artifacts_hash] = (
+                self._load_from_library()
+            )
 
             if not LoadableLibraryMixin.cache.library_artifacts:
                 raise ValueError(f"Could not load library artifacts for selector.")
@@ -509,7 +629,7 @@ def get_expert_prototype_from_library_artifacts(
     return proto
 
 
-@Selector.register("per_token_router", PerTokenSelectorConfig)
+@register_multi_expert_selector("per_token_router", PerTokenSelectorConfig)
 class PerTokenSelector(Selector, TaskToExpertMixin, LoadableLibraryMixin):
     def __init__(self, config, **kwargs) -> None:
         super().__init__(config, **kwargs)
@@ -720,7 +840,7 @@ class TaskNameSelectorConfig(SelectorConfig):
     pass
 
 
-@Selector.register("task_selector", TaskNameSelectorConfig)
+@register_multi_expert_selector("task_selector", TaskNameSelectorConfig)
 class TaskNameSelector(Selector, TaskToExpertMixin):
     def __init__(self, **kwargs) -> None:
         super().__init__()
@@ -805,7 +925,7 @@ class KVTaskNameSelectorConfig(SelectorConfig):
     pass
 
 
-@Selector.register("kv_task_selector", KVTaskNameSelectorConfig)
+@register_multi_expert_selector("kv_task_selector", KVTaskNameSelectorConfig)
 class KVTaskNameSelector(KVSelector):
     """Selects KVAdapters based on the task name."""
 
@@ -854,7 +974,7 @@ class KVConcatSelectorConfig(SelectorConfig):
     pass
 
 
-@Selector.register("kv_concat_selector", KVConcatSelectorConfig)
+@register_multi_expert_selector("kv_concat_selector", KVConcatSelectorConfig)
 class KVConcatSelector(KVSelector, nn.Module):
     """Concatenates along the sequence dim. all the adapters, and lets the
     model's internal attention mechanism take care of routing in a task agnostic way
@@ -907,7 +1027,7 @@ class KVNormSelectorConfig(SelectorConfig):
     pass
 
 
-@Selector.register("kv_norm_selector", KVNormSelectorConfig)
+@register_multi_expert_selector("kv_norm_selector", KVNormSelectorConfig)
 class KVNormSelector(KVSelector):
     def route(self, experts, query, keys, attn_layer):
         """(2) Compute The Standard Attention Scores in augmented attention"""
@@ -931,7 +1051,7 @@ class KVConcatNormSelectorConfig(SelectorConfig):
     pass
 
 
-@Selector.register("kv_concat_norm_selector", KVConcatNormSelectorConfig)
+@register_multi_expert_selector("kv_concat_norm_selector", KVConcatNormSelectorConfig)
 class KVConcatNormSelector(KVConcatSelector, KVNormSelector):
     pass
 
@@ -941,6 +1061,6 @@ class KVTaskNameNormSelectorConfig(SelectorConfig):
     pass
 
 
-@Selector.register("kv_task_norm_selector", KVTaskNameNormSelectorConfig)
+@register_multi_expert_selector("kv_task_norm_selector", KVTaskNameNormSelectorConfig)
 class KVTaskNameNormSelector(KVTaskNameSelector, KVNormSelector):
     pass
