@@ -24,11 +24,9 @@ class ModifierConfig(object):
         """Dump the config to a string."""
         from dataclasses import asdict
 
-        from mttl.models.modifiers.modify_model import CONFIGS_TO_MODIFIERS
-
         data = asdict(self)
         # store the model modifier for easy loading
-        data["__model_modifier__"] = CONFIGS_TO_MODIFIERS[type(self)]
+        data["__model_modifier__"] = Modifier.get_name_by_config_class[type(self)]
         return data
 
     @classmethod
