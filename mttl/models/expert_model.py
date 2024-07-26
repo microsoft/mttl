@@ -1,19 +1,23 @@
 import math
+import os
 import re
 import threading
 from collections import defaultdict
 from functools import partial
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 
 import torch
 from torch.optim.optimizer import Optimizer
 from transformers import PreTrainedModel
+from transformers.utils import cached_file
 
 from mttl.logging import logger
 from mttl.models.containers import add_expert_to_transformer
 from mttl.models.containers.expert_containers import ExpertContainer
 from mttl.models.containers.selectors import Selector, SelectorConfig
 from mttl.models.containers.selectors.base_selectors import LoadableSelectorConfig
+from mttl.models.containers.selectors.moe_selector import MOERKHSSelectorConfig
+from mttl.models.containers.selectors.poly_selector import PolySelectorConfig
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_context import InfoContainer
 from mttl.models.library.expert import Expert, ExpertInfo
@@ -23,10 +27,12 @@ from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.lora import SkilledLoRAConfig
 from mttl.models.utils import (
+    CHECKPOINT_PATH_IN_HUB,
     EfficientCheckpointModule,
     model_loader_helper,
     prepare_model_for_kbit_training,
 )
+from mttl.utils import get_checkpoint_path
 
 torch.set_float32_matmul_precision("high")
 
@@ -114,7 +120,6 @@ class SingleExpertModel(torch.nn.Module):
         # Load model
         instantiate_model = kwargs.pop("instantiate_model", True)
         cache_dir = kwargs.pop("cache_dir", None)
-        force_download = kwargs.pop("force_download", None)
         force_download = kwargs.pop("force_download", False)
         resume_download = kwargs.pop("resume_download", False)
         proxies = kwargs.pop("proxies", None)
@@ -169,8 +174,11 @@ class SingleExpertModel(torch.nn.Module):
             resolved_archive_file = None
 
         if instantiate_model:
-            ckpt = torch.load(checkpoint_path, map_location="cpu")
-            model = ckpt["hyper_parameters"].get("model_base_name", "model")
+            ckpt = torch.load(resolved_archive_file, map_location="cpu")
+
+            # assume this has been trained with pytorch lightning, which dumps all the
+            # hyperparameters in the checkpoint
+            model_base_name = ckpt["hyper_parameters"].get("model")
 
             if tokenizer is None and "model" in ckpt["hyper_parameters"]:
                 tokenizer = get_tokenizer_with_args(
@@ -197,29 +205,19 @@ class MultiExpertModel(SingleExpertModel):
     def __init__(
         self,
         base_model_name,
-        selector_configs: Union[SelectorConfig, Dict[str, SelectorConfig]] = None,
+        selector_config: Union[SelectorConfig, Dict[str, SelectorConfig]] = None,
         **kwargs,
     ):
         super().__init__(base_model_name, modifier_config=None, **kwargs)
 
-        # config about the routing
-        if selector_configs is not None:
-            if type(selector_configs) is SelectorConfig:
-                logger.info(
-                    "Assuming provided selector config is for `lora` modifier type."
-                )
-                selector_configs = {"lora": selector_configs}
-        else:
-            selector_configs = None
-
-        self.selector_configs = selector_configs
+        self.selector_config = selector_config
         self.experts_names = []
 
     @classmethod
     def from_pretrained_library(
         cls,
         library_id: Union[str, ExpertLibrary],
-        selector_configs: Union[SelectorConfig, Dict[str, SelectorConfig]] = None,
+        selector_config: Union[SelectorConfig, Dict[str, SelectorConfig]] = None,
         remote_token: str = None,
         **kwargs,
     ):
@@ -234,32 +232,32 @@ class MultiExpertModel(SingleExpertModel):
             library = library_id
 
         # get a config file from the library, and initialize the expert model
-        an_expert = library[next(iter(library.keys()))]
+        an_expert: Expert = library[next(iter(library.keys()))]
 
-        train_cfg = deepcopy(an_expert.training_config)
+        train_cfg: ExpertConfig = deepcopy(an_expert.training_config)
         train_cfg.device_map = "cpu"
 
-        model = cls(**vars(train_cfg))
+        model = cls(train_cfg.model)
         model.add_experts_from_library(library)
 
         # set selector for the added experts
-        if selector_configs is not None:
+        if selector_config is not None:
             # assume "lora" is the default modifier type
-            if type(selector_configs) is SelectorConfig:
+            if type(selector_config) is SelectorConfig:
                 logger.info(
                     "Assuming provided selector config is for `lora` modifier type."
                 )
-                selector_configs = {"lora": selector_configs}
+                selector_config = {"lora": selector_config}
 
-            for modifier_type, selector_config in selector_configs.items():
+            for modifier_type, selector_config_ in selector_config.items():
                 # inject the library id if it is None
                 if (
-                    isinstance(selector_config, LoadableSelectorConfig)
-                    and selector_config.library_id is None
+                    isinstance(selector_config_, LoadableSelectorConfig)
+                    and selector_config_.library_id is None
                 ):
-                    selector_config.library_id = library_id
+                    selector_config_.library_id = library_id
 
-                model.set_selector(modifier_type, selector_config)
+                model.set_selector(modifier_type, selector_config_)
         else:
             logger.info("No selector config provided, assuming expert name selector!")
         return model
@@ -422,7 +420,7 @@ class MultiExpertModel(SingleExpertModel):
                 expert_instance,
                 action=action,
                 is_default=is_default,
-                routing_config=self.selector_configs,
+                routing_config=self.selector_config,
                 training_config=expert_instance.training_config,
             )
 
@@ -593,25 +591,34 @@ class MultiExpertModel(SingleExpertModel):
         return Expert(expert_info=expert_info, expert_weights=expert_params)
 
 
-class MoEModel(MultiExpertModel):
+class LoRAMoEModel(MultiExpertModel):
+    __supported_selectors__ = [PolySelectorConfig, MOERKHSSelectorConfig]
+
     def __init__(
         self,
         base_model_name,
-        moe_num_experts: int = None,
-        moe_top_k: int = None,
-        moe_emb_dim: int = None,
-        moe_rkhs_dim: int = None,
-        modifier_config: SkilledLoRAConfig = None,
+        modifier_config: SkilledLoRAConfig,
+        selector_config: SelectorConfig,
         expert_library: ExpertLibrary = None,
         **kwargs,
     ):
-        super().__init__(base_model_name=base_model_name)
+        if type(selector_config) not in self.__supported_selectors__:
+            raise ValueError(
+                f"Compatible selector config is required for MoE model: {self.__supported_selectors__}."
+            )
+
+        super().__init__(
+            base_model_name=base_model_name, selector_config=selector_config
+        )
 
         if expert_library is None:
             if not modifier_config:
                 raise ValueError("Modifier config is required for MoE model.")
 
-            for i in range(moe_num_experts):
+            if not selector_config.num_experts:
+                raise ValueError("Required specification of the number of experts.")
+
+            for i in range(selector_config.num_experts):
                 # Adding a Skilled LoRA with 1 skill.
                 exp_config = SkilledLoRAConfig(
                     n_skills=1,
@@ -625,7 +632,8 @@ class MoEModel(MultiExpertModel):
                     phi_2_align_heads=modifier_config.phi_2_align_heads,
                 )
                 self.add_empty_expert(f"e{i}", exp_config)
-            self.moe_num_experts = moe_num_experts
+
+            self.num_experts = selector_config.num_experts
         else:
             if expert_library is None:
                 expert_library = ExpertLibrary.get_expert_library(
@@ -634,4 +642,4 @@ class MoEModel(MultiExpertModel):
             for i, expert in enumerate(sorted(list(expert_library.keys()))):
                 self.add_expert_instance(expert_library[expert], expert_name=f"e{i}")
 
-            self.moe_num_experts = i + 1
+            self.num_experts = i + 1
