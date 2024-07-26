@@ -17,5 +17,5 @@ def test_load_selectors_from_config():
         selector = get_selector(config, {})
 
     config = TaskNameSelectorConfig()
-    selector = get_selector(config, {})
+    selector = get_selector(config)
     assert type(selector) == TaskNameSelector
