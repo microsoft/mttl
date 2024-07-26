@@ -77,7 +77,6 @@ class ExpertContainer(Container):
             )
 
         self.on_add_expert(expert, action=action, is_default=is_default)
-
         self.expert_infos[expert.name] = expert_info
         self.default_expert_name: str | None = (
             expert.name if is_default else self.default_expert_name
@@ -185,6 +184,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
     ):
         MergeableAdapter.__init__(self)
         super().__init__(config, layer, selector)
+
         self.lora_merge_after = lora_merge_after
 
         if not isinstance(self.layer, nn.Linear):
@@ -444,6 +444,33 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             return skilled_lora
         else:
             raise ValueError("Unknown modifier type, expected LoRA or SkilledLoRA.")
+
+    def on_add_expert(self, expert: Expert, action="merge", is_default=False) -> None:
+        from mttl.models.containers import filter_expert_weights
+
+        # back-compatibility, in previous versions, the expert config was a training config
+        self._check_config(expert.expert_config)
+
+        # We may want to add a SkilledLoRA directly, if we are loading an MHR model for example
+        lora_type = get_modifier_type(expert.expert_config)
+        LoRA_cls = {"lora": LoRA, "skilled_lora": SkilledLoRA}[lora_type]
+
+        modifier_module = LoRA_cls(
+            expert.expert_config, self.layer, layer_name=self.__layer_name__
+        )
+
+        if expert.expert_weights:
+            expert_weights = filter_expert_weights(
+                self.__layer_name__, expert.expert_weights
+            )
+            modifier_module.load_lora_weights(expert_weights)
+
+        if action == "merge":
+            # weight is merged with layer so we can discard it now
+            modifier_module.merge_with_layer()
+            self.merged_expert_names.append(expert.name)
+        else:
+            self.experts.add_skill(modifier_module)
 
     def merge_with_layer(self):
         raise NotImplementedError()
