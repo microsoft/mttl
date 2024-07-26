@@ -1,7 +1,7 @@
 from torch import nn
 
 from mttl.models.containers.lora_containers import ExpertContainer
-from mttl.models.containers.selectors.base_selectors import KVTaskNameSelector
+from mttl.models.containers.selectors.base import KVTaskNameSelector
 from mttl.models.library.expert import Expert
 from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
 

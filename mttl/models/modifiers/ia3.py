@@ -1,12 +1,11 @@
 import torch
 from torch import nn
 
-from mttl.models.modifiers.base import Adapter, ModifyMixin
-from mttl.models.modifiers.modify_model import register_modifier
+from mttl.models.modifiers.base import Modifier
 
 
-@register_modifier("ia3")
-class IA3(Adapter, ModifyMixin):
+@Modifier.register("ia3", config_cls=None)
+class IA3(Modifier):
     def __init__(self, config, layer):
         super().__init__()
 
@@ -21,8 +20,8 @@ class IA3(Adapter, ModifyMixin):
         return self.layer(input) * self.multi_lora_b
 
 
-@register_modifier("ln")
-class LN(Adapter, ModifyMixin):
+@Modifier.register("ln", config_cls=None)
+class LN(Modifier):
     def __init__(self, config, layer):
         super().__init__()
 

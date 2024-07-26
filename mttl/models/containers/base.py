@@ -20,7 +20,7 @@ from mttl.models.library.expert import Expert
 from mttl.models.modifiers.base import ModifierConfig, ModifyMixin
 from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
 from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
-from mttl.models.modifiers.modify_model import get_modifier_type
+from mttl.models.modifiers.modify_model import get_modifier_name
 
 
 class Container(abc.ABC):
