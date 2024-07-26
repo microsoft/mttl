@@ -38,7 +38,10 @@ class PolySelector(Selector):
         self.n_tasks = len(self.config.task_names) if self.config.task_names else 0
 
         # We add an extra task for the default (average) expert if not found
-        shape = (self.n_tasks + 1, self.config.n_splits, self.config.num_experts)
+        shape = (
+            self.n_tasks + 1,
+            self.config.n_splits,
+        )
         self.module_logits = nn.Parameter(torch.empty(*shape).uniform_(-1e-3, 1e-3))
 
         if self.n_tasks == 0:
