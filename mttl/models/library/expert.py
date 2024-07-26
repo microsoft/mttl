@@ -94,7 +94,7 @@ class ExpertInfo:
     @property
     def model_modifier(self):
         if self.expert_config is not None:
-            return Modifier.get_name_by_config_class.get(type(self.expert_config))
+            return Modifier.get_name_by_config_class(type(self.expert_config))
         return self.training_config.model_modifier
 
 
