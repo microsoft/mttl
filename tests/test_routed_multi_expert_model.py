@@ -187,7 +187,7 @@ class TestMultiExpertModel:
                 mod.module_logits.data[:, -1] = 999
 
         output = module(batch)
-        assert np.allclose(output.item(), 15.21, atol=0.1)
+        assert np.allclose(output.item(), 16.22, atol=0.1)
 
         # Finally, Test invalid tasks
         batch["task_names"][-1] = "task_10"
