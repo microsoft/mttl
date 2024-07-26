@@ -6,9 +6,10 @@ from typing import Dict, Iterable, Union
 from torch import nn
 
 from mttl.logging import logger
+from mttl.registrable import Registrable
 
 
-class Adapter(nn.Module):
+class Modifier(nn.Module, Registrable):
     @property
     def layer_name(self):
         if not hasattr(self, "__layer_name__"):
@@ -19,7 +20,7 @@ class Adapter(nn.Module):
         return self.__layer_name__
 
 
-class MergeableAdapterMixin(ABC):
+class MergeableModifierMixin(ABC):
     @abstractmethod
     def merge_with_layer(self):
         pass
