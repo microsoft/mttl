@@ -58,8 +58,8 @@ class PhatgooseSelectorConfig(PerTokenSelectorConfig):
 
 @register_multi_expert_selector("phatgoose_router", PhatgooseSelectorConfig)
 class PhatgooseSelector(PerTokenSelector):
-    def __init__(self, info_container, config, **kwargs) -> None:
-        super().__init__(info_container, config, **kwargs)
+    def __init__(self, config, **kwargs) -> None:
+        super().__init__(config, **kwargs)
 
         if not self.config.lora_merge_after:
             logger.warning("PhatgooseSelector should have lora_merge_after=True")
@@ -98,10 +98,8 @@ class PhatgooseTrainerSelector(Selector):
     Selector from https://arxiv.org/abs/2402.05859
     """
 
-    def __init__(
-        self, info_container, config: PhatgooseTrainerSelectorConfig, **kwargs
-    ) -> None:
-        super().__init__(info_container, config)
+    def __init__(self, config: PhatgooseTrainerSelectorConfig, **kwargs) -> None:
+        super().__init__(config)
 
         if "layer" not in kwargs:
             raise ValueError(
@@ -121,18 +119,13 @@ class PhatgooseTrainerSelector(Selector):
         # selectors for tasks are trained independently
         # all samples go through the same selector
         scores = self.gates[self.default_expert_name](input)
-        # log the scores
-        container = kwargs.get("container", None)
-        if container is not None:
-            self.routing_gates.append(scores.detach().cpu().float())
+        self.routing_gates.append(scores.detach().cpu().float())
+
         return BatchSequenceExpertsAndWeightsSelectorOutput(
             torch.zeros_like(scores, dtype=torch.long), scores
         )
 
-    def add_expert(self, expert_name: str, **kwargs):
-        self.expert_names.append(expert_name)
-        expert_info = kwargs["expert_info"]
-        self.default_expert_name = expert_name
+    def on_add_expert(self, expert_name: str, **kwargs):
         self.gates[expert_name] = SigmoidGate(self.input_dim)
 
     def get_merging_weights(self, **selector_kwargs) -> Dict:

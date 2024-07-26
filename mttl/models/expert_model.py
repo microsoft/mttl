@@ -11,17 +11,20 @@ from transformers import PreTrainedModel
 
 from mttl.logging import logger
 from mttl.models.containers import add_expert_to_transformer
-from mttl.models.containers.expert_containers import ExpertContainer
+from mttl.models.containers.base import ExpertContainer
 from mttl.models.containers.selectors import Selector, SelectorConfig
-from mttl.models.containers.selectors.base_selectors import LoadableSelectorConfig
+from mttl.models.containers.selectors.base_selectors import (
+    LoadableLibraryMixin,
+    LoadableSelectorConfig,
+)
 from mttl.models.expert_config import ExpertConfig
+from mttl.models.expert_context import InfoContainer
 from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.llama_patch import replace_attn_with_flash_attn
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.lora import SkilledLoRAConfig
-from mttl.models.modifiers.routing import RoutingInfo
 from mttl.models.utils import EfficientCheckpointModule, prepare_model_for_kbit_training
 
 torch.set_float32_matmul_precision("high")
@@ -74,11 +77,10 @@ class ExpertModel(EfficientCheckpointModule):
         self._inference_outputs = []
         self._log_pref = kwargs.get("logging_prefix", "")
 
+    @InfoContainer.wrap
     def forward(self, batch, reduction="mean"):
         input_ids = batch["input_ids"]
         labels = batch["labels"]
-
-        self.set_routing_infos(batch)
 
         outputs = self.model.forward(input_ids, attention_mask=batch["attention_mask"])
 
@@ -213,20 +215,16 @@ class ExpertModel(EfficientCheckpointModule):
                         prog_bar=True,
                     )
 
-    def set_routing_infos(self, batch, generate=False):
-        self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
-
     @property
     def generation_config(self):
         return self.model.generation_config
 
+    @InfoContainer.wrap
     def generate(
         self,
         batch,
         **kwargs,
     ):
-        self.set_routing_infos(batch, generate=True)
-
         generations = self.model.generate(
             inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
         )
@@ -413,6 +411,7 @@ class MultiExpertModel(ExpertModel):
         self,
         expert_name,
         expert_config=None,
+        is_default=False,
     ) -> Expert:
         """Adds a new empty expert to the model."""
         new_expert = Expert(
@@ -424,7 +423,7 @@ class MultiExpertModel(ExpertModel):
             ),
         )
 
-        new_expert = self.add_expert_instance(new_expert)
+        new_expert = self.add_expert_instance(new_expert, is_default=is_default)
         logger.info("Added empty expert: {}".format(expert_name))
         return new_expert
 
@@ -578,7 +577,7 @@ class MultiExpertModel(ExpertModel):
         for container in self.experts_containers:
             if expert_name in container.expert_infos:
                 expert_info = container.expert_infos[expert_name]
-                expert_weights = container._get_expert_weights(expert_name)
+                expert_weights = container[expert_name].state_dict()
                 expert_weights = {
                     f"{container.layer_name}.{k}": v for k, v in expert_weights.items()
                 }
@@ -650,9 +649,6 @@ class MultiExpertModel(ExpertModel):
         )
         return Expert(expert_info=expert_info, expert_weights=expert_params)
 
-    def set_routing_infos(self, batch, generate=False):
-        self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
-
 
 class MoEModel(MultiExpertModel):
     def __init__(self, expert_library: ExpertLibrary = None, **kwargs):
@@ -693,15 +689,14 @@ class MoEModel(MultiExpertModel):
         loss = super().training_step(batch, _)
         total_loss = loss.clone()
 
-        if (
-            "routing_gates" in self.model.info_container
-            and self.model.info_container["routing_gates"]
-        ):
+        info_container = InfoContainer.get()
+
+        if getattr(info_container, "routing_gates", []):
             num = 0.0
             entropy_of_avg = 0.0
             entropy_of_route = 0.0
 
-            for values in self.model.info_container["routing_gates"]:
+            for values in info_container.routing_gates:
                 # compute MI loss
                 values = values.to(torch.float32)
                 values = values.view(-1, values.shape[-1])
@@ -743,8 +738,6 @@ class MoEModel(MultiExpertModel):
                 total_loss += (
                     (1.0 - normalized_entropy) >= self.hparams.moe_ent_free_bits
                 ) * -entropy_of_route
-
-            self.model.info_container["routing_gates"].clear()
 
         self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
         self.log(
