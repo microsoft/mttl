@@ -22,6 +22,7 @@ from mttl.models.llama_patch import replace_attn_with_flash_attn
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.base import Modifier, ModifierConfig
 from mttl.models.modifiers.lora import SkilledLoRAConfig
+from mttl.models.modifiers.modify_model import get_modifier_name
 from mttl.models.utils import EfficientCheckpointModule, prepare_model_for_kbit_training
 
 torch.set_float32_matmul_precision("high")
@@ -621,12 +622,10 @@ class MultiExpertModel(ExpertModel):
         assert (
             modifier_type in self.selectors
         ), f"Modifier type {modifier_type} not in model."
+
         for container in self.experts_containers:
-            config_modifier = Modifier.get_name_by_config_class(type(container.config))
-            if (
-                Modifier.get_name_by_config_class(type(container.config))
-                == modifier_type
-            ):
+            config_modifier = get_modifier_name(container.config)
+            if config_modifier != modifier_type:
                 logger.info(
                     f"Skipping container {container.layer_name} with modifier type {config_modifier}"
                 )

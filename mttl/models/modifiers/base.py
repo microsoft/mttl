@@ -26,7 +26,7 @@ class ModifierConfig(object):
 
         data = asdict(self)
         # store the model modifier for easy loading
-        data["__model_modifier__"] = Modifier.get_name_by_config_class[type(self)]
+        data["__model_modifier__"] = Modifier.get_name_by_config_class(type(self))
         return data
 
     @classmethod
