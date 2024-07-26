@@ -13,7 +13,10 @@ from mttl.logging import logger
 from mttl.models.containers import add_expert_to_transformer
 from mttl.models.containers.base import ExpertContainer
 from mttl.models.containers.selectors import Selector, SelectorConfig
-from mttl.models.containers.selectors.base_selectors import LoadableSelectorConfig
+from mttl.models.containers.selectors.base_selectors import (
+    LoadableLibraryMixin,
+    LoadableSelectorConfig,
+)
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_context import InfoContainer
 from mttl.models.library.expert import Expert, ExpertInfo

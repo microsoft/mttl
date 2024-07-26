@@ -121,6 +121,11 @@ class LoadableSelectorConfig(SelectorConfig):
     library_id: str = None
     selector_data_id: str = None
 
+    @property
+    def artifacts_hash(self):
+        """Returns an unique key identifying the artifacts for this selector."""
+        return f"{self.library_id}_{self.selector_data_id}"
+
 
 @dataclass
 class SelectorOutput:
@@ -563,22 +568,31 @@ class PerTokenSelectorConfig(LoadableSelectorConfig):
 
 
 class LoadableLibraryMixin(ABC):
-
     cache = threading.local()
-    cache.library_artifacts = None
+    cache.library_artifacts = {}
+
+    @classmethod
+    def clear(cls):
+        cls.cache.library_artifacts = {}
 
     @property
     def library_artifacts(self) -> Optional[Dict]:
-        return LoadableLibraryMixin.cache.library_artifacts
+        return LoadableLibraryMixin.cache.library_artifacts.get(
+            self.config.artifacts_hash, None
+        )
 
     @abstractmethod
     def _load_from_library(self):
         pass
 
     def load_from_library(self):
-
-        if LoadableLibraryMixin.cache.library_artifacts is None:
-            LoadableLibraryMixin.cache.library_artifacts = self._load_from_library()
+        if (
+            self.config.artifacts_hash
+            not in LoadableLibraryMixin.cache.library_artifacts
+        ):
+            LoadableLibraryMixin.cache.library_artifacts[self.config.artifacts_hash] = (
+                self._load_from_library()
+            )
 
             if not LoadableLibraryMixin.cache.library_artifacts:
                 raise ValueError(f"Could not load library artifacts for selector.")
