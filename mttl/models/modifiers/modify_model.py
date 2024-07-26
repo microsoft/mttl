@@ -3,7 +3,7 @@ import bitsandbytes as bnb
 from mttl.models.modifiers.base import Modifier, ModifierConfig
 
 
-def get_modifier_type(config, model_modifier=None):
+def get_modifier_name(config, model_modifier=None):
     model_modifier = model_modifier or getattr(config, "model_modifier", None)
     model_modifier = model_modifier or Modifier.get_name_by_config_class(type(config))
     return model_modifier
@@ -33,7 +33,7 @@ def modify_transformer(
             ):
                 param.requires_grad = True
 
-    model_modifier = get_modifier_type(modifier_config, model_modifier=model_modifier)
+    model_modifier = get_modifier_name(modifier_config, model_modifier=model_modifier)
 
     if model_modifier is None:
         logger.warning("Model modifier not set nor in config nor as an argument.")

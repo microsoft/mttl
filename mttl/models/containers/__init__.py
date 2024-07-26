@@ -11,6 +11,7 @@ from mttl.models.containers.selectors import (
 )
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
+from mttl.models.modifiers.base import Modifier
 from mttl.utils import logger
 
 
@@ -147,21 +148,20 @@ def replace_selector_for_container(
     modifier_type: str,
     selector_config: SelectorConfig,
     training_config: Config = None,
-    selector_weights: dict = None,
     force_replace: bool = False,
 ):
     """
     Assigns a selector to the expert containers in the transformer model.
     """
-    from mttl.models.modifiers.modify_model import get_modifier_type
-
     expert_containers = []
     for _, module in dict(transformer.named_modules()).items():
         for _, layer in dict(module.named_children()).items():
             if isinstance(layer, ExpertContainer):
                 # check if the container holds the same modifier type, e.g. LoRAConfig --> "lora"
                 for supports_config in layer.__supports_configs__:
-                    container_modifier = get_modifier_type(supports_config)
+                    container_modifier = Modifier.get_name_by_config_class(
+                        supports_config
+                    )
                     # selector does not apply to this container
                     if not container_modifier == modifier_type:
                         continue
@@ -173,10 +173,6 @@ def replace_selector_for_container(
         raise ValueError(
             f"No expert containers found for modifier type: {modifier_type}. Cannot assign a selector! Load some experts beforehand."
         )
-
-    # stores the selectors per container type
-    if not hasattr(transformer, "selectors"):
-        transformer.selectors = {}
 
     if not modifier_type in transformer.selectors:
         transformer.selectors[modifier_type] = {}
@@ -199,11 +195,6 @@ def replace_selector_for_container(
         )
         n_selectors += isinstance(selector, Selector)
         n_selectors_views += isinstance(selector, SelectorView)
-
-    if selector_weights is not None:
-        raise NotImplementedError(
-            "Support for `selector_weights` is not implemented yet."
-        )
 
     return n_selectors, n_selectors_views
 
@@ -307,9 +298,9 @@ def add_expert_to_transformer(
     from mttl.models.containers.hard_prompts_container import (
         add_hard_prompt_to_transformer,
     )
-    from mttl.models.modifiers.modify_model import get_modifier_type
+    from mttl.models.modifiers.modify_model import get_modifier_name
 
-    model_modifier = get_modifier_type(expert_config)
+    model_modifier = get_modifier_name(expert_config)
 
     if model_modifier == "hard_prompt":
         return add_hard_prompt_to_transformer(
