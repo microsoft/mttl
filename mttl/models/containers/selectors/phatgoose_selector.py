@@ -5,7 +5,7 @@ import torch
 from torch import nn
 
 from mttl.logging import logger
-from mttl.models.containers.selectors.base_selectors import (
+from mttl.models.containers.selectors.base import (
     BatchSequenceExpertsAndWeightsSelectorOutput,
     PerTokenSelector,
     PerTokenSelectorConfig,

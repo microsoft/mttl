@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from mttl.models.containers.selectors.base_selectors import (
+from mttl.models.containers.selectors.base import (
     BatchSequenceExpertsAndWeightsSelectorOutput,
     Selector,
     SelectorConfig,

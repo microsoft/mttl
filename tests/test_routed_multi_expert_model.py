@@ -16,7 +16,7 @@ from mttl.models.containers.selectors import (
     PolySelectorDirect,
     SelectorOutput,
 )
-from mttl.models.containers.selectors.base_selectors import LoadableLibraryMixin
+from mttl.models.containers.selectors.base import LoadableLibraryMixin
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import MoEModel, MultiExpertModel
 from mttl.models.library.expert import Expert

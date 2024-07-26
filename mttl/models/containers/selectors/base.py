@@ -17,38 +17,14 @@ from mttl.models.library.expert import ExpertInfo
 from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
 from mttl.models.ranker.classifier_ranker import ClusterPredictor
 from mttl.models.utils import MetricLogger
-
-SELECTORS_NAME_TO_KLASS = {}
-SELECTORS_CONFIG_TO_NAME = {}
-SELECTORS_NAME_TO_CONFIG = {}
-
+from mttl.registrable import Registrable
 
 EPS = 1e-8
 
 
-def register_multi_expert_selector(name, config_cls):
-    print("Registering muti-expert selector..." + name)
-
-    def _thunk(fn):
-        if name in SELECTORS_NAME_TO_KLASS:
-            raise ValueError(
-                f"Cannot register duplicate multi-expert selector ({name})."
-            )
-
-        if config_cls in SELECTORS_CONFIG_TO_NAME:
-            raise ValueError(f"Cannot register with config class ({config_cls}).")
-
-        SELECTORS_NAME_TO_KLASS[name] = fn
-        SELECTORS_CONFIG_TO_NAME[config_cls] = name
-        SELECTORS_NAME_TO_CONFIG[name] = config_cls
-        return fn
-
-    return _thunk
-
-
 def get_selector(selector_config: "SelectorConfig", **kwargs):
     """Returns a selector object for the given routing_config."""
-    return SELECTORS_NAME_TO_KLASS[SELECTORS_CONFIG_TO_NAME[selector_config.__class__]](
+    return Selector.get_class_by_config_class(selector_config.__class__)(
         config=selector_config, **kwargs
     )
 
@@ -70,7 +46,7 @@ class SelectorConfig:
 
         data = asdict(self)
         # store the model modifier for easy loading
-        data["__selector_name__"] = SELECTORS_CONFIG_TO_NAME[type(self)]
+        data["__selector_name__"] = Selector.get_name_by_config_class(type(self))
         return data
 
     @classmethod
@@ -80,7 +56,7 @@ class SelectorConfig:
                 "Cannot load SelectorConfig from dict, missing '__selector_name__' key."
             )
         name = dumped.pop("__selector_name__")
-        return SELECTORS_NAME_TO_CONFIG[name](**dumped)
+        return Selector.get_config_class_by_name(name)(**dumped)
 
     @classmethod
     def from_training_config(
@@ -98,12 +74,14 @@ class SelectorConfig:
         if training_config.router_selector is None:
             return None
 
-        if training_config.router_selector not in SELECTORS_NAME_TO_KLASS:
+        if training_config.router_selector not in Selector.registered_names():
             raise ValueError(
                 f"Selector '{training_config.router_selector}' not found, has it been registered?"
             )
 
-        config_klass = SELECTORS_NAME_TO_CONFIG[training_config.router_selector]
+        config_klass = Selector.get_config_class_by_name(
+            training_config.router_selector
+        )
 
         kwargs = {}
         for key in config_klass.__dataclass_fields__.keys():
@@ -267,7 +245,7 @@ def safe_logging(func):
     return wrapper
 
 
-class Selector(nn.Module):
+class Selector(nn.Module, Registrable):
     metric_logger: MetricLogger = MetricLogger()
 
     def __init__(self, config=None, **kwargs):
@@ -395,7 +373,7 @@ class TaskPredictorSelectorConfig(SelectorConfig):
     ranker_top_k: int = 1
 
 
-@register_multi_expert_selector("task_predictor_selector", TaskPredictorSelectorConfig)
+@Selector.register("task_predictor_selector", TaskPredictorSelectorConfig)
 class TaskPredictorSelector(Selector):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -449,7 +427,7 @@ class MOERKHSSelectorConfig(SelectorConfig):
     top_k: int = -1
 
 
-@register_multi_expert_selector("moe_rkhs_router", MOERKHSSelectorConfig)
+@Selector.register("moe_rkhs_router", MOERKHSSelectorConfig)
 class MOERKHSSelector(Selector):
     def __init__(self, config, **kwargs) -> None:
         super().__init__(config)
@@ -629,7 +607,7 @@ def get_expert_prototype_from_library_artifacts(
     return proto
 
 
-@register_multi_expert_selector("per_token_router", PerTokenSelectorConfig)
+@Selector.register("per_token_router", PerTokenSelectorConfig)
 class PerTokenSelector(Selector, TaskToExpertMixin, LoadableLibraryMixin):
     def __init__(self, config, **kwargs) -> None:
         super().__init__(config, **kwargs)
@@ -840,7 +818,7 @@ class TaskNameSelectorConfig(SelectorConfig):
     pass
 
 
-@register_multi_expert_selector("task_selector", TaskNameSelectorConfig)
+@Selector.register("task_selector", TaskNameSelectorConfig)
 class TaskNameSelector(Selector, TaskToExpertMixin):
     def __init__(self, **kwargs) -> None:
         super().__init__()
@@ -925,7 +903,7 @@ class KVTaskNameSelectorConfig(SelectorConfig):
     pass
 
 
-@register_multi_expert_selector("kv_task_selector", KVTaskNameSelectorConfig)
+@Selector.register("kv_task_selector", KVTaskNameSelectorConfig)
 class KVTaskNameSelector(KVSelector):
     """Selects KVAdapters based on the task name."""
 
@@ -974,7 +952,7 @@ class KVConcatSelectorConfig(SelectorConfig):
     pass
 
 
-@register_multi_expert_selector("kv_concat_selector", KVConcatSelectorConfig)
+@Selector.register("kv_concat_selector", KVConcatSelectorConfig)
 class KVConcatSelector(KVSelector, nn.Module):
     """Concatenates along the sequence dim. all the adapters, and lets the
     model's internal attention mechanism take care of routing in a task agnostic way
@@ -1027,7 +1005,7 @@ class KVNormSelectorConfig(SelectorConfig):
     pass
 
 
-@register_multi_expert_selector("kv_norm_selector", KVNormSelectorConfig)
+@Selector.register("kv_norm_selector", KVNormSelectorConfig)
 class KVNormSelector(KVSelector):
     def route(self, experts, query, keys, attn_layer):
         """(2) Compute The Standard Attention Scores in augmented attention"""
@@ -1051,7 +1029,7 @@ class KVConcatNormSelectorConfig(SelectorConfig):
     pass
 
 
-@register_multi_expert_selector("kv_concat_norm_selector", KVConcatNormSelectorConfig)
+@Selector.register("kv_concat_norm_selector", KVConcatNormSelectorConfig)
 class KVConcatNormSelector(KVConcatSelector, KVNormSelector):
     pass
 
@@ -1061,6 +1039,6 @@ class KVTaskNameNormSelectorConfig(SelectorConfig):
     pass
 
 
-@register_multi_expert_selector("kv_task_norm_selector", KVTaskNameNormSelectorConfig)
+@Selector.register("kv_task_norm_selector", KVTaskNameNormSelectorConfig)
 class KVTaskNameNormSelector(KVTaskNameSelector, KVNormSelector):
     pass
