@@ -48,8 +48,6 @@ class ModifierConfig(object):
 
         Returns None if no modifier is set.
         """
-        from mttl.models.modifiers.modify_model import MODIFIERS_TO_CONFIGS
-
         if isinstance(training_config, ModifierConfig):
             # nothing to do here
             return training_config
