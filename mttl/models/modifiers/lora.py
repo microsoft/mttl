@@ -253,8 +253,6 @@ class SkilledLoRA(LoRA):
         ).to(device=self.lora_a.device, dtype=self.lora_a.dtype)
 
     def add_skill(self, lora: Union[LoRA, "SkilledLoRA"]):
-        self.n_skills += 1
-
         self.lora_a.data = torch.cat(
             [self.lora_a.data, torch.zeros_like(self.lora_a.data[:1])],
             dim=0,
@@ -263,7 +261,8 @@ class SkilledLoRA(LoRA):
             [self.lora_b.data, torch.zeros_like(self.lora_b.data[:1])],
             dim=0,
         )
-        self.set_skill(lora, self.n_skills - 1)
+        self.set_skill(lora, self.n_skills)
+        self.n_skills += 1
 
     def create_for_layer(self, layer):
         if isinstance(layer, nn.Linear):
