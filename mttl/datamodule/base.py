@@ -435,7 +435,7 @@ class DefaultDataModule(LightningDataModule):
         return DataLoader(
             train_dataset,
             batch_size=self.config.train_batch_size,
-            shuffle=False,
+            shuffle=True,
             num_workers=8,
             pin_memory=True,
             persistent_workers=False,
