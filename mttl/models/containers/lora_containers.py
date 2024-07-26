@@ -13,7 +13,7 @@ from mttl.models.containers.selectors.base_selectors import (
 )
 from mttl.models.library.expert import Expert
 from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
-from mttl.models.modifiers.modify_model import get_modifier_type
+from mttl.models.modifiers.modify_model import get_modifier_name
 
 
 class LoRAExpertContainer(ExpertContainer):
@@ -53,7 +53,7 @@ class LoRAExpertContainer(ExpertContainer):
 
         # We may want to add a SkilledLoRA directly, if we are loading an MHR model for example
         LoRA_cls = {"lora": LoRA, "skilled_lora": SkilledLoRA}[
-            get_modifier_type(expert.expert_config)
+            get_modifier_name(expert.expert_config)
         ]
 
         modifier_module = LoRA_cls(
@@ -274,7 +274,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
         weights: dict[str, Tensor] = self.experts.get_skill_weights(index_of)
 
         config = self.expert_infos[name].expert_config
-        modifier_type = get_modifier_type(config)
+        modifier_type = get_modifier_name(config)
 
         if modifier_type == "lora":
             assert self.dummy_config.n_splits == 1
@@ -302,7 +302,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
         self._check_config(expert.expert_config)
 
         # We may want to add a SkilledLoRA directly, if we are loading an MHR model for example
-        lora_type = get_modifier_type(expert.expert_config)
+        lora_type = get_modifier_name(expert.expert_config)
         LoRA_cls = {"lora": LoRA, "skilled_lora": SkilledLoRA}[lora_type]
 
         modifier_module = LoRA_cls(

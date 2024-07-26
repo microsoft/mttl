@@ -10,7 +10,6 @@ import torch
 from torch import nn
 
 from mttl.logging import warn_once
-from mttl.models.modifiers import register_modifier
 from mttl.models.modifiers.base import (
     MergeableModifierMixin,
     Modifier,
