@@ -17,7 +17,7 @@ from mttl.models.containers.selectors import (
     SelectorOutput,
 )
 from mttl.models.library.expert import Expert
-from mttl.models.modifiers.base import MergeableAdapter, ModifierConfig, ModifyMixin
+from mttl.models.modifiers.base import ModifierConfig, ModifyMixin
 from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
 from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
 from mttl.models.modifiers.modify_model import get_modifier_type
@@ -33,18 +33,19 @@ class Container(abc.ABC):
         pass
 
 
-class ExpertContainer(Container):
+class ExpertContainer(nn.Module, Container):
     __supports_configs__ = []
 
     def __init__(self, config, layer, selector=None):
+        super().__init__()
+
         from mttl.models.containers.selectors import TaskNameSelector
 
         self.config = config
         self.layer = layer
         self.selector = selector or TaskNameSelector()
-
-        self.expert_infos = {}
         self.default_expert_name = None
+        self.expert_infos = {}
 
     def assign_selector(self, selector: Selector) -> None:
         """Assigns a selector to this container."""
@@ -63,7 +64,7 @@ class ExpertContainer(Container):
                 is_default=expert_name == self.default_expert_name,
             )
 
-    def add_expert(self, expert: Expert, action="merge", is_default=False) -> None:
+    def add_expert(self, expert: Expert, action="route", is_default=False) -> None:
         expert_info = expert.expert_info
 
         if expert.name in self.expert_infos:
@@ -77,13 +78,16 @@ class ExpertContainer(Container):
             )
 
         self.on_add_expert(expert, action=action, is_default=is_default)
-        self.expert_infos[expert.name] = expert_info
-        self.default_expert_name: str | None = (
-            expert.name if is_default else self.default_expert_name
-        )
-        self.selector.add_expert(
-            expert.name, expert_info=expert_info, is_default=is_default
-        )
+
+        # if a new expert was added, we update the selector and information meta-data
+        if action != "merge":
+            self.expert_infos[expert.name] = expert_info
+            self.selector.add_expert(
+                expert.name, expert_info=expert_info, is_default=is_default
+            )
+            self.default_expert_name: str | None = (
+                expert.name if is_default else self.default_expert_name
+            )
 
     @property
     def expert_names(self) -> list:
@@ -172,7 +176,7 @@ class ExpertContainer(Container):
         return len(self.expert_names)
 
 
-class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
+class LoRAExpertContainer(ExpertContainer):
     __supports_configs__ = [LoRAConfig]
 
     def __init__(
@@ -182,7 +186,6 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         selector=None,
         lora_merge_after=False,
     ):
-        MergeableAdapter.__init__(self)
         super().__init__(config, layer, selector)
 
         self.lora_merge_after = lora_merge_after
@@ -200,7 +203,7 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
     def on_add_expert(
         self,
         expert: Expert,
-        action="merge",
+        action="route",
         is_default=False,
     ) -> None:
         from mttl.models.containers import filter_expert_weights
@@ -209,8 +212,10 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         self._check_config(expert.expert_config)
 
         # We may want to add a SkilledLoRA directly, if we are loading an MHR model for example
-        lora_type = get_modifier_type(expert.expert_config)
-        LoRA_cls = {"lora": LoRA, "skilled_lora": SkilledLoRA}[lora_type]
+        LoRA_cls = {"lora": LoRA, "skilled_lora": SkilledLoRA}[
+            get_modifier_type(expert.expert_config)
+        ]
+
         modifier_module = LoRA_cls(
             expert.expert_config, self.layer, layer_name=self.__layer_name__
         )
@@ -232,10 +237,11 @@ class LoRAExpertContainer(MergeableAdapter, ExpertContainer, ModifyMixin):
         if not len(self.experts):
             return
 
-        for _, expert_module in self.experts.items():
+        for expert_name, expert_module in self.experts.items():
             expert_module.merge_with_layer()
 
         self.merged_expert_names.extend(self.experts)
+        self.expert_infos.clear()
         self.experts.clear()
 
     def _convert_expert_names_to_indices(
@@ -393,7 +399,6 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
         lora_merge_after=False,
         **kwargs,
     ):
-        MergeableAdapter.__init__(self)
         super().__init__(config, layer, selector, lora_merge_after)
 
         if not isinstance(self.layer, nn.Linear):
@@ -445,8 +450,13 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
         else:
             raise ValueError("Unknown modifier type, expected LoRA or SkilledLoRA.")
 
-    def on_add_expert(self, expert: Expert, action="merge", is_default=False) -> None:
+    def on_add_expert(self, expert: Expert, action="route", is_default=False) -> None:
         from mttl.models.containers import filter_expert_weights
+
+        if action == "merge":
+            raise ValueError(
+                "Merging is not supported for `CoalescedLoRAExpertContainer`."
+            )
 
         # back-compatibility, in previous versions, the expert config was a training config
         self._check_config(expert.expert_config)
@@ -465,15 +475,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             )
             modifier_module.load_lora_weights(expert_weights)
 
-        if action == "merge":
-            # weight is merged with layer so we can discard it now
-            modifier_module.merge_with_layer()
-            self.merged_expert_names.append(expert.name)
-        else:
-            self.experts.add_skill(modifier_module)
-
-    def merge_with_layer(self):
-        raise NotImplementedError()
+        self.experts.add_skill(modifier_module)
 
     def route(self, input, selection, **kwargs):
         if isinstance(selection, BatchExpertsSelectorOutput):
