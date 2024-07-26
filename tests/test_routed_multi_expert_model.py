@@ -4,7 +4,10 @@ import torch
 from pytorch_lightning import seed_everything
 
 from mttl.config import Config
-from mttl.models.containers import CoalescedLoRAExpertContainer, LoRAExpertContainer
+from mttl.models.containers.lora_containers import (
+    CoalescedLoRAExpertContainer,
+    LoRAExpertContainer,
+)
 from mttl.models.containers.selectors import (
     BatchSequenceExpertsAndWeightsSelectorOutput,
     MOERKHSSelector,

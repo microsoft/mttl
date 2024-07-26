@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import logger
-from mttl.models.containers.expert_containers import ExpertContainer
+from mttl.models.containers.lora_containers import ExpertContainer
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary

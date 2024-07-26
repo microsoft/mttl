@@ -11,7 +11,7 @@ from transformers import PreTrainedModel
 
 from mttl.logging import logger
 from mttl.models.containers import add_expert_to_transformer
-from mttl.models.containers.expert_containers import ExpertContainer
+from mttl.models.containers.base import ExpertContainer
 from mttl.models.containers.selectors import Selector, SelectorConfig
 from mttl.models.containers.selectors.base_selectors import LoadableSelectorConfig
 from mttl.models.expert_config import ExpertConfig
