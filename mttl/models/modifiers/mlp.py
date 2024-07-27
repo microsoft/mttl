@@ -8,8 +8,7 @@ import torch
 from torch import nn
 from transformers.activations import ACT2FN
 
-from mttl.models.modifiers import register_modifier
-from mttl.models.modifiers.base import ModifierConfig, ModifyMixin
+from mttl.models.modifiers.base import Modifier, ModifierConfig
 
 
 @dataclass
@@ -17,8 +16,8 @@ class MLPConfig(ModifierConfig):
     n_embd: int = 2560
 
 
-@register_modifier("mlp", config_cls=MLPConfig)
-class MLPModifier(ModifyMixin):
+@Modifier.register("mlp", config_cls=MLPConfig)
+class MLPModifier(Modifier):
     def __init__(
         self,
         config: MLPConfig,

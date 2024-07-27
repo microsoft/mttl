@@ -6,8 +6,11 @@ import torch
 from mttl.config import Config
 from mttl.logging import logger
 from mttl.models.expert_config import ExpertConfig
-from mttl.models.modifiers.base import ModifierConfig, get_target_2_source_param_mapping
-from mttl.models.modifiers.modify_model import CONFIGS_TO_MODIFIERS
+from mttl.models.modifiers.base import (
+    Modifier,
+    ModifierConfig,
+    get_target_2_source_param_mapping,
+)
 from mttl.models.utils import download_from_hub
 from mttl.utils import get_checkpoint_path
 
@@ -91,7 +94,7 @@ class ExpertInfo:
     @property
     def model_modifier(self):
         if self.expert_config is not None:
-            return CONFIGS_TO_MODIFIERS.get(type(self.expert_config), None)
+            return Modifier.get_name_by_config_class(type(self.expert_config))
         return self.training_config.model_modifier
 
 

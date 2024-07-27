@@ -14,8 +14,8 @@ def test_load_selectors_from_config():
 
     with pytest.raises(ValueError, match="MOERKHSSelector requires a layer"):
         # raises value error due to MOERKHSSelectorConfig not having a layer
-        selector = get_selector(config, {})
+        selector = get_selector(config)
 
     config = TaskNameSelectorConfig()
-    selector = get_selector(config, {})
+    selector = get_selector(config)
     assert type(selector) == TaskNameSelector

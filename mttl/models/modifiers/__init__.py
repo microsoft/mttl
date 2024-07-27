@@ -1,6 +1,5 @@
 from mttl.models.modifiers.modify_model import (  # noqa: F401 isort:skip
     modify_transformer,
-    register_modifier,
 )
 import mttl.models.modifiers.hard_prompts  # noqa: F401
 import mttl.models.modifiers.kv_adapter  # noqa: F401

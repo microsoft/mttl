@@ -1,5 +1,6 @@
 import functools
 import threading
+from typing import List
 
 from mttl.models.modifiers.routing import RoutingInfo
 
@@ -10,7 +11,10 @@ class InfoContainer:
 
     def __init__(self, model, routing_infos=None, **kwargs):
         self.model = model
+        # stores the routing info for the model
         self._routing_infos = routing_infos
+        # stores the routing gates for each layer, if any
+        self._routing_gates = []
 
     @classmethod
     def get(cls):
@@ -20,9 +24,17 @@ class InfoContainer:
     def routing_infos(self):
         return self._routing_infos
 
+    @property
+    def routing_gates(self):
+        return self._routing_gates
+
     @routing_infos.setter
     def routing_infos(self, value: RoutingInfo):
         self._routing_infos = value
+
+    @routing_gates.setter
+    def routing_gates(self, value: List):
+        self._routing_gates = value
 
     @classmethod
     def create(cls, model, routing_infos: RoutingInfo = None):
