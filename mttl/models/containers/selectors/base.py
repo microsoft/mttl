@@ -94,9 +94,12 @@ class SelectorConfig:
         kwargs = {}
         for key in config_klass.__dataclass_fields__.keys():
             # only overwrite default if value exists and is not None
-            train_cfg_value = getattr(
-                training_config, (ignore_prefix or "") + key, None
-            )
+            if ignore_prefix:
+                default_value = getattr(training_config, ignore_prefix + key, None)
+            else:
+                default_value = None
+
+            train_cfg_value = getattr(training_config, key, default_value)
             if train_cfg_value is not None:
                 kwargs[key] = train_cfg_value
         return config_klass(**kwargs)
