@@ -146,14 +146,13 @@ class PolySelector(Selector):
     def on_add_expert(
         self, expert_name: str, expert_info: ExpertInfo, is_default=False
     ):
-        if self.n_experts == self.module_logits.shape[-1]:
-            # we need additional space in the routing to accomodate the incoming expert
-            self.module_logits.data = torch.empty(
-                self.n_tasks + 1, self.config.n_splits * (self.n_experts + 1)
-            ).uniform_(-1e-3, 1e-3)
+        # we need additional space in the routing to accomodate the incoming expert
+        self.module_logits.data = torch.empty(
+            self.n_tasks + 1, self.config.n_splits * (self.n_experts + 1)
+        ).uniform_(-1e-3, 1e-3)
 
-            # Last expert is exactly uniform
-            self.module_logits.data[-1] = 0.0
+        # Last expert is exactly uniform
+        self.module_logits.data[-1] = 0.0
 
 
 @dataclass
