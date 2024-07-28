@@ -196,7 +196,10 @@ class PolySelectorDirect(PolySelector):
 
         expert_task_name = expert_info.expert_task_name
         if expert_name not in self.module_logits_dict:
-            if self.training_config.finetune_task_name == expert_task_name:
+            if (
+                self.training_config
+                and self.training_config.finetune_task_name == expert_task_name
+            ):
                 self.init_gap = [
                     0,
                     0,
