@@ -1,6 +1,7 @@
 import math
 import threading
 from abc import ABC
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Union
 
@@ -14,6 +15,7 @@ from torch.distributions import Categorical
 from mttl.logging import logger, warn_once
 from mttl.models.expert_context import InfoContainer
 from mttl.models.library.expert import ExpertInfo
+from mttl.models.modifiers.base import Modifier
 from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
 from mttl.models.ranker.classifier_ranker import ClusterPredictor
 from mttl.models.utils import MetricLogger
@@ -90,6 +92,41 @@ class SelectorConfig:
             if train_cfg_value is not None:
                 kwargs[key] = getattr(training_config, key)
         return config_klass(**kwargs)
+
+
+class SelectorsCache:
+    """Keep a cache of all added selectors indexed by both modifier and selector name."""
+
+    def __init__(self):
+        self.cache = defaultdict(dict)
+        self.clear()
+
+    def clear(self, modifier_name: str = None):
+        # initialize cache for all registered modifiers
+        if modifier_name is None:
+            for modifier_name in Modifier.registered_names():
+                self.cache[modifier_name] = {}
+        else:
+            self.cache[modifier_name] = {}
+
+    def insert(self, modifier_name: str, selector_name: str, selector: "Selector"):
+        self.cache[modifier_name][selector_name] = selector
+
+    def get(
+        self, modifier_name: str, selector_name: str = None
+    ) -> Union["Selector", Dict]:
+        if selector_name is None:
+            return self.cache[modifier_name]
+        return self.cache[modifier_name].get(selector_name, None)
+
+    def items(self):
+        return iter(self.cache.items())
+
+    def __setitem__(self, key, value):
+        if key not in Modifier.registered_names():
+            raise ValueError(f"Modifier '{key}' not found, has it been registered?")
+
+        self.cache[key] = value
 
 
 @dataclass

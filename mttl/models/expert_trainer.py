@@ -1,3 +1,4 @@
+import math
 import os
 from collections import defaultdict
 from typing import Any, Mapping
@@ -6,8 +7,9 @@ import torch
 from torch import nn
 
 from mttl.logging import logger
-from mttl.models.containers.selectors.base_selectors import SelectorConfig
+from mttl.models.containers.selectors.base import SelectorConfig
 from mttl.models.expert_config import ExpertConfig
+from mttl.models.expert_context import InfoContainer
 from mttl.models.expert_model import MoEModel, SingleExpertModel
 from mttl.models.get_scheduler import get_scheduler_with_args
 from mttl.models.library.expert import Expert, ExpertInfo
@@ -16,7 +18,7 @@ from mttl.models.modifiers.lora import SkilledLoRAConfig
 from mttl.models.utils import EfficientCheckpointModule, prepare_model_for_kbit_training
 
 
-class SingleExpertModelTrainer(EfficientCheckpointModule):
+class SingleExpertModelLightningWrapper(EfficientCheckpointModule):
     """Module for training an expert model with PyTorch Lightning."""
 
     def __init__(self, **kwargs):
@@ -128,6 +130,7 @@ class SingleExpertModelTrainer(EfficientCheckpointModule):
         """Inject expert info in the checkpoint."""
         # inject expert info in the expert checkpoint
         ckpt["expert_info"] = self.expert_info.asdict()
+        ckpt["modifier_config"] = self.modifier_config.asdict()
 
     @property
     def expert_info(self) -> ExpertInfo:
@@ -160,7 +163,7 @@ class SingleExpertModelTrainer(EfficientCheckpointModule):
         )
 
 
-class LoRAMoETrainer(SingleExpertModelTrainer):
+class LoRAMoELightningWrapper(SingleExpertModelLightningWrapper):
     def __init__(self, **kwargs):
         self.tokenizer = kwargs.pop("tokenizer", None)
         self.model = kwargs.pop("model_object", None)
@@ -206,13 +209,13 @@ class LoRAMoETrainer(SingleExpertModelTrainer):
         loss = super().training_step(batch, _)
         total_loss = loss.clone()
 
-        info_container = InfoContainer.get()
-        if getattr(info_container, "routing_gates", []):
+        routing_gates = InfoContainer.get().routing_gates
+        if routing_gates:
             num = 0.0
             entropy_of_avg = 0.0
             entropy_of_route = 0.0
 
-            for values in info_container.routing_gates:
+            for values in routing_gates:
                 # compute MI loss
                 values = values.to(torch.float32)
                 values = values.view(-1, values.shape[-1])
@@ -263,3 +266,9 @@ class LoRAMoETrainer(SingleExpertModelTrainer):
         for i, pg in enumerate(self.optimizers().optimizer.param_groups):
             self.log(f"train/lr_{i}", pg["lr"])
         return total_loss
+
+    def on_save_checkpoint(self, ckpt):
+        """Inject expert info in the checkpoint."""
+        ckpt["expert_info"] = self.expert_info.asdict()
+        ckpt["modifier_config"] = self.modifier_config.asdict()
+        ckpt["selector_config"] = self.selector_config.asdict()

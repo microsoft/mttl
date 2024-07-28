@@ -53,9 +53,6 @@ class ExpertInfo:
             # convert it to the generic Config object
             training_config = ExpertConfig.fromdict(data["training_config"])
 
-        if training_config is None:
-            training_config = expert_config
-
         kwargs = {}
         for key in cls.__dataclass_fields__.keys():
             kwargs[key] = data.get(key, None)

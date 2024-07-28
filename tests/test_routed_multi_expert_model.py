@@ -299,9 +299,6 @@ class TestMultiExpertModel:
                 weights[selector.layer_name] = selector.get_routing_weights()
         assert len(weights) > 1
 
-        expert = module.get_merged_expert()
-        assert isinstance(expert, Expert)
-
     def test_expert_selector_with_moe_routing_soft(
         self, mocker, tmp_exp_config, dummy_batch
     ):

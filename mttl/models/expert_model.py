@@ -18,6 +18,7 @@ from mttl.models.containers.selectors import Selector, SelectorConfig
 from mttl.models.containers.selectors.base import (
     LoadableLibraryMixin,
     LoadableSelectorConfig,
+    SelectorsCache,
 )
 from mttl.models.containers.selectors.moe_selector import MOERKHSSelectorConfig
 from mttl.models.containers.selectors.poly_selector import PolySelectorConfig
@@ -44,19 +45,16 @@ torch.set_float32_matmul_precision("high")
 class SingleExpertModel(torch.nn.Module):
     """Base model to load a single model from HF and modify it with a modifier config."""
 
-    def __init__(
-        self, base_model_name, modifier_config: ModifierConfig = None, **kwargs
-    ):
+    def __init__(self, model: str, modifier_config: ModifierConfig = None, **kwargs):
         super().__init__()
 
         self.load_in_4bit = kwargs.get("load_in_4bit", None) or False
         self.load_in_8bit = kwargs.get("load_in_8bit", None) or False
         self.model: PreTrainedModel = None
-        self.base_model_name = base_model_name
-        self.accumulate_metrics_batch = defaultdict(list)
+        self.base_model_name = model
 
         self.model = model_loader_helper(
-            base_model_name,
+            model,
             load_in_4bit=self.load_in_4bit,
             load_in_8bit=self.load_in_8bit,
             device_map=kwargs.get("device_map", "cpu"),
@@ -121,86 +119,23 @@ class SingleExpertModel(torch.nn.Module):
         *model_args,
         **kwargs,
     ):
-        # Load model
-        instantiate_model = kwargs.pop("instantiate_model", True)
-        cache_dir = kwargs.pop("cache_dir", None)
-        force_download = kwargs.pop("force_download", False)
-        resume_download = kwargs.pop("resume_download", False)
-        proxies = kwargs.pop("proxies", None)
-        local_files_only = kwargs.pop("local_files_only", False)
-        use_auth_token = kwargs.pop("use_auth_token", None)
+        from mttl.models.expert_trainer import SingleExpertModelLightningWrapper
 
-        user_agent = {
-            "file_type": "model",
-            "framework": "pytorch",
-            "from_auto_class": False,
-        }
+        checkpoint = SingleExpertModelLightningWrapper.from_pretrained(
+            pretrained_model_name_or_path,
+            *model_args,
+            instantiate_model=False,
+            **kwargs,
+        )
 
-        if pretrained_model_name_or_path is not None:
-            pretrained_model_name_or_path = str(pretrained_model_name_or_path)
+        # assume this has been trained with pytorch lightning, which dumps all the
+        # hyperparameters in the checkpoint
+        model_base_name = checkpoint["hyper_parameters"]["model"]
+        modifier_config = ExpertInfo.fromdict(checkpoint["expert_info"]).expert_config
 
-            if os.path.isfile(pretrained_model_name_or_path) or os.path.isdir(
-                pretrained_model_name_or_path
-            ):
-                resolved_archive_file = get_checkpoint_path(
-                    pretrained_model_name_or_path
-                )
-            else:
-                try:
-                    # Load from URL or cache if already cached
-                    resolved_archive_file = cached_file(
-                        pretrained_model_name_or_path,
-                        CHECKPOINT_PATH_IN_HUB,
-                        cache_dir=cache_dir,
-                        force_download=force_download,
-                        proxies=proxies,
-                        resume_download=resume_download,
-                        local_files_only=local_files_only,
-                        use_auth_token=use_auth_token,
-                        user_agent=user_agent,
-                    )
-                except EnvironmentError as err:
-                    logger.error(err)
-                    msg = (
-                        f"Can't load weights for '{pretrained_model_name_or_path}'. Make sure that:\n\n"
-                        f"- '{pretrained_model_name_or_path}' is a correct model identifier listed on 'https://huggingface.co/models'\n\n"
-                        f"- or '{pretrained_model_name_or_path}' is the correct path to a directory containing a file named one of checkpoint.ckpt\n\n"
-                    )
-                    raise EnvironmentError(msg)
-
-                if resolved_archive_file == pretrained_model_name_or_path:
-                    logger.info(f"loading weights file {resolved_archive_file}")
-                else:
-                    logger.info(
-                        f"loading weights file {pretrained_model_name_or_path} from cache at {resolved_archive_file}"
-                    )
-        else:
-            resolved_archive_file = None
-
-        if instantiate_model:
-            ckpt = torch.load(resolved_archive_file, map_location="cpu")
-
-            # assume this has been trained with pytorch lightning, which dumps all the
-            # hyperparameters in the checkpoint
-            model_base_name = ckpt["hyper_parameters"].get("model")
-
-            if tokenizer is None and "model" in ckpt["hyper_parameters"]:
-                tokenizer = get_tokenizer_with_args(
-                    model_name=ckpt["hyper_parameters"]["model"],
-                    model_family=ckpt["hyper_parameters"]["model_family"],
-                    padding_side=ckpt["hyper_parameters"]["padding_side"],
-                )
-
-            model = cls()
-            model.load_state_dict(ckpt["state_dict"], strict=False)
-            return model
-        else:
-            ckpt = torch.load(resolved_archive_file, map_location="cpu")
-
-            return ckpt["state_dict"], ckpt["hyper_parameters"]
-
-    def from_pretrained_library(self, library_path: str, expert_name: str):
-        pass
+        model = cls(model_base_name, modifier_config=modifier_config, **kwargs)
+        model.load_state_dict(checkpoint["state_dict"], strict=False)
+        return model
 
 
 class MultiExpertModel(SingleExpertModel):
@@ -208,15 +143,15 @@ class MultiExpertModel(SingleExpertModel):
 
     def __init__(
         self,
-        base_model_name,
+        model: str,
         selector_config: Union[SelectorConfig, Dict[str, SelectorConfig]] = None,
         **kwargs,
     ):
-        super().__init__(base_model_name, modifier_config=None, **kwargs)
+        super().__init__(model, modifier_config=None, **kwargs)
 
-        self.selector_config = selector_config
         # inject memory for adding selectors
-        self.model.selectors = {}
+        self.selector_config = selector_config
+        self.selectors_cache = SelectorsCache()
         self.experts_names = []
 
     @classmethod
@@ -239,15 +174,14 @@ class MultiExpertModel(SingleExpertModel):
 
         # get a config file from the library, and initialize the expert model
         an_expert: Expert = library[next(iter(library.keys()))]
+        model = an_expert.expert_info.model
 
-        train_cfg: ExpertConfig = deepcopy(an_expert.training_config)
-        train_cfg.device_map = "cpu"
-
-        model = cls(train_cfg.model)
+        model = cls(model, device_map=kwargs.get("device_map", "cpu"))
         model.add_experts_from_library(library)
 
         # set selector for the added experts
         if selector_config is not None:
+
             # assume "lora" is the default modifier type
             if type(selector_config) is SelectorConfig:
                 logger.info(
@@ -255,7 +189,7 @@ class MultiExpertModel(SingleExpertModel):
                 )
                 selector_config = {"lora": selector_config}
 
-            for modifier_type, selector_config_ in selector_config.items():
+            for modifier_name, selector_config_ in selector_config.items():
                 # inject the library id if it is None
                 if (
                     isinstance(selector_config_, LoadableSelectorConfig)
@@ -263,7 +197,7 @@ class MultiExpertModel(SingleExpertModel):
                 ):
                     selector_config_.library_id = library_id
 
-                model.set_selector(modifier_type, selector_config_)
+                model.set_selector(modifier_name, selector_config_)
         else:
             logger.info("No selector config provided, assuming expert name selector!")
         return model
@@ -289,12 +223,12 @@ class MultiExpertModel(SingleExpertModel):
         return containers
 
     @property
-    def selectors(self) -> Dict[str, List[Selector]]:
-        selectors = defaultdict(list)
-        for modifier, selectors_dict in self.model.selectors.items():
+    def experts_selectors(self) -> List[Selector]:
+        selectors = []
+        for modifier, selectors_dict in self.selectors_cache.items():
             for selector in selectors_dict.values():
                 if isinstance(selector, Selector):
-                    selectors[modifier].append(selector)
+                    selectors.append(selector)
         return selectors
 
     def delete_expert_container(self):
@@ -421,13 +355,16 @@ class MultiExpertModel(SingleExpertModel):
             )
 
         with self.lock:
+            training_config = expert_instance.training_config
+
             add_expert_to_transformer(
                 self.model,
                 expert_instance,
                 action=action,
                 is_default=is_default,
+                training_config=training_config,
                 routing_config=self.selector_config,
-                training_config=expert_instance.training_config,
+                selectors_cache=self.selectors_cache,
             )
 
             if action != "merge":
@@ -438,18 +375,19 @@ class MultiExpertModel(SingleExpertModel):
 
     def set_selector(
         self,
-        modifier_type: str,
+        modifier_name: str,
         selector_config: SelectorConfig,
     ):
         from mttl.models.containers import replace_selector_for_container
 
         n_selectors, n_selectors_views = replace_selector_for_container(
             self.model,
-            modifier_type,
+            modifier_name,
+            self.selectors_cache,
             selector_config,
             force_replace=True,
         )
-        assert self.model.selectors[modifier_type]
+        assert self.selectors_cache.get(modifier_name)
         logger.info(
             "Created {} selectors and {} views.".format(n_selectors, n_selectors_views)
         )
@@ -546,63 +484,13 @@ class MultiExpertModel(SingleExpertModel):
             library.add_expert(expert)
         return library
 
-    def get_merged_expert(
-        self, modifier_type: str = "lora", with_global_names=True, **kwargs
-    ) -> Expert:
-        """
-        Converts the current expert model into an instance of the Expert class by merging the experts in the containers using weights from the corresponding selectors.
-
-        Args:
-            with_global_names (bool, optional): Whether to include global names in the merged weights. Defaults to True.
-
-        Returns:
-            Expert: An instance of the Expert class.
-
-        Raises:
-            None
-
-        Example:
-            model = ExpertModel()
-            expert = model.get_merged_expert(weights={'expert1': 0.5, 'expert2': 0.5}, with_global_names=True)
-        """
-        expert_params = {}
-        assert (
-            modifier_type in self.selectors
-        ), f"Modifier type {modifier_type} not in model."
-
-        for container in self.experts_containers:
-            config_modifier = get_modifier_name(container.config)
-            if config_modifier != modifier_type:
-                logger.info(
-                    f"Skipping container {container.layer_name} with modifier type {config_modifier}"
-                )
-                continue
-
-            params = container.get_merged_params(
-                with_global_names=with_global_names, **kwargs
-            )
-            expert_params.update(params)
-            expert_config = container.config
-        if len(expert_params) == 0:
-            raise ValueError(
-                "No experts to merge found. Make sure the 'modifier_type' is correct."
-            )
-
-        expert_info = ExpertInfo(
-            expert_name=self.training_config.finetune_task_name,
-            expert_task_name=self.training_config.finetune_task_name,
-            training_config=self.training_config,
-            expert_config=expert_config,
-        )
-        return Expert(expert_info=expert_info, expert_weights=expert_params)
-
 
 class LoRAMoEModel(MultiExpertModel):
     __supported_selectors__ = [PolySelectorConfig, MOERKHSSelectorConfig]
 
     def __init__(
         self,
-        base_model_name,
+        model,
         modifier_config: SkilledLoRAConfig,
         selector_config: SelectorConfig,
         expert_library: ExpertLibrary = None,
@@ -613,9 +501,7 @@ class LoRAMoEModel(MultiExpertModel):
                 f"Compatible selector config is required for MoE model: {self.__supported_selectors__}."
             )
 
-        super().__init__(
-            base_model_name=base_model_name, selector_config=selector_config
-        )
+        super().__init__(model, selector_config=selector_config)
 
         if expert_library is None:
             if not modifier_config:
@@ -649,3 +535,31 @@ class LoRAMoEModel(MultiExpertModel):
                 self.add_expert_instance(expert_library[expert], expert_name=f"e{i}")
 
             self.num_experts = i + 1
+
+        @classmethod
+        def from_pretrained(
+            cls,
+            pretrained_model_name_or_path: Optional[Union[str, os.PathLike]],
+            *model_args,
+            **kwargs,
+        ):
+            from mttl.models.expert_trainer import LoRAMoELightningWrapper
+
+            checkpoint = LoRAMoELightningWrapper.from_pretrained(
+                pretrained_model_name_or_path,
+                *model_args,
+                instantiate_model=False,
+                **kwargs,
+            )
+
+            # assume this has been trained with pytorch lightning, which dumps all the
+            # hyperparameters in the checkpoint
+            model_base_name = checkpoint["hyper_parameters"]["model"]
+            selector_config = checkpoint["selector_config"]
+            modifier_config = ExpertInfo.fromdict(
+                checkpoint["expert_info"]
+            ).expert_config
+
+            model = cls(model_base_name, modifier_config=modifier_config, **kwargs)
+            model.load_state_dict(checkpoint["state_dict"], strict=False)
+            return model

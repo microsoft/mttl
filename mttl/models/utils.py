@@ -132,7 +132,7 @@ class OnLogCallback:
         return output
 
 
-class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
+class EfficientCheckpointModule(LightningModule, OnLogCallback):
     """Efficiently save and load checkpoints.
 
     Only saves and loads parameters that are either in the trainable parameters
@@ -140,8 +140,7 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
     """
 
     def __init__(self, **kwargs):
-        LightningModule.__init__(self)
-        PushToHubMixin.__init__(self)
+        super().__init__()
 
         self.loss_plugins = {}
         # If True, do not delete any parameters that were loaded in a
@@ -229,8 +228,7 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
             return cls.load_from_checkpoint(resolved_archive_file, **kwargs)
         else:
             ckpt = torch.load(resolved_archive_file, map_location="cpu")
-
-            return ckpt["state_dict"], ckpt["hyper_parameters"]
+            return ckpt
 
     @classmethod
     def load_from_checkpoint(
@@ -253,39 +251,6 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
         model = cls(**ckpt["hyper_parameters"])
         model.load_state_dict(ckpt["state_dict"], strict=False)
         return model
-
-    def save_pretrained(
-        self,
-        save_directory: Union[str, os.PathLike],
-        save_config: bool = True,
-        state_dict: Optional[dict] = None,
-        save_function: Callable = torch.save,
-        push_to_hub: bool = False,
-        save_full_model: bool = False,
-        **kwargs,
-    ):
-        ckpt = self.state_dict()
-
-        if not save_full_model:
-            self._delete_non_trainable_params(ckpt)
-
-        hparams_allowed = {}
-        # drop parameters which contain some strange datatypes as fsspec
-        for k, v in self.hparams.items():
-            v = v.name if isinstance(v, Enum) else v
-            hparams_allowed[k] = v
-
-        save_package = {
-            "state_dict": ckpt,
-            "hyper_parameters": hparams_allowed,
-        }
-        if hasattr(self, "expert_info"):
-            save_package["expert_info"] = self.expert_info.__dict__
-
-        output_model_file = os.path.join(save_directory, CHECKPOINT_PATH_IN_HUB)
-        torch.save(save_package, output_model_file)
-        logger.info(f"Model weights saved in {output_model_file}")
-        return output_model_file
 
     def load_state_dict(self, ckpt, **kwargs):
         # store params that might have been loaded from a previous checkpoint

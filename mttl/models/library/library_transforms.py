@@ -923,7 +923,7 @@ class ArrowTransform(LibraryTransform):
 
             # get parameters tied during training
             param_map = get_target_2_source_param_mapping(
-                expert.expert_weights.items(), expert.training_config.tie_params
+                expert.expert_weights.items(), expert.expert_config.tie_params
             )
             if self.config.tie_params != "default":
                 # get parameters we wish to tie during for Arrow
