@@ -11,7 +11,7 @@ from einops import rearrange, repeat
 from transformers import Cache
 from transformers.models.llama.modeling_llama import apply_rotary_pos_emb
 
-from mttl.models.modifiers.base import Modifier, ModifierConfig
+from mttl.models.modifiers.base import Modifier, ModifierConfig, ModifyMixin
 
 
 @dataclass
@@ -25,7 +25,7 @@ class KVAdapterConfig(ModifierConfig):
 
 
 @Modifier.register("kv_adapter", config_cls=KVAdapterConfig)
-class KVAdapter(Modifier):
+class KVAdapter(Modifier, ModifyMixin):
     """
     Modifier augmenting the self-attention with additional learnable KV pairs.
 
