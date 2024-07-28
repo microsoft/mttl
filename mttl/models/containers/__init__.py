@@ -1,5 +1,5 @@
 import re
-from typing import Dict, List
+from typing import Dict, List, Union
 
 from mttl.config import Config
 from mttl.logging import logger
@@ -271,7 +271,7 @@ def add_expert_to_transformer(
     action: str = "route",
     is_default: bool = False,
     training_config: Config = None,
-    routing_config: Dict[str, SelectorConfig] = None,
+    routing_config: Union[SelectorConfig, Dict[str, SelectorConfig]] = None,
     selectors_cache: SelectorsCache = None,
 ) -> None:
     """
@@ -361,8 +361,16 @@ def add_expert_to_transformer(
         )
 
     if routing_config is not None:
+        if isinstance(routing_config, SelectorConfig):
+            logger.debug(
+                f"Assuming routing config is for model modifier: {model_modifier}."
+            )
+            routing_config = {model_modifier: routing_config}
+
         if model_modifier not in routing_config:
-            raise ValueError("No routing config was specified for the model modifier.")
+            raise ValueError(
+                f"No routing config was specified for the model modifier: {model_modifier}."
+            )
 
         if selectors_cache is None:
             raise ValueError(
@@ -385,7 +393,7 @@ def add_expert_to_transformer(
         logger.debug(
             "Added expert %s, with %s selectors",
             expert.name,
-            len(transformer.selectors[model_modifier]),
+            len(selectors_cache.get(model_modifier)),
         )
 
     logger.debug("Patched layers: %s", added_layers)
