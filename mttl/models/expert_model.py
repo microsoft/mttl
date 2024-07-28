@@ -15,6 +15,7 @@ from mttl.logging import logger
 from mttl.models.containers import add_expert_to_transformer
 from mttl.models.containers.base import ExpertContainer
 from mttl.models.containers.selectors import Selector, SelectorConfig
+from mttl.models.containers.selectors.arrow_selector import ArrowSelectorConfig
 from mttl.models.containers.selectors.base import (
     LoadableLibraryMixin,
     LoadableSelectorConfig,
@@ -486,7 +487,11 @@ class MultiExpertModel(SingleExpertModel):
 
 
 class LoRAMoEModel(MultiExpertModel):
-    __supported_selectors__ = [PolySelectorConfig, MOERKHSSelectorConfig]
+    __supported_selectors__ = [
+        PolySelectorConfig,
+        MOERKHSSelectorConfig,
+        ArrowSelectorConfig,
+    ]
 
     def __init__(
         self,
@@ -508,7 +513,9 @@ class LoRAMoEModel(MultiExpertModel):
                 raise ValueError("Modifier config is required for MoE model.")
 
             if not selector_config.num_experts:
-                raise ValueError("Required specification of the number of experts.")
+                raise ValueError(
+                    "`num_experts` is None in SelectorConfig, this requires prior specification of the number of experts."
+                )
 
             for i in range(selector_config.num_experts):
                 # Adding a Skilled LoRA with 1 skill.
@@ -534,7 +541,7 @@ class LoRAMoEModel(MultiExpertModel):
             for i, expert in enumerate(sorted(list(expert_library.keys()))):
                 self.add_expert_instance(expert_library[expert], expert_name=f"e{i}")
 
-            self.num_experts = i + 1
+            self.selector_config.num_experts = i + 1
 
         @classmethod
         def from_pretrained(

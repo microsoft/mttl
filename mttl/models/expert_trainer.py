@@ -10,8 +10,8 @@ from mttl.logging import logger
 from mttl.models.containers.selectors.base import SelectorConfig
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_context import InfoContainer
-from mttl.models.expert_model import MoEModel, SingleExpertModel
-from mttl.models.get_scheduler import get_scheduler_with_args
+from mttl.models.expert_model import LoRAMoEModel, SingleExpertModel
+from mttl.models.get_scheduler import get_scheduler
 from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.lora import SkilledLoRAConfig
@@ -71,6 +71,12 @@ class SingleExpertModelLightningWrapper(EfficientCheckpointModule):
         for i, pg in enumerate(self.optimizers().optimizer.param_groups):
             self.log(f"train/lr_{i}", pg["lr"])
         return total_loss
+
+    def forward(self, batch, **kwargs):
+        return self.model.forward(batch, **kwargs)
+
+    def generate(self, batch, **kwargs):
+        return self.model.generate(batch, **kwargs)
 
     def on_validation_epoch_start(self) -> None:
         self._inference_outputs.clear()
@@ -181,7 +187,7 @@ class LoRAMoELightningWrapper(SingleExpertModelLightningWrapper):
             )
             selector_config = SelectorConfig.from_training_config(self.training_config)
             self.base_model_name = kwargs.get("model", None)
-            self.model = MoEModel(
+            self.model = LoRAMoEModel(
                 self.base_model_name,
                 modifier_config=modifier_config,
                 selector_config=selector_config,
@@ -199,6 +205,7 @@ class LoRAMoELightningWrapper(SingleExpertModelLightningWrapper):
         self.training_config.vocab_size = (
             self.model.get_input_embeddings().num_embeddings
         )
+        self.num_experts = self.selector_config.num_experts
 
         self.test_results = []
         self.best_val_result = None
@@ -253,7 +260,9 @@ class LoRAMoELightningWrapper(SingleExpertModelLightningWrapper):
                 total_loss += self.hparams.moe_ent_reg * mi_loss
 
             elif self.hparams.moe_ent_free_bits > 0.0:
-                normalized_entropy = entropy_of_route / math.log(self.moe_num_experts)
+                normalized_entropy = entropy_of_route / math.log(
+                    self.selector_config.num_experts
+                )
                 total_loss += (
                     (1.0 - normalized_entropy) >= self.hparams.moe_ent_free_bits
                 ) * -entropy_of_route
