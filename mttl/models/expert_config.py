@@ -45,11 +45,12 @@ class ExpertConfig(Config):
         self.use_instruct_template = False
         self.source_template = None
         self.augment_few_shot = 0
-
         self.subsample_train = None
         self.subsample_dev = None
 
-        self.moe_num_experts = 8
+        # argument to control the number of experts explicitly
+        self.num_experts = 0
+
         self.moe_emb_dim = 128
         self.moe_rkhs_dim = 512
         self.moe_ent_reg = 0.0
