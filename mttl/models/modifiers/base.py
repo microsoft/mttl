@@ -54,9 +54,9 @@ class ModifierConfig(object):
         mod = dumped.pop("__model_modifier__")
         return Modifier.get_config_class_by_name(mod)(**dumped)
 
-    @staticmethod
+    @classmethod
     def from_training_config(
-        training_config: Union["Config", "ModifierConfig"]
+        cls, training_config: Union["Config", "ModifierConfig"]
     ) -> Union["ModifierConfig", None]:
         """Build modifier config from the training config.
 
@@ -66,15 +66,21 @@ class ModifierConfig(object):
             # nothing to do here
             return training_config
 
-        if training_config.model_modifier is None:
-            return None
+        if cls == ModifierConfig:
+            if training_config.model_modifier is None:
+                return None
 
-        if training_config.model_modifier not in Modifier.registered_names():
-            raise ValueError(
-                f"Model modifier '{training_config.model_modifier}' not found, has it been registered?"
+            if training_config.model_modifier not in Modifier.registered_names():
+                raise ValueError(
+                    f"Model modifier '{training_config.model_modifier}' not found, has it been registered?"
+                )
+
+            config_klass = Modifier.get_config_class_by_name(
+                training_config.model_modifier
             )
+        else:
+            config_klass = cls
 
-        config_klass = Modifier.get_config_class_by_name(training_config.model_modifier)
         kwargs = {}
         for key, _ in config_klass.__dataclass_fields__.items():
             if hasattr(training_config, key):

@@ -37,6 +37,7 @@ class SelectorConfig:
     router_granularity: str = "*"
     lora_merge_after: bool = False
     selector_logging: bool = True
+    num_experts: int = 0
 
     def __eq__(self, other):
         # compare all the attributes
@@ -62,7 +63,9 @@ class SelectorConfig:
 
     @classmethod
     def from_training_config(
-        cls, training_config: Union["Config", "SelectorConfig"]
+        cls,
+        training_config: Union["Config", "SelectorConfig"],
+        ignore_prefix: str = None,
     ) -> Union["SelectorConfig", None]:
         """Build modifier config from the training config.
 
@@ -72,25 +75,30 @@ class SelectorConfig:
             # nothing to do here
             return training_config
 
-        # if called on the base class, we need to find the correct subclass
-        if training_config.router_selector is None:
-            return None
+        if cls == SelectorConfig:
+            # if called on the base class, we need to find the correct subclass
+            if training_config.router_selector is None:
+                return None
 
-        if training_config.router_selector not in Selector.registered_names():
-            raise ValueError(
-                f"Selector '{training_config.router_selector}' not found, has it been registered?"
+            if training_config.router_selector not in Selector.registered_names():
+                raise ValueError(
+                    f"Selector '{training_config.router_selector}' not found, has it been registered?"
+                )
+
+            config_klass = Selector.get_config_class_by_name(
+                training_config.router_selector
             )
-
-        config_klass = Selector.get_config_class_by_name(
-            training_config.router_selector
-        )
+        else:
+            config_klass = cls
 
         kwargs = {}
         for key in config_klass.__dataclass_fields__.keys():
             # only overwrite default if value exists and is not None
-            train_cfg_value = getattr(training_config, key, None)
+            train_cfg_value = getattr(
+                training_config, (ignore_prefix or "") + key, None
+            )
             if train_cfg_value is not None:
-                kwargs[key] = getattr(training_config, key)
+                kwargs[key] = train_cfg_value
         return config_klass(**kwargs)
 
 
