@@ -18,6 +18,7 @@ from tqdm import tqdm
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import logger
 from mttl.models.containers.lora_containers import ExpertContainer
+from mttl.models.containers.selectors.phatgoose_selector import PhatgooseSelectorConfig
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
@@ -677,7 +678,13 @@ class PhatgooseTransform(HiddenStateComputer):
 
             logger.info("Training config: {}".format(vars(training_config)))
 
-            model = MultiExpertModel(**vars(training_config)).to("cuda")
+            model = MultiExpertModel(
+                model=training_config.model,
+                selector_config=PhatgooseSelectorConfig.from_training_config(
+                    training_config
+                ),
+                **vars(training_config),
+            )
             model.add_expert_instance(expert, is_default=True)
 
             # for checksum
@@ -700,7 +707,13 @@ class PhatgooseTransform(HiddenStateComputer):
             ):
                 from mttl.models.expert_model import MultiExpertModel
 
-                model_after = MultiExpertModel(**vars(training_config)).to("cuda")
+                model_after = MultiExpertModel(
+                    model=training_config.model,
+                    selector_config=PhatgooseSelectorConfig.from_training_config(
+                        training_config
+                    ),
+                    **vars(training_config),
+                ).to("cuda")
                 model_after.add_expert_instance(expert, is_default=True)
                 model_after.load_state_dict(torch.load(checkpoint)["state_dict"])
 
