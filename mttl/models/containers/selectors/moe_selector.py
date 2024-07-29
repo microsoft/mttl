@@ -12,6 +12,7 @@ from mttl.models.containers.selectors.base import (
     SelectorOutput,
     forward_with_cache,
 )
+from mttl.models.expert_context import InfoContainer
 from mttl.models.library.expert import ExpertInfo
 
 
@@ -70,9 +71,8 @@ class MOERKHSSelector(Selector):
             # soft routing
             selected_experts = SelectorOutput.ALL_EXPERTS
 
-        g = getattr(self.info_container, "routing_gates", [])
+        g = InfoContainer.get().routing_gates
         g.append(router_logits)
-        self.info_container.routing_gates = g
 
         return BatchSequenceExpertsAndWeightsSelectorOutput(
             experts=selected_experts, weights=routing_weights
