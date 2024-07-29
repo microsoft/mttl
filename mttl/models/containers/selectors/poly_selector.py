@@ -148,7 +148,7 @@ class PolySelector(Selector):
     ):
         # we need additional space in the routing to accomodate the incoming expert
         self.module_logits.data = torch.empty(
-            self.n_tasks + 1, self.config.n_splits * (self.n_experts + 1)
+            self.n_tasks + 1, self.config.n_splits * self.n_experts
         ).uniform_(-1e-3, 1e-3)
 
         # Last expert is exactly uniform
@@ -157,7 +157,8 @@ class PolySelector(Selector):
 
 @dataclass
 class PolySelectorDirectConfig(PolySelectorConfig):
-    pass
+    # Used to initialize the logits of the expert for the current task
+    finetune_task_name: str = None
 
 
 @Selector.register("poly_router_dir", PolySelectorDirectConfig)
@@ -187,16 +188,19 @@ class PolySelectorDirect(PolySelector):
     ):
         """
         Assume:
-        expert_task_name -- task name expert is pecialized at
+        expert_task_name -- task name expert is specialized in
         self.config.finetune_task_name -- name of the task the model is currently trained on
 
         If we encounter a module for the current task, we init it with one hot, otherwise with uniform.
         """
         main_m = 1
 
-        expert_task_name = expert_info.expert_task_name
         if expert_name not in self.module_logits_dict:
-            if self.training_config.finetune_task_name == expert_task_name:
+            if (
+                self.config.finetune_task_name
+                and self.task_to_expert_name[self.config.finetune_task_name]
+                == expert_name
+            ):
                 self.init_gap = [
                     0,
                     0,

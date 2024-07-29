@@ -1,6 +1,7 @@
 import math
 import threading
 from abc import ABC
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Union
 
@@ -14,6 +15,7 @@ from torch.distributions import Categorical
 from mttl.logging import logger, warn_once
 from mttl.models.expert_context import InfoContainer
 from mttl.models.library.expert import ExpertInfo
+from mttl.models.modifiers.base import Modifier
 from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
 from mttl.models.ranker.classifier_ranker import ClusterPredictor
 from mttl.models.utils import MetricLogger
@@ -35,6 +37,7 @@ class SelectorConfig:
     router_granularity: str = "*"
     lora_merge_after: bool = False
     selector_logging: bool = True
+    num_experts: int = 0
 
     def __eq__(self, other):
         # compare all the attributes
@@ -60,7 +63,9 @@ class SelectorConfig:
 
     @classmethod
     def from_training_config(
-        cls, training_config: Union["Config", "SelectorConfig"]
+        cls,
+        training_config: Union["Config", "SelectorConfig"],
+        ignore_prefix: str = None,
     ) -> Union["SelectorConfig", None]:
         """Build modifier config from the training config.
 
@@ -70,26 +75,69 @@ class SelectorConfig:
             # nothing to do here
             return training_config
 
-        # if called on the base class, we need to find the correct subclass
-        if training_config.router_selector is None:
-            return None
+        if cls == SelectorConfig:
+            # if called on the base class, we need to find the correct subclass
+            if training_config.router_selector is None:
+                return None
 
-        if training_config.router_selector not in Selector.registered_names():
-            raise ValueError(
-                f"Selector '{training_config.router_selector}' not found, has it been registered?"
+            if training_config.router_selector not in Selector.registered_names():
+                raise ValueError(
+                    f"Selector '{training_config.router_selector}' not found, has it been registered?"
+                )
+
+            config_klass = Selector.get_config_class_by_name(
+                training_config.router_selector
             )
-
-        config_klass = Selector.get_config_class_by_name(
-            training_config.router_selector
-        )
+        else:
+            config_klass = cls
 
         kwargs = {}
         for key in config_klass.__dataclass_fields__.keys():
             # only overwrite default if value exists and is not None
-            train_cfg_value = getattr(training_config, key, None)
+            if ignore_prefix:
+                default_value = getattr(training_config, ignore_prefix + key, None)
+            else:
+                default_value = None
+
+            train_cfg_value = getattr(training_config, key, default_value)
             if train_cfg_value is not None:
-                kwargs[key] = getattr(training_config, key)
+                kwargs[key] = train_cfg_value
         return config_klass(**kwargs)
+
+
+class SelectorsCache:
+    """Keep a cache of all added selectors indexed by both modifier and selector name."""
+
+    def __init__(self):
+        self.cache = defaultdict(dict)
+        self.clear()
+
+    def clear(self, modifier_name: str = None):
+        # initialize cache for all registered modifiers
+        if modifier_name is None:
+            for modifier_name in Modifier.registered_names():
+                self.cache[modifier_name] = {}
+        else:
+            self.cache[modifier_name] = {}
+
+    def insert(self, modifier_name: str, selector_name: str, selector: "Selector"):
+        self.cache[modifier_name][selector_name] = selector
+
+    def get(
+        self, modifier_name: str, selector_name: str = None
+    ) -> Union["Selector", Dict]:
+        if selector_name is None:
+            return self.cache[modifier_name]
+        return self.cache[modifier_name].get(selector_name, None)
+
+    def items(self):
+        return iter(self.cache.items())
+
+    def __setitem__(self, key, value):
+        if key not in Modifier.registered_names():
+            raise ValueError(f"Modifier '{key}' not found, has it been registered?")
+
+        self.cache[key] = value
 
 
 @dataclass
@@ -258,6 +306,7 @@ class Selector(nn.Module, Registrable):
         self.default_expert_name = None
         self.total_calls_per_forward = 0
         self._calls_counter = 0
+        self._task_to_expert_name = {}
         # dependency injection filled from ExpertContainer
         self.__layer_name__ = None
 
@@ -305,6 +354,10 @@ class Selector(nn.Module, Registrable):
         return self.__layer_name__
 
     @property
+    def task_to_expert_name(self):
+        return getattr(self, "_task_to_expert_name", {})
+
+    @property
     def n_experts(self):
         return len(self.expert_names)
 
@@ -324,13 +377,27 @@ class Selector(nn.Module, Registrable):
     def add_expert(
         self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
     ):
-        self.on_add_expert(expert_name, expert_info, is_default)
+        if expert_info is None or expert_info.expert_task_name is None:
+            logger.warning(
+                "Expert's task_name not set, assume task name corresponds to expert name!"
+            )
+            self._task_to_expert_name[expert_name] = expert_name
+        else:
+            for task_name in expert_info.expert_task_name.split(","):
+                if task_name in self._task_to_expert_name:
+                    logger.warning(
+                        f"Task name {task_name} already assigned to expert {self._task_to_expert_name[task_name]}"
+                    )
+            self._task_to_expert_name[task_name] = expert_name
 
         # standard bookkeeping for all selectors
         if is_default:
             self.default_expert_name = expert_name
 
         self.expert_infos[expert_name] = expert_info
+
+        # call custom logic for add expert
+        self.on_add_expert(expert_name, expert_info, is_default)
 
 
 class SelectorView:
@@ -420,37 +487,6 @@ class TaskPredictorSelector(Selector):
         pass
 
 
-class TaskToExpertMixin:
-    """
-    Builds `task_to_expert_name` mapping on add_expert, useful for
-    routing (as in TaskNameSelector) or for logging in-distribution stats (PerTokenSelector)
-    """
-
-    @property
-    def task_to_expert_name(self):
-        return getattr(self, "_task_to_expert_name", {})
-
-    def on_add_expert(
-        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
-    ):
-        _task_to_expert_name = self.task_to_expert_name
-
-        if expert_info is None or expert_info.expert_task_name is None:
-            logger.warning(
-                "Expert's task_name not set, assume task name corresponds to expert name!"
-            )
-            _task_to_expert_name[expert_name] = expert_name
-        else:
-            for task_name in expert_info.expert_task_name.split(","):
-                if task_name in _task_to_expert_name:
-                    logger.warning(
-                        f"Task name {task_name} already assigned to expert {_task_to_expert_name[task_name]}"
-                    )
-            _task_to_expert_name[task_name] = expert_name
-
-        self._task_to_expert_name = _task_to_expert_name
-
-
 @dataclass
 class PerTokenSelectorConfig(LoadableSelectorConfig):
     router_temp: float = None
@@ -523,7 +559,7 @@ def get_expert_prototype_from_library_artifacts(
 
 
 @Selector.register("per_token_router", PerTokenSelectorConfig)
-class PerTokenSelector(Selector, TaskToExpertMixin, LoadableLibraryMixin):
+class PerTokenSelector(Selector, LoadableLibraryMixin):
     def __init__(self, config, **kwargs) -> None:
         super().__init__(config, **kwargs)
 
@@ -734,7 +770,7 @@ class TaskNameSelectorConfig(SelectorConfig):
 
 
 @Selector.register("task_selector", TaskNameSelectorConfig)
-class TaskNameSelector(Selector, TaskToExpertMixin):
+class TaskNameSelector(Selector):
     def __init__(self, **kwargs) -> None:
         super().__init__()
 
