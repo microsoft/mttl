@@ -5,7 +5,6 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from mttl.models.expert_context import InfoContainer
 from mttl.models.containers.selectors.base import (
     BatchSequenceExpertsAndWeightsSelectorOutput,
     Selector,
@@ -13,6 +12,7 @@ from mttl.models.containers.selectors.base import (
     SelectorOutput,
     forward_with_cache,
 )
+from mttl.models.expert_context import InfoContainer
 from mttl.models.library.expert import ExpertInfo
 
 
