@@ -306,6 +306,7 @@ class Selector(nn.Module, Registrable):
         self.default_expert_name = None
         self.total_calls_per_forward = 0
         self._calls_counter = 0
+        self._task_to_expert_name = {}
         # dependency injection filled from ExpertContainer
         self.__layer_name__ = None
 
@@ -353,6 +354,10 @@ class Selector(nn.Module, Registrable):
         return self.__layer_name__
 
     @property
+    def task_to_expert_name(self):
+        return getattr(self, "_task_to_expert_name", {})
+
+    @property
     def n_experts(self):
         return len(self.expert_names)
 
@@ -372,13 +377,27 @@ class Selector(nn.Module, Registrable):
     def add_expert(
         self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
     ):
-        self.on_add_expert(expert_name, expert_info, is_default)
+        if expert_info is None or expert_info.expert_task_name is None:
+            logger.warning(
+                "Expert's task_name not set, assume task name corresponds to expert name!"
+            )
+            self._task_to_expert_name[expert_name] = expert_name
+        else:
+            for task_name in expert_info.expert_task_name.split(","):
+                if task_name in self._task_to_expert_name:
+                    logger.warning(
+                        f"Task name {task_name} already assigned to expert {self._task_to_expert_name[task_name]}"
+                    )
+            self._task_to_expert_name[task_name] = expert_name
 
         # standard bookkeeping for all selectors
         if is_default:
             self.default_expert_name = expert_name
 
         self.expert_infos[expert_name] = expert_info
+
+        # call custom logic for add expert
+        self.on_add_expert(expert_name, expert_info, is_default)
 
 
 class SelectorView:
@@ -468,37 +487,6 @@ class TaskPredictorSelector(Selector):
         pass
 
 
-class TaskToExpertMixin:
-    """
-    Builds `task_to_expert_name` mapping on add_expert, useful for
-    routing (as in TaskNameSelector) or for logging in-distribution stats (PerTokenSelector)
-    """
-
-    @property
-    def task_to_expert_name(self):
-        return getattr(self, "_task_to_expert_name", {})
-
-    def on_add_expert(
-        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
-    ):
-        _task_to_expert_name = self.task_to_expert_name
-
-        if expert_info is None or expert_info.expert_task_name is None:
-            logger.warning(
-                "Expert's task_name not set, assume task name corresponds to expert name!"
-            )
-            _task_to_expert_name[expert_name] = expert_name
-        else:
-            for task_name in expert_info.expert_task_name.split(","):
-                if task_name in _task_to_expert_name:
-                    logger.warning(
-                        f"Task name {task_name} already assigned to expert {_task_to_expert_name[task_name]}"
-                    )
-            _task_to_expert_name[task_name] = expert_name
-
-        self._task_to_expert_name = _task_to_expert_name
-
-
 @dataclass
 class PerTokenSelectorConfig(LoadableSelectorConfig):
     router_temp: float = None
@@ -571,7 +559,7 @@ def get_expert_prototype_from_library_artifacts(
 
 
 @Selector.register("per_token_router", PerTokenSelectorConfig)
-class PerTokenSelector(Selector, TaskToExpertMixin, LoadableLibraryMixin):
+class PerTokenSelector(Selector, LoadableLibraryMixin):
     def __init__(self, config, **kwargs) -> None:
         super().__init__(config, **kwargs)
 
@@ -782,7 +770,7 @@ class TaskNameSelectorConfig(SelectorConfig):
 
 
 @Selector.register("task_selector", TaskNameSelectorConfig)
-class TaskNameSelector(Selector, TaskToExpertMixin):
+class TaskNameSelector(Selector):
     def __init__(self, **kwargs) -> None:
         super().__init__()
 

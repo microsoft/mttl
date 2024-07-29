@@ -224,12 +224,12 @@ class MultiExpertModel(SingleExpertModel):
         return containers
 
     @property
-    def experts_selectors(self) -> List[Selector]:
-        selectors = []
+    def selectors(self) -> Dict[str, List[Selector]]:
+        selectors = defaultdict(list)
         for modifier, selectors_dict in self.selectors_cache.items():
             for selector in selectors_dict.values():
                 if isinstance(selector, Selector):
-                    selectors.append(selector)
+                    selectors[modifier].append(selector)
         return selectors
 
     def delete_expert_container(self):

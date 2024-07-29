@@ -260,6 +260,8 @@ class TestMultiExpertModel:
             selector_config=SelectorConfig.from_training_config(config),
         )
         module.load_from_module_dict(module_dict, action="route")
+        # no special init gap, given that there is no training_config
+        assert module.selectors["lora"][0].init_gap == [-1e-3, 1e-3]
 
         assert isinstance(
             module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
@@ -278,7 +280,7 @@ class TestMultiExpertModel:
 
         # Test Base Llama model
         output = module(batch)
-        assert np.allclose(output.item(), 10.15, atol=0.1)
+        assert np.allclose(output.item(), 9.68, atol=0.1)
 
         # check the get_router_weights function
         weights = {}
@@ -290,7 +292,7 @@ class TestMultiExpertModel:
             "mod1" in weights["transformer.h.0.attn.attention.k_proj.selector"]
             and "mod2" in weights["transformer.h.0.attn.attention.k_proj.selector"]
         )
-        assert "shared" in module.model.selectors["lora"]
+        assert "shared" in module.selectors_cache.get("lora")
 
         assert isinstance(
             module.model.transformer.h[0].attn.attention.k_proj.selector,
@@ -305,13 +307,21 @@ class TestMultiExpertModel:
 
         # change router_granularity to finegrained
         config.router_granularity = "finegrained"
+        config.finetune_task_name = "mod1"
+
         module = MultiExpertModel(
             config.model,
             selector_config=SelectorConfig.from_training_config(config),
         )
         module.load_from_module_dict(module_dict)
+
+        # init gap should reflect the finetune_task_name! we found the correct module
+        assert module.selectors["lora"][0].init_gap == [0, 0]
+        assert module.selectors["lora"][0].module_logits_dict["mod1"].item() == 1.0
+        assert module.selectors["lora"][0].module_logits_dict["mod2"].item() == 0.0
+
         output = module(batch)
-        assert np.allclose(output.item(), 10.15, atol=0.1)
+        assert np.allclose(output.item(), 9.68, atol=0.1)
 
         weights = {}
         for _, selector_list in module.selectors.items():
@@ -411,7 +421,7 @@ class TestMultiExpertModel:
 
         module = LoRAMoEModel(
             config.model,
-            modifier_config=SkilledLoRAConfig(n_skills=config.n_skills),
+            modifier_config=SkilledLoRAConfig.from_training_config(config),
             selector_config=MOERKHSSelectorConfig.from_training_config(
                 config, ignore_prefix="moe_"
             ),
@@ -448,7 +458,7 @@ class TestMultiExpertModel:
 
         module = LoRAMoEModel(
             config.model,
-            modifier_config=SkilledLoRAConfig(n_skills=config.n_skills),
+            modifier_config=SkilledLoRAConfig.from_training_config(config),
             selector_config=MOERKHSSelectorConfig.from_training_config(
                 config, ignore_prefix="moe_"
             ),

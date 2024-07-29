@@ -25,13 +25,13 @@ def test_expert_model():
     model.add_empty_expert(
         "b", LoRAConfig(modify_layers=".*out_proj.*"), is_default=True
     )
-    assert len(model.experts_selectors) == 0
+    assert len(model.selectors) == 0
     assert model.experts_containers[0].default_expert_name == "b"
 
     # plug a poly selector
     model.set_selector("lora", PolySelectorConfig(task_names=["t1", "t2", "t3"]))
-    assert len(model.experts_selectors) == 12
-    assert isinstance(model.experts_selectors[0], PolySelector)
+    assert len(model.selectors["lora"]) == 12
+    assert isinstance(model.selectors["lora"][0], PolySelector)
 
     expert_a: Expert = model.get_expert_instance("a")
     assert len(expert_a.expert_weights) == 24
@@ -40,8 +40,8 @@ def test_expert_model():
     # switch selector for lora to task name
     model.set_selector("lora", TaskNameSelectorConfig())
 
-    assert len(model.experts_selectors) == 12
-    assert isinstance(model.experts_selectors[0], TaskNameSelector)
+    assert len(model.selectors["lora"]) == 12
+    assert isinstance(model.selectors["lora"][0], TaskNameSelector)
 
 
 def test_from_pretrained(tmp_path):
@@ -85,19 +85,19 @@ def test_from_pretrained_with_arrow(tmp_path):
     # the order might be different due to multi-threading in adding experts in parallel
     assert "a" in model.experts_names
     assert "b" in model.experts_names
-    assert model.experts_selectors[0].config == selector_config
-    assert isinstance(model.experts_selectors[0], ArrowSelector)
+    assert model.selectors["lora"][0].config == selector_config
+    assert isinstance(model.selectors["lora"][0], ArrowSelector)
     # loaded two experts
-    assert model.experts_selectors[0].prototypes.shape[0] == 2
-    name1 = model.experts_selectors[0].expert_names[0]
-    name2 = model.experts_selectors[0].expert_names[1]
-    ln = model.experts_selectors[0].layer_name.replace(".selector", "")
+    assert model.selectors["lora"][0].prototypes.shape[0] == 2
+    name1 = model.selectors["lora"][0].expert_names[0]
+    name2 = model.selectors["lora"][0].expert_names[1]
+    ln = model.selectors["lora"][0].layer_name.replace(".selector", "")
     assert np.allclose(
-        model.experts_selectors[0].prototypes[0].sum().item(),
+        model.selectors["lora"][0].prototypes[0].sum().item(),
         protos[name1][ln].sum().item(),
     )
     assert np.allclose(
-        model.experts_selectors[0].prototypes[1].sum().item(),
+        model.selectors["lora"][0].prototypes[1].sum().item(),
         protos[name2][ln].sum().item(),
     )
 
