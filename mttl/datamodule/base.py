@@ -40,6 +40,7 @@ class DatasetConfig:
     subsample: int = -1
     pack_sequences: bool = False  # True
     pad_to_multiple_of: int = 8
+    max_seq_per_pack: int = 4
 
 
 @dataclass
@@ -280,6 +281,21 @@ class DefaultCollator:
     def __call__(self, batch: Dict):
         # is our input already tokenized ?
         # trim according to the attention mask and return
+
+        def pad_sequence_wrapper(tensor_list, batch_first, padding_value, side="right"):
+            """Padding Sequence Fn that supports left padding"""
+            if side == "left":
+                tensor_list = [x.flip(0) for x in tensor_list]
+
+            padded = pad_sequence(
+                tensor_list, batch_first=batch_first, padding_value=padding_value
+            )
+
+            if side == "left":
+                padded = padded.flip(1)
+
+            return padded
+
         if "input_ids" in batch[0]:
             output_batch = defaultdict(list)
             for batch_item in batch:
@@ -298,8 +314,11 @@ class DefaultCollator:
                         "input_ids": self.tokenizer.pad_token_id,
                         "labels": self.label_pad_token_id,
                     }.get(key, 0)
-                    value = pad_sequence(
-                        value, batch_first=True, padding_value=pad_token
+                    value = pad_sequence_wrapper(
+                        value,
+                        batch_first=True,
+                        padding_value=pad_token,
+                        side=self.tokenizer.padding_side,
                     )
                     output_batch[key] = value
 
@@ -655,12 +674,12 @@ class DefaultDataModule(LightningDataModule):
 
         return dataset
 
-    def pack_sequences(self, dataset, max_sequences=8):
+    def pack_sequences(self, dataset, max_sequences=4):
         """
         Combine sequences together in larger chunks closer to `max_input_length`
         """
         # first, let's shuffle the dataset
-        # dataset = dataset.shuffle(seed=42)
+        dataset = dataset.shuffle(seed=42)
 
         # TODO: first partition dataset according to `task_name`, and
         # pack each task individually to ensure that we don't mix tasks
@@ -668,7 +687,6 @@ class DefaultDataModule(LightningDataModule):
         # Very basic code that will iterate over sequences one by one,
         # and merge together until the max_input_length is reached
         # This is not optimal, but it's a start
-
         max_length = self.config.max_input_length
 
         def group(examples):
@@ -759,7 +777,9 @@ class DefaultDataModule(LightningDataModule):
                 dataset = getattr(self, f"{split}_dataset")
                 logger.info(f"Packing sequences for {split} dataset")
                 dataset = self.tokenize_dataset(dataset)
-                dataset = self.pack_sequences(dataset)
+                dataset = self.pack_sequences(
+                    dataset, max_sequences=self.config.max_seq_per_pack
+                )
                 setattr(self, f"{split}_dataset", dataset)
 
         self.print_infos()
@@ -860,6 +880,7 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         "subsample_per_task": args.subsample_per_task,
         "pad_to_multiple_of": args.pad_to_multiple_of,
         "padding_side": args.padding_side,
+        "max_seq_per_pack": args.max_seq_per_pack,
     }
 
     if dataset in [

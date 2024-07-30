@@ -55,7 +55,11 @@ class Config:
         self.post_init(silent=silent)
 
     def post_init(self, silent=False):
-        pass
+        if self.attn_implementation == "eager" and self.pack_sequences:
+            logger.warning(
+                "Eager attention is not compatible with packed sequences"
+                + ", tokens across examples will not be masked"
+            )
 
     @classmethod
     def fromdict(cls, data):
@@ -188,6 +192,7 @@ class Config:
         self.pack_sequences = False
         self.pad_to_multiple_of = 8
         self.padding_side = "right"
+        self.max_seq_per_pack = 4
 
         self.data_dir = os.getenv("TRAIN_DIR", "/tmp/")
         self.output_dir = os.getenv("OUTPUT_DIR", "./output")
