@@ -24,7 +24,7 @@ def test_expert_model():
     model.add_empty_expert(
         "b", LoRAConfig(modify_layers=".*out_proj.*"), is_default=True
     )
-    assert len(model.selectors) == 0
+    assert len(model.selectors["lora"]) == 0
     assert model.experts_containers[0].default_expert_name == "b"
 
     # plug a poly selector
@@ -95,19 +95,21 @@ def test_from_pretrained_with_arrow(tmp_path):
     # the order might be different due to multi-threading in adding experts in parallel
     assert "a" in model.experts_names
     assert "b" in model.experts_names
-    assert model.selectors["lora"][0].config == selector_config
-    assert isinstance(model.selectors["lora"][0], ArrowSelector)
+
+    selector = list(model.selectors["lora"].values())[0]
+    assert selector.config == selector_config
+    assert isinstance(selector, ArrowSelector)
     # loaded two experts
-    assert model.selectors["lora"][0].prototypes.shape[0] == 2
-    name1 = model.selectors["lora"][0].expert_names[0]
-    name2 = model.selectors["lora"][0].expert_names[1]
-    ln = model.selectors["lora"][0].layer_name.replace(".selector", "")
+    assert selector.prototypes.shape[0] == 2
+    name1 = selector.expert_names[0]
+    name2 = selector.expert_names[1]
+    ln = selector.layer_name.replace(".selector", "")
     assert np.allclose(
-        model.selectors["lora"][0].prototypes[0].sum().item(),
+        selector.prototypes[0].sum().item(),
         protos[name1][ln].sum().item(),
     )
     assert np.allclose(
-        model.selectors["lora"][0].prototypes[1].sum().item(),
+        selector.prototypes[1].sum().item(),
         protos[name2][ln].sum().item(),
     )
 

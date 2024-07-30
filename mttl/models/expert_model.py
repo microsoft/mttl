@@ -503,7 +503,7 @@ class MultiExpertModel(ExpertModel):
             self.selector_cache,
             force_replace=True,
         )
-        assert self.selector_cache[modifier_type]
+        assert self.selector_cache.get(modifier_type)
         logger.info(
             "Created {} selectors and {} views.".format(n_selectors, n_selectors_views)
         )
