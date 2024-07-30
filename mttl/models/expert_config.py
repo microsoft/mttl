@@ -16,6 +16,7 @@ class ExpertConfig(Config):
         self.load_in_8bit = False
         self.wandb_project = None
         self.tensorboard = False
+        self.logging_prefix = ""
 
         self.remote_token = None
         self.library_id = None
