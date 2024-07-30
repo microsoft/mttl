@@ -1,63 +1,81 @@
 import math
 import os
 from collections import defaultdict
-from typing import Any, Mapping
+from typing import Any, List, Mapping, Union
 
 import torch
 from torch import nn
 
+from mttl import logging
 from mttl.logging import logger
-from mttl.models.containers.selectors.base import SelectorConfig
+from mttl.models.containers.selectors.base import Selector, SelectorConfig
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_context import InfoContainer
-from mttl.models.expert_model import LoRAMoEModel, SingleExpertModel
+from mttl.models.expert_model import ExpertModel, LoRAMoEModel, MultiExpertModel
 from mttl.models.get_scheduler import get_scheduler
 from mttl.models.library.expert import Expert, ExpertInfo
-from mttl.models.modifiers.base import ModifierConfig
+from mttl.models.modifiers.base import Modifier, ModifierConfig
 from mttl.models.modifiers.lora import SkilledLoRAConfig
 from mttl.models.utils import EfficientCheckpointModule, prepare_model_for_kbit_training
 
 
-class SingleExpertModelLightningWrapper(EfficientCheckpointModule):
-    """Module for training an expert model with PyTorch Lightning."""
+class ExpertModelLightningWrapper(EfficientCheckpointModule):
+    """Wrapper module for training an expert model with PyTorch Lightning. This encapsulates
+    ``training_step``, ``validation_step``, ``test_step`` and all the logs and metrics.
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    An ExpertModel instance should be passed to this wrapper with the ``model_object`` argument.
+    The rest of the hyperparameters are passed as kwargs and constitutes training arguments
+    that will be saved by pytorch lightning as HPs.
+    """
 
-        self.tokenizer = kwargs.pop("tokenizer", None)
-        self.model = kwargs.pop("model_object", None)
+    def _update_expert_infos(self, model: ExpertModel):
+        self.model.expert_info = ExpertInfo(
+            expert_name=self.expert_name,
+            expert_task_name=self.finetune_task_name,
+            expert_config=self.model.modifier_config,
+            training_config=self.training_config,
+        )
+
+    def _update_training_config_from_model(
+        self, model: ExpertModel, training_config: ExpertConfig
+    ):
+        """Given that the model has a modifier, update the training config with the modifier config."""
+        # Override the model_modifier with the actual modifier used in the model
+        modifier_name = model.modifier_config.asdict()["__model_modifier__"]
+        training_config.model = model.base_model_name
+        training_config.model_modifier = modifier_name
+        training_config.update_kwargs(model.modifier_config.asdict(), raise_error=False)
+
+    def __init__(self, model_object: ExpertModel, training_config: ExpertConfig):
+        super().__init__()
 
         # log hyperparameters
-        self.save_hyperparameters(kwargs)
         self.accumulate_metrics_batch = defaultdict(list)
 
-        # rebuild the training config, a bit cumbersome, but that's life
-        self.training_config: ExpertConfig = ExpertConfig.fromdict(kwargs)
+        self.model: ExpertModel = model_object
+        self._update_training_config_from_model(training_config)
 
-        if self.model is None:
-            modifier_config = ModifierConfig.from_training_config(self.training_config)
-            self.base_model_name = kwargs.get("model", None)
-            self.model = SingleExpertModel(
-                self.base_model_name,
-                modifier_config=modifier_config,
-                **kwargs,
-            )
-        else:
-            self.base_model_name = self.model.base_model_name
-
+        self.base_model_name = self.model.base_model_name
         self.modifier_config = self.model.modifier_config
+        self.training_config = training_config
+
+        self.expert_name = training_config.expert_name
+        self.finetune_task_name = training_config.finetune_task_name
 
         if self.model.load_in_8bit:
             self.model = prepare_model_for_kbit_training(self.model)
 
         self.training_config.vocab_size = (
-            self.model.get_input_embeddings().num_embeddings
+            self.model.model.get_input_embeddings().num_embeddings
         )
 
-        self.test_results = []
         self.best_val_result = None
+        self.test_results = []
         self._inference_outputs = []
-        self._log_pref = kwargs.get("logging_prefix", "")
+        self._log_pref = training_config.logging_prefix
+
+        self.save_hyperparameters(self.training_config.asdict())
+        self._update_expert_infos(self.model)
 
     def training_step(self, batch, _):
         loss = self.model.forward(batch)
@@ -132,85 +150,173 @@ class SingleExpertModelLightningWrapper(EfficientCheckpointModule):
                         prog_bar=True,
                     )
 
-    def on_save_checkpoint(self, ckpt):
-        """Inject expert info in the checkpoint."""
-        # inject expert info in the expert checkpoint
-        ckpt["expert_info"] = self.expert_info.asdict()
-        ckpt["modifier_config"] = self.modifier_config.asdict()
+    @classmethod
+    def load_from_checkpoint(
+        cls,
+        checkpoint_path,
+        **extra_training_kwargs,
+    ):
+        ckpt = torch.load(checkpoint_path, map_location="cpu")
+        ckpt["hyper_parameters"].update(**extra_training_kwargs)
 
-    @property
-    def expert_info(self) -> ExpertInfo:
-        # inject expert info in the expert checkpoint
-        expert_info = ExpertInfo(
-            expert_name=self.hparams.expert_name,
-            expert_task_name=self.hparams.finetune_task_name,
-            expert_config=self.modifier_config,
-            training_config=self.training_config,
+        training_config: ExpertConfig = ExpertConfig.fromdict(ckpt["hyper_parameters"])
+        expert_info: ExpertInfo = ExpertInfo.fromdict(ckpt["experts_info"])
+
+        model = ExpertModel(
+            training_config.model,
+            load_in_4bit=training_config.load_in_4bit,
+            load_in_8bit=training_config.load_in_8bit,
+            device_map=training_config.device_map,
+            expert_info=expert_info,
         )
-        return expert_info
+        wrapper = cls(model, training_config)
+        load_result = wrapper.load_state_dict(ckpt["state_dict"], strict=False)
+        assert (
+            len(load_result.unexpected_keys) == 0
+        ), f"Load model failed, unexpected keys {load_result.unexpected_keys.__str__()}"
+        return wrapper
+
+    def on_save_checkpoint(self, ckpt):
+        """Inject expert info in the checkpoint and removes wrapping from the parameter names."""
+        # Delete the non trainable parameters from the model
+        super().on_save_checkpoint(ckpt)
+
+        ckpt["experts_info"] = self.model.expert_info.asdict()
 
     def as_expert(self) -> Expert:
         """Returns the model as an expert instance."""
-        if not isinstance(self.model, SingleExpertModel):
-            raise ValueError(
-                "Only SingleExpertModel can be converted to a single expert."
+        expert: Expert = self.model.get_expert_instance()
+        # inject trainer information into the expert
+        expert.expert_info = self.expert_info
+        return expert
+
+
+class MultiExpertModelLightningWrapper(ExpertModelLightningWrapper):
+    def _update_training_config_from_model(
+        self, model: ExpertModel, training_config: ExpertConfig
+    ):
+        # update the training config with the modifier config
+        training_config.model_modifier = None
+        training_config.model = model.base_model_name
+
+        if self.model.selector_config:
+            training_config.router_selector = Selector.get_name_by_config_class(
+                model.selector_config
+            )
+            training_config.update_kwargs(
+                model.selector_config.asdict(), raise_error=False
             )
 
-        state_dict = self.model.state_dict()
-        self._delete_non_trainable_params(state_dict)
+    def _update_expert_infos(self, model: MultiExpertModel):
+        # update the expert info for each expert with the training config
+        for expert_info in self.expert_info:
+            expert_info.training_config = self.training_config
 
-        # to use as an expert, we need to remove a `model.` prefix
-        state_dict = {k[len("model.") :]: v for k, v in state_dict.items()}
+    @property
+    def expert_info(self) -> List[ExpertInfo]:
+        self.model: MultiExpertModel
+        return [
+            self.model.get_expert_instance(n).expert_info
+            for n in self.model.experts_names
+        ]
 
-        # inject expert info in the expert checkpoint
-        return Expert(
-            expert_info=self.expert_info,
-            expert_weights=state_dict,
+    @classmethod
+    def load_from_checkpoint(
+        cls,
+        checkpoint_path,
+        **extra_training_kwargs,
+    ):
+        ckpt = torch.load(checkpoint_path, map_location="cpu")
+        ckpt["hyper_parameters"].update(**extra_training_kwargs)
+
+        training_config: ExpertConfig = ExpertConfig.fromdict(ckpt["hyper_parameters"])
+        selector_config: SelectorConfig = SelectorConfig.fromdict(
+            ckpt["selector_config"]
         )
+        experts_info: List[ExpertInfo] = [
+            ExpertInfo.fromdict(e) for e in ckpt["experts_info"]
+        ]
 
-
-class LoRAMoELightningWrapper(SingleExpertModelLightningWrapper):
-    def __init__(self, **kwargs):
-        self.tokenizer = kwargs.pop("tokenizer", None)
-        self.model = kwargs.pop("model_object", None)
-
-        # log hyperparameters
-        self.save_hyperparameters(kwargs)
-        self.accumulate_metrics_batch = defaultdict(list)
-
-        # rebuild the training config, a bit cumbersome, but that's life
-        self.training_config: ExpertConfig = ExpertConfig.fromdict(kwargs)
-
-        if self.model is None:
-            modifier_config = SkilledLoRAConfig.from_training_config(
-                self.training_config
-            )
-            selector_config = SelectorConfig.from_training_config(self.training_config)
-            self.base_model_name = kwargs.get("model", None)
-            self.model = LoRAMoEModel(
-                self.base_model_name,
-                modifier_config=modifier_config,
-                selector_config=selector_config,
-                **kwargs,
-            )
-        else:
-            self.base_model_name = self.model.base_model_name
-
-        self.selector_config = self.model.selector_config
-        self.modifier_config = self.model.modifier_config
-
-        if self.model.load_in_8bit:
-            self.model = prepare_model_for_kbit_training(self.model)
-
-        self.training_config.vocab_size = (
-            self.model.get_input_embeddings().num_embeddings
+        model = MultiExpertModel(
+            training_config.model,
+            load_in_4bit=training_config.load_in_4bit,
+            load_in_8bit=training_config.load_in_8bit,
+            device_map=training_config.device_map,
+            experts_info=experts_info,
+            selector_config=selector_config,
         )
-        self.num_experts = self.selector_config.num_experts
+        wrapper = cls(model, training_config)
+        load_result = wrapper.load_state_dict(ckpt["state_dict"], strict=False)
+        assert (
+            len(load_result.unexpected_keys) == 0
+        ), f"Load model failed, unexpected keys {load_result.unexpected_keys.__str__()}"
+        return wrapper
 
-        self.test_results = []
-        self.best_val_result = None
-        self._inference_outputs = []
-        self._log_pref = kwargs.get("logging_prefix", "")
+    def on_save_checkpoint(self, ckpt):
+        # Delete the non trainable parameters from the model
+        EfficientCheckpointModule.on_save_checkpoint(self, ckpt)
+
+        ckpt["experts_info"] = [e.asdict() for e in self.expert_info]
+        ckpt["selector_config"] = self.model.selector_config.asdict()
+
+
+class LoRAMoELightningWrapper(MultiExpertModelLightningWrapper):
+    def _update_training_config_from_model(self, model: LoRAMoEModel):
+        # update the training config with the modifier config
+        self.training_config.model_modifier = None
+        self.training_config.router_selector = SelectorConfig.get_name_by_config_class(
+            model.selector_config
+        )
+        self.training_config.update_kwargs(
+            model.selector_config.asdict(), raise_error=False
+        )
+        # inject library id if it exists in the model
+        self.training_config.library_id = model.expert_library_id
+
+    def on_save_checkpoint(self, ckpt):
+        # Delete the non trainable parameters from the model
+        model: LoRAMoEModel = self.model
+
+        EfficientCheckpointModule.on_save_checkpoint(self, ckpt)
+
+        ckpt["experts_info"] = [e.asdict() for e in self.expert_info]
+        ckpt["experts_library_id"] = model.expert_library_id
+        ckpt["selector_config"] = self.model.selector_config.asdict()
+
+    @classmethod
+    def load_from_checkpoint(
+        cls,
+        checkpoint_path,
+        **extra_training_kwargs,
+    ):
+        ckpt = torch.load(checkpoint_path, map_location="cpu")
+        ckpt["hyper_parameters"].update(**extra_training_kwargs)
+
+        training_config: ExpertConfig = ExpertConfig.fromdict(ckpt["hyper_parameters"])
+        selector_config: SelectorConfig = SelectorConfig.fromdict(
+            ckpt["selector_config"]
+        )
+        experts_library_id = ckpt.get("experts_library_id", None)
+        experts_info: List[ExpertInfo] = [
+            ExpertInfo.fromdict(e) for e in ckpt["experts_info"]
+        ]
+
+        # reload the model from checkpoint using experts info
+        model = LoRAMoEModel(
+            training_config.model,
+            selector_config=selector_config,
+            experts_library_id=experts_library_id,
+            experts_info=experts_info if experts_library_id is None else None,
+            load_in_4bit=training_config.load_in_4bit,
+            load_in_8bit=training_config.load_in_8bit,
+            device_map=training_config.device_map,
+        )
+        wrapper = cls(model, training_config)
+        load_result = wrapper.load_state_dict(ckpt["state_dict"], strict=False)
+        assert (
+            len(load_result.unexpected_keys) == 0
+        ), f"Load model failed, unexpected keys {load_result.unexpected_keys.__str__()}"
+        return wrapper
 
     def training_step(self, batch, _):
         loss = super().training_step(batch, _)
@@ -275,9 +381,3 @@ class LoRAMoELightningWrapper(SingleExpertModelLightningWrapper):
         for i, pg in enumerate(self.optimizers().optimizer.param_groups):
             self.log(f"train/lr_{i}", pg["lr"])
         return total_loss
-
-    def on_save_checkpoint(self, ckpt):
-        """Inject expert info in the checkpoint."""
-        ckpt["expert_info"] = self.expert_info.asdict()
-        ckpt["modifier_config"] = self.modifier_config.asdict()
-        ckpt["selector_config"] = self.selector_config.asdict()
