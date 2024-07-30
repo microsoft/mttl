@@ -167,9 +167,9 @@ class PolySelectorDirect(PolySelector):
         super().__init__(**kwargs)
 
         self.module_logits_dict = nn.ParameterDict()
-        self.training_config = kwargs["training_config"]
         self.init_gap = [-1e-3, 1e-3]
         self.device = kwargs["layer"].weight.device
+        self.finetune_task_name = self.config.finetune_task_name
 
     def _get_weights(self):
         weights = torch.cat(

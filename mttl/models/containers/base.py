@@ -77,16 +77,18 @@ class ExpertContainer(nn.Module, Container):
                 "Cannot set is_default if this expert is merged, change to 'route'."
             )
 
-        self.on_add_expert(expert, action=action, is_default=is_default)
-
-        # if a new expert was added, we update the selector and information meta-data
-        if action != "merge":
+        update = action != "merge"
+        if update:
             self.expert_infos[expert.name] = expert_info
-            self.selector.add_expert(
-                expert.name, expert_info=expert_info, is_default=is_default
-            )
             self.default_expert_name: str | None = (
                 expert.name if is_default else self.default_expert_name
+            )
+
+        self.on_add_expert(expert, action=action, is_default=is_default)
+        if update:
+            # if a new expert was added, we update the selector and information meta-data
+            self.selector.add_expert(
+                expert.name, expert_info=expert_info, is_default=is_default
             )
 
     @property

@@ -216,7 +216,7 @@ class MultiExpertModel(ExpertModel):
 
         # inject memory for adding selectors
         self.selector_config = selector_config
-        self.selectors_cache = SelectorsCache()
+        self.selector_cache = SelectorsCache()
         self.experts_infos = {}
 
         # initialize the model with the empty experts
@@ -322,13 +322,8 @@ class MultiExpertModel(ExpertModel):
         return containers
 
     @property
-    def selectors(self) -> Dict[str, List[Selector]]:
-        selectors = defaultdict(list)
-        for modifier, selectors_dict in self.selectors_cache.items():
-            for selector in selectors_dict.values():
-                if isinstance(selector, Selector):
-                    selectors[modifier].append(selector)
-        return selectors
+    def selectors(self) -> Dict[str, Dict[str, Selector]]:
+        return self.selector_cache.cache
 
     def delete_expert_container(self):
         """
@@ -338,6 +333,8 @@ class MultiExpertModel(ExpertModel):
             for c_name, child in dict(module.named_children()).items():
                 if isinstance(child, ExpertContainer) and len(child.experts) > 0:
                     setattr(module, c_name, child.layer)
+
+        self.selector_cache.clear()
         self.experts_infos.clear()
 
     def add_experts_from_library(self, library):
@@ -461,9 +458,8 @@ class MultiExpertModel(ExpertModel):
                 expert_instance,
                 action=action,
                 is_default=is_default,
-                training_config=training_config,
                 routing_config=self.selector_config,
-                selectors_cache=self.selectors_cache,
+                selector_cache=self.selector_cache,
             )
 
             if action != "merge":
@@ -482,11 +478,11 @@ class MultiExpertModel(ExpertModel):
         n_selectors, n_selectors_views = replace_selector_for_container(
             self.model,
             modifier_name,
-            self.selectors_cache,
+            self.selector_cache,
             selector_config,
             force_replace=True,
         )
-        assert self.selectors_cache.get(modifier_name)
+        assert self.selector_cache.get(modifier_name)
         logger.info(
             "Created {} selectors and {} views.".format(n_selectors, n_selectors_views)
         )
@@ -507,28 +503,6 @@ class MultiExpertModel(ExpertModel):
             if re.fullmatch(p_name_pattern, name):
                 para_list.append(param.reshape(-1))
         return torch.cat(para_list)
-
-    def get_task_embeddings(self):
-        """
-        Retrieves the task embeddings for the loaded experts.
-
-        This method assumes that the names of the loaded experts correspond to the tasks they are made for.
-
-        Returns:
-        embeddings (dict): A dictionary containing the task embeddings for each expert.
-                           The keys are the expert names and the values are the corresponding embeddings.
-        """
-        if len(self.experts_names) == 0:
-            return self.extract_parameters()
-
-        embeddings = {}
-        for exp_name in self.experts_names:
-            embeddings[exp_name] = (
-                self.extract_parameters(p_name_pattern=rf".*{exp_name}\..*lora.*")
-                .detach()
-                .cpu()
-            )
-        return embeddings
 
     def get_expert_instance(self, expert_name):
         """
