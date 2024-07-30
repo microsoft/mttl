@@ -1,16 +1,21 @@
-import transformers
-import transformers.modeling_flash_attention_utils
-
-from .src.utils.flash_attention_monkey_patch import (
-    flash_attention_forward,
-    get_unpad_data,
+from .src.utils.packed_attention_monkey_patch import (
+    flash_attn_func_wrapper,
+    flash_attn_varlen_func_wrapper,
     scaled_dot_product_attention,
 )
 
-transformers.modeling_flash_attention_utils._get_unpad_data = get_unpad_data
-transformers.modeling_flash_attention_utils._flash_attention_forward = (
-    flash_attention_forward
-)
+try:
+    import flash_attn
+    from flash_attn import flash_attn_func, flash_attn_varlen_func
+
+    flash_attn._default_flash_attn_func = flash_attn_func
+    flash_attn._default_flash_attn_varlen_func = flash_attn_varlen_func
+    flash_attn.flash_attn_varlen_func = flash_attn_varlen_func_wrapper
+    flash_attn.flash_attn_func = flash_attn_func_wrapper
+except ImportError:
+    from mttl.logging import logger
+
+    logger.info("Flash Attention not available")
 
 import torch
 
