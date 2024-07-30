@@ -16,6 +16,7 @@ from mttl.models.containers.selectors import Selector, SelectorConfig
 from mttl.models.containers.selectors.base import (
     LoadableLibraryMixin,
     LoadableSelectorConfig,
+    SelectorsCache,
 )
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_context import InfoContainer
@@ -271,6 +272,7 @@ class MultiExpertModel(ExpertModel):
 
     def __init__(self, **config_kwargs):
         config_kwargs["model_modifier"] = None
+
         super().__init__(**config_kwargs)
 
         # config about the routing
@@ -282,7 +284,7 @@ class MultiExpertModel(ExpertModel):
             )
 
         # inject memory for adding selectors
-        self.model.selectors = {}
+        self.selector_cache = SelectorsCache()
         self.experts_names = []
 
     @classmethod
@@ -350,13 +352,8 @@ class MultiExpertModel(ExpertModel):
         return containers
 
     @property
-    def selectors(self) -> Dict[str, List[Selector]]:
-        selectors = defaultdict(list)
-        for modifier, selectors_dict in self.model.selectors.items():
-            for selector in selectors_dict.values():
-                if isinstance(selector, Selector):
-                    selectors[modifier].append(selector)
-        return selectors
+    def selectors(self) -> Dict[str, Dict[str, Selector]]:
+        return self.selector_cache.cache
 
     def delete_expert_container(self):
         """
@@ -482,8 +479,8 @@ class MultiExpertModel(ExpertModel):
                 expert_instance,
                 action=action,
                 is_default=expert_instance.name == "default" or is_default,
-                routing_config=self.selector_config,
-                training_config=self.training_config,
+                selector_config=self.selector_config,
+                selector_cache=self.selector_cache,
             )
 
             if action != "merge":
@@ -503,9 +500,10 @@ class MultiExpertModel(ExpertModel):
             self.model,
             modifier_type,
             selector_config,
+            self.selector_cache,
             force_replace=True,
         )
-        assert self.model.selectors[modifier_type]
+        assert self.selector_cache[modifier_type]
         logger.info(
             "Created {} selectors and {} views.".format(n_selectors, n_selectors_views)
         )

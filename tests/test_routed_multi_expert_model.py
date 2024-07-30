@@ -241,7 +241,7 @@ class TestMultiExpertModel:
 
         module = MultiExpertModel(**vars(config))
         module.load_from_module_dict(module_dict, action="route")
-        assert module.selectors["lora"][0].init_gap == [-1e-3, 1e-3]
+        assert list(module.selectors["lora"].values())[0].init_gap == [-1e-3, 1e-3]
 
         assert isinstance(
             module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
@@ -264,15 +264,15 @@ class TestMultiExpertModel:
 
         # check the get_router_weights function
         weights = {}
-        for _, selector_list in module.selectors.items():
-            for selector in selector_list:
+        for _, selector_dict in module.selectors.items():
+            for selector in selector_dict.values():
                 weights[selector.layer_name] = selector.get_routing_weights()
         assert len(weights) == 1
         assert (
             "mod1" in weights["transformer.h.0.attn.attention.k_proj.selector"]
             and "mod2" in weights["transformer.h.0.attn.attention.k_proj.selector"]
         )
-        assert "shared" in module.model.selectors["lora"]
+        assert "shared" in module.selectors["lora"]
 
         assert isinstance(
             module.model.transformer.h[0].attn.attention.k_proj.selector,
@@ -293,16 +293,17 @@ class TestMultiExpertModel:
             **vars(config),
         )
         module.load_from_module_dict(module_dict)
-        assert module.selectors["lora"][0].init_gap == [0, 0]
-        assert module.selectors["lora"][0].module_logits_dict["mod1"].item() == 1.0
-        assert module.selectors["lora"][0].module_logits_dict["mod2"].item() == 0.0
+        selector = list(module.selectors["lora"].values())[0]
+        assert selector.init_gap == [0, 0]
+        assert selector.module_logits_dict["mod1"].item() == 1.0
+        assert selector.module_logits_dict["mod2"].item() == 0.0
 
         output = module(batch)
         assert np.allclose(output.item(), 9.68, atol=0.1)
 
         weights = {}
-        for _, selector_list in module.selectors.items():
-            for selector in selector_list:
+        for _, selector_dict in module.selectors.items():
+            for selector in selector_dict.values():
                 weights[selector.layer_name] = selector.get_routing_weights()
         assert len(weights) > 1
 
