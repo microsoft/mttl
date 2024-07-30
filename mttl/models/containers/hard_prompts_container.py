@@ -10,15 +10,11 @@ from mttl.models.containers.selectors import (
     TaskNameSelector,
 )
 from mttl.models.library.expert import Expert
-from mttl.models.modifiers.base import ModifyMixin
 from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
-from mttl.models.modifiers.modify_model import register_modifier
 
 
-class HardPromptDecoderWrapper(nn.Module):
+class HardPromptDecoderWrapper:
     def __init__(self, transformer, expert_container):
-        super().__init__()
-
         self.transformer = transformer
         self.expert_container = expert_container
         self.transformer_prepare_inputs_for_generation = (
@@ -35,6 +31,9 @@ class HardPromptDecoderWrapper(nn.Module):
             return super().__getattr__(name)
         else:
             return getattr(self.transformer, name)
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
 
     def forward(self, *args, **kwargs):
         # Should be padded (**right**)
@@ -108,18 +107,18 @@ class HardPromptExpertContainer(ExpertContainer):
         self.merged_expert_names = []
         self.experts = nn.ModuleDict({})
 
-    def _add_expert(
+    def on_add_expert(
         self,
         expert: Expert,
         action="route",
         is_default=False,
     ) -> None:
-        from mttl.models.modifiers.modify_model import get_modifier_type
+        from mttl.models.modifiers.modify_model import get_modifier_name
 
         if action == "merge":
             raise ValueError("Merging is not supported for hard prompts.")
 
-        if get_modifier_type(expert.expert_config) == "hard_prompt":
+        if get_modifier_name(expert.expert_config) == "hard_prompt":
             expert_module = HardPrompt(
                 expert.expert_config, prompt_init=expert.expert_weights
             )

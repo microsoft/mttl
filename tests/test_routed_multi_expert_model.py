@@ -4,7 +4,10 @@ import torch
 from pytorch_lightning import seed_everything
 
 from mttl.config import Config
-from mttl.models.containers import CoalescedLoRAExpertContainer, LoRAExpertContainer
+from mttl.models.containers.lora_containers import (
+    CoalescedLoRAExpertContainer,
+    LoRAExpertContainer,
+)
 from mttl.models.containers.selectors import (
     BatchSequenceExpertsAndWeightsSelectorOutput,
     MOERKHSSelector,
@@ -13,6 +16,7 @@ from mttl.models.containers.selectors import (
     PolySelectorDirect,
     SelectorOutput,
 )
+from mttl.models.containers.selectors.base import LoadableLibraryMixin
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import MoEModel, MultiExpertModel
 from mttl.models.library.expert import Expert
@@ -184,7 +188,7 @@ class TestMultiExpertModel:
                 mod.module_logits.data[:, -1] = 999
 
         output = module(batch)
-        assert np.allclose(output.item(), 15.21, atol=0.1)
+        assert np.allclose(output.item(), 16.22, atol=0.1)
 
         # Finally, Test invalid tasks
         batch["task_names"][-1] = "task_10"
@@ -237,6 +241,7 @@ class TestMultiExpertModel:
 
         module = MultiExpertModel(**vars(config))
         module.load_from_module_dict(module_dict, action="route")
+        assert module.selectors["lora"][0].init_gap == [-1e-3, 1e-3]
 
         assert isinstance(
             module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
@@ -255,7 +260,7 @@ class TestMultiExpertModel:
 
         # Test Base Llama model
         output = module(batch)
-        assert np.allclose(output.item(), 10.15, atol=0.1)
+        assert np.allclose(output.item(), 9.68, atol=0.1)
 
         # check the get_router_weights function
         weights = {}
@@ -282,12 +287,18 @@ class TestMultiExpertModel:
 
         # change router_granularity to finegrained
         config.router_granularity = "finegrained"
+        config.finetune_task_name = "mod1"
+
         module = MultiExpertModel(
             **vars(config),
         )
         module.load_from_module_dict(module_dict)
+        assert module.selectors["lora"][0].init_gap == [0, 0]
+        assert module.selectors["lora"][0].module_logits_dict["mod1"].item() == 1.0
+        assert module.selectors["lora"][0].module_logits_dict["mod2"].item() == 0.0
+
         output = module(batch)
-        assert np.allclose(output.item(), 10.15, atol=0.1)
+        assert np.allclose(output.item(), 9.68, atol=0.1)
 
         weights = {}
         for _, selector_list in module.selectors.items():

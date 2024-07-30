@@ -11,17 +11,21 @@ from transformers import PreTrainedModel
 
 from mttl.logging import logger
 from mttl.models.containers import add_expert_to_transformer
-from mttl.models.containers.expert_containers import ExpertContainer
+from mttl.models.containers.base import ExpertContainer
 from mttl.models.containers.selectors import Selector, SelectorConfig
-from mttl.models.containers.selectors.base_selectors import LoadableSelectorConfig
+from mttl.models.containers.selectors.base import (
+    LoadableLibraryMixin,
+    LoadableSelectorConfig,
+)
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_context import InfoContainer
 from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.llama_patch import replace_attn_with_flash_attn
 from mttl.models.modifiers import modify_transformer
-from mttl.models.modifiers.base import ModifierConfig
+from mttl.models.modifiers.base import Modifier, ModifierConfig
 from mttl.models.modifiers.lora import SkilledLoRAConfig
+from mttl.models.modifiers.modify_model import get_modifier_name
 from mttl.models.utils import EfficientCheckpointModule, prepare_model_for_kbit_training
 
 torch.set_float32_matmul_precision("high")
@@ -278,6 +282,8 @@ class MultiExpertModel(ExpertModel):
                 self.training_config
             )
 
+        # inject memory for adding selectors
+        self.model.selectors = {}
         self.experts_names = []
 
     @classmethod
@@ -409,6 +415,7 @@ class MultiExpertModel(ExpertModel):
         self,
         expert_name,
         expert_config=None,
+        is_default=False,
     ) -> Expert:
         """Adds a new empty expert to the model."""
         new_expert = Expert(
@@ -420,7 +427,7 @@ class MultiExpertModel(ExpertModel):
             ),
         )
 
-        new_expert = self.add_expert_instance(new_expert)
+        new_expert = self.add_expert_instance(new_expert, is_default=is_default)
         logger.info("Added empty expert: {}".format(expert_name))
         return new_expert
 
@@ -615,16 +622,16 @@ class MultiExpertModel(ExpertModel):
             model = ExpertModel()
             expert = model.to_expert(weights={'expert1': 0.5, 'expert2': 0.5}, with_global_names=True)
         """
-        from mttl.models.modifiers.modify_model import get_modifier_type
-
         expert_params = {}
         assert (
             modifier_type in self.selectors
         ), f"Modifier type {modifier_type} not in model."
+
         for container in self.experts_containers:
-            if not get_modifier_type(container.config) == modifier_type:
+            config_modifier = get_modifier_name(container.config)
+            if config_modifier != modifier_type:
                 logger.info(
-                    f"Skipping container {container.layer_name} with modifier type {get_modifier_type(container.config)}"
+                    f"Skipping container {container.layer_name} with modifier type {config_modifier}"
                 )
                 continue
 
