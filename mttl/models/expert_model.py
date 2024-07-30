@@ -322,8 +322,10 @@ class MultiExpertModel(ExpertModel):
         return containers
 
     @property
-    def selectors(self) -> Dict[str, Dict[str, Selector]]:
-        return self.selector_cache.cache
+    def selectors(self) -> Dict[str, List[Selector]]:
+        return {
+            name: list(cache.values()) for name, cache in self.selector_cache.items()
+        }
 
     def delete_expert_container(self):
         """
