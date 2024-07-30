@@ -8,11 +8,14 @@ from pytorch_lightning import Trainer
 from mttl.callbacks import LiveCheckpointCallback
 from mttl.logging import get_pl_loggers
 from mttl.models.expert_config import ExpertConfig
-from mttl.models.expert_model import ExpertModel as ExpertTrainer
+from mttl.models.expert_model import ExpertModel
+from mttl.models.expert_trainer import ExpertModelLightningWrapper
 from mttl.models.monitors import get_monitors
 
 
-def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
+def train_module(module: ExpertModelLightningWrapper, dm):
+    """Given a lightning wrapper, train the module with the given datamodule."""
+    args = module.training_config
     loggers = get_pl_loggers(args)
     callbacks = get_monitors(args)
 

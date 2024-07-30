@@ -110,6 +110,7 @@ def tmp_exp_config(tmp_path):
     class SimpleConfig(ExpertConfig):
         def _set_defaults(self):
             super()._set_defaults()
+
             self.library_id = None
             self.model_modifier = "lora"
             self.modify_layers = "c_fc|c_proj|k_proj|v_proj|q_proj|out_proj"
@@ -132,7 +133,8 @@ def create_dummy_expert(make_tiny_llama):
         ):
             # use tiny llama by default
             kwargs["model_object"] = make_tiny_llama()
-        model = MultiExpertModel(**vars(config), **kwargs)
+
+        model = MultiExpertModel(model=kwargs["model_object"])
         expert = model.add_empty_expert(
             exp_name, ModifierConfig.from_training_config(config)
         )

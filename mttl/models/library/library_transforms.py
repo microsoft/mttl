@@ -20,6 +20,7 @@ from mttl.logging import logger
 from mttl.models.containers.lora_containers import ExpertContainer
 from mttl.models.containers.selectors.phatgoose_selector import PhatgooseSelectorConfig
 from mttl.models.expert_config import ExpertConfig
+from mttl.models.expert_trainer import MultiExpertModelLightningWrapper
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.modifiers.base import get_target_2_source_param_mapping
@@ -699,7 +700,9 @@ class PhatgooseTransform(HiddenStateComputer):
                     frozen_sum += value.sum()
                     value.requires_grad = False
 
-            checkpoint = train_module(training_config, model, dm)
+            checkpoint = train_module(
+                MultiExpertModelLightningWrapper(model, training_config), dm
+            )
 
             if (
                 training_config.compute_strategy

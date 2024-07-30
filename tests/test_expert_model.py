@@ -11,7 +11,7 @@ from mttl.models.containers.selectors import (
     TaskNameSelector,
     TaskNameSelectorConfig,
 )
-from mttl.models.expert_model import Expert, MultiExpertModel
+from mttl.models.expert_model import Expert, ExpertModel, MultiExpertModel
 from mttl.models.modifiers.lora import LoRAConfig
 
 

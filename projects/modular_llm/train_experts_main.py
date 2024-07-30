@@ -4,15 +4,24 @@ import sys
 from tempfile import TemporaryDirectory
 
 import torch
-from pytorch_lightning import Trainer, seed_everything
+from pytorch_lightning import LightningModule, Trainer, seed_everything
+
+from mttl.models.containers.selectors.base import SelectorConfig
+from mttl.models.expert_model import ExpertModel, LoRAMoEModel, MultiExpertModel
+from mttl.models.modifiers.base import ModifierConfig
+from mttl.models.modifiers.lora import SkilledLoRAConfig
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
+
 
 from mttl.callbacks import LiveCheckpointCallback, NanoMMLUCallback, RougeCallback
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
 from mttl.models.expert_config import ExpertConfig
-from mttl.models.expert_model import ExpertModel, MoEModel
+from mttl.models.expert_trainer import (
+    ExpertModelLightningWrapper,
+    LoRAMoELightningWrapper,
+)
 from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
 from mttl.models.monitors import get_monitors
@@ -73,18 +82,35 @@ def run_multitask(args: ExpertConfig):
         expert_library = create_library(args)
 
     loggers = get_pl_loggers(args)
-    # select dataloader
-    if args.model_modifier == "poly":
-        args.init_from_scratch = True
-        model_class = MoEModel
-    else:
-        model_class = ExpertModel
 
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
     args.task_names = dm._task_names
 
-    module = model_class(**vars(args), tokenizer=dm.tokenizer)
+    # initialize models (add experts, etc.)
+    if args.router_selector == "poly":
+        args.init_from_scratch = True
+
+        model = LoRAMoEModel(
+            model=args.model,
+            modifier_config=SkilledLoRAConfig.from_training_config(
+                args, ignore_prefix="moe_"
+            ),
+            selector_config=SelectorConfig.from_training_config(args),
+        )
+        module = LoRAMoELightningWrapper(
+            model=model,
+            training_config=args,
+        )
+    else:
+        args.expert_name = (
+            args.expert_name or args.finetune_task_name or generate_random_string()
+        )
+        model = ExpertModel.from_training_config(args)
+        module = ExpertModelLightningWrapper(
+            model=model,
+            training_config=args,
+        )
 
     # get metric monitors for models
     callbacks = get_monitors(args)
@@ -201,24 +227,23 @@ def run_multitask(args: ExpertConfig):
         trainer.test(module, dm)
 
         @rank_zero_only_and_wait(before=False, after=True)
-        def upload_library(expert_library, module):
+        def upload_library(
+            expert_library: ExpertLibrary, module: ExpertModelLightningWrapper
+        ):
             if expert_library is not None:
                 # refresh expert library: so we dont overwrite the readme if the remote has changed.
                 expert_library.refresh_from_remote()
 
-                if isinstance(module, MoEModel):
+                if isinstance(module, LoRAMoELightningWrapper):
                     with expert_library.batched_commit():
-                        for expert_name in module.experts_names:
-                            expert = module.get_expert_instance(expert_name)
+                        for expert_name in module.model.experts_names:
+                            expert = module.model.get_expert_instance(expert_name)
                             expert_library.add_expert(expert, expert_name)
-                elif isinstance(module, ExpertModel):
-                    expert = module.as_expert()
-                    expert_name = (
-                        args.expert_name
-                        or args.finetune_task_name
-                        or generate_random_string()
-                    )
-                    expert_library.add_expert(expert, expert_name)
+
+                elif isinstance(module, ExpertModelLightningWrapper):
+                    model: MultiExpertModel = module.model
+                    expert: Expert = model.get_expert_instance(args.expert_name)
+                    expert_library.add_expert(expert)
                 else:
                     raise ValueError("Model class not recognized")
 

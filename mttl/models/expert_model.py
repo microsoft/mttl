@@ -191,6 +191,16 @@ class ExpertModel(torch.nn.Module):
         expert = Expert(expert_info=self.expert_info, expert_weights=expert_params)
         return expert
 
+    @classmethod
+    def from_training_config(cls, training_config: ExpertConfig):
+        return cls(
+            model_name_or_object=training_config.model,
+            modifier_config=ModifierConfig.from_training_config(training_config),
+            load_in_4bit=training_config.load_in_4bit,
+            load_in_8bit=training_config.load_in_8bit,
+            device_map=training_config.device_map,
+        )
+
 
 class MultiExpertModel(ExpertModel):
     """Adds all functions and properties for a multi-expert model."""
@@ -215,6 +225,16 @@ class MultiExpertModel(ExpertModel):
                 self.add_empty_expert(
                     expert_info.expert_name, expert_info.expert_config
                 )
+
+    @classmethod
+    def from_training_config(cls, training_config: ExpertConfig):
+        return cls(
+            model_name_or_object=training_config.model,
+            selector_config=SelectorConfig.from_training_config(training_config),
+            load_in_4bit=training_config.load_in_4bit,
+            load_in_8bit=training_config.load_in_8bit,
+            device_map=training_config.device_map,
+        )
 
     @property
     def experts_names(self):

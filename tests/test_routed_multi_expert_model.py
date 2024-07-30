@@ -30,8 +30,8 @@ from mttl.models.containers.selectors.poly_selector import PolySelectorConfig
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import LoRAMoEModel, MultiExpertModel
 from mttl.models.expert_trainer import (
+    ExpertModelLightningWrapper,
     LoRAMoELightningWrapper,
-    SingleExpertModelLightningWrapper,
 )
 from mttl.models.library.expert import Expert
 from mttl.models.modifiers.base import ModifierConfig
