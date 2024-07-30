@@ -285,7 +285,11 @@ class MultiExpertModel(ExpertModel):
 
         # inject memory for adding selectors
         self.selector_cache = SelectorsCache()
-        self.experts_names = []
+        self.experts_infos = {}
+
+    @property
+    def experts_names(self):
+        return list(self.experts_infos.keys())
 
     @classmethod
     def from_pretrained_library(
@@ -363,7 +367,9 @@ class MultiExpertModel(ExpertModel):
             for c_name, child in dict(module.named_children()).items():
                 if isinstance(child, ExpertContainer) and len(child.experts) > 0:
                     setattr(module, c_name, child.layer)
-        self.experts_names.clear()
+
+        self.selector_cache.clear()
+        self.experts_infos.clear()
 
     def add_experts_from_library(self, library):
         import concurrent.futures
@@ -484,7 +490,7 @@ class MultiExpertModel(ExpertModel):
             )
 
             if action != "merge":
-                self.experts_names.append(expert_instance.name)
+                self.experts_infos[expert_instance.name] = expert_instance.expert_info
                 # reload the expert instance to fill the weights properly if this was an empty expert
                 expert_instance = self.get_expert_instance(expert_instance.name)
             return expert_instance
@@ -524,28 +530,6 @@ class MultiExpertModel(ExpertModel):
             if re.fullmatch(p_name_pattern, name):
                 para_list.append(param.reshape(-1))
         return torch.cat(para_list)
-
-    def get_task_embeddings(self):
-        """
-        Retrieves the task embeddings for the loaded experts.
-
-        This method assumes that the names of the loaded experts correspond to the tasks they are made for.
-
-        Returns:
-        embeddings (dict): A dictionary containing the task embeddings for each expert.
-                           The keys are the expert names and the values are the corresponding embeddings.
-        """
-        if len(self.experts_names) == 0:
-            return self.extract_parameters()
-
-        embeddings = {}
-        for exp_name in self.experts_names:
-            embeddings[exp_name] = (
-                self.extract_parameters(p_name_pattern=rf".*{exp_name}\..*lora.*")
-                .detach()
-                .cpu()
-            )
-        return embeddings
 
     def get_expert_instance(self, expert_name):
         """
