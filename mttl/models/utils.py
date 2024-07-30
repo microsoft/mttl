@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import os
 import re
 from collections import defaultdict, deque
@@ -26,6 +27,65 @@ class Singleton(object):
         if not hasattr(cls, "instance"):
             cls.instance = super(Singleton, cls).__new__(cls)
         return cls.instance
+
+
+def get_cached_file(pretrained_model_name_or_path, **kwargs) -> str:
+    """Returns local path to the cached file."""
+    # Load model
+    instantiate_model = kwargs.pop("instantiate_model", True)
+    cache_dir = kwargs.pop("cache_dir", None)
+    force_download = kwargs.pop("force_download", None)
+    force_download = kwargs.pop("force_download", False)
+    resume_download = kwargs.pop("resume_download", False)
+    proxies = kwargs.pop("proxies", None)
+    local_files_only = kwargs.pop("local_files_only", False)
+    use_auth_token = kwargs.pop("use_auth_token", None)
+
+    user_agent = {
+        "file_type": "model",
+        "framework": "pytorch",
+        "from_auto_class": False,
+    }
+
+    if pretrained_model_name_or_path is not None:
+        pretrained_model_name_or_path = str(pretrained_model_name_or_path)
+
+        if os.path.isfile(pretrained_model_name_or_path) or os.path.isdir(
+            pretrained_model_name_or_path
+        ):
+            resolved_archive_file = get_checkpoint_path(pretrained_model_name_or_path)
+        else:
+            try:
+                # Load from URL or cache if already cached
+                resolved_archive_file = cached_file(
+                    pretrained_model_name_or_path,
+                    CHECKPOINT_PATH_IN_HUB,
+                    cache_dir=cache_dir,
+                    force_download=force_download,
+                    proxies=proxies,
+                    resume_download=resume_download,
+                    local_files_only=local_files_only,
+                    use_auth_token=use_auth_token,
+                    user_agent=user_agent,
+                )
+            except EnvironmentError as err:
+                logger.error(err)
+                msg = (
+                    f"Can't load weights for '{pretrained_model_name_or_path}'. Make sure that:\n\n"
+                    f"- '{pretrained_model_name_or_path}' is a correct model identifier listed on 'https://huggingface.co/models'\n\n"
+                    f"- or '{pretrained_model_name_or_path}' is the correct path to a directory containing a file named one of checkpoint.ckpt\n\n"
+                )
+                raise EnvironmentError(msg)
+
+            if resolved_archive_file == pretrained_model_name_or_path:
+                logger.info(f"loading weights file {resolved_archive_file}")
+            else:
+                logger.info(
+                    f"loading weights file {pretrained_model_name_or_path} from cache at {resolved_archive_file}"
+                )
+    else:
+        resolved_archive_file = None
+    return resolved_archive_file
 
 
 def transfer_batch_to_device(batch, device):
@@ -140,7 +200,7 @@ class EfficientCheckpointModule(LightningModule, OnLogCallback):
     """
 
     def __init__(self, **kwargs):
-        super().__init__()
+        LightningModule.__init__(self)
 
         self.loss_plugins = {}
         # If True, do not delete any parameters that were loaded in a
@@ -159,98 +219,6 @@ class EfficientCheckpointModule(LightningModule, OnLogCallback):
         model_hash = hashlib.sha256()
         model_hash.update(f"{self.hparams}".encode())
         return model_hash.hexdigest()
-
-    @classmethod
-    def from_pretrained(
-        cls,
-        pretrained_model_name_or_path: Optional[Union[str, os.PathLike]],
-        *model_args,
-        **kwargs,
-    ):
-        # Load model
-        instantiate_model = kwargs.pop("instantiate_model", True)
-        cache_dir = kwargs.pop("cache_dir", None)
-        force_download = kwargs.pop("force_download", None)
-        force_download = kwargs.pop("force_download", False)
-        resume_download = kwargs.pop("resume_download", False)
-        proxies = kwargs.pop("proxies", None)
-        local_files_only = kwargs.pop("local_files_only", False)
-        use_auth_token = kwargs.pop("use_auth_token", None)
-
-        user_agent = {
-            "file_type": "model",
-            "framework": "pytorch",
-            "from_auto_class": False,
-        }
-
-        if pretrained_model_name_or_path is not None:
-            pretrained_model_name_or_path = str(pretrained_model_name_or_path)
-
-            if os.path.isfile(pretrained_model_name_or_path) or os.path.isdir(
-                pretrained_model_name_or_path
-            ):
-                resolved_archive_file = get_checkpoint_path(
-                    pretrained_model_name_or_path
-                )
-            else:
-                try:
-                    # Load from URL or cache if already cached
-                    resolved_archive_file = cached_file(
-                        pretrained_model_name_or_path,
-                        CHECKPOINT_PATH_IN_HUB,
-                        cache_dir=cache_dir,
-                        force_download=force_download,
-                        proxies=proxies,
-                        resume_download=resume_download,
-                        local_files_only=local_files_only,
-                        use_auth_token=use_auth_token,
-                        user_agent=user_agent,
-                    )
-                except EnvironmentError as err:
-                    logger.error(err)
-                    msg = (
-                        f"Can't load weights for '{pretrained_model_name_or_path}'. Make sure that:\n\n"
-                        f"- '{pretrained_model_name_or_path}' is a correct model identifier listed on 'https://huggingface.co/models'\n\n"
-                        f"- or '{pretrained_model_name_or_path}' is the correct path to a directory containing a file named one of checkpoint.ckpt\n\n"
-                    )
-                    raise EnvironmentError(msg)
-
-                if resolved_archive_file == pretrained_model_name_or_path:
-                    logger.info(f"loading weights file {resolved_archive_file}")
-                else:
-                    logger.info(
-                        f"loading weights file {pretrained_model_name_or_path} from cache at {resolved_archive_file}"
-                    )
-        else:
-            resolved_archive_file = None
-
-        if instantiate_model:
-            return cls.load_from_checkpoint(resolved_archive_file, **kwargs)
-        else:
-            ckpt = torch.load(resolved_archive_file, map_location="cpu")
-            return ckpt
-
-    @classmethod
-    def load_from_checkpoint(
-        cls,
-        checkpoint_path,
-        **model_kwargs,
-    ):
-        from mttl.datamodule.utils import get_tokenizer_with_args
-
-        tokenizer = model_kwargs.get("tokenizer", None)
-        ckpt = torch.load(checkpoint_path, map_location="cpu")
-        ckpt["hyper_parameters"].update(**model_kwargs)
-
-        if tokenizer is None and "model" in ckpt["hyper_parameters"]:
-            tokenizer = get_tokenizer_with_args(
-                model_name=ckpt["hyper_parameters"]["model"],
-                model_family=ckpt["hyper_parameters"]["model_family"],
-                padding_side=ckpt["hyper_parameters"]["padding_side"],
-            )
-        model = cls(**ckpt["hyper_parameters"])
-        model.load_state_dict(ckpt["state_dict"], strict=False)
-        return model
 
     def load_state_dict(self, ckpt, **kwargs):
         # store params that might have been loaded from a previous checkpoint
@@ -295,18 +263,8 @@ class EfficientCheckpointModule(LightningModule, OnLogCallback):
     def on_save_checkpoint(self, ckpt):
         self._delete_non_trainable_params(ckpt["state_dict"])
 
-    def on_load_checkpoint(self, ckpt):
-        print("Loading checkpoint...")
-
-        load_result = self.load_state_dict(ckpt["state_dict"])
-
-        assert (
-            len(load_result.unexpected_keys) == 0
-        ), f"Load model failed, unexpected keys {load_result.unexpected_keys.__str__()}"
-
     def configure_optimizers(self):
         args = self.hparams
-        self.ml_optimizer = self.ml_scheduler = None
 
         optimizer, self.trainable_param_names = get_optimizer(
             self, args, no_decay=["bias", "LayerNorm.weight"]
