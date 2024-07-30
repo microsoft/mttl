@@ -349,3 +349,4 @@ class Config:
 
         # rl training
         self.rl_training = "dpo"
+        self.beta = 0.5

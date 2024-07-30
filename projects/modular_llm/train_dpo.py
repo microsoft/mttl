@@ -107,14 +107,6 @@ def run_multitask(args: ExpertConfig):
         ref_model = model_class(
             **vars(args), tokenizer=dm.tokenizer, expert_library=expert_library
         )
-
-        # if args.library_id:
-        #     model.add_experts_from_library(expert_library)
-        #     patch_prototypes(model, expert_library, args)
-
-        #     # ref_model = copy.deepcopy(model)
-        #     ref_model.add_experts_from_library(expert_library)
-        #     patch_prototypes(ref_model, expert_library, args)
         module = ExpertModelDPO(
             **vars(args), preference_model=model, ref_expert_model=ref_model
         )

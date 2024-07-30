@@ -599,7 +599,7 @@ def calculate_DPO_loss(
     original_disprefered_logprob,
     ref_prefered_logprob,
     ref_disprefered_logprob,
-    beta=0.5,
+    beta=2.0,
 ):
     """
     Calculate the DPO loss.
@@ -645,6 +645,7 @@ class ExpertModelSimPO(EfficientCheckpointModule):
         self.beta = kwargs.get("beta", 0.5)
         self.loss_type = kwargs.get("loss_type", "sigmoid")
         self.label_smoothing = kwargs.get("label_smoothing", 0.1)
+        self.gamma_beta_ratio = kwargs.get("gamma_beta_ratio", 0.5)
         # log hyperparameters
         self.save_hyperparameters(kwargs)
 
@@ -675,14 +676,9 @@ class ExpertModelSimPO(EfficientCheckpointModule):
                 f"Loss type {self.loss_type} not supported. Choose from ['sigmoid', 'hinge']"
             )
 
-        chosen_rewards = (
-            self.beta * original_prefered_logprob.detach()
-        )
+        chosen_rewards = self.beta * original_prefered_logprob.detach()
 
-        reject_rewards = (
-            -self.beta
-            * original_disprefered_logprob.detach()
-        )
+        reject_rewards = self.beta * original_disprefered_logprob.detach()
 
         return losses, chosen_rewards, reject_rewards
 
@@ -709,12 +705,19 @@ class ExpertModelSimPO(EfficientCheckpointModule):
         )
 
         loss, chosen_rewards, rejected_rewards = self.simpo_loss(
-            model_prefered_log_prob, model_disprefered_log_prob, gamma_beta_ratio=0.1
+            model_prefered_log_prob,
+            model_disprefered_log_prob,
+            gamma_beta_ratio=self.gamma_beta_ratio,
         )
         self.log("train/loss", loss.mean(), on_step=True, on_epoch=True, prog_bar=True)
-        self.log("train/chosen_rewards", chosen_rewards.mean(), on_step=True, on_epoch=True)
         self.log(
-            "train/rejected_rewards", rejected_rewards.mean(), on_step=True, on_epoch=True
+            "train/chosen_rewards", chosen_rewards.mean(), on_step=True, on_epoch=True
+        )
+        self.log(
+            "train/rejected_rewards",
+            rejected_rewards.mean(),
+            on_step=True,
+            on_epoch=True,
         )
 
         return loss.mean()
@@ -742,11 +745,17 @@ class ExpertModelSimPO(EfficientCheckpointModule):
         )
 
         loss, chosen_rewards, rejected_rewards = self.simpo_loss(
-            model_prefered_log_prob, model_disprefered_log_prob, gamma_beta_ratio=0.1
+            model_prefered_log_prob,
+            model_disprefered_log_prob,
+            gamma_beta_ratio=self.gamma_beta_ratio,
         )
         self.log("val/loss", loss.mean(), on_step=True, on_epoch=True, prog_bar=True)
-        self.log("val/chosen_rewards", chosen_rewards.mean(), on_step=True, on_epoch=True)
-        self.log("val/rejected_rewards", rejected_rewards.mean(), on_step=True, on_epoch=True)
+        self.log(
+            "val/chosen_rewards", chosen_rewards.mean(), on_step=True, on_epoch=True
+        )
+        self.log(
+            "val/rejected_rewards", rejected_rewards.mean(), on_step=True, on_epoch=True
+        )
 
         return loss.mean()
 
@@ -758,6 +767,7 @@ class ExpertModelDPO(EfficientCheckpointModule):
         self.preference_model = preference_model
         self.ref_expert_model = ref_expert_model
         self.trainable_param_names = kwargs.get("trainable_param_names", None)
+        self.beta = kwargs.get("beta", 2.0)
         # log hyperparameters
         self.save_hyperparameters(kwargs)
 
@@ -804,7 +814,7 @@ class ExpertModelDPO(EfficientCheckpointModule):
             model_disprefered_log_prob,
             ref_prefered_log_prob,
             ref_disprefered_log_prob,
-            beta=0.1,
+            beta=self.beta,
         )
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
 
@@ -867,7 +877,7 @@ class ExpertModelDPO(EfficientCheckpointModule):
             model_disprefered_log_prob,
             ref_prefered_log_prob,
             ref_disprefered_log_prob,
-            beta=0.1,
+            beta=self.beta,
         )
 
         self.log("val/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
@@ -930,7 +940,7 @@ class ExpertModelDPO(EfficientCheckpointModule):
             model_disprefered_log_prob,
             ref_prefered_log_prob,
             ref_disprefered_log_prob,
-            beta=0.1,
+            beta=self.beta,
         )
         self.log("test/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
         self.log(
