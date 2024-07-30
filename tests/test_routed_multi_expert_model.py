@@ -76,7 +76,7 @@ def bigger_dummy_batch():
 
 class TestMultiExpertModel:
     def create_dummy_expert(self, config: ExpertConfig, exp_name) -> Expert:
-        model = MultiExpertModel(model=config.model, device_map="cpu")
+        model = MultiExpertModel(config.model, device_map="cpu")
         expert = model.add_empty_expert(
             exp_name, ModifierConfig.from_training_config(config)
         )
