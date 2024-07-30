@@ -266,7 +266,7 @@ class LoRAMoELightningWrapper(MultiExpertModelLightningWrapper):
     ):
         # update the training config with the modifier config
         training_config.model_modifier = None
-        training_config.router_selector = SelectorConfig.get_name_by_config_class(
+        training_config.router_selector = Selector.get_name_by_config_class(
             model.selector_config
         )
         training_config.update_kwargs(model.selector_config.asdict(), raise_error=False)
@@ -280,7 +280,7 @@ class LoRAMoELightningWrapper(MultiExpertModelLightningWrapper):
         EfficientCheckpointModule.on_save_checkpoint(self, ckpt)
 
         ckpt["experts_info"] = [e.asdict() for e in self.expert_info]
-        ckpt["experts_library_id"] = model.expert_library_id
+        ckpt["experts_library_id"] = model.experts_library_id
         ckpt["selector_config"] = self.model.selector_config.asdict()
 
     @classmethod
