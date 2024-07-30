@@ -439,14 +439,14 @@ def model_loader_helper(
     device_map="auto",
     load_in_4bit=False,
     load_in_8bit=False,
-    use_flash_attn=False,
+    attn_implementation=None,
 ):
     if load_in_4bit and load_in_8bit:
         raise ValueError("Specify either 'load_in_4bit' or 'load_in_8bit' or neither.")
 
     from transformers import AutoModelForCausalLM, LlamaForCausalLM, PreTrainedModel
 
-    logger.info(f"Using flash attention 2: {use_flash_attn}")
+    logger.info(f"Attention Implementation: {attn_implementation}")
 
     if isinstance(model_name, PreTrainedModel):
         return model_name
@@ -458,7 +458,7 @@ def model_loader_helper(
             load_in_8bit=load_in_8bit,
             torch_dtype=torch.bfloat16,
             device_map=device_map,
-            use_flash_attention_2=use_flash_attn,
+            attn_implementation=attn_implementation,
         )
     elif "phi-2" == model_name:
         # local phi-2 version. use `microsoft/phi-2 for the official hf version`
@@ -485,7 +485,7 @@ def model_loader_helper(
             load_in_4bit=load_in_4bit,
             load_in_8bit=load_in_8bit,
             trust_remote_code=True,
-            use_flash_attention_2=use_flash_attn,
+            attn_implementation=attn_implementation,
             torch_dtype=torch.bfloat16,
         )
     return model_object

@@ -308,6 +308,27 @@ class DefaultCollator:
                 torch.int32
             )
 
+            # build the appropriate "block"-lower triangular mask for sdpa attention
+            bs, seq_len = output_batch["input_ids"].shape
+            packed_attn_mask = torch.zeros(bs, 1, seq_len, seq_len, dtype=torch.bool)
+            for i in range(bs):
+                start_idx = 0
+                for seq_len in output_batch["seq_lens"][i]:
+                    packed_attn_mask[
+                        i,
+                        :,
+                        start_idx : start_idx + seq_len,
+                        start_idx : start_idx + seq_len,
+                    ] = True
+                    start_idx += seq_len
+
+                # For whatever reason, we need to let padding tokens attend the previous context ¯\_(ツ)_/¯
+                # Otherwise SDPA has nans
+                packed_attn_mask[i, :, start_idx:, :start_idx] = True
+
+            packed_attn_mask = packed_attn_mask.tril()
+            output_batch["packed_attn_mask"] = packed_attn_mask
+
             return dict(output_batch)
 
         # Otherwise process as expected
@@ -634,7 +655,7 @@ class DefaultDataModule(LightningDataModule):
 
         return dataset
 
-    def pack_sequences(self, dataset):
+    def pack_sequences(self, dataset, max_sequences=8):
         """
         Combine sequences together in larger chunks closer to `max_input_length`
         """
@@ -685,24 +706,27 @@ class DefaultDataModule(LightningDataModule):
 
             num_examples = len(examples["input_ids"])
             packed = new_container()
-            current_len = 0
+            current_lens = []
             for i in range(num_examples):
                 ex = dict_get_item(examples, i)
                 ex_len = len(ex["input_ids"])
                 # can pack
-                if current_len + ex_len <= max_length:
+                if (
+                    sum(current_lens) + ex_len <= max_length
+                    and len(current_lens) < max_sequences
+                ):
                     append_to_running_seq(packed, ex)
-                    current_len += ex_len
+                    current_lens += [ex_len]
                 else:
-                    if current_len > 0:
+                    if len(current_lens) > 0:
                         add_finished_sequence(grouped_samples, packed)
                     packed = new_container()
-                    current_len = 0
+                    current_lens = []
                     trim_ex(ex)
                     append_to_running_seq(packed, ex)
-                    current_len += ex_len
+                    current_lens += [ex_len]
 
-            if current_len > 0:
+            if len(current_lens) > 0:
                 add_finished_sequence(grouped_samples, packed)
 
             return grouped_samples

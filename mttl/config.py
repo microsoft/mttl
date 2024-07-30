@@ -187,6 +187,7 @@ class Config:
         self.subsample_per_task = False
         self.pack_sequences = False
         self.pad_to_multiple_of = 8
+        self.padding_side = "right"
 
         self.data_dir = os.getenv("TRAIN_DIR", "/tmp/")
         self.output_dir = os.getenv("OUTPUT_DIR", "./output")
@@ -282,7 +283,7 @@ class Config:
 
         self.model = None
         self.model_family = None  # model family, either "gpt" or "encdec"
-        self.use_flash_attn = False
+        self.attn_implementation = "spda"
 
         self.precision = "32"
         self.monitor_grad_alignment_on = None
