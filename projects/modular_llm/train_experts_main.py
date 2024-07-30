@@ -140,7 +140,7 @@ def run_multitask(args: ExpertConfig):
     val_check_interval = args.eval_every
     if val_check_interval == -1 or val_check_interval is None:
         val_check_interval = None
-    else:
+    elif not (0.0 < val_check_interval < 1.0):
         val_check_interval = args.gradient_accumulation_steps * args.eval_every
         if val_check_interval > len(dm.train_dataloader()):
             val_check_interval = len(dm.train_dataloader())
