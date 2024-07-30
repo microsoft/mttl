@@ -13,9 +13,12 @@ from mttl.callbacks import LiveCheckpointCallback, RougeCallback
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
 from mttl.models.expert_config import ExpertConfig
-from mttl.models.expert_model import ExpertModel as ExpertTrainer
-from mttl.models.expert_model import MoEModel as MoETrainer
 from mttl.models.expert_model import MultiExpertModel
+from mttl.models.expert_trainer import (
+    ExpertModelLightningWrapper,
+    LoRAMoELightningWrapper,
+    MultiExpertModelLightningWrapper,
+)
 from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import (
     ExpertLibrary,
@@ -253,10 +256,10 @@ def finetune_lib_mu(args: ExpertConfig, dm):
     if args.finetune_task_name:
         mean_expert.name = args.finetune_task_name
 
-    module = MultiExpertModel(**vars(args)).to("cuda")
+    module = MultiExpertModel.from_training_config(args).to("cuda")
     module.add_expert_instance(mean_expert, is_default=True)
 
-    return (train_module(args, module, dm),)
+    return (train_module(args, MultiExpertModelLightningWrapper(module, args), dm),)
 
 
 @register_finetune_func("lib_mu_randretr")
@@ -277,7 +280,7 @@ def finetune_lib_mu_with_rand_retrieval(args: ExpertConfig, dm):
     module = MultiExpertModel(**vars(args)).to("cuda")
     module.add_expert_instance(mean_expert, is_default=True)
 
-    return train_module(args, module, dm)
+    return train_module(args, MultiExpertModelLightningWrapper(module, args), dm)
 
 
 @register_finetune_func("lib_mu_svdretr")
@@ -298,7 +301,7 @@ def finetune_lib_mu_with_svd_retrieval(args: ExpertConfig, dm):
     module = MultiExpertModel(**vars(args)).to("cuda")
     module.add_expert_instance(mean_expert, is_default=True)
 
-    return train_module(args, module, dm)
+    return train_module(args, MultiExpertModelLightningWrapper(module, args), dm)
 
 
 @register_finetune_func("polylib_full")
@@ -313,22 +316,22 @@ def finetune_polylib_full(args: ExpertConfig, dm):
         args.trainable_param_names
         + "|.*module_logits.*|.*selector.*"  # adds selector params to trainable params
     )
-    # args.router_selector = "poly_router"
+
     assert args.router_selector is not None
-    module = MoETrainer(**vars(args), device_map="auto")
+    module = LoRAMoEModel(**vars(args), device_map="auto")
 
     for n, p in module.named_parameters():
         if "selector" in n:
             assert p.requires_grad
 
     module.to("cuda")
-    return train_module(args, module, dm)
+    return train_module(args, LoraM, dm)
 
 
 @register_finetune_func("polylib_uniform")
 def finetune_polylib_full(args: ExpertConfig, dm):
     args.router_selector = "uniform"
-    module = MoETrainer(**vars(args), device_map="auto")
+    module = LoRAMoELightningWrapper(**vars(args), device_map="auto")
 
     # for n, p in module.named_parameters():
     #     if "selector" in n:
@@ -347,7 +350,7 @@ def finetune_polylib_sel(args: ExpertConfig, dm):
     args.trainable_param_names = "|.*module_logits.*|.*selector.*"
     assert args.router_selector is not None
 
-    module = MoETrainer(**vars(args), device_map="auto")
+    module = LoRAMoELightningWrapper(**vars(args), device_map="auto")
 
     for n, p in module.named_parameters():
         if "selector" in n:
@@ -369,7 +372,9 @@ def finetune_polylib_full_with_rand_retrieval(args: ExpertConfig, dm):
 
     # assert args.router_selector == "poly_router"
     assert args.router_selector is not None
-    module = MoETrainer(**vars(args), device_map="auto", expert_library=library)
+    module = LoRAMoELightningWrapper(
+        **vars(args), device_map="auto", expert_library=library
+    )
 
     for n, p in module.named_parameters():
         if "selector" in n:
@@ -385,7 +390,7 @@ def finetune_private(args: ExpertConfig, dm):
     Just train an expert from scratch
     """
 
-    module = ExpertTrainer(**vars(args)).to("cuda")
+    module = ExpertModelLightningWrapper(**vars(args)).to("cuda")
     return train_module(args, module, dm)
 
 
@@ -401,7 +406,9 @@ def finetune_polylib_full_with_svd_retrieval(args: ExpertConfig, dm):
 
     # args.router_selector = "poly_router"
     assert args.router_selector is not None
-    module = MoETrainer(**vars(args), device_map="auto", expert_library=library)
+    module = LoRAMoELightningWrapper(
+        **vars(args), device_map="auto", expert_library=library
+    )
 
     for n, p in module.named_parameters():
         if "selector" in n:
@@ -418,11 +425,10 @@ def finetune_polylib_full_with_svd_retrieval(args: ExpertConfig, dm):
     """
     assert args.checkpoint is not None, "Please specify a checkpoint"
 
-    # Passing a checkpoint assumes the use of `ExpertTrainer`
     # e.g. for poly-μ and MHR-μ
     ckpt_path = get_checkpoint_path(args.checkpoint)
     expert = load_expert(ckpt_path)
-    module = ExpertTrainer(**vars(expert.training_config))
+    module = ExpertModelLightningWrapper(**vars(expert.training_config))
 
     ckpt = torch.load(ckpt_path)
     result = module.load_state_dict(ckpt["state_dict"], strict=False)
@@ -448,7 +454,7 @@ def finetune_joint(args: ExpertConfig, dm):
     library = HFExpertLibrary(args.library_id)
     expert: Expert = library[args.expert_selection]
     pretrain_args = expert.training_config
-    module = ExpertTrainer(**vars(pretrain_args))
+    module = ExpertModelLightningWrapper(**vars(pretrain_args))
     module.load_state_dict(expert.expert_weights)
 
     return train_module(args, module, dm)
@@ -468,11 +474,9 @@ def run_multitask(args: ExpertConfig):
     args.n_tasks = len(dm._task_names)
 
     if args.checkpoint is not None:
-        # Passing a checkpoint assumes the use of `ExpertTrainer`
-        # e.g. for poly-μ and MHR-μ
         ckpt_path = get_checkpoint_path(args.checkpoint)
         expert = load_expert(ckpt_path)
-        module = ExpertTrainer(**vars(expert.training_config))
+        module = ExpertModelLightningWrapper(**vars(expert.training_config))
 
         ckpt = torch.load(ckpt_path)
         result = module.load_state_dict(ckpt["state_dict"], strict=False)
@@ -505,12 +509,12 @@ def finetune_polylib_full(args: ExpertConfig, dm):
         args.trainable_param_names += "|.*module_logits.*|.*selector.*"
     assert args.library_id is None
     args.router_selector = "poly_router"
-    module = MoETrainer(**vars(args), device_map="auto")
+    module = LoRAMoELightningWrapper(**vars(args), device_map="auto")
     module.to("cuda")
     return train_module(args, module, dm)
 
 
-def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
+def train_module(args: ExpertConfig, module: ExpertModelLightningWrapper, dm):
     loggers = get_pl_loggers(args)
     callbacks = get_monitors(args)
 
