@@ -53,7 +53,7 @@ class ExpertModelLightningWrapper(EfficientCheckpointModule):
         self.accumulate_metrics_batch = defaultdict(list)
 
         self.model: ExpertModel = model_object
-        self._update_training_config_from_model(training_config)
+        self._update_training_config_from_model(self.model, training_config)
 
         self.base_model_name = self.model.base_model_name
         self.modifier_config = self.model.modifier_config
@@ -261,17 +261,17 @@ class MultiExpertModelLightningWrapper(ExpertModelLightningWrapper):
 
 
 class LoRAMoELightningWrapper(MultiExpertModelLightningWrapper):
-    def _update_training_config_from_model(self, model: LoRAMoEModel):
+    def _update_training_config_from_model(
+        self, model: LoRAMoEModel, training_config: ExpertConfig
+    ):
         # update the training config with the modifier config
-        self.training_config.model_modifier = None
-        self.training_config.router_selector = SelectorConfig.get_name_by_config_class(
+        training_config.model_modifier = None
+        training_config.router_selector = SelectorConfig.get_name_by_config_class(
             model.selector_config
         )
-        self.training_config.update_kwargs(
-            model.selector_config.asdict(), raise_error=False
-        )
+        training_config.update_kwargs(model.selector_config.asdict(), raise_error=False)
         # inject library id if it exists in the model
-        self.training_config.library_id = model.expert_library_id
+        training_config.library_id = model.expert_library_id
 
     def on_save_checkpoint(self, ckpt):
         # Delete the non trainable parameters from the model
