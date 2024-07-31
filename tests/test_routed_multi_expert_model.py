@@ -279,7 +279,7 @@ class TestMultiExpertModel:
 
         # check the get_router_weights function
         weights = {}
-        for _, selector_dict in module.selectors.items():
+        for _, selector_dict in module.selector_cache.items():
             for selector in selector_dict.values():
                 weights[selector.layer_name] = selector.get_routing_weights()
         assert len(weights) == 1
@@ -287,7 +287,7 @@ class TestMultiExpertModel:
             "mod1" in weights["transformer.h.0.attn.attention.k_proj.selector"]
             and "mod2" in weights["transformer.h.0.attn.attention.k_proj.selector"]
         )
-        assert "shared" in module.selectors_cache.get("lora")
+        assert "shared" in module.selector_cache.get("lora")
 
         assert isinstance(
             module.model.transformer.h[0].attn.attention.k_proj.selector,
