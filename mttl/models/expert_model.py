@@ -460,7 +460,7 @@ class MultiExpertModel(ExpertModel):
                 expert_instance,
                 action=action,
                 is_default=is_default,
-                routing_config=self.selector_config,
+                selector_config=self.selector_config,
                 selector_cache=self.selector_cache,
             )
 
