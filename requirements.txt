@@ -1,6 +1,8 @@
-transformers==4.38.2
-datasets==2.19.1
-pytorch-lightning==2.1.0
+transformers>=4.43.3
+datasets>=2.19.1
+pytorch-lightning>=2.3.3
+flash-attn>=2.6.0
+torch>=2.1.1
 accelerate
 deepspeed
 huggingface_hub
