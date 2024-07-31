@@ -60,6 +60,11 @@ class Config:
                 "Eager attention is not compatible with packed sequences"
                 + ", tokens across examples will not be masked"
             )
+        elif self.attn_implementation == "flash_attention_2" and self.pack_sequences:
+            logger.warning(
+                "The wrapper we provide for flash attention 2 may not behave as expected for"
+                + " some models. Please make sure you test the model with packed sequences"
+            )
 
     @classmethod
     def fromdict(cls, data):

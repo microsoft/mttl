@@ -674,12 +674,13 @@ class DefaultDataModule(LightningDataModule):
 
         return dataset
 
-    def pack_sequences(self, dataset, max_sequences=4):
+    def pack_sequences(self, dataset, max_sequences=4, shuffle=True):
         """
         Combine sequences together in larger chunks closer to `max_input_length`
         """
         # first, let's shuffle the dataset
-        dataset = dataset.shuffle(seed=42)
+        if shuffle:
+            dataset = dataset.shuffle(seed=42)
 
         # TODO: first partition dataset according to `task_name`, and
         # pack each task individually to ensure that we don't mix tasks
