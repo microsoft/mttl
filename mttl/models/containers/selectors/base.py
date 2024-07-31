@@ -12,6 +12,7 @@ from pyparsing import abstractmethod
 from torch import nn
 from torch.distributions import Categorical
 
+from mttl.config import Config
 from mttl.logging import logger, warn_once
 from mttl.models.expert_context import InfoContainer
 from mttl.models.library.expert import ExpertInfo
@@ -22,6 +23,7 @@ from mttl.models.utils import MetricLogger
 from mttl.registrable import Registrable
 
 EPS = 1e-8
+NAME_FIELD = "__selector_name__"
 
 
 def get_selector(selector_config: "SelectorConfig", **kwargs):
@@ -49,17 +51,21 @@ class SelectorConfig:
 
         data = asdict(self)
         # store the model modifier for easy loading
-        data["__selector_name__"] = Selector.get_name_by_config_class(type(self))
+        data[NAME_FIELD] = Selector.get_name_by_config_class(type(self))
         return data
 
     @classmethod
     def fromdict(cls, dumped: Dict) -> "SelectorConfig":
-        if "__selector_name__" not in dumped:
+        if NAME_FIELD not in dumped:
             raise ValueError(
                 "Cannot load SelectorConfig from dict, missing '__selector_name__' key."
             )
-        name = dumped.pop("__selector_name__")
+        name = dumped.pop(NAME_FIELD)
         return Selector.get_config_class_by_name(name)(**dumped)
+
+    @property
+    def selector_name(self) -> str:
+        return Selector.get_name_by_config_class(type(self))
 
     @classmethod
     def from_training_config(
@@ -103,6 +109,40 @@ class SelectorConfig:
             if train_cfg_value is not None:
                 kwargs[key] = train_cfg_value
         return config_klass(**kwargs)
+
+
+class MultiSelectorConfig(dict):
+    @classmethod
+    def from_training_config(
+        cls,
+        training_config: Union["Config", "SelectorConfig"],
+        ignore_prefix: str = None,
+    ) -> Dict[str, "SelectorConfig"]:
+        import json
+
+        if training_config.router_selector is None:
+            return None
+
+        config_dict = json.loads(training_config.router_selector)
+        if type(config_dict) is not dict:
+            config_dict = {Modifier.DEFAULT: config_dict}
+
+        for key, value in config_dict.items():
+            config_dict[key] = SelectorConfig.from_training_config(value, ignore_prefix)
+
+        multi_config = cls()
+        multi_config.update(config_dict)
+        return multi_config
+
+    @property
+    def selector_name(self) -> str:
+        import json
+
+        selector_string = {}
+        for key, value in self.items():
+            selector_string[key] = value.selector_name
+
+        return json.dumps(selector_string)
 
 
 class SelectorsCache:
