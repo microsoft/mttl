@@ -2,7 +2,11 @@ import inspect
 import os
 from typing import Optional, Tuple
 
-import flash_attn
+try:
+    import flash_attn
+except ImportError:
+    flash_attn = None
+
 import torch
 import torch.nn.functional as F
 
@@ -18,15 +22,7 @@ def scaled_dot_product_attention(
     from mttl.models.expert_context import InfoContainer
 
     context = InfoContainer.get()
-
-    if attn_mask is not None:
-        bool_mask = attn_mask == 0  # True if we use for attention
-
-    if context._routing_infos.packed_seq_lens is not None:
-        # update the attention mask to account for packed sequences
-        # seq_lens = context._routing_infos.seq_lens
-        # mask = context._routing_infos.attention_mask
-        # bool_mask = context._routing_infos.packed_attn_mask# .to(attn_mask.dtype)
+    if context is not None and context._routing_infos.packed_seq_lens is not None:
         attn_mask = context._routing_infos.packed_attn_mask
         is_causal = False
 
@@ -61,7 +57,7 @@ def flash_attn_varlen_func_wrapper(
         raise ValueError("q and k must have the same shape")
 
     context = InfoContainer.get()
-    if context.routing_infos.packed_seq_lens is not None:
+    if context is not None and context.routing_infos.packed_seq_lens is not None:
         warn_once(
             "\n\n\n\nUsing the Flash Attention 2 Sequence Packing Wrapper\n\n\n\n"
         )

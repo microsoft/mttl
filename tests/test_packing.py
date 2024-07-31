@@ -11,7 +11,7 @@ from mttl.models.expert_context import InfoContainer
 from mttl.models.modifiers.routing import RoutingInfo
 
 
-def test_dst_subsample(tiny_flan_id):
+def test_packing_and_attn(tiny_flan_id):
 
     # Important to pick a model with only relative positional embeddings
     model_name = "EleutherAI/pythia-31m"
@@ -75,7 +75,7 @@ def test_dst_subsample(tiny_flan_id):
         packed_batch["seq_lens"].flatten()
         == input_batch["attention_mask"].sum(1).flatten()
     ).all()
-    model = AutoModelForCausalLM.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(model_name, attn_implementation="sdpa")
 
     def _strip_model(model):
         model.eval()

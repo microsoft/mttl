@@ -293,7 +293,7 @@ class Config:
 
         self.model = None
         self.model_family = None  # model family, either "gpt" or "encdec"
-        self.attn_implementation = "spda"
+        self.attn_implementation = None
 
         self.precision = "32"
         self.monitor_grad_alignment_on = None
