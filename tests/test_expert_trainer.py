@@ -72,7 +72,7 @@ def test_expert_trainer(tmp_path, alpaca, tmp_exp_config):
     trainer.fit(wrapper, datamodule=alpaca)
 
     # reload the model without the wrapper, directly from checkpoint!
-    loaded_model = ExpertModel.from_pretrained(tmp_path / "last.ckpt")
+    loaded_model = ExpertModel.load_from_checkpoint(tmp_path / "last.ckpt")
     for n, p in loaded_model.named_parameters():
         assert torch.allclose(p, wrapper.model.state_dict()[n], atol=1e-4)
 
@@ -125,7 +125,7 @@ def test_multi_expert_trainer(tmp_path, alpaca, tmp_exp_config):
     trainer.fit(wrapper, datamodule=alpaca)
 
     # reload the model without the wrapper, directly from checkpoint!
-    loaded_model = MultiExpertModel.from_pretrained(tmp_path / "last.ckpt")
+    loaded_model = MultiExpertModel.load_from_checkpoint(tmp_path / "last.ckpt")
     for n, p in loaded_model.named_parameters():
         assert torch.allclose(p, wrapper.model.state_dict()[n], atol=1e-4)
 
@@ -181,7 +181,7 @@ def test_lora_moe_trainer(tmp_path, alpaca, tmp_exp_config):
     trainer.fit(wrapper, datamodule=alpaca)
 
     # reload the model without the wrapper, directly from checkpoint!
-    loaded_model = LoRAMoEModel.from_pretrained(tmp_path / "last.ckpt")
+    loaded_model = LoRAMoEModel.load_from_checkpoint(tmp_path / "last.ckpt")
     for n, p in loaded_model.named_parameters():
         assert torch.allclose(p, wrapper.model.state_dict()[n], atol=1e-4)
 
