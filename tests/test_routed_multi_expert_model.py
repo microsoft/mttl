@@ -9,6 +9,8 @@ from mttl.models.containers.lora_containers import (
     LoRAExpertContainer,
 )
 from mttl.models.containers.selectors import (
+    ArrowSelector,
+    ArrowSelectorConfig,
     BatchSequenceExpertsAndWeightsSelectorOutput,
     MOERKHSSelector,
     MOERKHSSelectorConfig,
@@ -16,16 +18,9 @@ from mttl.models.containers.selectors import (
     PolySelector,
     PolySelectorDirect,
     SelectorOutput,
-)
-from mttl.models.containers.selectors.arrow_selector import (
-    ArrowSelector,
-    ArrowSelectorConfig,
-)
-from mttl.models.containers.selectors.base import (
-    LoadableLibraryMixin,
-    SelectorConfig,
     TaskPredictorSelectorConfig,
 )
+from mttl.models.containers.selectors.base import LoadableLibraryMixin, SelectorConfig
 from mttl.models.containers.selectors.poly_selector import PolySelectorConfig
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import LoRAMoEModel, MultiExpertModel
