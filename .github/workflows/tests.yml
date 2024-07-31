@@ -26,10 +26,12 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
+      # flash-attn requires torch to be installed
       - name: Install dependencies
         run: |
           pip install --upgrade pip
           pip install -e '.[dev]'
+          pip install -e '.[flash-attn]'
       # - name: Lint with flake8
       #   run: |
       #     # stop the build if there are Python syntax errors or undefined names

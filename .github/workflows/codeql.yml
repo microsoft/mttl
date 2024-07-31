@@ -45,10 +45,12 @@ jobs:
       with:
         python-version: '3.11'
         cache: 'pip'
+    # flash-attn requires torch to be installed
     - name: Install dependencies
       run: |
         pip install --upgrade pip
         pip install -e '.[dev]'
+        pip install -e '.[flash-attn]'
     # Initializes the CodeQL tools for scanning.
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v3
