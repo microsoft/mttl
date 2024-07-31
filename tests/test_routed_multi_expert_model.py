@@ -319,7 +319,7 @@ class TestMultiExpertModel:
         assert np.allclose(output.item(), 9.68, atol=0.1)
 
         weights = {}
-        for _, selector_dict in module.selectors.items():
+        for _, selector_dict in module.selector_cache.items():
             for selector in selector_dict.values():
                 weights[selector.layer_name] = selector.get_routing_weights()
         assert len(weights) > 1
