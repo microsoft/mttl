@@ -155,9 +155,8 @@ def test_expert_model_generate(tmp_path, create_dummy_expert, flan_data_module):
     )
 
     model.add_empty_expert(
+        "e1",
         expert_config=config,
-        expert_name="expert1",
-        action="route",
         is_default=True,
     )
 
