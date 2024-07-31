@@ -11,6 +11,7 @@ from mttl.models.containers.selectors import (
     TaskNameSelector,
     TaskNameSelectorConfig,
 )
+from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import Expert, ExpertModel, MultiExpertModel
 from mttl.models.modifiers.lora import LoRAConfig
 
@@ -18,7 +19,7 @@ from mttl.models.modifiers.lora import LoRAConfig
 def test_expert_model():
     seed_everything(0)
 
-    model = MultiExpertModel(model="EleutherAI/gpt-neo-125m", device_map="cpu")
+    model = MultiExpertModel("EleutherAI/gpt-neo-125m", device_map="cpu")
     model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
     assert model.experts_containers[0].default_expert_name is None
 
@@ -30,7 +31,7 @@ def test_expert_model():
 
     # plug a poly selector
     model.set_selector("lora", PolySelectorConfig(task_names=["t1", "t2", "t3"]))
-    selector = list(model.selectors["lora"].values())[0]
+    selector = model.selectors["lora"][0]
     assert len(model.selectors["lora"]) == 12
     assert isinstance(selector, PolySelector)
 
@@ -42,12 +43,12 @@ def test_expert_model():
     model.set_selector("lora", TaskNameSelectorConfig())
 
     assert len(model.selectors["lora"]) == 12
-    assert isinstance(list(model.selectors["lora"].values())[0], TaskNameSelector)
+    assert isinstance(model.selectors["lora"][0], TaskNameSelector)
 
 
 def test_from_pretrained(tmp_path):
     # create a dummy library
-    model = MultiExpertModel(model="EleutherAI/gpt-neo-125m", device_map="cpu")
+    model = MultiExpertModel("EleutherAI/gpt-neo-125m", device_map="cpu")
     model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
     model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
     library = model.save_to_library(f"local://{tmp_path}")
@@ -65,7 +66,7 @@ def test_from_pretrained_with_arrow(tmp_path):
     from mttl.models.library.library_transforms import ArrowConfig, ArrowTransform
 
     # create a dummy library
-    model = MultiExpertModel(model="EleutherAI/gpt-neo-125m", device_map="cpu")
+    model = MultiExpertModel("EleutherAI/gpt-neo-125m", device_map="cpu")
     model.add_empty_expert(
         "a", LoRAConfig(modify_layers=".*out_proj.*", lora_init_b_random=True)
     )
@@ -87,7 +88,7 @@ def test_from_pretrained_with_arrow(tmp_path):
     assert "a" in model.experts_names
     assert "b" in model.experts_names
 
-    selector = list(model.selectors["lora"].values())[0]
+    selector = model.selectors["lora"][0]
     assert selector.config == selector_config
     assert isinstance(selector, ArrowSelector)
     # loaded two experts
@@ -108,7 +109,8 @@ def test_from_pretrained_with_arrow(tmp_path):
 def test_get_modules_to_modify_trie():
     model_name = "EleutherAI/gpt-neo-125m"
     transformer = AutoModelForCausalLM.from_pretrained(model_name)
-    multi_expert_model = MultiExpertModel(model=model_name, device_map="cpu")
+
+    multi_expert_model = MultiExpertModel(model_name, device_map="cpu")
     transformer_modules = dict(get_modules_to_modify_trie(transformer))
     clean_multi_expert_modules = dict(
         get_modules_to_modify_trie(multi_expert_model.model)
@@ -129,6 +131,45 @@ def test_get_modules_to_modify_trie():
     two_expert_all_modules = dict(multi_expert_model.model.named_modules())
     assert two_expert_modules.keys() == transformer_modules.keys()
     assert len(two_expert_all_modules) > len(one_expert_all_modules)
+
+
+def test_expert_model_generate(tmp_path, create_dummy_expert, flan_data_module):
+    config = ExpertConfig()
+    config.model = "EleutherAI/gpt-neo-125m"
+    config.device_map = "cpu"
+
+    model = MultiExpertModel(
+        config.model,
+        device_map=config.device_map,
+    )
+
+    config = ExpertConfig(
+        kwargs={
+            "model_modifier": "lora",
+            "modify_layers": "k_proj|v_proj|q_proj",
+            "modify_modules": ".*",
+            "trainable_param_names": ".*lora_[ab].*",
+            "output_dir": tmp_path,
+            "model": "EleutherAI/gpt-neo-125m",
+        }
+    )
+
+    model.add_empty_expert(
+        expert_config=config,
+        expert_name="expert1",
+        action="route",
+        is_default=True,
+    )
+
+    batch = next(iter(flan_data_module.val_dataloader()))
+
+    input_shift = batch["input_ids"].shape[1]
+    generation = model.generate(batch, max_new_tokens=3)[:, input_shift:]
+    assert generation.cpu().numpy().tolist() == [[198, 198, 464]]
+
+    batch["attention_mask"][:1] = 0
+    generation = model.generate(batch, max_new_tokens=3)[:, input_shift:]
+    assert generation.cpu().numpy().tolist() == [[355, 257, 1255]]
 
 
 if __name__ == "__main__":

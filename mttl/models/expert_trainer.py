@@ -5,6 +5,7 @@ from typing import Any, List, Mapping, Union
 
 import torch
 from torch import nn
+from transformers.utils import PushToHubMixin
 
 from mttl import logging
 from mttl.logging import logger
@@ -19,7 +20,7 @@ from mttl.models.modifiers.lora import SkilledLoRAConfig
 from mttl.models.utils import EfficientCheckpointModule, prepare_model_for_kbit_training
 
 
-class ExpertModelLightningWrapper(EfficientCheckpointModule):
+class ExpertModelLightningWrapper(EfficientCheckpointModule, PushToHubMixin):
     """Wrapper module for training an expert model with PyTorch Lightning. This encapsulates
     ``training_step``, ``validation_step``, ``test_step`` and all the logs and metrics.
 
@@ -157,18 +158,22 @@ class ExpertModelLightningWrapper(EfficientCheckpointModule):
         **extra_training_kwargs,
     ):
         ckpt = torch.load(checkpoint_path, map_location="cpu")
-        ckpt["hyper_parameters"].update(**extra_training_kwargs)
 
-        training_config: ExpertConfig = ExpertConfig.fromdict(ckpt["hyper_parameters"])
         expert_info: ExpertInfo = ExpertInfo.fromdict(ckpt["experts_info"])
+        training_config: ExpertConfig = ExpertConfig.fromdict(ckpt["hyper_parameters"])
+        modifier_config: ModifierConfig = ModifierConfig.fromdict(
+            ckpt["modifier_config"]
+        )
 
         model = ExpertModel(
             training_config.model,
+            modifier_config=modifier_config,
             load_in_4bit=training_config.load_in_4bit,
             load_in_8bit=training_config.load_in_8bit,
             device_map=training_config.device_map,
             expert_info=expert_info,
         )
+
         wrapper = cls(model, training_config)
         load_result = wrapper.load_state_dict(ckpt["state_dict"], strict=False)
         assert (

@@ -46,18 +46,12 @@ def train_triplet_clip(args):
     if "default" not in task_names:
         task_names.append("default")
 
-    # cls = SentenceTransformerClassifier.from_pretrained(
-    #     "zhan1993/classifier_ranker_held_out"
-    # )
-    print("num experts", len(task_names))
     model = CLIPTripletRanker(
         task_names=task_names,
         encoder_model_name=args.encoder_model_name,
         text_embedding_dim=args.text_embedding_dim,
         expert_embedding_dim=args.expert_embedding_dim,
         projection_dim=args.projection_dim,
-        # pretrained_embedding=cls.out_projecter.weight,
-        # pretrained_ids_to_tasks_names=cls.ids_to_tasks_names,
         learning_rate=args.learning_rate,
     )
     if args.ranker_path:

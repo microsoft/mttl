@@ -4,12 +4,12 @@ import re
 import threading
 from collections import defaultdict
 from functools import partial
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 from torch.optim.optimizer import Optimizer
 from transformers import PreTrainedModel
-from transformers.utils import cached_file
+from transformers.utils import PushToHubMixin, cached_file
 
 from mttl.logging import logger
 from mttl.models.containers import add_expert_to_transformer
@@ -163,7 +163,7 @@ class ExpertModel(torch.nn.Module):
         return instance
 
     @classmethod
-    def from_pretrained(
+    def load_from_checkpoint(
         cls,
         pretrained_model_name_or_path: Optional[Union[str, os.PathLike]],
         *model_args,
@@ -241,7 +241,7 @@ class MultiExpertModel(ExpertModel):
         return self.experts_infos.keys()
 
     @classmethod
-    def from_pretrained(
+    def load_from_checkpoint(
         cls,
         pretrained_model_name_or_path: Optional[Union[str, os.PathLike]],
         **kwargs,
@@ -638,7 +638,7 @@ class LoRAMoEModel(MultiExpertModel):
             self.selector_config.num_experts = i + 1
 
     @classmethod
-    def from_pretrained(
+    def load_from_checkpoint(
         cls,
         pretrained_model_name_or_path: Optional[Union[str, os.PathLike]],
         **kwargs,

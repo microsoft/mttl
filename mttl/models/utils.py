@@ -179,20 +179,7 @@ class SimpleLogger(pl.loggers.logger.DummyLogger):
             logger.error(f"Failed to log metrics: {e}")
 
 
-class OnLogCallback:
-    """Adds `on_log` capability to callbacks."""
-
-    def log(self, name, value, **kwargs):
-        output = LightningModule.log(self, name, value, **kwargs)
-
-        # call on log on each callback
-        for callback in self.trainer.callbacks:
-            if hasattr(callback, "on_log"):
-                callback.on_log(self.trainer, self, name, value, **kwargs)
-        return output
-
-
-class EfficientCheckpointModule(LightningModule, OnLogCallback):
+class EfficientCheckpointModule(LightningModule, PushToHubMixin):
     """Efficiently save and load checkpoints.
 
     Only saves and loads parameters that are either in the trainable parameters
@@ -214,6 +201,15 @@ class EfficientCheckpointModule(LightningModule, OnLogCallback):
             logger.warning(
                 "`save_if_loaded_from_ckpt` is True. Because you are using deepspeed, you will be saving full model checkpoints."
             )
+
+    def log(self, name, value, **kwargs):
+        output = LightningModule.log(self, name, value, **kwargs)
+
+        # call on log on each callback
+        for callback in self.trainer.callbacks:
+            if hasattr(callback, "on_log"):
+                callback.on_log(self.trainer, self, name, value, **kwargs)
+        return output
 
     def get_hash(self):
         model_hash = hashlib.sha256()
@@ -262,6 +258,66 @@ class EfficientCheckpointModule(LightningModule, OnLogCallback):
 
     def on_save_checkpoint(self, ckpt):
         self._delete_non_trainable_params(ckpt["state_dict"])
+
+    def save_pretrained(
+        self,
+        save_directory: Union[str, os.PathLike],
+        save_config: bool = True,
+        state_dict: Optional[dict] = None,
+        save_function: Callable = torch.save,
+        push_to_hub: bool = False,
+        save_full_model: bool = False,
+        **kwargs,
+    ):
+        """
+        This handles creating a checkpoint and is used by `push_to_hub` in PushToHubMixin.
+        """
+        ckpt = self.state_dict()
+
+        if not save_full_model:
+            self._delete_non_trainable_params(ckpt)
+
+        hparams_allowed = {}
+
+        # drop parameters which contain some strange datatypes as fsspec
+        for k, v in self.hparams.items():
+            v = v.name if isinstance(v, Enum) else v
+            hparams_allowed[k] = v
+
+        save_package = {
+            "state_dict": ckpt,
+            "hyper_parameters": hparams_allowed,
+        }
+
+        # every model can inherit this function and add more to the save_package
+        self.on_save_checkpoint(save_package)
+
+        output_model_file = os.path.join(save_directory, CHECKPOINT_PATH_IN_HUB)
+        torch.save(save_package, output_model_file)
+
+        return output_model_file
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        pretrained_model_name_or_path: Optional[Union[str, os.PathLike]],
+        *model_args,
+        **kwargs,
+    ):
+        """
+        Loads a given model from huggingface -- or locally --, if on HF, it
+        downloads the model and call the `load_from_checkpoint` method.
+        """
+
+        instantiate_model = kwargs.pop("instantiate_model", True)
+        resolved_archive_file = get_cached_file(pretrained_model_name_or_path, **kwargs)
+
+        if instantiate_model:
+            return cls.load_from_checkpoint(resolved_archive_file, **kwargs)
+        else:
+            ckpt = torch.load(resolved_archive_file, map_location="cpu")
+
+            return ckpt["state_dict"], ckpt["hyper_parameters"]
 
     def configure_optimizers(self):
         args = self.hparams

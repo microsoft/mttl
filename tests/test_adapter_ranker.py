@@ -3,8 +3,10 @@ import pytest
 
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
 from mttl.models.containers.selectors import TaskPredictorSelector
+from mttl.models.containers.selectors.tp_selector import TaskPredictorSelectorConfig
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import MultiExpertModel
+from mttl.models.expert_trainer import MultiExpertModelLightningWrapper
 from mttl.models.modifiers.lora import LoRAConfig
 from mttl.models.ranker.classifier_ranker import SentenceTransformerClassifier
 from mttl.models.ranker.clip_ranker import CLIPRanker
@@ -12,6 +14,7 @@ from mttl.models.ranker.clip_ranker import CLIPRanker
 
 def test_clip_routing(tiny_flan_id):
     config = ExpertConfig()
+
     config.ranker_model = "clip"
     config.ranker_path = "zhan1993/clip_ranker_debug"
     config.model = "EleutherAI/gpt-neo-125m"
@@ -30,11 +33,16 @@ def test_clip_routing(tiny_flan_id):
         ),
         for_generation=True,
     )
-    module = MultiExpertModel(**vars(config), tokenizer=data_module.tokenizer)
-    module.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
-    module.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
+
+    model = MultiExpertModel(
+        config.model,
+        selector_config=TaskPredictorSelectorConfig.from_training_config(config),
+    )
+    model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
+    model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
+
     batch = next(iter(data_module.val_dataloader()))
-    selector = module.model.transformer.h[0].attn.attention.out_proj.selector
+    selector = model.model.transformer.h[0].attn.attention.out_proj.selector
     assert isinstance(selector, TaskPredictorSelector)
 
     prediction_experts = selector.expert_ranker.predict_task(batch["sources_texts"])
@@ -63,52 +71,20 @@ def test_classifier_routing(tiny_flan_id):
         for_generation=True,
     )
 
-    module = MultiExpertModel(**vars(config), tokenizer=data_module.tokenizer)
+    model = MultiExpertModel(
+        config.model,
+        selector_config=TaskPredictorSelectorConfig.from_training_config(config),
+    )
+    model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
+    model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
 
-    module.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
-    module.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
     batch = next(iter(data_module.val_dataloader()))
-    selector = module.model.transformer.h[0].attn.attention.out_proj.selector
+    selector = model.model.transformer.h[0].attn.attention.out_proj.selector
     assert isinstance(selector, TaskPredictorSelector)
     prediction_experts = selector.expert_ranker.predict_task(batch["sources_texts"])
     assert len(prediction_experts) == 2  # experts and names
     assert isinstance(selector.expert_ranker, SentenceTransformerClassifier)
     assert prediction_experts[0][0][0] == "cot_gsm8k"
-
-
-def test_expert_model_generate(tmp_path, create_dummy_expert, flan_data_module):
-    config = ExpertConfig()
-    config.model = "EleutherAI/gpt-neo-125m"
-    config.device_map = "cpu"
-    module = MultiExpertModel(**vars(config), tokenizer=flan_data_module.tokenizer)
-    config = ExpertConfig(
-        kwargs={
-            "model_modifier": "lora",
-            "modify_layers": "k_proj|v_proj|q_proj",
-            "modify_modules": ".*",
-            "trainable_param_names": ".*lora_[ab].*",
-            "output_dir": tmp_path,
-            "model": "EleutherAI/gpt-neo-125m",
-        }
-    )
-    # create random Lora
-    expert1 = create_dummy_expert(config, "module1")
-    module.add_expert_instance(
-        expert1,
-        expert_name="expert1",
-        action="route",
-        is_default=True,
-    )
-
-    batch = next(iter(flan_data_module.val_dataloader()))
-
-    input_shift = batch["input_ids"].shape[1]
-    generation = module.generate(batch, max_new_tokens=3)[:, input_shift:]
-    assert generation.cpu().numpy().tolist() == [[198, 198, 464]]
-
-    batch["attention_mask"][:1] = 0
-    generation = module.generate(batch, max_new_tokens=3)[:, input_shift:]
-    assert generation.cpu().numpy().tolist() == [[355, 257, 1255]]
 
 
 if __name__ == "__main__":

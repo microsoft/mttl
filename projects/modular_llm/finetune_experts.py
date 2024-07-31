@@ -473,27 +473,10 @@ def run_multitask(args: ExpertConfig):
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
 
-    if args.checkpoint is not None:
-        ckpt_path = get_checkpoint_path(args.checkpoint)
-        expert = load_expert(ckpt_path)
-        module = ExpertModelLightningWrapper(**vars(expert.training_config))
-
-        ckpt = torch.load(ckpt_path)
-        result = module.load_state_dict(ckpt["state_dict"], strict=False)
-        assert len(result.unexpected_keys) == 0, result.unexpected_keys
-
-        # For Poly and MHR, apply potential averaging, or resizing
-        if args.finetune_type and args.finetune_type == "MuZ":
-            module.model.switch_selector_to_average()
-        elif expert.training_config.model_modifier == "poly":
-            module.model.resize_module_logits(1)
-        checkpoint = train_module(args, module, dm)
-
-    else:
-        # fine-tuning with expert library
-        assert args.finetune_regime in FINETUNE_FUNCTIONS
-        expert = FINETUNE_FUNCTIONS[args.finetune_regime](args, dm)
-        shutil.rmtree(f"/tmp/{args.library_id}", ignore_errors=True)
+    # fine-tuning with expert library
+    assert args.finetune_regime in FINETUNE_FUNCTIONS
+    expert = FINETUNE_FUNCTIONS[args.finetune_regime](args, dm)
+    shutil.rmtree(f"/tmp/{args.library_id}", ignore_errors=True)
 
 
 @register_finetune_func("poly_from_scratch")

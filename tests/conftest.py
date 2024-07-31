@@ -134,7 +134,7 @@ def create_dummy_expert(make_tiny_llama):
             # use tiny llama by default
             kwargs["model_object"] = make_tiny_llama()
 
-        model = MultiExpertModel(model=kwargs["model_object"])
+        model = MultiExpertModel(model_name_or_object=kwargs["model_object"])
         expert = model.add_empty_expert(
             exp_name, ModifierConfig.from_training_config(config)
         )
