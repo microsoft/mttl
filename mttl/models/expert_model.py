@@ -709,10 +709,19 @@ class ExpertModelSimPO(EfficientCheckpointModule):
             model_disprefered_log_prob,
             gamma_beta_ratio=self.gamma_beta_ratio,
         )
+
+        reward_accuracies = (chosen_rewards > rejected_rewards).float()
+        self.log(
+            "train/accuracies",
+            reward_accuracies.mean().cpu(),
+            on_step=True,
+            on_epoch=True,
+        )
         self.log("train/loss", loss.mean(), on_step=True, on_epoch=True, prog_bar=True)
         self.log(
             "train/chosen_rewards", chosen_rewards.mean(), on_step=True, on_epoch=True
         )
+
         self.log(
             "train/rejected_rewards",
             rejected_rewards.mean(),
@@ -748,6 +757,15 @@ class ExpertModelSimPO(EfficientCheckpointModule):
             model_prefered_log_prob,
             model_disprefered_log_prob,
             gamma_beta_ratio=self.gamma_beta_ratio,
+        )
+
+        reward_accuracies = (chosen_rewards > rejected_rewards).float()
+        self.log(
+            "val/reward_accuracies",
+            reward_accuracies.mean(),
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
         )
         self.log("val/loss", loss.mean(), on_step=True, on_epoch=True, prog_bar=True)
         self.log(
