@@ -73,7 +73,7 @@ def test_expert_model_coalesced():
     # plug a poly selector
     model.set_selector("lora", PolySelectorConfig(task_names=["t1", "t2", "t3"]))
     # model.set_selector("skilled_lora", PolySelectorConfig(task_names=["t1", "t2", "t3"]))
-    selector = list(model.selectors["lora"].values())[0]
+    selector = model.selectors["lora"][0]
     assert len(model.selectors["lora"]) == 12
     assert isinstance(selector, PolySelector)
 
@@ -96,7 +96,7 @@ def test_expert_model_coalesced():
         model.get_merged_expert()
 
     assert len(model.selectors["lora"]) == 12
-    assert isinstance(list(model.selectors["lora"].values())[0], TaskNameSelector)
+    assert isinstance(model.selectors["lora"][0], TaskNameSelector)
 
 
 def test_from_pretrained(tmp_path):

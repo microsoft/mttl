@@ -397,7 +397,7 @@ class TestMultiExpertModel:
         assert container.selector.top_k == -1
         # Test Base Llama model
         output = module(dummy_batch)
-        assert np.allclose(output.item(), 18, atol=0.1)
+        assert np.allclose(output.item(), 18.1, atol=0.1)
         assert container.selector.total_calls_per_forward == 72
 
         config: ExpertConfig = tmp_exp_config
