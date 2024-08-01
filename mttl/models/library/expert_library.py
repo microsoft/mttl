@@ -660,11 +660,12 @@ class ExpertLibrary:
         return self._uri
 
     @staticmethod
-    def _remove_protocol(repo_id):
+    def _remove_protocol(repo_id) -> Tuple[str, str]:
         """Remove the protocol from the repo_id. Ex:
         az://storage_account/container -> storage_account/container
         """
-        return str(repo_id).split("://")
+        paths = str(repo_id).split("://")
+        return "hf" if len(paths) == 1 else paths[0], paths[-1]
 
     @property
     def sliced(self):
