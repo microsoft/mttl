@@ -10,6 +10,9 @@ from mttl.registrable import Registrable
 
 
 class Modifier(nn.Module, Registrable):
+    # default modifier
+    default = "lora"
+
     @property
     def layer_name(self):
         if not hasattr(self, "__layer_name__"):

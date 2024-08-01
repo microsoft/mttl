@@ -45,7 +45,7 @@ class InfoContainer:
         return cls.local.context
 
     @classmethod
-    def wrap(cls, f):
+    def wrap_forward(cls, f):
         """
         Decorator method that wraps a ``forward()`` function of a model class.
         """

@@ -71,15 +71,12 @@ class ExpertModel(EfficientCheckpointModule):
         self.modifier_config = ModifierConfig.from_training_config(self.training_config)
         self.model = modify_transformer(model_object, self.modifier_config)
 
-        # replace w flash attn!
-        replace_attn_with_flash_attn(self.model)
-
         self.test_results = []
         self.best_val_result = None
         self._inference_outputs = []
         self._log_pref = kwargs.get("logging_prefix", "")
 
-    @InfoContainer.wrap
+    @InfoContainer.wrap_forward
     def forward(self, batch, reduction="mean"):
         input_ids = batch["input_ids"]
         labels = batch["labels"]
@@ -221,7 +218,7 @@ class ExpertModel(EfficientCheckpointModule):
     def generation_config(self):
         return self.model.generation_config
 
-    @InfoContainer.wrap
+    @InfoContainer.wrap_forward
     def generate(
         self,
         batch,
@@ -295,7 +292,7 @@ class MultiExpertModel(ExpertModel):
     def from_pretrained_library(
         cls,
         library_id: Union[str, ExpertLibrary],
-        selector_configs: Union[SelectorConfig, Dict[str, SelectorConfig]] = None,
+        selector_config: Union[SelectorConfig, Dict[str, SelectorConfig]] = None,
         remote_token: str = None,
         **kwargs,
     ):
@@ -319,23 +316,20 @@ class MultiExpertModel(ExpertModel):
         model.add_experts_from_library(library)
 
         # set selector for the added experts
-        if selector_configs is not None:
+        if selector_config is not None:
             # assume "lora" is the default modifier type
-            if type(selector_configs) is SelectorConfig:
+            if type(selector_config) is SelectorConfig:
                 logger.info(
                     "Assuming provided selector config is for `lora` modifier type."
                 )
-                selector_configs = {"lora": selector_configs}
+                selector_config = {Modifier.default: selector_config}
 
-            for modifier_type, selector_config in selector_configs.items():
+            for modifier_type, cfg in selector_config.items():
                 # inject the library id if it is None
-                if (
-                    isinstance(selector_config, LoadableSelectorConfig)
-                    and selector_config.library_id is None
-                ):
-                    selector_config.library_id = library_id
+                if isinstance(cfg, LoadableSelectorConfig) and cfg.library_id is None:
+                    cfg.library_id = library_id
 
-                model.set_selector(modifier_type, selector_config)
+                model.set_selector(modifier_type, cfg)
         else:
             logger.info("No selector config provided, assuming expert name selector!")
         return model
