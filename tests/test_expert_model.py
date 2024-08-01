@@ -73,8 +73,8 @@ def test_expert_model_coalesced():
     # plug a poly selector
     model.set_selector("lora", PolySelectorConfig(task_names=["t1", "t2", "t3"]))
     # model.set_selector("skilled_lora", PolySelectorConfig(task_names=["t1", "t2", "t3"]))
-    selector = model.selectors["lora"][0]
     assert len(model.selectors["lora"]) == 12
+    selector = model.selectors["lora"][0]
     assert isinstance(selector, PolySelector)
 
     expert_a: Expert = model.get_expert_instance("a")
