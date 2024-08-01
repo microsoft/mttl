@@ -268,16 +268,14 @@ class ExpertModel(EfficientCheckpointModule):
 class MultiExpertModel(ExpertModel):
     """Adds all functions and properties for a multi-expert model."""
 
-    def __init__(self, **config_kwargs):
+    def __init__(self, model=None, selector_config=None, **config_kwargs):
         config_kwargs["model_modifier"] = None
 
-        super().__init__(**config_kwargs)
+        super().__init__(model=model, **config_kwargs)
 
         # config about the routing
         if "selector_config" in config_kwargs:
-            self.selector_config = MultiSelectorConfig.create_default(
-                config_kwargs.pop("selector_config")
-            )
+            self.selector_config = selector_config
         else:
             self.selector_config = MultiSelectorConfig.from_training_config(
                 self.training_config
@@ -324,26 +322,24 @@ class MultiExpertModel(ExpertModel):
         train_cfg = deepcopy(an_expert.training_config)
         train_cfg.device_map = "cpu"
 
-        model = cls(**vars(train_cfg))
-        model.add_experts_from_library(library)
-
         # set selector for the added experts
         if selector_config is not None:
-            # assume "lora" is the default modifier type
-            if isinstance(selector_config, SelectorConfig):
-                logger.info(
-                    f"Assuming provided selector config is for `lora, skilled_lora` modifier type."
-                )
-                selector_config = MultiSelectorConfig.create_default(selector_config)
+            if isinstance(selector_config, LoadableSelectorConfig):
+                selector_config.library_id = library_id
 
-            for modifier_name, cfg in selector_config.items():
-                # inject the library id if it is None
-                if isinstance(cfg, LoadableSelectorConfig) and cfg.library_id is None:
-                    cfg.library_id = library_id
-
-                model.set_selector(modifier_name, cfg)
+            elif isinstance(selector_config, dict):
+                for modifier_name, cfg in selector_config.items():
+                    # inject the library id if it is None
+                    if (
+                        isinstance(cfg, LoadableSelectorConfig)
+                        and cfg.library_id is None
+                    ):
+                        cfg.library_id = library_id
         else:
             logger.info("No selector config provided, assuming expert name selector!")
+
+        model = cls(**vars(train_cfg), selector_config=selector_config, **kwargs)
+        model.add_experts_from_library(library)
         return model
 
     @property
@@ -458,6 +454,14 @@ class MultiExpertModel(ExpertModel):
         )
         self.add_expert_instance(expert, action=action, is_default=is_default)
 
+    def _get_selector_config(self, model_modifier: str) -> SelectorConfig:
+        if not self.selector_config:
+            return None
+        if isinstance(self.selector_config, dict):
+            return self.selector_config.get(model_modifier)
+        else:
+            return self.selector_config
+
     def add_expert_instance(
         self,
         expert_instance: Expert,
@@ -476,18 +480,15 @@ class MultiExpertModel(ExpertModel):
             expert_instance.name = expert_name
 
         with self.lock:
-            model_modifier = expert_instance.expert_config.modifier_name
+            modifier_name = expert_instance.expert_config.modifier_name
+            selector_config = self._get_selector_config(modifier_name)
 
             add_expert_to_transformer(
                 self.model,
                 expert_instance,
                 action=action,
                 is_default=is_default,
-                selector_config=(
-                    self.selector_config.get(model_modifier)
-                    if self.selector_config
-                    else None
-                ),
+                selector_config=selector_config,
                 selector_cache=self.selector_cache,
             )
 
@@ -504,6 +505,7 @@ class MultiExpertModel(ExpertModel):
     ):
         from mttl.models.containers import replace_selector_for_container
 
+        selector_config = self._get_selector_config(modifier_name)
         n_selectors, n_selectors_views = replace_selector_for_container(
             self.model,
             modifier_name,
