@@ -16,6 +16,7 @@ from mttl.models.containers.selectors import Selector, SelectorConfig
 from mttl.models.containers.selectors.base import (
     LoadableLibraryMixin,
     LoadableSelectorConfig,
+    SelectorsCache,
 )
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_context import InfoContainer
@@ -271,6 +272,7 @@ class MultiExpertModel(ExpertModel):
 
     def __init__(self, **config_kwargs):
         config_kwargs["model_modifier"] = None
+
         super().__init__(**config_kwargs)
 
         # config about the routing
@@ -282,8 +284,12 @@ class MultiExpertModel(ExpertModel):
             )
 
         # inject memory for adding selectors
-        self.model.selectors = {}
-        self.experts_names = []
+        self.selector_cache = SelectorsCache()
+        self.experts_infos = {}
+
+    @property
+    def experts_names(self):
+        return list(self.experts_infos.keys())
 
     @classmethod
     def from_pretrained_library(
@@ -350,13 +356,8 @@ class MultiExpertModel(ExpertModel):
         return containers
 
     @property
-    def selectors(self) -> Dict[str, List[Selector]]:
-        selectors = defaultdict(list)
-        for modifier, selectors_dict in self.model.selectors.items():
-            for selector in selectors_dict.values():
-                if isinstance(selector, Selector):
-                    selectors[modifier].append(selector)
-        return selectors
+    def selectors(self) -> Dict[str, Dict[str, Selector]]:
+        return self.selector_cache.cache
 
     def delete_expert_container(self):
         """
@@ -366,7 +367,9 @@ class MultiExpertModel(ExpertModel):
             for c_name, child in dict(module.named_children()).items():
                 if isinstance(child, ExpertContainer) and len(child.experts) > 0:
                     setattr(module, c_name, child.layer)
-        self.experts_names.clear()
+
+        self.selector_cache.clear()
+        self.experts_infos.clear()
 
     def add_experts_from_library(self, library):
         import concurrent.futures
@@ -482,12 +485,12 @@ class MultiExpertModel(ExpertModel):
                 expert_instance,
                 action=action,
                 is_default=expert_instance.name == "default" or is_default,
-                routing_config=self.selector_config,
-                training_config=self.training_config,
+                selector_config=self.selector_config,
+                selector_cache=self.selector_cache,
             )
 
             if action != "merge":
-                self.experts_names.append(expert_instance.name)
+                self.experts_infos[expert_instance.name] = expert_instance.expert_info
                 # reload the expert instance to fill the weights properly if this was an empty expert
                 expert_instance = self.get_expert_instance(expert_instance.name)
             return expert_instance
@@ -503,9 +506,10 @@ class MultiExpertModel(ExpertModel):
             self.model,
             modifier_type,
             selector_config,
+            self.selector_cache,
             force_replace=True,
         )
-        assert self.model.selectors[modifier_type]
+        assert self.selector_cache.get(modifier_type)
         logger.info(
             "Created {} selectors and {} views.".format(n_selectors, n_selectors_views)
         )
@@ -526,28 +530,6 @@ class MultiExpertModel(ExpertModel):
             if re.fullmatch(p_name_pattern, name):
                 para_list.append(param.reshape(-1))
         return torch.cat(para_list)
-
-    def get_task_embeddings(self):
-        """
-        Retrieves the task embeddings for the loaded experts.
-
-        This method assumes that the names of the loaded experts correspond to the tasks they are made for.
-
-        Returns:
-        embeddings (dict): A dictionary containing the task embeddings for each expert.
-                           The keys are the expert names and the values are the corresponding embeddings.
-        """
-        if len(self.experts_names) == 0:
-            return self.extract_parameters()
-
-        embeddings = {}
-        for exp_name in self.experts_names:
-            embeddings[exp_name] = (
-                self.extract_parameters(p_name_pattern=rf".*{exp_name}\..*lora.*")
-                .detach()
-                .cpu()
-            )
-        return embeddings
 
     def get_expert_instance(self, expert_name):
         """
