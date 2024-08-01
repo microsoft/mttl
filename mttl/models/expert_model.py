@@ -313,8 +313,10 @@ class MultiExpertModel(ExpertModel):
                 repo_id=library_id,
                 token=remote_token,
             )
+            repo_id = library_id
         else:
             library = library_id
+            repo_id = library_id.uri
 
         # get a config file from the library, and initialize the expert model
         an_expert = library[next(iter(library.keys()))]
@@ -325,7 +327,7 @@ class MultiExpertModel(ExpertModel):
         # set selector for the added experts
         if selector_config is not None:
             if isinstance(selector_config, LoadableSelectorConfig):
-                selector_config.library_id = library_id
+                selector_config.library_id = repo_id
 
             elif isinstance(selector_config, dict):
                 for modifier_name, cfg in selector_config.items():
@@ -334,7 +336,7 @@ class MultiExpertModel(ExpertModel):
                         isinstance(cfg, LoadableSelectorConfig)
                         and cfg.library_id is None
                     ):
-                        cfg.library_id = library_id
+                        cfg.library_id = repo_id
         else:
             logger.info("No selector config provided, assuming expert name selector!")
 

@@ -1,3 +1,4 @@
+import functools
 import math
 import threading
 from abc import ABC
@@ -335,6 +336,25 @@ def safe_logging(func):
     return wrapper
 
 
+def artifacts_cache(func):
+    cache = {}
+    lock = threading.Lock()
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        # wrapper expects
+        key = args[1].artifacts_hash
+
+        with lock:
+            if key in cache:
+                return cache[key]
+            result = func(*args, **kwargs)
+            cache[key] = result
+        return result
+
+    return wrapper
+
+
 class Selector(nn.Module, Registrable):
     metric_logger: MetricLogger = MetricLogger()
 
@@ -539,34 +559,10 @@ class PerTokenSelectorConfig(LoadableSelectorConfig):
 
 
 class LoadableLibraryMixin(ABC):
-    cache = threading.local()
-    cache.library_artifacts = {}
-
     @classmethod
-    def clear(cls):
-        cls.cache.library_artifacts = {}
-
-    @property
-    def library_artifacts(self) -> Optional[Dict]:
-        return LoadableLibraryMixin.cache.library_artifacts.get(
-            self.config.artifacts_hash, None
-        )
-
     @abstractmethod
-    def _load_from_library(self):
+    def load_from_library(cls, config):
         pass
-
-    def load_from_library(self):
-        if (
-            self.config.artifacts_hash
-            not in LoadableLibraryMixin.cache.library_artifacts
-        ):
-            LoadableLibraryMixin.cache.library_artifacts[self.config.artifacts_hash] = (
-                self._load_from_library()
-            )
-
-            if not LoadableLibraryMixin.cache.library_artifacts:
-                raise ValueError(f"Could not load library artifacts for selector.")
 
 
 def get_expert_prototype_from_library_artifacts(
@@ -649,7 +645,9 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
 
         # init selector from library if needed
         if self.config.library_id is not None:
-            self.load_from_library()
+            self.library_artifacts = self.load_from_library(self.config)
+        else:
+            self.library_artifacts = None
 
     def overwrite_prototypes(self, prototypes: torch.tensor):
         """Overwrites the prototypes with the given tensor."""
