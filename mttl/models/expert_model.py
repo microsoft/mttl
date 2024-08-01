@@ -16,6 +16,7 @@ from mttl.models.containers.selectors import Selector, SelectorConfig
 from mttl.models.containers.selectors.base import (
     LoadableLibraryMixin,
     LoadableSelectorConfig,
+    MultiSelectorConfig,
     SelectorsCache,
 )
 from mttl.models.expert_config import ExpertConfig
@@ -276,7 +277,7 @@ class MultiExpertModel(ExpertModel):
         if "selector_config" in config_kwargs:
             self.selector_config = config_kwargs.pop("selector_config")
         else:
-            self.selector_config = SelectorConfig.from_training_config(
+            self.selector_config = MultiSelectorConfig.from_training_config(
                 self.training_config
             )
 
@@ -318,9 +319,9 @@ class MultiExpertModel(ExpertModel):
         # set selector for the added experts
         if selector_config is not None:
             # assume "lora" is the default modifier type
-            if type(selector_config) is SelectorConfig:
+            if isinstance(selector_config, SelectorConfig):
                 logger.info(
-                    "Assuming provided selector config is for `lora` modifier type."
+                    f"Assuming provided selector config is for `{Modifier.default}` modifier type."
                 )
                 selector_config = {Modifier.default: selector_config}
 
@@ -577,56 +578,6 @@ class MultiExpertModel(ExpertModel):
             expert = self.get_expert_instance(expert_name)
             library.add_expert(expert)
         return library
-
-    def get_merged_expert(
-        self, modifier_type: str = "lora", with_global_names=True, **kwargs
-    ) -> Expert:
-        """
-        Converts the current expert model into an instance of the Expert class by merging the experts in the containers using weights from the corresponding selectors.
-
-        Args:
-            with_global_names (bool, optional): Whether to include global names in the merged weights. Defaults to True.
-
-        Returns:
-            Expert: An instance of the Expert class.
-
-        Raises:
-            None
-
-        Example:
-            model = ExpertModel()
-            expert = model.to_expert(weights={'expert1': 0.5, 'expert2': 0.5}, with_global_names=True)
-        """
-        expert_params = {}
-        assert (
-            modifier_type in self.selectors
-        ), f"Modifier type {modifier_type} not in model."
-
-        for container in self.experts_containers:
-            config_modifier = get_modifier_name(container.config)
-            if config_modifier != modifier_type:
-                logger.info(
-                    f"Skipping container {container.layer_name} with modifier type {config_modifier}"
-                )
-                continue
-
-            params = container.get_merged_params(
-                with_global_names=with_global_names, **kwargs
-            )
-            expert_params.update(params)
-            expert_config = container.config
-        if len(expert_params) == 0:
-            raise ValueError(
-                "No experts to merge found. Make sure the 'modifier_type' is correct."
-            )
-
-        expert_info = ExpertInfo(
-            expert_name=self.training_config.finetune_task_name,
-            expert_task_name=self.training_config.finetune_task_name,
-            training_config=self.training_config,
-            expert_config=expert_config,
-        )
-        return Expert(expert_info=expert_info, expert_weights=expert_params)
 
 
 class MoEModel(MultiExpertModel):

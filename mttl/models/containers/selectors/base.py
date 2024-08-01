@@ -49,7 +49,7 @@ class SelectorConfig:
 
         data = asdict(self)
         # store the model modifier for easy loading
-        data["__selector_name__"] = Selector.get_name_by_config_class(type(self))
+        data["__selector_name__"] = self.selector_name
         return data
 
     @classmethod
@@ -60,6 +60,10 @@ class SelectorConfig:
             )
         name = dumped.pop("__selector_name__")
         return Selector.get_config_class_by_name(name)(**dumped)
+
+    @property
+    def selector_name(self):
+        return Selector.get_name_by_config_class(type(self))
 
     @classmethod
     def from_training_config(
@@ -103,6 +107,40 @@ class SelectorConfig:
             if train_cfg_value is not None:
                 kwargs[key] = train_cfg_value
         return config_klass(**kwargs)
+
+
+class MultiSelectorConfig(dict):
+    @property
+    def selector_name(self):
+        import json
+
+        return json.dumps({k: v.selector_name for k, v in self.items()})
+
+    @classmethod
+    def from_training_config(
+        cls,
+        training_config: "Config",
+    ):
+        import copy
+        import json
+
+        if training_config.router_selector is None:
+            return None
+
+        try:
+            router_selector = json.loads(training_config.router_selector)
+        except:
+            router_selector = {Modifier.default: training_config.router_selector}
+
+        selector_configs = cls()
+        for modifier_name, selector_name in router_selector.items():
+            config_clone = copy.deepcopy(training_config)
+            config_clone.router_selector = selector_name
+
+            selector_configs[modifier_name] = SelectorConfig.from_training_config(
+                config_clone
+            )
+        return selector_configs
 
 
 class SelectorsCache:
