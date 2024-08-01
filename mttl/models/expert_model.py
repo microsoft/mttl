@@ -268,13 +268,13 @@ class ExpertModel(EfficientCheckpointModule):
 class MultiExpertModel(ExpertModel):
     """Adds all functions and properties for a multi-expert model."""
 
-    def __init__(self, model=None, selector_config=None, **config_kwargs):
+    def __init__(self, selector_config=None, **config_kwargs):
         config_kwargs["model_modifier"] = None
 
-        super().__init__(model=model, **config_kwargs)
+        super().__init__(**config_kwargs)
 
         # config about the routing
-        if "selector_config" in config_kwargs:
+        if selector_config is not None:
             self.selector_config = selector_config
         else:
             self.selector_config = MultiSelectorConfig.from_training_config(
@@ -338,7 +338,7 @@ class MultiExpertModel(ExpertModel):
         else:
             logger.info("No selector config provided, assuming expert name selector!")
 
-        model = cls(**vars(train_cfg), selector_config=selector_config, **kwargs)
+        model = cls(selector_config=selector_config, **vars(train_cfg))
         model.add_experts_from_library(library)
         return model
 
