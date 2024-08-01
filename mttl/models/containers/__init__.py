@@ -154,10 +154,9 @@ def replace_selector_for_container(
                         break
 
     if not expert_containers:
-        logger.warn(
+        raise ValueError(
             f"No expert containers found for modifier type: {modifier_name}. Cannot assign a selector! Load some experts beforehand."
         )
-        return 0, 0
 
     if force_replace:
         for container in expert_containers:
