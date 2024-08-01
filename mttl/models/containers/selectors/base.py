@@ -168,6 +168,9 @@ class SelectorsCache:
             return self.cache[modifier_name]
         return self.cache[modifier_name].get(selector_name, None)
 
+    def keys(self):
+        return self.cache.keys()
+
     def items(self):
         return iter(self.cache.items())
 
