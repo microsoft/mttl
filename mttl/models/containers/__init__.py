@@ -89,8 +89,8 @@ def create_selector_for_container(
     transformer,
     container,
     modifier_name: str,
-    selector_config: SelectorConfig,
-    selector_cache: SelectorsCache,
+    selector_config: SelectorConfig = None,
+    selector_cache: SelectorsCache = None,
 ) -> Selector:
     if container.selector is not None and container.selector.config == selector_config:
         # selector already exists and has the same config
@@ -130,8 +130,8 @@ def create_selector_for_container(
 def replace_selector_for_container(
     transformer,
     modifier_name: str,
-    selector_config: SelectorConfig,
-    selector_cache: SelectorsCache,
+    selector_config: SelectorConfig = None,
+    selector_cache: SelectorsCache = None,
     force_replace: bool = False,
 ) -> Tuple[int, int]:
     """

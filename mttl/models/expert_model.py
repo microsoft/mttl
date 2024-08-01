@@ -505,7 +505,6 @@ class MultiExpertModel(ExpertModel):
     ):
         from mttl.models.containers import replace_selector_for_container
 
-        selector_config = self._get_selector_config(modifier_name)
         n_selectors, n_selectors_views = replace_selector_for_container(
             self.model,
             modifier_name,
