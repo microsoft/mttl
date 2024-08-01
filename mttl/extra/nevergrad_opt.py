@@ -2,17 +2,13 @@ import hashlib
 import os
 import sys
 from functools import partial
+from typing import Callable
 
 import nevergrad as ng
 import torch
 import tqdm
-from torch.utils.data import DataLoader
-
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-
-from typing import Callable
-
 import wandb
+from torch.utils.data import DataLoader
 
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators import MMLUEvaluator

@@ -16,11 +16,64 @@ from torch.optim import Optimizer
 
 from mttl.datamodule.base import DefaultDataModule
 from mttl.evaluators import MMLUEvaluator
+from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.evaluators.evaluators import Evaluator
 from mttl.logging import logger
+from mttl.models.expert_model import ExpertModel
 from mttl.models.utils import transfer_batch_to_device
 
 DEBUG = False
+
+
+class DownstreamEvalCallback(cb.Callback):
+    METRIC_KEY = "downstream"
+
+    def __init__(self, args) -> None:
+        super().__init__()
+
+        self.args = args
+        self.runner: EvaluatorRunner = setup_evaluators(
+            model_type=args.model,
+            model_family=args.model_family,
+            max_input_length=args.max_input_length,
+            max_output_length=args.max_output_length,
+            predict_batch_size=args.predict_batch_size,
+            truncation_side=args.truncation_side,
+            tasks=args.pipeline_eval_tasks,
+            output_path=os.path.join(args.output_dir, self.METRIC_KEY),
+            add_eos_to_targets=args.add_eos_to_downstream_targets,
+        )
+
+    def on_validation_epoch_start(
+        self, trainer: Trainer, pl_module: ExpertModel
+    ) -> None:
+        if trainer.global_step == 0 and not self.args.eval_before_training:
+            return
+
+        if self.args.eval_every_n_epoch is None or (
+            self.args.eval_every_n_epoch
+            and trainer.current_epoch % self.args.eval_every_n_epoch != 0
+        ):
+            return
+
+        metrics = self.runner.run(pl_module)
+        for task, metric in metrics.items():
+            pl_module.log(
+                f"{self.METRIC_KEY}/{task}",
+                metric,
+                on_epoch=True,
+                prog_bar=True,
+            )
+
+    def on_test_epoch_end(self, trainer: Trainer, pl_module: ExpertModel) -> None:
+        metrics = self.runner.run(pl_module)
+        for task, metric in metrics.items():
+            pl_module.log(
+                f"{self.METRIC_KEY}_last/{task}",
+                metric,
+                on_epoch=True,
+                prog_bar=True,
+            )
 
 
 class LiveCheckpointCallback(pl.Callback):

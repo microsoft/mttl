@@ -7,8 +7,6 @@ import wandb
 from matplotlib import pyplot as plt
 from pytorch_lightning import seed_everything
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-
 from mttl.evaluators.evaluators import Evaluator, prepare_evaluator
 from mttl.logging import TableLogger, init_wandb_logger, logger, setup_logging
 from mttl.models.expert_config import ExpertConfig
@@ -21,10 +19,6 @@ from mttl.utils import remote_login
 from mttl.vllm_engines.engines import free_memory
 
 DEBUG = False
-if "AMLT_OUTPUT_DIR" in os.environ:
-    DEBUG = False
-if DEBUG:
-    print("!!!!!!!!!!!!!!!!!!!!!! DEBUG MODE")
 
 
 class TransferMatrixConfig(ExpertConfig):

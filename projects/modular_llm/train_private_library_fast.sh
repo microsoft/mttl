@@ -11,7 +11,7 @@ if [ -z "${DATASET_PATH}" ]; then
 fi
 
 for task_name in "race_middle_Select_the_best_answer_no_instructions_"  "drop_2_0_0"; do
-    CUDA_VISIBLE_DEVICES=0 python train_experts_main.py \
+    CUDA_VISIBLE_DEVICES=0 python ../../../mttl/train_experts_main.py \
         -c configs/models/gptneo_125m.json \
         -k \
         output_dir=output/${task_name}/ \

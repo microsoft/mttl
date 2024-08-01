@@ -3,17 +3,17 @@ import os
 import pytorch_lightning as pl
 from pytorch_lightning import seed_everything
 
+from mttl.datamodule.clip_data_module import (
+    CLIPExpertsConfig,
+    CLIPExpertsDatamodule,
+    CLIPTripleDataModule,
+)
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
 from mttl.models.ranker.classifier_ranker import (
     ClassifierSmooth,
     SentenceTransformerClassifier,
 )
 from mttl.models.ranker.clip_ranker import CLIPRanker, CLIPTripletRanker
-from projects.modular_llm.src.ranker.clip_data_module import (
-    CLIPExpertsConfig,
-    CLIPExpertsDatamodule,
-    CLIPTripleDataModule,
-)
 
 
 def train_triplet_clip(args):
@@ -277,7 +277,7 @@ def train_classifier_smooth(args):
 
 
 if __name__ == "__main__":
-    from projects.modular_llm.src.ranker.config import RankerConfig
+    from mttl.models.ranker.ranker_config import RankerConfig
 
     args = RankerConfig.parse()
     if args.ranker_model == "classifier":

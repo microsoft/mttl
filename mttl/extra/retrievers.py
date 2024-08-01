@@ -10,21 +10,10 @@ from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import VirtualLocalLibrary
 from mttl.models.library.library_transforms import LibraryTransform
 from mttl.models.library.utils import get_svd_embedding
-
-RETRIEVERS = {}
-
-
-def register_retriever(name):
-    def decorator(cls):
-        if name in RETRIEVERS:
-            raise ValueError(f"Retriever {name} already registered")
-        RETRIEVERS[name] = cls
-        return cls
-
-    return decorator
+from mttl.registrable import Registrable
 
 
-class Retriever(LibraryTransform):
+class Retriever(LibraryTransform, Registrable):
     def __init__(self, config: ExpertConfig, sk=None, retriever_include_parent=True):
         super().__init__(config)
         self.sk = sk if sk is not None else config.sk
@@ -53,7 +42,7 @@ class Retriever(LibraryTransform):
         raise NotImplementedError()
 
 
-@register_retriever("random")
+@Retriever.register("random")
 class RandomRetriever(Retriever):
     def transform(
         self, expert_lib, current_task, task_expert: Expert = None, **kwargs
@@ -106,7 +95,7 @@ def get_lora_task_embeddings(module: MultiExpertModel):
     return embeddings
 
 
-@register_retriever("lora_sim")
+@Retriever.register("lora_sim")
 class LoraSimRetriever(Retriever):
     def transform(
         self,
@@ -163,7 +152,7 @@ class LoraSimRetriever(Retriever):
         return resulting_library
 
 
-@register_retriever("svdemb")
+@Retriever.register("svdemb")
 class SVDEmbeddingRetriever(Retriever):
     def transform(
         self,

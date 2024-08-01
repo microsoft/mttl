@@ -1,16 +1,14 @@
 import os
 import shutil
 import sys
+from typing import Callable
 
 import torch
 from pytorch_lightning import Trainer, seed_everything
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
-
-from typing import Callable
-
-from mttl.callbacks import LiveCheckpointCallback, RougeCallback
+from mttl.callbacks import DownstreamEvalCallback, LiveCheckpointCallback, RougeCallback
 from mttl.datamodule.base import get_datamodule
+from mttl.extra.retrievers import RandomRetriever, SVDEmbeddingRetriever
 from mttl.logging import get_pl_loggers, logger, setup_logging
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import ExpertModel as ExpertTrainer
@@ -33,8 +31,6 @@ from mttl.models.library.library_transforms import (
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.monitors import get_monitors
 from mttl.utils import get_checkpoint_path, remote_login
-from projects.modular_llm.src.callbacks import DownstreamEvalCallback
-from projects.modular_llm.src.retrievers import RandomRetriever, SVDEmbeddingRetriever
 
 FINETUNE_FUNCTIONS: dict[str, Callable] = {}
 
@@ -161,7 +157,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
         wandb.config.update(args)
 
     from mttl.evaluators.rouge_evaluator import RougeEvaluator
-    from projects.modular_llm.src.nevergrad_opt import NGRoutingOptimizer
+    from mttl.extra.nevergrad_opt import NGRoutingOptimizer
 
     library = retrieve(args, args.finetune_task_name, args.sk, retrieve_with="random")
     assert (
@@ -207,7 +203,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
         wandb.config.update(args)
 
     from mttl.evaluators.rouge_evaluator import RougeEvaluator
-    from projects.modular_llm.src.nevergrad_opt import NGRoutingOptimizer
+    from mttl.extra.nevergrad_opt import NGRoutingOptimizer
 
     lib_location = f"/tmp/{args.library_id}"
     os.makedirs(lib_location, exist_ok=True)
