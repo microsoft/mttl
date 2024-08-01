@@ -117,6 +117,10 @@ class MultiSelectorConfig(dict):
         return json.dumps({k: v.selector_name for k, v in self.items()})
 
     @classmethod
+    def create_default(cls, selector_config: SelectorConfig):
+        return cls({"lora": selector_config, "skilled_lora": selector_config})
+
+    @classmethod
     def from_training_config(
         cls,
         training_config: "Config",
@@ -130,7 +134,10 @@ class MultiSelectorConfig(dict):
         try:
             router_selector = json.loads(training_config.router_selector)
         except:
-            router_selector = {Modifier.default: training_config.router_selector}
+            router_selector = {
+                "lora": training_config.router_selector,
+                "skilled_lora": training_config.router_selector,
+            }
 
         selector_configs = cls()
         for modifier_name, selector_name in router_selector.items():

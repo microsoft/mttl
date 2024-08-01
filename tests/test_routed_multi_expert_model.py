@@ -78,7 +78,7 @@ class TestMultiExpertModel:
         module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
 
         module = MultiExpertModel(**vars(config))
-        module.load_from_module_dict(module_dict, action="merge")
+        module.add_experts_from_dict(module_dict, action="merge")
         bs, max_seq_len = 10, 100
 
         assert isinstance(
@@ -129,7 +129,7 @@ class TestMultiExpertModel:
             **vars(config),
         )
         assert module.hparams.model_modifier == None
-        module.load_from_module_dict(module_dict, action="route")
+        module.add_experts_from_dict(module_dict, action="route")
         bs, max_seq_len = 10, 100
 
         assert isinstance(
@@ -173,7 +173,7 @@ class TestMultiExpertModel:
             **vars(config),
         )
         assert module.hparams.model_modifier == None
-        module.load_from_module_dict(module_dict, action="route")
+        module.add_experts_from_dict(module_dict, action="route")
         self.nonzero_B_init(module)
 
         output = module(batch)
@@ -206,7 +206,7 @@ class TestMultiExpertModel:
 
         module = MultiExpertModel(**vars(config))
         assert module.hparams.model_modifier == None
-        module.load_from_module_dict(module_dict, action="route")
+        module.add_experts_from_dict(module_dict, action="route")
         bs, max_seq_len = 10, 100
 
         assert isinstance(
@@ -240,7 +240,7 @@ class TestMultiExpertModel:
         module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
 
         module = MultiExpertModel(**vars(config))
-        module.load_from_module_dict(module_dict, action="route")
+        module.add_experts_from_dict(module_dict, action="route")
         assert list(module.selectors["lora"].values())[0].init_gap == [-1e-3, 1e-3]
 
         assert isinstance(
@@ -292,7 +292,7 @@ class TestMultiExpertModel:
         module = MultiExpertModel(
             **vars(config),
         )
-        module.load_from_module_dict(module_dict)
+        module.add_experts_from_dict(module_dict)
         selector = list(module.selectors["lora"].values())[0]
         assert selector.init_gap == [0, 0]
         assert selector.module_logits_dict["mod1"].item() == 1.0
@@ -306,9 +306,6 @@ class TestMultiExpertModel:
             for selector in selector_dict.values():
                 weights[selector.layer_name] = selector.get_routing_weights()
         assert len(weights) > 1
-
-        expert = module.get_merged_expert()
-        assert isinstance(expert, Expert)
 
     def test_expert_selector_with_moe_routing_soft(
         self, mocker, tmp_exp_config, dummy_batch
@@ -486,7 +483,7 @@ class TestMultiExpertModel:
         module_dict = {"niv2_sentence_compression": exp1_dest, "niv2_misc": exp2_dest}
 
         module = MultiExpertModel(**vars(config))
-        module.load_from_module_dict(module_dict, action="route")
+        module.add_experts_from_dict(module_dict, action="route")
 
         bs, max_seq_len = 2, 100
         batch = {

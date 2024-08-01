@@ -275,7 +275,9 @@ class MultiExpertModel(ExpertModel):
 
         # config about the routing
         if "selector_config" in config_kwargs:
-            self.selector_config = config_kwargs.pop("selector_config")
+            self.selector_config = MultiSelectorConfig.create_default(
+                config_kwargs.pop("selector_config")
+            )
         else:
             self.selector_config = MultiSelectorConfig.from_training_config(
                 self.training_config
@@ -321,16 +323,16 @@ class MultiExpertModel(ExpertModel):
             # assume "lora" is the default modifier type
             if isinstance(selector_config, SelectorConfig):
                 logger.info(
-                    f"Assuming provided selector config is for `{Modifier.default}` modifier type."
+                    f"Assuming provided selector config is for `lora, skilled_lora` modifier type."
                 )
-                selector_config = {Modifier.default: selector_config}
+                selector_config = MultiSelectorConfig.create_default(selector_config)
 
-            for modifier_type, cfg in selector_config.items():
+            for modifier_name, cfg in selector_config.items():
                 # inject the library id if it is None
                 if isinstance(cfg, LoadableSelectorConfig) and cfg.library_id is None:
                     cfg.library_id = library_id
 
-                model.set_selector(modifier_type, cfg)
+                model.set_selector(modifier_name, cfg)
         else:
             logger.info("No selector config provided, assuming expert name selector!")
         return model
@@ -394,22 +396,9 @@ class MultiExpertModel(ExpertModel):
                         raise result.exception()
                     progress_bar.update(1)
 
-    def load_from_module_dict(self, module_dict, action="route"):
-        for module_name, destination in module_dict.items():
-            if isinstance(destination, str):
-                self.load_expert(
-                    destination,
-                    module_name,
-                    action=action,
-                    is_default=module_name == "default",
-                )
-            elif isinstance(destination, Expert):
-                self.add_expert_instance(
-                    destination,
-                    module_name,
-                    action=action,
-                    is_default=module_name == "default",
-                )
+    def add_experts_from_dict(self, experts_dict, action="route"):
+        for expert_name, expert_dump in experts_dict.items():
+            self.add_expert_instance(expert_dump, expert_name, action=action)
 
     def add_empty_expert(
         self,
@@ -478,12 +467,18 @@ class MultiExpertModel(ExpertModel):
             expert_instance.name = expert_name
 
         with self.lock:
+            model_modifier = expert_instance.expert_config.modifier_name
+
             add_expert_to_transformer(
                 self.model,
                 expert_instance,
                 action=action,
-                is_default=expert_instance.name == "default" or is_default,
-                selector_config=self.selector_config,
+                is_default=is_default,
+                selector_config=(
+                    self.selector_config.get(model_modifier)
+                    if self.selector_config
+                    else None
+                ),
                 selector_cache=self.selector_cache,
             )
 
@@ -495,19 +490,19 @@ class MultiExpertModel(ExpertModel):
 
     def set_selector(
         self,
-        modifier_type: str,
+        modifier_name: str,
         selector_config: SelectorConfig,
     ):
         from mttl.models.containers import replace_selector_for_container
 
         n_selectors, n_selectors_views = replace_selector_for_container(
             self.model,
-            modifier_type,
+            modifier_name,
             selector_config,
             self.selector_cache,
             force_replace=True,
         )
-        assert self.selector_cache.get(modifier_type)
+        assert self.selector_cache.get(modifier_name)
         logger.info(
             "Created {} selectors and {} views.".format(n_selectors, n_selectors_views)
         )

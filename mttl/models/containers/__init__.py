@@ -87,7 +87,7 @@ def filter_expert_weights(layer_name, expert_weights):
 def create_selector_for_container(
     transformer,
     container,
-    modifier_type: str,
+    modifier_name: str,
     selector_config: SelectorConfig,
     selector_cache: SelectorsCache,
 ) -> Selector:
@@ -102,8 +102,8 @@ def create_selector_for_container(
     # we create a new selector if it doesn't exist for this identifier, or
     # if we are replacing a previous one of a different type
     create_new_selector = (
-        not selector_cache.get(modifier_type, identifier)
-        or selector_cache.get(modifier_type, identifier).config != selector_config
+        not selector_cache.get(modifier_name, identifier)
+        or selector_cache.get(modifier_name, identifier).config != selector_config
     )
     if create_new_selector:
         # Special case when you have a decoder layer in an enc-dec model
@@ -111,12 +111,12 @@ def create_selector_for_container(
             selector_config,
             layer=container.layer,
         )
-        selector_cache.insert(modifier_type, identifier, selector)
+        selector_cache.insert(modifier_name, identifier, selector)
 
         # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
         selector.total_calls_per_forward += 1
     else:
-        selector: Selector = selector_cache.get(modifier_type, identifier)
+        selector: Selector = selector_cache.get(modifier_name, identifier)
         # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
         selector.total_calls_per_forward += 1
         selector = selector.create_view()
@@ -128,7 +128,7 @@ def create_selector_for_container(
 
 def replace_selector_for_container(
     transformer,
-    modifier_type: str,
+    modifier_name: str,
     selector_config: SelectorConfig,
     selector_cache: SelectorsCache,
     force_replace: bool = False,
@@ -146,7 +146,7 @@ def replace_selector_for_container(
                         supports_config
                     )
                     # selector does not apply to this container
-                    if not container_modifier == modifier_type:
+                    if not container_modifier == modifier_name:
                         continue
                     else:
                         expert_containers.append(layer)
@@ -154,13 +154,13 @@ def replace_selector_for_container(
 
     if not expert_containers:
         raise ValueError(
-            f"No expert containers found for modifier type: {modifier_type}. Cannot assign a selector! Load some experts beforehand."
+            f"No expert containers found for modifier type: {modifier_name}. Cannot assign a selector! Load some experts beforehand."
         )
 
     if force_replace:
         for container in expert_containers:
             container.selector = None
-        selector_cache.clear(modifier_type)
+        selector_cache.clear(modifier_name)
 
     n_selectors = 0
     n_selectors_views = 0
@@ -169,7 +169,7 @@ def replace_selector_for_container(
         selector = create_selector_for_container(
             transformer,
             container,
-            modifier_type,
+            modifier_name,
             selector_config,
             selector_cache,
         )
