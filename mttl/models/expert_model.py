@@ -291,6 +291,15 @@ class MultiExpertModel(ExpertModel):
     def experts_names(self):
         return list(self.experts_infos.keys())
 
+    def set_default_expert(self, expert_name):
+        """Propagate default expert to all containers that contain it."""
+        if expert_name not in self.experts_infos:
+            raise ValueError(f"Expert {expert_name} not found in the model.")
+
+        for container in self.experts_containers:
+            if expert_name in container.expert_infos:
+                container.default_expert_name = expert_name
+
     @classmethod
     def from_pretrained_library(
         cls,

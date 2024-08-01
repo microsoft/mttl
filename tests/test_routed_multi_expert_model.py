@@ -202,11 +202,13 @@ class TestMultiExpertModel:
         config.router_selector = "task_selector"
         exp1 = self.create_dummy_expert(config, "exp1")
         exp2 = self.create_dummy_expert(config, "exp2")
-        module_dict = {"mod1": exp1, "mod2": exp2, "default": exp1}
+        module_dict = {"mod1": exp1, "mod2": exp2, "mod3": exp1}
 
         module = MultiExpertModel(**vars(config))
         assert module.hparams.model_modifier == None
         module.add_experts_from_dict(module_dict, action="route")
+        module.set_default_expert("mod3")
+
         bs, max_seq_len = 10, 100
 
         assert isinstance(
@@ -241,7 +243,7 @@ class TestMultiExpertModel:
 
         module = MultiExpertModel(**vars(config))
         module.add_experts_from_dict(module_dict, action="route")
-        assert list(module.selectors["lora"].values())[0].init_gap == [-1e-3, 1e-3]
+        assert module.selectors["lora"][0].init_gap == [-1e-3, 1e-3]
 
         assert isinstance(
             module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
@@ -264,7 +266,7 @@ class TestMultiExpertModel:
 
         # check the get_router_weights function
         weights = {}
-        for _, selector_dict in module.selectors.items():
+        for _, selector_dict in module.selector_cache.items():
             for selector in selector_dict.values():
                 weights[selector.layer_name] = selector.get_routing_weights()
         assert len(weights) == 1
@@ -272,7 +274,7 @@ class TestMultiExpertModel:
             "mod1" in weights["transformer.h.0.attn.attention.k_proj.selector"]
             and "mod2" in weights["transformer.h.0.attn.attention.k_proj.selector"]
         )
-        assert "shared" in module.selectors["lora"]
+        assert "shared" in module.selector_cache.get("lora")
 
         assert isinstance(
             module.model.transformer.h[0].attn.attention.k_proj.selector,
@@ -293,7 +295,7 @@ class TestMultiExpertModel:
             **vars(config),
         )
         module.add_experts_from_dict(module_dict)
-        selector = list(module.selectors["lora"].values())[0]
+        selector = module.selectors["lora"][0]
         assert selector.init_gap == [0, 0]
         assert selector.module_logits_dict["mod1"].item() == 1.0
         assert selector.module_logits_dict["mod2"].item() == 0.0
@@ -302,7 +304,7 @@ class TestMultiExpertModel:
         assert np.allclose(output.item(), 9.68, atol=0.1)
 
         weights = {}
-        for _, selector_dict in module.selectors.items():
+        for _, selector_dict in module.selector_cache.items():
             for selector in selector_dict.values():
                 weights[selector.layer_name] = selector.get_routing_weights()
         assert len(weights) > 1
