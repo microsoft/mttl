@@ -84,25 +84,6 @@ def filter_expert_weights(layer_name, expert_weights):
     return weights
 
 
-def add_expert_library_to_transformer(
-    transformer,
-    expert_library: ExpertLibrary,
-    action: str = "route",
-    default_expert: str = None,
-    selector_config: SelectorConfig = None,
-):
-    for expert_name, expert_dump in expert_library.items():
-        add_expert_to_transformer(
-            transformer,
-            expert_name,
-            expert_dump.expert_config,
-            expert_dump.expert_weights,
-            action=action,
-            is_default=expert_name == default_expert,
-            selector_config=selector_config,
-        )
-
-
 def create_selector_for_container(
     transformer,
     container,
