@@ -1,4 +1,5 @@
 import re
+from typing import Tuple
 
 from mttl.config import Config
 from mttl.logging import logger
@@ -132,7 +133,7 @@ def replace_selector_for_container(
     selector_config: SelectorConfig,
     selector_cache: SelectorsCache,
     force_replace: bool = False,
-):
+) -> Tuple[int, int]:
     """
     Assigns a selector to the expert containers in the transformer model.
     """
@@ -153,9 +154,10 @@ def replace_selector_for_container(
                         break
 
     if not expert_containers:
-        raise ValueError(
+        logger.warn(
             f"No expert containers found for modifier type: {modifier_name}. Cannot assign a selector! Load some experts beforehand."
         )
+        return 0, 0
 
     if force_replace:
         for container in expert_containers:

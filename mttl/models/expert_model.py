@@ -511,7 +511,6 @@ class MultiExpertModel(ExpertModel):
             self.selector_cache,
             force_replace=True,
         )
-        assert self.selector_cache.get(modifier_name)
         logger.info(
             "Created {} selectors and {} views.".format(n_selectors, n_selectors_views)
         )
@@ -585,6 +584,11 @@ class MultiExpertModel(ExpertModel):
             expert = self.get_expert_instance(expert_name)
             library.add_expert(expert)
         return library
+
+    def as_expert(self):
+        raise NotImplementedError(
+            "This method is not implemented for MultiExpertModel."
+        )
 
 
 class MoEModel(MultiExpertModel):
