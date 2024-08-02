@@ -11,8 +11,7 @@ from einops import rearrange, repeat
 from transformers import Cache
 from transformers.models.llama.modeling_llama import apply_rotary_pos_emb
 
-from mttl.models.modifiers import register_modifier
-from mttl.models.modifiers.base import Adapter, ModifierConfig, ModifyMixin
+from mttl.models.modifiers.base import Modifier, ModifierConfig, ModifyMixin
 
 
 @dataclass
@@ -25,10 +24,10 @@ class KVAdapterConfig(ModifierConfig):
     patch_last_k_layers: int = -1
 
 
-@register_modifier("kv_adapter", config_cls=KVAdapterConfig)
-class KVAdapter(Adapter, ModifyMixin):
+@Modifier.register("kv_adapter", config_cls=KVAdapterConfig)
+class KVAdapter(Modifier, ModifyMixin):
     """
-    Adapter augmenting the self-attention with additional learnable KV pairs.
+    Modifier augmenting the self-attention with additional learnable KV pairs.
 
     Adapter modifies the self-attention call with the following execution :
     1. adapter_k, adapter_v = adapter.get_kv_weights(k_proj, v_proj)

@@ -1,10 +1,16 @@
+import functools
+import os
+
 import numpy as np
 import pytest
 import torch
 from pytorch_lightning import seed_everything
 
 from mttl.config import Config
-from mttl.models.containers import CoalescedLoRAExpertContainer, LoRAExpertContainer
+from mttl.models.containers.lora_containers import (
+    CoalescedLoRAExpertContainer,
+    LoRAExpertContainer,
+)
 from mttl.models.containers.selectors import (
     BatchSequenceExpertsAndWeightsSelectorOutput,
     MOERKHSSelector,
@@ -13,11 +19,38 @@ from mttl.models.containers.selectors import (
     PolySelectorDirect,
     SelectorOutput,
 )
+from mttl.models.containers.selectors.base import LoadableLibraryMixin
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import MoEModel, MultiExpertModel
 from mttl.models.library.expert import Expert
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.lora import LoRA
+
+
+def no_coalesced_lora_container():
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            # Save the original value of the environment variable
+            original_value = os.environ.get("COALESCED_LORA_CONTAINER")
+
+            # Set the environment variable to the new value
+            os.environ["COALESCED_LORA_CONTAINER"] = "0"
+
+            try:
+                # Call the wrapped function
+                return func(*args, **kwargs)
+            finally:
+                # Restore the original value of the environment variable
+                if original_value is None:
+                    # Remove the environment variable if it was not set originally
+                    os.environ.pop("COALESCED_LORA_CONTAINER", None)
+                else:
+                    os.environ["COALESCED_LORA_CONTAINER"] = original_value
+
+        return wrapper
+
+    return decorator
 
 
 @pytest.fixture
@@ -64,6 +97,7 @@ class TestMultiExpertModel:
         )
         return expert
 
+    @no_coalesced_lora_container()
     def test_add_expert_with_action_merge(self, tmp_exp_config):
         seed_everything(0)
         config: ExpertConfig = tmp_exp_config
@@ -74,7 +108,7 @@ class TestMultiExpertModel:
         module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
 
         module = MultiExpertModel(**vars(config))
-        module.load_from_module_dict(module_dict, action="merge")
+        module.add_experts_from_dict(module_dict, action="merge")
         bs, max_seq_len = 10, 100
 
         assert isinstance(
@@ -125,7 +159,7 @@ class TestMultiExpertModel:
             **vars(config),
         )
         assert module.hparams.model_modifier == None
-        module.load_from_module_dict(module_dict, action="route")
+        module.add_experts_from_dict(module_dict, action="route")
         bs, max_seq_len = 10, 100
 
         assert isinstance(
@@ -143,14 +177,16 @@ class TestMultiExpertModel:
         batch["attention_mask"] = attn_mask
         batch["task_names"] = ["task_1", "task_2"] * 5
 
+        is_coalesced = os.environ.get("COALESCED_LORA_CONTAINER", "0") == "1"
+
         # BASE MODEL FWD BASS (because all Bs are == 0, so functially same as backbone)
         output = module(batch)
-        assert np.allclose(output.item(), 10.20, atol=0.1)
+        assert np.allclose(output.item(), 10.08 if is_coalesced else 10.20, atol=0.1)
 
         # Now let's change the adapter params, and also the function parameterized by the model
         self.nonzero_B_init(module)
         output = module(batch)
-        assert np.allclose(output.item(), 14.69, atol=0.1)
+        assert np.allclose(output.item(), 15.03 if is_coalesced else 14.69, atol=0.1)
 
         """ Multi-Head Routing Test """
         # NOTE: We need to add SkilledLoRAs instead of standard LoRAs
@@ -169,13 +205,13 @@ class TestMultiExpertModel:
             **vars(config),
         )
         assert module.hparams.model_modifier == None
-        module.load_from_module_dict(module_dict, action="route")
+        module.add_experts_from_dict(module_dict, action="route")
         self.nonzero_B_init(module)
 
         output = module(batch)
 
         # Because routing is initialized to uniform, should give same result
-        assert np.allclose(output.item(), 15.27, atol=0.1)
+        assert np.allclose(output.item(), 15.03 if is_coalesced else 15.27, atol=0.1)
 
         # Now let's change the routing, to make sure the output also changes
         for mod in module.modules():
@@ -184,7 +220,7 @@ class TestMultiExpertModel:
                 mod.module_logits.data[:, -1] = 999
 
         output = module(batch)
-        assert np.allclose(output.item(), 15.21, atol=0.1)
+        assert np.allclose(output.item(), 15.56 if is_coalesced else 16.22, atol=0.1)
 
         # Finally, Test invalid tasks
         batch["task_names"][-1] = "task_10"
@@ -198,22 +234,27 @@ class TestMultiExpertModel:
         config.router_selector = "task_selector"
         exp1 = self.create_dummy_expert(config, "exp1")
         exp2 = self.create_dummy_expert(config, "exp2")
-        module_dict = {"mod1": exp1, "mod2": exp2, "default": exp1}
+        module_dict = {"mod1": exp1, "mod2": exp2, "mod3": exp1}
 
         module = MultiExpertModel(**vars(config))
         assert module.hparams.model_modifier == None
-        module.load_from_module_dict(module_dict, action="route")
+        module.add_experts_from_dict(module_dict, action="route")
+        module.set_default_expert("mod3")
+
         bs, max_seq_len = 10, 100
 
         assert isinstance(
             module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
         )
 
+        # Model has been created. Now, we fix the generator to ensure that coalesced vs not coalesced gives the same as base llama
+        generator = torch.Generator()
+        generator.manual_seed(0)
         batch = {
-            "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
-            "labels": torch.randint(10, 400, (bs, max_seq_len)),
+            "input_ids": torch.randint(10, 400, (bs, max_seq_len), generator=generator),
+            "labels": torch.randint(10, 400, (bs, max_seq_len), generator=generator),
         }
-        seq_len = torch.randint(0, max_seq_len, (bs,))
+        seq_len = torch.randint(0, max_seq_len, (bs,), generator=generator)
         attn_mask = torch.zeros(bs, max_seq_len, dtype=torch.int32)
         attn_mask[torch.arange(bs), seq_len] = 1
         attn_mask = 1 - attn_mask.cumsum(dim=-1)
@@ -224,7 +265,7 @@ class TestMultiExpertModel:
 
         # Test Base Llama model
         output = module(batch)
-        assert np.allclose(output.item(), 11.04, atol=0.1)
+        assert np.allclose(output.item(), 10.1, atol=0.1)
 
     def test_expert_selector_with_poly_routing(self, tmp_exp_config):
         seed_everything(0)
@@ -236,38 +277,45 @@ class TestMultiExpertModel:
         module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
 
         module = MultiExpertModel(**vars(config))
-        module.load_from_module_dict(module_dict, action="route")
+        module.add_experts_from_dict(module_dict, action="route")
+        assert module.selectors["lora"][0].init_gap == [-1e-3, 1e-3]
 
         assert isinstance(
             module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
         )
 
+        # Model has been created. Now, we fix the generator to ensure that coalesced vs not coalesced gives the same as base llama
+        generator = torch.Generator()
+        generator.manual_seed(0)
         bs, max_seq_len = 10, 100
         batch = {
-            "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
-            "labels": torch.randint(10, 400, (bs, max_seq_len)),
+            "input_ids": torch.randint(10, 400, (bs, max_seq_len), generator=generator),
+            "labels": torch.randint(10, 400, (bs, max_seq_len), generator=generator),
         }
-        seq_len = torch.randint(0, max_seq_len, (bs,))
+        seq_len = torch.randint(0, max_seq_len, (bs,), generator=generator)
         attn_mask = torch.zeros(bs, max_seq_len, dtype=torch.int32)
         attn_mask[torch.arange(bs), seq_len] = 1
         attn_mask = 1 - attn_mask.cumsum(dim=-1)
         batch["attention_mask"] = attn_mask
+        batch["task_names"] = ["mod1", "mod2"] * 4
+        batch["task_names"] += ["some_unknown_task_name"] * 2
+        batch["task_sources"] = batch["task_names"]
 
         # Test Base Llama model
         output = module(batch)
-        assert np.allclose(output.item(), 10.15, atol=0.1)
+        assert np.allclose(output.item(), 10.1, atol=0.1)
 
         # check the get_router_weights function
         weights = {}
-        for _, selector_list in module.selectors.items():
-            for selector in selector_list:
+        for _, selector_dict in module.selector_cache.items():
+            for selector in selector_dict.values():
                 weights[selector.layer_name] = selector.get_routing_weights()
         assert len(weights) == 1
         assert (
             "mod1" in weights["transformer.h.0.attn.attention.k_proj.selector"]
             and "mod2" in weights["transformer.h.0.attn.attention.k_proj.selector"]
         )
-        assert "shared" in module.model.selectors["lora"]
+        assert "shared" in module.selector_cache.get("lora")
 
         assert isinstance(
             module.model.transformer.h[0].attn.attention.k_proj.selector,
@@ -282,21 +330,25 @@ class TestMultiExpertModel:
 
         # change router_granularity to finegrained
         config.router_granularity = "finegrained"
+        config.finetune_task_name = "mod1"
+
         module = MultiExpertModel(
             **vars(config),
         )
-        module.load_from_module_dict(module_dict)
+        module.add_experts_from_dict(module_dict)
+        selector = module.selectors["lora"][0]
+        assert selector.init_gap == [0, 0]
+        assert selector.module_logits_dict["mod1"].item() == 1.0
+        assert selector.module_logits_dict["mod2"].item() == 0.0
+
         output = module(batch)
-        assert np.allclose(output.item(), 10.15, atol=0.1)
+        assert np.allclose(output.item(), 10.1, atol=0.1)
 
         weights = {}
-        for _, selector_list in module.selectors.items():
-            for selector in selector_list:
+        for _, selector_dict in module.selector_cache.items():
+            for selector in selector_dict.values():
                 weights[selector.layer_name] = selector.get_routing_weights()
         assert len(weights) > 1
-
-        expert = module.get_merged_expert()
-        assert isinstance(expert, Expert)
 
     def test_expert_selector_with_moe_routing_soft(
         self, mocker, tmp_exp_config, dummy_batch
@@ -345,7 +397,7 @@ class TestMultiExpertModel:
         assert container.selector.top_k == -1
         # Test Base Llama model
         output = module(dummy_batch)
-        assert np.allclose(output.item(), 18, atol=0.1)
+        assert np.allclose(output.item(), 18.1, atol=0.1)
         assert container.selector.total_calls_per_forward == 72
 
         config: ExpertConfig = tmp_exp_config
@@ -474,7 +526,7 @@ class TestMultiExpertModel:
         module_dict = {"niv2_sentence_compression": exp1_dest, "niv2_misc": exp2_dest}
 
         module = MultiExpertModel(**vars(config))
-        module.load_from_module_dict(module_dict, action="route")
+        module.add_experts_from_dict(module_dict, action="route")
 
         bs, max_seq_len = 2, 100
         batch = {

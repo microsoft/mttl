@@ -11,17 +11,23 @@ from transformers import PreTrainedModel
 
 from mttl.logging import logger
 from mttl.models.containers import add_expert_to_transformer
-from mttl.models.containers.expert_containers import ExpertContainer
+from mttl.models.containers.base import ExpertContainer
 from mttl.models.containers.selectors import Selector, SelectorConfig
-from mttl.models.containers.selectors.base_selectors import LoadableSelectorConfig
+from mttl.models.containers.selectors.base import (
+    LoadableLibraryMixin,
+    LoadableSelectorConfig,
+    MultiSelectorConfig,
+    SelectorsCache,
+)
 from mttl.models.expert_config import ExpertConfig
+from mttl.models.expert_context import InfoContainer
 from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.llama_patch import replace_attn_with_flash_attn
 from mttl.models.modifiers import modify_transformer
-from mttl.models.modifiers.base import ModifierConfig
+from mttl.models.modifiers.base import Modifier, ModifierConfig
 from mttl.models.modifiers.lora import SkilledLoRAConfig
-from mttl.models.modifiers.routing import RoutingInfo
+from mttl.models.modifiers.modify_model import get_modifier_name
 from mttl.models.utils import EfficientCheckpointModule, prepare_model_for_kbit_training
 
 torch.set_float32_matmul_precision("high")
@@ -50,6 +56,7 @@ class ExpertModel(EfficientCheckpointModule):
                 load_in_4bit=self.load_in_4bit,
                 load_in_8bit=self.load_in_8bit,
                 device_map=getattr(self.hparams, "device_map", "cpu"),
+                attn_implementation=getattr(self.hparams, "attn_implementation", None),
             )
 
         if self.load_in_8bit:
@@ -66,19 +73,15 @@ class ExpertModel(EfficientCheckpointModule):
         self.modifier_config = ModifierConfig.from_training_config(self.training_config)
         self.model = modify_transformer(model_object, self.modifier_config)
 
-        # replace w flash attn!
-        replace_attn_with_flash_attn(self.model)
-
         self.test_results = []
         self.best_val_result = None
         self._inference_outputs = []
         self._log_pref = kwargs.get("logging_prefix", "")
 
+    @InfoContainer.wrap_forward
     def forward(self, batch, reduction="mean"):
         input_ids = batch["input_ids"]
         labels = batch["labels"]
-
-        self.set_routing_infos(batch)
 
         outputs = self.model.forward(input_ids, attention_mask=batch["attention_mask"])
 
@@ -213,20 +216,16 @@ class ExpertModel(EfficientCheckpointModule):
                         prog_bar=True,
                     )
 
-    def set_routing_infos(self, batch, generate=False):
-        self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
-
     @property
     def generation_config(self):
         return self.model.generation_config
 
+    @InfoContainer.wrap_forward
     def generate(
         self,
         batch,
         **kwargs,
     ):
-        self.set_routing_infos(batch, generate=True)
-
         generations = self.model.generate(
             inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
         )
@@ -270,25 +269,41 @@ class ExpertModel(EfficientCheckpointModule):
 class MultiExpertModel(ExpertModel):
     """Adds all functions and properties for a multi-expert model."""
 
-    def __init__(self, **config_kwargs):
+    def __init__(self, selector_config=None, **config_kwargs):
         config_kwargs["model_modifier"] = None
+
         super().__init__(**config_kwargs)
 
         # config about the routing
-        if "selector_config" in config_kwargs:
-            self.selector_config = config_kwargs.pop("selector_config")
+        if selector_config is not None:
+            self.selector_config = selector_config
         else:
-            self.selector_config = SelectorConfig.from_training_config(
+            self.selector_config = MultiSelectorConfig.from_training_config(
                 self.training_config
             )
 
-        self.experts_names = []
+        # inject memory for adding selectors
+        self.selector_cache = SelectorsCache()
+        self.experts_infos = {}
+
+    @property
+    def experts_names(self):
+        return list(self.experts_infos.keys())
+
+    def set_default_expert(self, expert_name):
+        """Propagate default expert to all containers that contain it."""
+        if expert_name not in self.experts_infos:
+            raise ValueError(f"Expert {expert_name} not found in the model.")
+
+        for container in self.experts_containers:
+            if expert_name in container.expert_infos:
+                container.default_expert_name = expert_name
 
     @classmethod
     def from_pretrained_library(
         cls,
         library_id: Union[str, ExpertLibrary],
-        selector_configs: Union[SelectorConfig, Dict[str, SelectorConfig]] = None,
+        selector_config: Union[SelectorConfig, Dict[str, SelectorConfig]] = None,
         remote_token: str = None,
         **kwargs,
     ):
@@ -299,8 +314,10 @@ class MultiExpertModel(ExpertModel):
                 repo_id=library_id,
                 token=remote_token,
             )
+            repo_id = library_id
         else:
             library = library_id
+            repo_id = library_id.uri
 
         # get a config file from the library, and initialize the expert model
         an_expert = library[next(iter(library.keys()))]
@@ -308,29 +325,24 @@ class MultiExpertModel(ExpertModel):
         train_cfg = deepcopy(an_expert.training_config)
         train_cfg.device_map = "cpu"
 
-        model = cls(**vars(train_cfg))
-        model.add_experts_from_library(library)
-
         # set selector for the added experts
-        if selector_configs is not None:
-            # assume "lora" is the default modifier type
-            if type(selector_configs) is SelectorConfig:
-                logger.info(
-                    "Assuming provided selector config is for `lora` modifier type."
-                )
-                selector_configs = {"lora": selector_configs}
+        if selector_config is not None:
+            if isinstance(selector_config, LoadableSelectorConfig):
+                selector_config.library_id = repo_id
 
-            for modifier_type, selector_config in selector_configs.items():
-                # inject the library id if it is None
-                if (
-                    isinstance(selector_config, LoadableSelectorConfig)
-                    and selector_config.library_id is None
-                ):
-                    selector_config.library_id = library_id
-
-                model.set_selector(modifier_type, selector_config)
+            elif isinstance(selector_config, dict):
+                for modifier_name, cfg in selector_config.items():
+                    # inject the library id if it is None
+                    if (
+                        isinstance(cfg, LoadableSelectorConfig)
+                        and cfg.library_id is None
+                    ):
+                        cfg.library_id = repo_id
         else:
             logger.info("No selector config provided, assuming expert name selector!")
+
+        model = cls(selector_config=selector_config, **vars(train_cfg))
+        model.add_experts_from_library(library)
         return model
 
     @property
@@ -350,12 +362,10 @@ class MultiExpertModel(ExpertModel):
 
     @property
     def selectors(self) -> Dict[str, List[Selector]]:
-        selectors = defaultdict(list)
-        for modifier, selectors_dict in self.model.selectors.items():
-            for selector in selectors_dict.values():
-                if isinstance(selector, Selector):
-                    selectors[modifier].append(selector)
-        return selectors
+        return {
+            key: list(self.selector_cache.get(key).values())
+            for key in self.selector_cache.keys()
+        }
 
     def delete_expert_container(self):
         """
@@ -365,7 +375,9 @@ class MultiExpertModel(ExpertModel):
             for c_name, child in dict(module.named_children()).items():
                 if isinstance(child, ExpertContainer) and len(child.experts) > 0:
                     setattr(module, c_name, child.layer)
-        self.experts_names.clear()
+
+        self.selector_cache.clear()
+        self.experts_infos.clear()
 
     def add_experts_from_library(self, library):
         import concurrent.futures
@@ -392,27 +404,15 @@ class MultiExpertModel(ExpertModel):
                         raise result.exception()
                     progress_bar.update(1)
 
-    def load_from_module_dict(self, module_dict, action="route"):
-        for module_name, destination in module_dict.items():
-            if isinstance(destination, str):
-                self.load_expert(
-                    destination,
-                    module_name,
-                    action=action,
-                    is_default=module_name == "default",
-                )
-            elif isinstance(destination, Expert):
-                self.add_expert_instance(
-                    destination,
-                    module_name,
-                    action=action,
-                    is_default=module_name == "default",
-                )
+    def add_experts_from_dict(self, experts_dict, action="route"):
+        for expert_name, expert_dump in experts_dict.items():
+            self.add_expert_instance(expert_dump, expert_name, action=action)
 
     def add_empty_expert(
         self,
         expert_name,
         expert_config=None,
+        is_default=False,
     ) -> Expert:
         """Adds a new empty expert to the model."""
         new_expert = Expert(
@@ -424,7 +424,7 @@ class MultiExpertModel(ExpertModel):
             ),
         )
 
-        new_expert = self.add_expert_instance(new_expert)
+        new_expert = self.add_expert_instance(new_expert, is_default=is_default)
         logger.info("Added empty expert: {}".format(expert_name))
         return new_expert
 
@@ -457,6 +457,14 @@ class MultiExpertModel(ExpertModel):
         )
         self.add_expert_instance(expert, action=action, is_default=is_default)
 
+    def _get_selector_config(self, model_modifier: str) -> SelectorConfig:
+        if not self.selector_config:
+            return None
+        if isinstance(self.selector_config, dict):
+            return self.selector_config.get(model_modifier)
+        else:
+            return self.selector_config
+
     def add_expert_instance(
         self,
         expert_instance: Expert,
@@ -475,35 +483,38 @@ class MultiExpertModel(ExpertModel):
             expert_instance.name = expert_name
 
         with self.lock:
+            modifier_name = expert_instance.expert_config.modifier_name
+            selector_config = self._get_selector_config(modifier_name)
+
             add_expert_to_transformer(
                 self.model,
                 expert_instance,
                 action=action,
-                is_default=expert_instance.name == "default" or is_default,
-                routing_config=self.selector_config,
-                training_config=self.training_config,
+                is_default=is_default,
+                selector_config=selector_config,
+                selector_cache=self.selector_cache,
             )
 
             if action != "merge":
-                self.experts_names.append(expert_instance.name)
+                self.experts_infos[expert_instance.name] = expert_instance.expert_info
                 # reload the expert instance to fill the weights properly if this was an empty expert
                 expert_instance = self.get_expert_instance(expert_instance.name)
             return expert_instance
 
     def set_selector(
         self,
-        modifier_type: str,
+        modifier_name: str,
         selector_config: SelectorConfig,
     ):
         from mttl.models.containers import replace_selector_for_container
 
         n_selectors, n_selectors_views = replace_selector_for_container(
             self.model,
-            modifier_type,
+            modifier_name,
             selector_config,
+            self.selector_cache,
             force_replace=True,
         )
-        assert self.model.selectors[modifier_type]
         logger.info(
             "Created {} selectors and {} views.".format(n_selectors, n_selectors_views)
         )
@@ -524,28 +535,6 @@ class MultiExpertModel(ExpertModel):
             if re.fullmatch(p_name_pattern, name):
                 para_list.append(param.reshape(-1))
         return torch.cat(para_list)
-
-    def get_task_embeddings(self):
-        """
-        Retrieves the task embeddings for the loaded experts.
-
-        This method assumes that the names of the loaded experts correspond to the tasks they are made for.
-
-        Returns:
-        embeddings (dict): A dictionary containing the task embeddings for each expert.
-                           The keys are the expert names and the values are the corresponding embeddings.
-        """
-        if len(self.experts_names) == 0:
-            return self.extract_parameters()
-
-        embeddings = {}
-        for exp_name in self.experts_names:
-            embeddings[exp_name] = (
-                self.extract_parameters(p_name_pattern=rf".*{exp_name}\..*lora.*")
-                .detach()
-                .cpu()
-            )
-        return embeddings
 
     def get_expert_instance(self, expert_name):
         """
@@ -578,7 +567,7 @@ class MultiExpertModel(ExpertModel):
         for container in self.experts_containers:
             if expert_name in container.expert_infos:
                 expert_info = container.expert_infos[expert_name]
-                expert_weights = container._get_expert_weights(expert_name)
+                expert_weights = container[expert_name].state_dict()
                 expert_weights = {
                     f"{container.layer_name}.{k}": v for k, v in expert_weights.items()
                 }
@@ -600,58 +589,10 @@ class MultiExpertModel(ExpertModel):
             library.add_expert(expert)
         return library
 
-    def get_merged_expert(
-        self, modifier_type: str = "lora", with_global_names=True, **kwargs
-    ) -> Expert:
-        """
-        Converts the current expert model into an instance of the Expert class by merging the experts in the containers using weights from the corresponding selectors.
-
-        Args:
-            with_global_names (bool, optional): Whether to include global names in the merged weights. Defaults to True.
-
-        Returns:
-            Expert: An instance of the Expert class.
-
-        Raises:
-            None
-
-        Example:
-            model = ExpertModel()
-            expert = model.to_expert(weights={'expert1': 0.5, 'expert2': 0.5}, with_global_names=True)
-        """
-        from mttl.models.modifiers.modify_model import get_modifier_type
-
-        expert_params = {}
-        assert (
-            modifier_type in self.selectors
-        ), f"Modifier type {modifier_type} not in model."
-        for container in self.experts_containers:
-            if not get_modifier_type(container.config) == modifier_type:
-                logger.info(
-                    f"Skipping container {container.layer_name} with modifier type {get_modifier_type(container.config)}"
-                )
-                continue
-
-            params = container.get_merged_params(
-                with_global_names=with_global_names, **kwargs
-            )
-            expert_params.update(params)
-            expert_config = container.config
-        if len(expert_params) == 0:
-            raise ValueError(
-                "No experts to merge found. Make sure the 'modifier_type' is correct."
-            )
-
-        expert_info = ExpertInfo(
-            expert_name=self.training_config.finetune_task_name,
-            expert_task_name=self.training_config.finetune_task_name,
-            training_config=self.training_config,
-            expert_config=expert_config,
+    def as_expert(self):
+        raise NotImplementedError(
+            "This method is not implemented for MultiExpertModel."
         )
-        return Expert(expert_info=expert_info, expert_weights=expert_params)
-
-    def set_routing_infos(self, batch, generate=False):
-        self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
 
 
 class MoEModel(MultiExpertModel):
@@ -693,15 +634,14 @@ class MoEModel(MultiExpertModel):
         loss = super().training_step(batch, _)
         total_loss = loss.clone()
 
-        if (
-            "routing_gates" in self.model.info_container
-            and self.model.info_container["routing_gates"]
-        ):
+        info_container = InfoContainer.get()
+
+        if getattr(info_container, "routing_gates", []):
             num = 0.0
             entropy_of_avg = 0.0
             entropy_of_route = 0.0
 
-            for values in self.model.info_container["routing_gates"]:
+            for values in info_container.routing_gates:
                 # compute MI loss
                 values = values.to(torch.float32)
                 values = values.view(-1, values.shape[-1])
@@ -743,8 +683,6 @@ class MoEModel(MultiExpertModel):
                 total_loss += (
                     (1.0 - normalized_entropy) >= self.hparams.moe_ent_free_bits
                 ) * -entropy_of_route
-
-            self.model.info_container["routing_gates"].clear()
 
         self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
         self.log(

@@ -3,13 +3,13 @@ import copy
 import numpy as np
 import torch
 
+from mttl.logging import logger
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import MultiExpertModel
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import VirtualLocalLibrary
 from mttl.models.library.library_transforms import LibraryTransform
 from mttl.models.library.utils import get_svd_embedding
-from mttl.utils import logger
 
 RETRIEVERS = {}
 
@@ -83,6 +83,29 @@ class RandomRetriever(Retriever):
         return resulting_library
 
 
+def get_lora_task_embeddings(module: MultiExpertModel):
+    """
+    Retrieves the task embeddings for the loaded experts.
+
+    This method assumes that the names of the loaded experts correspond to the tasks they are made for.
+
+    Returns:
+    embeddings (dict): A dictionary containing the task embeddings for each expert.
+                        The keys are the expert names and the values are the corresponding embeddings.
+    """
+    if len(module.experts_names) == 0:
+        return module.extract_parameters()
+
+    embeddings = {}
+    for exp_name in module.experts_names:
+        embeddings[exp_name] = (
+            module.extract_parameters(p_name_pattern=rf".*{exp_name}\..*lora.*")
+            .detach()
+            .cpu()
+        )
+    return embeddings
+
+
 @register_retriever("lora_sim")
 class LoraSimRetriever(Retriever):
     def transform(
@@ -101,12 +124,15 @@ class LoraSimRetriever(Retriever):
         assert task_expert in expert_lib_copy
 
         module = copy.deepcopy(module)
-        module.load_from_module_dict(expert_lib_copy)
+        module.add_experts_from_library(expert_lib_copy)
+
         from torch.nn.functional import cosine_similarity
 
         task_module_name = task_expert.name
+
         # compute cosine similarity between each expert and current task's expert, keep top sk
-        emb_tasks = module.get_task_embeddings()
+        emb_tasks = module.get_lora_task_embeddings()
+
         # compare this task's embed with  other
         if task_module_name not in emb_tasks:
             return expert_lib_copy
