@@ -59,7 +59,7 @@ def test_expert_model():
 
 @pytest.mark.skipif(
     os.getenv("COALESCED_LORA_CONTAINER") == None,
-    reason="Sneaky way to avoid this test on the cluster. It's not failing locally",
+    reason="Sneaky way to avoid this test on the cluster. It's not failing locally.",
 )
 def test_expert_model_coalesced():
     seed_everything(0)
