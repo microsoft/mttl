@@ -56,6 +56,7 @@ class ExpertModel(EfficientCheckpointModule):
                 load_in_4bit=self.load_in_4bit,
                 load_in_8bit=self.load_in_8bit,
                 device_map=getattr(self.hparams, "device_map", "cpu"),
+                attn_implementation=getattr(self.hparams, "attn_implementation", None),
             )
 
         if self.load_in_8bit:
