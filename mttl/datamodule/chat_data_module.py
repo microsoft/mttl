@@ -8,7 +8,6 @@ class ChatDataConfig(DatasetConfig):
 
 
 class ChatDataModule(DefaultDataModule):
-
     def setup_dataset(self):
         dataset = DatasetLibrary.pull_dataset(self.config.dataset, split="train")
 

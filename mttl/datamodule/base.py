@@ -777,6 +777,7 @@ class DefaultDataModule(LightningDataModule):
             if self.config.pack_sequences and split == "train":
                 dataset = getattr(self, f"{split}_dataset")
                 logger.info(f"Packing sequences for {split} dataset")
+
                 dataset = self.tokenize_dataset(dataset)
                 dataset = self.pack_sequences(
                     dataset, max_sequences=self.config.max_seq_per_pack
@@ -883,6 +884,7 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         "pad_to_multiple_of": args.pad_to_multiple_of,
         "padding_side": args.padding_side,
         "max_seq_per_pack": args.max_seq_per_pack,
+        "pack_sequences": args.pack_sequences,
     }
 
     if dataset in [
