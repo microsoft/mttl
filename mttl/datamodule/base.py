@@ -722,7 +722,7 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         assert not for_generation
         config = dataset_to_klass_map[dataset][0]
         dm = dataset_to_klass_map[dataset][1](config)
-    elif "chat" in dataset:
+    elif "chat" in dataset or "clusters" in dataset:
         config = ChatDataConfig(
             **common_kwargs,
         )

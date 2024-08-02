@@ -18,13 +18,12 @@ class ChatDataModule(DefaultDataModule):
 
         dataset = dataset.shuffle(seed=self.config.seed)
 
-        # use maybe_filter_hf_dataset_by_task instead?
-        self._task_names = []
-        self._task_to_id = {}
-        # self._task_names = sorted(list(set(dataset['task_name'])))
-        # self._task_to_id = {
-        #     task_name: i for i, task_name in enumerate(self._task_names)
-        # }
+        dataset = dataset.rename_column("task_name", "origin_task_name")
+        dataset = dataset.rename_column("cluster_id", "task_name")
+        self._task_names = sorted(list(set(dataset["task_name"])))
+        self._task_to_id = {
+            task_name: i for i, task_name in enumerate(self._task_names)
+        }
 
         self.train_dataset = dataset.select(range(num_train))
         self.dev_dataset = dataset.select(range(num_train, num_train + num_dev))
