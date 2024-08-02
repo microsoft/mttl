@@ -1,3 +1,4 @@
+import functools
 import math
 import threading
 from abc import ABC
@@ -49,7 +50,7 @@ class SelectorConfig:
 
         data = asdict(self)
         # store the model modifier for easy loading
-        data["__selector_name__"] = Selector.get_name_by_config_class(type(self))
+        data["__selector_name__"] = self.selector_name
         return data
 
     @classmethod
@@ -60,6 +61,10 @@ class SelectorConfig:
             )
         name = dumped.pop("__selector_name__")
         return Selector.get_config_class_by_name(name)(**dumped)
+
+    @property
+    def selector_name(self):
+        return Selector.get_name_by_config_class(type(self))
 
     @classmethod
     def from_training_config(
@@ -105,6 +110,41 @@ class SelectorConfig:
         return config_klass(**kwargs)
 
 
+class MultiSelectorConfig(dict):
+    @property
+    def selector_name(self):
+        import json
+
+        return json.dumps({k: v.selector_name for k, v in self.items()})
+
+    @classmethod
+    def from_training_config(
+        cls,
+        training_config: "Config",
+    ) -> Union[SelectorConfig, "MultiSelectorConfig"]:
+        import copy
+        import json
+
+        if training_config.router_selector is None:
+            return None
+
+        try:
+            router_selector = json.loads(training_config.router_selector)
+        except:
+            # if not a json, assume it's a single selector
+            return SelectorConfig.from_training_config(training_config)
+
+        selector_configs = cls()
+        for modifier_name, selector_name in router_selector.items():
+            config_clone = copy.deepcopy(training_config)
+            config_clone.router_selector = selector_name
+
+            selector_configs[modifier_name] = SelectorConfig.from_training_config(
+                config_clone
+            )
+        return selector_configs
+
+
 class SelectorsCache:
     """Keep a cache of all added selectors indexed by both modifier and selector name."""
 
@@ -129,6 +169,9 @@ class SelectorsCache:
         if selector_name is None:
             return self.cache[modifier_name]
         return self.cache[modifier_name].get(selector_name, None)
+
+    def keys(self):
+        return self.cache.keys()
 
     def items(self):
         return iter(self.cache.items())
@@ -288,6 +331,25 @@ def safe_logging(func):
                 logger.exception(f"An error occurred in {func.__name__}: {e}")
                 logger.previous_error = str(e)[:100]
             result = None
+        return result
+
+    return wrapper
+
+
+def artifacts_cache(func):
+    cache = {}
+    lock = threading.Lock()
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        # wrapper expects
+        key = args[1].artifacts_hash
+
+        with lock:
+            if key in cache:
+                return cache[key]
+            result = func(*args, **kwargs)
+            cache[key] = result
         return result
 
     return wrapper
@@ -497,34 +559,10 @@ class PerTokenSelectorConfig(LoadableSelectorConfig):
 
 
 class LoadableLibraryMixin(ABC):
-    cache = threading.local()
-    cache.library_artifacts = {}
-
     @classmethod
-    def clear(cls):
-        cls.cache.library_artifacts = {}
-
-    @property
-    def library_artifacts(self) -> Optional[Dict]:
-        return LoadableLibraryMixin.cache.library_artifacts.get(
-            self.config.artifacts_hash, None
-        )
-
     @abstractmethod
-    def _load_from_library(self):
+    def load_from_library(cls, config):
         pass
-
-    def load_from_library(self):
-        if (
-            self.config.artifacts_hash
-            not in LoadableLibraryMixin.cache.library_artifacts
-        ):
-            LoadableLibraryMixin.cache.library_artifacts[self.config.artifacts_hash] = (
-                self._load_from_library()
-            )
-
-            if not LoadableLibraryMixin.cache.library_artifacts:
-                raise ValueError(f"Could not load library artifacts for selector.")
 
 
 def get_expert_prototype_from_library_artifacts(
@@ -607,7 +645,9 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
 
         # init selector from library if needed
         if self.config.library_id is not None:
-            self.load_from_library()
+            self.library_artifacts = self.load_from_library(self.config)
+        else:
+            self.library_artifacts = None
 
     def overwrite_prototypes(self, prototypes: torch.tensor):
         """Overwrites the prototypes with the given tensor."""

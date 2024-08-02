@@ -274,15 +274,15 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
         weights: dict[str, Tensor] = self.experts.get_skill_weights(index_of)
 
         config = self.expert_infos[name].expert_config
-        modifier_type = get_modifier_name(config)
+        modifier_name = get_modifier_name(config)
 
-        if modifier_type == "lora":
+        if modifier_name == "lora":
             assert self.dummy_config.n_splits == 1
             # squeeze the first dimension and the n_splits dimension
             lora = LoRA(config, self.layer)
             lora.load_lora_weights({n: w.squeeze() for n, w in weights.items()})
             return lora
-        elif modifier_type == "skilled_lora":
+        elif modifier_name == "skilled_lora":
             # should be skilled lora
             skilled_lora = SkilledLoRA(config, self.layer)
             skilled_lora.load_lora_weights(weights)
