@@ -624,7 +624,8 @@ class ExpertLibrary:
     ):
         super().__init__()
 
-        self.repo_id = self._remove_protocol(repo_id)
+        self.protocol, self.repo_id = self._remove_protocol(repo_id)
+        self._uri = repo_id
         self._sliced = False
         self.selection = selection
         self.exclude_selection = exclude_selection
@@ -654,12 +655,17 @@ class ExpertLibrary:
         self._build_lib()
         logger.info("Loaded %s experts from remote storage", len(self.data))
 
+    @property
+    def uri(self):
+        return self._uri
+
     @staticmethod
-    def _remove_protocol(repo_id):
+    def _remove_protocol(repo_id) -> Tuple[str, str]:
         """Remove the protocol from the repo_id. Ex:
         az://storage_account/container -> storage_account/container
         """
-        return str(repo_id).split("://")[-1]
+        paths = str(repo_id).split("://")
+        return "hf" if len(paths) == 1 else paths[0], paths[-1]
 
     @property
     def sliced(self):
