@@ -1576,7 +1576,9 @@ class HuggingfaceHubDatasetEngine(DatasetEngine):
         split: Optional[str] = None,
         **kwargs,
     ) -> Dataset:
-        return load_dataset(self.dataset_id, name, split=split, **kwargs)
+        return load_dataset(
+            self.dataset_id, name, split=split, trust_remote_code=True, **kwargs
+        )
 
     def push_dataset(
         self,

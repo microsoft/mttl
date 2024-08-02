@@ -435,12 +435,18 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
 
 
 def model_loader_helper(
-    model_name, device_map="auto", load_in_4bit=False, load_in_8bit=False
+    model_name,
+    device_map="auto",
+    load_in_4bit=False,
+    load_in_8bit=False,
+    attn_implementation=None,
 ):
     if load_in_4bit and load_in_8bit:
         raise ValueError("Specify either 'load_in_4bit' or 'load_in_8bit' or neither.")
 
     from transformers import AutoModelForCausalLM, LlamaForCausalLM, PreTrainedModel
+
+    logger.info(f"Attention Implementation: {attn_implementation}")
 
     if isinstance(model_name, PreTrainedModel):
         return model_name
@@ -452,6 +458,7 @@ def model_loader_helper(
             load_in_8bit=load_in_8bit,
             torch_dtype=torch.bfloat16,
             device_map=device_map,
+            attn_implementation=attn_implementation,
         )
     elif "phi-2" == model_name:
         # local phi-2 version. use `microsoft/phi-2 for the official hf version`
@@ -478,6 +485,8 @@ def model_loader_helper(
             load_in_4bit=load_in_4bit,
             load_in_8bit=load_in_8bit,
             trust_remote_code=True,
+            attn_implementation=attn_implementation,
+            torch_dtype=torch.bfloat16,
         )
     return model_object
 
