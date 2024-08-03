@@ -53,7 +53,7 @@ class EncoderModel:
             model.encoder_fn = model.get_text_encode
             postprocess = lambda x: x.cpu().detach().numpy()
         elif encoding == "embedding":
-            model = SentenceTransformer(model, device=device)
+            model = SentenceTransformer(model, device=device, trust_remote_code=True)
             model.encoder_fn = model.encode
             postprocess = lambda x: x
         else:
