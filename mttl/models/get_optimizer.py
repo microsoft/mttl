@@ -7,6 +7,13 @@ from transformers import Adafactor
 from mttl.logging import logger
 
 
+def instantiate_bnb_optimizer(model_parameters, **kwargs):
+    import bitsandbytes as bnb
+
+    optimizer = bnb.optim.PagedAdamW(model_parameters, **kwargs)
+    return optimizer
+
+
 def get_optimizer(model, args, no_decay=None):
     """
     Construct optimizer based on args
@@ -92,7 +99,10 @@ def get_optimizer(model, args, no_decay=None):
         # from transformers import AdamW # tloen uses adamw_torch
         from torch.optim import AdamW
 
-        optimizer = AdamW(param_groups, eps=args.adam_epsilon)
+        if args.load_in_4bit or args.load_in_8bit:
+            optimizer = instantiate_bnb_optimizer(param_groups, eps=args.adam_epsilon)
+        else:
+            optimizer = AdamW(param_groups, eps=args.adam_epsilon)
     elif optim_name.lower() == "adafactor":
         optimizer = Adafactor(
             param_groups,
