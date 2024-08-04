@@ -5,7 +5,6 @@ import os
 import huggingface_hub
 import numpy as np
 from datasets import concatenate_datasets, load_dataset
-from nomic import atlas
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import KMeans
 from torch.utils.data import DataLoader, Dataset, Subset
@@ -24,6 +23,7 @@ logging.basicConfig(level=logging.INFO)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--batch_size", type=int, default=64)
+parser.add_argument("--embed_dim", type=int, default=768)
 
 parser.add_argument("--subsample", type=float, default=0.2)
 
@@ -140,7 +140,7 @@ if __name__ == "__main__":
             embedding = get_text_encode(batch["question"], model)
         embedding_list.append(embedding)
 
-    all_embedding = np.concatenate(embedding_list, axis=0).reshape(-1, 768)
+    all_embedding = np.concatenate(embedding_list, axis=0).reshape(-1, args.embed_dim)
     logger.info(f"all_embedding shape: {all_embedding.shape}")
     kmeans = KMeans(
         n_clusters=args.num_clusters,
