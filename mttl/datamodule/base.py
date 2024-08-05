@@ -682,9 +682,6 @@ class DefaultDataModule(LightningDataModule):
         if shuffle:
             dataset = dataset.shuffle(seed=42)
 
-        # TODO: first partition dataset according to `task_name`, and
-        # pack each task individually to ensure that we don't mix tasks
-
         # Very basic code that will iterate over sequences one by one,
         # and merge together until the max_input_length is reached
         # This is not optimal, but it's a start
@@ -707,7 +704,6 @@ class DefaultDataModule(LightningDataModule):
                     else:
                         raise ValueError(f"Unknown type {type(v)}")
 
-                # TODO: THis is SOMEHOW WRONG. CHECK.
                 container["seq_lens"] += [len(example["input_ids"])]
 
             def add_finished_sequence(container, example):
