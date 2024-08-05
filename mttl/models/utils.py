@@ -10,6 +10,7 @@ import prettytable
 import pytorch_lightning as pl
 import torch
 from pytorch_lightning import LightningModule
+from transformers import BitsAndBytesConfig
 from transformers.file_utils import PushToHubMixin
 from transformers.utils import cached_file
 
@@ -446,6 +447,18 @@ def model_loader_helper(
 
     from transformers import AutoModelForCausalLM, LlamaForCausalLM, PreTrainedModel
 
+    if load_in_8bit:
+        bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+    elif load_in_4bit:
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
+        )
+    else:
+        bnb_config = None
+
     logger.info(f"Attention Implementation: {attn_implementation}")
 
     if isinstance(model_name, PreTrainedModel):
@@ -454,8 +467,7 @@ def model_loader_helper(
     if "llama" in model_name:
         model_object = LlamaForCausalLM.from_pretrained(
             model_name,
-            load_in_4bit=load_in_4bit,
-            load_in_8bit=load_in_8bit,
+            quantization_config=bnb_config,
             torch_dtype=torch.bfloat16,
             device_map=device_map,
             attn_implementation=attn_implementation,
@@ -468,7 +480,7 @@ def model_loader_helper(
         logger.info(f"Loading phi-2 model from {os.environ['PHI_PATH']}")
         model_object = AutoModelForCausalLM.from_pretrained(
             os.environ["PHI_PATH"],
-            load_in_8bit=load_in_8bit,
+            quantization_config=bnb_config,
             torch_dtype=torch.bfloat16,
             device_map=device_map,
             trust_remote_code=True,
@@ -482,8 +494,7 @@ def model_loader_helper(
         model_object = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map=device_map,
-            load_in_4bit=load_in_4bit,
-            load_in_8bit=load_in_8bit,
+            quantization_config=bnb_config,
             trust_remote_code=True,
             attn_implementation=attn_implementation,
             torch_dtype=torch.bfloat16,

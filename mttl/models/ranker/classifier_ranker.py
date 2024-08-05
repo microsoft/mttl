@@ -85,6 +85,13 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
         self.out_projecter = nn.Linear(hidden_size, self.num_labels)
         self.save_hyperparameters(ignore=["text_encoder"])
 
+    def get_text_encode(self, x):
+        # Encode the text input
+        text_output = self.text_encoder(x)
+        # conver the text output to hidden vector
+        text_output_projecter = self.text_projecter(text_output)
+        return text_output_projecter
+
     def forward(self, x):
         # Encode the text input
         text_output = self.text_encoder(x)
