@@ -201,10 +201,7 @@ class Config:
 
         self.data_dir = os.getenv("TRAIN_DIR", "/tmp/")
         self.output_dir = os.getenv("OUTPUT_DIR", "./output")
-
         self.finetune_task_name = None
-        self.example_to_ids_path = None  # path to clustering of data
-        self.embeddings_path = None
 
         # NI related configs
         self.use_task_descriptions = False  # Use task descriptions
@@ -215,7 +212,6 @@ class Config:
             0  # Use some few-shot examples if possible (applies to NI)
         )
 
-        self.task_prefix = None  # xfit has task prefixes detailing # of shots, seed, etc; this is automatically filled in at fine-tuning time
         self.exp_name = None
         self.wandb_project = None
         self.padding_side = "right"
