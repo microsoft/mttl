@@ -143,7 +143,6 @@ def main():
     subset_dataset = subset_dataset.map(
         add_cluster_id, batched=True, batch_size=args.batch_size
     )
-    breakpoint()
     DatasetLibrary.push_dataset(
         subset_dataset,
         f"local://{args.output_dir}/subset-clusters-{args.num_clusters}-{datetime.now().isoformat()}",
