@@ -203,7 +203,36 @@ def test_truncation_side(tiny_flan_id):
         assert true[:10] == dec[:10]
 
 
-def test_auto_module(tiny_flan_id):
+def test_task_name_field(tmp_path):
+    """Tests whether task names are correctly extracted from the dataset."""
+    from datasets import Dataset, DatasetDict, load_dataset
+
+    dataset = [
+        {"source": "a", "target": "b", "cluster_id": "0"},
+        {"source": "c", "target": "d", "cluster_id": "1"},
+        {"source": "e", "target": "f", "cluster_id": "0"},
+        {"source": "g", "target": "h", "cluster_id": "1"},
+        {"source": "g", "target": "h", "cluster_id": "1"},
+    ]
+    dataset = DatasetDict({"train": Dataset.from_list(dataset)})
+    dataset.save_to_disk(tmp_path / "mini_dataset")
+
+    dataset_name = "local://" + str(tmp_path / "mini_dataset")
+    dataset_config = FlatMultiTaskConfig(
+        model="EleutherAI/gpt-neo-125m",
+        model_family="gpt",
+        dataset=dataset_name,
+        task_id_field="cluster_id",
+        task_name_field="cluster_id",
+    )
+    datamodule = FlatMultiTaskModule(dataset_config)
+    batch = next(iter(datamodule.train_dataloader()))
+    assert "task_ids" in batch
+    assert "task_names" in batch
+    assert np.all(x in ["0", "1"] for x in batch["task_names"])
+
+
+def test_auto_modsule(tiny_flan_id):
     flan = FlanModule(
         FlanConfig(
             dataset=tiny_flan_id,
