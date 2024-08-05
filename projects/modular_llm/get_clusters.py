@@ -1,6 +1,7 @@
 import argparse
 import os
 from datetime import datetime
+from functools import partial
 
 import numpy as np
 import torch
@@ -29,7 +30,7 @@ def get_dataset(args):
     np.random.shuffle(indices)
     split = int(np.floor(args.subsample * dataset_size))
     subset_indices = indices[:split]
-    subset_dataset = Subset(dataset, subset_indices)
+    subset_dataset = dataset.select(subset_indices)
 
     train_dataloader = DataLoader(
         subset_dataset, batch_size=args.batch_size, num_workers=args.num_workers
@@ -38,12 +39,13 @@ def get_dataset(args):
         dataset, batch_size=args.batch_size, num_workers=args.num_workers
     )
 
-    return train_dataloader, all_dataloader, dataset
+    return train_dataloader, all_dataloader, dataset, subset_dataset
 
 
 class EncoderModel:
-
-    def __init__(self, encoding, model, device="cuda"):
+    def __init__(
+        self, encoding, model, prompt_name=None, batch_size=None, device="cuda"
+    ):
         if encoding == "classifier":
             model = AdapterRankerHelper.get_ranker_instance(
                 ranker_model="classifier",
@@ -54,7 +56,12 @@ class EncoderModel:
             postprocess = lambda x: x.cpu().detach().numpy()
         elif encoding == "embedding":
             model = SentenceTransformer(model, device=device, trust_remote_code=True)
-            model.encoder_fn = model.encode
+            if prompt_name:
+                model.encoder_fn = partial(
+                    model.encode, batch_size=batch_size, prompt_name=prompt_name
+                )
+            else:
+                model.encoder_fn = model.encode
             postprocess = lambda x: x
         else:
             raise ValueError(f"Invalid encoding: {encoding}")
@@ -71,6 +78,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--encoding", type=str, default="embedding")
+    parser.add_argument("--prompt_name", type=str, default=None)
     parser.add_argument(
         "--model", type=str, default="sentence-transformers/sentence-t5-xxl"
     )
@@ -100,8 +108,14 @@ def main():
     seed_everything(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = EncoderModel(args.encoding, args.model, device=device)
-    train_dataloader, all_dataloader, all_dataset = get_dataset(args)
+    model = EncoderModel(
+        args.encoding,
+        args.model,
+        prompt_name=args.prompt_name,
+        batch_size=args.batch_size,
+        device=device,
+    )
+    train_dataloader, all_dataloader, all_dataset, subset_dataset = get_dataset(args)
 
     with torch.no_grad():
         embedding_list = [
@@ -126,8 +140,16 @@ def main():
         example["cluster_id"] = [str(i) for i in kmeans.predict(embedding)]
         return example
 
-    dataset = all_dataset.map(add_cluster_id, batched=True, batch_size=args.batch_size)
+    subset_dataset = subset_dataset.map(
+        add_cluster_id, batched=True, batch_size=args.batch_size
+    )
+    breakpoint()
+    DatasetLibrary.push_dataset(
+        subset_dataset,
+        f"local://{args.output_dir}/subset-clusters-{args.num_clusters}-{datetime.now().isoformat()}",
+    )
 
+    dataset = all_dataset.map(add_cluster_id, batched=True, batch_size=args.batch_size)
     dataset_name = (
         f"local://{args.output_dir}/clusters-"
         f"{args.num_clusters}-{datetime.now().isoformat()}"
