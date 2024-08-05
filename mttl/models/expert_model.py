@@ -83,7 +83,6 @@ class ExpertModel(EfficientCheckpointModule):
         input_ids = batch["input_ids"]
         labels = batch["labels"]
 
-        print(input_ids.shape[-1])
         outputs = self.model.forward(input_ids, attention_mask=batch["attention_mask"])
 
         # calculate loss, could also be done inside of the model
@@ -152,6 +151,18 @@ class ExpertModel(EfficientCheckpointModule):
         self.log(
             f"{self._log_pref}train/total_loss", total_loss, on_step=True, prog_bar=True
         )
+
+        # get peak and avg memory
+        peak_memory = torch.cuda.max_memory_allocated() / 1024**3
+        memory = torch.cuda.memory_allocated() / 1024**3
+
+        self.log(
+            f"{self._log_pref}train/peak_memory",
+            peak_memory,
+            on_step=True,
+            prog_bar=True,
+        )
+        self.log(f"{self._log_pref}train/memory", memory, on_step=True, prog_bar=True)
 
         for i, pg in enumerate(self.optimizers().optimizer.param_groups):
             self.log(f"train/lr_{i}", pg["lr"])
