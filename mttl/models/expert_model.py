@@ -666,6 +666,10 @@ class ExpertModelSimPO(EfficientCheckpointModule):
               original_disprefered_logps: log probabiliteis of the disprefered expert in the original model
         """
 
+        # normalize the log probabilities with the length of the response
+        original_prefered_logprob = original_prefered_logprob / prefered_y_len
+        original_disprefered_logprob = original_disprefered_logprob / disprefered_y_len
+
         pi_logratios = original_prefered_logprob - original_disprefered_logprob
         logits = pi_logratios - gamma_beta_ratio
 
@@ -682,11 +686,9 @@ class ExpertModelSimPO(EfficientCheckpointModule):
             )
 
         # normalize the log probabilities with the length of the response
-        chosen_rewards = self.beta * original_prefered_logprob.detach() / prefered_y_len
+        chosen_rewards = self.beta * original_prefered_logprob.detach()
 
-        reject_rewards = (
-            self.beta * original_disprefered_logprob.detach() / disprefered_y_len
-        )
+        reject_rewards = self.beta * original_disprefered_logprob.detach()
 
         return losses, chosen_rewards, reject_rewards
 
