@@ -28,11 +28,6 @@ Instruction:
 
 {% endfor %}
 
-{% if previous_tag %}
-The previous tag for this group of instructions was:
-Tag: {{previous_tag}}
-{% endif -%}
-
 Determine a better title that encapsulates a common aspect found in most of these instructions, please provide it in this format:
 Tag: Descriptive title for the tag
 
@@ -77,14 +72,12 @@ async def get_completions(prompt, num_completions=1, max_tokens=128):
 
 
 async def get_tag(instruction):
-    return await get_new_tag([instruction], [""])
+    return await get_new_tag([instruction])
 
 
-async def get_new_tag(instructions, previous_tag):
+async def get_new_tag(instructions):
     response = await get_completions(
-        jinja2.Template(m_template).render(
-            instructions=instructions, previous_tag=previous_tag
-        )
+        jinja2.Template(m_template).render(instructions=instructions)
     )
     response = response[0]
     if response.startswith("Tag:"):
@@ -215,9 +208,7 @@ async def train_jsonl_file(file_path, output_path, num_tags):
 
         print("M-step for # tags =", len(groups))
 
-        new_tags = await tqdm.gather(
-            *[get_new_tag(group, tags[key]) for key, group in zip(keys, groups)]
-        )
+        new_tags = await tqdm.gather(*[get_new_tag(group) for group in groups])
         new_tags_dict = dict(zip(keys, new_tags))
 
         new_tags = []
