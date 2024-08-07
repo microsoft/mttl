@@ -47,6 +47,8 @@ class DataCollatorForDPO(DefaultCollator):
             [torch.ones_like(prompt_ids), torch.zeros_like(disprefered_ids)], dim=-1
         )
 
+        breakpoint()
+
         return {
             "prompt_prefered_ids": prompt_prefered_ids,
             "prompt_disprefered_ids": prompt_disprefered_ids,

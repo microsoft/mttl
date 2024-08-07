@@ -61,72 +61,92 @@ if args.encoding == "classifier":
 elif args.encoding == "embedding":
     model = SentenceTransformer(args.model)
 
-# load the dataset
+def get_dataset(args):
+    dataset = DatasetLibrary.pull_dataset(args.dataset, split="train")
 
+    # create the subsample of the dataset if cutoff is set.
+    if args.cutoff > 0:
+        dataset = dataset.shuffle(seed=args.seed)
+        dataset = dataset.select(range(args.cutoff))
 
-def get_orca_dataset():
-
-    dataset = load_dataset("Open-Orca/OpenOrca")
-
-    # create the subsample of the dataset.
-    dataset_size = len(dataset["train"])
-    indices = list(range(dataset_size))
-    # random indices
-    np.random.shuffle(indices)
-    split = int(np.floor(args.subsample * dataset_size))
-    subset_indices = indices[:split]
-    subset_dataset = Subset(dataset["train"], subset_indices)
-
-    train_dataloader = DataLoader(
-        subset_dataset, batch_size=args.batch_size, num_workers=8
-    )
-    all_dataloader = DataLoader(
-        dataset["train"], batch_size=args.batch_size, num_workers=8
-    )
-
-    return train_dataloader, all_dataloader, dataset["train"]
-
-
-def get_flan_dataset():
-
-    flan = FlanModule(
-        FlanConfig(
-            model="EleutherAI/gpt-neo-125m",
-            model_family="gpt",
-            train_batch_size=4,
-            predict_batch_size=4,
-            dataset="sordonia/flan-10k-flat",
-            remove_phi_eval_tasks=True,
-        )
-    )
-
-    dataset = flan.train_dataset
-    # create the subsample of the dataset.
     dataset_size = len(dataset)
     indices = list(range(dataset_size))
-    # random indices
     np.random.shuffle(indices)
     split = int(np.floor(args.subsample * dataset_size))
     subset_indices = indices[:split]
-    subset_dataset = Subset(dataset, subset_indices)
+    subset_dataset = dataset.select(subset_indices)
 
     train_dataloader = DataLoader(
-        subset_dataset, batch_size=args.batch_size, num_workers=8
+        subset_dataset, batch_size=args.batch_size, num_workers=args.num_workers
     )
-    all_dataloader = flan.train_dataloader()
-
-    all_dataset = concatenate_datasets(
-        [flan.train_dataset, flan.dev_dataset, flan.test_dataset]
+    all_dataloader = DataLoader(
+        dataset, batch_size=args.batch_size, num_workers=args.num_workers
     )
 
-    return train_dataloader, all_dataloader, all_dataset
+    return train_dataloader, all_dataloader, dataset, subset_dataset
+
+# def get_orca_dataset():
+
+#     dataset = load_dataset("Open-Orca/OpenOrca")
+
+#     # create the subsample of the dataset.
+#     dataset_size = len(dataset["train"])
+#     indices = list(range(dataset_size))
+#     # random indices
+#     np.random.shuffle(indices)
+#     split = int(np.floor(args.subsample * dataset_size))
+#     subset_indices = indices[:split]
+#     subset_dataset = Subset(dataset["train"], subset_indices)
+
+#     train_dataloader = DataLoader(
+#         subset_dataset, batch_size=args.batch_size, num_workers=8
+#     )
+#     all_dataloader = DataLoader(
+#         dataset["train"], batch_size=args.batch_size, num_workers=8
+#     )
+
+#     return train_dataloader, all_dataloader, dataset["train"]
+
+
+# def get_flan_dataset():
+
+#     flan = FlanModule(
+#         FlanConfig(
+#             model="EleutherAI/gpt-neo-125m",
+#             model_family="gpt",
+#             train_batch_size=4,
+#             predict_batch_size=4,
+#             dataset="sordonia/flan-10k-flat",
+#             remove_phi_eval_tasks=True,
+#         )
+#     )
+
+#     dataset = flan.train_dataset
+#     # create the subsample of the dataset.
+#     dataset_size = len(dataset)
+#     indices = list(range(dataset_size))
+#     # random indices
+#     np.random.shuffle(indices)
+#     split = int(np.floor(args.subsample * dataset_size))
+#     subset_indices = indices[:split]
+#     subset_dataset = Subset(dataset, subset_indices)
+
+#     train_dataloader = DataLoader(
+#         subset_dataset, batch_size=args.batch_size, num_workers=8
+#     )
+#     all_dataloader = flan.train_dataloader()
+
+#     all_dataset = concatenate_datasets(
+#         [flan.train_dataset, flan.dev_dataset, flan.test_dataset]
+#     )
+
+#     return train_dataloader, all_dataloader, all_dataset
 
 
 if __name__ == "__main__":
-    if args.dataset == "orca":
-        train_dataloader, all_dataloader, all_dataset = get_orca_dataset()
-    elif args.dataset == "flan":
-        train_dataloader, all_dataloader, all_dataset = get_flan_dataset()
+    
+    train_dataloader, all_dataloader, all_dataset, subset_dataset = get_dataset(args)
+    breakpoint()
 
     embedding_list = []
 
