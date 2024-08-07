@@ -52,7 +52,7 @@ Tags:
 Please indicate the most appropriate tag by providing ONLY the corresponding number (1-{{tags|length}}). Use the following format:
 Tag number: Number
 
-"""
+Tag number:"""
 
 
 @tenacity.retry(
@@ -95,14 +95,19 @@ async def get_new_tag(instructions, previous_tag):
 async def assign_tag(instruction, tags):
     response = await get_completions(
         jinja2.Template(e_template).render(instruction=instruction, tags=tags),
-        max_tokens=10,
+        max_tokens=5,
     )
     response = response[0]
-    if response.startswith("Tag number:"):
-        try:
-            return int(response[len("Tag number:") :].strip()) - 1
-        except:
-            return None
+    try:
+        # parse response right away
+        return int(response.strip()) - 1
+    except:
+        # if the model has generated "tag number"...
+        if response.startswith("Tag number:"):
+            try:
+                return int(response[len("Tag number:") :].strip()) - 1
+            except:
+                return None
     return None
 
 
@@ -250,10 +255,10 @@ async def infer_jsonl_file(file_path, tags_file, output_path):
     # load all the examples to be tagged
     with open(file_path, "r") as ifile:
         train_examples = ifile.readlines()
-        train_loader = list(get_instructions(train_examples, return_metadata=True))
+        train_loader = get_instructions(train_examples, return_metadata=True)
 
     ofile = open(output_path, "w")
-    progress_bar = ttqdm(total=len(train_loader))
+    progress_bar = ttqdm(total=len(train_examples) + 100_000)
     while not end:
         batch = []
         metadata = []
