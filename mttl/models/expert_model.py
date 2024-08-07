@@ -650,7 +650,12 @@ class ExpertModelSimPO(EfficientCheckpointModule):
         self.save_hyperparameters(kwargs)
 
     def simpo_loss(
-        self, original_prefered_logprob, original_disprefered_logprob, gamma_beta_ratio
+        self,
+        original_prefered_logprob,
+        original_disprefered_logprob,
+        gamma_beta_ratio,
+        prefered_y_len,
+        disprefered_y_len,
     ):
         """
         Compute the SIMPO loss.
@@ -676,20 +681,27 @@ class ExpertModelSimPO(EfficientCheckpointModule):
                 f"Loss type {self.loss_type} not supported. Choose from ['sigmoid', 'hinge']"
             )
 
-        chosen_rewards = self.beta * original_prefered_logprob.detach()
+        # normalize the log probabilities with the length of the response
+        chosen_rewards = self.beta * original_prefered_logprob.detach() / prefered_y_len
 
-        reject_rewards = self.beta * original_disprefered_logprob.detach()
+        reject_rewards = (
+            self.beta * original_disprefered_logprob.detach() / disprefered_y_len
+        )
 
         return losses, chosen_rewards, reject_rewards
 
-    def training_step(self, batch, _):
+    def forward(self, batch):
         prompt_prefered_ids = batch["prompt_prefered_ids"]
         prompt_disprefered_ids = batch["prompt_disprefered_ids"]
 
         prompt_prefered_mask = batch["prompt_prefered_mask"]
         prompt_disprefered_mask = batch["prompt_disprefered_mask"]
 
-        # original model
+        # get the length of the response
+        prefered_y_len = batch["prefered_y_len"]
+        disprefered_y_len = batch["disprefered_y_len"]
+
+        # get the log probabilities of the prefered and disprefered experts
         model_prefered_log_prob = get_log_prob(
             self.preference_model.model.forward(
                 prompt_prefered_ids, attention_mask=prompt_prefered_mask
@@ -708,72 +720,61 @@ class ExpertModelSimPO(EfficientCheckpointModule):
             model_prefered_log_prob,
             model_disprefered_log_prob,
             gamma_beta_ratio=self.gamma_beta_ratio,
+            prefered_y_len=prefered_y_len,
+            disprefered_y_len=disprefered_y_len,
         )
 
+        return loss.mean(), chosen_rewards, rejected_rewards
+
+    def training_step(self, batch, _):
+
+        loss, chosen_rewards, rejected_rewards = self.forward(batch)
         reward_accuracies = (chosen_rewards > rejected_rewards).float()
-        self.log(
-            "train/accuracies",
-            reward_accuracies.mean().cpu(),
-            on_step=True,
-            on_epoch=True,
-        )
-        self.log("train/loss", loss.mean(), on_step=True, on_epoch=True, prog_bar=True)
-        self.log(
-            "train/chosen_rewards", chosen_rewards.mean(), on_step=True, on_epoch=True
-        )
 
-        self.log(
-            "train/rejected_rewards",
-            rejected_rewards.mean(),
-            on_step=True,
-            on_epoch=True,
-        )
+        metrices = {
+            "loss": loss.mean(),
+            "reward_accuracies": reward_accuracies.mean().cpu(),
+            "chosen_rewards": chosen_rewards.mean(),
+            "rejected_rewards": rejected_rewards.mean(),
+            "reward_margins": (chosen_rewards - rejected_rewards).mean().cpu(),
+        }
+
+        for key, value in metrices.items():
+            self.log(f"train/{key}", value, on_step=True, on_epoch=True, prog_bar=True)
 
         return loss.mean()
 
     def validation_step(self, batch, _):
-        prompt_prefered_ids = batch["prompt_prefered_ids"]
-        prompt_disprefered_ids = batch["prompt_disprefered_ids"]
 
-        prompt_prefered_mask = batch["prompt_prefered_mask"]
-        prompt_disprefered_mask = batch["prompt_disprefered_mask"]
-
-        # original model
-        model_prefered_log_prob = get_log_prob(
-            self.preference_model.model.forward(
-                prompt_prefered_ids, attention_mask=prompt_prefered_mask
-            ).logits,
-            labels=prompt_prefered_ids,
-        )
-
-        model_disprefered_log_prob = get_log_prob(
-            self.preference_model.model.forward(
-                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
-            ).logits,
-            labels=prompt_disprefered_ids,
-        )
-
-        loss, chosen_rewards, rejected_rewards = self.simpo_loss(
-            model_prefered_log_prob,
-            model_disprefered_log_prob,
-            gamma_beta_ratio=self.gamma_beta_ratio,
-        )
+        loss, chosen_rewards, rejected_rewards = self.forward(batch)
 
         reward_accuracies = (chosen_rewards > rejected_rewards).float()
-        self.log(
-            "val/reward_accuracies",
-            reward_accuracies.mean(),
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-        )
-        self.log("val/loss", loss.mean(), on_step=True, on_epoch=True, prog_bar=True)
-        self.log(
-            "val/chosen_rewards", chosen_rewards.mean(), on_step=True, on_epoch=True
-        )
-        self.log(
-            "val/rejected_rewards", rejected_rewards.mean(), on_step=True, on_epoch=True
-        )
+
+        metrices = {
+            "loss": loss.mean(),
+            "reward_accuracies": reward_accuracies.mean().cpu(),
+            "chosen_rewards": chosen_rewards.mean(),
+            "rejected_rewards": rejected_rewards.mean(),
+            "reward_margins": (chosen_rewards - rejected_rewards).mean().cpu(),
+        }
+        for key, value in metrices.items():
+            self.log(f"val/{key}", value, on_step=True, on_epoch=True, prog_bar=True)
+
+        return loss.mean()
+
+    def test_step(self, batch, _):
+        loss, chosen_rewards, rejected_rewards = self.forward(batch)
+
+        reward_accuracies = (chosen_rewards > rejected_rewards).float()
+        metrices = {
+            "loss": loss.mean(),
+            "reward_accuracies": reward_accuracies.mean().cpu(),
+            "chosen_rewards": chosen_rewards.mean(),
+            "rejected_rewards": rejected_rewards.mean(),
+            "reward_margins": (chosen_rewards - rejected_rewards).mean().cpu(),
+        }
+        for key, value in metrices.items():
+            self.log(f"test/{key}", value, on_step=True, on_epoch=True, prog_bar=True)
 
         return loss.mean()
 

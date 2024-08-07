@@ -21,21 +21,23 @@ class DataCollatorForDPO(DefaultCollator):
             truncation=True,
         )["input_ids"]
 
-        prefered_ids = self.tokenizer.batch_encode_plus(
+        prefered_tokenize = self.tokenizer.batch_encode_plus(
             chosen_responses,
             padding=True,
             return_tensors="pt",
             max_length=self.max_input_length,
             truncation=True,
-        )["input_ids"]
+        )
+        prefered_ids = prefered_tokenize["input_ids"]
 
-        disprefered_ids = self.tokenizer.batch_encode_plus(
+        disprefered_tokenize = self.tokenizer.batch_encode_plus(
             rejected_responses,
             padding=True,
             return_tensors="pt",
             max_length=self.max_input_length,
             truncation=True,
-        )["input_ids"]
+        )
+        disprefered_ids = disprefered_tokenize["input_ids"]
 
         prompt_prefered_ids = torch.cat([prompt_ids, prefered_ids], dim=-1)
         prompt_disprefered_ids = torch.cat([prompt_ids, disprefered_ids], dim=-1)
@@ -43,17 +45,21 @@ class DataCollatorForDPO(DefaultCollator):
         prompt_prefered_mask = torch.cat(
             [torch.ones_like(prompt_ids), torch.zeros_like(prefered_ids)], dim=-1
         )
+        # compute the each length of the prefered
+        prefered_y_len = prefered_tokenize["attention_mask"].sum(dim=1)
+        disprefered_y_len = disprefered_tokenize["attention_mask"].sum(dim=1)
+
         prompt_disprefered_mask = torch.cat(
             [torch.ones_like(prompt_ids), torch.zeros_like(disprefered_ids)], dim=-1
         )
-
-        breakpoint()
 
         return {
             "prompt_prefered_ids": prompt_prefered_ids,
             "prompt_disprefered_ids": prompt_disprefered_ids,
             "prompt_prefered_mask": prompt_prefered_mask,
             "prompt_disprefered_mask": prompt_disprefered_mask,
+            "prefered_y_len": prefered_y_len,
+            "disprefered_y_len": disprefered_y_len,
         }
 
 
@@ -94,5 +100,11 @@ if __name__ == "__main__":
     train_dataloader = datamodule.train_dataloader()
     val_dataloder = datamodule.val_dataloader()
     for batch in val_dataloder:
-        print(batch)
+        prompt_prefered_mask = batch["prompt_prefered_mask"]
+        prompt_disprefered_mask = batch["prompt_disprefered_mask"]
+
+        # get the length of the response
+        prefered_y_len = batch["prefered_y_len"]
+        disprefered_y_len = batch["disprefered_y_len"]
+        print(prefered_y_len, disprefered_y_len)
         breakpoint()
