@@ -2,8 +2,8 @@ from dataclasses import dataclass
 
 import numpy as np
 import torch
-from regex import F
 from torch import nn
+from torch.nn import functional as F
 
 from mttl.logging import warn_once
 from mttl.models.containers.selectors.base import (
