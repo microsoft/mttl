@@ -88,30 +88,33 @@ def test_packing_and_attn(tiny_flan_id):
         return logits[attn_mask.flatten() == 1]
 
     _strip_model(model)
-    InfoContainer.create(model, RoutingInfo.from_batch(packed_batch))
-    packed_out = model(
-        input_ids=packed_batch["input_ids"],
-        attention_mask=packed_batch["attention_mask"],
-    ).logits[0]
-    InfoContainer.create(model, RoutingInfo.from_batch(input_batch))
-    reg_out = model(
-        input_ids=input_batch["input_ids"], attention_mask=input_batch["attention_mask"]
-    ).logits
-    reg_out = _flatten(reg_out, input_batch["attention_mask"])
+    with InfoContainer(model, RoutingInfo.from_batch(packed_batch)) as context:
+        packed_out = model(
+            input_ids=packed_batch["input_ids"],
+            attention_mask=packed_batch["attention_mask"],
+        ).logits[0]
+
+    with InfoContainer(model, RoutingInfo.from_batch(input_batch)):
+        reg_out = model(
+            input_ids=input_batch["input_ids"],
+            attention_mask=input_batch["attention_mask"],
+        ).logits
+        reg_out = _flatten(reg_out, input_batch["attention_mask"])
 
     # remove monkey patching
-    InfoContainer.create(model, None)
-    torch.nn.functional.scaled_dot_product_attention = (
-        torch.nn.functional._default_scaled_dot_product_attention
-    )
-    rm_packed_out = model(
-        input_ids=packed_batch["input_ids"],
-        attention_mask=packed_batch["attention_mask"],
-    ).logits[0]
-    rm_reg_out = model(
-        input_ids=input_batch["input_ids"], attention_mask=input_batch["attention_mask"]
-    ).logits
-    rm_reg_out = _flatten(rm_reg_out, input_batch["attention_mask"])
+    with InfoContainer(model, None):
+        torch.nn.functional.scaled_dot_product_attention = (
+            torch.nn.functional._default_scaled_dot_product_attention
+        )
+        rm_packed_out = model(
+            input_ids=packed_batch["input_ids"],
+            attention_mask=packed_batch["attention_mask"],
+        ).logits[0]
+        rm_reg_out = model(
+            input_ids=input_batch["input_ids"],
+            attention_mask=input_batch["attention_mask"],
+        ).logits
+        rm_reg_out = _flatten(rm_reg_out, input_batch["attention_mask"])
 
     # TEST 1 : With or without monkey patching, non packed sequences should give the same result
     assert torch.allclose(reg_out, rm_reg_out, atol=1e-5)
