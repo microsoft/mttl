@@ -8,8 +8,8 @@ from mttl.models.modifiers.base import Modifier
 @dataclass
 class HardPromptConfig:
     max_input_length: int = None
+    model_family: str = "gpt"
     tokenizer: str = None
-    model_family: str = None
 
 
 @Modifier.register("hard_prompt", config_cls=HardPromptConfig)

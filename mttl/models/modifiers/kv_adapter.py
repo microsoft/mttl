@@ -1,6 +1,6 @@
 import math
 import types
-from dataclasses import dataclass
+from dataclasses import MISSING, dataclass
 from functools import partial
 from typing import Optional, Tuple
 
@@ -16,7 +16,7 @@ from mttl.models.modifiers.base import Modifier, ModifierConfig, ModifyMixin
 
 @dataclass
 class KVAdapterConfig(ModifierConfig):
-    model: str = "gpt-neo"
+    model: str = None
     soft_prompt_length: int = 10
     soft_prompt_learn_kv: bool = True
     n_tasks: int = None
