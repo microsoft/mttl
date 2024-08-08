@@ -273,6 +273,7 @@ class DataCollatorForNI(DefaultCollator):
         return output_batch
 
 
+@DefaultDataModule.register("ni", NiDataConfig)
 class NiDataModule(DefaultDataModule):
     def test_dataloader(self, subsample=-1, shuffle=False):
         if subsample > 0:

@@ -37,6 +37,7 @@ class FactsLMConfig(PlatypusConfig):
     text_field: str = "facts"
 
 
+@DefaultDataModule.register("facts", FactsLMConfig)
 class FactsLMDataModule(DefaultDataModule):
     @property
     def collate_fn(self):
@@ -46,11 +47,11 @@ class FactsLMDataModule(DefaultDataModule):
         if self.config.finetune_task_name is not None:
             task_names = sorted(self.config.finetune_task_name.split(","))
         else:
-            task_names = get_dataset_split_names(self.config.dataset)
+            task_names = get_dataset_split_names(self.config.dataset_repo)
 
         datasets_ = []
         for task_name in task_names:
-            datasets_.append(_load_dataset(self.config.dataset, split=task_name))
+            datasets_.append(_load_dataset(self.config.dataset_repo, split=task_name))
         self.dataset = concatenate_datasets(datasets_)
 
         train_facts = []

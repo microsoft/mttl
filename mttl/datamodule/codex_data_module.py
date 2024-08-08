@@ -11,6 +11,7 @@ class CodexDataConfig(DatasetConfig):
     pass
 
 
+@DefaultDataModule.register("codex", CodexDataConfig)
 class CodexDataModule(DefaultDataModule):
     def setup_dataset(self):
         dataset = DatasetLibrary.pull_dataset("jinaai/code_exercises", split="train")

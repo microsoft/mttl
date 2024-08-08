@@ -134,9 +134,10 @@ def apply_source_template(dataset, source_template):
     return dataset
 
 
+@DefaultDataModule.register("flat_multi_task", FlatMultiTaskConfig)
 class FlatMultiTaskModule(DefaultDataModule):
     def setup_dataset(self):
-        self.dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
+        self.dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset_repo)
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
 
         if "split" not in self.dataset.column_names["train"]:
@@ -213,9 +214,11 @@ def filter_task_source(include_task_source, example):
     return example["task_source"] in include_task_source
 
 
+@DefaultDataModule.register("flan", FlanConfig)
 class FlanModule(DefaultDataModule):
     def setup_dataset(self):
-        dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
+        dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset_repo)
+
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
         if "split" not in dataset.column_names["train"]:
             raise ValueError(

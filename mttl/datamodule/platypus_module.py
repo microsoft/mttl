@@ -15,6 +15,7 @@ class PlatypusConfig(DatasetConfig):
     train_on_reverse: bool = False
 
 
+@DefaultDataModule.register("platypus", PlatypusConfig)
 class PlatypusModule(DefaultDataModule):
     def setup_dataset(self):
         if getattr(self.config, "train_on_reverse", False):
@@ -32,7 +33,7 @@ class PlatypusQAModule(PlatypusModule):
             raise NotImplementedError("train_on_reverse is not implemented for QA.")
         else:
             train_dataset = PlatypusQADataset(
-                dataset_name=self.config.dataset,
+                dataset_name=self.config.dataset_repo,
                 filter_by_subject=self.config.finetune_task_name,
                 val_mixin=self.val_mixin,
             )

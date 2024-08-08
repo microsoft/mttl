@@ -3,25 +3,28 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Union
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from datasets import Dataset as ArrowDataset
 from datasets import concatenate_datasets
 from pytorch_lightning import LightningDataModule
+from simple_parsing import Serializable
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Dataset
+from torch.utils.data.dataset import ConcatDataset
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PaddingStrategy
 
 from mttl.datamodule.utils import get_tokenizer
 from mttl.logging import logger
+from mttl.registrable import Registrable
 
 
 @dataclass
-class DatasetConfig:
-    dataset: str = None
-    data_dir: str = None
+class DatasetConfig(Serializable):
     model: str = None
+    dataset_repo: str = None
     train_batch_size: int = 4
     predict_batch_size: int = 4
     max_input_length: int = 1024
@@ -465,7 +468,58 @@ def subsample_dst(dataset, subsample: int, rng: torch.Generator = None):
     return dataset
 
 
-class DefaultDataModule(LightningDataModule):
+def take_n_examples_per_task(task_names, n, rng=None):
+    """Returns indices of x / n examples per task given a list of task names.
+
+    Args:
+        task_names (list): List of task names, one per example.
+        n (int): Subsampling factor.
+        rng (np.random.RandomState, optional): Random number generator. Defaults to None.
+
+    Returns:
+        list: List of indices.
+    """
+    if rng is None:
+        rng = np.random.RandomState(0)
+
+    tasks_to_ids = defaultdict(list)
+    for i, task in enumerate(task_names):
+        tasks_to_ids[task].append(i)
+    indices = []
+    for task in tasks_to_ids.keys():
+        indices += rng.choice(
+            tasks_to_ids[task], max(len(tasks_to_ids[task]) // n, 1), replace=False
+        ).tolist()
+    return indices
+
+
+class TrainIndices:
+    _instance = None
+
+    def __init__(self, dataset, num_examples, seed):
+        self.num_examples = num_examples
+        self.seed = seed
+        self.rng = np.random.RandomState(self.seed)
+        self.train_indices = self.rng.randint(
+            0, len(dataset), self.num_examples
+        ).tolist()
+
+    @classmethod
+    def get(cls, dataset, num_examples, seed):
+        if cls._instance is None:
+            cls._instance = cls(dataset, num_examples, seed)
+
+        return cls._instance.train_indices
+
+
+class IndexConcatDataset(ConcatDataset):
+    def __getitem__(self, idx):
+        example_info = super().__getitem__(idx)
+        example_info["example_id"] = idx
+        return example_info
+
+
+class DefaultDataModule(LightningDataModule, Registrable):
     def train_dataloader(self, subsample=None):
         subsample = subsample or self.config.subsample
         train_dataset = self.train_dataset
@@ -531,7 +585,7 @@ class DefaultDataModule(LightningDataModule):
         )
 
     def print_infos(self):
-        logger.info("Dataset name: %s", self.config.dataset)
+        logger.info("Dataset name: %s", self.config.dataset_repo)
         logger.info("Reader class: %s", self.__class__.__name__)
         if self.train_dataset is not None and len(self.train_dataset) > 0:
             logger.info("Training steps: %s" % len(self.train_dataloader()))
@@ -829,36 +883,6 @@ class MultiChoiceSourceDataModule(DefaultDataModule):
 
 
 def get_datamodule(args, for_generation=False, dataset_override=None):
-    from mttl.datamodule.arc_data_module import ArcDataConfig, ArcMultiChoiceDataModule
-    from mttl.datamodule.codex_data_module import CodexDataConfig, CodexDataModule
-    from mttl.datamodule.hellaswag_data_module import (
-        HellaswagDataConfig,
-        HellaswagMultiChoiceDataModule,
-    )
-    from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
-    from mttl.datamodule.mt_seq_to_seq_module import (
-        FlanConfig,
-        FlanModule,
-        FlatMultiTaskConfig,
-        FlatMultiTaskModule,
-    )
-    from mttl.datamodule.openbookqa_data_module import (
-        OpenbookQADataConfig,
-        OpenbookQAMultiChoiceDataModule,
-    )
-    from mttl.datamodule.piqa_data_module import (
-        PiqaDataConfig,
-        PiqaMultiChoiceDataModule,
-    )
-    from mttl.datamodule.superglue_data_module import (
-        BoolQDataModule,
-        SuperGLUEDataConfig,
-    )
-    from mttl.datamodule.winogrande_data_module import (
-        WinograndeDataConfig,
-        WinograndeMultiChoiceDataModule,
-    )
-
     # refactor all the common arguments below into a dict common kwargs
     dataset = args.dataset if not dataset_override else dataset_override
 

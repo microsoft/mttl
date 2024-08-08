@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
 
-from mttl.datamodule.base import DatasetConfig, MultiChoiceDataModule
+from mttl.datamodule.base import DatasetConfig, DefaultDataModule, MultiChoiceDataModule
 from mttl.models.library.expert_library import DatasetLibrary
 
 
@@ -10,6 +10,7 @@ class SuperGLUEDataConfig(DatasetConfig):
     pass
 
 
+@DefaultDataModule.register("superglue", SuperGLUEDataConfig)
 class SuperGLUEMultiChoiceDataModule(MultiChoiceDataModule):
     TASK_NAME = None
     DATASET_SPLIT = "validation"
@@ -37,6 +38,7 @@ class SuperGLUEMultiChoiceDataModule(MultiChoiceDataModule):
         )
 
 
+@DefaultDataModule.register("boolq", SuperGLUEDataConfig)
 class BoolQDataModule(SuperGLUEMultiChoiceDataModule):
     TASK_NAME = "boolq"
     DATASET_SPLIT = "validation"

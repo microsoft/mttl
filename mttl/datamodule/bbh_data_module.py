@@ -14,6 +14,7 @@ class BBHConfig(DatasetConfig):
     source_template: str = "Solve the following problem: {}\nAnswer:"
 
 
+@DefaultDataModule.register("bbh", BBHConfig)
 class BBHDataModule(DefaultDataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))

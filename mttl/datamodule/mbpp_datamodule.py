@@ -87,6 +87,7 @@ def completion_template(for_generation, example):
     return example
 
 
+@DefaultDataModule.register("mbpp", MBPPDataConfig)
 class MBPPDataModule(DefaultDataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))

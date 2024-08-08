@@ -2,7 +2,7 @@ import os
 from dataclasses import dataclass
 from functools import partial
 
-from mttl.datamodule.base import DatasetConfig, MultiChoiceDataModule
+from mttl.datamodule.base import DatasetConfig, DefaultDataModule, MultiChoiceDataModule
 from mttl.models.library.expert_library import DatasetLibrary
 
 
@@ -11,6 +11,7 @@ class ArcDataConfig(DatasetConfig):
     arc_type: str = "ARC-Easy"
 
 
+@DefaultDataModule.register("arc", ArcDataConfig)
 class ArcMultiChoiceDataModule(MultiChoiceDataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))

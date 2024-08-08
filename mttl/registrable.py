@@ -47,3 +47,7 @@ class Registrable:
     @classmethod
     def registered_names(cls) -> List[str]:
         return list(Registrable._registry[cls].keys())
+
+    @classmethod
+    def registered_configs(cls) -> List[Type]:
+        return [value[1] for value in Registrable._registry[cls].values()]

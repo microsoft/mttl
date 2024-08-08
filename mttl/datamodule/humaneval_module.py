@@ -55,6 +55,7 @@ def completion_template(example):
     return example
 
 
+@DefaultDataModule.register("humaneval", HumanEvalConfig)
 class HumanEvalDataModule(DefaultDataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))

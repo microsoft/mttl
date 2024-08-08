@@ -1,9 +1,10 @@
 import torch
 
 from mttl.dataloader.alpaca_dataset_readers import AlpacaDataset
-from mttl.datamodule.base import DefaultDataModule
+from mttl.datamodule.base import DatasetConfig, DefaultDataModule
 
 
+@DefaultDataModule.register("alpaca", DatasetConfig)
 class AlpacaDataModule(DefaultDataModule):
     @property
     def all_instructions(self):
@@ -17,11 +18,3 @@ class AlpacaDataModule(DefaultDataModule):
 
         self.train_dataset, self.dev_dataset = self.create_train_valid_split(dataset)
         self.test_dataset = self.dev_dataset
-
-
-class AlpacaPretrainDataModule(AlpacaDataModule):
-    pass
-
-
-class AlpacaFinetuneDataModule(AlpacaDataModule):
-    pass

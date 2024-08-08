@@ -186,6 +186,7 @@ class MMLUDataConfig(DatasetConfig):
     augment_mmlu: bool = False
 
 
+@DefaultDataModule.register("mmlu", MMLUDataConfig)
 class MMLUDataModule(DefaultDataModule):
     DATA_ENV = "MMLU_DATA_DIR"
 
