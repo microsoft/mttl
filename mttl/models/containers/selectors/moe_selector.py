@@ -6,13 +6,14 @@ from torch import nn
 from torch.nn import functional as F
 
 from mttl.models.containers.selectors.base import (
-    BatchSequenceExpertsAndWeightsSelectorOutput,
     Selector,
     SelectorConfig,
-    SelectorOutput,
     forward_with_cache,
 )
-from mttl.models.expert_context import InfoContainer
+from mttl.models.containers.selectors.selector_output import (
+    BatchSequenceExpertsAndWeightsSelectorOutput,
+    SelectorOutput,
+)
 from mttl.models.library.expert import ExpertInfo
 
 
@@ -71,7 +72,7 @@ class MOERKHSSelector(Selector):
             # soft routing
             selected_experts = SelectorOutput.ALL_EXPERTS
 
-        g = InfoContainer.get().routing_gates
+        g = self.info_container.routing_gates
         g.append(router_logits)
 
         return BatchSequenceExpertsAndWeightsSelectorOutput(

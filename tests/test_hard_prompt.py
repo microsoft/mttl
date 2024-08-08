@@ -214,14 +214,14 @@ def test_hard_prompt_eval(dm_batch):
     )
     assert model.expert_container.experts["prefix"].prompt == weight
 
-    InfoContainer.create(flan_batch_for_generation)
-    outputs_with_prompt = model.generate(
-        inputs=flan_batch_for_generation["input_ids"],
-        attention_mask=flan_batch_for_generation["attention_mask"],
-        pad_token_id=tokenizer.pad_token_id,
-        max_length=flan_batch_for_generation["input_ids"].shape[1] + 20,
-    )
-    text_outputs_with_prompt = tokenizer.batch_decode(
-        outputs_with_prompt, skip_special_tokens=True
-    )
-    assert all(["I don't know" in o for o in text_outputs_with_prompt])
+    with InfoContainer(flan_batch_for_generation):
+        outputs_with_prompt = model.generate(
+            inputs=flan_batch_for_generation["input_ids"],
+            attention_mask=flan_batch_for_generation["attention_mask"],
+            pad_token_id=tokenizer.pad_token_id,
+            max_length=flan_batch_for_generation["input_ids"].shape[1] + 20,
+        )
+        text_outputs_with_prompt = tokenizer.batch_decode(
+            outputs_with_prompt, skip_special_tokens=True
+        )
+        assert all(["I don't know" in o for o in text_outputs_with_prompt])

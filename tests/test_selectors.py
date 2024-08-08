@@ -2,12 +2,14 @@ import pytest
 
 
 def test_load_selectors_from_config():
-    from mttl.models.containers.selectors import (
-        MOERKHSSelector,
-        MOERKHSSelectorConfig,
+    from mttl.models.containers.selectors.base import (
         TaskNameSelector,
         TaskNameSelectorConfig,
         get_selector,
+    )
+    from mttl.models.containers.selectors.moe_selector import (
+        MOERKHSSelector,
+        MOERKHSSelectorConfig,
     )
 
     config = MOERKHSSelectorConfig(emb_dim=10)

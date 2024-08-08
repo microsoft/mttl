@@ -6,14 +6,20 @@ from pytorch_lightning import seed_everything
 from transformers import AutoModelForCausalLM
 
 from mttl.models.containers import get_modules_to_modify_trie
-from mttl.models.containers.selectors import (
+from mttl.models.containers.selectors.arrow_selector import (
     ArrowSelector,
-    PolySelector,
-    PolySelectorConfig,
+    ArrowSelectorConfig,
+)
+from mttl.models.containers.selectors.base import (
     TaskNameSelector,
     TaskNameSelectorConfig,
 )
+from mttl.models.containers.selectors.poly_selector import (
+    PolySelector,
+    PolySelectorConfig,
+)
 from mttl.models.expert_model import Expert, MultiExpertModel
+from mttl.models.library.library_transforms import ArrowConfig, ArrowTransform
 from mttl.models.modifiers.lora import LoRAConfig
 
 
@@ -109,9 +115,6 @@ def test_from_pretrained(tmp_path):
 
 
 def test_from_pretrained_with_arrow(tmp_path):
-    from mttl.models.containers.selectors import ArrowSelectorConfig
-    from mttl.models.library.library_transforms import ArrowConfig, ArrowTransform
-
     # create a dummy library
     model = MultiExpertModel(model="EleutherAI/gpt-neo-125m", device_map="cpu")
     model.add_empty_expert(

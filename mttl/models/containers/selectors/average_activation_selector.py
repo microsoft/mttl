@@ -1,10 +1,9 @@
 from dataclasses import dataclass
 
-from mttl.models.containers.selectors.base import (
+from mttl.models.containers.selectors.base import Selector, artifacts_cache
+from mttl.models.containers.selectors.per_token_selector import (
     PerTokenSelector,
     PerTokenSelectorConfig,
-    Selector,
-    artifacts_cache,
 )
 
 

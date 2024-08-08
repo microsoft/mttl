@@ -55,33 +55,35 @@ def test_prefix_prompt_tuning():
     assert round(output.loss.item(), 4) == 6.0884
 
     # Test Base Llama model
-    InfoContainer.create(model, RoutingInfo.from_batch(batch))
-    new_model = modify_transformer(model, adapter_config)
+    with InfoContainer(model, RoutingInfo.from_batch(batch)):
+        new_model = modify_transformer(model, adapter_config)
 
-    # Test Fresh Soft Prompt Init
-    labels = batch.pop("labels")
-    output = new_model(**batch)
+        # Test Fresh Soft Prompt Init
+        labels = batch.pop("labels")
+        output = new_model(**batch)
 
-    def masked_cross_entropy(logits, labels, mask):
-        bs, ds, vocab_size = logits.size()
-        ce = F.cross_entropy(logits.flatten(0, 1), labels.flatten(), reduction="none")
-        ce = ce.view_as(labels)
-        bs_loss = (ce * attn_mask).sum(1) / attn_mask.sum(1)
-        return bs_loss.mean()
+        def masked_cross_entropy(logits, labels, mask):
+            bs, ds, vocab_size = logits.size()
+            ce = F.cross_entropy(
+                logits.flatten(0, 1), labels.flatten(), reduction="none"
+            )
+            ce = ce.view_as(labels)
+            bs_loss = (ce * attn_mask).sum(1) / attn_mask.sum(1)
+            return bs_loss.mean()
 
-    # trim the logits to remove the soft prompt
-    loss = masked_cross_entropy(output.logits, labels, batch["attention_mask"])
-    assert round(loss.item(), 4) == 0.7573
+        # trim the logits to remove the soft prompt
+        loss = masked_cross_entropy(output.logits, labels, batch["attention_mask"])
+        assert round(loss.item(), 4) == 0.7573
 
-    # Manually set the soft prompt embeddings to high values to induce a change
-    for module in new_model.modules():
-        if isinstance(module, ExtendedEmbedding):
-            module.new_embeds.data.fill_(0)
+        # Manually set the soft prompt embeddings to high values to induce a change
+        for module in new_model.modules():
+            if isinstance(module, ExtendedEmbedding):
+                module.new_embeds.data.fill_(0)
 
-    # Test Fresh all 0s Soft Prompt Init
-    output = new_model(**batch)
-    loss = masked_cross_entropy(output.logits, labels, batch["attention_mask"])
-    assert round(loss.item(), 4) == 0.7482
+        # Test Fresh all 0s Soft Prompt Init
+        output = new_model(**batch)
+        loss = masked_cross_entropy(output.logits, labels, batch["attention_mask"])
+        assert round(loss.item(), 4) == 0.7482
 
 
 def test_suffix_prompt_tuning():
@@ -127,35 +129,36 @@ def test_suffix_prompt_tuning():
         batch["labels"][i, sq:] = -100
 
     # Test Base Llama model
-    InfoContainer.create(model, RoutingInfo(task_ids=task_ids, labels=batch["labels"]))
+    with InfoContainer(model, RoutingInfo(task_ids=task_ids, labels=batch["labels"])):
+        # Test Base Llama model
+        output = model(**batch)
+        assert round(output.loss.item(), 4) == 6.0884
 
-    # Test Base Llama model
-    output = model(**batch)
-    assert round(output.loss.item(), 4) == 6.0884
+        new_model = modify_transformer(model, adapter_config)
 
-    new_model = modify_transformer(model, adapter_config)
+        # Test Fresh Soft Prompt Init
+        labels = batch.pop("labels")
+        output = new_model(**batch)
 
-    # Test Fresh Soft Prompt Init
-    labels = batch.pop("labels")
-    output = new_model(**batch)
+        def masked_cross_entropy(logits, labels, mask):
+            bs, ds, vocab_size = logits.size()
+            ce = F.cross_entropy(
+                logits.flatten(0, 1), labels.flatten(), reduction="none"
+            )
+            ce = ce.view_as(labels)
+            bs_loss = (ce * attn_mask).sum(1) / attn_mask.sum(1)
+            return bs_loss.mean()
 
-    def masked_cross_entropy(logits, labels, mask):
-        bs, ds, vocab_size = logits.size()
-        ce = F.cross_entropy(logits.flatten(0, 1), labels.flatten(), reduction="none")
-        ce = ce.view_as(labels)
-        bs_loss = (ce * attn_mask).sum(1) / attn_mask.sum(1)
-        return bs_loss.mean()
+        # trim the logits to remove the soft prompt
+        loss = masked_cross_entropy(output.logits, labels, batch["attention_mask"])
+        assert round(loss.item(), 4) == 0.7535
 
-    # trim the logits to remove the soft prompt
-    loss = masked_cross_entropy(output.logits, labels, batch["attention_mask"])
-    assert round(loss.item(), 4) == 0.7535
+        # Manually set the soft prompt embeddings to high values to induce a change
+        for module in new_model.modules():
+            if isinstance(module, ExtendedEmbedding):
+                module.new_embeds.data.fill_(0)
 
-    # Manually set the soft prompt embeddings to high values to induce a change
-    for module in new_model.modules():
-        if isinstance(module, ExtendedEmbedding):
-            module.new_embeds.data.fill_(0)
-
-    # Test Fresh all 0s Soft Prompt Init
-    output = new_model(**batch)
-    loss = masked_cross_entropy(output.logits, labels, batch["attention_mask"])
-    assert round(loss.item(), 4) == 0.7495
+        # Test Fresh all 0s Soft Prompt Init
+        output = new_model(**batch)
+        loss = masked_cross_entropy(output.logits, labels, batch["attention_mask"])
+        assert round(loss.item(), 4) == 0.7495

@@ -14,7 +14,15 @@ from torch import nn
 from torch.distributions import Categorical
 
 from mttl.logging import logger, warn_once
-from mttl.models.expert_context import InfoContainer
+from mttl.models.containers.selectors.selector_output import (
+    BatchExpertsAndWeightsSelectorOutput,
+    BatchExpertsSelectorOutput,
+    BatchExpertsSplitsAndWeightsSelectorOutput,
+    BatchSequenceExpertsAndWeightsSelectorOutput,
+    ExpertsAndWeightsSelectorOutput,
+    ExpertsSplitsAndWeightsSelectorOutput,
+    SelectorOutput,
+)
 from mttl.models.library.expert import ExpertInfo
 from mttl.models.modifiers.base import Modifier
 from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
@@ -196,116 +204,6 @@ class LoadableSelectorConfig(SelectorConfig):
         return f"{self.library_id}_{self.selector_data_id}"
 
 
-@dataclass
-class SelectorOutput:
-    ALL_EXPERTS = "all"
-
-    def __post_init__(self):
-        if hasattr(self, "weights") and self.weights.ndim != len(self.dim_names):
-            raise ValueError(
-                "Weights should have the same number of dimensions as dim_names for this SelectorOutput."
-            )
-
-    @property
-    def dim_names(self):
-        raise NotImplementedError("dim_names not implemented for this selector output.")
-
-
-@dataclass
-class BatchExpertsSelectorOutput(SelectorOutput):
-    """A selector output that contains a list of experts without weights.
-
-    experts: names of the selected experts for each element in the batch
-    """
-
-    experts: List[str]
-
-
-@dataclass
-class ExpertsAndWeightsSelectorOutput(SelectorOutput):
-    """A selector output that contains a list of experts and weights shared across the batch.
-
-    experts: names of the selected experts
-    weights: their weights
-    """
-
-    experts: List[str]
-    weights: torch.Tensor
-
-    @property
-    def dim_names(self):
-        return ["experts"]
-
-
-@dataclass
-class BatchExpertsAndWeightsSelectorOutput(SelectorOutput):
-    """A selector output that contains a list of experts and weights for each example.
-
-    experts: either names or indices of the selected experts
-    weights: their weights
-    """
-
-    experts: Union[List[List[str]], torch.Tensor]
-    weights: torch.Tensor
-
-    @property
-    def dim_names(self):
-        return ["batch", "experts"]
-
-
-@dataclass
-class ExpertsSplitsAndWeightsSelectorOutput(ExpertsAndWeightsSelectorOutput):
-    """A selector output that contains a list of experts and weights for each split (MHR) and expert shared across the batch.
-
-    experts: names of the selected experts
-    weights: their weights
-    """
-
-    @property
-    def dim_names(self):
-        return ["splits", "experts"]
-
-
-@dataclass
-class BatchExpertsSplitsAndWeightsSelectorOutput(BatchExpertsAndWeightsSelectorOutput):
-    """A selector output that contains a list of experts and weights for each split (MHR) and expert shared across the batch.
-
-    experts: names of the selected experts
-    weights: their weights
-    """
-
-    @property
-    def dim_names(self):
-        return ["batch", "splits", "experts"]
-
-
-@dataclass
-class BatchSequenceExpertsAndWeightsSelectorOutput(SelectorOutput):
-    """A selector output that contains a list of experts and weights for each example and token.
-
-    experts: indices of the selected experts
-    weights: their weights
-    """
-
-    experts: torch.Tensor
-    weights: torch.Tensor
-
-    @property
-    def dim_names(self):
-        return ["batch", "sequence", "experts"]
-
-
-@dataclass
-class BatchSequenceExpertsSplitsAndWeightsSelectorOutput(
-    BatchSequenceExpertsAndWeightsSelectorOutput
-):
-    """A selector output that contains a list of experts and weights for each example, token and split (MHR)."""
-
-    @property
-    def dim_names(self):
-        return ["batch", "sequence", "splits", "experts"]
-
-
 def forward_with_cache(func):
     def wrapper(self: Selector, input, **kwargs):
         if self.forward_cache is not None and not self.clear_cache:
@@ -424,8 +322,16 @@ class Selector(nn.Module, Registrable):
         return len(self.expert_names)
 
     @property
+    def info_container(self):
+        from mttl.models.expert_context import InfoContainer
+
+        return InfoContainer.get()
+
+    @property
     def routing_infos(self):
-        info_container = InfoContainer.get()
+        from mttl.models.expert_context import InfoContainer
+
+        info_container = self.info_container
         if not info_container:
             return None
         return info_container.routing_infos
@@ -549,15 +455,6 @@ class TaskPredictorSelector(Selector):
         pass
 
 
-@dataclass
-class PerTokenSelectorConfig(LoadableSelectorConfig):
-    router_temp: float = None
-    moe_top_k: int = None
-    proto_init: str = None
-    input_norm_fn: str = None
-    proto_norm_fn: str = None
-
-
 class LoadableLibraryMixin(ABC):
     @classmethod
     @abstractmethod
@@ -594,214 +491,6 @@ def get_expert_prototype_from_library_artifacts(
     if isinstance(proto, np.ndarray):
         proto = torch.from_numpy(proto)
     return proto
-
-
-@Selector.register("per_token_router", PerTokenSelectorConfig)
-class PerTokenSelector(Selector, LoadableLibraryMixin):
-    def __init__(self, config, **kwargs) -> None:
-        super().__init__(config, **kwargs)
-
-        if "layer" not in kwargs:
-            raise ValueError(
-                "Selector requires a layer to be passed in kwargs to infer the input dimension."
-            )
-
-        layer = kwargs["layer"]
-        self.output_dim, self.input_dim = layer.out_features, layer.in_features
-
-        self.prototypes = nn.Parameter(
-            torch.empty((0, self.input_dim), device=layer.weight.device)
-        )
-
-        # validate args
-        assert self.config.proto_init is not None
-        assert self.config.input_norm_fn in ["id", "norm_d", "unit"]
-        assert self.config.proto_norm_fn in ["id", "norm_d", "norm_p", "unit"]
-
-        def _get_norm_layer(norm_fn):
-            """helper for normalizing input and expert embeddings"""
-
-            if norm_fn == "norm_d":
-                return nn.LayerNorm(self.input_dim, elementwise_affine=False)
-            elif norm_fn == "norm_p":
-
-                def _unit_norm(x):
-                    x_ = x.transpose(0, 1)  # (d, n_exp)
-                    return F.layer_norm(x_, x_.shape[1:]).transpose(0, 1)
-
-                return _unit_norm
-
-            elif norm_fn == "unit":
-
-                def _unit_norm(x):
-                    return x / x.norm(dim=-1, p=2, keepdim=True).clamp(min=EPS)
-
-                return _unit_norm
-            else:
-                return nn.Identity()
-
-        self.input_norm = _get_norm_layer(self.config.input_norm_fn)
-        self.proto_norm = _get_norm_layer(self.config.proto_norm_fn)
-
-        # init selector from library if needed
-        if self.config.library_id is not None:
-            self.library_artifacts = self.load_from_library(self.config)
-        else:
-            self.library_artifacts = None
-
-    def overwrite_prototypes(self, prototypes: torch.tensor):
-        """Overwrites the prototypes with the given tensor."""
-        if (
-            prototypes.shape[0] != self.prototypes.shape[0]
-            or self.prototypes.shape[1] != prototypes.shape[1]
-        ):
-            raise ValueError("Prototypes shape are mismatched!")
-
-        self.prototypes.data = prototypes.to(
-            dtype=self.prototypes.dtype, device=self.prototypes.device
-        )
-
-    @safe_logging
-    def _log_angle(self, angle):
-        bs, sq, n_exp = angle.size()
-
-        if sq > 1:
-            attn_mask = self.routing_infos.attention_mask == 1.0
-            mean_angle = angle[attn_mask].sum() / attn_mask.sum() / n_exp
-        else:
-            mean_angle = angle.mean()
-
-        task = self.routing_infos.task_sources[0]
-        to_store = {"angle": mean_angle.item()}
-        self.metric_logger.update(prefix=f"task_{task}", value_dict=to_store)
-        self.metric_logger.update(prefix=self.__layer_name__, value_dict=to_store)
-
-    @safe_logging
-    def _log_entropy(self, logits):
-        # uniform routing entropy
-        bs, sq, dim = logits.size()
-
-        dist = Categorical(logits=logits)
-        entropy = dist.entropy()
-
-        if sq > 1:
-            attn_mask = self.routing_infos.attention_mask == 1.0
-            mean_entropy = entropy[attn_mask].sum() / attn_mask.sum()
-        else:
-            mean_entropy = entropy.mean()
-
-        task = self.routing_infos.task_sources[0]
-        to_store = {"ent_routing": mean_entropy.item()}
-        self.metric_logger.update(prefix=f"task_{task}", value_dict=to_store)
-        self.metric_logger.update(prefix=self.__layer_name__, value_dict=to_store)
-
-        to_store["ent_uniform"] = np.log(len(self.expert_names))
-        self.metric_logger.update(value_dict=to_store)
-
-    @safe_logging
-    def _maybe_log_in_dist(self, logits):
-        probs = F.softmax(logits, dim=-1)
-        bs, seq_len, _ = probs.size()
-        task_names = self.routing_infos.task_names
-
-        if all([t in self.task_to_expert_name for t in task_names]):
-            expert_names = [self.task_to_expert_name[t] for t in task_names]
-
-            expert_ids = torch.LongTensor(
-                [self.expert_names.index(e) for e in expert_names]
-            ).to(logits.device)
-
-            expert_p = torch.gather(
-                probs, index=expert_ids.view(bs, 1, 1).expand(-1, seq_len, -1), dim=-1
-            )
-
-            attn_mask = self.routing_infos.attention_mask == 1.0
-
-            # are we teacher forcing or generating ?
-            if seq_len == 1:
-                mean_correct_p = expert_p.mean()
-            else:
-                mean_correct_p = expert_p[attn_mask].mean()
-
-            to_store = {"expert_p": mean_correct_p.item()}
-            self.metric_logger.update(
-                prefix=f"task_{task_names[0]}", value_dict=to_store
-            )
-            self.metric_logger.update(prefix=self.__layer_name__, value_dict=to_store)
-
-    @forward_with_cache
-    def forward(self, input, **kwargs) -> BatchSequenceExpertsAndWeightsSelectorOutput:
-        # do routing business on fp32
-        temp = (
-            self.config.router_temp
-            if self.config.router_temp > 0
-            else np.sqrt(input.shape[-1])
-        )
-        if self.prototypes.size(0) != len(self.expert_names):
-            raise ValueError("Prototypes not initialized correctly.")
-
-        input = input.to(dtype=self.prototypes.dtype)
-        input = self.input_norm(input)
-        prototypes = self.proto_norm(self.prototypes)
-
-        # logit computation
-        router_logits = F.linear(input, prototypes)
-        if self.config.proto_init == "arrow":
-            router_logits = router_logits.abs()
-
-        # log angle between input and prototypes
-        angle = router_logits / input.norm(p=2, dim=-1, keepdim=True).clamp(min=EPS)
-        angle = angle / prototypes.norm(p=2, dim=-1).view(1, 1, -1).clamp(min=EPS)
-
-        self._log_angle(angle)
-
-        # control entropy of distribution
-        router_logits /= temp
-
-        if self.config.moe_top_k > 0:
-            # For now, we always renormalize the routing weights for hard routing
-            top_k_logits, experts = torch.topk(
-                router_logits, self.config.moe_top_k, dim=-1
-            )
-            router_probs = F.softmax(top_k_logits, dim=-1)
-
-            # Adjust router_logits accordingly for logging
-            chosen = torch.zeros_like(router_logits, dtype=torch.bool)
-            chosen.scatter_add_(
-                dim=-1, index=experts, src=torch.ones_like(experts).bool()
-            )
-            router_logits = router_logits.masked_fill(~chosen, -1e9)
-        else:
-            experts = SelectorOutput.ALL_EXPERTS
-            router_probs = F.softmax(router_logits, dim=-1, dtype=torch.float)
-
-        self._log_entropy(router_logits)
-        self._maybe_log_in_dist(router_logits)
-
-        return BatchSequenceExpertsAndWeightsSelectorOutput(
-            experts=experts, weights=router_probs
-        )
-
-    def on_add_expert(
-        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
-    ):
-        if self.library_artifacts is not None:
-            proto = get_expert_prototype_from_library_artifacts(
-                expert_name, self.layer_name, self.library_artifacts
-            ).view(1, -1)
-        else:
-            warn_once(
-                f"Library artifacts not loaded for {self.__class__}, using zero initialization."
-            )
-            proto = torch.zeros(
-                1,
-                self.prototypes.size(1),
-                dtype=self.prototypes.dtype,
-                device=self.prototypes.device,
-            )
-
-        dev = self.prototypes.device
-        self.prototypes.data = torch.cat([self.prototypes.data, proto.to(dev)])
 
 
 @dataclass
@@ -852,184 +541,3 @@ class TaskNameSelector(Selector):
         raise NotImplementedError(
             "Not required for TaskNameSelector as it performs hard selection. Use 'get_expert_instance' instead."
         )
-
-
-class KVSelector(Selector):
-    """Selector specific to KV adapters. The KV Adapter modifies the self-attention
-    call, adding the following execution :
-
-    1. adapter_k, adapter_v = adapter.get_kv_weights(k_proj, v_proj)
-    2. adapter_weights = adapter.route(query_states, adapter_k, self)
-        2.1 `adapter.route` calls get_gate(adapter_weights)
-    3. adapter_output = adapter.aggregate(adapter_weights, adapter_v)
-
-    To enable custom routing, one typically needs to modify `get_kv_weights` and `get_gate`.
-    For example, see `KVTaskNameSelector` for an example.
-
-    You can also overwrite the `route` method; the `KVExpertContainer` will call it instead of
-    the default `route` method (see lines 199-201 in `KVExpertContainer`)
-    """
-
-    @abstractmethod
-    def get_kv_weights(self, k_proj, v_proj):
-        pass
-
-    @abstractmethod
-    def get_gate(self, adapter_weights):
-        pass
-
-    def get_merging_weights(self, **selector_kwargs) -> Dict:
-        raise ValueError(
-            f"Not supported for {self.__class__}  since routing depends on input."
-        )
-
-    def on_add_expert(
-        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
-    ):
-        pass
-
-
-@dataclass
-class KVTaskNameSelectorConfig(SelectorConfig):
-    pass
-
-
-@Selector.register("kv_task_selector", KVTaskNameSelectorConfig)
-class KVTaskNameSelector(KVSelector):
-    """Selects KVAdapters based on the task name."""
-
-    def __init__(self, **kwargs) -> None:
-        super().__init__()
-
-    def get_kv_weights(self, experts, k_proj, v_proj):
-        routing_infos = self.routing_infos
-
-        task_names = routing_infos.task_names
-
-        if task_names is None:
-            task_names = [self.default_expert_name]
-
-        if len(set(task_names)) == 1:
-            # broadcast along batch dim if only 1 task
-            adapter_k, adapter_v = experts[task_names[0]].get_kv_weights(k_proj, v_proj)
-            return adapter_k, adapter_v
-
-        out = zip(
-            *[experts[name].get_kv_weights(k_proj, v_proj) for name in task_names]
-        )
-        out = (torch.cat(tensors, dim=0) for tensors in out)
-        return out
-
-    def get_gate(self, experts, adapter_weights):
-        routing_infos = self.routing_infos
-
-        task_names = routing_infos.task_names
-
-        if task_names is None:
-            task_names = [self.default_expert_name]
-
-        if len(set(task_names)) == 1:
-            # broadcast along batch dim if only 1 task
-            out = experts[task_names[0]].get_gate(adapter_weights)
-            return out
-
-        return torch.cat(
-            [experts[name].get_gate(adapter_weights) for name in task_names],
-        )
-
-
-@dataclass
-class KVConcatSelectorConfig(SelectorConfig):
-    pass
-
-
-@Selector.register("kv_concat_selector", KVConcatSelectorConfig)
-class KVConcatSelector(KVSelector, nn.Module):
-    """Concatenates along the sequence dim. all the adapters, and lets the
-    model's internal attention mechanism take care of routing in a task agnostic way
-    """
-
-    def __init__(self, **kwargs) -> None:
-        super().__init__()
-
-        self.default_expert_name = None
-
-    def get_kv_weights(self, experts, k_proj, v_proj):
-        out = zip(
-            *[
-                kv_adapter.get_kv_weights(k_proj, v_proj)
-                for kv_adapter in experts.values()
-            ]
-        )
-        # NO (1, n_experts, n_heads, soft_prompt_len, head_dim)
-        # (n_experts, n_heads, soft_prompt_len, head_dim)
-        adapter_k, adapter_v = (torch.cat(tensors, dim=0) for tensors in out)
-        n_experts, n_heads, soft_prompt_len, head_dim = adapter_k.size()
-
-        # (n_heads, n_experts * soft_prompt_len, head_dim)
-        adapter_k = adapter_k.transpose(0, 1).reshape(
-            1, n_heads, n_experts * soft_prompt_len, head_dim
-        )
-        adapter_v = adapter_v.transpose(0, 1).reshape(
-            1, n_heads, n_experts * soft_prompt_len, head_dim
-        )
-        return adapter_k, adapter_v
-
-    def get_gate(self, experts, adapter_weights):
-        bsz, n_heads, q_len, n_exp_kv_len = adapter_weights.size()
-        adapter_weights = adapter_weights.view(bsz, n_heads, q_len, len(experts), -1)
-
-        # sum probs over all `soft_prompt_len` keys, to get (bsz, n_heads, q_len, n_experts)
-        per_expert_weight = adapter_weights.sum(dim=-1)
-
-        # (n_experts, n_heads, 1, 1)
-        all_gates = torch.cat(
-            [kv_adapter.get_gate(adapter_weights) for kv_adapter in experts.values()]
-        )
-        # output : (bsz, n_heads, q_len, 1)
-        out = torch.einsum("bhqe,ehab->bhqa", per_expert_weight, all_gates)
-        return out
-
-
-@dataclass
-class KVNormSelectorConfig(SelectorConfig):
-    pass
-
-
-@Selector.register("kv_norm_selector", KVNormSelectorConfig)
-class KVNormSelector(KVSelector):
-    def route(self, experts, query, keys, attn_layer):
-        """(2) Compute The Standard Attention Scores in augmented attention"""
-
-        query = F.normalize(query, dim=-1, p=2)
-        keys = F.normalize(keys, dim=-1, p=2)
-
-        adapter_logits = torch.matmul(
-            query, keys.transpose(2, 3).type_as(query)
-        ) / math.sqrt(attn_layer.head_dim)
-
-        adapter_weights = F.softmax(adapter_logits, dim=-1, dtype=torch.float32)
-        gate_out = self.get_gate(experts, adapter_weights)
-        out = gate_out * adapter_weights.type_as(query)
-
-        return out
-
-
-@dataclass
-class KVConcatNormSelectorConfig(SelectorConfig):
-    pass
-
-
-@Selector.register("kv_concat_norm_selector", KVConcatNormSelectorConfig)
-class KVConcatNormSelector(KVConcatSelector, KVNormSelector):
-    pass
-
-
-@dataclass
-class KVTaskNameNormSelectorConfig(SelectorConfig):
-    pass
-
-
-@Selector.register("kv_task_norm_selector", KVTaskNameNormSelectorConfig)
-class KVTaskNameNormSelector(KVTaskNameSelector, KVNormSelector):
-    pass

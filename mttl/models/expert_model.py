@@ -12,11 +12,12 @@ from transformers import PreTrainedModel
 from mttl.logging import logger
 from mttl.models.containers import add_expert_to_transformer
 from mttl.models.containers.base import ExpertContainer
-from mttl.models.containers.selectors import Selector, SelectorConfig
 from mttl.models.containers.selectors.base import (
     LoadableLibraryMixin,
     LoadableSelectorConfig,
     MultiSelectorConfig,
+    Selector,
+    SelectorConfig,
     SelectorsCache,
 )
 from mttl.models.expert_config import ExpertConfig
@@ -631,17 +632,26 @@ class MoEModel(MultiExpertModel):
             self.moe_num_experts = i + 1
 
     def training_step(self, batch, _):
-        loss = super().training_step(batch, _)
+        loss, context = self.forward(batch, return_context=True)
+        total_loss = loss
+
+        self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
+        self.log(
+            f"{self._log_pref}train/total_loss", total_loss, on_step=True, prog_bar=True
+        )
+
+        for i, pg in enumerate(self.optimizers().optimizer.param_groups):
+            self.log(f"train/lr_{i}", pg["lr"])
+
         total_loss = loss.clone()
+        routing_gates = context["routing_gates"]
 
-        info_container = InfoContainer.get()
-
-        if getattr(info_container, "routing_gates", []):
+        if routing_gates:
             num = 0.0
             entropy_of_avg = 0.0
             entropy_of_route = 0.0
 
-            for values in info_container.routing_gates:
+            for values in routing_gates:
                 # compute MI loss
                 values = values.to(torch.float32)
                 values = values.view(-1, values.shape[-1])

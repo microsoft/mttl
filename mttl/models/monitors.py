@@ -8,7 +8,7 @@ import torch
 from pytorch_lightning import Callback
 from torch.distributions import Bernoulli, Categorical
 
-from mttl.models.containers.selectors import Selector
+from mttl.models.containers.selectors.base import Selector
 from mttl.utils import agg_dicts
 
 try:

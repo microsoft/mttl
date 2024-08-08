@@ -9,13 +9,13 @@ from mttl.models.containers.lora_containers import (
     CoalescedLoRAExpertContainer,
     LoRAExpertContainer,
 )
-from mttl.models.containers.selectors import (
+from mttl.models.containers.selectors.base import (
     Selector,
     SelectorConfig,
+    SelectorsCache,
     SelectorView,
     get_selector,
 )
-from mttl.models.containers.selectors.base import SelectorsCache
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.modifiers.base import Modifier
