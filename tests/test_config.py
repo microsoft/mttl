@@ -135,7 +135,8 @@ def test_dump_load_lora_config():
 
 
 def test_dump_load_selector_config():
-    from mttl.models.containers.selectors import MOERKHSSelectorConfig, SelectorConfig
+    from mttl.models.containers.selectors.base import SelectorConfig
+    from mttl.models.containers.selectors.moe_selector import MOERKHSSelectorConfig
 
     dump = MOERKHSSelectorConfig(emb_dim=12345).asdict()
     test = SelectorConfig.fromdict(dump)

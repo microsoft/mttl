@@ -11,15 +11,17 @@ from mttl.models.containers.lora_containers import (
     CoalescedLoRAExpertContainer,
     LoRAExpertContainer,
 )
-from mttl.models.containers.selectors import (
-    BatchSequenceExpertsAndWeightsSelectorOutput,
-    MOERKHSSelector,
-    PerTokenSelector,
+from mttl.models.containers.selectors.base import LoadableLibraryMixin
+from mttl.models.containers.selectors.per_token_selector import PerTokenSelector
+from mttl.models.containers.selectors.poly_selector import (
     PolySelector,
+    PolySelectorConfig,
     PolySelectorDirect,
+)
+from mttl.models.containers.selectors.selector_output import (
+    BatchSequenceExpertsAndWeightsSelectorOutput,
     SelectorOutput,
 )
-from mttl.models.containers.selectors.base import LoadableLibraryMixin
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import MoEModel, MultiExpertModel
 from mttl.models.library.expert import Expert

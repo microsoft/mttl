@@ -11,9 +11,6 @@ from mttl.models.modifiers.base import Modifier, ModifierConfig
 from mttl.models.modifiers.debug_utils import check_if_align, monitor_transformer
 from mttl.models.modifiers.kv_adapter import KVAdapterConfig
 
-# from mttl.models.containers.selectors import PolySelectorConfig
-
-
 PromptTuningRouting = None
 
 
