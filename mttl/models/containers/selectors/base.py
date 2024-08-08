@@ -1,3 +1,4 @@
+import functools
 import math
 import threading
 from abc import ABC
@@ -14,6 +15,12 @@ from torch.distributions import Categorical
 
 from mttl.config import Config
 from mttl.logging import logger, warn_once
+from mttl.models.containers.selectors.selector_output import (
+    BatchExpertsAndWeightsSelectorOutput,
+    BatchExpertsSelectorOutput,
+    BatchSequenceExpertsAndWeightsSelectorOutput,
+    SelectorOutput,
+)
 from mttl.models.expert_context import InfoContainer
 from mttl.models.library.expert import ExpertInfo
 from mttl.models.modifiers.base import Modifier
@@ -23,314 +30,6 @@ from mttl.models.utils import MetricLogger
 from mttl.registrable import Registrable
 
 EPS = 1e-8
-NAME_FIELD = "__selector_name__"
-
-
-def get_selector(selector_config: "SelectorConfig", **kwargs):
-    """Returns a selector object for the given routing_config."""
-    return Selector.get_class_by_config_class(selector_config.__class__)(
-        config=selector_config, **kwargs
-    )
-
-
-@dataclass
-class SelectorConfig:
-    # the granularity of the selector (which layers use the same selectors)
-    router_granularity: str = "*"
-    lora_merge_after: bool = False
-    selector_logging: bool = True
-    num_experts: int = 0
-
-    def __eq__(self, other):
-        # compare all the attributes
-        return self.__dict__ == other.__dict__
-
-    def asdict(self) -> Dict:
-        """Dump the config to a string."""
-        from dataclasses import asdict
-
-        data = asdict(self)
-        # store the model modifier for easy loading
-        data[NAME_FIELD] = Selector.get_name_by_config_class(type(self))
-        return data
-
-    @classmethod
-    def fromdict(cls, dumped: Dict) -> "SelectorConfig":
-        if NAME_FIELD not in dumped:
-            raise ValueError(
-                "Cannot load SelectorConfig from dict, missing '__selector_name__' key."
-            )
-        name = dumped.pop(NAME_FIELD)
-        return Selector.get_config_class_by_name(name)(**dumped)
-
-    @property
-    def selector_name(self) -> str:
-        return Selector.get_name_by_config_class(type(self))
-
-    @classmethod
-    def from_training_config(
-        cls,
-        training_config: Union["Config", "SelectorConfig"],
-        ignore_prefix: str = None,
-    ) -> Union["SelectorConfig", None]:
-        """Build modifier config from the training config.
-
-        Returns None if no modifier is set.
-        """
-        if isinstance(training_config, SelectorConfig):
-            # nothing to do here
-            return training_config
-
-        if cls == SelectorConfig:
-            # if called on the base class, we need to find the correct subclass
-            if training_config.router_selector is None:
-                return None
-
-            if training_config.router_selector not in Selector.registered_names():
-                raise ValueError(
-                    f"Selector '{training_config.router_selector}' not found, has it been registered?"
-                )
-
-            config_klass = Selector.get_config_class_by_name(
-                training_config.router_selector
-            )
-        else:
-            config_klass = cls
-
-        kwargs = {}
-        for key in config_klass.__dataclass_fields__.keys():
-            # only overwrite default if value exists and is not None
-            if ignore_prefix:
-                default_value = getattr(training_config, ignore_prefix + key, None)
-            else:
-                default_value = None
-
-            train_cfg_value = getattr(training_config, key, default_value)
-            if train_cfg_value is not None:
-                kwargs[key] = train_cfg_value
-        return config_klass(**kwargs)
-
-
-class MultiSelectorConfig(dict):
-    @classmethod
-    def from_training_config(
-        cls,
-        training_config: Union["Config", "SelectorConfig"],
-        ignore_prefix: str = None,
-    ) -> Dict[str, "SelectorConfig"]:
-        import json
-
-        if training_config.router_selector is None:
-            return None
-
-        config_dict = json.loads(training_config.router_selector)
-        if type(config_dict) is not dict:
-            config_dict = {Modifier.DEFAULT: config_dict}
-
-        for key, value in config_dict.items():
-            config_dict[key] = SelectorConfig.from_training_config(value, ignore_prefix)
-
-        multi_config = cls()
-        multi_config.update(config_dict)
-        return multi_config
-
-    @property
-    def selector_name(self) -> str:
-        import json
-
-        selector_string = {}
-        for key, value in self.items():
-            selector_string[key] = value.selector_name
-
-        return json.dumps(selector_string)
-
-
-class SelectorsCache:
-    """Keep a cache of all added selectors indexed by both modifier and selector name."""
-
-    def __init__(self):
-        self.cache = defaultdict(dict)
-        self.clear()
-
-    def clear(self, modifier_name: str = None):
-        # initialize cache for all registered modifiers
-        if modifier_name is None:
-            for modifier_name in Modifier.registered_names():
-                self.cache[modifier_name] = {}
-        else:
-            self.cache[modifier_name] = {}
-
-    def insert(self, modifier_name: str, selector_name: str, selector: "Selector"):
-        self.cache[modifier_name][selector_name] = selector
-
-    def get(
-        self, modifier_name: str, selector_name: str = None
-    ) -> Union["Selector", Dict]:
-        if selector_name is None:
-            return self.cache[modifier_name]
-        return self.cache[modifier_name].get(selector_name, None)
-
-    def items(self):
-        return iter(self.cache.items())
-
-    def __setitem__(self, key, value):
-        if key not in Modifier.registered_names():
-            raise ValueError(f"Modifier '{key}' not found, has it been registered?")
-
-        self.cache[key] = value
-
-
-@dataclass
-class LoadableSelectorConfig(SelectorConfig):
-    """Adds support for library_id and data_id, which specifies the unique identifier to load."""
-
-    library_id: str = None
-    selector_data_id: str = None
-
-    @property
-    def artifacts_hash(self):
-        """Returns an unique key identifying the artifacts for this selector."""
-        return f"{self.library_id}_{self.selector_data_id}"
-
-
-@dataclass
-class SelectorOutput:
-    ALL_EXPERTS = "all"
-
-    def __post_init__(self):
-        if hasattr(self, "weights") and self.weights.ndim != len(self.dim_names):
-            raise ValueError(
-                "Weights should have the same number of dimensions as dim_names for this SelectorOutput."
-            )
-
-    @property
-    def dim_names(self):
-        raise NotImplementedError("dim_names not implemented for this selector output.")
-
-
-@dataclass
-class BatchExpertsSelectorOutput(SelectorOutput):
-    """A selector output that contains a list of experts without weights.
-
-    experts: names of the selected experts for each element in the batch
-    """
-
-    experts: List[str]
-
-
-@dataclass
-class ExpertsAndWeightsSelectorOutput(SelectorOutput):
-    """A selector output that contains a list of experts and weights shared across the batch.
-
-    experts: names of the selected experts
-    weights: their weights
-    """
-
-    experts: List[str]
-    weights: torch.Tensor
-
-    @property
-    def dim_names(self):
-        return ["experts"]
-
-
-@dataclass
-class BatchExpertsAndWeightsSelectorOutput(SelectorOutput):
-    """A selector output that contains a list of experts and weights for each example.
-
-    experts: either names or indices of the selected experts
-    weights: their weights
-    """
-
-    experts: Union[List[List[str]], torch.Tensor]
-    weights: torch.Tensor
-
-    @property
-    def dim_names(self):
-        return ["batch", "experts"]
-
-
-@dataclass
-class ExpertsSplitsAndWeightsSelectorOutput(ExpertsAndWeightsSelectorOutput):
-    """A selector output that contains a list of experts and weights for each split (MHR) and expert shared across the batch.
-
-    experts: names of the selected experts
-    weights: their weights
-    """
-
-    @property
-    def dim_names(self):
-        return ["splits", "experts"]
-
-
-@dataclass
-class BatchExpertsSplitsAndWeightsSelectorOutput(BatchExpertsAndWeightsSelectorOutput):
-    """A selector output that contains a list of experts and weights for each split (MHR) and expert shared across the batch.
-
-    experts: names of the selected experts
-    weights: their weights
-    """
-
-    @property
-    def dim_names(self):
-        return ["batch", "splits", "experts"]
-
-
-@dataclass
-class BatchSequenceExpertsAndWeightsSelectorOutput(SelectorOutput):
-    """A selector output that contains a list of experts and weights for each example and token.
-
-    experts: indices of the selected experts
-    weights: their weights
-    """
-
-    experts: torch.Tensor
-    weights: torch.Tensor
-
-    @property
-    def dim_names(self):
-        return ["batch", "sequence", "experts"]
-
-
-@dataclass
-class BatchSequenceExpertsSplitsAndWeightsSelectorOutput(
-    BatchSequenceExpertsAndWeightsSelectorOutput
-):
-    """A selector output that contains a list of experts and weights for each example, token and split (MHR)."""
-
-    @property
-    def dim_names(self):
-        return ["batch", "sequence", "splits", "experts"]
-
-
-def forward_with_cache(func):
-    def wrapper(self: Selector, input, **kwargs):
-        if self.forward_cache is not None and not self.clear_cache:
-            self.count_call()
-            return self.forward_cache
-
-        output = func(self, input, **kwargs)
-        self.forward_cache = output
-        self.count_call()
-        return output
-
-    return wrapper
-
-
-def safe_logging(func):
-    def wrapper(selector, *args, **kwargs):
-        if not selector.config.selector_logging:
-            return None
-        try:
-            result = func(selector, *args, **kwargs)
-        except Exception as e:
-            if str(e)[:100] != getattr(logger, "previous_error", ""):
-                logger.exception(f"An error occurred in {func.__name__}: {e}")
-                logger.previous_error = str(e)[:100]
-            result = None
-        return result
-
-    return wrapper
 
 
 class Selector(nn.Module, Registrable):
@@ -365,7 +64,7 @@ class Selector(nn.Module, Registrable):
         self._calls_counter += 1
 
     @abstractmethod
-    def forward(self, input, **kwargs) -> SelectorOutput:
+    def forward(self, input, **kwargs) -> "SelectorOutput":
         pass
 
     def create_view(self) -> "SelectorView":
@@ -473,6 +172,226 @@ class SelectorView:
         pass
 
 
+def get_selector(selector_config: "SelectorConfig", **kwargs):
+    """Returns a selector object for the given routing_config."""
+    return Selector.get_class_by_config_class(selector_config.__class__)(
+        config=selector_config, **kwargs
+    )
+
+
+@dataclass
+class SelectorConfig:
+    # the granularity of the selector (which layers use the same selectors)
+    router_granularity: str = "*"
+    lora_merge_after: bool = False
+    selector_logging: bool = True
+    num_experts: int = 0
+
+    def __eq__(self, other):
+        # compare all the attributes
+        return self.__dict__ == other.__dict__
+
+    def asdict(self) -> Dict:
+        """Dump the config to a string."""
+        from dataclasses import asdict
+
+        data = asdict(self)
+        # store the model modifier for easy loading
+        data["__selector_name__"] = self.selector_name
+        return data
+
+    @classmethod
+    def fromdict(cls, dumped: Dict) -> "SelectorConfig":
+        if "__selector_name__" not in dumped:
+            raise ValueError(
+                "Cannot load SelectorConfig from dict, missing '__selector_name__' key."
+            )
+        name = dumped.pop("__selector_name__")
+        return Selector.get_config_class_by_name(name)(**dumped)
+
+    @property
+    def selector_name(self) -> str:
+        return Selector.get_name_by_config_class(type(self))
+
+    @classmethod
+    def from_training_config(
+        cls,
+        training_config: Union["Config", "SelectorConfig"],
+        ignore_prefix: str = None,
+    ) -> Union["SelectorConfig", None]:
+        """Build modifier config from the training config.
+
+        Returns None if no modifier is set.
+        """
+        if isinstance(training_config, SelectorConfig):
+            # nothing to do here
+            return training_config
+
+        if cls == SelectorConfig:
+            # if called on the base class, we need to find the correct subclass
+            if training_config.router_selector is None:
+                return None
+
+            if training_config.router_selector not in Selector.registered_names():
+                raise ValueError(
+                    f"Selector '{training_config.router_selector}' not found, has it been registered?"
+                )
+
+            config_klass = Selector.get_config_class_by_name(
+                training_config.router_selector
+            )
+        else:
+            config_klass = cls
+
+        kwargs = {}
+        for key in config_klass.__dataclass_fields__.keys():
+            # only overwrite default if value exists and is not None
+            if ignore_prefix:
+                default_value = getattr(training_config, ignore_prefix + key, None)
+            else:
+                default_value = None
+
+            train_cfg_value = getattr(training_config, key, default_value)
+            if train_cfg_value is not None:
+                kwargs[key] = train_cfg_value
+        return config_klass(**kwargs)
+
+
+class MultiSelectorConfig(dict):
+    @property
+    def selector_name(self):
+        import json
+
+        return json.dumps({k: v.selector_name for k, v in self.items()})
+
+    @classmethod
+    def from_training_config(
+        cls,
+        training_config: "Config",
+    ) -> Union[SelectorConfig, "MultiSelectorConfig"]:
+        import copy
+        import json
+
+        if training_config.router_selector is None:
+            return None
+
+        try:
+            router_selector = json.loads(training_config.router_selector)
+        except:
+            # if not a json, assume it's a single selector
+            return SelectorConfig.from_training_config(training_config)
+
+        selector_configs = cls()
+        for modifier_name, selector_name in router_selector.items():
+            config_clone = copy.deepcopy(training_config)
+            config_clone.router_selector = selector_name
+
+            selector_configs[modifier_name] = SelectorConfig.from_training_config(
+                config_clone
+            )
+        return selector_configs
+
+
+class SelectorsCache:
+    """Keep a cache of all added selectors indexed by both modifier and selector name."""
+
+    def __init__(self):
+        self.cache = defaultdict(dict)
+        self.clear()
+
+    def clear(self, modifier_name: str = None):
+        # initialize cache for all registered modifiers
+        if modifier_name is None:
+            for modifier_name in Modifier.registered_names():
+                self.cache[modifier_name] = {}
+        else:
+            self.cache[modifier_name] = {}
+
+    def insert(self, modifier_name: str, selector_name: str, selector: "Selector"):
+        self.cache[modifier_name][selector_name] = selector
+
+    def get(
+        self, modifier_name: str, selector_name: str = None
+    ) -> Union["Selector", Dict]:
+        if selector_name is None:
+            return self.cache[modifier_name]
+        return self.cache[modifier_name].get(selector_name, None)
+
+    def keys(self):
+        return self.cache.keys()
+
+    def items(self):
+        return iter(self.cache.items())
+
+    def __setitem__(self, key, value):
+        if key not in Modifier.registered_names():
+            raise ValueError(f"Modifier '{key}' not found, has it been registered?")
+
+        self.cache[key] = value
+
+
+@dataclass
+class LoadableSelectorConfig(SelectorConfig):
+    """Adds support for library_id and data_id, which specifies the unique identifier to load."""
+
+    library_id: str = None
+    selector_data_id: str = None
+
+    @property
+    def artifacts_hash(self):
+        """Returns an unique key identifying the artifacts for this selector."""
+        return f"{self.library_id}_{self.selector_data_id}"
+
+
+def forward_with_cache(func):
+    def wrapper(self: Selector, input, **kwargs):
+        if self.forward_cache is not None and not self.clear_cache:
+            self.count_call()
+            return self.forward_cache
+
+        output = func(self, input, **kwargs)
+        self.forward_cache = output
+        self.count_call()
+        return output
+
+    return wrapper
+
+
+def safe_logging(func):
+    def wrapper(selector, *args, **kwargs):
+        if not selector.config.selector_logging:
+            return None
+        try:
+            result = func(selector, *args, **kwargs)
+        except Exception as e:
+            if str(e)[:100] != getattr(logger, "previous_error", ""):
+                logger.exception(f"An error occurred in {func.__name__}: {e}")
+                logger.previous_error = str(e)[:100]
+            result = None
+        return result
+
+    return wrapper
+
+
+def artifacts_cache(func):
+    cache = {}
+    lock = threading.Lock()
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        # wrapper expects
+        key = args[1].artifacts_hash
+
+        with lock:
+            if key in cache:
+                return cache[key]
+            result = func(*args, **kwargs)
+            cache[key] = result
+        return result
+
+    return wrapper
+
+
 @dataclass
 class PerTokenSelectorConfig(LoadableSelectorConfig):
     router_temp: float = None
@@ -483,34 +402,10 @@ class PerTokenSelectorConfig(LoadableSelectorConfig):
 
 
 class LoadableLibraryMixin(ABC):
-    cache = threading.local()
-    cache.library_artifacts = {}
-
     @classmethod
-    def clear(cls):
-        cls.cache.library_artifacts = {}
-
-    @property
-    def library_artifacts(self) -> Optional[Dict]:
-        return LoadableLibraryMixin.cache.library_artifacts.get(
-            self.config.artifacts_hash, None
-        )
-
     @abstractmethod
-    def _load_from_library(self):
+    def load_from_library(cls, config):
         pass
-
-    def load_from_library(self):
-        if (
-            self.config.artifacts_hash
-            not in LoadableLibraryMixin.cache.library_artifacts
-        ):
-            LoadableLibraryMixin.cache.library_artifacts[self.config.artifacts_hash] = (
-                self._load_from_library()
-            )
-
-            if not LoadableLibraryMixin.cache.library_artifacts:
-                raise ValueError(f"Could not load library artifacts for selector.")
 
 
 def get_expert_prototype_from_library_artifacts(
@@ -593,7 +488,9 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
 
         # init selector from library if needed
         if self.config.library_id is not None:
-            self.load_from_library()
+            self.library_artifacts = self.load_from_library(self.config)
+        else:
+            self.library_artifacts = None
 
     def overwrite_prototypes(self, prototypes: torch.tensor):
         """Overwrites the prototypes with the given tensor."""

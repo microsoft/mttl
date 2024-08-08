@@ -1,5 +1,5 @@
 import re
-from typing import Dict, List, Union
+from typing import Dict, List, Tuple, Union
 
 from mttl.config import Config
 from mttl.logging import logger
@@ -85,32 +85,55 @@ def filter_expert_weights(layer_name, expert_weights):
     return weights
 
 
-def add_expert_library_to_transformer(
+def create_selector_for_container(
     transformer,
-    expert_library: ExpertLibrary,
-    action: str = "route",
-    default_expert: str = None,
+    container,
+    modifier_name: str,
     selector_config: SelectorConfig = None,
-):
-    for expert_name, expert_dump in expert_library.items():
-        add_expert_to_transformer(
-            transformer,
-            expert_name,
-            expert_dump.expert_config,
-            expert_dump.expert_weights,
-            action=action,
-            is_default=expert_name == default_expert,
-            selector_config=selector_config,
+    selector_cache: SelectorsCache = None,
+) -> Selector:
+    if container.selector is not None and container.selector.config == selector_config:
+        # selector already exists and has the same config
+        return
+
+    identifier = _extract_identifier(
+        container.layer_name, selector_config.router_granularity
+    )
+
+    # we create a new selector if it doesn't exist for this identifier, or
+    # if we are replacing a previous one of a different type
+    create_new_selector = (
+        not selector_cache.get(modifier_name, identifier)
+        or selector_cache.get(modifier_name, identifier).config != selector_config
+    )
+    if create_new_selector:
+        # Special case when you have a decoder layer in an enc-dec model
+        selector = get_selector(
+            selector_config,
+            layer=container.layer,
         )
+        selector_cache.insert(modifier_name, identifier, selector)
+
+        # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
+        selector.total_calls_per_forward += 1
+    else:
+        selector: Selector = selector_cache.get(modifier_name, identifier)
+        # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
+        selector.total_calls_per_forward += 1
+        selector = selector.create_view()
+
+    # assign this selector to the container, propagates expert informations, etc.
+    container.assign_selector(selector)
+    return selector
 
 
 def replace_selector_for_container(
     transformer,
     modifier_name: str,
-    selector_cache: SelectorsCache,
-    selector_config: SelectorConfig,
+    selector_config: SelectorConfig = None,
+    selector_cache: SelectorsCache = None,
     force_replace: bool = False,
-):
+) -> Tuple[int, int]:
     """
     Assigns a selector to the expert containers in the transformer model.
     """
@@ -138,47 +161,21 @@ def replace_selector_for_container(
     if force_replace:
         for container in expert_containers:
             container.selector = None
-
         selector_cache.clear(modifier_name)
 
     n_selectors = 0
     n_selectors_views = 0
 
     for container in expert_containers:
-        if (
-            container.selector is not None
-            and container.selector.config == selector_config
-        ):
-            # selector already exists and has the same config
-            return
-
-        identifier = _extract_identifier(
-            container.layer_name, selector_config.router_granularity
+        selector = create_selector_for_container(
+            transformer,
+            container,
+            modifier_name,
+            selector_config,
+            selector_cache,
         )
-
-        # we create a new selector if it doesn't exist for this identifier, or
-        # if we are replacing a previous one of a different type
-        selector_found = selector_cache.get(modifier_name, identifier)
-        create_new_selector = (
-            not selector_found or selector_found.config != selector_config
-        )
-        if create_new_selector:
-            # Special case when you have a decoder layer in an enc-dec model
-            selector = get_selector(selector_config, layer=container.layer)
-            selector_cache.insert(modifier_name, identifier, selector)
-            # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
-            selector.total_calls_per_forward += 1
-        else:
-            selector: Selector = selector_cache.get(modifier_name, identifier)
-            # selector needs to know how many times it will be called per forward pass in order to be able to reset the cache
-            selector.total_calls_per_forward += 1
-            selector = selector.create_view()
-
-        # assign this selector to the container, propagates expert informations, etc.
-        container.assign_selector(selector)
         n_selectors += isinstance(selector, Selector)
         n_selectors_views += isinstance(selector, SelectorView)
-
     return n_selectors, n_selectors_views
 
 

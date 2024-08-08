@@ -4,6 +4,7 @@ from mttl.models.containers.selectors.base import (
     PerTokenSelector,
     PerTokenSelectorConfig,
     Selector,
+    artifacts_cache,
 )
 
 
@@ -44,10 +45,12 @@ class ArrowSelectorConfig(PerTokenSelectorConfig):
 
 @Selector.register("arrow_router", ArrowSelectorConfig)
 class ArrowSelector(PerTokenSelector):
-    def _load_from_library(self):
+    @classmethod
+    @artifacts_cache
+    def load_from_library(cls, config):
         """Fetches prototypes from the library."""
         from mttl.models.library.library_transforms import ArrowConfig, ArrowTransform
 
-        return ArrowTransform(ArrowConfig(name=self.config.selector_data_id)).fetch(
-            self.config.library_id
+        return ArrowTransform(ArrowConfig(name=config.selector_data_id)).fetch(
+            config.library_id
         )

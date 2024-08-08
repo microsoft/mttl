@@ -16,6 +16,7 @@ def ConfigTest(tmp_path):
             self.total_steps = 1000
             self.learning_rate = 1e-3
             self.output_dir = str(tmp_path / "output_dir")
+            self.attn_implementation = None
 
     return SimpleConfig
 

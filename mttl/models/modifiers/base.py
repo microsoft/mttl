@@ -10,7 +10,8 @@ from mttl.registrable import Registrable
 
 
 class Modifier(nn.Module, Registrable):
-    DEFAULT = "lora"
+    # default modifier
+    default = "lora"
 
     @property
     def layer_name(self):
@@ -44,7 +45,7 @@ class ModifierConfig(object):
 
         data = asdict(self)
         # store the model modifier for easy loading
-        data["__model_modifier__"] = Modifier.get_name_by_config_class(type(self))
+        data["__model_modifier__"] = self.modifier_name
         return data
 
     @classmethod
@@ -56,7 +57,11 @@ class ModifierConfig(object):
         mod = dumped.pop("__model_modifier__")
         return Modifier.get_config_class_by_name(mod)(**dumped)
 
-    @classmethod
+    @property
+    def modifier_name(self):
+        return Modifier.get_name_by_config_class(type(self))
+
+    @staticmethod
     def from_training_config(
         cls, training_config: Union["Config", "ModifierConfig"]
     ) -> Union["ModifierConfig", None]:

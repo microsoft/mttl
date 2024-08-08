@@ -19,6 +19,7 @@ from mttl.models.containers.selectors.arrow_selector import ArrowSelectorConfig
 from mttl.models.containers.selectors.base import (
     LoadableLibraryMixin,
     LoadableSelectorConfig,
+    MultiSelectorConfig,
     SelectorsCache,
 )
 from mttl.models.containers.selectors.moe_selector import MOERKHSSelectorConfig
@@ -54,6 +55,7 @@ class ExpertModel(torch.nn.Module):
         load_in_4bit: bool = False,
         load_in_8bit: bool = False,
         device_map: str = "cpu",
+        attn_implementation: str = None,
     ):
         super().__init__()
 
@@ -74,6 +76,7 @@ class ExpertModel(torch.nn.Module):
                 load_in_4bit=self.load_in_4bit,
                 load_in_8bit=self.load_in_8bit,
                 device_map=device_map,
+                attn_implementation=attn_implementation,
             )
         )
         self.base_model_name = (
@@ -208,7 +211,7 @@ class MultiExpertModel(ExpertModel):
     def __init__(
         self,
         model_name_or_object: Union[str, PreTrainedModel],
-        selector_config: Union[SelectorConfig, Dict[str, SelectorConfig]] = None,
+        selector_config: Union[SelectorConfig, MultiSelectorConfig] = None,
         experts_info: List[ExpertInfo] = None,
         **kwargs,
     ):
@@ -253,6 +256,15 @@ class MultiExpertModel(ExpertModel):
             pretrained_model_name_or_path, **kwargs
         ).model
 
+    def set_default_expert(self, expert_name):
+        """Propagate default expert to all containers that contain it."""
+        if expert_name not in self.experts_infos:
+            raise ValueError(f"Expert {expert_name} not found in the model.")
+
+        for container in self.experts_containers:
+            if expert_name in container.expert_infos:
+                container.default_expert_name = expert_name
+
     @classmethod
     def from_pretrained_library(
         cls,
@@ -268,37 +280,38 @@ class MultiExpertModel(ExpertModel):
                 repo_id=library_id,
                 token=remote_token,
             )
+            repo_id = library_id
         else:
             library = library_id
+            repo_id = library_id.uri
 
         # get a config file from the library, and initialize the expert model
         an_expert: Expert = library[next(iter(library.keys()))]
-        model = an_expert.expert_info.model
 
-        model = cls(model, device_map=kwargs.get("device_map", "cpu"))
-        model.add_experts_from_library(library)
+        model_name = an_expert.expert_info.model
 
         # set selector for the added experts
         if selector_config is not None:
+            if isinstance(selector_config, LoadableSelectorConfig):
+                selector_config.library_id = repo_id
 
-            # assume "lora" is the default modifier type
-            if type(selector_config) is SelectorConfig:
-                logger.info(
-                    "Assuming provided selector config is for `lora` modifier type."
-                )
-                selector_config = {"lora": selector_config}
-
-            for modifier_name, selector_config_ in selector_config.items():
-                # inject the library id if it is None
-                if (
-                    isinstance(selector_config_, LoadableSelectorConfig)
-                    and selector_config_.library_id is None
-                ):
-                    selector_config_.library_id = library_id
-
-                model.set_selector(modifier_name, selector_config_)
+            elif isinstance(selector_config, dict):
+                for modifier_name, cfg in selector_config.items():
+                    # inject the library id if it is None
+                    if (
+                        isinstance(cfg, LoadableSelectorConfig)
+                        and cfg.library_id is None
+                    ):
+                        cfg.library_id = repo_id
         else:
             logger.info("No selector config provided, assuming expert name selector!")
+
+        model = cls(
+            model,
+            selector_config=selector_config,
+            device_map=kwargs.get("device_map", "cpu"),
+        )
+        model.add_experts_from_library(library)
         return model
 
     @property
@@ -324,7 +337,8 @@ class MultiExpertModel(ExpertModel):
     @property
     def selectors(self) -> Dict[str, List[Selector]]:
         return {
-            name: list(cache.values()) for name, cache in self.selector_cache.items()
+            key: list(self.selector_cache.get(key).values())
+            for key in self.selector_cache.keys()
         }
 
     def delete_expert_container(self):
@@ -364,22 +378,9 @@ class MultiExpertModel(ExpertModel):
                         raise result.exception()
                     progress_bar.update(1)
 
-    def load_from_module_dict(self, module_dict, action="route"):
-        for module_name, destination in module_dict.items():
-            if isinstance(destination, str):
-                self.load_expert(
-                    destination,
-                    module_name,
-                    action=action,
-                    is_default=module_name == "default",
-                )
-            elif isinstance(destination, Expert):
-                self.add_expert_instance(
-                    destination,
-                    module_name,
-                    action=action,
-                    is_default=module_name == "default",
-                )
+    def add_experts_from_dict(self, experts_dict, action="route"):
+        for expert_name, expert_dump in experts_dict.items():
+            self.add_expert_instance(expert_dump, expert_name, action=action)
 
     def add_empty_expert(
         self,
@@ -430,6 +431,14 @@ class MultiExpertModel(ExpertModel):
         )
         self.add_expert_instance(expert, action=action, is_default=is_default)
 
+    def _get_selector_config(self, model_modifier: str) -> SelectorConfig:
+        if not self.selector_config:
+            return None
+        if isinstance(self.selector_config, dict):
+            return self.selector_config.get(model_modifier)
+        else:
+            return self.selector_config
+
     def add_expert_instance(
         self,
         expert_instance: Expert,
@@ -453,14 +462,15 @@ class MultiExpertModel(ExpertModel):
             )
 
         with self.lock:
-            training_config = expert_instance.training_config
+            modifier_name = expert_instance.expert_config.modifier_name
+            selector_config = self._get_selector_config(modifier_name)
 
             add_expert_to_transformer(
                 self.model,
                 expert_instance,
                 action=action,
                 is_default=is_default,
-                selector_config=self.selector_config,
+                selector_config=selector_config,
                 selector_cache=self.selector_cache,
             )
 
@@ -480,11 +490,12 @@ class MultiExpertModel(ExpertModel):
         n_selectors, n_selectors_views = replace_selector_for_container(
             self.model,
             modifier_name,
-            self.selector_cache,
-            selector_config,
+            selector_cache=self.selector_cache,
+            selector_config=selector_config,
             force_replace=True,
         )
-        assert self.selector_cache.get(modifier_name)
+        assert n_selectors > 0, f"No selector added for modifier {modifier_name}."
+
         logger.info(
             "Created {} selectors and {} views.".format(n_selectors, n_selectors_views)
         )

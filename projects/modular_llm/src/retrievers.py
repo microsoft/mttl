@@ -124,7 +124,8 @@ class LoraSimRetriever(Retriever):
         assert task_expert in expert_lib_copy
 
         module = copy.deepcopy(module)
-        module.load_from_module_dict(expert_lib_copy)
+        module.add_experts_from_library(expert_lib_copy)
+
         from torch.nn.functional import cosine_similarity
 
         task_module_name = task_expert.name

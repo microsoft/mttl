@@ -24,6 +24,12 @@ pip install -r requirements.txt
 export PYTHONPATH=$PWD
 ```
 
+Optionally, you can install the `flash-attn` for improved performance:
+
+```
+pip install -e ".[flash-attn]"
+```
+
 ## Dataset Preparation
 
 First of all, download and prepare [FLANv2](https://github.com/google-research/FLAN/tree/main/flan/v2) dataset. We limit each task to having 10000 examples for computational reasons. We provide a simple script to do all the preprocessing as below:

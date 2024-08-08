@@ -44,8 +44,18 @@ class ExpertContainer(nn.Module, Container):
         self.config = config
         self.layer = layer
         self.selector = selector or TaskNameSelector()
-        self.default_expert_name = None
+        self._default_expert_name = None
         self.expert_infos = {}
+
+    @property
+    def default_expert_name(self):
+        return self._default_expert_name
+
+    @default_expert_name.setter
+    def default_expert_name(self, value):
+        self._default_expert_name = value
+        if self.selector is not None:
+            self.selector.default_expert_name = value
 
     def assign_selector(self, selector: Selector) -> None:
         """Assigns a selector to this container."""

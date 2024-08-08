@@ -11,6 +11,7 @@ from mttl.models.containers.selectors.base import (
     PerTokenSelectorConfig,
     Selector,
     SelectorConfig,
+    artifacts_cache,
     forward_with_cache,
 )
 
@@ -63,7 +64,9 @@ class PhatgooseSelector(PerTokenSelector):
         if not self.config.lora_merge_after:
             logger.warning("PhatgooseSelector should have lora_merge_after=True")
 
-    def _load_from_library(self):
+    @classmethod
+    @artifacts_cache
+    def load_from_library(cls, config):
         """Fetches prototypes from the library."""
         from mttl.models.library.library_transforms import (
             PhatgooseConfig,

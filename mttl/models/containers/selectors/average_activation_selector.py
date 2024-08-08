@@ -4,6 +4,7 @@ from mttl.models.containers.selectors.base import (
     PerTokenSelector,
     PerTokenSelectorConfig,
     Selector,
+    artifacts_cache,
 )
 
 
@@ -49,7 +50,9 @@ class AverageActivationSelectorConfig(PerTokenSelectorConfig):
 
 @Selector.register("avg_act_router", AverageActivationSelectorConfig)
 class AverageActivationSelector(PerTokenSelector):
-    def _load_from_library(self):
+    @classmethod
+    @artifacts_cache
+    def load_from_library(cls, config):
         """Fetches prototypes from the library."""
         from mttl.models.library.library_transforms import (
             HiddenStateComputer,
@@ -57,5 +60,5 @@ class AverageActivationSelector(PerTokenSelector):
         )
 
         return HiddenStateComputer(
-            HiddenStateComputerConfig(name=self.config.selector_data_id)
-        ).fetch(self.config.library_id)
+            HiddenStateComputerConfig(name=config.selector_data_id)
+        ).fetch(config.library_id)
