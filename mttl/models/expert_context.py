@@ -2,8 +2,6 @@ import functools
 import threading
 from typing import List
 
-from mttl.models.modifiers.routing import RoutingInfo
-
 
 class InfoContainer:
     local = threading.local()
@@ -36,7 +34,7 @@ class InfoContainer:
         return self._routing_gates
 
     @routing_infos.setter
-    def routing_infos(self, value: RoutingInfo):
+    def routing_infos(self, value: "RoutingInfo"):
         self._routing_infos = value
 
     @routing_gates.setter
@@ -48,6 +46,7 @@ class InfoContainer:
         """
         Decorator method that wraps a ``forward()`` function of a model class.
         """
+        from mttl.models.modifiers.routing import RoutingInfo
 
         @functools.wraps(f)
         def wrapper_func(model, *args, **kwargs):
