@@ -147,7 +147,7 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
         ), "expected right-padded input"
 
         # Assumes ExpertTrainer here. Removing the labels so as to not trigger an automatic loss computation
-        labels = self.routing_infos.labels
+        labels = InfoContainer.get().routing_infos.labels
 
         # preprend the soft prompt
         if self.config.prompt_placement == "prefix":
