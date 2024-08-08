@@ -632,10 +632,19 @@ class MoEModel(MultiExpertModel):
             self.moe_num_experts = i + 1
 
     def training_step(self, batch, _):
-        loss = super().training_step(batch, _)
-        total_loss = loss.clone()
+        loss, context = self.forward(batch, return_context=True)
+        total_loss = loss
 
-        routing_gates = InfoContainer.get().routing_gates
+        self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
+        self.log(
+            f"{self._log_pref}train/total_loss", total_loss, on_step=True, prog_bar=True
+        )
+
+        for i, pg in enumerate(self.optimizers().optimizer.param_groups):
+            self.log(f"train/lr_{i}", pg["lr"])
+
+        total_loss = loss.clone()
+        routing_gates = context["routing_gates"]
 
         if routing_gates:
             num = 0.0

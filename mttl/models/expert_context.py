@@ -16,6 +16,13 @@ class InfoContainer:
         # stores the routing gates for each layer, if any
         self._routing_gates = []
 
+    def __enter__(self):
+        InfoContainer.local.context = self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # delete the context
+        InfoContainer.local.context = None
+
     @classmethod
     def get(cls):
         return cls.local.context
@@ -37,14 +44,6 @@ class InfoContainer:
         self._routing_gates = value
 
     @classmethod
-    def create(cls, model, routing_infos: RoutingInfo = None):
-        """
-        Creates a new context and sets it as the active context.
-        """
-        cls.local.context = cls(model, routing_infos)
-        return cls.local.context
-
-    @classmethod
     def wrap_forward(cls, f):
         """
         Decorator method that wraps a ``forward()`` function of a model class.
@@ -57,8 +56,14 @@ class InfoContainer:
                     "The first argument of the function to wrap must be a dictionary with 'input_ids' key."
                 )
 
-            InfoContainer.create(model, RoutingInfo.from_batch(args[0]))
-            results = f(model, *args, **kwargs)
+            with cls(model, RoutingInfo.from_batch(args[0])) as context:
+                results = f(model, *args, **kwargs)
+                if kwargs.get("return_context", False):
+                    context_returns = {
+                        "routing_infos": context.routing_infos,
+                        "routing_gates": context.routing_gates,
+                    }
+                    return results, context_returns
             return results
 
         return wrapper_func
