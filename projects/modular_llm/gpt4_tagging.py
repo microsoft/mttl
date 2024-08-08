@@ -248,6 +248,14 @@ async def infer_jsonl_file(file_path, tags_file, output_path):
         train_examples = ifile.readlines()
         train_loader = get_instructions(train_examples, return_metadata=True)
 
+    try:
+        with open(output_path, "r") as ofile:
+            resume_from_line = ofile.readlines()
+            resume_from = len(resume_from_line)
+            print("Resuming from example id:", resume_from)
+    except:
+        resume_from = 0
+
     ofile = open(output_path, "w")
     progress_bar = ttqdm(total=len(train_examples) + 100_000)
     while not end:
@@ -255,8 +263,12 @@ async def infer_jsonl_file(file_path, tags_file, output_path):
         metadata = []
         try:
             for message, ex_id, turn, is_last in train_loader:
-                batch.append(message)
-                metadata.append((ex_id, turn, is_last))
+                if ex_id >= resume_from:
+                    batch.append(message)
+                    metadata.append((ex_id, turn, is_last))
+                else:
+                    if is_last:
+                        progress_bar.update(1)
 
                 if len(batch) == batch_size:
                     break
