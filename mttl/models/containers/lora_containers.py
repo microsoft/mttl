@@ -4,7 +4,7 @@ from torch import Tensor, nn
 
 from mttl.logging import warn_once
 from mttl.models.containers.base import ExpertContainer
-from mttl.models.containers.selectors.base import (
+from mttl.models.containers.selectors.selector_output import (
     BatchExpertsAndWeightsSelectorOutput,
     BatchExpertsSelectorOutput,
     BatchSequenceExpertsAndWeightsSelectorOutput,

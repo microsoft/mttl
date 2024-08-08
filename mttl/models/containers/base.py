@@ -7,13 +7,13 @@ from torch import Tensor, nn
 
 from mttl.config import Config
 from mttl.logging import warn_once
-from mttl.models.containers.selectors import (
+from mttl.models.containers.selectors.base import Selector
+from mttl.models.containers.selectors.kv_selector import KVTaskNameSelector
+from mttl.models.containers.selectors.selector_output import (
     BatchExpertsAndWeightsSelectorOutput,
     BatchExpertsSelectorOutput,
     BatchSequenceExpertsAndWeightsSelectorOutput,
     ExpertsAndWeightsSelectorOutput,
-    KVTaskNameSelector,
-    Selector,
     SelectorOutput,
 )
 from mttl.models.library.expert import Expert
