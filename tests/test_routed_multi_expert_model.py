@@ -12,6 +12,7 @@ from mttl.models.containers.lora_containers import (
     LoRAExpertContainer,
 )
 from mttl.models.containers.selectors.base import LoadableLibraryMixin
+from mttl.models.containers.selectors.moe_selector import MOERKHSSelector
 from mttl.models.containers.selectors.per_token_selector import PerTokenSelector
 from mttl.models.containers.selectors.poly_selector import (
     PolySelector,
