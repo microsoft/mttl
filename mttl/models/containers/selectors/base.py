@@ -23,7 +23,6 @@ from mttl.models.containers.selectors.selector_output import (
     ExpertsSplitsAndWeightsSelectorOutput,
     SelectorOutput,
 )
-from mttl.models.expert_context import InfoContainer
 from mttl.models.library.expert import ExpertInfo
 from mttl.models.modifiers.base import Modifier
 from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
@@ -323,8 +322,16 @@ class Selector(nn.Module, Registrable):
         return len(self.expert_names)
 
     @property
+    def info_container(self):
+        from mttl.models.expert_context import InfoContainer
+
+        return InfoContainer.get()
+
+    @property
     def routing_infos(self):
-        info_container = InfoContainer.get()
+        from mttl.models.expert_context import InfoContainer
+
+        info_container = self.info_container
         if not info_container:
             return None
         return info_container.routing_infos

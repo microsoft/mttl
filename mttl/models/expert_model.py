@@ -634,14 +634,14 @@ class MoEModel(MultiExpertModel):
         loss = super().training_step(batch, _)
         total_loss = loss.clone()
 
-        info_container = InfoContainer.get()
+        routing_gates = InfoContainer.get().routing_gates
 
-        if getattr(info_container, "routing_gates", []):
+        if routing_gates:
             num = 0.0
             entropy_of_avg = 0.0
             entropy_of_route = 0.0
 
-            for values in info_container.routing_gates:
+            for values in routing_gates:
                 # compute MI loss
                 values = values.to(torch.float32)
                 values = values.view(-1, values.shape[-1])
