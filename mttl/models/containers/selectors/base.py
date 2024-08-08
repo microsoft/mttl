@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from pyparsing import abstractmethod
+from simple_parsing import Serializable
 from torch import nn
 from torch.distributions import Categorical
 
@@ -19,9 +20,9 @@ from mttl.models.containers.selectors.selector_output import (
     BatchExpertsAndWeightsSelectorOutput,
     BatchExpertsSelectorOutput,
     BatchSequenceExpertsAndWeightsSelectorOutput,
+    ExpertsAndWeightsSelectorOutput,
     SelectorOutput,
 )
-from mttl.models.expert_context import InfoContainer
 from mttl.models.library.expert import ExpertInfo
 from mttl.models.modifiers.base import Modifier
 from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
@@ -102,6 +103,8 @@ class Selector(nn.Module, Registrable):
 
     @property
     def routing_infos(self):
+        from mttl.models.expert_context import InfoContainer
+
         info_container = InfoContainer.get()
         if not info_container:
             return None
@@ -180,7 +183,7 @@ def get_selector(selector_config: "SelectorConfig", **kwargs):
 
 
 @dataclass
-class SelectorConfig:
+class SelectorConfig(Serializable):
     # the granularity of the selector (which layers use the same selectors)
     router_granularity: str = "*"
     lora_merge_after: bool = False
