@@ -10,9 +10,11 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from pyparsing import abstractmethod
+from simple_parsing import Serializable
 from torch import nn
 from torch.distributions import Categorical
 
+from mttl.config import Config
 from mttl.logging import logger, warn_once
 from mttl.models.containers.selectors.selector_output import (
     BatchExpertsAndWeightsSelectorOutput,
@@ -33,6 +35,148 @@ from mttl.registrable import Registrable
 EPS = 1e-8
 
 
+class Selector(nn.Module, Registrable):
+    metric_logger: MetricLogger = MetricLogger()
+
+    def __init__(self, config=None, **kwargs):
+        nn.Module.__init__(self)
+
+        self.config = config
+        self.expert_infos = {}
+        self.selector_views = []
+        self.forward_cache = None
+        self.default_expert_name = None
+        self.total_calls_per_forward = 0
+        self._calls_counter = 0
+        self._task_to_expert_name = {}
+        # dependency injection filled from ExpertContainer
+        self.__layer_name__ = None
+
+    @property
+    def expert_names(self) -> list:
+        return list(self.expert_infos.keys())
+
+    @property
+    def clear_cache(self):
+        reset_cache = self._calls_counter >= self.total_calls_per_forward
+        if reset_cache:
+            self._calls_counter = 0
+        return reset_cache
+
+    def count_call(self):
+        self._calls_counter += 1
+
+    @abstractmethod
+    def forward(self, input, **kwargs) -> "SelectorOutput":
+        pass
+
+    def create_view(self) -> "SelectorView":
+        self.selector_views.append(SelectorView(self))
+        return self.selector_views[-1]
+
+    @property
+    def views(self):
+        return self.selector_views
+
+    @abstractmethod
+    def get_merging_weights(self, **selector_kwargs) -> Dict:
+        """
+        Returns a dictionary of the form {expert_name: weight} for each expert in the container.
+        raises ValueError if not supported, e.g. because routing depends on the input x.
+        """
+        pass
+
+    @property
+    def layer_name(self):
+        if not hasattr(self, "__layer_name__"):
+            raise ValueError(
+                "Layer name not available, dependency injection not done properly?"
+            )
+
+        return self.__layer_name__
+
+    @property
+    def task_to_expert_name(self):
+        return getattr(self, "_task_to_expert_name", {})
+
+    @property
+    def n_experts(self):
+        return len(self.expert_names)
+
+    @property
+    def routing_infos(self):
+        from mttl.models.expert_context import InfoContainer
+
+        info_container = InfoContainer.get()
+        if not info_container:
+            return None
+        return info_container.routing_infos
+
+    @abstractmethod
+    def on_add_expert(
+        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+    ):
+        pass
+
+    def add_expert(
+        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+    ):
+        if expert_info is None or expert_info.expert_task_name is None:
+            logger.warning(
+                "Expert's task_name not set, assume task name corresponds to expert name!"
+            )
+            self._task_to_expert_name[expert_name] = expert_name
+        else:
+            for task_name in expert_info.expert_task_name.split(","):
+                if task_name in self._task_to_expert_name:
+                    logger.warning(
+                        f"Task name {task_name} already assigned to expert {self._task_to_expert_name[task_name]}"
+                    )
+            self._task_to_expert_name[task_name] = expert_name
+
+        # standard bookkeeping for all selectors
+        if is_default:
+            self.default_expert_name = expert_name
+
+        self.expert_infos[expert_name] = expert_info
+
+        # call custom logic for add expert
+        self.on_add_expert(expert_name, expert_info, is_default)
+
+
+class SelectorView:
+    """A view on a selector that allows it to call forward but doesn't act on add_expert.
+
+    This is because add expert is to be called only on the main instance of this selector
+    and not on the multiple views across the network.
+    """
+
+    def __init__(self, selector_instance):
+        self.selector_instance = selector_instance
+
+    @property
+    def config(self):
+        return self.selector_instance.config
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
+
+    def forward(self, *args, **kwargs):
+        return self.selector_instance.forward(*args, **kwargs)
+
+    def get_merging_weights(self, **selector_kwargs) -> Dict:
+        return self.selector_instance.get_merging_weights(**selector_kwargs)
+
+    def add_expert(
+        self,
+        expert_name: str,
+        expert_info: ExpertInfo = None,
+        is_default=False,
+        **kwargs,
+    ):
+        pass
+
+
 def get_selector(selector_config: "SelectorConfig", **kwargs):
     """Returns a selector object for the given routing_config."""
     return Selector.get_class_by_config_class(selector_config.__class__)(
@@ -41,7 +185,7 @@ def get_selector(selector_config: "SelectorConfig", **kwargs):
 
 
 @dataclass
-class SelectorConfig:
+class SelectorConfig(Serializable):
     # the granularity of the selector (which layers use the same selectors)
     router_granularity: str = "*"
     lora_merge_after: bool = False
@@ -71,7 +215,7 @@ class SelectorConfig:
         return Selector.get_config_class_by_name(name)(**dumped)
 
     @property
-    def selector_name(self):
+    def selector_name(self) -> str:
         return Selector.get_name_by_config_class(type(self))
 
     @classmethod

@@ -1,17 +1,21 @@
 import math
+import os
 import re
 import threading
 from collections import defaultdict
 from functools import partial
-from typing import Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 from torch.optim.optimizer import Optimizer
 from transformers import PreTrainedModel
+from transformers.utils import PushToHubMixin, cached_file
 
 from mttl.logging import logger
 from mttl.models.containers import add_expert_to_transformer
 from mttl.models.containers.base import ExpertContainer
+from mttl.models.containers.selectors import Selector, SelectorConfig
+from mttl.models.containers.selectors.arrow_selector import ArrowSelectorConfig
 from mttl.models.containers.selectors.base import (
     LoadableLibraryMixin,
     LoadableSelectorConfig,
@@ -20,6 +24,8 @@ from mttl.models.containers.selectors.base import (
     SelectorConfig,
     SelectorsCache,
 )
+from mttl.models.containers.selectors.moe_selector import MOERKHSSelectorConfig
+from mttl.models.containers.selectors.poly_selector import PolySelectorConfig
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_context import InfoContainer
 from mttl.models.library.expert import Expert, ExpertInfo
@@ -29,55 +35,74 @@ from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.base import Modifier, ModifierConfig
 from mttl.models.modifiers.lora import SkilledLoRAConfig
 from mttl.models.modifiers.modify_model import get_modifier_name
-from mttl.models.utils import EfficientCheckpointModule, prepare_model_for_kbit_training
+from mttl.models.utils import (
+    CHECKPOINT_PATH_IN_HUB,
+    EfficientCheckpointModule,
+    model_loader_helper,
+    prepare_model_for_kbit_training,
+)
+from mttl.utils import get_checkpoint_path
 
 torch.set_float32_matmul_precision("high")
 
 
-class ExpertModel(EfficientCheckpointModule):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+class ExpertModel(torch.nn.Module):
+    """Base model to load a single model from HF and modify it with a modifier config."""
 
-        self.tokenizer = kwargs.pop("tokenizer", None)
-        model_object = kwargs.pop("model_object", None)
+    def __init__(
+        self,
+        model_name_or_object: Union[str, PreTrainedModel],
+        modifier_config: ModifierConfig = None,
+        expert_info: ExpertInfo = None,
+        load_in_4bit: bool = False,
+        load_in_8bit: bool = False,
+        device_map: str = "cpu",
+        attn_implementation: str = None,
+    ):
+        super().__init__()
 
-        # log hyperparameters
-        self.save_hyperparameters(kwargs)
-
-        self.load_in_4bit = kwargs.get("load_in_4bit", None) or False
-        self.load_in_8bit = kwargs.get("load_in_8bit", None) or False
-        self.model: PreTrainedModel = None
-        self.accumulate_metrics_batch = defaultdict(list)
-
-        if model_object is None:
-            from mttl.models.utils import model_loader_helper
-
-            model_object = model_loader_helper(
-                self.hparams.model,
-                load_in_4bit=self.load_in_4bit,
-                load_in_8bit=self.load_in_8bit,
-                device_map=getattr(self.hparams, "device_map", "cpu"),
-                attn_implementation=getattr(self.hparams, "attn_implementation", None),
+        if modifier_config is not None and expert_info is not None:
+            raise ValueError(
+                "Both ``modifier_config`` and ``expert_info`` cannot be provided at the same time."
             )
 
-        if self.load_in_8bit:
-            model_object = prepare_model_for_kbit_training(model_object)
+        self.load_in_4bit = load_in_4bit
+        self.load_in_8bit = load_in_8bit
+        self.device_map = device_map
 
-        # rebuild the training config, a bit cumbersome, but that's life
-        self.training_config = ExpertConfig.fromdict(kwargs)
-        self.training_config.vocab_size = (
-            model_object.get_input_embeddings().num_embeddings
+        self.model: PreTrainedModel = (
+            model_name_or_object
+            if isinstance(model_name_or_object, PreTrainedModel)
+            else model_loader_helper(
+                model_name_or_object,
+                load_in_4bit=self.load_in_4bit,
+                load_in_8bit=self.load_in_8bit,
+                device_map=device_map,
+                attn_implementation=attn_implementation,
+            )
+        )
+        self.base_model_name = (
+            self.model.config._name_or_path
+            if isinstance(self.model, PreTrainedModel)
+            else model_name_or_object
         )
 
-        # init the transformer just with the modifier config, this avoids
-        # passing the whole training config to the modify_transformer func
-        self.modifier_config = ModifierConfig.from_training_config(self.training_config)
-        self.model = modify_transformer(model_object, self.modifier_config)
+        # initialize an empty expert info, fields will be filled by either loading or training
+        self.expert_info = expert_info or ExpertInfo(
+            expert_name=None,
+            expert_task_name=None,
+            expert_config=modifier_config,
+            training_config=None,
+        )
 
-        self.test_results = []
-        self.best_val_result = None
-        self._inference_outputs = []
-        self._log_pref = kwargs.get("logging_prefix", "")
+        self.modifier_config = self.expert_info.expert_config
+
+        if self.modifier_config is not None:
+            self.model = modify_transformer(self.model, self.modifier_config)
+
+    @property
+    def generation_config(self):
+        return self.model.generation_config
 
     @InfoContainer.wrap_forward
     def forward(self, batch, reduction="mean"):
@@ -114,113 +139,6 @@ class ExpertModel(EfficientCheckpointModule):
         del outputs, shift_logits, shift_labels
         return loss
 
-    def compute_unlikelihood_loss(self, batch, reduction="mean"):
-        # compute lm losses for all the options
-        loss = self.forward(batch, reduction="none")
-
-        num = 0
-        lm_loss, mc_loss = [], []
-        for i, num_options in enumerate(batch["num_options"]):
-            loss_slice = loss[num : num + num_options]
-            lm_loss.append(loss_slice[batch["labels_index"][i]])
-            mc_loss.append(
-                -torch.nn.functional.log_softmax(-loss_slice, dim=0)[
-                    batch["labels_index"][i]
-                ]
-            )
-            num += num_options
-
-        lm_loss = torch.stack(lm_loss)
-        mc_loss = torch.stack(mc_loss)
-        if reduction == "mean":
-            lm_loss = lm_loss.mean()
-            mc_loss = mc_loss.mean()
-        return lm_loss, mc_loss
-
-    def training_step(self, batch, _):
-        if "num_options" in batch:
-            loss, mc_loss = self.compute_unlikelihood_loss(batch)
-            self.log(
-                f"{self._log_pref}train/mc_loss", loss, on_step=True, prog_bar=True
-            )
-            total_loss = loss + mc_loss
-        else:
-            loss = self.forward(batch)
-            total_loss = loss
-
-        self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
-        self.log(
-            f"{self._log_pref}train/total_loss", total_loss, on_step=True, prog_bar=True
-        )
-
-        for i, pg in enumerate(self.optimizers().optimizer.param_groups):
-            self.log(f"train/lr_{i}", pg["lr"])
-        return total_loss
-
-    def on_validation_epoch_start(self) -> None:
-        self._inference_outputs.clear()
-
-    def on_test_epoch_start(self) -> None:
-        self._inference_outputs.clear()
-
-    def on_validation_epoch_end(self) -> None:
-        self.log_loss(split="val")
-
-    def on_test_epoch_end(self) -> None:
-        self.log_loss(split="test")
-
-    def test_step(self, batch, batch_idx):
-        if "num_options" in batch:
-            loss, _ = self.compute_unlikelihood_loss(batch, reduction="none")
-        else:
-            loss = self.forward(batch, reduction="none")
-        mean_loss = loss.sum() / loss.shape[0]
-        self._inference_outputs += [(loss.detach(),)]
-        return mean_loss
-
-    def get_loss_for_all(self, batch, batch_idx):
-        loss = self.forward(batch, reduction="none")
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        if "num_options" in batch:
-            loss, _ = self.compute_unlikelihood_loss(batch, reduction="none")
-        else:
-            loss = self.forward(batch, reduction="none")
-        mean_loss = loss.sum() / loss.shape[0]
-        self._inference_outputs += [(loss.detach(),)]
-        return mean_loss
-
-    def log_loss(self, split="val"):
-        outputs = self._inference_outputs
-        losses = torch.cat([out[0] for out in outputs], 0)
-        self._inference_outputs.clear()
-        self.log(
-            f"{self._log_pref}{split}/loss",
-            losses.mean(),
-            on_epoch=True,
-            prog_bar=True,
-            sync_dist=True,
-        )
-
-        # log also the best val/loss sofar
-        if split == "val":
-            if self.best_val_result is None:
-                self.best_val_result = losses.mean()
-            else:
-                if losses.mean() < self.best_val_result:
-                    self.best_val_result = losses.mean()
-                    self.log(
-                        f"{self._log_pref}{split}/best_loss",
-                        losses.mean(),
-                        on_epoch=True,
-                        prog_bar=True,
-                    )
-
-    @property
-    def generation_config(self):
-        return self.model.generation_config
-
     @InfoContainer.wrap_forward
     def generate(
         self,
@@ -232,64 +150,113 @@ class ExpertModel(EfficientCheckpointModule):
         )
         return generations
 
-    def on_save_checkpoint(self, ckpt):
-        super().on_save_checkpoint(ckpt)
-
-        # inject expert info in the expert checkpoint
-        expert_info = ExpertInfo(
-            expert_name=self.hparams.expert_name,
-            expert_task_name=self.hparams.finetune_task_name,
-            expert_config=self.modifier_config,
-            training_config=self.training_config,
+    @classmethod
+    def from_pretrained_expert(
+        cls,
+        expert: Expert,
+        **kwargs,
+    ):
+        model = expert.expert_info.model
+        modifier_config = expert.expert_config
+        instance = cls(
+            model,
+            modifier_config=modifier_config,
+            expert_info=expert.expert_info,
+            **kwargs,
         )
-        ckpt["expert_info"] = expert_info.asdict()
+        instance.load_state_dict(expert.expert_weights, strict=False)
+        return instance
 
-    def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
-        return super().on_before_optimizer_step(optimizer)
+    @classmethod
+    def load_from_checkpoint(
+        cls,
+        pretrained_model_name_or_path: Optional[Union[str, os.PathLike]],
+        *model_args,
+        **kwargs,
+    ):
+        """Assumes the model has been trained with the Pytorch lightning and ExpertModelLightningWrapper."""
+        from mttl.models.expert_trainer import ExpertModelLightningWrapper
 
-    def as_expert(self):
-        state_dict = self.state_dict()
-        self._delete_non_trainable_params(state_dict)
+        return ExpertModelLightningWrapper.load_from_checkpoint(
+            pretrained_model_name_or_path, *model_args, **kwargs
+        ).model
 
-        # to use as an expert, we need to remove a `model.` prefix
-        state_dict = {k[len("model.") :]: v for k, v in state_dict.items()}
+    def get_expert_instance(self):
+        """Returns the model as an expert instance."""
+        expert_params = {}
+        for mname, module in self.named_modules().items():
+            for cname, children in module.named_children().items():
+                if isinstance(children, Modifier):
+                    expert_weights = children.state_dict()
+                    expert_weights = {
+                        f"{mname}.{cname}.{k}": v for k, v in expert_weights.items()
+                    }
+                    expert_params.update(expert_weights)
 
-        # inject expert info in the expert checkpoint
-        expert_info = ExpertInfo(
-            expert_name=self.hparams.expert_name,
-            expert_task_name=self.hparams.finetune_task_name,
-            expert_config=self.modifier_config,
-            training_config=self.training_config,
-        )
-        return Expert(
-            expert_info=expert_info,
-            expert_weights=state_dict,
+        expert = Expert(expert_info=self.expert_info, expert_weights=expert_params)
+        return expert
+
+    @classmethod
+    def from_training_config(cls, training_config: ExpertConfig):
+        return cls(
+            model_name_or_object=training_config.model,
+            modifier_config=ModifierConfig.from_training_config(training_config),
+            load_in_4bit=training_config.load_in_4bit,
+            load_in_8bit=training_config.load_in_8bit,
+            device_map=training_config.device_map,
         )
 
 
 class MultiExpertModel(ExpertModel):
     """Adds all functions and properties for a multi-expert model."""
 
-    def __init__(self, selector_config=None, **config_kwargs):
-        config_kwargs["model_modifier"] = None
-
-        super().__init__(**config_kwargs)
-
-        # config about the routing
-        if selector_config is not None:
-            self.selector_config = selector_config
-        else:
-            self.selector_config = MultiSelectorConfig.from_training_config(
-                self.training_config
-            )
+    def __init__(
+        self,
+        model_name_or_object: Union[str, PreTrainedModel],
+        selector_config: Union[SelectorConfig, MultiSelectorConfig] = None,
+        experts_info: List[ExpertInfo] = None,
+        **kwargs,
+    ):
+        super().__init__(model_name_or_object, modifier_config=None, **kwargs)
 
         # inject memory for adding selectors
+        self.selector_config = selector_config
         self.selector_cache = SelectorsCache()
         self.experts_infos = {}
 
+        # initialize the model with the empty experts
+        if experts_info is not None:
+            for expert_info in experts_info:
+                self.add_empty_expert(
+                    expert_info.expert_name, expert_info.expert_config
+                )
+
+    @classmethod
+    def from_training_config(cls, training_config: ExpertConfig):
+        return cls(
+            model_name_or_object=training_config.model,
+            selector_config=SelectorConfig.from_training_config(training_config),
+            load_in_4bit=training_config.load_in_4bit,
+            load_in_8bit=training_config.load_in_8bit,
+            device_map=training_config.device_map,
+        )
+
     @property
     def experts_names(self):
-        return list(self.experts_infos.keys())
+        return self.experts_infos.keys()
+
+    @classmethod
+    def load_from_checkpoint(
+        cls,
+        pretrained_model_name_or_path: Optional[Union[str, os.PathLike]],
+        **kwargs,
+    ):
+        """Assumes the model has been trained with the Pytorch lightning and ExpertModelLightningWrapper."""
+        from mttl.models.expert_trainer import MultiExpertModelLightningWrapper
+
+        return MultiExpertModelLightningWrapper.load_from_checkpoint(
+            pretrained_model_name_or_path, **kwargs
+        ).model
 
     def set_default_expert(self, expert_name):
         """Propagate default expert to all containers that contain it."""
@@ -321,10 +288,9 @@ class MultiExpertModel(ExpertModel):
             repo_id = library_id.uri
 
         # get a config file from the library, and initialize the expert model
-        an_expert = library[next(iter(library.keys()))]
+        an_expert: Expert = library[next(iter(library.keys()))]
 
-        train_cfg = deepcopy(an_expert.training_config)
-        train_cfg.device_map = "cpu"
+        model_name = an_expert.expert_info.model
 
         # set selector for the added experts
         if selector_config is not None:
@@ -342,9 +308,18 @@ class MultiExpertModel(ExpertModel):
         else:
             logger.info("No selector config provided, assuming expert name selector!")
 
-        model = cls(selector_config=selector_config, **vars(train_cfg))
+        model = cls(
+            model,
+            selector_config=selector_config,
+            device_map=kwargs.get("device_map", "cpu"),
+        )
         model.add_experts_from_library(library)
         return model
+
+    @property
+    def experts(self):
+        for expert_name in self.experts_names:
+            yield self.get_expert_instance(expert_name)
 
     @property
     def lock(self):
@@ -420,8 +395,8 @@ class MultiExpertModel(ExpertModel):
             expert_info=ExpertInfo(
                 expert_name,
                 expert_config=expert_config,
-                expert_model=self.hparams.model,
-                training_config=self.training_config,
+                expert_model=self.base_model_name,
+                training_config=None,
             ),
         )
 
@@ -445,11 +420,11 @@ class MultiExpertModel(ExpertModel):
             expert_library=expert_library,
         )
 
-        if self.hparams.model != expert.training_config.model:
+        if self.base_model_name != expert.training_config.model:
             raise ValueError(
                 "The expert has been trained on top of a different model!"
                 " Detected: {} - Expected: {}".format(
-                    expert.training_config.model, self.hparams.model
+                    expert.training_config.model, self.base_model_name
                 )
             )
 
@@ -483,6 +458,11 @@ class MultiExpertModel(ExpertModel):
             expert_instance = expert_instance.clone()
             expert_instance.name = expert_name
 
+        if expert_instance.name in self.experts_names:
+            raise ValueError(
+                f"Expert with name {expert_instance.name} already exists in the model!"
+            )
+
         with self.lock:
             modifier_name = expert_instance.expert_config.modifier_name
             selector_config = self._get_selector_config(modifier_name)
@@ -512,10 +492,12 @@ class MultiExpertModel(ExpertModel):
         n_selectors, n_selectors_views = replace_selector_for_container(
             self.model,
             modifier_name,
-            selector_config,
-            self.selector_cache,
+            selector_cache=self.selector_cache,
+            selector_config=selector_config,
             force_replace=True,
         )
+        assert n_selectors > 0, f"No selector added for modifier {modifier_name}."
+
         logger.info(
             "Created {} selectors and {} views.".format(n_selectors, n_selectors_views)
         )
@@ -585,51 +567,88 @@ class MultiExpertModel(ExpertModel):
             library_id (str): The ID of the library to save the experts to.
         """
         library = ExpertLibrary.get_expert_library(library_id, create=True)
-        for expert_name in self.experts_names:
-            expert = self.get_expert_instance(expert_name)
-            library.add_expert(expert)
+        with library.batched_commit():
+            for expert_name in self.experts_names:
+                expert = self.get_expert_instance(expert_name)
+                library.add_expert(expert)
         return library
 
-    def as_expert(self):
-        raise NotImplementedError(
-            "This method is not implemented for MultiExpertModel."
+
+class LoRAMoEModel(MultiExpertModel):
+    """A MoE model with LoRA experts."""
+
+    __supported_selectors__ = [
+        PolySelectorConfig,
+        MOERKHSSelectorConfig,
+        ArrowSelectorConfig,
+    ]
+
+    def __init__(
+        self,
+        model,
+        selector_config: SelectorConfig,
+        modifier_config: SkilledLoRAConfig = None,
+        experts_library_id: str = None,
+        experts_info: List[ExpertInfo] = None,
+        **kwargs,
+    ):
+        if type(selector_config) not in self.__supported_selectors__:
+            raise ValueError(
+                f"Compatible selector config is required for MoE model: {self.__supported_selectors__}."
+            )
+
+        if (
+            sum(
+                [
+                    experts_info is not None,
+                    experts_library_id is not None,
+                    modifier_config is not None,
+                ]
+            )
+            > 1
+        ):
+            raise ValueError(
+                "Only one of `experts_info` or `expert_library` or `modifier_config` can be provided."
+            )
+
+        super().__init__(
+            model, selector_config=selector_config, experts_info=experts_info
         )
 
+        self.experts_library_id = experts_library_id
 
-class MoEModel(MultiExpertModel):
-    def __init__(self, expert_library: ExpertLibrary = None, **kwargs):
-        kwargs["top_k"] = kwargs["moe_top_k"]
-        kwargs["emb_dim"] = kwargs["moe_emb_dim"]
-        kwargs["rkhs_dim"] = kwargs["moe_rkhs_dim"]
-        init_from_scratch = kwargs.get("init_from_scratch", False)
+        if experts_library_id is None and experts_info is None:
+            if not modifier_config:
+                raise ValueError("Modifier config is required for MoE model.")
 
-        super().__init__(**kwargs)
+            if not selector_config.num_experts:
+                raise ValueError(
+                    "`num_experts` is None in SelectorConfig, this requires prior specification of the number of experts."
+                )
 
-        if not self.hparams.library_id and expert_library is None or init_from_scratch:
-            for i in range(self.hparams.moe_num_experts):
+            for i in range(selector_config.num_experts):
                 # Adding a Skilled LoRA with 1 skill.
                 exp_config = SkilledLoRAConfig(
                     n_skills=1,
-                    modify_layers=self.hparams.modify_layers,
-                    modify_modules=self.hparams.modify_modules,
-                    lora_alpha=self.hparams.lora_alpha,
-                    lora_dropout=self.hparams.lora_dropout,
-                    lora_rank=self.hparams.lora_rank,
+                    modify_layers=modifier_config.modify_layers,
+                    modify_modules=modifier_config.modify_modules,
+                    lora_alpha=modifier_config.lora_alpha,
+                    lora_dropout=modifier_config.lora_dropout,
+                    lora_rank=modifier_config.lora_rank,
                     lora_init_b_random=True,
-                    n_splits=self.hparams.n_splits,
-                    phi_2_align_heads=self.hparams.phi_2_align_heads,
+                    n_splits=modifier_config.n_splits,
+                    phi_2_align_heads=modifier_config.phi_2_align_heads,
                 )
                 self.add_empty_expert(f"e{i}", exp_config)
-            self.moe_num_experts = kwargs["moe_num_experts"]
-        else:
-            if expert_library is None:
-                expert_library = ExpertLibrary.get_expert_library(
-                    self.hparams.library_id
-                )
-            for i, expert in enumerate(sorted(list(expert_library.keys()))):
+
+            self.num_experts = selector_config.num_experts
+        elif experts_library_id is not None:
+            expert_library = ExpertLibrary.get_expert_library(experts_library_id)
+
+            for i, expert in enumerate(sorted(list(self.expert_library.keys()))):
                 self.add_expert_instance(expert_library[expert], expert_name=f"e{i}")
 
-            self.moe_num_experts = i + 1
+            self.selector_config.num_experts = i + 1
 
     def training_step(self, batch, _):
         loss, context = self.forward(batch, return_context=True)
@@ -685,20 +704,15 @@ class MoEModel(MultiExpertModel):
                 prog_bar=True,
             )
 
-            if self.hparams.moe_ent_reg > 0.0:
-                total_loss += self.hparams.moe_ent_reg * mi_loss
+    @classmethod
+    def load_from_checkpoint(
+        cls,
+        pretrained_model_name_or_path: Optional[Union[str, os.PathLike]],
+        **kwargs,
+    ):
+        """Assumes the model has been trained with the Pytorch lightning and ExpertModelLightningWrapper."""
+        from mttl.models.expert_trainer import LoRAMoELightningWrapper
 
-            elif self.hparams.moe_ent_free_bits > 0.0:
-                normalized_entropy = entropy_of_route / math.log(self.moe_num_experts)
-                total_loss += (
-                    (1.0 - normalized_entropy) >= self.hparams.moe_ent_free_bits
-                ) * -entropy_of_route
-
-        self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
-        self.log(
-            f"{self._log_pref}train/total_loss", total_loss, on_step=True, prog_bar=True
-        )
-
-        for i, pg in enumerate(self.optimizers().optimizer.param_groups):
-            self.log(f"train/lr_{i}", pg["lr"])
-        return total_loss
+        return LoRAMoELightningWrapper.load_from_checkpoint(
+            pretrained_model_name_or_path, **kwargs
+        ).model

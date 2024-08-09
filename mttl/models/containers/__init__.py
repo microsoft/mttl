@@ -1,5 +1,5 @@
 import re
-from typing import Tuple
+from typing import Dict, List, Tuple, Union
 
 from mttl.config import Config
 from mttl.logging import logger
@@ -176,7 +176,6 @@ def replace_selector_for_container(
         )
         n_selectors += isinstance(selector, Selector)
         n_selectors_views += isinstance(selector, SelectorView)
-
     return n_selectors, n_selectors_views
 
 
@@ -261,7 +260,7 @@ def add_expert_to_transformer(
     expert: Expert,
     action: str = "route",
     is_default: bool = False,
-    selector_config: SelectorConfig = None,
+    selector_config: Union[SelectorConfig, Dict[str, SelectorConfig]] = None,
     selector_cache: SelectorsCache = None,
 ) -> None:
     """
@@ -355,11 +354,27 @@ def add_expert_to_transformer(
         )
 
     if selector_config is not None:
+        if isinstance(selector_config, SelectorConfig):
+            logger.debug(
+                f"Assuming routing config is for model modifier: {model_modifier}."
+            )
+            selector_config = {model_modifier: selector_config}
+
+        if model_modifier not in selector_config:
+            raise ValueError(
+                f"No routing config was specified for the model modifier: {model_modifier}."
+            )
+
+        if selector_cache is None:
+            raise ValueError(
+                "No selectors cache was provided. This is required for routing. If you are calling this function directly, you need to provide a cache."
+            )
+
         replace_selector_for_container(
             transformer,
             model_modifier,
-            selector_config,
             selector_cache,
+            selector_config[model_modifier],
         )
 
         if not selector_cache.get(model_modifier):

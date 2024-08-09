@@ -4,13 +4,17 @@ import sys
 import torch
 from pytorch_lightning import Trainer, seed_everything
 
+from mttl.models.containers.selectors.base import SelectorConfig
+from mttl.models.expert_model import LoRAMoEModel
+from mttl.models.modifiers.lora import SkilledLoRAConfig
+
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.callbacks import LiveCheckpointCallback, NanoMMLUCallback, RougeCallback
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
 from mttl.models.expert_config import ExpertConfig
-from mttl.models.expert_model import MoEModel
+from mttl.models.expert_trainer import LoRAMoELightningWrapper
 from mttl.models.monitors import get_monitors
 from mttl.utils import remote_login
 from projects.modular_llm.src.callbacks import DownstreamEvalCallback
@@ -26,13 +30,23 @@ def run_multitask(args: ExpertConfig):
     remote_login(args.remote_token)
 
     # select dataloader
-    model_class = MoEModel
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
     args.task_names = dm._task_names
 
     loggers = get_pl_loggers(args)
-    module = model_class(**vars(args), tokenizer=dm.tokenizer)
+
+    model = LoRAMoEModel(
+        model=args.model,
+        modifier_config=SkilledLoRAConfig.from_training_config(
+            args, ignore_prefix="moe_"
+        ),
+        selector_config=SelectorConfig.from_training_config(args),
+    )
+    module = LoRAMoELightningWrapper(
+        model=model,
+        training_config=args,
+    )
 
     # get metric monitors for models
     callbacks = get_monitors(args)

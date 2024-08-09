@@ -91,17 +91,13 @@ def test_expert_model_coalesced():
     # switch selector for lora to task name
     model.set_selector("lora", TaskNameSelectorConfig())
 
-    # this should raise an error
-    with pytest.raises(NotImplementedError):
-        model.get_merged_expert()
-
     assert len(model.selectors["lora"]) == 12
     assert isinstance(model.selectors["lora"][0], TaskNameSelector)
 
 
 def test_from_pretrained(tmp_path):
     # create a dummy library
-    model = MultiExpertModel(model="EleutherAI/gpt-neo-125m", device_map="cpu")
+    model = MultiExpertModel("EleutherAI/gpt-neo-125m", device_map="cpu")
     model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
     model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
     library = model.save_to_library(f"local://{tmp_path}")
@@ -116,7 +112,7 @@ def test_from_pretrained(tmp_path):
 
 def test_from_pretrained_with_arrow(tmp_path):
     # create a dummy library
-    model = MultiExpertModel(model="EleutherAI/gpt-neo-125m", device_map="cpu")
+    model = MultiExpertModel("EleutherAI/gpt-neo-125m", device_map="cpu")
     model.add_empty_expert(
         "a", LoRAConfig(modify_layers=".*out_proj.*", lora_init_b_random=True)
     )
@@ -160,7 +156,8 @@ def test_get_modules_to_modify_trie():
     os.environ["COALESCED_LORA_CONTAINER"] = "0"
     model_name = "EleutherAI/gpt-neo-125m"
     transformer = AutoModelForCausalLM.from_pretrained(model_name)
-    multi_expert_model = MultiExpertModel(model=model_name, device_map="cpu")
+
+    multi_expert_model = MultiExpertModel(model_name, device_map="cpu")
     transformer_modules = dict(get_modules_to_modify_trie(transformer))
     clean_multi_expert_modules = dict(
         get_modules_to_modify_trie(multi_expert_model.model)

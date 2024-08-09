@@ -127,7 +127,6 @@ class NGRoutingOptimizer:
             parametrization=self.parametrization, budget=budget
         )
         self.get_loss = get_loss
-
         self._iteration = 0
 
     def optimize(

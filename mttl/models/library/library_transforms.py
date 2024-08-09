@@ -18,7 +18,9 @@ from tqdm import tqdm
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import logger
 from mttl.models.containers.lora_containers import ExpertContainer
+from mttl.models.containers.selectors.phatgoose_selector import PhatgooseSelectorConfig
 from mttl.models.expert_config import ExpertConfig
+from mttl.models.expert_trainer import MultiExpertModelLightningWrapper
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.modifiers.base import get_target_2_source_param_mapping
@@ -677,7 +679,13 @@ class PhatgooseTransform(HiddenStateComputer):
 
             logger.info("Training config: {}".format(vars(training_config)))
 
-            model = MultiExpertModel(**vars(training_config)).to("cuda")
+            model = MultiExpertModel(
+                model=training_config.model,
+                selector_config=PhatgooseSelectorConfig.from_training_config(
+                    training_config
+                ),
+                **vars(training_config),
+            )
             model.add_expert_instance(expert, is_default=True)
 
             # for checksum
@@ -692,7 +700,9 @@ class PhatgooseTransform(HiddenStateComputer):
                     frozen_sum += value.sum()
                     value.requires_grad = False
 
-            checkpoint = train_module(training_config, model, dm)
+            checkpoint = train_module(
+                MultiExpertModelLightningWrapper(model, training_config), dm
+            )
 
             if (
                 training_config.compute_strategy
@@ -700,7 +710,13 @@ class PhatgooseTransform(HiddenStateComputer):
             ):
                 from mttl.models.expert_model import MultiExpertModel
 
-                model_after = MultiExpertModel(**vars(training_config)).to("cuda")
+                model_after = MultiExpertModel(
+                    model=training_config.model,
+                    selector_config=PhatgooseSelectorConfig.from_training_config(
+                        training_config
+                    ),
+                    **vars(training_config),
+                ).to("cuda")
                 model_after.add_expert_instance(expert, is_default=True)
                 model_after.load_state_dict(torch.load(checkpoint)["state_dict"])
 
@@ -923,7 +939,7 @@ class ArrowTransform(LibraryTransform):
 
             # get parameters tied during training
             param_map = get_target_2_source_param_mapping(
-                expert.expert_weights.items(), expert.training_config.tie_params
+                expert.expert_weights.items(), expert.expert_config.tie_params
             )
             if self.config.tie_params != "default":
                 # get parameters we wish to tie during for Arrow

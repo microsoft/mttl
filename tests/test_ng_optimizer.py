@@ -2,13 +2,12 @@ import numpy as np
 import pytest
 
 from mttl.models.expert_config import ExpertConfig
-from mttl.models.expert_model import ExpertModel as ExpertTrainer
 from mttl.models.expert_model import MultiExpertModel
+from mttl.models.expert_trainer import ExpertModelLightningWrapper
 from mttl.models.library.expert_library import LocalExpertLibrary
 from projects.modular_llm.src.nevergrad_opt import NGRoutingOptimizer
 
 
-# remove this for now, since NG Routing is be to rebuilt.
 def test_NGRoutingOptimizer(tmp_path, make_tiny_llama, create_dummy_expert):
     config = ExpertConfig(
         kwargs={
@@ -30,7 +29,8 @@ def test_NGRoutingOptimizer(tmp_path, make_tiny_llama, create_dummy_expert):
     library.add_expert(expert1, expert1.name)
     library.add_expert(expert2, expert2.name)
     model_object = make_tiny_llama()
-    model = MultiExpertModel(model_object=model_object, **vars(config))
+
+    model = MultiExpertModel(model_object)
 
     # create an NGRoutingOptimizer instance
     optimizer = NGRoutingOptimizer(

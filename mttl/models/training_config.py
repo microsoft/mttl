@@ -5,8 +5,6 @@ from typing import Any
 from mttl.datamodule.base import DatasetConfig, DefaultDataModule
 from mttl.models.containers.selectors.base import Selector, SelectorConfig
 from mttl.models.modifiers.base import Modifier, ModifierConfig
-from mttl.models.modifiers.lora import LoRAConfig
-from mttl.models.modifiers.prompt_tuning import PromptTuningConfig
 
 
 class Serializable:

@@ -10,7 +10,7 @@ from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
 from mttl.logging import logger
 from mttl.models.expert_config import ExpertConfig
-from mttl.models.expert_model import ExpertModel as ExpertTrainer
+from mttl.models.expert_trainer import ExpertModelLightningWrapper
 
 DEBUG = False
 
@@ -35,7 +35,7 @@ class DownstreamEvalCallback(cb.Callback):
         )
 
     def on_validation_epoch_start(
-        self, trainer: Trainer, pl_module: ExpertTrainer
+        self, trainer: Trainer, pl_module: ExpertModelLightningWrapper
     ) -> None:
         if trainer.global_step == 0 and not self.args.eval_before_training:
             return
@@ -55,7 +55,9 @@ class DownstreamEvalCallback(cb.Callback):
                 prog_bar=True,
             )
 
-    def on_test_epoch_end(self, trainer: Trainer, pl_module: ExpertTrainer) -> None:
+    def on_test_epoch_end(
+        self, trainer: Trainer, pl_module: ExpertModelLightningWrapper
+    ) -> None:
         metrics = self.runner.run(pl_module)
         for task, metric in metrics.items():
             pl_module.log(
@@ -79,7 +81,9 @@ class RougeCallbackTestPerEpoch(cb.Callback):
         self.checkpointing_callback = checkpointing_callback
         self.epoch = 0
 
-    def on_train_epoch_end(self, trainer: Trainer, pl_module: ExpertTrainer) -> None:
+    def on_train_epoch_end(
+        self, trainer: Trainer, pl_module: ExpertModelLightningWrapper
+    ) -> None:
         # test best model sofar
         pl_module_device = pl_module.device
         pl_module.to("cpu")
@@ -228,7 +232,7 @@ class ValLossCheckpointCallback(cb.Callback):
         return self._prev_checkpoint
 
     def on_validation_epoch_end(
-        self, trainer: Trainer, pl_module: ExpertTrainer
+        self, trainer: Trainer, pl_module: ExpertModelLightningWrapper
     ) -> None:
         if self.best_val_loss is None or pl_module.best_val_result < self.best_val_loss:
             self.best_val_loss = pl_module.best_val_result
