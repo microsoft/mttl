@@ -34,6 +34,28 @@ Tag: Descriptive title for the tag
 """
 
 
+m_contrastive_template = """
+The following two groups of instructions A and B, and each is associated with a specific tag. Your task is to create a precise and descriptive title for the tag of group B, encapsulating a common aspect found in most of these instructions.
+The title should describe the instructions in group B in a way that contrasts with common aspects of instructions of the group A.
+
+{% for instruction in instructions_a %}
+Instruction (A):
+{{instruction}}
+
+{% endfor %}
+
+{% for instruction in instructions_b %}
+Instruction (B):
+{{instruction}}
+
+{% endfor %}
+
+Determine a better title for the instructions in group B that encapsulates a common aspect found in most of these instructions while being different from the instructions of group A, please provide it in this format:
+Tag: Descriptive title for the tag
+
+"""
+
+
 e_template = """
 Select a tag from the list that most accurately represents the given instruction. If a specific tag accurately describes the instruction, prioritize it over a more generic one.
 
@@ -85,7 +107,23 @@ async def get_new_tag(instructions):
     return None
 
 
+async def get_new_tag_contrastive(instructions_a, instructions_b):
+    response = await get_completions(
+        jinja2.Template(m_contrastive_template).render(
+            instructions_a=instructions_a, instructions_b=instructions_b
+        )
+    )
+    response = response[0]
+    if response.startswith("Tag:"):
+        return response[len("Tag:") :].strip().rstrip(".").strip()
+    return None
+
+
 async def assign_tag(instruction, tags):
+    if len(instruction.split()) >= 10_000:
+        print("too long instruction, skipping.")
+        return None
+
     response = await get_completions(
         jinja2.Template(e_template).render(instruction=instruction, tags=tags),
         max_tokens=5,
@@ -142,14 +180,14 @@ def get_batch(dataloader, batch_size):
     return batch
 
 
-async def train_jsonl_file(file_path, output_path, num_tags):
+async def train_jsonl_file(file_path, output_path, num_tags, mode="normal"):
     """E-M training for tagging instructions."""
     import random
 
     random.seed(42)
 
     tags = None
-    batch_size = num_tags * 25
+    batch_size = num_tags * 15
     init_examples_per_tag = 5
 
     with open(file_path, "r") as ifile:
@@ -190,7 +228,16 @@ async def train_jsonl_file(file_path, output_path, num_tags):
                 continue
             grouped_examples[int(tag)].append(example)
 
-        # get "widow" tags, create a new tag for each group
+        # print "entropy" of the distribution, normalize the length of each group and compute the normalized entropy
+        lengths = [len(v) for v in grouped_examples.values()]
+        norm_lengths = np.array(lengths) / np.sum(lengths)
+        entropy = -np.sum(norm_lengths * np.log(norm_lengths + 1e-6)) / np.log(
+            len(lengths)
+        )
+        print("Entropy of tags assignments: ", entropy)
+
+        # get "widow" tags, create a new tag for each group, here we sample random examples
+        # until each group has 10 examples
         for i in range(num_tags):
             if i not in grouped_examples or len(grouped_examples[i]) == 1:
                 grouped_examples[i].extend(
@@ -200,6 +247,7 @@ async def train_jsonl_file(file_path, output_path, num_tags):
         # now get the m-step for each group
         groups, keys = [], []
         for key, group in grouped_examples.items():
+            # cap maximum group size
             if len(group) >= 10:
                 group = group[:10]
 
@@ -208,7 +256,26 @@ async def train_jsonl_file(file_path, output_path, num_tags):
 
         print("M-step for # tags =", len(groups))
 
-        new_tags = await tqdm.gather(*[get_new_tag(group) for group in groups])
+        # in normal mode we just sample conditioned on the current group
+        if mode == "normal":
+            new_tags = await tqdm.gather(*[get_new_tag(group) for group in groups])
+        # in contrastive mode, we sample a negative group the tag should *not* describe
+        elif mode == "contrastive":
+            print("Contrastive mode")
+            args = []
+            for i in range(len(groups)):
+                j = np.random.choice([k for k in range(len(groups)) if k != i])
+                args.append((groups[j], groups[i]))
+
+            new_tags = await tqdm.gather(
+                *[
+                    get_new_tag_contrastive(group_a, group_b)
+                    for group_a, group_b in args
+                ]
+            )
+        else:
+            raise ValueError("Invalid mode:", mode)
+
         new_tags_dict = dict(zip(keys, new_tags))
 
         new_tags = []
@@ -231,7 +298,7 @@ async def train_jsonl_file(file_path, output_path, num_tags):
     ofile.close()
 
 
-async def infer_jsonl_file(file_path, tags_file, output_path):
+async def infer_jsonl_file(file_path, tags_file, output_path, num_inferences=-1):
     tags = None
     end = False
     batch_size = 100
@@ -256,9 +323,10 @@ async def infer_jsonl_file(file_path, tags_file, output_path):
     except:
         resume_from = 0
 
+    done = 0
     ofile = open(output_path, "w")
     progress_bar = ttqdm(total=len(train_examples) + 100_000)
-    while not end:
+    while not end and (num_inferences == -1 or done < num_inferences):
         batch = []
         metadata = []
         try:
@@ -296,42 +364,52 @@ async def infer_jsonl_file(file_path, tags_file, output_path):
             # if it is the last message for this example, write it to the file
             if is_last:
                 ofile.write(train_examples[metadata[i][0]] + "\n")
+                done += 1
 
         progress_bar.update(len(batch))
         print("Random tags:", n_random)
     ofile.close()
 
 
-async def train_(json_file_path, num_tags=100):
+async def train_(json_file_path, output_path, num_tags=100, mode="normal"):
     await train_jsonl_file(
         json_file_path,
-        json_file_path.replace(".jsonl", "") + f"_{gpt_model}_tags-{num_tags}.jsonl",
+        output_path,
         num_tags=num_tags,
+        mode=mode,
+    )
+    await infer_(
+        json_file_path,
+        output_path,
+        num_inferences=100_000,
     )
 
 
-async def infer_(json_file_path, tags_file):
+async def infer_(json_file_path, tags_file, num_inferences=-1):
     await infer_jsonl_file(
         json_file_path,
         tags_file,
-        tags_file.replace(".jsonl", "") + f"_inferred.jsonl",
+        tags_file.replace(".jsonl", "") + f"_inferred_{num_inferences}.jsonl",
+        num_inferences=num_inferences,
     )
 
 
 class GPT4EMTagging:
-    def infer(self, tags_path, file_path, model="gpt-4o-gs"):
+    def infer(self, tags_path, file_path, model="gpt-4o-gs", num_inferences=-1):
         global gpt_model
 
         gpt_model = model
         print("Working on...", file_path)
-        asyncio.run(infer_(file_path, tags_path))
+        asyncio.run(infer_(file_path, tags_path, num_inferences=num_inferences))
 
-    def train(self, file_path, num_tags=100, model="gpt-4o-gs"):
+    def train(
+        self, file_path, output_path, num_tags=100, model="gpt-4o-gs", mode="normal"
+    ):
         global gpt_model
 
         gpt_model = model
         print("Working on...", file_path)
-        asyncio.run(train_(file_path, num_tags=num_tags))
+        asyncio.run(train_(file_path, output_path, num_tags=num_tags, mode=mode))
 
 
 if __name__ == "__main__":
