@@ -16,7 +16,10 @@ client = AsyncAzureOpenAI(
     azure_endpoint="https://gcrgpt4aoai7.openai.azure.com/",
     api_version="2024-05-01-preview",
 )
-gpt_model = "gpt-4o-gs"
+
+
+gpt_model = None
+g_infer_model = "gpt-4o-mini"
 
 
 m_template = """
@@ -39,13 +42,13 @@ The following two groups of instructions A and B are each associated with a spec
 The title should describe the instructions in group B in a way that contrasts with common aspects of the instructions in group A.
 
 {% for instruction in instructions_a %}
-Instruction (A):
+Instruction (Group A):
 {{instruction}}
 
 {% endfor %}
 
 {% for instruction in instructions_b %}
-Instruction (B):
+Instruction (Group B):
 {{instruction}}
 
 {% endfor %}
@@ -120,7 +123,7 @@ async def get_new_tag_contrastive(instructions_a, instructions_b):
 
 
 async def assign_tag(instruction, tags):
-    if len(instruction.split()) >= 10_000:
+    if len(instruction.split()) >= 50_000:
         print("too long instruction, skipping.")
         return None
 
@@ -372,16 +375,22 @@ async def infer_jsonl_file(file_path, tags_file, output_path, num_inferences=-1)
 
 
 async def train_(json_file_path, output_path, num_tags=100, mode="normal"):
+    global gpt_model
+    global g_infer_model
+
     await train_jsonl_file(
         json_file_path,
         output_path,
         num_tags=num_tags,
         mode=mode,
     )
+
+    # switch inference mode
+    gpt_model = g_infer_model
     await infer_(
         json_file_path,
         output_path,
-        num_inferences=100_000,
+        num_inferences=10_000,
     )
 
 
@@ -395,19 +404,29 @@ async def infer_(json_file_path, tags_file, num_inferences=-1):
 
 
 class GPT4EMTagging:
-    def infer(self, tags_path, file_path, model="gpt-4o-gs", num_inferences=-1):
+    def infer(self, tags_path, file_path, model="gpt-4o-mini", num_inferences=-1):
         global gpt_model
 
         gpt_model = model
+
         print("Working on...", file_path)
         asyncio.run(infer_(file_path, tags_path, num_inferences=num_inferences))
 
     def train(
-        self, file_path, output_path, num_tags=100, model="gpt-4o-gs", mode="normal"
+        self,
+        file_path,
+        output_path,
+        num_tags=100,
+        model="gpt-4o-gs",
+        infer_model="gpt-4o-mini",
+        mode="normal",
     ):
         global gpt_model
+        global g_infer_model
 
         gpt_model = model
+        g_infer_model = infer_model
+
         print("Working on...", file_path)
         asyncio.run(train_(file_path, output_path, num_tags=num_tags, mode=mode))
 
