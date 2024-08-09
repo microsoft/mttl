@@ -11,8 +11,7 @@ from mttl.dataloader.data_utils import ExampleInfo, MultiChoiceExampleInfo
 
 
 def apply_template(template, example, hash_friendly=False, handle_edge_cases=True):
-    """Could be done with a context manager, but we're lazy.
-    """
+    """Could be done with a context manager, but we're lazy."""
     if hash_friendly:
         state = random.getstate()
         random.seed(42)
@@ -150,7 +149,9 @@ class T0FinetuneDatasetWithTemplate(torch.utils.data.dataset.Dataset):
             template = self.templates
         example = self.dataset[example_id]
 
-        input_str, target_str = apply_template(template, example, hash_friendly=False, handle_edge_cases=False)
+        input_str, target_str = apply_template(
+            template, example, hash_friendly=False, handle_edge_cases=False
+        )
         answer_choices = template.get_answer_choices_list(example)
 
         if isinstance(input_str, list):
@@ -201,7 +202,9 @@ class T0FinetuneDatasetWithTemplate(torch.utils.data.dataset.Dataset):
         label = torch.LongTensor([example["label"]])
         idx = torch.LongTensor([example["idx"]])
 
-        input_str, _ = apply_template(template, example, hash_friendly=True, handle_edge_cases=False)
+        input_str, _ = apply_template(
+            template, example, hash_friendly=True, handle_edge_cases=False
+        )
 
         hash = hash_example(
             " ".join(input_str) if isinstance(input_str, list) else input_str
@@ -233,7 +236,7 @@ class T0PretrainDataModule(LightningDataModule):
         self.id2task = dict((k, v) for v, k in self.task2id.items())
         self.flatten_templates = flatten_templates
 
-    def setup(self, stage='fit'):
+    def setup(self, stage="fit"):
         self.train_datasets = self.dataset_reader.read_orig_dataset("train")
         self.train_datasets_withtemplate = []
         self.val_datasets_withtemplate = []
@@ -262,17 +265,13 @@ class T0PretrainDataModule(LightningDataModule):
             tr_dataset_wt, val_dataset_wt = torch.utils.data.random_split(
                 tr_dataset_wt,
                 [
-                    len(tr_dataset_wt) - 100,
-                    100,
+                    len(tr_dataset_wt) - 32,
+                    32,
                 ],
                 generator=self.rng,
-            )                    
-            self.train_datasets_withtemplate.append(
-                tr_dataset_wt
             )
-            self.val_datasets_withtemplate.append(
-                val_dataset_wt
-            )
+            self.train_datasets_withtemplate.append(tr_dataset_wt)
+            self.val_datasets_withtemplate.append(val_dataset_wt)
             self.all_datasets_withtemplate.extend([tr_dataset_wt, val_dataset_wt])
 
         if self.config.use_t0_few_shot_training_set:
@@ -283,16 +282,12 @@ class T0PretrainDataModule(LightningDataModule):
                     [
                         len(self.train_datasets_withtemplate[i]) - 1000,
                         1000,
-                    ]
+                    ],
                 )[1]
 
         self.full_train_dataset = IndexConcatDataset(self.all_datasets_withtemplate)
-        self.train_dataset = IndexConcatDataset(
-            self.train_datasets_withtemplate
-        )
-        self.val_dataset = IndexConcatDataset(
-            self.val_datasets_withtemplate
-        )
+        self.train_dataset = IndexConcatDataset(self.train_datasets_withtemplate)
+        self.val_dataset = IndexConcatDataset(self.val_datasets_withtemplate)
 
         # store relevant information
         self.dataset_ids = [

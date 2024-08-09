@@ -12,6 +12,7 @@ from mttl.models.encoder_decoder import EncoderDecoder
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.models.monitors import get_monitors
 from mttl.utils import get_mlf_logger
+import torch
 
 
 def run_multitask(args):
@@ -56,6 +57,48 @@ def run_multitask(args):
     else:
         module = model_class(**vars(args), tokenizer=dm.tokenizer)
 
+    # compute the similarity across different tasks
+    # get the selector weights
+    routing = (
+        module.model.decoder.block[0].layer[0].SelfAttention.k.selector.module_logits
+    )
+
+    # get the similarity score
+    adapter_embedding = []
+    for task_id in dm.task2id:
+        routing_distribution = routing[dm.task2id[task_id]]
+        # get the lora weights
+        adapater_weights_lora_a = (
+            module.model.decoder.block[0].layer[0].SelfAttention.k.lora_a
+        )
+        adapater_weights_lora_b = (
+            module.model.decoder.block[0].layer[0].SelfAttention.k.lora_b
+        )
+
+        # compute the final adapter according to the routing
+        adapter_weights = torch.einsum(
+            "abir, abro -> abio", adapater_weights_lora_a, adapater_weights_lora_b
+        )
+
+        result = torch.einsum(
+            "bi,bijk->bijk", routing_distribution.reshape(1, -1), adapter_weights
+        )
+
+        adapter = result.sum(dim=1).squeeze(0).reshape(1, -1)
+        adapter_embedding.append(adapter)
+
+    # compute the similarity across different tasks
+    adapter_embedding = torch.cat(adapter_embedding, dim=0)
+    adapter_embedding = adapter_embedding / (
+        adapter_embedding.norm(dim=-1, keepdim=True) + 1e-6
+    )
+    similarity = torch.einsum("ij, kj -> ik", adapter_embedding, adapter_embedding)
+    breakpoint()
+    dm.setup()
+    for batch in dm.val_dataloader():
+        loss, _ = module.validation_step(batch, 0)
+        # get the adapters
+        print(loss)
     # legit logging
     loggers = []
     if os.environ.get("WANDB_API_KEY"):
@@ -112,9 +155,9 @@ def run_multitask(args):
         strategy=args.compute_strategy if args.compute_strategy != "null" else None,
         callbacks=callbacks,
         accumulate_grad_batches=args.gradient_accumulation_steps,
-        precision=int(args.precision)
-        if args.precision in ["16", "32"]
-        else args.precision,
+        precision=(
+            int(args.precision) if args.precision in ["16", "32"] else args.precision
+        ),
         **kwargs,
     )
 

@@ -747,6 +747,11 @@ class PolyLoRALinear(PolytroponAdapter):
         B = B.transpose(1, 2).reshape(bs, self.rank, self.out_features)
 
         adapter_out = input.bmm(A).bmm(B) / self.rank
+        # save the adapter_output for visualization
+        # np.save(
+        #     f"adapter_output_poly_{task_id[0]}.npy", adapter_out.detach().cpu().numpy()
+        # )
+
         warmup = min(self.training_steps / 10_000, 1)
         if self.use_warmup:
             adapter_out = adapter_out * warmup

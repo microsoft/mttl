@@ -31,7 +31,9 @@ class T0EncoderDecoder(EfficientCheckpointModule):
         self.config = config = self.hparams
         self.tokenizer = kwargs["tokenizer"]
 
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(config.model, cache_dir="tmp/hf-cache")
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(
+            config.model, cache_dir="tmp/hf-cache"
+        )
         # free up local space after loading in memory
         # os.system("rm -rf tmp/hf-cache")
         # os.system("df")
@@ -58,7 +60,6 @@ class T0EncoderDecoder(EfficientCheckpointModule):
     def training_step(self, batch, batch_idx, split="train"):
         # propagate task information
         self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
-
         if self.config.mc_loss > 0 or self.config.unlikely_loss > 0:
             input_ids, choices_ids, labels = (
                 batch["input_ids"],
@@ -187,8 +188,8 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             tensorboard_logs = {"loss": loss.item()}
 
         # log learning rate as well
-        for i, pg in enumerate(self.optimizers().param_groups):
-            tensorboard_logs[f"lr_{i}"] = pg["lr"]
+        # for i, pg in enumerate(self.optimizers().param_groups):
+        #     tensorboard_logs[f"lr_{i}"] = pg["lr"]
 
         if (
             self.config.save_every
