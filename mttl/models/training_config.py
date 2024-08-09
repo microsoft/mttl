@@ -5,23 +5,7 @@ from typing import Any
 from mttl.datamodule.base import DatasetConfig, DefaultDataModule
 from mttl.models.containers.selectors.base import Selector, SelectorConfig
 from mttl.models.modifiers.base import Modifier, ModifierConfig
-
-
-class Serializable:
-    @classmethod
-    def from_dict(cls, data):
-        field_names = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in data.items() if k in field_names})
-
-    def to_dict(self):
-        return asdict(self)
-
-    @classmethod
-    def load_json(cls, path):
-        import json
-
-        with open(path, "r") as f:
-            return cls.from_dict(json.load(f))
+from mttl.serializable import Serializable
 
 
 @dataclass
@@ -33,11 +17,27 @@ class TrainingConfig(Serializable):
     wandb_project: str = None
     freeze_embeds: bool = False
 
-    # Training config
+    # training config
     compute_strategy: str = None
+    precision: str = "32"
     checkpoint: str = None  # load from checkpoint
 
+    # logging stuff
+    num_train_epochs: int = -1
+    warmup_steps: int = -1
+    total_steps: int = -1
+    save_every: int = None
+    eval_every: int = None
+    eval_every_n_epoch: int = 1
+    debug: bool = False
+    seed: int = 42
+    eval_before_training: bool = True
+
     # optimizer flags
+    optimizer: str = "adamw"
+    adafactor_scale_parameter: bool = True
+    adafactor_warmup_init: bool = False
+    adafactor_relative_step: bool = False
     scheduler: str = "linear_decay_with_warmup"
     learning_rate: str = 1e-3
     warmup_proportion: str = 0.06
@@ -47,25 +47,7 @@ class TrainingConfig(Serializable):
     adam_epsilon: float = 1e-8
     max_grad_norm: float = 0.1
     micro_batch_size: int = 1
-    optimizer: str = "adamw"
-    adafactor_scale_parameter: bool = True
-    adafactor_warmup_init: bool = False
-    adafactor_relative_step: bool = False
-    num_train_epochs: int = -1
-    warmup_steps: int = -1
-    total_steps: int = -1
-    save_every: int = None
-    eval_every: int = None
-    precision: str = "32"
-    eval_every_n_epoch: int = 1
-    debug: bool = False
-    seed: int = 42
-    eval_before_training: bool = True
-    mi_loss: float = 0.0  # mi between tasks and skills (difference of entropies method)
-    mc_loss: float = 0.0  # T-Few
-    length_norm: float = 0.0  # T-Few
-    unlikely_loss: float = 0.0  # T-Few
-    poly_unlikely_loss: float = 0.0  # poly unlikelihood loss
+
     finetune_type: str = None  # ["F", "A", "Z", "MuZ", "Poly", "PolyRand"]
     finetune_skip_es: bool = False  # skip early stopping while fine-tuning
     finetune_use_last_checkpoint: bool = (
@@ -87,6 +69,20 @@ class TrainingConfig(Serializable):
 
 
 @dataclass
+class TFewTrainingConfig(TrainingConfig):
+    mc_loss: float = 0.0  # T-Few
+    length_norm: float = 0.0  # T-Few
+    unlikely_loss: float = 0.0  # T-Few
+
+
+@dataclass
+class FinetuningConfig(TrainingConfig):
+    mc_loss: float = 0.0  # T-Few
+    length_norm: float = 0.0  # T-Few
+    unlikely_loss: float = 0.0  # T-Few
+
+
+@dataclass
 class ModelConfig(Serializable):
     model: str = None
     model_family: str = "gpt"
@@ -99,12 +95,24 @@ class ModelConfig(Serializable):
 class MetaConfig(type):
     """Creates a new dataclass with all fields from all registered configs."""
 
-    def __new__(cls, name, bases, attrs):
+    @property
+    def selector_config(self):
+        return SelectorConfig.from_dict(self.to_dict())
+
+    @property
+    def modifier_config(self):
+        return ModifierConfig.from_dict(self.to_dict())
+
+    @property
+    def dataset_config(self):
+        return DatasetConfig.from_dict(self.to_dict())
+
+    def __new__(cls, name, bases, attrs, training_config, model_config):
         from dataclasses import MISSING
 
         reserved = ["model_modifier", "dataset", "router_selector"]
 
-        inherit_default_configs = [TrainingConfig, ModelConfig]
+        inherit_default_configs = [training_config, model_config]
         none_default_configs = (
             Modifier.registered_configs()
             + Selector.registered_configs()
@@ -129,8 +137,8 @@ class MetaConfig(type):
                 new_fields[f.name] = (f.type, field(default=f.default))
 
         # these are reserved fields
-        new_fields["model_modifier"] = (str, field(default=None))
         new_fields["dataset"] = (str, field(default=None))
+        new_fields["model_modifier"] = (str, field(default=None))
         new_fields["router_selector"] = (str, field(default=None))
 
         to_tuples = [(k,) + v for k, v in new_fields.items()]
@@ -140,34 +148,25 @@ class MetaConfig(type):
 
         for field_name, field_type in attrs.items():
             setattr(new_cls, field_name, field_type)
+
+        setattr(new_cls, "selector_config", cls.selector_config)
+        setattr(new_cls, "modifier_config", cls.modifier_config)
+        setattr(new_cls, "dataset_config", cls.model_config)
+
+        def get_training_config(self):
+            return training_config.from_dict(self.to_dict())
+
+        def get_model_config(self):
+            return model_config.from_dict(self.to_dict())
+
+        setattr(new_cls, "training_config", property(get_training_config))
+        setattr(new_cls, "model_config", property(get_model_config))
         return new_cls
 
 
-class GlobalConfig(metaclass=MetaConfig):
-    @property
-    def training_config(self):
-        return TrainingConfig.from_dict(self.to_dict())
-
-    def modifier_config(self):
-        if self.model_modifier is None:
-            return None
-        return Modifier.get_config_class_by_name(self.model_modifier).fromdict(
-            self.to_dict(), drop_extra_fields=True
-        )
-
-    def model_config(self):
-        return ModelConfig.from_dict(self.to_dict())
-
-    def selector_config(self):
-        if self.router_selector is None:
-            return None
-        return Selector.get_config_class_by_name(self.router_selector).fromdict(
-            self.to_dict()
-        )
-
-    def dataset_config(self):
-        if self.dataset is None:
-            return None
-        return DefaultDataModule.get_config_class_by_name(self.dataset_config).fromdict(
-            self.to_dict()
-        )
+class TFewGlobalConfig(
+    metaclass=MetaConfig,
+    training_config=TrainingConfig,
+    model_config=ModelConfig,
+):
+    pass

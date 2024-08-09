@@ -9,7 +9,6 @@ import torch.nn.functional as F
 from datasets import Dataset as ArrowDataset
 from datasets import concatenate_datasets
 from pytorch_lightning import LightningDataModule
-from simple_parsing import Serializable
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.dataset import ConcatDataset
@@ -19,6 +18,7 @@ from transformers.tokenization_utils_base import PaddingStrategy
 from mttl.datamodule.utils import get_tokenizer
 from mttl.logging import logger
 from mttl.registrable import Registrable
+from mttl.serializable import Serializable
 
 
 @dataclass
@@ -882,104 +882,7 @@ class MultiChoiceSourceDataModule(DefaultDataModule):
         )
 
 
-def get_datamodule(args, for_generation=False, dataset_override=None):
-    # refactor all the common arguments below into a dict common kwargs
-    dataset = args.dataset if not dataset_override else dataset_override
-
-    common_kwargs = {
-        "model": args.model,
-        "train_batch_size": args.train_batch_size,
-        "predict_batch_size": args.predict_batch_size,
-        "max_input_length": args.max_input_length,
-        "max_output_length": args.max_output_length,
-        "validation_portion": args.validation_portion,
-        "model_family": args.model_family,
-        "finetune_task_name": args.finetune_task_name,
-        "truncation_side": args.truncation_side,
-        "dataset": dataset,
-        "train_on_inputs": False,
-        "add_eos_to_targets": True,
-        "subsample_train": args.subsample_train,
-        "subsample_dev": args.subsample_dev,
-        "subsample_test": args.subsample_test,
-        "subsample_per_task": args.subsample_per_task,
-        "pad_to_multiple_of": args.pad_to_multiple_of,
-        "padding_side": args.padding_side,
-        "max_seq_per_pack": args.max_seq_per_pack,
-    }
-
-    if dataset in [
-        "arc-easy",
-        "arc-challenge",
-        "arc_easy",
-        "arc_challenge",
-        "openbookqa",
-        "boolq",
-        "piqa",
-        "winogrande",
-        "hellaswag",
-    ]:
-        dataset_to_klass_map = {
-            "arc-easy": (
-                ArcDataConfig(**common_kwargs, arc_type="ARC-Easy"),
-                ArcMultiChoiceDataModule,
-            ),
-            "arc_easy": (
-                ArcDataConfig(**common_kwargs, arc_type="ARC-Easy"),
-                ArcMultiChoiceDataModule,
-            ),
-            "arc-challenge": (
-                ArcDataConfig(**common_kwargs, arc_type="ARC-Challenge"),
-                ArcMultiChoiceDataModule,
-            ),
-            "arc_challenge": (
-                ArcDataConfig(**common_kwargs, arc_type="ARC-Challenge"),
-                ArcMultiChoiceDataModule,
-            ),
-            "openbookqa": (
-                OpenbookQADataConfig(**common_kwargs),
-                OpenbookQAMultiChoiceDataModule,
-            ),
-            "boolq": (SuperGLUEDataConfig(**common_kwargs), BoolQDataModule),
-            "piqa": (PiqaDataConfig(**common_kwargs), PiqaMultiChoiceDataModule),
-            "winogrande": (
-                WinograndeDataConfig(**common_kwargs),
-                WinograndeMultiChoiceDataModule,
-            ),
-            "hellaswag": (
-                HellaswagDataConfig(**common_kwargs),
-                HellaswagMultiChoiceDataModule,
-            ),
-        }
-        assert not for_generation
-        config = dataset_to_klass_map[dataset][0]
-        dm = dataset_to_klass_map[dataset][1](config)
-    elif "flan" in dataset:
-        config = FlanConfig(
-            **common_kwargs,
-            remove_phi_eval_tasks=args.remove_phi_eval_tasks,
-            include_task_source=args.include_task_source,
-            pack_sequences=args.pack_sequences,
-        )
-        dm = FlanModule(config, for_generation=for_generation)
-    elif "flat" in dataset:
-        config = FlatMultiTaskConfig(
-            **common_kwargs,
-            source_template=args.source_template,
-            augment_few_shot=args.augment_few_shot,
-            pack_sequences=args.pack_sequences,
-        )
-        dm = FlatMultiTaskModule(config, for_generation=for_generation)
-    elif "mmlu" in dataset:
-        config = MMLUDataConfig(
-            **common_kwargs,
-        )
-        dm = MMLUDataModule(config, for_generation=for_generation)
-    elif "codex" in dataset:
-        config = CodexDataConfig(
-            **common_kwargs,
-        )
-        dm = CodexDataModule(config, for_generation=for_generation)
-    else:
-        raise ValueError(f"Unknown dataset {args.dataset}")
-    return dm
+def get_datamodule(config, for_generation=False, dataset_override=None):
+    return DefaultDataModule.get_class_by_config_class(type(config))(
+        config, for_generation
+    )
