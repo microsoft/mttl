@@ -19,8 +19,9 @@ classifiers = [
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
 
-[tool.setuptools]
-packages = ["mttl", "mttl.dataloader", "mttl.datamodule", "mttl.models", "projects"]
+[tool.setuptools.packages]
+find = {}
+
 
 [project.optional-dependencies]
 dev = [
