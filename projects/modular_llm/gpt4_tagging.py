@@ -35,8 +35,8 @@ Tag: Descriptive title for the tag
 
 
 m_contrastive_template = """
-The following two groups of instructions A and B, and each is associated with a specific tag. Your task is to create a precise and descriptive title for the tag of group B, encapsulating a common aspect found in most of these instructions.
-The title should describe the instructions in group B in a way that contrasts with common aspects of instructions of the group A.
+The following two groups of instructions A and B are each associated with a specific tag. Your task is to create a precise and descriptive title for the tag of group B, encapsulating a common aspect found in most of these instructions.
+The title should describe the instructions in group B in a way that contrasts with common aspects of the instructions in group A.
 
 {% for instruction in instructions_a %}
 Instruction (A):
@@ -50,7 +50,7 @@ Instruction (B):
 
 {% endfor %}
 
-Determine a better title for the instructions in group B that encapsulates a common aspect found in most of these instructions while being different from the instructions of group A, please provide it in this format:
+Determine a better title for the instructions in group B that encapsulates a common aspect found in most of these instructions while not encapsulating common aspects of the instructions in group A, please provide it in this format:
 Tag: Descriptive title for the tag
 
 """
