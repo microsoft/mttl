@@ -398,7 +398,8 @@ async def infer_(json_file_path, tags_file, num_inferences=-1):
     await infer_jsonl_file(
         json_file_path,
         tags_file,
-        tags_file.replace(".jsonl", "") + f"_inferred_{num_inferences}.jsonl",
+        tags_file.replace(".jsonl", "")
+        + f"_inferred_{gpt_model}_n{num_inferences}.jsonl",
         num_inferences=num_inferences,
     )
 
