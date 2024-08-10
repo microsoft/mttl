@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PaddingStrategy
 
-from mttl.datamodule.base import DatasetConfig, DefaultCollator, DefaultDataModule
+from mttl.datamodule.base import DataModule, DatasetConfig, DefaultCollator
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 from mttl.models.library.expert_library import DatasetLibrary
 
@@ -186,7 +186,8 @@ class MMLUDataConfig(DatasetConfig):
     augment_mmlu: bool = False
 
 
-class MMLUDataModule(DefaultDataModule):
+@DataModule.register("mmlu", config_cls=MMLUDataConfig)
+class MMLUDataModule(DataModule):
     DATA_ENV = "MMLU_DATA_DIR"
 
     def test_dataloader(self, subsample=None, shuffle=False):

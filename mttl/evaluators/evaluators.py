@@ -4,7 +4,7 @@ from functools import partial
 
 import torch
 
-from mttl.datamodule.base import DefaultDataModule, get_datamodule
+from mttl.datamodule.base import DataModule, get_datamodule
 from mttl.evaluators import MMLUEvaluator, RougeEvaluator
 from mttl.models.expert_config import ExpertConfig
 
@@ -100,7 +100,7 @@ class ExtendedRougeEvaluator(RougeEvaluator, Evaluator):
 class ExtendedMMLUEvaluator(MMLUEvaluator, Evaluator):
     def __init__(
         self,
-        datamodule: DefaultDataModule,
+        datamodule: DataModule,
         name="test",
         split="test",
         subsample=-1,

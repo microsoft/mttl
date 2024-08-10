@@ -1,10 +1,11 @@
 import torch
 
 from mttl.dataloader.alpaca_dataset_readers import AlpacaDataset
-from mttl.datamodule.base import DefaultDataModule
+from mttl.datamodule.base import DataModule, DatasetConfig
 
 
-class AlpacaDataModule(DefaultDataModule):
+@DataModule.register("alpaca", config_cls=DatasetConfig)
+class AlpacaDataModule(DataModule):
     @property
     def all_instructions(self):
         return self.dataset.read_all_instructions()
