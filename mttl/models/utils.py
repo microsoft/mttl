@@ -265,7 +265,6 @@ class EfficientCheckpointModule(LightningModule, PushToHubMixin):
         save_config: bool = True,
         state_dict: Optional[dict] = None,
         save_function: Callable = torch.save,
-        push_to_hub: bool = False,
         save_full_model: bool = False,
         **kwargs,
     ):
