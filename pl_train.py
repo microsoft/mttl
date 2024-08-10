@@ -67,42 +67,44 @@ def run_multitask(args):
     )
 
     # get the similarity score
-    adapter_embedding = []
-    for task_name in dm.task2id:
-        routing_distribution = routing[dm.task2id[task_name]]
-        # get the lora weights
-        adapater_weights_lora_a = (
-            module.model.decoder.block[0].layer[0].SelfAttention.k.lora_a
-        )
-        adapater_weights_lora_b = (
-            module.model.decoder.block[0].layer[0].SelfAttention.k.lora_b
-        )
+    def get_adapter_similarity():
+        adapter_embedding = []
+        for task_name in dm.task2id:
+            routing_distribution = routing[dm.task2id[task_name]]
+            # get the lora weights
+            adapater_weights_lora_a = (
+                module.model.decoder.block[0].layer[0].SelfAttention.k.lora_a
+            )
+            adapater_weights_lora_b = (
+                module.model.decoder.block[0].layer[0].SelfAttention.k.lora_b
+            )
 
-        # compute the final adapter according to the routing
-        adapter_weights = torch.einsum(
-            "abir, abro -> abio", adapater_weights_lora_a, adapater_weights_lora_b
-        )
+            # compute the final adapter according to the routing
+            adapter_weights = torch.einsum(
+                "abir, abro -> abio", adapater_weights_lora_a, adapater_weights_lora_b
+            )
 
-        result = torch.einsum(
-            "bi,bijk->bijk", routing_distribution.reshape(1, -1), adapter_weights
-        )
+            result = torch.einsum(
+                "bi,bijk->bijk", routing_distribution.reshape(1, -1), adapter_weights
+            )
 
-        adapter = result.sum(dim=1).squeeze(0).reshape(1, -1)
-        adapter_embedding.append(adapter)
+            adapter = result.sum(dim=1).squeeze(0).reshape(1, -1)
+            adapter_embedding.append(adapter)
 
-    # compute the similarity across different tasks
-    adapter_embedding = torch.cat(adapter_embedding, dim=0)
-    # reduce the dimensionality
-    pca = PCA(n_components=100)
-    adapter_embedding = pca.fit_transform(adapter_embedding.cpu().detach().numpy())
+        # compute the similarity across different tasks
+        adapter_embedding = torch.cat(adapter_embedding, dim=0)
+        # reduce the dimensionality
+        pca = PCA(n_components=100)
+        adapter_embedding = pca.fit_transform(adapter_embedding.cpu().detach().numpy())
 
-    # create the adapter dict
-    adapter_dict = {}
-    for i, task_name in enumerate(dm.task2id):
-        adapter_dict[task_name] = adapter_embedding[i]
+        # create the adapter dict
+        adapter_dict = {}
+        for i, task_name in enumerate(dm.task2id):
+            adapter_dict[task_name] = adapter_embedding[i]
 
-    # save the adapter embedding to npy
-    np.save(f"adapter_embedding_{save_name}.npy", adapter_dict)
+        # save the adapter embedding to npy
+        np.save(f"adapter_embedding_{save_name}.npy", adapter_dict)
+
     # adapter_embedding = torch.tensor(adapter_embedding).to(module.device)
     # adapter_embedding = adapter_embedding / (
     #     adapter_embedding.norm(dim=-1, keepdim=True, p=2) + 1e-6
@@ -112,48 +114,53 @@ def run_multitask(args):
     # similarity = torch.einsum("ij, kj -> ik", adapter_embedding, adapter_embedding)
     # # save the similarity matrix to npy
     # np.save("similarity.npy", similarity.cpu().detach().numpy())
+    def get_adapter_grad_similarity():
+        dm.setup()
+        adapter_embedding_grad = {}
+        count = 0
+        for batch in dm.val_dataloader():
+            task_id = batch["task_ids"].numpy()[0]
+            loss, _ = module.validation_step(batch, 0)
+            loss.backward()
 
-    dm.setup()
-    adapter_embedding_grad = {}
-    count = 0
-    for batch in dm.val_dataloader():
-        task_id = batch["task_ids"].numpy()[0]
-        loss, _ = module.validation_step(batch, 0)
-        loss.backward()
+            routing_distribution = routing[task_id]
+            # get the lora weights
+            adapater_weights_grad_lora_a = (
+                module.model.decoder.block[0].layer[0].SelfAttention.k.lora_a
+            ).grad
+            adapater_weights_grad_lora_b = (
+                module.model.decoder.block[0].layer[0].SelfAttention.k.lora_b
+            ).grad
 
-        routing_distribution = routing[task_id]
-        # get the lora weights
-        adapater_weights_grad_lora_a = (
-            module.model.decoder.block[0].layer[0].SelfAttention.k.lora_a
-        ).grad
-        adapater_weights_grad_lora_b = (
-            module.model.decoder.block[0].layer[0].SelfAttention.k.lora_b
-        ).grad
+            represent_a = torch.einsum(
+                "bi,bijk->bijk",
+                routing_distribution.reshape(1, -1),
+                adapater_weights_grad_lora_a,
+            )
 
-        represent_a = torch.einsum(
-            "bi,bijk->bijk",
-            routing_distribution.reshape(1, -1),
-            adapater_weights_grad_lora_a,
-        )
+            represent_b = torch.einsum(
+                "bi,bijk->bijk",
+                routing_distribution.reshape(1, -1),
+                adapater_weights_grad_lora_b,
+            )
 
-        represent_b = torch.einsum(
-            "bi,bijk->bijk",
-            routing_distribution.reshape(1, -1),
-            adapater_weights_grad_lora_b,
-        )
+            adapter_a = represent_a.sum(dim=1).squeeze(0).reshape(1, -1)
+            adapter_b = represent_b.sum(dim=1).squeeze(0).reshape(1, -1)
 
-        adapter_a = represent_a.sum(dim=1).squeeze(0).reshape(1, -1)
-        adapter_b = represent_b.sum(dim=1).squeeze(0).reshape(1, -1)
+            # concat
+            adapter = torch.cat((adapter_a, adapter_b), dim=1)
+            adapter_embedding_grad[task_id] = adapter
+            count += 1
+            # if count > 2:
+            #     break
+            print(loss)
 
-        # concat
-        adapter = torch.cat((adapter_a, adapter_b), dim=1)
-        adapter_embedding_grad[task_id] = adapter
-        count += 1
-        # if count > 2:
-        #     break
-        print(loss)
+        np.save(f"adapter_embedding_grad_{save_name}.npy", adapter_embedding_grad)
 
-    np.save(f"adapter_embedding_grad_{save_name}.npy", adapter_embedding_grad)
+    if args.similarity_analysis == "weight":
+        get_adapter_similarity()
+    elif args.similarity_analysis == "grad":
+        get_adapter_grad_similarity()
     # adapter_embedding_grad = torch.cat(adapter_embedding_grad, dim=0)
     # # reduce the dimensionality
     # pca = PCA(n_components=20)

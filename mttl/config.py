@@ -36,7 +36,10 @@ class Config(object):
 
         # tensor poly params
         self.order = 2
-        self.variant = "tensor_poly" # select tensor poly II, III, IV.
+        self.variant = "tensor_poly"  # select tensor poly II, III, IV.
+
+        # add similarity analysis
+        self.similarity_analysis = "weight"
 
         self.use_t0_templates_as_tasks = (
             False  # if True, then t0 consists of 313 tasks, otherwise 38
