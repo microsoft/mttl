@@ -13,6 +13,7 @@ from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.models.monitors import get_monitors
 from mttl.utils import get_mlf_logger
 import torch
+from sklearn.decomposition import PCA
 
 
 def run_multitask(args):
@@ -89,6 +90,10 @@ def run_multitask(args):
 
     # compute the similarity across different tasks
     adapter_embedding = torch.cat(adapter_embedding, dim=0)
+    # reduce the dimensionality
+    pca = PCA(n_components=100)
+    adapter_embedding = pca.fit_transform(adapter_embedding.cpu().detach().numpy())
+    adapter_embedding = torch.tensor(adapter_embedding).to(module.device)
     adapter_embedding = adapter_embedding / (
         adapter_embedding.norm(dim=-1, keepdim=True) + 1e-6
     )
