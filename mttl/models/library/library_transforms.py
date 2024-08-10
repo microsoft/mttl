@@ -25,9 +25,10 @@ from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.modifiers.base import get_target_2_source_param_mapping
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
+from mttl.registrable import Registrable
 
 
-class LibraryTransform(abc.ABC):
+class LibraryTransform(abc.ABC, Registrable):
     """Defines a transformation of a library of experts."""
 
     def __init__(self, config):
@@ -89,6 +90,7 @@ class SVDEmbeddingTransformConfig(LibraryTransformConfig):
     sparsity_threshold: float = 0.8
 
 
+@LibraryTransform.register("svd_embedding", config_cls=SVDEmbeddingTransformConfig)
 class SVDEmbeddingTransform(LibraryTransform):
     """Creates adapter embeddings by low-rank decomposition of a sparsified version
     of the adapter experts.
@@ -190,6 +192,7 @@ class WeightedLinearMergeConfig(LibraryTransformConfig):
     weights: dict = None
 
 
+@LibraryTransform.register("weighted_merge", config_cls=WeightedLinearMergeConfig)
 class WeightedLinearMerge(LibraryTransform):
     """
     Computes a uniform weight mixture across experts of a given library
@@ -257,6 +260,7 @@ class TiesMergeConfig(LibraryTransformConfig):
     only_sparsify: bool = False
 
 
+@LibraryTransform.register("ties_merge", config_cls=TiesMergeConfig)
 class TiesMerge(LibraryTransform):
     """
     Computes a uniform weight mixture across experts of a given library
@@ -359,6 +363,9 @@ class HiddenStateComputerConfig(LibraryTransformConfig):
     pool: str = "last"  # last, or mean
 
 
+@LibraryTransform.register(
+    "hidden_state_computer", config_cls=HiddenStateComputerConfig
+)
 class HiddenStateComputer(LibraryTransform):
     """
     Encodes a dataset and computes the average embedding
@@ -584,6 +591,7 @@ class PhatgooseConfig(LibraryTransformConfig):
     warmup_ratio: float = 0.1  # 0.9999999 # 0.1
 
 
+@LibraryTransform.register("phatgoose", config_cls=PhatgooseConfig)
 class PhatgooseTransform(HiddenStateComputer):
     def __init__(self, config: PhatgooseConfig = None):
         super().__init__(config or PhatgooseConfig())
@@ -774,6 +782,7 @@ class ArrowConfig(LibraryTransformConfig):
     tie_op: str = "concat"  # or "sum"
 
 
+@LibraryTransform.register("arrow", config_cls=ArrowConfig)
 class ArrowTransform(LibraryTransform):
     """
     Given a library of experts, extract the input direction most affected by the linear transforms
@@ -1103,6 +1112,7 @@ class ExpertProjectorConfig:
     )
 
 
+@LibraryTransform.register("expert_projector", config_cls=ExpertProjectorConfig)
 class ExpertProjector(LibraryTransform):
     """
     Given a library of clustered experts, project each one onto the basis generated
@@ -1191,6 +1201,9 @@ class CrossExpertNormComputerConfig:
     pass
 
 
+@LibraryTransform.register(
+    "cross_expert_norm", config_cls=CrossExpertNormComputerConfig
+)
 class CrossExpertNormComputer(HiddenStateComputer):
     """
     Given a library of experts, compute the norm of ABx for both in-dist and ood experts
@@ -1317,6 +1330,7 @@ class MBClusteringTransformConfig(SVDEmbeddingTransformConfig):
     k: int = 10
 
 
+@LibraryTransform.register("mbc_cos_sim", config_cls=MBClusteringTransformConfig)
 class MBCWithCosSimTransform(LibraryTransform):
     """
     Computes clusters based on the embedding similarity of the experts.
