@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
 
-from mttl.datamodule.base import DatasetConfig, DefaultCollator, DefaultDataModule
+from mttl.datamodule.base import DataModule, DatasetConfig, DefaultCollator
 from mttl.models.library.expert_library import DatasetLibrary
 
 
@@ -89,7 +89,7 @@ def maybe_filter_hf_dataset_by_key(dataset, key, task_names: str = None, n_proc=
 
 
 @dataclass
-class CLIPExpertsDatamodule(DefaultDataModule):
+class CLIPExpertsDatamodule(DataModule):
     # The dataset format is [x, E, accuracy]
     DATA_ENV = "CLIP_DATA_DIR"
 
@@ -159,7 +159,7 @@ class CLIPExpertsDatamodule(DefaultDataModule):
 
 
 @dataclass
-class CLIPTripleDataModule(DefaultDataModule):
+class CLIPTripleDataModule(DataModule):
     # the dataset format is [task_eval, input x, positive_experts, negative_experts]
     DATA_ENV = "CLIP_TRIPLE_DATA_DIR"
 

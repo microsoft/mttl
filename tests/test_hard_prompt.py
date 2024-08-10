@@ -3,7 +3,7 @@ import torch
 from datasets import Dataset
 from transformers import AutoModelForCausalLM
 
-from mttl.datamodule.base import DatasetConfig, DefaultDataModule
+from mttl.datamodule.base import DataModule, DatasetConfig
 from mttl.datamodule.utils import get_tokenizer_with_args
 from mttl.models.containers import add_expert_to_transformer
 from mttl.models.expert_context import InfoContainer
@@ -11,7 +11,7 @@ from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
 
 
-class DummyDataModule(DefaultDataModule):
+class DummyDataModule(DataModule):
     def setup_dataset(self):
         shared = {
             "target": ["a", "b"],

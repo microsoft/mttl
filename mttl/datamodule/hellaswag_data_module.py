@@ -2,7 +2,7 @@ import os
 import re
 from dataclasses import dataclass
 
-from mttl.datamodule.base import DatasetConfig, MultiChoiceDataModule
+from mttl.datamodule.base import DataModule, DatasetConfig, MultiChoiceDataModule
 from mttl.models.library.expert_library import DatasetLibrary
 
 
@@ -19,6 +19,7 @@ def _pre_process_text(text: str) -> str:
     return text
 
 
+@DataModule.register("hellaswag", config_cls=HellaswagDataConfig)
 class HellaswagMultiChoiceDataModule(MultiChoiceDataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))

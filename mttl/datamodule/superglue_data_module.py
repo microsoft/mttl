@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
 
-from mttl.datamodule.base import DatasetConfig, MultiChoiceDataModule
+from mttl.datamodule.base import DataModule, DatasetConfig, MultiChoiceDataModule
 from mttl.models.library.expert_library import DatasetLibrary
 
 
@@ -37,6 +37,7 @@ class SuperGLUEMultiChoiceDataModule(MultiChoiceDataModule):
         )
 
 
+@DataModule.register("boolq", config_cls=SuperGLUEDataConfig)
 class BoolQDataModule(SuperGLUEMultiChoiceDataModule):
     TASK_NAME = "boolq"
     DATASET_SPLIT = "validation"

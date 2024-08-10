@@ -15,6 +15,7 @@ from transformers.tokenization_utils_base import PaddingStrategy
 
 from mttl.datamodule.utils import get_tokenizer
 from mttl.logging import logger
+from mttl.registrable import Registrable
 
 
 @dataclass
@@ -465,7 +466,7 @@ def subsample_dst(dataset, subsample: int, rng: torch.Generator = None):
     return dataset
 
 
-class DefaultDataModule(LightningDataModule):
+class DataModule(LightningDataModule, Registrable):
     def train_dataloader(self, subsample=None):
         subsample = subsample or self.config.subsample
         train_dataset = self.train_dataset
@@ -786,7 +787,7 @@ class DefaultDataModule(LightningDataModule):
         self.print_infos()
 
 
-class MultiChoiceDataModule(DefaultDataModule):
+class MultiChoiceDataModule(DataModule):
     @property
     def collate_fn(self):
         return MultipleChoiceCollator(
@@ -804,7 +805,7 @@ class MultiChoiceDataModule(DefaultDataModule):
         )
 
 
-class MultiChoiceSourceDataModule(DefaultDataModule):
+class MultiChoiceSourceDataModule(DataModule):
     """
     Collates multiple sources for the same target, it's when the target is the same,
     but the source is different.
