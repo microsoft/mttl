@@ -14,6 +14,7 @@ from mttl.models.monitors import get_monitors
 from mttl.utils import get_mlf_logger
 import torch
 from sklearn.decomposition import PCA
+import numpy as np
 
 
 def run_multitask(args):
@@ -65,9 +66,9 @@ def run_multitask(args):
     )
 
     # get the similarity score
-    adapter_embedding = []
-    for task_id in dm.task2id:
-        routing_distribution = routing[dm.task2id[task_id]]
+    adapter_embedding = {}
+    for task_name in dm.task2id:
+        routing_distribution = routing[dm.task2id[task_name]]
         # get the lora weights
         adapater_weights_lora_a = (
             module.model.decoder.block[0].layer[0].SelfAttention.k.lora_a
@@ -86,24 +87,86 @@ def run_multitask(args):
         )
 
         adapter = result.sum(dim=1).squeeze(0).reshape(1, -1)
-        adapter_embedding.append(adapter)
+        adapter_embedding[task_name] = adapter
 
+    # save the adapter embedding to npy
+    np.save(f"adapter_embedding_{args.checkpoint}.npy", adapter_embedding)
     # compute the similarity across different tasks
-    adapter_embedding = torch.cat(adapter_embedding, dim=0)
-    # reduce the dimensionality
-    pca = PCA(n_components=100)
-    adapter_embedding = pca.fit_transform(adapter_embedding.cpu().detach().numpy())
-    adapter_embedding = torch.tensor(adapter_embedding).to(module.device)
-    adapter_embedding = adapter_embedding / (
-        adapter_embedding.norm(dim=-1, keepdim=True) + 1e-6
-    )
-    similarity = torch.einsum("ij, kj -> ik", adapter_embedding, adapter_embedding)
-    breakpoint()
+    # adapter_embedding = torch.cat(adapter_embedding, dim=0)
+    # # reduce the dimensionality
+    # pca = PCA(n_components=100)
+    # adapter_embedding = pca.fit_transform(adapter_embedding.cpu().detach().numpy())
+    # adapter_embedding = torch.tensor(adapter_embedding).to(module.device)
+    # adapter_embedding = adapter_embedding / (
+    #     adapter_embedding.norm(dim=-1, keepdim=True, p=2) + 1e-6
+    # )
+
+    # # compute the consine similarity
+    # similarity = torch.einsum("ij, kj -> ik", adapter_embedding, adapter_embedding)
+    # # save the similarity matrix to npy
+    # np.save("similarity.npy", similarity.cpu().detach().numpy())
+
     dm.setup()
+    adapter_embedding_grad = {}
+    count = 0
     for batch in dm.val_dataloader():
+        task_id = batch["task_ids"].numpy()[0]
         loss, _ = module.validation_step(batch, 0)
-        # get the adapters
+        loss.backward()
+
+        routing_distribution = routing[task_id]
+        # get the lora weights
+        adapater_weights_grad_lora_a = (
+            module.model.decoder.block[0].layer[0].SelfAttention.k.lora_a
+        ).grad
+        adapater_weights_grad_lora_b = (
+            module.model.decoder.block[0].layer[0].SelfAttention.k.lora_b
+        ).grad
+
+        represent_a = torch.einsum(
+            "bi,bijk->bijk",
+            routing_distribution.reshape(1, -1),
+            adapater_weights_grad_lora_a,
+        )
+
+        represent_b = torch.einsum(
+            "bi,bijk->bijk",
+            routing_distribution.reshape(1, -1),
+            adapater_weights_grad_lora_b,
+        )
+
+        adapter_a = represent_a.sum(dim=1).squeeze(0).reshape(1, -1)
+        adapter_b = represent_b.sum(dim=1).squeeze(0).reshape(1, -1)
+
+        # concat
+        adapter = torch.cat((adapter_a, adapter_b), dim=1)
+        adapter_embedding_grad[task_id] = adapter
+        count += 1
+        if count > 2:
+            break
         print(loss)
+
+    np.save(f"adapter_embedding_grad_{args.checkpoint}.npy", adapter_embedding_grad)
+    # adapter_embedding_grad = torch.cat(adapter_embedding_grad, dim=0)
+    # # reduce the dimensionality
+    # pca = PCA(n_components=20)
+    # adapter_embedding_grad = pca.fit_transform(
+    #     adapter_embedding_grad.cpu().detach().numpy()
+    # )
+    # adapter_embedding_grad = torch.tensor(adapter_embedding_grad).to(module.device)
+    # # convert it to unit vector
+
+    # adapter_embedding_grad = adapter_embedding_grad / (
+    #     adapter_embedding_grad.norm(dim=-1, keepdim=True, p=2)
+    # )
+
+    # # compute the consine similarity
+    # similarity_grad = torch.einsum(
+    #     "ij, kj -> ik", adapter_embedding_grad, adapter_embedding_grad
+    # )
+    # # save the similarity matrix to npy
+    # np.save("similarity_grad.npy", similarity_grad.cpu().detach().numpy())
+    breakpoint()
     # legit logging
     loggers = []
     if os.environ.get("WANDB_API_KEY"):
