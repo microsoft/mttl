@@ -5,8 +5,10 @@ from argparse import ArgumentParser
 from dataclasses import MISSING, asdict, dataclass, field, fields, make_dataclass
 from typing import Any
 
+import torch
+
 from mttl.datamodule.base import DatasetConfig, DefaultDataModule
-from mttl.logging import logger, setup_logging
+from mttl.logging import logger, setup_logging, warn_once
 from mttl.models.containers.selectors.base import Selector, SelectorConfig
 from mttl.models.modifiers.base import Modifier, ModifierConfig
 from mttl.registrable import Registrable
@@ -99,7 +101,20 @@ class TrainingArgs(MttlArgs):
     eval_every_n_epoch: int = 1
     debug: bool = False
     seed: int = 42
+    wandb_project = None
+    tensorboard = False
+    logging_prefix = ""
     eval_before_training: bool = True
+
+    # if set, will try to only load expert with this name from the library when evaluating
+    remote_token: str = None
+    library_id: str = None
+    expert_selection: str = None
+    destination_library_id: str = None
+
+    # TODO: only used in flan eval experts
+    load_module: str = None
+    expert_name: str = None
 
     # optimizer flags
     optimizer: str = "adamw"
@@ -116,16 +131,22 @@ class TrainingArgs(MttlArgs):
     max_grad_norm: float = 0.1
     micro_batch_size: int = 1
 
+    finetune_task_name: str = None
     finetune_type: str = None  # ["F", "A", "Z", "MuZ", "Poly", "PolyRand"]
     finetune_skip_es: bool = False  # skip early stopping while fine-tuning
     finetune_use_last_checkpoint: bool = (
         False  # use always the best valid_perf checkpoint if available
     )
     monitor_grad_alignment_on: str = None
+    tasksets_path: str = None
 
     # routing flags
     router_weight_decay: float = 0.0  # router weight decay
     router_learning_rate: float = 0.0
+
+    # TODO: for training the moe, might be moved to a separate training args
+    moe_ent_reg: float = 0.0
+    moe_free_bits: float = 0.0
 
     # adapter flags
     adapters_learning_rate: float = None
@@ -135,6 +156,52 @@ class TrainingArgs(MttlArgs):
 
     # evaluation stuff
     pipeline_eval_tasks: str = None
+    eval_mmlu_flag: bool = False
+    eval_rouge_flag: bool = False
+    eval_metric: str = "loss"
+    eval_before_training: bool = True
+
+    def __post_init__(self):
+        if self.micro_batch_size is None:
+            self.micro_batch_size = self.train_batch_size
+
+        self.gradient_accumulation_steps = (
+            self.train_batch_size // self.micro_batch_size
+        )
+        self.train_batch_size = self.micro_batch_size
+
+        n_devices = torch.cuda.device_count()
+        if n_devices > 1:
+            warn_once(
+                "You have multiple GPUs, but your device count is not being taken "
+                + "into account when computing `gradient_accumulation_steps`."
+            )
+
+        if self.finetune_task_name is not None and isinstance(
+            self.finetune_task_name, str
+        ):
+            # resolve task keys
+            task_names = []
+            tasks = self.finetune_task_name.split(",")
+
+            if self.tasksets_path is not None and os.path.exists(self.tasksets_path):
+                # load task names from json file
+                task_sets = json.load(open(self.tasksets_path))
+                for task_name in tasks:
+                    # try to fetch task_names from the file
+                    if task_name in task_sets:
+                        task_names.extend(task_sets[task_name])
+                    else:
+                        task_names.append(task_name)
+            else:
+                task_names = tasks
+
+            self.finetune_task_name = ",".join(task_names)
+
+
+@dataclass
+class FinetuneArgs(TrainingArgs):
+    pass
 
 
 @dataclass
