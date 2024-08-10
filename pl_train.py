@@ -67,7 +67,7 @@ def run_multitask(args):
     )
 
     # get the similarity score
-    adapter_embedding = {}
+    adapter_embedding = []
     for task_name in dm.task2id:
         routing_distribution = routing[dm.task2id[task_name]]
         # get the lora weights
@@ -88,15 +88,21 @@ def run_multitask(args):
         )
 
         adapter = result.sum(dim=1).squeeze(0).reshape(1, -1)
-        adapter_embedding[task_name] = adapter
+        adapter_embedding.append(adapter)
+
+    # compute the similarity across different tasks
+    adapter_embedding = torch.cat(adapter_embedding, dim=0)
+    # reduce the dimensionality
+    pca = PCA(n_components=100)
+    adapter_embedding = pca.fit_transform(adapter_embedding.cpu().detach().numpy())
+
+    # create the adapter dict
+    adapter_dict = {}
+    for i, task_name in enumerate(dm.task2id):
+        adapter_dict[task_name] = adapter_embedding[i]
 
     # save the adapter embedding to npy
-    np.save(f"adapter_embedding_{save_name}.npy", adapter_embedding)
-    # compute the similarity across different tasks
-    # adapter_embedding = torch.cat(adapter_embedding, dim=0)
-    # # reduce the dimensionality
-    # pca = PCA(n_components=100)
-    # adapter_embedding = pca.fit_transform(adapter_embedding.cpu().detach().numpy())
+    np.save(f"adapter_embedding_{save_name}.npy", adapter_dict)
     # adapter_embedding = torch.tensor(adapter_embedding).to(module.device)
     # adapter_embedding = adapter_embedding / (
     #     adapter_embedding.norm(dim=-1, keepdim=True, p=2) + 1e-6
@@ -143,8 +149,8 @@ def run_multitask(args):
         adapter = torch.cat((adapter_a, adapter_b), dim=1)
         adapter_embedding_grad[task_id] = adapter
         count += 1
-        if count > 2:
-            break
+        # if count > 2:
+        #     break
         print(loss)
 
     np.save(f"adapter_embedding_grad_{save_name}.npy", adapter_embedding_grad)
