@@ -25,11 +25,15 @@ class Registrable:
 
     @classmethod
     def get_config_class_by_name(cls, name: str) -> Type:
+        if name not in cls.registered_names():
+            raise ValueError(f"{name} is not a registered {cls.__name__}")
         subclass, config_cls = Registrable._registry[cls].get(name)
         return config_cls
 
     @classmethod
     def get_class_by_name(cls, name: str) -> Type:
+        if name not in cls.registered_names():
+            raise ValueError(f"{name} is not a registered {cls.__name__}")
         subclass, config_cls = Registrable._registry[cls].get(name)
         return subclass
 
