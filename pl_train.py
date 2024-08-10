@@ -46,6 +46,7 @@ def run_multitask(args):
         else:
             raise NotImplementedError()
 
+    save_name = args.checkpoint
     if args.checkpoint is not None:
         from mttl.utils import get_checkpoint_path
 
@@ -90,7 +91,7 @@ def run_multitask(args):
         adapter_embedding[task_name] = adapter
 
     # save the adapter embedding to npy
-    np.save(f"adapter_embedding_{args.checkpoint}.npy", adapter_embedding)
+    np.save(f"adapter_embedding_{save_name}.npy", adapter_embedding)
     # compute the similarity across different tasks
     # adapter_embedding = torch.cat(adapter_embedding, dim=0)
     # # reduce the dimensionality
@@ -146,7 +147,7 @@ def run_multitask(args):
             break
         print(loss)
 
-    np.save(f"adapter_embedding_grad_{args.checkpoint}.npy", adapter_embedding_grad)
+    np.save(f"adapter_embedding_grad_{save_name}.npy", adapter_embedding_grad)
     # adapter_embedding_grad = torch.cat(adapter_embedding_grad, dim=0)
     # # reduce the dimensionality
     # pca = PCA(n_components=20)
