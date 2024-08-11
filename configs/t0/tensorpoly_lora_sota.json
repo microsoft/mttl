@@ -12,5 +12,5 @@
     "adafactor_scale_parameter": false,
     "adapters_learning_rate": 1e-3,
     "module_logits_relaxed_bernoulli": false,
-    "order": 4
+    "order": 2
 }

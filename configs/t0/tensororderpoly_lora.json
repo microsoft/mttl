@@ -1,6 +1,6 @@
 {
     "n_skills": 8,
-    "n_splits": 4,
+    "n_splits": 2,
     "n_tasks": 8,
     "model_modifier": "tensororderpoly_lora",
     "lora_rank": 16,
