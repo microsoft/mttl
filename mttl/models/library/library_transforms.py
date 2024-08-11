@@ -15,7 +15,6 @@ from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
 from tqdm import tqdm
 
-from mttl.config import ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import logger
 from mttl.models.containers.lora_containers import ExpertContainer
@@ -23,7 +22,7 @@ from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.modifiers.base import get_target_2_source_param_mapping
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
-from mttl.utils import Registrable
+from mttl.registrable import Registrable
 
 
 class LibraryTransform(abc.ABC, Registrable):
@@ -617,6 +616,7 @@ class PhatgooseTransform(HiddenStateComputer):
         expert_names: list = None,
         default_args=None,
     ):
+        from mttl.config import ExpertConfig
         from mttl.models.expert_model import MultiExpertModel
         from mttl.models.library.utils import train_module
 
