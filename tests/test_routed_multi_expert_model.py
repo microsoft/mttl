@@ -360,8 +360,8 @@ class TestMultiExpertModel:
         config: ExpertConfig = tmp_exp_config
         config.router_selector = "moe_rkhs_router"
         config.router_granularity = "finegrained"
-        config.moe_emb_dim = 10
-        config.moe_rkhs_dim = 10
+        config.emb_dim = 10
+        config.rkhs_dim = 10
 
         module = MoEModel(**vars(config))
 
