@@ -1,9 +1,9 @@
 # unit test for adapter_ranker
 import pytest
 
+from mttl.config import ExpertConfig
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
 from mttl.models.containers.selectors.base import TaskPredictorSelector
-from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import MultiExpertModel
 from mttl.models.modifiers.lora import LoRAConfig
 from mttl.models.ranker.classifier_ranker import SentenceTransformerClassifier

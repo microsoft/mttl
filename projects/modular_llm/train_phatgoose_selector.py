@@ -5,7 +5,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from pytorch_lightning import seed_everything
 
-from mttl.models.expert_config import ExpertConfig
+from mttl.config import ExpertConfig
 from mttl.models.library.expert_library import ExpertLibrary
 
 

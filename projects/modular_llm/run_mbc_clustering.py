@@ -1,8 +1,8 @@
 import json
 import os
 
+from mttl.config import ExpertConfig
 from mttl.logging import logger
-from mttl.models.expert_config import ExpertConfig
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.library.library_transforms import (
     MBClusteringTransformConfig,

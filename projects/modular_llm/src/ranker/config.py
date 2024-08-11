@@ -1,4 +1,4 @@
-from mttl.models.expert_config import ExpertConfig
+from mttl.config import ExpertConfig
 
 
 class RankerConfig(ExpertConfig):

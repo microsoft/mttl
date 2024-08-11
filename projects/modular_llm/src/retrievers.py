@@ -3,8 +3,8 @@ import copy
 import numpy as np
 import torch
 
+from mttl.config import ExpertConfig
 from mttl.logging import logger
-from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import MultiExpertModel
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import VirtualLocalLibrary

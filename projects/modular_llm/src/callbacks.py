@@ -6,10 +6,10 @@ from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning import callbacks as cb
 from torch.optim import Optimizer
 
+from mttl.config import ExpertConfig
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
 from mttl.logging import logger
-from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import ExpertModel as ExpertTrainer
 
 DEBUG = False

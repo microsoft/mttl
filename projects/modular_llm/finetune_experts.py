@@ -10,9 +10,9 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from typing import Callable
 
 from mttl.callbacks import LiveCheckpointCallback, RougeCallback
+from mttl.config import ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
-from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import ExpertModel as ExpertTrainer
 from mttl.models.expert_model import MoEModel as MoETrainer
 from mttl.models.expert_model import MultiExpertModel

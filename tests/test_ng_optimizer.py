@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from mttl.models.expert_config import ExpertConfig
+from mttl.config import ExpertConfig
 from mttl.models.expert_model import ExpertModel as ExpertTrainer
 from mttl.models.expert_model import MultiExpertModel
 from mttl.models.library.expert_library import LocalExpertLibrary

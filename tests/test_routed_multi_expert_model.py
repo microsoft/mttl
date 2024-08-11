@@ -6,7 +6,7 @@ import pytest
 import torch
 from pytorch_lightning import seed_everything
 
-from mttl.config import Config
+from mttl.config import Config, ExpertConfig
 from mttl.models.containers.lora_containers import (
     CoalescedLoRAExpertContainer,
     LoRAExpertContainer,
@@ -23,7 +23,6 @@ from mttl.models.containers.selectors.selector_output import (
     BatchSequenceExpertsAndWeightsSelectorOutput,
     SelectorOutput,
 )
-from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import MoEModel, MultiExpertModel
 from mttl.models.library.expert import Expert
 from mttl.models.modifiers.base import ModifierConfig
