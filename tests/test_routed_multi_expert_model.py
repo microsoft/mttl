@@ -150,7 +150,7 @@ class TestMultiExpertModel:
         self, tmp_exp_config, is_coalesced
     ):  # this fails, why?
         seed_everything(0)
-        config: Config = tmp_exp_config
+        config: ExpertConfig = tmp_exp_config
         config.router_selector = "poly_router"
 
         # Tasks need to be specified to the selector to perform routing
@@ -235,7 +235,7 @@ class TestMultiExpertModel:
 
     def test_expert_selector_with_task_name_routing(self, tmp_exp_config):
         seed_everything(0)
-        config: Config = tmp_exp_config
+        config: ExpertConfig = tmp_exp_config
 
         config.router_selector = "task_selector"
         exp1 = self.create_dummy_expert(config, "exp1")
@@ -388,8 +388,8 @@ class TestMultiExpertModel:
         config: ExpertConfig = tmp_exp_config
         config.router_selector = "moe_rkhs_router"
         config.router_granularity = "coarsegrained"
-        config.moe_emb_dim = 10
-        config.moe_rkhs_dim = 10
+        config.emb_dim = 10
+        config.rkhs_dim = 10
 
         module = MoEModel(**vars(config))
 
@@ -420,9 +420,9 @@ class TestMultiExpertModel:
         config: ExpertConfig = tmp_exp_config
         config.router_selector = "moe_rkhs_router"
         config.router_granularity = "finegrained"
-        config.moe_to_k = -1
-        config.moe_emb_dim = 10
-        config.moe_rkhs_dim = 10
+        config.top_k = -1
+        config.emb_dim = 10
+        config.rkhs_dim = 10
 
         module = MoEModel(**vars(config))
 
@@ -449,9 +449,9 @@ class TestMultiExpertModel:
         config: ExpertConfig = tmp_exp_config
         config.router_selector = "moe_rkhs_router"
         config.router_granularity = "finegrained"
-        config.moe_top_k = 2
-        config.moe_emb_dim = 10
-        config.moe_rkhs_dim = 10
+        config.top_k = 2
+        config.emb_dim = 10
+        config.rkhs_dim = 10
 
         module = MoEModel(**vars(config))
 
@@ -487,7 +487,7 @@ class TestMultiExpertModel:
         container = module.model.transformer.h[0].attn.attention.k_proj
         assert isinstance(container, CoalescedLoRAExpertContainer)
         assert isinstance(container.selector, PerTokenSelector)
-        assert container.selector.config.moe_top_k == -1
+        assert container.selector.config.top_k == -1
         assert container.selector.config.router_temp == 0.1
 
         # Test Base Llama model
@@ -518,7 +518,7 @@ class TestMultiExpertModel:
 
     def test_expert_selector_with_task_predictor_selection(self, tmp_exp_config):
         seed_everything(0)
-        config: Config = tmp_exp_config
+        config: ExpertConfig = tmp_exp_config
 
         config.device_map = "cpu"
         config.router_selector = "task_predictor_selector"
