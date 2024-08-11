@@ -5,7 +5,7 @@ import json
 import os
 from dataclasses import dataclass, field, fields, make_dataclass
 from string import Template
-from typing import Dict, Type
+from typing import Dict, List, Type
 
 import torch
 
@@ -35,13 +35,16 @@ class Args:
     @property
     def updated_kwargs(self):
         return {
-            k: getattr(self, k) for k in fields(self) if getattr(self, k) != k.default
+            k.name: getattr(self, k.name)
+            for k in fields(self)
+            if getattr(self, k.name) != k.default
         }
 
     @classmethod
     def fromdict(cls, data):
         cls_name = data.pop("_class")
-        cls = globals()[cls_name]
+        if cls_name and cls_name in globals():
+            cls = globals()[cls_name]
         return cls(**data)
 
     def asdict(self) -> Dict:
@@ -51,10 +54,10 @@ class Args:
         return {"_class": self.__class__.__name__, **data}
 
     def was_overridden(self, key):
-        return key in self._updated_kwargs
+        return key in self.updated_kwargs
 
     def was_default(self, key):
-        return key not in self._updated_kwargs
+        return key not in self.updated_kwargs
 
     @classmethod
     def process_kwargs(cls, kwargs, eval=True, raise_error=True, silent=False):
@@ -82,9 +85,6 @@ class Args:
             kwargs[k] = v
         return overwrites_log
 
-    def __getitem__(self, item):
-        return getattr(self, item, None)
-
     def to_json(self):
         """
         Converts parameter values in config to json
@@ -93,9 +93,26 @@ class Args:
         import copy
 
         to_save = copy.deepcopy(self.__dict__)
-        to_save.pop("_updated_kwargs")
-
         return json.dumps(to_save, indent=4, sort_keys=False)
+
+    @classmethod
+    def from_json(cls, config_file, raise_error=True):
+        """
+        Loads the config from a file
+        """
+        with open(config_file, "r") as fin:
+            kwargs = json.load(fin)
+
+        overwrite_logs = cls.process_kwargs(
+            kwargs,
+            eval=False,
+            raise_error=raise_error,
+        )
+        # log the overwrites
+        for log in overwrite_logs:
+            logger.warning(log)
+
+        return cls(**kwargs)
 
     def save_config(self, output_dir):
         """
@@ -184,6 +201,24 @@ class MetaRegistrable(type):
         to_tuples = [(k,) + v for k, v in new_fields.items()]
         new_cls = make_dataclass(name, to_tuples, bases=(Args,), init=False)
         new_cls.registrable_class = registrable_class
+
+        # set functions to be had in the new baby dataclass
+        for k, v in {
+            **attrs,
+        }.items():
+            setattr(new_cls, k, v)
+        return new_cls
+
+
+class ArgsUnion(type):
+    def __new__(cls, name, bases, attrs, args: List[Args] = None):
+        union = {}
+        for arg in args:
+            for f in fields(arg):
+                union[f.name] = (f.type, field(default=f.default))
+
+        to_tuples = [(k,) + v for k, v in union.items()]
+        new_cls = make_dataclass(name, to_tuples, bases=(Args,))
 
         # set functions to be had in the new baby dataclass
         for k, v in {
@@ -305,7 +340,9 @@ class TrainingArgs(Args):
 
 
 @dataclass
-class ExpertConfig(TrainingArgs, DataArgs, SelectorArgs, ModifierArgs):
+class ExpertConfig(
+    metaclass=ArgsUnion, args=(TrainingArgs, DataArgs, SelectorArgs, ModifierArgs)
+):
     model_modifier: str = None
     router_selector: str = None
     dataset_type: str = None
