@@ -484,7 +484,6 @@ def run_multitask(args: FinetuneConfig):
         elif expert.training_config.model_modifier == "poly":
             module.model.resize_module_logits(1)
         checkpoint = train_module(args, module, dm)
-
     else:
         # fine-tuning with expert library
         assert args.finetune_regime in FINETUNE_FUNCTIONS

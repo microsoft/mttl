@@ -112,6 +112,8 @@ def tmp_exp_config(tmp_path):
     class SimpleConfig(ExpertConfig):
         model: str = "EleutherAI/gpt-neo-125m"
         library_id: str = None
+        lora_rank: int = 16
+        lora_alpha: float = 1.0
         model_modifier: str = "lora"
         modify_layers: str = "c_fc|c_proj|k_proj|v_proj|q_proj|out_proj"
         modify_modules: str = ".*"
