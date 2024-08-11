@@ -374,8 +374,9 @@ class HiddenStateComputer(LibraryTransform):
         for k, v in vars(default_args).items():
             if not hasattr(args, k):
                 setattr(args, k, v)
+
         # Also, overwrite the updated args even if already present
-        for k, v in default_args._updated_kwargs.items():
+        for k, v in default_args.updated_kwargs.items():
             setattr(args, k, v)
 
         for arg_name in [

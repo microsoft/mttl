@@ -3,30 +3,87 @@ import ast
 import importlib
 import json
 import os
-from dataclasses import dataclass, field, fields, make_dataclass
+from dataclasses import MISSING, Field, dataclass, field, fields, make_dataclass
 from string import Template
-from typing import Dict, List, Type
+from typing import Any, Dict, List, Type
 
 import torch
 
 from mttl.logging import logger, setup_logging, warn_once
 from mttl.registrable import Registrable
 
-# when registered dataclasses have same field w different init values,
-# we init as multi default to avoid conflicts
-MultiDefault = object()
+
+class MultiDefaultValue:
+    """
+    Manages multiple default values for fields that may have the same name but different defaults
+    across merged dataclasses.
+    """
+
+    def __init__(self, cls, name, field_type, default):
+        self.name = name
+        self.type = field_type
+        self.defaults = {cls.__name__: default}
+
+    def update(self, cls, default, field_type):
+        if field_type != self.type:
+            raise TypeError(
+                f"Field '{self.name}' has conflicting types: {field_type} and {self.type}."
+            )
+
+        # Add a new default only if it's different from the last one
+        last_default = list(self.defaults.values())[-1]
+        if default != last_default:
+            self.defaults[cls.__name__] = default
+
+    @property
+    def default(self):
+        return next(iter(self.defaults.values())) if len(self.defaults) == 1 else self
+
+    def __repr__(self):
+        if len(self.defaults) == 1:
+            return repr(self.default)
+        return f"MultiDefaultValue({self.defaults})"
+
+
+def dataclasses_union(*args: Type[dataclass]) -> List:
+    """
+    Create a new dataclass that is the union of the fields of the input dataclasses.
+    """
+    new_fields = {}
+    for c in args:
+        for f in fields(c):
+            if f.name not in new_fields:
+                value = (
+                    f.type,
+                    field(default=MultiDefaultValue(c, f.name, f.type, f.default)),
+                )
+                new_fields[f.name] = value
+            else:
+                value = new_fields[f.name][1]
+                value.default.update(c, f.default, f.type)
+
+    # now we need to set the default values for all the fields in which there is only one default value
+    for k in new_fields:
+        value = new_fields[k][1]
+        value.default = value.default.default
+
+    return [(k,) + v for k, v in new_fields.items()]
 
 
 def create_config_class_from_args(config_class: dataclass, args: "Args"):
     """
-    Load a dataclass from a dictionary
+    Load a dataclass from the arguments.
     """
     kwargs = {}
 
     for f in fields(config_class):
-        # if the field is not in the args, we skip it, we leave the default value
-        if getattr(args, f.name, None) is not None:
-            kwargs[f.name] = getattr(args, f.name)
+        if hasattr(args, f.name):
+            value = getattr(args, f.name)
+
+            # if the field is not a multi-default, we override it (it was either default or set by the user)
+            if not isinstance(value, MultiDefaultValue):
+                kwargs[f.name] = value
+
     return config_class(**kwargs)
 
 
@@ -41,10 +98,15 @@ class Args:
         }
 
     @classmethod
-    def fromdict(cls, data):
-        cls_name = data.pop("_class")
-        if cls_name and cls_name in globals():
-            cls = globals()[cls_name]
+    def fromdict(cls, data) -> "Args":
+        """
+        Reload a dataclass from a dictionary. We store the class name in the dict to be able to reload it.
+        If the cls is Args, then we try to access the `_class` attribute to get the class name.
+        """
+        if cls == Args:
+            cls_name = data.pop("_class")
+            if cls_name:
+                cls = globals()[cls_name]
         return cls(**data)
 
     def asdict(self) -> Dict:
@@ -187,38 +249,23 @@ class Args:
 
 
 class MetaRegistrable(type):
+    """
+    Meta class that creates a new dataclass containing all the configs
+    in this registrable.
+    """
+
     def __new__(cls, name, bases, attrs, registrable: Registrable = None):
         module_name, class_name = registrable.rsplit(".", 1)
         module = importlib.import_module(module_name)
 
         registrable_class = getattr(module, class_name)
 
-        new_fields = {}
-        for c in registrable_class.registered_configs():
-            for f in fields(c):
-                new_fields[f.name] = (f.type, field(default=None))
+        # make the union of all the fields across the registered configs
+        to_tuples = dataclasses_union(*registrable_class.registered_configs())
 
-        to_tuples = [(k,) + v for k, v in new_fields.items()]
+        # create new dataclass with the union of all the fields
         new_cls = make_dataclass(name, to_tuples, bases=(Args,), init=False)
         new_cls.registrable_class = registrable_class
-
-        # set functions to be had in the new baby dataclass
-        for k, v in {
-            **attrs,
-        }.items():
-            setattr(new_cls, k, v)
-        return new_cls
-
-
-class ArgsUnion(type):
-    def __new__(cls, name, bases, attrs, args: List[Args] = None):
-        union = {}
-        for arg in args:
-            for f in fields(arg):
-                union[f.name] = (f.type, field(default=f.default))
-
-        to_tuples = [(k,) + v for k, v in union.items()]
-        new_cls = make_dataclass(name, to_tuples, bases=(Args,))
 
         # set functions to be had in the new baby dataclass
         for k, v in {
@@ -340,9 +387,7 @@ class TrainingArgs(Args):
 
 
 @dataclass
-class ExpertConfig(
-    metaclass=ArgsUnion, args=(TrainingArgs, DataArgs, SelectorArgs, ModifierArgs)
-):
+class ExpertConfig(TrainingArgs, DataArgs, SelectorArgs, ModifierArgs):
     model_modifier: str = None
     router_selector: str = None
     dataset_type: str = None
@@ -353,42 +398,15 @@ class ExpertConfig(
 
     @property
     def modifier_config(self):
-        if self.model_modifier is not None:
-            return create_config_class_from_args(
-                ModifierArgs.registrable_class.get_config_class_by_name(
-                    self.model_modifier
-                ),
-                self,
-            )
+        from mttl.models.modifiers.base import ModifierConfig
+
+        return ModifierConfig.from_training_config(self)
 
     @property
     def selector_config(self):
-        import copy
-        import json
-
-        if self.router_selector is None:
-            return None
-
-        try:
-            router_selector = json.loads(self.router_selector)
-        except:
-            # if not a json, assume it's a single selector
-            return create_config_class_from_args(
-                SelectorArgs.registrable_class.get_config_class_by_name(
-                    self.router_selector
-                ),
-                self,
-            )
-
         from mttl.models.containers.selectors.base import MultiSelectorConfig
 
-        selector_configs = {}
-        for modifier_name, selector_name in router_selector.items():
-            selector_configs[modifier_name] = create_config_class_from_args(
-                SelectorArgs.registrable_class.get_config_class_by_name(selector_name),
-                self,
-            )
-        return MultiSelectorConfig(**selector_configs)
+        return MultiSelectorConfig.from_training_config(self)
 
     @property
     def dataset_config(self):

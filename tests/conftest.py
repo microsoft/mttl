@@ -1,5 +1,6 @@
 import os
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -107,19 +108,18 @@ def tiny_llama(make_tiny_llama):
 
 @pytest.fixture
 def tmp_exp_config(tmp_path):
+    @dataclass
     class SimpleConfig(ExpertConfig):
-        def _set_defaults(self):
-            super()._set_defaults()
-            self.library_id = None
-            self.model_modifier = "lora"
-            self.modify_layers = "c_fc|c_proj|k_proj|v_proj|q_proj|out_proj"
-            self.modify_modules = ".*"
-            self.trainable_param_names = ".*lora_[ab].*"
-            self.output_dir = tmp_path
-            self.router_selector = "poly_router_dir"
-            self.router_granularity = "coarsegrained"
-            self.model = "EleutherAI/gpt-neo-125m"
-            self.n_tasks = 1
+        model: str = "EleutherAI/gpt-neo-125m"
+        library_id: str = None
+        model_modifier: str = "lora"
+        modify_layers: str = "c_fc|c_proj|k_proj|v_proj|q_proj|out_proj"
+        modify_modules: str = ".*"
+        trainable_param_names: str = ".*lora_[ab].*"
+        output_dir: str = tmp_path
+        router_selector: str = "poly_router_dir"
+        router_granularity: str = "coarsegrained"
+        n_tasks: int = 1
 
     return SimpleConfig()
 
