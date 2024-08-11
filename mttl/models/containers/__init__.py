@@ -1,7 +1,6 @@
 import re
 from typing import Tuple
 
-from mttl.config import Config
 from mttl.logging import logger
 from mttl.models.containers.base import ExpertContainer
 from mttl.models.containers.kv_containers import KVExpertContainer
