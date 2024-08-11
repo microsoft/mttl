@@ -1,7 +1,7 @@
 import re
 from typing import Tuple
 
-from mttl.logging import logger
+from mttl.logging import logger, warn_once
 from mttl.models.containers.base import ExpertContainer
 from mttl.models.containers.kv_containers import KVExpertContainer
 from mttl.models.containers.lora_containers import (
@@ -48,7 +48,7 @@ def get_container_class(modifier: str):
         return LoRAExpertContainer
     elif modifier == "skilled_lora":
         if not os.environ.get("COALESCED_LORA_CONTAINER", "False") == "1":
-            logger.warning(
+            warn_once(
                 "COALESCED_LORA_CONTAINER is not set to 1, but still using it for SkilledLoRA"
             )
         return CoalescedLoRAExpertContainer
