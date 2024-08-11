@@ -346,7 +346,7 @@ class Selector(nn.Module, Registrable):
         self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
     ):
         if expert_info is None or expert_info.expert_task_name is None:
-            logger.warning(
+            logger.debug(
                 "Expert's task_name not set, assume task name corresponds to expert name!"
             )
             self._task_to_expert_name[expert_name] = expert_name

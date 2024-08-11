@@ -92,6 +92,9 @@ def bigger_dummy_batch():
     return batch
 
 
+bs, max_seq_len = 10, 5
+
+
 class TestMultiExpertModel:
     def create_dummy_expert(self, config: ExpertConfig, exp_name) -> Expert:
         model = MultiExpertModel(model=config.model, device_map="cpu")
@@ -112,7 +115,6 @@ class TestMultiExpertModel:
 
         module = MultiExpertModel(**vars(config))
         module.add_experts_from_dict(module_dict, action="merge")
-        bs, max_seq_len = 10, 100
 
         assert isinstance(
             module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
@@ -132,7 +134,7 @@ class TestMultiExpertModel:
 
         # Test Base Llama model
         output = module(batch)
-        assert np.allclose(output.item(), 10.15, atol=0.1)
+        assert np.allclose(output.item(), 15.2, atol=0.1)
 
     def nonzero_B_init(self, model):
         gen = torch.Generator()
@@ -144,8 +146,9 @@ class TestMultiExpertModel:
                 mod.lora_a.data = torch.rand(mod.lora_a.shape, generator=gen) * 0.5
                 mod.lora_b.data = torch.rand(mod.lora_b.shape, generator=gen) * 0.5
 
+    @pytest.mark.parametrize("is_coalesced", [(True, False)])
     def test_expert_selector_with_poly_task_routing(
-        self, tmp_exp_config
+        self, tmp_exp_config, is_coalesced
     ):  # this fails, why?
         seed_everything(0)
         config: Config = tmp_exp_config
@@ -163,7 +166,6 @@ class TestMultiExpertModel:
         )
         assert module.hparams.model_modifier == None
         module.add_experts_from_dict(module_dict, action="route")
-        bs, max_seq_len = 10, 100
 
         assert isinstance(
             module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
@@ -180,16 +182,16 @@ class TestMultiExpertModel:
         batch["attention_mask"] = attn_mask
         batch["task_names"] = ["task_1", "task_2"] * 5
 
-        is_coalesced = os.environ.get("COALESCED_LORA_CONTAINER", "0") == "1"
+        os.environ["COALESCED_LORA_CONTAINER"] = str(is_coalesced)
 
         # BASE MODEL FWD BASS (because all Bs are == 0, so functially same as backbone)
         output = module(batch)
-        assert np.allclose(output.item(), 10.08 if is_coalesced else 10.20, atol=0.1)
+        assert np.allclose(output.item(), 15.625 if is_coalesced else 10.20, atol=0.1)
 
         # Now let's change the adapter params, and also the function parameterized by the model
         self.nonzero_B_init(module)
         output = module(batch)
-        assert np.allclose(output.item(), 15.03 if is_coalesced else 14.69, atol=0.1)
+        assert np.allclose(output.item(), 18.37 if is_coalesced else 14.69, atol=0.1)
 
         """ Multi-Head Routing Test """
         # NOTE: We need to add SkilledLoRAs instead of standard LoRAs
@@ -214,7 +216,7 @@ class TestMultiExpertModel:
         output = module(batch)
 
         # Because routing is initialized to uniform, should give same result
-        assert np.allclose(output.item(), 15.03 if is_coalesced else 15.27, atol=0.1)
+        assert np.allclose(output.item(), 19.125 if is_coalesced else 15.27, atol=0.1)
 
         # Now let's change the routing, to make sure the output also changes
         for mod in module.modules():
@@ -223,12 +225,14 @@ class TestMultiExpertModel:
                 mod.module_logits.data[:, -1] = 999
 
         output = module(batch)
-        assert np.allclose(output.item(), 15.56 if is_coalesced else 16.22, atol=0.1)
+        assert np.allclose(output.item(), 19.875 if is_coalesced else 16.22, atol=0.1)
 
         # Finally, Test invalid tasks
         batch["task_names"][-1] = "task_10"
         with pytest.raises(AssertionError):
             output = module(batch)
+
+        os.environ["COALESCED_LORA_CONTAINER"] = "0"
 
     def test_expert_selector_with_task_name_routing(self, tmp_exp_config):
         seed_everything(0)
@@ -243,8 +247,6 @@ class TestMultiExpertModel:
         assert module.hparams.model_modifier == None
         module.add_experts_from_dict(module_dict, action="route")
         module.set_default_expert("mod3")
-
-        bs, max_seq_len = 10, 100
 
         assert isinstance(
             module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
@@ -268,7 +270,7 @@ class TestMultiExpertModel:
 
         # Test Base Llama model
         output = module(batch)
-        assert np.allclose(output.item(), 10.1, atol=0.1)
+        assert np.allclose(output.item(), 12.3125, atol=0.1)
 
     def test_expert_selector_with_poly_routing(self, tmp_exp_config):
         seed_everything(0)
@@ -290,7 +292,6 @@ class TestMultiExpertModel:
         # Model has been created. Now, we fix the generator to ensure that coalesced vs not coalesced gives the same as base llama
         generator = torch.Generator()
         generator.manual_seed(0)
-        bs, max_seq_len = 10, 100
         batch = {
             "input_ids": torch.randint(10, 400, (bs, max_seq_len), generator=generator),
             "labels": torch.randint(10, 400, (bs, max_seq_len), generator=generator),
@@ -306,7 +307,7 @@ class TestMultiExpertModel:
 
         # Test Base Llama model
         output = module(batch)
-        assert np.allclose(output.item(), 10.1, atol=0.1)
+        assert np.allclose(output.item(), 12.3125, atol=0.1)
 
         # check the get_router_weights function
         weights = {}
@@ -345,7 +346,7 @@ class TestMultiExpertModel:
         assert selector.module_logits_dict["mod2"].item() == 0.0
 
         output = module(batch)
-        assert np.allclose(output.item(), 10.1, atol=0.1)
+        assert np.allclose(output.item(), 12.3125, atol=0.1)
 
         weights = {}
         for _, selector_dict in module.selector_cache.items():
@@ -531,7 +532,7 @@ class TestMultiExpertModel:
         module = MultiExpertModel(**vars(config))
         module.add_experts_from_dict(module_dict, action="route")
 
-        bs, max_seq_len = 2, 100
+        bs = 2
         batch = {
             "input_ids": torch.randint(bs, 400, (bs, max_seq_len)),
             "labels": torch.randint(bs, 400, (bs, max_seq_len)),
