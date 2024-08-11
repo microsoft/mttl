@@ -510,7 +510,7 @@ def finetune_polylib_full(args: FinetuneConfig, dm):
     return train_module(args, module, dm)
 
 
-def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
+def train_module(args: FinetuneConfig, module: ExpertTrainer, dm):
     loggers = get_pl_loggers(args)
     callbacks = get_monitors(args)
 
