@@ -146,7 +146,7 @@ class TestMultiExpertModel:
                 mod.lora_a.data = torch.rand(mod.lora_a.shape, generator=gen) * 0.5
                 mod.lora_b.data = torch.rand(mod.lora_b.shape, generator=gen) * 0.5
 
-    @pytest.mark.parametrize('is_coalesced', [(True, False)])
+    @pytest.mark.parametrize("is_coalesced", [(True, False)])
     def test_expert_selector_with_poly_task_routing(
         self, tmp_exp_config, is_coalesced
     ):  # this fails, why?
