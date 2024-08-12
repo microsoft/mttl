@@ -410,12 +410,6 @@ class TrainingArgs(DataArgs):
             )
 
     def __post_init__(self):
-        if self.model is None:
-            raise ValueError("`model` is not specified and required!")
-
-        if self.model_family is None:
-            raise ValueError("`model_family` is not specified and required!")
-
         if self.attn_implementation == "eager" and self.pack_sequences:
             logger.warning(
                 "Eager attention is not compatible with packed sequences"
