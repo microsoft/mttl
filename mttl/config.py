@@ -410,6 +410,16 @@ class TrainingArgs(DataArgs):
             )
 
     def __post_init__(self):
+        if self.model is not None and self.model_family is None:
+            # attempt to infer the model family from the model name
+            if "t5" in self.model or "T0" in self.model:
+                self.model_family = "seq2seq"
+            else:
+                self.model_family = "gpt"
+            logger.warning(
+                "Model family not specified, assuming {}".format(self.model_family)
+            )
+
         if self.attn_implementation == "eager" and self.pack_sequences:
             logger.warning(
                 "Eager attention is not compatible with packed sequences"
