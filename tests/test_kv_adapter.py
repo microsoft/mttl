@@ -1,13 +1,12 @@
 import os
-import torch
+
 import pytest
+import torch
 from pytorch_lightning import seed_everything
-from mttl.models.modifiers.routing import RoutingInfo
+
 from mttl.models.modifiers import modify_transformer
-from mttl.models.modifiers.kv_adapter import (
-    KVAdapter,
-    KVAdapterConfig,
-)
+from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
+from mttl.models.modifiers.routing import RoutingInfo
 
 
 @pytest.mark.parametrize("adapter_type", ["kv_adapter"])
@@ -41,8 +40,8 @@ def test_llama_adapter(adapter_type, model_arg):
 
         model = LlamaForCausalLM(small_config)
     elif model_arg == "gpt-neo":
-        from transformers.models.gpt_neo.modeling_gpt_neo import GPTNeoForCausalLM
         from transformers.models.gpt_neo.configuration_gpt_neo import GPTNeoConfig
+        from transformers.models.gpt_neo.modeling_gpt_neo import GPTNeoForCausalLM
 
         adapter_config.modify_layers = ".*attention.*"
 
@@ -59,7 +58,7 @@ def test_llama_adapter(adapter_type, model_arg):
         model = GPTNeoForCausalLM(small_config)
 
     bs, max_seq_len = 10, 100
-    model.info_container = {}
+
     seed_everything(0)
     batch = {
         "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
@@ -74,12 +73,8 @@ def test_llama_adapter(adapter_type, model_arg):
     task_ids = torch.randint(0, adapter_config.n_tasks, (bs,))
     batch["attention_mask"] = attn_mask
 
-    model.info_container["routing_infos"] = RoutingInfo(task_ids=task_ids)
-
     # Test with llama adapter
     new_model = modify_transformer(model, adapter_config)
-
-    new_model.info_container["routing_infos"] = RoutingInfo(task_ids=task_ids)
 
     print("model : ", model_arg)
     if model_arg == "llama":

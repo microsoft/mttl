@@ -1,10 +1,12 @@
-from functools import partial
-from mttl.datamodule.base import DefaultDataModule, DatasetConfig
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
+from functools import partial
+
 import numpy
+
+from mttl.datamodule.base import DataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
-from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
+from mttl.models.library.expert_library import DatasetLibrary
 
 
 @dataclass
@@ -85,15 +87,18 @@ def completion_template(for_generation, example):
     return example
 
 
-class MBPPDataModule(DefaultDataModule):
+@DataModule.register("mbpp", config_cls=MBPPDataConfig)
+class MBPPDataModule(DataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
         dataset = DatasetLibrary.pull_dataset("mbpp", name=self.config.name)
 
         dataset = dataset.map(
-            instruct_template
-            if self.config.use_instruct_template
-            else partial(completion_template, self.for_generation),
+            (
+                instruct_template
+                if self.config.use_instruct_template
+                else partial(completion_template, self.for_generation)
+            ),
             num_proc=n_proc,
         )
 
@@ -128,7 +133,7 @@ class CodeExDataConfig(DatasetConfig):
     pass
 
 
-class CodeExDataModule(DefaultDataModule):
+class CodeExDataModule(DataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
 

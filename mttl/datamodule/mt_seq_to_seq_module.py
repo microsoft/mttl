@@ -1,13 +1,14 @@
-from functools import partial
 import os
-import numpy
-from datasets import concatenate_datasets
-from datasets import Dataset
-from mttl.datamodule.base import DefaultDataModule, DatasetConfig
-from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task, logger
 from dataclasses import dataclass
+from functools import partial
 
-from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
+import numpy
+from datasets import Dataset, concatenate_datasets
+
+from mttl.datamodule.base import DataModule, DatasetConfig
+from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
+from mttl.logging import logger
+from mttl.models.library.expert_library import DatasetLibrary
 
 
 def is_phi2_eval_task(task):
@@ -133,7 +134,8 @@ def apply_source_template(dataset, source_template):
     return dataset
 
 
-class FlatMultiTaskModule(DefaultDataModule):
+@DataModule.register("flat_multitask", config_cls=FlatMultiTaskConfig)
+class FlatMultiTaskModule(DataModule):
     def setup_dataset(self):
         self.dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
@@ -212,7 +214,8 @@ def filter_task_source(include_task_source, example):
     return example["task_source"] in include_task_source
 
 
-class FlanModule(DefaultDataModule):
+@DataModule.register("flan", config_cls=FlanConfig)
+class FlanModule(DataModule):
     def setup_dataset(self):
         dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
@@ -287,3 +290,9 @@ class FlanModule(DefaultDataModule):
                 num_proc=n_proc,
                 desc="Filtering phi-2 eval tasks from training mixture.",
             )
+            if not self.train_dataset.num_rows:
+                logger.warning(
+                    "No training examples left after filtering. "
+                    "Please set `remove_phi_eval_tasks=False` "
+                    "if you want to train on phi-2 eval tasks."
+                )

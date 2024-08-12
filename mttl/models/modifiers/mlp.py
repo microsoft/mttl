@@ -1,17 +1,14 @@
+import math
 from dataclasses import dataclass
 from typing import List
+
+import bitsandbytes as bnb
 import numpy as np
 import torch
 from torch import nn
-import math
-from torch import nn
-import torch
-import math
-import bitsandbytes as bnb
-
 from transformers.activations import ACT2FN
-from mttl.models.modifiers import register_modifier
-from mttl.models.modifiers.base import ModifyMixin, ModifierConfig
+
+from mttl.models.modifiers.base import Modifier, ModifierConfig
 
 
 @dataclass
@@ -19,8 +16,8 @@ class MLPConfig(ModifierConfig):
     n_embd: int = 2560
 
 
-@register_modifier("mlp", config_cls=MLPConfig)
-class MLPModifier(ModifyMixin):
+@Modifier.register("mlp", config_cls=MLPConfig)
+class MLPModifier(Modifier):
     def __init__(
         self,
         config: MLPConfig,

@@ -1,5 +1,7 @@
 import json
+
 import pytest
+
 from mttl.config import Config
 
 
@@ -14,6 +16,7 @@ def ConfigTest(tmp_path):
             self.total_steps = 1000
             self.learning_rate = 1e-3
             self.output_dir = str(tmp_path / "output_dir")
+            self.attn_implementation = None
 
     return SimpleConfig
 
@@ -132,10 +135,8 @@ def test_dump_load_lora_config():
 
 
 def test_dump_load_selector_config():
-    from mttl.models.modifiers.expert_containers.selectors import (
-        SelectorConfig,
-        MOERKHSSelectorConfig,
-    )
+    from mttl.models.containers.selectors.base import SelectorConfig
+    from mttl.models.containers.selectors.moe_selector import MOERKHSSelectorConfig
 
     dump = MOERKHSSelectorConfig(emb_dim=12345).asdict()
     test = SelectorConfig.fromdict(dump)

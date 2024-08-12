@@ -1,12 +1,12 @@
 import copy
-import torch
+import json
 
-from pytorch_lightning.callbacks import Callback
+import torch
 from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks import Callback
 
 from mttl.datamodule.ni_data_module import NiDataModule
 from mttl.models.encoder_decoder import Finetuner
-import json
 
 
 class NIOnlineZeroShot(Callback):

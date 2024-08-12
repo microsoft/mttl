@@ -1,18 +1,24 @@
-import sys, os
 import copy
-import torch
-import tqdm
+import os
 import shutil
+import sys
+from abc import ABC, abstractmethod
 
 import pytorch_lightning as pl
-from pytorch_lightning import LightningModule, Trainer, callbacks as cb
+import torch
+import tqdm
+import wandb
+from pytorch_lightning import LightningModule, Trainer
+from pytorch_lightning import callbacks as cb
 from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch.optim import Optimizer
 
-from mttl.utils import logger
+from mttl.datamodule.base import DataModule
+from mttl.evaluators import MMLUEvaluator
+from mttl.evaluators.evaluators import Evaluator
+from mttl.logging import logger
 from mttl.models.utils import transfer_batch_to_device
-
 
 DEBUG = False
 
@@ -99,7 +105,7 @@ class LiveCheckpointCallback(pl.Callback):
         if metric_name != self.monitor:
             return
 
-        if trainer.global_step == 0: 
+        if trainer.global_step == 0:
             # skip checkpoint before training (deepspeed fails checkpointing if optimizer non-existent
             return
 
@@ -297,7 +303,7 @@ class NanoMMLUCallback(cb.Callback):
     ):
         super().__init__()
 
-        from mttl.evaluators.mmlu_evaluator import MMLUEvaluator
+        from mttl.evaluators import MMLUEvaluator
 
         self.evaluator = MMLUEvaluator(datamodule=datamodule)
         self.every_n_epochs = every_n_epochs
@@ -418,8 +424,8 @@ class MMLUCallback(cb.Callback):
             )
 
     def eval_mmlu(self, pl_module):
-        from mttl.evaluators import MMLUEvaluator
         from mttl.datamodule.mmlu_data_module import MMLUDataConfig
+        from mttl.evaluators import MMLUEvaluator
 
         if DEBUG:
             self.eval_mmlu_count += 1
@@ -578,3 +584,92 @@ class ProgressCallback(cb.TQDMProgressBar):
             file=sys.stderr,
         )
         return bar
+
+
+class EvalCallback(ABC):
+    @abstractmethod
+    def evaluate_model(self, model, prefix=""):
+        pass
+
+
+class MMLUEvalCallback(MMLUEvaluator, EvalCallback):
+    def __init__(
+        self,
+        config,
+        name="mmlu_test_callback",
+        split="test",
+        subsample=-1,
+        use_vllm=False,
+    ):
+        self.split = split
+        from mttl.datamodule.mmlu_data_module import MMLUDataConfig
+
+        assert split in ["test"]
+        self.use_vllm = use_vllm
+        mmlu_config = MMLUDataConfig(
+            **{
+                k: v
+                for k, v in config.__dict__.items()
+                if k in MMLUDataConfig.__dataclass_fields__.keys()
+            }
+        )
+        super().__init__(mmlu_config, use_vllm=use_vllm)
+        self.subsample = subsample
+        self.name = name
+
+    def evaluate_model(self, model, prefix=""):
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model.to(device)
+        score = self.evaluate(model, self.split, self.subsample)["all"]["mean"]
+        # log
+        if wandb.run is not None:
+            wandb.log({f"{prefix}{self.name}_{self.split}": score})
+        return score
+
+
+class TestLossEvaluator(LossCallback, Evaluator):
+    def __init__(
+        self,
+        datamodule: DataModule,
+        name="test",
+        split="test",
+        subsample=-1,
+        **kwargs,
+    ):
+        self.split = split
+        if split == "test":
+            dataloader = datamodule.test_dataloader(subsample=subsample)
+        elif split in ["val", "valid", "validation"]:
+            dataloader = datamodule.val_dataloader(subsample=subsample)
+        elif split == "train":
+            dataloader = datamodule.train_dataloader(subsample=subsample)
+        super().__init__(
+            dataloader=dataloader,
+            name=name,
+            output_dir=None,
+            eval_every_opt_step=0,
+            checkpoint_oracle=False,
+        )
+        self.datamodule = datamodule
+
+    @property
+    def tasks(self):
+        return self.datamodule.task_names
+
+    def evaluate(self, model):
+        # return something that should be maximized
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model.to(device)
+        loss = self.test(model)
+        loss *= -1.0
+        return {"all": {"mean": loss.item()}, f"{self.name}": {"mean": loss.item()}}
+
+    def get_loss(self, model, **kwargs):
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model.to(device)
+        loss = self.test(model, **kwargs)
+        return loss.item()
+
+    @property
+    def tokenizer(self):
+        return self.datamodule.tokenizer

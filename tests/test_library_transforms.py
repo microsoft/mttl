@@ -1,25 +1,25 @@
 # unit test for adapter_ranker
 import copy
+import logging
 from collections import OrderedDict
-import torch
-import pytest
+
 import numpy as np
+import pytest
+import torch
 from pytorch_lightning import seed_everything
 
+from mttl.logging import logger
 from mttl.models.expert_config import ExpertConfig
-from mttl.models.modifiers.expert_containers.expert_library import (
-    HFExpertLibrary,
-    LocalExpertLibrary,
-)
-from mttl.models.modifiers.expert_containers.library_transforms import (
+from mttl.models.library.expert_library import HFExpertLibrary, LocalExpertLibrary
+from mttl.models.library.library_transforms import (
+    ArrowConfig,
+    ArrowTransform,
+    MBClusteringTransformConfig,
+    MBCWithCosSimTransform,
     TiesMerge,
     TiesMergeConfig,
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
-    MBClusteringTransformConfig,
-    MBCWithCosSimTransform,
-    ArrowTransform,
-    ArrowConfig,
 )
 
 
@@ -35,9 +35,6 @@ def test_config():
 
 
 def test_arrow():
-    import logging
-    from mttl.utils import logger
-
     logger.setLevel(logging.DEBUG)
 
     library = HFExpertLibrary("sordonia/new-test-library")
@@ -57,20 +54,30 @@ def test_arrow():
 
 
 def test_arrow_with_tiedlora(tmp_path, create_dummy_expert):
-    import logging
-    from mttl.utils import logger
-
     seed_everything(0)
-
     logger.setLevel(logging.DEBUG)
 
-    def patch_expert_weights(expert):
-        for k, v in expert.expert_weights.items():
+    def patch_expert_weights(expert, offset=0):
+        keys = sorted(expert.expert_weights.keys())
+        for idx, k in enumerate(keys):
+            v = expert.expert_weights[k]
             if "q_proj" in k or "k_proj" in k or "v_proj" in k or "o_proj" in k:
-                assert ".".join(k.split(".")[:-1]) + ".lora_a" in expert.expert_weights
-                assert ".".join(k.split(".")[:-1]) + ".lora_b" in expert.expert_weights
+                parent = ".".join(k.split(".")[:-1])
+                assert parent + ".lora_a" in expert.expert_weights
+                assert parent + ".lora_b" in expert.expert_weights
+            gen = torch.Generator()
             if "lora_b" in k:
-                expert.expert_weights[k] = torch.randn_like(v)
+                gen.manual_seed(idx + offset)
+            elif "lora_a" in k:
+                # map q_proj, k_proj, v_proj or o_proj to q_proj
+                base_name = parent = ".".join(k.split(".")[:-2] + ["k_proj.lora_a"])
+                logger.debug(f"from {k} to {base_name}")
+                gen.manual_seed(keys.index(base_name) + offset)
+
+            expert.expert_weights[k] = torch.randn(
+                size=v.size(), dtype=v.dtype, generator=gen
+            )
+
         return expert
 
     config = ExpertConfig(
@@ -85,8 +92,8 @@ def test_arrow_with_tiedlora(tmp_path, create_dummy_expert):
         }
     )
     # create random Lora
-    expert1 = patch_expert_weights(create_dummy_expert(config, "module1"))
-    expert2 = patch_expert_weights(create_dummy_expert(config, "module2"))
+    expert1 = patch_expert_weights(create_dummy_expert(config, "module1"), offset=0)
+    expert2 = patch_expert_weights(create_dummy_expert(config, "module2"), offset=1_000)
 
     library = LocalExpertLibrary(tmp_path)
     library.add_expert(expert1, expert1.name)
@@ -103,17 +110,17 @@ def test_arrow_with_tiedlora(tmp_path, create_dummy_expert):
             task_sum += protos[task_name][key].sum().item()
         sums.append(task_sum)
 
-    assert np.allclose(sums, [-3.8098, 13.9056], atol=1e-3)
+    assert np.allclose(sums, [-13.642, -7.734], atol=1e-3)
 
 
 def test_compute_svd_embeddings():
-    from mttl.models.modifiers.expert_containers.library_transforms import (
+    from mttl.models.library.library_transforms import (
         SVDEmbeddingTransform,
         SVDEmbeddingTransformConfig,
     )
 
     library = HFExpertLibrary("sordonia/new-test-library")
-    embeddings, svd = SVDEmbeddingTransform(
+    embeddings = SVDEmbeddingTransform(
         SVDEmbeddingTransformConfig(n_components=2)
     ).transform(library=library, persist=False)
 
@@ -168,9 +175,6 @@ def test_weighted_merge():
 
 
 def test_ties_merge():
-    import logging
-    from mttl.utils import logger
-
     logger.setLevel(logging.DEBUG)
 
     top_k = 0.2

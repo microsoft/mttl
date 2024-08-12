@@ -7,7 +7,7 @@ name = "mttl"
 version = "0.0.1"
 description = "Multi-Task Transfer Learning with Adapters"
 readme = "README.md"
-requires-python = ">=3.8, <3.12"  # ray don't support 3.12
+requires-python = ">=3.9, <3.12"  # ray don't support 3.12
 dynamic = ["dependencies"]
 
 classifiers = [
@@ -19,8 +19,9 @@ classifiers = [
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
 
-[tool.setuptools]
-packages = ["mttl", "mttl.dataloader", "mttl.datamodule", "mttl.models", "projects"]
+[tool.setuptools.packages]
+find = {}
+
 
 [project.optional-dependencies]
 dev = [
@@ -28,8 +29,20 @@ dev = [
     "pytest-mock>=3.13",
     "pytest-xdist",
     "pre-commit",
+    "black",
+    "isort",
+]
+
+flash-att = [
+    "flash-attn>=2.6.0",
 ]
 
 [project.urls]
 "Homepage" = "https://github.com/microsoft/mttl"
 "Bug Tracker" = "https://github.com/microsoft/mttl/issues"
+
+[tool.black]
+line-length = 88
+
+[tool.isort]
+profile = "black"

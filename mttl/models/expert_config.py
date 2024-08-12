@@ -1,9 +1,10 @@
 import json
 import os
+
 import torch
 
 from mttl.config import Config
-from mttl.utils import logger, warn_once
+from mttl.logging import warn_once
 
 
 class ExpertConfig(Config):
@@ -63,7 +64,7 @@ class ExpertConfig(Config):
         self.eval_mmlu_few_shot = True  # use few-shot for mmlu, default
         self.eval_mmlu_flag = False  # eval mmlu performance during training
         self.eval_rouge_flag = False  # eval rouge during training
-        self.pipeline_eval_tasks = "all"
+        self.pipeline_eval_tasks = None
 
         self.eval_metric = "loss"
         self.use_vllm = False
@@ -103,7 +104,7 @@ class ExpertConfig(Config):
         self.es_metric = "loss"
         self.n_ng_iterations = 30  # number of iterations for LoraHub
         self.recompute_prototypes = False
-        self.expert_embeds_save_name = None
+        self.selector_data_id = None
         self.selector_logging = (
             True  # If false, routing specific stats are not computed
         )

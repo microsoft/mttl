@@ -14,11 +14,15 @@ def get_scheduler(optimizer, config):
     scheduler_name = getattr(config, "scheduler", "linear_decay_with_warmup")
 
     if scheduler_name == "polynomial_decay_with_warmup":
-        return get_polynomial_decay_schedule_with_warmup(optimizer, config.warmup_steps, config.total_steps)
+        return get_polynomial_decay_schedule_with_warmup(
+            optimizer, config.warmup_steps, config.total_steps
+        )
     elif scheduler_name == "exponential_decay":
         return torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=config.gamma)
     elif scheduler_name == "linear_decay_with_warmup":
-        return get_linear_schedule_with_warmup(optimizer, config.warmup_steps, config.total_steps)
+        return get_linear_schedule_with_warmup(
+            optimizer, config.warmup_steps, config.total_steps
+        )
     elif scheduler_name == "cosine_annealing":
         return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, config.total_steps)
     elif scheduler_name == "adafactor":
@@ -27,7 +31,9 @@ def get_scheduler(optimizer, config):
         raise ValueError("Invalid Scheduler Name %s" % scheduler_name)
 
 
-def get_linear_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps, last_epoch=-1):
+def get_linear_schedule_with_warmup(
+    optimizer, num_warmup_steps, num_training_steps, last_epoch=-1
+):
     """
     Create a schedule with a learning rate that decreases linearly from the initial lr set in the optimizer to 0,
     after a warmup period during which it increases linearly from 0 to the initial lr set in the optimizer.
@@ -49,13 +55,22 @@ def get_linear_schedule_with_warmup(optimizer, num_warmup_steps, num_training_st
     def lr_lambda(current_step: int):
         if current_step < num_warmup_steps:
             return float(current_step) / float(max(1, num_warmup_steps))
-        return max(0.0, float(num_training_steps - current_step) / float(max(1, num_training_steps - num_warmup_steps)))
+        return max(
+            0.0,
+            float(num_training_steps - current_step)
+            / float(max(1, num_training_steps - num_warmup_steps)),
+        )
 
     return LambdaLR(optimizer, lr_lambda, last_epoch)
 
 
 def get_polynomial_decay_schedule_with_warmup(
-    optimizer, num_warmup_steps, num_training_steps, lr_end=1e-7, power=1.0, last_epoch=-1
+    optimizer,
+    num_warmup_steps,
+    num_training_steps,
+    lr_end=1e-7,
+    power=1.0,
+    last_epoch=-1,
 ):
     """
     Create a schedule with a learning rate that decreases as a polynomial decay
@@ -87,7 +102,9 @@ def get_polynomial_decay_schedule_with_warmup(
     """
 
     lr_init = optimizer.defaults["lr"]
-    assert lr_init > lr_end, f"lr_end ({lr_end}) must be be smaller than initial lr ({lr_init})"
+    assert (
+        lr_init > lr_end
+    ), f"lr_end ({lr_end}) must be be smaller than initial lr ({lr_init})"
 
     def lr_lambda(current_step: int):
         if current_step < num_warmup_steps:
@@ -98,7 +115,7 @@ def get_polynomial_decay_schedule_with_warmup(
             lr_range = lr_init - lr_end
             decay_steps = num_training_steps - num_warmup_steps
             pct_remaining = 1 - (current_step - num_warmup_steps) / decay_steps
-            decay = lr_range * pct_remaining ** power + lr_end
+            decay = lr_range * pct_remaining**power + lr_end
             return decay / lr_init  # as LambdaLR multiplies by lr_init
 
     return LambdaLR(optimizer, lr_lambda, last_epoch)

@@ -20,10 +20,10 @@
 import json
 import os
 import random
+
 import datasets
 
-from mttl.utils import logger
-
+from mttl.logging import logger
 
 _CITATION = """
 @article{wang2022benchmarking,

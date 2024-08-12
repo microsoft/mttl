@@ -1,9 +1,6 @@
 import multiprocessing
 
-from mttl.models.modifiers.expert_containers.expert_library import (
-    BlobExpertLibrary,
-    ExpertLibrary,
-)
+from mttl.models.library.expert_library import BlobExpertLibrary, ExpertLibrary
 
 
 def copy_repo(origin_repo_id, target_repo_id):
@@ -35,9 +32,6 @@ def main():
     pool.starmap(copy_repo, expert_repos)
     pool.close()
     pool.join()
-    # sync version
-    # for origin_repo_id, target_repo_id in expert_repos:
-    #     copy_repo(origin_repo_id, target_repo_id)
 
 
 if __name__ == "__main__":

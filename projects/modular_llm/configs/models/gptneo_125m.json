@@ -1,0 +1,23 @@
+{
+    "lora_rank": 4,
+    "lora_dropout": 0.0,
+    "weight_decay": 0.0,
+    "n_skills": 1,
+    "model_modifier": "lora",
+    "modify_modules": ".*",
+    "modify_layers": "q_proj|v_proj|k_proj",
+    "trainable_param_names": ".*lora_[ab].*",
+    "num_train_epochs": 10,
+    "learning_rate": 3e-5,
+    "micro_batch_size": 16,
+    "train_batch_size": 16,
+    "predict_batch_size": 8,
+    "precision": "16",
+    "model": "EleutherAI/gpt-neo-125m",
+    "model_family": "gpt",
+    "optimizer": "adamw",
+    "warmup_proportion": 0.06,
+    "max_input_length": 1024,
+    "max_output_length": 128,
+    "truncation_side": "left"
+}

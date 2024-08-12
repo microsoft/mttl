@@ -1,19 +1,19 @@
 # global interpreter
 import asyncio
+import logging
+import os
+from dataclasses import dataclass
+from typing import Any, List
+
 import numpy as np
 import openai
-import logging
 import tiktoken
-import os
-from typing import List, Any
-from dataclasses import dataclass
 from tenacity import (
     retry,
+    retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type,
 )
-
 
 default_forward_lm = None
 default_backward_lm = None

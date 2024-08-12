@@ -1,28 +1,27 @@
-# unit test for adapter_ranker
+import asyncio
 import io
 import os
-from unittest.mock import patch
-import pytest
-import asyncio
 import uuid
+from unittest.mock import patch
 
-from datasets import load_dataset
+import pytest
 import torch
+from datasets import load_dataset
 from huggingface_hub import (
     CommitOperationAdd,
-    CommitOperationDelete,
     CommitOperationCopy,
+    CommitOperationDelete,
 )
 
-from mttl.models.modifiers.expert_containers.expert_library import (
+from mttl.models.library.expert_library import (
     BlobExpertLibrary,
-    LocalExpertLibrary,
     BlobStorageEngine,
-    VirtualLocalLibrary,
-    LocalFSEngine,
-    HFExpertLibrary,
-    ExpertLibrary,
     DatasetLibrary,
+    ExpertLibrary,
+    HFExpertLibrary,
+    LocalExpertLibrary,
+    LocalFSEngine,
+    VirtualLocalLibrary,
 )
 
 
@@ -70,7 +69,7 @@ def test_expert_lib(mocker):
 
 
 def test_soft_delete(mocker):
-    from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+    from mttl.models.library.expert_library import HFExpertLibrary
 
     # read the stored embeddings
     library = HFExpertLibrary("sordonia/new-test-library", create=False)
@@ -91,7 +90,7 @@ def test_soft_delete(mocker):
 
 
 def test_read_embeddings():
-    from mttl.models.modifiers.expert_containers.expert_library import HFExpertLibrary
+    from mttl.models.library.expert_library import HFExpertLibrary
 
     # read the stored embeddings
     embeddings = HFExpertLibrary("sordonia/new-test-library").get_auxiliary_data(
@@ -102,10 +101,7 @@ def test_read_embeddings():
 
 
 def test_add_auxiliary_data(mocker, tmp_path):
-    from mttl.models.modifiers.expert_containers.expert_library import (
-        HFExpertLibrary,
-        LocalExpertLibrary,
-    )
+    from mttl.models.library.expert_library import HFExpertLibrary, LocalExpertLibrary
 
     library = LocalExpertLibrary.from_expert_library(
         HFExpertLibrary("sordonia/new-test-library"), tmp_path
@@ -413,7 +409,7 @@ def test_copy_library_blob_to_blob(tmp_path, build_meta_ckpt, setup_repo, repo_i
     library = ExpertLibrary.get_expert_library(az_repo_id)
 
     # Create a new library from the first one
-    new_repo_id = f"mttldata/{uuid.uuid4()}"
+    new_repo_id = f"local://mttldata/{uuid.uuid4()}"
     az_new_repo_id = f"az://{new_repo_id}"
     try:  # Clean up the new repo if the test fails
         new_lib = BlobExpertLibrary.from_expert_library(library, az_new_repo_id)
@@ -438,8 +434,9 @@ def test_copy_library_blob_to_local(tmp_path, build_meta_ckpt, setup_repo, repo_
     library = ExpertLibrary.get_expert_library(az_repo_id)
 
     # Create a new library from the first one
-    new_repo_id = tmp_path / "new_repo"
-    new_repo_id.mkdir()
+    new_repo_path = tmp_path / "new_repo"
+    new_repo_path.mkdir()
+    new_repo_id = f"local://{new_repo_path}"
     new_lib = LocalExpertLibrary.from_expert_library(library, new_repo_id)
     # drop the path and keep the filenames
     local_files = {f.split("/")[-1] for f in new_lib.list_repo_files(new_repo_id)}
@@ -448,19 +445,20 @@ def test_copy_library_blob_to_local(tmp_path, build_meta_ckpt, setup_repo, repo_
 
 def test_copy_library_local_to_local(tmp_path, build_meta_ckpt, setup_repo, repo_id):
     # Create a library with two experts
-    local_path = repo_id = tmp_path / "base_repo"
-    repo_id.mkdir()
-    repo_id = str(repo_id)
+    local_path = tmp_path / "base_repo"
+    local_path.mkdir()
     engine = LocalFSEngine()
-    setup_repo(engine, repo_id)
+    setup_repo(engine, local_path)
     filenames = build_meta_ckpt(local_path, 2)
+    repo_id = f"local://{local_path}"
 
     # Get the expert library
     library = ExpertLibrary.get_expert_library(repo_id)
 
     # Create a new library from the first one
-    new_repo_id = tmp_path / "new_repo"
-    new_repo_id.mkdir()
+    new_repo_path = tmp_path / "new_repo"
+    new_repo_path.mkdir()
+    new_repo_id = f"local://{new_repo_path}"
     new_lib = LocalExpertLibrary.from_expert_library(library, new_repo_id)
     # drop the path and keep the filenames
     base_files = {f.split("/")[-1] for f in library.list_repo_files(repo_id)}
@@ -470,18 +468,18 @@ def test_copy_library_local_to_local(tmp_path, build_meta_ckpt, setup_repo, repo
 
 def test_get_expert_library_copy(tmp_path, build_meta_ckpt, setup_repo, repo_id):
     # Create a library with two experts
-    local_path = repo_id = tmp_path / "base_repo"
-    repo_id.mkdir()
-    repo_id = str(repo_id)
+    local_path = tmp_path / "base_repo"
+    local_path.mkdir()
     engine = LocalFSEngine()
-    setup_repo(engine, repo_id)
+    setup_repo(engine, local_path)
     filenames = build_meta_ckpt(local_path, 2)
+    repo_id = f"local://{local_path}"
 
     # Get the expert library
     library = ExpertLibrary.get_expert_library(repo_id)
 
     # Get the expert library creating a copy of the original
-    new_repo_id = str(tmp_path / "new_repo")
+    new_repo_id = f"local://{tmp_path / 'new_repo'}"
     new_lib = ExpertLibrary.get_expert_library(repo_id, destination_id=new_repo_id)
 
     # drop the path and keep the filenames
@@ -492,18 +490,16 @@ def test_get_expert_library_copy(tmp_path, build_meta_ckpt, setup_repo, repo_id)
 
 def test_virtual_library_is_in_memory(tmp_path, build_meta_ckpt, setup_repo, repo_id):
     # Create a library with two experts
-    local_path = repo_id = tmp_path / "base_repo"
-    repo_id.mkdir()
-    repo_id = str(repo_id)
+    local_path = tmp_path / "base_repo"
+    local_path.mkdir()
     engine = LocalFSEngine()
-    setup_repo(engine, repo_id)
+    setup_repo(engine, local_path)
     filenames = build_meta_ckpt(local_path, 2)
+    repo_id = f"local://{local_path}"
     # Get the expert library
     local_library = ExpertLibrary.get_expert_library(repo_id)
 
     # Create a new library from the first one
-    virtual_repo_id = tmp_path / "virtual_repo"
-    virtual_repo_id.mkdir()
     virtual_lib = VirtualLocalLibrary.from_expert_library(
         local_library, local_library.repo_id
     )
@@ -513,7 +509,7 @@ def test_virtual_library_is_in_memory(tmp_path, build_meta_ckpt, setup_repo, rep
     assert set(virtual_lib.data.keys()) == {"expert_1"}
 
     # check that the original library is not affected
-    base_files = {f.split("/")[-1] for f in local_library.list_repo_files(repo_id)}
+    base_files = {f.split("/")[-1] for f in local_library.list_repo_files(local_path)}
     assert base_files == {
         "README.md",
         "expert_1.meta",
@@ -521,7 +517,7 @@ def test_virtual_library_is_in_memory(tmp_path, build_meta_ckpt, setup_repo, rep
         "expert_2.meta",
         "expert_2.ckpt",
     }
-    assert set(os.listdir(repo_id)) == {
+    assert set(os.listdir(local_path)) == {
         "README.md",
         "expert_1.meta",
         "expert_1.ckpt",
@@ -543,9 +539,7 @@ def test_virtual_library_is_in_memory(tmp_path, build_meta_ckpt, setup_repo, rep
 )
 def test_get_expert_library(expert_lib_class, repo_id):
     class_name = expert_lib_class.__name__
-    with patch(
-        f"mttl.models.modifiers.expert_containers.expert_library.{class_name}"
-    ) as mock_expert_lib:
+    with patch(f"mttl.models.library.expert_library.{class_name}") as mock_expert_lib:
         expert_library = ExpertLibrary.get_expert_library(repo_id)
         mock_expert_lib.assert_called_once()
         assert class_name in str(expert_library)

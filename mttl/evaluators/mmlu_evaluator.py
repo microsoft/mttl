@@ -1,10 +1,11 @@
 import copy
-import os
-import click
-import tqdm
-import torch
 import hashlib
+import os
+
+import click
 import numpy as np
+import torch
+import tqdm
 
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators.base import (

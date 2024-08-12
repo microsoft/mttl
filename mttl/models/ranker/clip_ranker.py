@@ -1,17 +1,17 @@
 # implements the CLIPRanker class
-from sentence_transformers import SentenceTransformer
-import torch
+import os
+
+import numpy as np
 import pytorch_lightning as pl
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import tqdm
-import os
-import numpy as np
+from sentence_transformers import SentenceTransformer
+from transformers import T5ForConditionalGeneration, T5Tokenizer
 
 from mttl.models.ranker.adapter_ranker import AdapterRanker
 from mttl.models.utils import EfficientCheckpointModule
-from transformers import T5ForConditionalGeneration
-from transformers import T5Tokenizer
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

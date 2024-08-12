@@ -1,22 +1,31 @@
-from enum import Enum
 import hashlib
+import json
 import os
 import re
 from collections import defaultdict, deque
-from typing import Any, Callable, Optional, Union
-import pytorch_lightning as pl
-from pytorch_lightning import LightningModule
-import torch
-import json
+from enum import Enum
+from typing import Callable, Optional, Union
+
 import prettytable
-from transformers.utils import cached_file
+import pytorch_lightning as pl
+import torch
+from pytorch_lightning import LightningModule
 from transformers.file_utils import PushToHubMixin
-from mttl.utils import logger, get_checkpoint_path
+from transformers.utils import cached_file
+
+from mttl.logging import logger
 from mttl.models.get_optimizer import get_optimizer
 from mttl.models.get_scheduler import get_scheduler
-
+from mttl.utils import get_checkpoint_path
 
 CHECKPOINT_PATH_IN_HUB = "checkpoint.ckpt"
+
+
+class Singleton(object):
+    def __new__(cls):
+        if not hasattr(cls, "instance"):
+            cls.instance = super(Singleton, cls).__new__(cls)
+        return cls.instance
 
 
 def transfer_batch_to_device(batch, device):
@@ -28,7 +37,7 @@ def transfer_batch_to_device(batch, device):
 
 def download_from_hub(repo_id) -> str:
     """Download checkpoint from hub."""
-    from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
+    from mttl.models.library.expert_library import ExpertLibrary
 
     return ExpertLibrary.get_expert_library(repo_id).hf_hub_download(
         repo_id=repo_id, filename=CHECKPOINT_PATH_IN_HUB
@@ -139,8 +148,13 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
         # previous checkpoint, even if the parameters are not trainable.
         self.save_if_loaded_from_ckpt = kwargs.get("save_if_loaded_from_ckpt", True)
 
-        if self.save_if_loaded_from_ckpt and kwargs.get("compute_strategy", "") == "deepspeed": 
-            logger.warning('`save_if_loaded_from_ckpt` is True. Because you are using deepspeed, you will be saving full model checkpoints.')
+        if (
+            self.save_if_loaded_from_ckpt
+            and kwargs.get("compute_strategy", "") == "deepspeed"
+        ):
+            logger.warning(
+                "`save_if_loaded_from_ckpt` is True. Because you are using deepspeed, you will be saving full model checkpoints."
+            )
 
     def get_hash(self):
         model_hash = hashlib.sha256()
@@ -421,12 +435,18 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
 
 
 def model_loader_helper(
-    model_name, device_map="auto", load_in_4bit=False, load_in_8bit=False
+    model_name,
+    device_map="auto",
+    load_in_4bit=False,
+    load_in_8bit=False,
+    attn_implementation=None,
 ):
     if load_in_4bit and load_in_8bit:
         raise ValueError("Specify either 'load_in_4bit' or 'load_in_8bit' or neither.")
 
-    from transformers import PreTrainedModel, LlamaForCausalLM, AutoModelForCausalLM
+    from transformers import AutoModelForCausalLM, LlamaForCausalLM, PreTrainedModel
+
+    logger.info(f"Attention Implementation: {attn_implementation}")
 
     if isinstance(model_name, PreTrainedModel):
         return model_name
@@ -438,12 +458,16 @@ def model_loader_helper(
             load_in_8bit=load_in_8bit,
             torch_dtype=torch.bfloat16,
             device_map=device_map,
+            attn_implementation=attn_implementation,
         )
     elif "phi-2" == model_name:
         # local phi-2 version. use `microsoft/phi-2 for the official hf version`
-        logger.info(f"Loading phi-2 model from {os.getenv('PHI_PATH', 'microsoft/phi-2')}")
+        if "PHI_PATH" not in os.environ:
+            raise ValueError("PHI_PATH is not set in the environment variables.")
+
+        logger.info(f"Loading phi-2 model from {os.environ['PHI_PATH']}")
         model_object = AutoModelForCausalLM.from_pretrained(
-            os.getenv("PHI_PATH", "microsoft/phi-2"),
+            os.environ["PHI_PATH"],
             load_in_8bit=load_in_8bit,
             torch_dtype=torch.bfloat16,
             device_map=device_map,
@@ -461,6 +485,8 @@ def model_loader_helper(
             load_in_4bit=load_in_4bit,
             load_in_8bit=load_in_8bit,
             trust_remote_code=True,
+            attn_implementation=attn_implementation,
+            torch_dtype=torch.bfloat16,
         )
     return model_object
 

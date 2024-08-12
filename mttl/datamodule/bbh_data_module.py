@@ -1,10 +1,11 @@
-from datasets import get_dataset_config_names, concatenate_datasets
-from mttl.datamodule.base import DefaultDataModule, DatasetConfig
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 
+from datasets import concatenate_datasets, get_dataset_config_names
+
+from mttl.datamodule.base import DataModule, DatasetConfig
 from mttl.datamodule.mt_seq_to_seq_module import augment_few_shot_task
-from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
+from mttl.models.library.expert_library import DatasetLibrary
 
 
 @dataclass
@@ -13,7 +14,8 @@ class BBHConfig(DatasetConfig):
     source_template: str = "Solve the following problem: {}\nAnswer:"
 
 
-class BBHDataModule(DefaultDataModule):
+@DataModule.register("bbh", config_cls=BBHConfig)
+class BBHDataModule(DataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
         self._task_names = get_dataset_config_names("maveriq/bigbenchhard")

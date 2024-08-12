@@ -1,15 +1,16 @@
-import pytest
 import numpy as np
+import pytest
+
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.base import DatasetConfig
-from mttl.datamodule.mt_seq_to_seq_module import (
-    FlanModule,
-    FlanConfig,
-    FlatMultiTaskModule,
-    FlatMultiTaskConfig,
-)
-from mttl.datamodule.mmlu_data_module import MMLUDataModule, MMLUDataConfig
 from mttl.datamodule.mbpp_datamodule import MBPPDataConfig, MBPPDataModule
+from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
+from mttl.datamodule.mt_seq_to_seq_module import (
+    FlanConfig,
+    FlanModule,
+    FlatMultiTaskConfig,
+    FlatMultiTaskModule,
+)
 from mttl.datamodule.platypus_module import PlatypusModule
 
 

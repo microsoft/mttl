@@ -1,36 +1,25 @@
 import os
-import sys
-import torch
 import shutil
-from pytorch_lightning import Trainer, seed_everything
+import sys
 from tempfile import TemporaryDirectory
+
+import torch
+from pytorch_lightning import Trainer, seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.models.expert_model import ExpertModel, MoEModel
-from mttl.models.expert_config import ExpertConfig
-from mttl.models.modifiers.expert_containers.expert_library import (
-    ExpertLibrary,
-    LocalExpertLibrary,
-)
-from mttl.callbacks import LiveCheckpointCallback
-from mttl.models.monitors import get_monitors
+from mttl.callbacks import LiveCheckpointCallback, NanoMMLUCallback, RougeCallback
 from mttl.datamodule.base import get_datamodule
-from mttl.callbacks import NanoMMLUCallback, RougeCallback
-from mttl.utils import (
-    get_pl_loggers,
-    remote_login,
-    setup_logging,
-    rank_zero_only_and_wait,
-    logger,
-    generate_random_string,
-)
-from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
+from mttl.logging import get_pl_loggers, logger, setup_logging
+from mttl.models.expert_config import ExpertConfig
+from mttl.models.expert_model import ExpertModel, MoEModel
+from mttl.models.library.expert import Expert, load_expert
+from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
+from mttl.models.monitors import get_monitors
+from mttl.utils import generate_random_string, rank_zero_only_and_wait, remote_login
 from projects.modular_llm.src.callbacks import DownstreamEvalCallback
-from projects.modular_llm.src.transfer_matrix import (
-    TransferMatrixConfig,
-    run_eval as produce_transfer_matrix,
-)
+from projects.modular_llm.src.transfer_matrix import TransferMatrixConfig
+from projects.modular_llm.src.transfer_matrix import run_eval as produce_transfer_matrix
 
 
 def create_transfer_matrix(args, checkpoint):
@@ -151,7 +140,7 @@ def run_multitask(args: ExpertConfig):
     val_check_interval = args.eval_every
     if val_check_interval == -1 or val_check_interval is None:
         val_check_interval = None
-    else:
+    elif not (0.0 < val_check_interval < 1.0):
         val_check_interval = args.gradient_accumulation_steps * args.eval_every
         if val_check_interval > len(dm.train_dataloader()):
             val_check_interval = len(dm.train_dataloader())

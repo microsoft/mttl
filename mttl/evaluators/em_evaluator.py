@@ -1,5 +1,5 @@
-import tqdm
 import numpy as np
+import tqdm
 
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators.base import (
@@ -7,7 +7,7 @@ from mttl.evaluators.base import (
     GenerativeEvaluator,
     switch_to_eval_mode,
 )
-from mttl.utils import logger
+from mttl.logging import logger
 
 
 class EMEvaluator(GenerativeEvaluator):

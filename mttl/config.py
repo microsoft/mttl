@@ -1,10 +1,11 @@
+import argparse
+import ast
 import json
 import os
-import ast
-import argparse
 from string import Template
 from typing import Dict
-from mttl.utils import logger, setup_logging
+
+from mttl.logging import logger, setup_logging
 
 
 class Config:
@@ -54,7 +55,16 @@ class Config:
         self.post_init(silent=silent)
 
     def post_init(self, silent=False):
-        pass
+        if self.attn_implementation == "eager" and self.pack_sequences:
+            logger.warning(
+                "Eager attention is not compatible with packed sequences"
+                + ", tokens across examples will not be masked"
+            )
+        elif self.attn_implementation == "flash_attention_2" and self.pack_sequences:
+            logger.warning(
+                "The wrapper we provide for flash attention 2 may not behave as expected for"
+                + " some models. Please make sure you test the model with packed sequences"
+            )
 
     @classmethod
     def fromdict(cls, data):
@@ -180,6 +190,14 @@ class Config:
         # Data config
         self.dataset = None
         self.custom_tasks_splits = None
+        self.subsample_train = None
+        self.subsample_dev = None
+        self.subsample_test = None
+        self.subsample_per_task = False
+        self.pack_sequences = False
+        self.pad_to_multiple_of = 8
+        self.padding_side = "right"
+        self.max_seq_per_pack = 4
 
         self.data_dir = os.getenv("TRAIN_DIR", "/tmp/")
         self.output_dir = os.getenv("OUTPUT_DIR", "./output")
@@ -252,11 +270,6 @@ class Config:
         self.seed = 42
         self.eval_before_training = True
 
-        self.subsample_train = None
-        self.subsample_dev = None
-        self.subsample_test = None
-        self.subsample_per_task = False
-
         self.ni_online_eval = False  # zero-shot online eval for ni
         self.t0_online_eval = False  # zero-shot eval for t0
         self.early_stop_on_zero_shot = False  # zero-shot early stopping
@@ -280,6 +293,7 @@ class Config:
 
         self.model = None
         self.model_family = None  # model family, either "gpt" or "encdec"
+        self.attn_implementation = None
 
         self.precision = "32"
         self.monitor_grad_alignment_on = None

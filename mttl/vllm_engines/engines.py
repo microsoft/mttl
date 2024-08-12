@@ -1,14 +1,15 @@
+import copy
+import gc
+import os
+import time
+
 import numpy as np
 import torch
-import gc
 import tqdm
-import time
-import os
-import copy
-
 from torch.utils.data import DataLoader
-from mttl.utils import logger
-from mttl.models.modifiers.base import MergeableAdapter
+
+from mttl.logging import logger
+from mttl.models.modifiers.base import MergeableModifierMixin
 
 try:
     from vllm import LLM, SamplingParams
@@ -56,7 +57,7 @@ def save_merged_model(model, model_path, hf_path="/tmp/merged"):
 
     for name, module in model_copy.named_modules():
         for c_name, child in module.named_children():
-            if isinstance(child, MergeableAdapter):
+            if isinstance(child, MergeableModifierMixin):
                 child.merge_with_layer()
                 setattr(
                     module,

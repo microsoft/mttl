@@ -1,16 +1,15 @@
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mttl.models.modifiers import register_modifier
-from mttl.models.modifiers.base import Adapter, ModifierConfig, ModifyMixin
 from transformers.modeling_utils import PreTrainedModel
-from mttl.models.modifiers.kv_adapter import KVAdapterConfig
 
-# from mttl.models.modifiers.expert_containers.selectors import PolySelectorConfig
-
+from mttl.models.expert_context import InfoContainer
+from mttl.models.modifiers.base import Modifier, ModifierConfig
 from mttl.models.modifiers.debug_utils import check_if_align, monitor_transformer
+from mttl.models.modifiers.kv_adapter import KVAdapterConfig
 
 PromptTuningRouting = None
 
@@ -148,7 +147,7 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
         ), "expected right-padded input"
 
         # Assumes ExpertTrainer here. Removing the labels so as to not trigger an automatic loss computation
-        labels = self.info_container["routing_infos"].labels
+        labels = InfoContainer.get().routing_infos.labels
 
         # preprend the soft prompt
         if self.config.prompt_placement == "prefix":
@@ -300,11 +299,10 @@ def modify_with_prompt_tuning(soft_prompt_cls, embed_cls, transformer, config):
     for param in transformer.parameters():
         param.requires_grad = False
 
-    info_container = transformer.info_container
     input_embeds = transformer.get_input_embeddings()
 
     # Create new embeddings and assign to transformer, replacing existing one
-    ext_embeds = embed_cls(config, input_embeds, info_container=info_container)
+    ext_embeds = embed_cls(config, input_embeds)
     transformer.set_input_embeddings(ext_embeds)
 
     # Replace in the original model
@@ -312,7 +310,6 @@ def modify_with_prompt_tuning(soft_prompt_cls, embed_cls, transformer, config):
 
     soft_prompt = soft_prompt_cls(
         config=config,
-        info_container=info_container,
         base_input_embeddings=input_embeds,
     )
 
@@ -326,8 +323,8 @@ class PromptTuningConfig(KVAdapterConfig):
     prompt_placement: str = "prefix"
 
 
-@register_modifier("prompt_tuning", config_cls=PromptTuningConfig)
-class PromptTuning(Adapter, ModifyMixin):
+@Modifier.register("prompt_tuning", config_cls=PromptTuningConfig)
+class PromptTuning(Modifier):
     def __init__(self, base_input_embeddings, config, *args, **kwargs):
         super().__init__()
 

@@ -1,9 +1,9 @@
 import os
 from dataclasses import dataclass
 
-from mttl.datamodule.base import DefaultDataModule, DatasetConfig
+from mttl.datamodule.base import DataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
-from mttl.models.modifiers.expert_containers.expert_library import DatasetLibrary
+from mttl.models.library.expert_library import DatasetLibrary
 
 
 @dataclass
@@ -55,7 +55,8 @@ def completion_template(example):
     return example
 
 
-class HumanEvalDataModule(DefaultDataModule):
+@DataModule.register("humaneval", config_cls=HumanEvalConfig)
+class HumanEvalDataModule(DataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
         dataset = DatasetLibrary.pull_dataset(
@@ -63,9 +64,11 @@ class HumanEvalDataModule(DefaultDataModule):
         )
 
         dataset = dataset.map(
-            instruct_template
-            if self.config.use_instruct_template
-            else completion_template,
+            (
+                instruct_template
+                if self.config.use_instruct_template
+                else completion_template
+            ),
             num_proc=n_proc,
             remove_columns=["prompt", "test", "entry_point", "task_id"],
         )
