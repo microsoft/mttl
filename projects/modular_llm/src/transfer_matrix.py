@@ -13,7 +13,7 @@ from mttl.datamodule.base import get_datamodule
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 
-from mttl.config import Args, ExpertConfig
+from mttl.config import Args, EvaluationConfig, ExpertConfig
 from mttl.evaluators.evaluators import (
     Evaluator,
     ExtendedMMLUEvaluator,
@@ -28,13 +28,13 @@ from mttl.models.library.expert_library import ExpertLibrary
 from mttl.utils import remote_login
 from mttl.vllm_engines.engines import free_memory
 
+DEBUG = False
 
-class TransferMatrixConfig(ExpertConfig):
-    def _set_defaults(self):
-        super()._set_defaults()
-        self.only_diagonal = False
-        self.eval_base = True
-        self.transfer_matrix_split = "test"
+
+class TransferMatrixConfig(EvaluationConfig):
+    only_diagonal = False
+    eval_base = True
+    transfer_matrix_split = "test"
 
 
 def eval_expert_on_task(
