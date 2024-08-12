@@ -268,9 +268,7 @@ def llama_self_attention(
     # adapter not precomputed, so we compute it
     if adapter_k is None:
         adapter_k, adapter_v = adapter.get_kv_weights(self.k_proj, self.v_proj)
-    if use_cache:
-        # past_key_value.adapter_k = adapter_k
-        # past_key_value.adapter_v = adapter_v
+    if use_cache and past_key_value:
         past_key_value.adapter_k = getattr(past_key_value, "adapter_k", [])
         past_key_value.adapter_k.append(adapter_k)
         past_key_value.adapter_v = getattr(past_key_value, "adapter_v", [])
