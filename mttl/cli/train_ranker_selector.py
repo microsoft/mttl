@@ -62,12 +62,10 @@ def train_triplet_clip(args):
     if args.ranker_path:
         model = model.load_from_checkpoint(args.ranker_path)
 
-    # add model checkpoint
-    checkpoint_callback = pl.callbacks.ModelCheckpoint(
+    checkpoint_callback = LiveCheckpointCallback(
+        dirpath=f"{args.output_dir}/classification_ranker_{args.exp_name}/",
         monitor="val/loss_epoch",
-        dirpath=f"clip_triplet_ranker_{args.exp_name}/",
-        filename="clip-{epoch:02d}-{val/loss:.2f}",
-        save_top_k=1,
+        save_last=True,
         mode="min",
     )
 
@@ -123,12 +121,11 @@ def train_clip(args):
         encoder_model_name=args.model,
         text_embedding_dim=args.text_embedding_dim,
     )
-    # add model checkpoint
-    checkpoint_callback = pl.callbacks.ModelCheckpoint(
+
+    checkpoint_callback = LiveCheckpointCallback(
+        dirpath=f"{args.output_dir}/classification_ranker_{args.exp_name}/",
         monitor="val/loss_epoch",
-        dirpath=f"clip_ranker_{args.exp_name}/",
-        filename="clip-{epoch:02d}-{val/loss:.2f}",
-        save_top_k=1,
+        save_last=True,
         mode="min",
     )
 
