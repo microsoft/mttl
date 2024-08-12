@@ -1,11 +1,9 @@
 import os
 import sys
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
-
 from pytorch_lightning import seed_everything
 
-from mttl.config import ExpertConfig
+from mttl.config import EvaluationConfig, ExpertConfig
 from mttl.models.library.expert_library import ExpertLibrary
 
 
@@ -17,8 +15,9 @@ def parse_libname(libname):
         return parts[0], parts[-1].split(",")
 
 
-def train_with_transform(args: ExpertConfig):
+def train_with_transform(args: EvaluationConfig):
     seed_everything(args.seed, workers=True)
+
     from mttl.models.library.library_transforms import (
         PhatgooseConfig,
         PhatgooseTransform,
@@ -40,5 +39,5 @@ def train_with_transform(args: ExpertConfig):
 
 
 if __name__ == "__main__":
-    args = ExpertConfig.parse()
+    args = EvaluationConfig.parse()
     train_with_transform(args)
