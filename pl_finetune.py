@@ -323,7 +323,7 @@ def finetune(args, use_mlf=True, do_zs=True):
 
             # save the adapter embedding to npy
             np.save(
-                f"adapter_finetune_embedding_{task_name}.npy",
+                f"adapter_finetune_embedding_{task_name}_{args.model_modifier}.npy",
                 adapter.cpu().detach().numpy(),
             )
             breakpoint()
