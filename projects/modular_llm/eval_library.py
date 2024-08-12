@@ -14,7 +14,7 @@ from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
 from mttl.logging import TableLogger, logger, setup_logging
-from mttl.models.containers.selectors import Selector, SelectorConfig
+from mttl.models.containers.selectors.base import Selector, SelectorConfig
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import ExpertModel, MultiExpertModel
 from mttl.models.library.expert_library import ExpertLibrary

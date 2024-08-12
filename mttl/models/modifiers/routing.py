@@ -16,6 +16,9 @@ class RoutingInfo:
     attention_mask: torch.Tensor = None
     task_weights: torch.nn.ParameterDict = None
     aux_losses: Dict = field(default_factory=dict)
+    packed_seq_lens: List[int] = None
+    seq_lens: List[int] = None
+    packed_attn_mask: torch.Tensor = None
 
     @classmethod
     def from_batch(cls, batch: dict, **kwargs):
@@ -34,6 +37,9 @@ class RoutingInfo:
             sources_texts=batch.get("sources_texts", None),
             labels=batch.get("labels", None),
             attention_mask=batch.get("attention_mask", None),
+            packed_seq_lens=batch.get("packed_seq_lens", None),
+            seq_lens=batch.get("seq_lens", None),
+            packed_attn_mask=batch.get("packed_attn_mask", None),
             **kwargs,
         )
         return ri

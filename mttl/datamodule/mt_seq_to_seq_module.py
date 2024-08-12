@@ -5,7 +5,7 @@ from functools import partial
 import numpy
 from datasets import Dataset, concatenate_datasets
 
-from mttl.datamodule.base import DatasetConfig, DefaultDataModule
+from mttl.datamodule.base import DataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 from mttl.logging import logger
 from mttl.models.library.expert_library import DatasetLibrary
@@ -134,7 +134,8 @@ def apply_source_template(dataset, source_template):
     return dataset
 
 
-class FlatMultiTaskModule(DefaultDataModule):
+@DataModule.register("flat_multitask", config_cls=FlatMultiTaskConfig)
+class FlatMultiTaskModule(DataModule):
     def setup_dataset(self):
         self.dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
@@ -213,7 +214,8 @@ def filter_task_source(include_task_source, example):
     return example["task_source"] in include_task_source
 
 
-class FlanModule(DefaultDataModule):
+@DataModule.register("flan", config_cls=FlanConfig)
+class FlanModule(DataModule):
     def setup_dataset(self):
         dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))

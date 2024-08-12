@@ -7,7 +7,7 @@ from mttl.dataloader.platypus_dataset_reader import (
     PlatypusDataset,
     PlatypusQADataset,
 )
-from mttl.datamodule.base import DatasetConfig, DefaultDataModule
+from mttl.datamodule.base import DataModule, DatasetConfig
 
 
 @dataclass
@@ -15,7 +15,8 @@ class PlatypusConfig(DatasetConfig):
     train_on_reverse: bool = False
 
 
-class PlatypusModule(DefaultDataModule):
+@DataModule.register("platypus", config_cls=PlatypusConfig)
+class PlatypusModule(DataModule):
     def setup_dataset(self):
         if getattr(self.config, "train_on_reverse", False):
             dataset = InversePlatypusDataset()

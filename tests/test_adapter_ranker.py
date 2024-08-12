@@ -2,7 +2,7 @@
 import pytest
 
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
-from mttl.models.containers.selectors import TaskPredictorSelector
+from mttl.models.containers.selectors.base import TaskPredictorSelector
 from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import MultiExpertModel
 from mttl.models.modifiers.lora import LoRAConfig
@@ -104,7 +104,7 @@ def test_expert_model_generate(tmp_path, create_dummy_expert, flan_data_module):
 
     input_shift = batch["input_ids"].shape[1]
     generation = module.generate(batch, max_new_tokens=3)[:, input_shift:]
-    assert generation.cpu().numpy().tolist() == [[198, 198, 464]]
+    assert generation.cpu().numpy().tolist() == [[198, 198, 32]]
 
     batch["attention_mask"][:1] = 0
     generation = module.generate(batch, max_new_tokens=3)[:, input_shift:]

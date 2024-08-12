@@ -6,9 +6,13 @@ from typing import Dict, Iterable, Union
 from torch import nn
 
 from mttl.logging import logger
+from mttl.registrable import Registrable
 
 
-class Adapter(nn.Module):
+class Modifier(nn.Module, Registrable):
+    # default modifier
+    default = "lora"
+
     @property
     def layer_name(self):
         if not hasattr(self, "__layer_name__"):
@@ -19,7 +23,7 @@ class Adapter(nn.Module):
         return self.__layer_name__
 
 
-class MergeableAdapter(ABC, Adapter):
+class MergeableModifierMixin(ABC):
     @abstractmethod
     def merge_with_layer(self):
         pass
@@ -39,23 +43,23 @@ class ModifierConfig(object):
         """Dump the config to a string."""
         from dataclasses import asdict
 
-        from mttl.models.modifiers.modify_model import CONFIGS_TO_MODIFIERS
-
         data = asdict(self)
         # store the model modifier for easy loading
-        data["__model_modifier__"] = CONFIGS_TO_MODIFIERS[type(self)]
+        data["__model_modifier__"] = self.modifier_name
         return data
 
     @classmethod
     def fromdict(cls, dumped: Dict) -> "ModifierConfig":
-        from mttl.models.modifiers.modify_model import MODIFIERS_TO_CONFIGS
-
         if "__model_modifier__" not in dumped:
             raise ValueError(
                 "Cannot load config from dict, missing '__model_modifier__' key."
             )
         mod = dumped.pop("__model_modifier__")
-        return MODIFIERS_TO_CONFIGS[mod](**dumped)
+        return Modifier.get_config_class_by_name(mod)(**dumped)
+
+    @property
+    def modifier_name(self):
+        return Modifier.get_name_by_config_class(type(self))
 
     @staticmethod
     def from_training_config(
@@ -65,8 +69,6 @@ class ModifierConfig(object):
 
         Returns None if no modifier is set.
         """
-        from mttl.models.modifiers.modify_model import MODIFIERS_TO_CONFIGS
-
         if isinstance(training_config, ModifierConfig):
             # nothing to do here
             return training_config
@@ -74,12 +76,12 @@ class ModifierConfig(object):
         if training_config.model_modifier is None:
             return None
 
-        if training_config.model_modifier not in MODIFIERS_TO_CONFIGS:
+        if training_config.model_modifier not in Modifier.registered_names():
             raise ValueError(
                 f"Model modifier '{training_config.model_modifier}' not found, has it been registered?"
             )
 
-        config_klass = MODIFIERS_TO_CONFIGS[training_config.model_modifier]
+        config_klass = Modifier.get_config_class_by_name(training_config.model_modifier)
         kwargs = {}
         for key, _ in config_klass.__dataclass_fields__.items():
             if hasattr(training_config, key):
@@ -87,7 +89,7 @@ class ModifierConfig(object):
         return config_klass(**kwargs)
 
 
-class ModifyMixin(nn.Module):
+class ModifyMixin:
     @classmethod
     def modify_transformer(cls, transformer, config):
         return modify_with_adapter(transformer, config, cls)

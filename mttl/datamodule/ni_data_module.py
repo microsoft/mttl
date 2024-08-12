@@ -12,7 +12,7 @@ import tqdm
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 
-from mttl.datamodule.base import DatasetConfig, DefaultCollator, DefaultDataModule
+from mttl.datamodule.base import DataModule, DatasetConfig, DefaultCollator
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 from mttl.logging import logger
 from mttl.models.library.expert_library import DatasetLibrary
@@ -273,7 +273,8 @@ class DataCollatorForNI(DefaultCollator):
         return output_batch
 
 
-class NiDataModule(DefaultDataModule):
+@DataModule.register("ni", config_cls=NiDataConfig)
+class NiDataModule(DataModule):
     def test_dataloader(self, subsample=-1, shuffle=False):
         if subsample > 0:
             from mttl.datamodule import take_n_examples_per_task

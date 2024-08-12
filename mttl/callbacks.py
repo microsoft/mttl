@@ -14,7 +14,7 @@ from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch.optim import Optimizer
 
-from mttl.datamodule.base import DefaultDataModule
+from mttl.datamodule.base import DataModule
 from mttl.evaluators import MMLUEvaluator
 from mttl.evaluators.evaluators import Evaluator
 from mttl.logging import logger
@@ -630,7 +630,7 @@ class MMLUEvalCallback(MMLUEvaluator, EvalCallback):
 class TestLossEvaluator(LossCallback, Evaluator):
     def __init__(
         self,
-        datamodule: DefaultDataModule,
+        datamodule: DataModule,
         name="test",
         split="test",
         subsample=-1,
