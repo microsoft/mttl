@@ -436,18 +436,6 @@ class TrainingArgs(DataArgs):
                 + "into account when computing `gradient_accumulation_steps`."
             )
 
-        if self.model_family is None:
-            # infer model family automatically
-            if "t5" in self.model or "T0" in self.model:
-                self.model_family = "seq2seq"
-            else:
-                self.model_family = "gpt"
-
-            logger.warn(
-                "Model family was not specified, inferring from model name:",
-                self.model_family,
-            )
-
 
 @dataclass
 class ExpertConfig(TrainingArgs, ModifierArgs):
