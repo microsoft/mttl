@@ -30,10 +30,10 @@ from mttl.models.library.library_transforms import (
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
 )
+from mttl.models.library.retrievers import RandomRetriever, SVDEmbeddingRetriever
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.monitors import get_monitors
 from mttl.utils import get_checkpoint_path, remote_login
-from projects.modular_llm.src.retrievers import RandomRetriever, SVDEmbeddingRetriever
 
 FINETUNE_FUNCTIONS: dict[str, Callable] = {}
 
