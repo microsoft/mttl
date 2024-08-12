@@ -11,13 +11,12 @@ from projects.modular_llm.src.nevergrad_opt import NGRoutingOptimizer
 # remove this for now, since NG Routing is be to rebuilt.
 def test_NGRoutingOptimizer(tmp_path, make_tiny_llama, create_dummy_expert):
     config = MultiExpertConfig(
-        kwargs={
+        **{
             "model_modifier": "lora",
             "modify_layers": "gate_proj|down_proj|up_proj",
             "modify_modules": ".*mlp.*",
             "trainable_param_names": ".*lora_[ab].*",
             "output_dir": tmp_path,
-            "model": "",
         }
     )
 
