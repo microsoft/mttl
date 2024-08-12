@@ -410,6 +410,12 @@ class TrainingArgs(DataArgs):
             )
 
     def __post_init__(self):
+        if self.model is None:
+            raise ValueError("`model` is not specified and required!")
+
+        if self.model_family is None:
+            raise ValueError("`model_family` is not specified and required!")
+
         if self.attn_implementation == "eager" and self.pack_sequences:
             logger.warning(
                 "Eager attention is not compatible with packed sequences"
@@ -434,18 +440,6 @@ class TrainingArgs(DataArgs):
             warn_once(
                 "You have multiple GPUs, but your device count is not being taken "
                 + "into account when computing `gradient_accumulation_steps`."
-            )
-
-        if self.model_family is None:
-            # infer model family automatically
-            if "t5" in self.model or "T0" in self.model:
-                self.model_family = "seq2seq"
-            else:
-                self.model_family = "gpt"
-
-            logger.warn(
-                "Model family was not specified, inferring from model name:",
-                self.model_family,
             )
 
 
