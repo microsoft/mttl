@@ -14,6 +14,8 @@ from mttl.callbacks import (
     NanoMMLUCallback,
     RougeCallback,
 )
+from mttl.cli.transfer_matrix import TransferMatrixConfig
+from mttl.cli.transfer_matrix import run_eval as produce_transfer_matrix
 from mttl.config import ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
@@ -22,8 +24,6 @@ from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
 from mttl.models.monitors import get_monitors
 from mttl.utils import generate_random_string, rank_zero_only_and_wait, remote_login
-from projects.modular_llm.src.transfer_matrix import TransferMatrixConfig
-from projects.modular_llm.src.transfer_matrix import run_eval as produce_transfer_matrix
 
 
 def create_transfer_matrix(args, checkpoint):

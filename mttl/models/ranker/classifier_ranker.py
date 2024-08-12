@@ -20,12 +20,9 @@ class TextEncoder(nn.Module):
         model_name: str = "all-MiniLM-L6-v2",
     ):
         super().__init__()
-        if model_name == "all-MiniLM-L6-v2":
-            self.transformer_encoder = SentenceTransformer(
-                model_name
-            )  # You need to define your text encoder
-
-            # frozen the transformer parameters
+        if "sentence-transformers/" in model_name:
+            self.transformer_encoder = SentenceTransformer(model_name.split("/")[1])
+            # freeze the transformer parameters
             auto_model = self.transformer_encoder._first_module().auto_model
             if not trainable:
                 for param in auto_model.parameters():
@@ -36,7 +33,7 @@ class TextEncoder(nn.Module):
                 model_name, return_dict=True
             )
         else:
-            raise NotImplementedError
+            raise ValueError("Model name not supported: {}".format(model_name))
 
     def forward(self, x):
         if isinstance(self.transformer_encoder, SentenceTransformer):

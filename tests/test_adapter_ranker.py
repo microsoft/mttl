@@ -1,13 +1,36 @@
 # unit test for adapter_ranker
 import pytest
 
-from mttl.config import ExpertConfig
+from mttl.config import ExpertConfig, RankerConfig
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
 from mttl.models.containers.selectors.base import TaskPredictorSelector
 from mttl.models.expert_model import MultiExpertConfig, MultiExpertModel
 from mttl.models.modifiers.lora import LoRAConfig
 from mttl.models.ranker.classifier_ranker import SentenceTransformerClassifier
 from mttl.models.ranker.clip_ranker import CLIPRanker
+
+
+def test_train_ranker(tiny_flan_id, tmp_path):
+    import os
+
+    from mttl.cli.train_ranker_selector import train_classifier
+
+    config = RankerConfig(
+        dataset_type="flan",
+        dataset=tiny_flan_id,
+        model="sentence-transformers/all-MiniLM-L6-v2",
+        model_family="seq2seq",
+        train_batch_size=2,
+        subsample_train=0.1,
+        num_train_epochs=2,
+        subsample_dev=0.1,
+        output_dir=tmp_path,
+    )
+
+    train_classifier(config)
+
+    dirs = os.listdir(tmp_path)
+    assert any("classification" in dir for dir in dirs)
 
 
 def test_clip_routing(tiny_flan_id):
