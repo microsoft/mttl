@@ -55,6 +55,7 @@ def run_multitask(args: ExpertConfig):
 
     # get directory of the current file
     setup_logging(args.output_dir)
+
     logger.info("Args: {}".format(args.to_json()))
 
     remote_login(args.remote_token)

@@ -30,13 +30,18 @@ class ExpertInfo:
 
     @classmethod
     def fromdict(cls, data):
-        from mttl.config import Args
+        from mttl.config import Args, MultiExpertConfig
 
-        expert_config = ModifierConfig.fromdict(data["expert_config"])
-        training_config = Args.fromdict(data["training_config"])
+        try:
+            # if we cannot infer the training class automatically, we assume it is a MultiExpertConfig
+            training_config = Args.fromdict(data["training_config"])
+        except:
+            training_config = MultiExpertConfig.fromdict(data["training_config"])
 
-        if training_config is None:
-            training_config = expert_config
+        if "expert_config" in data:
+            expert_config = ModifierConfig.fromdict(data["expert_config"])
+        else:
+            expert_config = ModifierConfig.from_training_config(training_config)
 
         kwargs = {}
         for key in cls.__dataclass_fields__.keys():
