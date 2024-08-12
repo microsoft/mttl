@@ -9,26 +9,19 @@ import wandb
 from matplotlib import pyplot as plt
 from pytorch_lightning import seed_everything
 
-from mttl.datamodule.base import get_datamodule
-
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-
 from mttl.config import Args, EvaluationConfig, ExpertConfig
+from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.evaluators import (
     Evaluator,
     ExtendedMMLUEvaluator,
     ExtendedRougeEvaluator,
 )
 from mttl.logging import TableLogger, init_wandb_logger, logger, setup_logging
-
-# register models
 from mttl.models.expert_model import ExpertModel
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.utils import remote_login
 from mttl.vllm_engines.engines import free_memory
-
-DEBUG = False
 
 
 class TransferMatrixConfig(EvaluationConfig):
@@ -100,12 +93,12 @@ def eval_all_experts_on_task(
     for expert_name, expert in expert_lib.items():
         if only_diagonal and expert.expert_info.expert_task_name != task_eval_on:
             continue
+
         score = eval_expert_on_task(
             task_eval_on,
             module_constructor,
             expert,
             evaluator_test=evaluator,
-            debug=DEBUG,
         )
         log_row[expert_name] = score["test"]
     return log_row
@@ -195,7 +188,7 @@ def produce_transfer_matrix(
         if args.eval_base:
             # eval on base model
             log_row["base"] = eval_expert_on_task(
-                task_eval_on, module, expert=None, evaluator_test=evaluator, debug=DEBUG
+                task_eval_on, module, expert=None, evaluator_test=evaluator
             )["test"]
 
         print(transfer_table.df)
