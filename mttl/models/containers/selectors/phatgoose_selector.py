@@ -7,12 +7,14 @@ from torch import nn
 from mttl.logging import logger
 from mttl.models.containers.selectors.base import (
     BatchSequenceExpertsAndWeightsSelectorOutput,
-    PerTokenSelector,
-    PerTokenSelectorConfig,
     Selector,
     SelectorConfig,
     artifacts_cache,
     forward_with_cache,
+)
+from mttl.models.containers.selectors.per_token_selector import (
+    PerTokenSelector,
+    PerTokenSelectorConfig,
 )
 
 
@@ -73,9 +75,9 @@ class PhatgooseSelector(PerTokenSelector):
             PhatgooseTransform,
         )
 
-        return PhatgooseTransform(
-            PhatgooseConfig(name=self.config.selector_data_id)
-        ).fetch(self.config.library_id)
+        return PhatgooseTransform(PhatgooseConfig(name=config.selector_data_id)).fetch(
+            config.library_id
+        )
 
 
 @dataclass

@@ -4,11 +4,8 @@ import torch
 from torch import nn
 
 from mttl.models.containers import ExpertContainer
-from mttl.models.containers.selectors import (
-    BatchExpertsSelectorOutput,
-    Selector,
-    TaskNameSelector,
-)
+from mttl.models.containers.selectors.base import Selector, TaskNameSelector
+from mttl.models.containers.selectors.selector_output import BatchExpertsSelectorOutput
 from mttl.models.library.expert import Expert
 from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
 

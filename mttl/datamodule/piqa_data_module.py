@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
 
-from mttl.datamodule.base import DatasetConfig, MultiChoiceDataModule
+from mttl.datamodule.base import DataModule, DatasetConfig, MultiChoiceDataModule
 from mttl.models.library.expert_library import DatasetLibrary
 
 
@@ -10,6 +10,7 @@ class PiqaDataConfig(DatasetConfig):
     pass
 
 
+@DataModule.register("piqa", config_cls=PiqaDataConfig)
 class PiqaMultiChoiceDataModule(MultiChoiceDataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))

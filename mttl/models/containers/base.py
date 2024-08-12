@@ -7,13 +7,13 @@ from torch import Tensor, nn
 
 from mttl.config import Config
 from mttl.logging import warn_once
-from mttl.models.containers.selectors import (
+from mttl.models.containers.selectors.base import Selector, TaskNameSelector
+from mttl.models.containers.selectors.kv_selector import KVTaskNameSelector
+from mttl.models.containers.selectors.selector_output import (
     BatchExpertsAndWeightsSelectorOutput,
     BatchExpertsSelectorOutput,
     BatchSequenceExpertsAndWeightsSelectorOutput,
     ExpertsAndWeightsSelectorOutput,
-    KVTaskNameSelector,
-    Selector,
     SelectorOutput,
 )
 from mttl.models.library.expert import Expert
@@ -38,8 +38,6 @@ class ExpertContainer(nn.Module, Container):
 
     def __init__(self, config, layer, selector=None):
         super().__init__()
-
-        from mttl.models.containers.selectors import TaskNameSelector
 
         self.config = config
         self.layer = layer
