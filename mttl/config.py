@@ -103,17 +103,20 @@ class Args:
         Reload a dataclass from a dictionary. We store the class name in the dict to be able to reload it.
         If the cls is Args, then we try to access the `_class` attribute to get the class name.
         """
-        if cls == Args:
-            cls_name = data.pop("_class")
-            if cls_name:
-                cls = globals()[cls_name]
+        cls_name = data.pop("args_class", None)
+        if cls != Args:
+            return cls(**data)
+        else:
+            if not cls_name:
+                raise ValueError("No class name found in the data.")
+            cls = globals()[cls_name]
         return cls(**data)
 
     def asdict(self) -> Dict:
         from mttl.models.utils import convert_hps_to_dict
 
         data = convert_hps_to_dict(self.__dict__)
-        return {"_class": self.__class__.__name__, **data}
+        return {"args_class": self.__class__.__name__, **data}
 
     def was_overridden(self, key):
         return key in self.updated_kwargs
@@ -306,7 +309,7 @@ class TransformArgs(
 
 
 @dataclass
-class TrainingArgs(Args):
+class TrainingArgs(DataArgs):
     cache_dir: str = os.getenv("CACHE_DIR", "./cache")
     data_dir: str = os.getenv("TRAIN_DIR", "/tmp/")
     output_dir: str = os.getenv("OUTPUT_DIR", "./output")
@@ -384,29 +387,7 @@ class TrainingArgs(Args):
     eval_before_training: bool = True
     pipeline_eval_tasks: str = None
     save_if_loaded_from_ckpt: bool = True
-
-
-@dataclass
-class ExpertConfig(TrainingArgs, DataArgs, SelectorArgs, ModifierArgs):
-    model_modifier: str = None
-    router_selector: str = None
     dataset_type: str = None
-
-    @property
-    def training_config(self):
-        return create_config_class_from_args(TrainingArgs, self)
-
-    @property
-    def modifier_config(self):
-        from mttl.models.modifiers.base import ModifierConfig
-
-        return ModifierConfig.from_training_config(self)
-
-    @property
-    def selector_config(self):
-        from mttl.models.containers.selectors.base import MultiSelectorConfig
-
-        return MultiSelectorConfig.from_training_config(self)
 
     @property
     def dataset_config(self):
@@ -454,7 +435,29 @@ class ExpertConfig(TrainingArgs, DataArgs, SelectorArgs, ModifierArgs):
 
 
 @dataclass
-class FinetuneConfig(ExpertConfig):
+class ExpertConfig(TrainingArgs, ModifierArgs):
+    model_modifier: str = None
+
+    @property
+    def modifier_config(self):
+        from mttl.models.modifiers.base import ModifierConfig
+
+        return ModifierConfig.from_training_config(self)
+
+
+@dataclass
+class MultiExpertConfig(ExpertConfig, SelectorArgs):
+    router_selector: str = None
+
+    @property
+    def selector_config(self):
+        from mttl.models.containers.selectors.base import MultiSelectorConfig
+
+        return MultiSelectorConfig.from_training_config(self)
+
+
+@dataclass
+class FinetuneConfig(MultiExpertConfig):
     finetune_type: str = None  # ["F", "A", "Z", "MuZ", "Poly", "PolyRand"]
     finetune_skip_es: str = False  # skip early stopping while fine-tuning
     finetune_use_last_checkpoint: bool = (
@@ -491,7 +494,7 @@ class FinetuneConfig(ExpertConfig):
 
 
 @dataclass
-class EvaluationConfig(ExpertConfig, TransformArgs):
+class EvaluationConfig(MultiExpertConfig, TransformArgs):
     expert_selection: str = None
     load_module: str = None
     eval_metric: str = "loss"
@@ -505,7 +508,7 @@ class EvaluationConfig(ExpertConfig, TransformArgs):
 
 
 @dataclass
-class MoEExpertConfig(ExpertConfig):
-    moe_num_experts: int = 8
+class MoEExpertConfig(MultiExpertConfig):
     moe_ent_reg: float = 0.0
     moe_ent_free_bits: float = 0.0
+    moe_num_experts: int = 8
