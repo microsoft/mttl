@@ -9,7 +9,7 @@ import torch
 from torch.optim.optimizer import Optimizer
 from transformers import PreTrainedModel
 
-from mttl.config import ExpertConfig
+from mttl.config import Args, ExpertConfig, MoEExpertConfig, MultiExpertConfig
 from mttl.logging import logger
 from mttl.models.containers import add_expert_to_transformer
 from mttl.models.containers.base import ExpertContainer
@@ -35,49 +35,67 @@ torch.set_float32_matmul_precision("high")
 
 
 class ExpertModel(EfficientCheckpointModule):
+    training_config_class: ExpertConfig = None
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+        self.model: PreTrainedModel = None
         self.tokenizer = kwargs.pop("tokenizer", None)
-        model_object = kwargs.pop("model_object", None)
+        self.model_object = kwargs.pop("model_object", None)
 
         # log hyperparameters
         self.save_hyperparameters(kwargs)
-
         self.load_in_4bit = kwargs.get("load_in_4bit", None) or False
         self.load_in_8bit = kwargs.get("load_in_8bit", None) or False
-        self.model: PreTrainedModel = None
         self.accumulate_metrics_batch = defaultdict(list)
 
-        if model_object is None:
+        if self.model_object is None:
             from mttl.models.utils import model_loader_helper
 
-            model_object = model_loader_helper(
+            self.model = model_loader_helper(
                 self.hparams.model,
                 load_in_4bit=self.load_in_4bit,
                 load_in_8bit=self.load_in_8bit,
                 device_map=getattr(self.hparams, "device_map", "cpu"),
                 attn_implementation=getattr(self.hparams, "attn_implementation", None),
             )
-
-        if self.load_in_8bit:
-            model_object = prepare_model_for_kbit_training(model_object)
-
-        # rebuild the training config, a bit cumbersome, but that's life
-        self.training_config = ExpertConfig.fromdict(kwargs)
-        self.training_config.vocab_size = (
-            model_object.get_input_embeddings().num_embeddings
-        )
+        else:
+            self.model = self.model_object
 
         # init the transformer just with the modifier config, this avoids
         # passing the whole training config to the modify_transformer func
-        self.modifier_config = ModifierConfig.from_training_config(self.training_config)
-        self.model = modify_transformer(model_object, self.modifier_config)
+        self.training_config = self.training_config_class.fromdict(kwargs)
+        self.modifier_config = self.training_config.modifier_config
+        self.model = modify_transformer(self.model, self.modifier_config)
 
-        self.test_results = []
         self.best_val_result = None
+        self.test_results = []
         self._inference_outputs = []
         self._log_pref = kwargs.get("logging_prefix", "")
+
+    def compute_unlikelihood_loss(self, batch, reduction="mean"):
+        # compute lm losses for all the options
+        loss = self.forward(batch, reduction="none")
+
+        num = 0
+        lm_loss, mc_loss = [], []
+        for i, num_options in enumerate(batch["num_options"]):
+            loss_slice = loss[num : num + num_options]
+            lm_loss.append(loss_slice[batch["labels_index"][i]])
+            mc_loss.append(
+                -torch.nn.functional.log_softmax(-loss_slice, dim=0)[
+                    batch["labels_index"][i]
+                ]
+            )
+            num += num_options
+
+        lm_loss = torch.stack(lm_loss)
+        mc_loss = torch.stack(mc_loss)
+        if reduction == "mean":
+            lm_loss = lm_loss.mean()
+            mc_loss = mc_loss.mean()
+        return lm_loss, mc_loss
 
     @InfoContainer.wrap_forward
     def forward(self, batch, reduction="mean"):
@@ -113,29 +131,6 @@ class ExpertModel(EfficientCheckpointModule):
 
         del outputs, shift_logits, shift_labels
         return loss
-
-    def compute_unlikelihood_loss(self, batch, reduction="mean"):
-        # compute lm losses for all the options
-        loss = self.forward(batch, reduction="none")
-
-        num = 0
-        lm_loss, mc_loss = [], []
-        for i, num_options in enumerate(batch["num_options"]):
-            loss_slice = loss[num : num + num_options]
-            lm_loss.append(loss_slice[batch["labels_index"][i]])
-            mc_loss.append(
-                -torch.nn.functional.log_softmax(-loss_slice, dim=0)[
-                    batch["labels_index"][i]
-                ]
-            )
-            num += num_options
-
-        lm_loss = torch.stack(lm_loss)
-        mc_loss = torch.stack(mc_loss)
-        if reduction == "mean":
-            lm_loss = lm_loss.mean()
-            mc_loss = mc_loss.mean()
-        return lm_loss, mc_loss
 
     def training_step(self, batch, _):
         if "num_options" in batch:
@@ -244,9 +239,6 @@ class ExpertModel(EfficientCheckpointModule):
         )
         ckpt["expert_info"] = expert_info.asdict()
 
-    def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
-        return super().on_before_optimizer_step(optimizer)
-
     def as_expert(self):
         state_dict = self.state_dict()
         self._delete_non_trainable_params(state_dict)
@@ -270,18 +262,18 @@ class ExpertModel(EfficientCheckpointModule):
 class MultiExpertModel(ExpertModel):
     """Adds all functions and properties for a multi-expert model."""
 
-    def __init__(self, selector_config=None, **config_kwargs):
-        config_kwargs["model_modifier"] = None
+    training_config_class = MultiExpertConfig
 
-        super().__init__(**config_kwargs)
+    def __init__(self, selector_config=None, **kwargs):
+        kwargs["model_modifier"] = None
+
+        super().__init__(**kwargs)
 
         # config about the routing
         if selector_config is not None:
             self.selector_config = selector_config
         else:
-            self.selector_config = MultiSelectorConfig.from_training_config(
-                self.training_config
-            )
+            self.selector_config = self.training_config.selector_config
 
         # inject memory for adding selectors
         self.selector_cache = SelectorsCache()
@@ -597,10 +589,9 @@ class MultiExpertModel(ExpertModel):
 
 
 class MoEModel(MultiExpertModel):
+    training_config_class = MoEExpertConfig
+
     def __init__(self, expert_library: ExpertLibrary = None, **kwargs):
-        kwargs["top_k"] = kwargs["moe_top_k"]
-        kwargs["emb_dim"] = kwargs["moe_emb_dim"]
-        kwargs["rkhs_dim"] = kwargs["moe_rkhs_dim"]
         init_from_scratch = kwargs.get("init_from_scratch", False)
 
         super().__init__(**kwargs)
