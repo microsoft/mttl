@@ -98,19 +98,26 @@ class Args:
         }
 
     @classmethod
-    def fromdict(cls, data) -> "Args":
+    def fromdict(cls, data, strict=False) -> "Args":
         """
         Reload a dataclass from a dictionary. We store the class name in the dict to be able to reload it.
         If the cls is Args, then we try to access the `_class` attribute to get the class name.
         """
         cls_name = data.pop("args_class", None)
-        if cls != Args:
-            return cls(**data)
-        else:
+        if cls == Args:
             if not cls_name:
                 raise ValueError("No class name found in the data.")
             cls = globals()[cls_name]
-        return cls(**data)
+
+        if not strict:
+            data_ = {}
+            for f in fields(cls):
+                if f.name in data:
+                    data_[f.name] = data[f.name]
+        else:
+            data_ = data
+
+        return cls(**data_)
 
     def asdict(self) -> Dict:
         from mttl.models.utils import convert_hps_to_dict
@@ -363,7 +370,6 @@ class TrainingArgs(DataArgs):
     # logging
     wandb_project: str = None
     tensorboard: bool = False
-    setup_logging: bool = True
     remote_token: str = None
     library_id: str = None
     destination_library_id: str = None
@@ -398,15 +404,6 @@ class TrainingArgs(DataArgs):
             )
 
     def __post_init__(self):
-        # setup logging to the output dir
-        if self.setup_logging:
-            try:
-                setup_logging(self.output_dir)
-            except Exception as e:
-                raise ValueError(
-                    "Error setting up logging, set `setup_logging` to `False`."
-                ) from e
-
         if self.attn_implementation == "eager" and self.pack_sequences:
             logger.warning(
                 "Eager attention is not compatible with packed sequences"
