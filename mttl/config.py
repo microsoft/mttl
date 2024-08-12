@@ -520,6 +520,7 @@ class MoEExpertConfig(MultiExpertConfig):
     moe_ent_reg: float = 0.0
     moe_ent_free_bits: float = 0.0
     moe_num_experts: int = 8
+    init_from_scratch: bool = True
 
 
 @dataclass

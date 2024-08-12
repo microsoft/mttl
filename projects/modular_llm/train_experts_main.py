@@ -2,6 +2,7 @@ import os
 import shutil
 import sys
 from tempfile import TemporaryDirectory
+from typing import Type
 
 import torch
 from pytorch_lightning import Trainer, seed_everything
@@ -15,7 +16,7 @@ from mttl.callbacks import (
     RougeCallback,
 )
 from mttl.cli.transfer_matrix import create_transfer_matrix
-from mttl.config import ExpertConfig
+from mttl.config import Args, ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
 from mttl.models.expert_model import ExpertModel, MoEModel
@@ -25,7 +26,7 @@ from mttl.models.monitors import get_monitors
 from mttl.utils import generate_random_string, rank_zero_only_and_wait, remote_login
 
 
-def run_multitask(args: ExpertConfig):
+def run_multitask(args: Args, model_class: Type[ExpertModel]):
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file
@@ -49,13 +50,6 @@ def run_multitask(args: ExpertConfig):
         expert_library = create_library(args)
 
     loggers = get_pl_loggers(args)
-
-    # select dataloader
-    if args.model_modifier == "poly":
-        args.init_from_scratch = True
-        model_class = MoEModel
-    else:
-        model_class = ExpertModel
 
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
@@ -206,5 +200,4 @@ def run_multitask(args: ExpertConfig):
 
 
 if __name__ == "__main__":
-    args = ExpertConfig.parse()
-    run_multitask(args)
+    run_multitask(ExpertConfig.parse(), ExpertModel)
