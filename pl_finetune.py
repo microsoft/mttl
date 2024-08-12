@@ -17,7 +17,11 @@ from mttl.datamodule.t0_data_module import T0FinetuneDataModule
 from mttl.models.encoder_decoder import Finetuner
 from mttl.models.t0_encoder_decoder import T0EncoderDecoder
 from mttl.utils import CustomModelCheckpoint, get_checkpoint_path, get_mlf_logger
-
+import torch
+from sklearn.decomposition import PCA
+import numpy as np
+import torch.nn as nn
+import math
 
 # When loading a checkpoint for evaluation, which args from old checkpoint
 # should overwrite the incoming arguments ?
@@ -48,6 +52,33 @@ ARGS_TO_OVERWRITE = [
     "num_pos_examples",
     "example_to_ids_path",
 ]
+
+
+def tensor_product_construct(
+    args, in_features, out_features, weight_leafs, tensor_rank, embedding_dim, flag="up"
+):
+    w = weight_leafs
+    order = args.order
+    rank = args.lora_rank
+    embedding_dim_leaf_a = math.ceil((in_features) ** (1 / order))
+    embedding_dim_leaf_b = math.ceil((out_features) ** (1 / order))
+    layerone_normalization_a = nn.LayerNorm(
+        normalized_shape=[rank, embedding_dim_leaf_a**2]
+    )
+    # self.layertwo_normalization_a = nn.LayerNorm(
+    #     normalized_shape=[self.rank, self.embedding_dim_leaf_a**2])
+    layerone_normalization_b = nn.LayerNorm(
+        normalized_shape=[rank, embedding_dim_leaf_b**2]
+    )
+    w01 = w[0, :, :, :, None] * w[1, :, :, None, :]
+    # print(w[:,:,:,:].size())
+    w01 = w01.view(tensor_rank, rank, -1)
+    if flag == "up":
+        w01 = layerone_normalization_a(w01)
+    elif flag == "down":
+        w01 = layerone_normalization_b(w01)
+    # print(w01.size())
+    return w01[:, :, :embedding_dim]
 
 
 def finetune(args, use_mlf=True, do_zs=True):
@@ -138,6 +169,168 @@ def finetune(args, use_mlf=True, do_zs=True):
             # resize to accomodate for new task
             module.model.resize_module_logits(1)
 
+    routing = (
+        module.model.decoder.block[0].layer[0].SelfAttention.k.selector.module_logits
+    )
+
+    # get the similarity score
+    def get_adapter_similarity():
+        out_features, in_features = (
+            module.model.decoder.block[0].layer[0].SelfAttention.k.weight.shape
+        )
+        for task_name in dm.task2id:
+            routing_distribution = routing[dm.task2id[task_name]]
+
+            if args.model_modifier == "tensorpoly_lora":
+
+                adapater_weights_lora_a = (
+                    module.model.decoder.block[0]
+                    .layer[0]
+                    .SelfAttention.k.weight_leafs_a
+                )
+                adapater_weights_lora_b = (
+                    module.model.decoder.block[0]
+                    .layer[0]
+                    .SelfAttention.k.weight_leafs_b
+                )
+                lora_a = tensor_product_construct(
+                    args,
+                    in_features,
+                    out_features,
+                    weight_leafs=adapater_weights_lora_a,
+                    tensor_rank=args.n_skills,
+                    embedding_dim=in_features,
+                    flag="up",
+                )
+
+                lora_b = tensor_product_construct(
+                    args,
+                    in_features,
+                    out_features,
+                    weight_leafs=adapater_weights_lora_b,
+                    tensor_rank=args.n_skills,
+                    embedding_dim=out_features,
+                    flag="down",
+                )
+                lora_a = lora_a.transpose(2, 1).unsqueeze(0)
+                lora_b = lora_b.unsqueeze(0)
+
+                # A is    n_splits, n_skills, D // n_splits, rank
+                # we want bs,       n_splits, D // n_splits, rank
+                adapter_weights = torch.einsum(
+                    "abir, abro -> abio",
+                    lora_a,
+                    lora_b,
+                )
+                result = torch.einsum(
+                    "bi,bijk->bijk",
+                    routing_distribution.reshape(1, -1),
+                    adapter_weights,
+                )
+                adapter = result.squeeze(0)
+            elif args.model_modifier == "tensororderpoly_lora":
+                mixing_weights = routing_distribution.reshape(
+                    args.n_splits, args.n_skills
+                )
+
+                adapater_weights_lora_a = (
+                    module.model.decoder.block[0]
+                    .layer[0]
+                    .SelfAttention.k.weight_leafs_a
+                )
+                adapater_weights_lora_b = (
+                    module.model.decoder.block[0]
+                    .layer[0]
+                    .SelfAttention.k.weight_leafs_b
+                )
+                A = torch.einsum(
+                    "os,osrl->orl", (mixing_weights, adapater_weights_lora_a)
+                )
+                # unsqueeze the rank dimension
+                A = A.unsqueeze(1)
+                B = torch.einsum(
+                    "os,osrl->orl", (mixing_weights, adapater_weights_lora_b)
+                )
+                B = B.unsqueeze(1)
+
+                lora_a = tensor_product_construct(
+                    args,
+                    in_features,
+                    out_features,
+                    weight_leafs=A,
+                    tensor_rank=1,
+                    embedding_dim=in_features,
+                    flag="up",
+                )
+                lora_b = tensor_product_construct(
+                    args,
+                    in_features,
+                    out_features,
+                    weight_leafs=B,
+                    tensor_rank=1,
+                    embedding_dim=out_features,
+                    flag="down",
+                )
+
+                lora_a = lora_a.transpose(2, 1).unsqueeze(0)
+                lora_b = lora_b.unsqueeze(0)
+
+                # A is    n_splits, n_skills, D // n_splits, rank
+                # we want bs,       n_splits, D // n_splits, rank
+                adapter_weights = torch.einsum(
+                    "abir, abro -> abio",
+                    lora_a,
+                    lora_b,
+                )
+                result = torch.einsum(
+                    "bi,bijk->bijk",
+                    routing_distribution.reshape(1, -1),
+                    adapter_weights,
+                )
+
+                adapter = result.squeeze(0)
+            elif args.model_modifier == "poly_lora":
+                # get the lora weights
+                adapater_weights_lora_a = (
+                    module.model.decoder.block[0].layer[0].SelfAttention.k.lora_a
+                )
+                adapater_weights_lora_b = (
+                    module.model.decoder.block[0].layer[0].SelfAttention.k.lora_b
+                )
+
+                # compute the final adapter according to the routing
+                adapter_weights = torch.einsum(
+                    "abir, abro -> abio",
+                    adapater_weights_lora_a,
+                    adapater_weights_lora_b,
+                )
+
+                result = torch.einsum(
+                    "bi,bijk->bijk",
+                    routing_distribution.reshape(1, -1),
+                    adapter_weights,
+                )
+
+                adapter = result.squeeze(0)
+            # reduce the dimensionality
+            # pca = PCA(n_components=8)
+            # adapter_embedding = pca.fit_transform(adapter.cpu().detach().numpy())
+
+            # # create the adapter dict
+            # adapter_dict = {}
+            # for i, task_name in enumerate(dm.task2id):
+            #     adapter_dict[task_name] = adapter_embedding[i]
+
+            # save the adapter embedding to npy
+            np.save(
+                f"adapter_finetune_embedding_{task_name}.npy",
+                adapter.cpu().detach().numpy(),
+            )
+            breakpoint()
+
+    if args.similarity_analysis == "weight":
+        get_adapter_similarity()
+
     def fit_and_test(zero_shot=False):
         callbacks = [ProgressCallback()]
 
@@ -172,14 +365,14 @@ def finetune(args, use_mlf=True, do_zs=True):
         if mlf_logger and use_mlf:
             loggers.append(mlf_logger)
 
-        loggers.append(pl.loggers.CSVLogger(
-            save_dir=args.output_dir, name="csv_metrics"
-        ))
+        loggers.append(
+            pl.loggers.CSVLogger(save_dir=args.output_dir, name="csv_metrics")
+        )
 
         if args.finetune_skip_es:
             check_val_every_n_epoch = 10000
         else:
-            check_val_every_n_epoch = 10 if args.dataset in ["ni", "xfit"] else 50 
+            check_val_every_n_epoch = 10 if args.dataset in ["ni", "xfit"] else 50
 
         trainer = Trainer(
             enable_checkpointing=not args.finetune_skip_es,
@@ -196,9 +389,11 @@ def finetune(args, use_mlf=True, do_zs=True):
             strategy=None if not args.compute_strategy else args.compute_strategy,
             limit_val_batches=1.0,
             limit_train_batches=1.0,
-            precision=int(args.precision)
-            if args.precision in ["16", "32"]
-            else args.precision,
+            precision=(
+                int(args.precision)
+                if args.precision in ["16", "32"]
+                else args.precision
+            ),
             callbacks=callbacks,
             accumulate_grad_batches=args.gradient_accumulation_steps,
         )
@@ -213,7 +408,7 @@ def finetune(args, use_mlf=True, do_zs=True):
             trainer.validate(module, dm, ckpt_path=ckpt_path)
         else:
             ckpt_path = "best"
-        trainer.test(module, dm, ckpt_path=ckpt_path) # change by zhan 
+        trainer.test(module, dm, ckpt_path=ckpt_path)  # change by zhan
 
         results = [module.best_val_result] + module.test_results
         return results
