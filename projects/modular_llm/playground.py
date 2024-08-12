@@ -94,13 +94,12 @@ def main():
     setup_autocomplete()
     setup_logging()
 
-    config = ExpertConfig.parse(
-        raise_error=False,
+    config = MultiExpertModel.parse(
         c="./configs/wiki-mmlu/phi-2_flan_v3.json",
         extra_kwargs=dict(k.split("=") for k in sys.argv[1:]),
     )
     tokenizer = get_tokenizer_with_args(config.model, "gpt", "left", "left", True)
-    model = MultiExpertModel(**vars(config), tokenizer=tokenizer).to("cuda")
+    model = MultiExpertModel(**config.asdict()).to("cuda")
     device = "cuda"
 
     print("Welcome to the LLM playground! Type 'exit' to leave.")

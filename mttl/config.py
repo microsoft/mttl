@@ -444,6 +444,12 @@ class ExpertConfig(TrainingArgs, ModifierArgs):
 
 @dataclass
 class MultiExpertConfig(ExpertConfig, SelectorArgs):
+    """
+    Multi-expert configuration class that allows setting selectors and modifiers.
+    In the future, we can remove the modifier support from this configuration, for now we leave it
+    as it simplifies current tests and experiments.
+    """
+
     router_selector: str = None
 
     @property
