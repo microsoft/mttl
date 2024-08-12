@@ -143,11 +143,11 @@ def get_tokenizer_with_args(
         # do not add eos token, we will add it accordingly *if* needed.
         tokenizer.add_eos_token = False
 
-        if tokenizer.pad_token_id is None:
-            logger.warning(
-                "!!! Setting pad_token_id to eos_token_id, given that pad_token_id was not detected !!!"
-            )
-            tokenizer.pad_token_id = tokenizer.eos_token_id
+    if tokenizer.pad_token_id is None:
+        logger.warning(
+            "!!! Setting pad_token_id to eos_token_id, given that pad_token_id was not detected !!!"
+        )
+        tokenizer.pad_token_id = tokenizer.eos_token_id
 
     tokenizer.mttl_merges_space = tokenizer_merges_space(tokenizer)
     tokenizer.mttl_enforces_eos = tokenizer_enforces_eos(tokenizer)
