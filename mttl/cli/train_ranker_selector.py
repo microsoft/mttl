@@ -3,22 +3,24 @@ import os
 import pytorch_lightning as pl
 from pytorch_lightning import seed_everything
 
+from mttl.config import RankerConfig
+from mttl.datamodule.clip_data_module import (
+    CLIPExpertsConfig,
+    CLIPExpertsDatamodule,
+    CLIPTripleDataModule,
+)
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
 from mttl.models.ranker.classifier_ranker import (
     ClassifierSmooth,
     SentenceTransformerClassifier,
 )
 from mttl.models.ranker.clip_ranker import CLIPRanker, CLIPTripletRanker
-from projects.modular_llm.src.ranker.clip_data_module import (
-    CLIPExpertsConfig,
-    CLIPExpertsDatamodule,
-    CLIPTripleDataModule,
-)
 
 
 def train_triplet_clip(args):
     seed_everything(args.seed, workers=True)
     wandb_logger = None
+
     if os.environ.get("WANDB_API_KEY") or args.wandb_project:
         import wandb
 
@@ -32,6 +34,7 @@ def train_triplet_clip(args):
         )
         wandb_logger.experiment.save("*.py")
         wandb_logger.experiment.save("*/ranker/*.py")
+
     # test the model
     dataconfig = CLIPExpertsConfig(
         dataset=args.dataset,
@@ -40,24 +43,19 @@ def train_triplet_clip(args):
         finetune_task_name=args.finetune_task_name,
         predict_batch_size=args.predict_batch_size,
     )
+
     datamodule = CLIPTripleDataModule(dataconfig)
     task_names = datamodule.task_names
 
     if "default" not in task_names:
         task_names.append("default")
 
-    # cls = SentenceTransformerClassifier.from_pretrained(
-    #     "zhan1993/classifier_ranker_held_out"
-    # )
-    print("num experts", len(task_names))
     model = CLIPTripletRanker(
         task_names=task_names,
-        encoder_model_name=args.encoder_model_name,
+        encoder_model_name=args.model_name,
         text_embedding_dim=args.text_embedding_dim,
         expert_embedding_dim=args.expert_embedding_dim,
         projection_dim=args.projection_dim,
-        # pretrained_embedding=cls.out_projecter.weight,
-        # pretrained_ids_to_tasks_names=cls.ids_to_tasks_names,
         learning_rate=args.learning_rate,
     )
     if args.ranker_path:
@@ -81,6 +79,7 @@ def train_triplet_clip(args):
         val_check_interval=0.5,
     )
     trainer.fit(model, datamodule)
+
     if wandb_logger:
         wandb_logger.experiment.finish()
 
@@ -88,6 +87,7 @@ def train_triplet_clip(args):
 def train_clip(args):
     seed_everything(args.seed, workers=True)
     wandb_logger = None
+
     if os.environ.get("WANDB_API_KEY") or args.wandb_project:
         import wandb
 
@@ -119,7 +119,7 @@ def train_clip(args):
 
     model = CLIPRanker(
         task_names=task_names,
-        encoder_model_name=args.encoder_model_name,
+        encoder_model_name=args.model_name,
         text_embedding_dim=args.text_embedding_dim,
     )
     # add model checkpoint
@@ -144,7 +144,7 @@ def train_clip(args):
         wandb_logger.experiment.finish()
 
 
-def train_classifier(args):
+def train_classifier(args: RankerConfig):
     # using wandb project
     seed_everything(args.seed, workers=True)
     wandb_logger = None
@@ -163,26 +163,18 @@ def train_classifier(args):
         wandb_logger.experiment.save("*/*.py")
 
     # train the classifier
-    if "flat" not in args.dataset:
-        raise ValueError("Only flat datamodule supported for now.")
+    if "flan" not in args.dataset_type:
+        raise ValueError("Only FLAN supported for now.")
 
-    config = FlanConfig(
-        dataset=args.dataset,
-        model=args.model,
-        train_batch_size=args.train_batch_size,
-        finetune_task_name=args.finetune_task_name,
-        predict_batch_size=args.predict_batch_size,
-        include_task_source="P3,Flan2021,CoT",
-        include_template_type="*",
-    )
-    datamodule = FlanModule(config)
+    datamodule = FlanModule(args.dataset_config)
+
     print("num of labels", len(datamodule.task_names))
     if args.ranker_path:
         module = SentenceTransformerClassifier.from_pretrained(args.ranker_path)
 
     module = SentenceTransformerClassifier(
         task_names=datamodule.task_names,
-        encoder_model_name=args.encoder_model_name,
+        encoder_model_name=args.model_name,
         transformer_embed_dim=args.text_embedding_dim,
     )
 
@@ -230,24 +222,15 @@ def train_classifier_smooth(args):
         wandb_logger.experiment.save("*/*.py")
 
     # train the classifier
-    if "flat" not in args.dataset:
-        raise ValueError("Only flat datamodule supported for now.")
+    if "flan" not in args.dataset_type:
+        raise ValueError("Only FLAN supported for now.")
 
-    config = FlanConfig(
-        dataset=args.dataset,
-        model=args.model,
-        train_batch_size=args.train_batch_size,
-        finetune_task_name=args.finetune_task_name,
-        predict_batch_size=args.predict_batch_size,
-        include_task_source="P3,Flan2021,CoT",
-        include_template_type="*",
-    )
-    datamodule = FlanModule(config)
+    datamodule = FlanModule(args.dataset_config)
     print("num of labels", len(datamodule.task_names))
 
     module = ClassifierSmooth(
         task_names=datamodule.task_names,
-        encoder_model_name=args.encoder_model_name,
+        encoder_model_name=args.model_name,
         transformer_embed_dim=args.text_embedding_dim,
     )
     if args.ranker_path:
@@ -277,9 +260,10 @@ def train_classifier_smooth(args):
 
 
 if __name__ == "__main__":
-    from projects.modular_llm.src.ranker.config import RankerConfig
+    from mttl.config import RankerConfig
 
     args = RankerConfig.parse()
+
     if args.ranker_model == "classifier":
         train_classifier(args)
     elif args.ranker_model == "clip":

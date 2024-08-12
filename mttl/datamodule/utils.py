@@ -111,16 +111,9 @@ def get_tokenizer_with_args(
     truncation_side="right",
     for_generation=False,
 ):
-    if model_family is None:
-        raise ValueError("model_family is None, please fix your config!")
-
     if "llama-2" in model_name:
         tokenizer = LlamaTokenizer.from_pretrained(model_name)
         tokenizer.pad_token_id = 0
-        if not model_family == "gpt":
-            raise ValueError(
-                "We detected a Llama model, but model_family != 'gpt', fix your config!"
-            )
     else:
         if "phi-2" == model_name:
             # local phi-2 version. use `microsoft/phi-2 for the official hf version`
