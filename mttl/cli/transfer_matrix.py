@@ -2,13 +2,14 @@ import copy
 import os
 import sys
 from functools import partial
+from tempfile import TemporaryDirectory
 from typing import Callable, Union
 
 import seaborn as sns
-import wandb
 from matplotlib import pyplot as plt
 from pytorch_lightning import seed_everything
 
+import wandb
 from mttl.config import Args, EvaluationConfig, ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.evaluators import (
@@ -18,8 +19,8 @@ from mttl.evaluators.evaluators import (
 )
 from mttl.logging import TableLogger, init_wandb_logger, logger, setup_logging
 from mttl.models.expert_model import ExpertModel
-from mttl.models.library.expert import Expert
-from mttl.models.library.expert_library import ExpertLibrary
+from mttl.models.library.expert import Expert, load_expert
+from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
 from mttl.utils import remote_login
 from mttl.vllm_engines.engines import free_memory
 
@@ -149,6 +150,39 @@ def prepare_evaluator(
         name=tasks,
         use_vllm=args.use_vllm,
     )
+
+
+def create_transfer_matrix(args, checkpoint):
+    config = TransferMatrixConfig()
+
+    for k, v in vars(args).items():
+        if k in vars(config):
+            setattr(config, k, v)
+
+    config.eval_base = False
+    config.eval_metric = "rougeL"
+
+    expert: Expert = load_expert(checkpoint)
+    expert.expert_info.expert_name = str(args.finetune_task_name)
+    expert.expert_info.expert_task_name = str(args.finetune_task_name)
+
+    temp_dir = TemporaryDirectory()
+    destination = temp_dir.name
+
+    LocalExpertLibrary.from_expert_dict({"checkpoint": expert}, destination=destination)
+
+    config.library_id = destination
+    config.finetune_task_name = (
+        args.finetune_task_name.split(",")
+        if not isinstance(args.finetune_task_name, list)
+        else args.finetune_task_name
+    )
+
+    if len(config.finetune_task_name) < 50:
+        run_eval(config, debug=False)
+
+    ########################
+    temp_dir.cleanup()
 
 
 def produce_transfer_matrix(

@@ -14,8 +14,7 @@ from mttl.callbacks import (
     NanoMMLUCallback,
     RougeCallback,
 )
-from mttl.cli.transfer_matrix import TransferMatrixConfig
-from mttl.cli.transfer_matrix import run_eval as produce_transfer_matrix
+from mttl.cli.transfer_matrix import create_transfer_matrix
 from mttl.config import ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
@@ -24,34 +23,6 @@ from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
 from mttl.models.monitors import get_monitors
 from mttl.utils import generate_random_string, rank_zero_only_and_wait, remote_login
-
-
-def create_transfer_matrix(args, checkpoint):
-    ########################
-    # create transfer matrix
-    config = TransferMatrixConfig()
-    for k, v in vars(args).items():
-        if k in vars(config):
-            setattr(config, k, v)
-    config.eval_base = False
-    config.eval_metric = "rougeL"
-
-    expert: Expert = load_expert(checkpoint)
-    expert.expert_info.expert_name = str(args.finetune_task_name)
-    expert.expert_info.expert_task_name = str(args.finetune_task_name)
-    temp_dir = TemporaryDirectory()
-    destination = temp_dir.name
-    LocalExpertLibrary.from_expert_dict({"checkpoint": expert}, destination=destination)
-    config.library_id = destination
-    config.finetune_task_name = (
-        args.finetune_task_name.split(",")
-        if not isinstance(args.finetune_task_name, list)
-        else args.finetune_task_name
-    )
-    if len(config.finetune_task_name) < 50:
-        produce_transfer_matrix(config, debug=False)
-    ########################
-    temp_dir.cleanup()
 
 
 def run_multitask(args: ExpertConfig):
@@ -78,6 +49,7 @@ def run_multitask(args: ExpertConfig):
         expert_library = create_library(args)
 
     loggers = get_pl_loggers(args)
+
     # select dataloader
     if args.model_modifier == "poly":
         args.init_from_scratch = True
