@@ -69,32 +69,30 @@ def test_clip_routing(tiny_flan_id):
 
 
 def test_classifier_routing(tiny_flan_id):
-    config = MultiExpertConfig()
-    config.model = "EleutherAI/gpt-neo-125m"
-    config.ranker_model = "classifier"
-    config.ranker_path = "zhan1993/classifier_ranker_debug"
-    finetune_task_name = "cot_gsm8k"
-    config.router_selector = "task_predictor_selector"
-    config.router_granularity = "coarsegrained"
+    config = MultiExpertConfig(
+        model="EleutherAI/gpt-neo-125m",
+        ranker_model="classifier",
+        dataset_type="flan",
+        dataset=tiny_flan_id,
+        ranker_path="zhan1993/classifier_ranker_debug",
+        finetune_task_name="cot_gsm8k",
+        router_selector="task_predictor_selector",
+        router_granularity="coarsegrained",
+    )
 
     data_module = FlanModule(
-        FlanConfig(
-            dataset=tiny_flan_id,
-            model="EleutherAI/gpt-neo-125m",
-            finetune_task_name=finetune_task_name,
-            predict_batch_size=1,
-            include_template_type="*",
-        ),
+        config.dataset_config,
         for_generation=True,
     )
 
     module = MultiExpertModel(**config.asdict())
-
     module.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
     module.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
+
     batch = next(iter(data_module.val_dataloader()))
     selector = module.model.transformer.h[0].attn.attention.out_proj.selector
     assert isinstance(selector, TaskPredictorSelector)
+
     prediction_experts = selector.expert_ranker.predict_task(batch["sources_texts"])
     assert len(prediction_experts) == 2  # experts and names
     assert isinstance(selector.expert_ranker, SentenceTransformerClassifier)

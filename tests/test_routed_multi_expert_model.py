@@ -527,6 +527,7 @@ class TestMultiExpertModel:
         config.router_selector = "task_predictor_selector"
         config.ranker_model = "classifier"
         config.ranker_path = "zhan1993/classifier_ranker_debug"
+
         exp1_dest = self.create_dummy_expert(config, "exp1")
         exp2_dest = self.create_dummy_expert(config, "exp2")
         module_dict = {"niv2_sentence_compression": exp1_dest, "niv2_misc": exp2_dest}
