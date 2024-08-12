@@ -12,7 +12,7 @@ from mttl.callbacks import (
     NanoMMLUCallback,
     RougeCallback,
 )
-from mttl.config import ExpertConfig
+from mttl.config import MoEExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
 from mttl.models.expert_model import MoEModel
@@ -20,7 +20,7 @@ from mttl.models.monitors import get_monitors
 from mttl.utils import remote_login
 
 
-def run_multitask(args: ExpertConfig):
+def run_multitask(args: MoEExpertConfig):
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file
@@ -130,5 +130,5 @@ def run_multitask(args: ExpertConfig):
 
 
 if __name__ == "__main__":
-    args = ExpertConfig.parse()
+    args = MoEExpertConfig.parse()
     run_multitask(args)
