@@ -32,6 +32,8 @@ def augment_few_shot_task(
     max_input_length=None,
     seed=42,
     modify_task_source=True,
+    task_source_field="task_source",
+    task_name_field="task_name",
 ):
     if num_samples is None and few_shots is None:
         raise ValueError("Either num_samples or few_shots must be specified.")
@@ -77,11 +79,11 @@ def augment_few_shot_task(
         return {
             "source": prompt,
             "target": dataset[index]["target"],
-            "task_name": dataset[index]["task_name"],
-            "task_source": (
-                "few_shot_{}".format(dataset[index]["task_source"])
+            task_name_field: dataset[index][task_name_field],
+            task_source_field: (
+                "few_shot_{}".format(dataset[index][task_source_field])
                 if modify_task_source
-                else dataset[index]["task_source"]
+                else dataset[index][task_source_field]
             ),
             "split": (
                 dataset[index]["split"] if "split" in dataset.column_names else None
@@ -93,21 +95,31 @@ def augment_few_shot_task(
 
 
 def augment_few_shot(
-    dataset, num_samples, tokenizer=None, max_input_length=None, seed=42
+    dataset,
+    num_samples,
+    tokenizer=None,
+    max_input_length=None,
+    seed=42,
+    task_name_field="task_name",
+    task_source_field="task_source",
 ):
     """Augment the dataset with few-shot examples."""
     import tqdm
 
     augmented_dataset = []
-    for source in tqdm.tqdm(dataset.unique("task_name")):
+    for source in tqdm.tqdm(dataset.unique(task_name_field)):
         augmented_dataset.append(
             Dataset.from_list(
                 augment_few_shot_task(
-                    dataset.filter(lambda x: x["task_name"] == source),
-                    num_samples,
-                    tokenizer,
-                    max_input_length,
-                    seed,
+                    dataset.filter(lambda x: x[task_name_field] == source),
+                    num_samples=num_samples,
+                    few_shots=None,
+                    tokenizer=tokenizer,
+                    max_input_length=max_input_length,
+                    seed=seed,
+                    modify_task_source=True,
+                    task_name_field=task_name_field,
+                    task_source_field=task_source_field,
                 )
             )
         )
@@ -140,6 +152,9 @@ class FlatMultiTaskModule(DataModule):
         self.dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
 
+        if "train" not in self.dataset.column_names:
+            raise ValueError("Flat multi-task datasets must have a 'train' split!")
+
         if "split" not in self.dataset.column_names["train"]:
             logger.warning(
                 "Dataset *should* have a 'split' column, try removing the dataset manually from the cache! Creating a new 'split' column."
@@ -161,7 +176,10 @@ class FlatMultiTaskModule(DataModule):
             _,
             _,
         ) = maybe_filter_hf_dataset_by_task(
-            self.dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
+            self.dataset,
+            self.config.task_name_field,
+            self.config.finetune_task_name,
+            n_proc=n_proc,
         )
 
         train_dataset = apply_source_template(
@@ -174,6 +192,8 @@ class FlatMultiTaskModule(DataModule):
                 self.config.augment_few_shot,
                 tokenizer=self.tokenizer,
                 max_input_length=self.config.max_input_length,
+                task_name_field=self.config.task_name_field,
+                task_source_field=self.config.task_source_field,
             )
             train_dataset_aug = train_dataset_aug.shuffle()
             train_dataset = train_dataset_aug.select(range(len(train_dataset)))
