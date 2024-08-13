@@ -161,8 +161,6 @@ def test_expert_selector_with_poly_task_routing(
     batch["attention_mask"] = attn_mask
     batch["task_names"] = ["task_1", "task_2"] * 5
 
-    os.environ["COALESCED_LORA_CONTAINER"] = str(is_coalesced)
-
     # BASE MODEL FWD BASS (because all Bs are == 0, so functially same as backbone)
     output = module(batch)
     assert np.allclose(output.item(), 13.625 if is_coalesced else 15.62, atol=0.1)
