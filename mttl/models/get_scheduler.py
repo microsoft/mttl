@@ -27,6 +27,10 @@ def get_scheduler(optimizer, config):
         return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, config.total_steps)
     elif scheduler_name == "adafactor":
         return AdafactorSchedule(optimizer, config.lr)
+    elif scheduler_name == "warmup":
+        return torch.optim.lr_scheduler.LambdaLR(
+            optimizer, lambda step: min(1.0, step / config.warmup_steps)
+        )
     else:
         raise ValueError("Invalid Scheduler Name %s" % scheduler_name)
 
