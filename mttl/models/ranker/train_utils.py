@@ -1,6 +1,7 @@
 import os
 
 import pytorch_lightning as pl
+import torch
 from pytorch_lightning import seed_everything
 
 from mttl.callbacks import LiveCheckpointCallback
@@ -71,8 +72,8 @@ def train_triplet_clip(args):
 
     trainer = pl.Trainer(
         max_epochs=args.num_train_epochs,
-        accelerator="gpu",
         callbacks=[checkpoint_callback],
+        accelerator="gpu" if torch.cuda.is_available() else None,
         devices=1,
         logger=wandb_logger,
         val_check_interval=args.val_check_interval,
@@ -131,7 +132,7 @@ def train_clip(args):
 
     trainer = pl.Trainer(
         max_epochs=args.num_train_epochs,
-        accelerator="gpu",
+        accelerator="gpu" if torch.cuda.is_available() else None,
         callbacks=[checkpoint_callback],
         devices=1,
         logger=wandb_logger,
@@ -186,8 +187,8 @@ def train_classifier(args: RankerConfig):
 
     trainer = pl.Trainer(
         default_root_dir=args.output_dir,
+        accelerator="gpu" if torch.cuda.is_available() else None,
         max_epochs=args.num_train_epochs,
-        accelerator="gpu",
         callbacks=[checkpoint_callback],
         devices=1,
         logger=wandb_logger,
