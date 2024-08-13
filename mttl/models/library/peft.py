@@ -5,7 +5,7 @@ from typing import Dict, Tuple
 
 import safetensors
 import torch
-from transformers import snapshot_download
+from huggingface_hub import snapshot_download
 
 from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.modifiers.base import ModifierConfig
