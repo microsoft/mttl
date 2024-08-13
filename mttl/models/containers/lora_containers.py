@@ -12,7 +12,13 @@ from mttl.models.containers.selectors.selector_output import (
     SelectorOutput,
 )
 from mttl.models.library.expert import Expert
-from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
+from mttl.models.modifiers.lora import (
+    LoRA,
+    LoRAConfig,
+    SkilledLoRA,
+    SkilledLoRAConfig,
+    SkilledLoRAView,
+)
 from mttl.models.modifiers.modify_model import get_modifier_name
 
 
@@ -185,12 +191,14 @@ class LoRAExpertContainer(ExpertContainer):
                     selection.experts, return_inverse=True
                 )
 
-                experts = SkilledLoRAView(
-                    self.experts.config,
-                    self.experts.layers,
-                    self.experts.lora_a[unique_indices],
-                    self.experts.lora_b[unique_indices],
-                )
+                experts = [
+                    SkilledLoRAView(
+                        self.experts.config,
+                        self.experts.layer,
+                        self.experts.lora_a[unique_indices],
+                        self.experts.lora_b[unique_indices],
+                    )
+                ]
 
                 # express weights in the new basis of unique indices
                 # i.e.

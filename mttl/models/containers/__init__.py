@@ -4,10 +4,7 @@ from typing import Tuple
 from mttl.logging import logger, warn_once
 from mttl.models.containers.base import ExpertContainer
 from mttl.models.containers.kv_containers import KVExpertContainer
-from mttl.models.containers.lora_containers import (
-    CoalescedLoRAExpertContainer,
-    LoRAExpertContainer,
-)
+from mttl.models.containers.lora_containers import LoRAExpertContainer
 from mttl.models.containers.selectors.base import (
     Selector,
     SelectorConfig,

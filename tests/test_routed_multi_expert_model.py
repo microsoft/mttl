@@ -6,11 +6,8 @@ import pytest
 import torch
 from pytorch_lightning import seed_everything
 
-from mttl.config import Config
-from mttl.models.containers.lora_containers import (
-    CoalescedLoRAExpertContainer,
-    LoRAExpertContainer,
-)
+from mttl.config import ExpertConfig, MoEExpertConfig, MultiExpertConfig
+from mttl.models.containers.lora_containers import LoRAExpertContainer
 from mttl.models.containers.selectors.base import LoadableLibraryMixin
 from mttl.models.containers.selectors.moe_selector import MOERKHSSelector
 from mttl.models.containers.selectors.per_token_selector import PerTokenSelector
@@ -23,7 +20,6 @@ from mttl.models.containers.selectors.selector_output import (
     BatchSequenceExpertsAndWeightsSelectorOutput,
     SelectorOutput,
 )
-from mttl.models.expert_config import MultiMultiExpertConfig
 from mttl.models.expert_model import MoEModel, MultiExpertModel
 from mttl.models.library.expert import Expert
 from mttl.models.modifiers.base import ModifierConfig
@@ -78,8 +74,6 @@ def create_dummy_expert(config: MultiExpertConfig, exp_name) -> Expert:
 
 
 def test_add_expert_with_action_merge(tmp_multi_exp_config, monkeypatch):
-    monkeypatch.setenv("COALESCED_LORA_CONTAINER", "0")
-
     seed_everything(0)
     config: MultiExpertConfig = tmp_multi_exp_config
 
@@ -123,9 +117,7 @@ def nonzero_B_init(model):
             mod.lora_b.data = torch.rand(mod.lora_b.shape, generator=gen) * 0.5
 
 
-def test_expert_selector_with_poly_task_routing(
-    tmp_multi_exp_config, monkeypatch, is_coalesced
-):
+def test_expert_selector_with_poly_task_routing(tmp_multi_exp_config, monkeypatch):
     seed_everything(0)
     config: MultiExpertConfig = tmp_multi_exp_config
     config.router_selector = "poly_router"
@@ -157,6 +149,8 @@ def test_expert_selector_with_poly_task_routing(
     attn_mask = 1 - attn_mask.cumsum(dim=-1)
     batch["attention_mask"] = attn_mask
     batch["task_names"] = ["task_1", "task_2"] * 5
+
+    is_coalesced = True
 
     # BASE MODEL FWD BASS (because all Bs are == 0, so functially same as backbone)
     output = module(batch)
@@ -327,15 +321,13 @@ def test_expert_selector_with_poly_routing(tmp_multi_exp_config):
     assert len(weights) > 1
 
 
-def test_expert_selector_with_moe_routing_soft(
-    mocker, tmp_multi_exp_config, dummy_batch
-):
+def test_expert_selector_with_moe_routing_soft(mocker, tmp_moe_exp_config, dummy_batch):
     seed_everything(0)
-    config: MultiExpertConfig = tmp_multi_exp_config
+    config: MultiExpertConfig = tmp_moe_exp_config
     config.router_selector = "moe_rkhs_router"
     config.router_granularity = "finegrained"
-    config.moe_emb_dim = 10
-    config.moe_rkhs_dim = 10
+    config.emb_dim = 10
+    config.rkhs_dim = 10
 
     module = MoEModel(**vars(config))
 
@@ -357,14 +349,14 @@ def test_expert_selector_with_moe_routing_soft(
 
 
 def test_expert_selector_with_moe_routing_soft_granularity(
-    mocker, tmp_multi_exp_config, dummy_batch
+    mocker, tmp_moe_exp_config, dummy_batch
 ):
     seed_everything(0)
-    config: MultiExpertConfig = tmp_multi_exp_config
+    config: MultiExpertConfig = tmp_moe_exp_config
     config.router_selector = "moe_rkhs_router"
     config.router_granularity = "coarsegrained"
-    config.moe_emb_dim = 10
-    config.moe_rkhs_dim = 10
+    config.emb_dim = 10
+    config.rkhs_dim = 10
 
     module = MoEModel(**vars(config))
 
@@ -388,17 +380,17 @@ def test_expert_selector_with_moe_routing_soft_granularity(
 
 
 def test_expert_selector_with_moe_routing_soft_coalesced(
-    mocker, tmp_multi_exp_config, dummy_batch, monkeypatch
+    mocker, tmp_moe_exp_config, dummy_batch, monkeypatch
 ):
     monkeypatch.setenv("COALESCED_LORA_CONTAINER", "1")
 
     seed_everything(0)
-    config: MultiExpertConfig = tmp_multi_exp_config
+    config: MultiExpertConfig = tmp_moe_exp_config
     config.router_selector = "moe_rkhs_router"
     config.router_granularity = "finegrained"
-    config.moe_to_k = -1
-    config.moe_emb_dim = 10
-    config.moe_rkhs_dim = 10
+    config.top_k = -1
+    config.emb_dim = 10
+    config.rkhs_dim = 10
 
     module = MoEModel(**vars(config))
 
@@ -419,16 +411,14 @@ def test_expert_selector_with_moe_routing_soft_coalesced(
     assert spy.spy_return.weights.shape == (2, 3, 8)
 
 
-def test_expert_selector_with_moe_routing_hard(
-    mocker, tmp_multi_exp_config, dummy_batch
-):
+def test_expert_selector_with_moe_routing_hard(mocker, tmp_moe_exp_config, dummy_batch):
     seed_everything(0)
-    config: MultiExpertConfig = tmp_multi_exp_config
+    config: MultiExpertConfig = tmp_moe_exp_config
     config.router_selector = "moe_rkhs_router"
     config.router_granularity = "finegrained"
-    config.moe_top_k = 2
-    config.moe_emb_dim = 10
-    config.moe_rkhs_dim = 10
+    config.top_k = 2
+    config.emb_dim = 10
+    config.rkhs_dim = 10
 
     module = MoEModel(**vars(config))
 
@@ -450,12 +440,12 @@ def test_expert_selector_with_moe_routing_hard(
 
 
 def test_expert_selector_with_moe_clown_routing_soft_coalesced(
-    mocker, tmp_multi_exp_config, bigger_dummy_batch, monkeypatch
+    mocker, tmp_moe_exp_config, bigger_dummy_batch, monkeypatch
 ):
     monkeypatch.setenv("COALESCED_LORA_CONTAINER", "1")
 
     seed_everything(0)
-    config: MultiExpertConfig = tmp_multi_exp_config
+    config: MultiExpertConfig = tmp_moe_exp_config
     config.router_selector = "arrow_router"
     config.router_granularity = "finegrained"
     config.router_temp = 0.1
@@ -465,7 +455,7 @@ def test_expert_selector_with_moe_clown_routing_soft_coalesced(
     container = module.model.transformer.h[0].attn.attention.k_proj
     assert isinstance(container, CoalescedLoRAExpertContainer)
     assert isinstance(container.selector, PerTokenSelector)
-    assert container.selector.config.moe_top_k == -1
+    assert container.selector.config.top_k == -1
     assert container.selector.config.router_temp == 0.1
 
     # Test Base Llama model
