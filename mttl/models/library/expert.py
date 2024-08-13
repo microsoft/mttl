@@ -3,9 +3,7 @@ from typing import Dict, Union
 
 import torch
 
-from mttl.config import Config
 from mttl.logging import logger
-from mttl.models.expert_config import ExpertConfig
 from mttl.models.modifiers.base import (
     Modifier,
     ModifierConfig,
@@ -26,35 +24,24 @@ class ExpertInfo:
     parent_node: str = None
     # configuration for this expert, i.e. a modifier config
     expert_config: ModifierConfig = None
-    # configuration with which the expert was trained, i.e. a training config
-    training_config: ExpertConfig = None
+    # arguments with which the expert was trained, i.e. the full training config
+    training_config: "Args" = None
     expert_model: str = None
 
     @classmethod
     def fromdict(cls, data):
-        expert_config = None
-        training_config = None
+        from mttl.config import Args, MultiExpertConfig
+
+        try:
+            # if we cannot infer the training class automatically, we assume it is a MultiExpertConfig
+            training_config = Args.fromdict(data["training_config"])
+        except:
+            training_config = MultiExpertConfig.fromdict(data["training_config"])
 
         if "expert_config" in data:
-            try:
-                expert_config = ModifierConfig.fromdict(data["expert_config"])
-            except:
-                # back-compatibility: in the previously stored checkpoints, expert_config was an object
-                if isinstance(data["expert_config"], Config):
-                    expert_config = ModifierConfig.from_training_config(
-                        data["expert_config"]
-                    )
-                else:
-                    # we are probably in the old format
-                    training_config = Config.fromdict(data["expert_config"])
-                    expert_config = ModifierConfig.from_training_config(training_config)
-
-        if "training_config" in data:
-            # convert it to the generic Config object
-            training_config = ExpertConfig.fromdict(data["training_config"])
-
-        if training_config is None:
-            training_config = expert_config
+            expert_config = ModifierConfig.fromdict(data["expert_config"])
+        else:
+            expert_config = ModifierConfig.from_training_config(training_config)
 
         kwargs = {}
         for key in cls.__dataclass_fields__.keys():
@@ -159,7 +146,7 @@ class Expert:
         return cls(**data)
 
     @property
-    def training_config(self) -> ExpertConfig:
+    def training_config(self) -> "Args":
         # back-compatibility, returns expert config
         return self.expert_info.training_config
 

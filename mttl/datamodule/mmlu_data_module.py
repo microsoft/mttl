@@ -192,7 +192,7 @@ class MMLUDataModule(DataModule):
 
     def test_dataloader(self, subsample=None, shuffle=False):
         if subsample is not None and subsample > 0:
-            from mttl.datamodule import take_n_examples_per_task
+            from mttl.datamodule.base import take_n_examples_per_task
 
             indices = take_n_examples_per_task(
                 list(self.test_dataset["Task"]),

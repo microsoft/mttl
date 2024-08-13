@@ -1,4 +1,4 @@
-from projects.modular_llm.cli_dataset_create import download_flan
+from mttl.dataloader.flan_utils import download_flan
 
 
 def test_download_slice():

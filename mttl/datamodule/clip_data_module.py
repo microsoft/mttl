@@ -88,7 +88,7 @@ def maybe_filter_hf_dataset_by_key(dataset, key, task_names: str = None, n_proc=
     return task_names, task_to_id, train_dataset, dev_dataset, test_dataset
 
 
-@dataclass
+@DataModule.register("clip_experts", CLIPExpertsConfig)
 class CLIPExpertsDatamodule(DataModule):
     # The dataset format is [x, E, accuracy]
     DATA_ENV = "CLIP_DATA_DIR"
@@ -158,7 +158,7 @@ class CLIPExpertsDatamodule(DataModule):
         )
 
 
-@dataclass
+@DataModule.register("clip_triple", CLIPExpertsConfig)
 class CLIPTripleDataModule(DataModule):
     # the dataset format is [task_eval, input x, positive_experts, negative_experts]
     DATA_ENV = "CLIP_TRIPLE_DATA_DIR"

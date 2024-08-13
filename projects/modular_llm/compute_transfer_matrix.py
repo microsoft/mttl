@@ -1,5 +1,8 @@
+import copy
 import os
 import sys
+from functools import partial
+from tempfile import TemporaryDirectory
 from typing import Callable, Union
 
 import seaborn as sns
@@ -7,32 +10,25 @@ import wandb
 from matplotlib import pyplot as plt
 from pytorch_lightning import seed_everything
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-
-from mttl.evaluators.evaluators import Evaluator, prepare_evaluator
+from mttl.config import Args, EvaluationConfig, ExpertConfig
+from mttl.datamodule.base import get_datamodule
+from mttl.evaluators.evaluators import (
+    Evaluator,
+    ExtendedMMLUEvaluator,
+    ExtendedRougeEvaluator,
+)
 from mttl.logging import TableLogger, init_wandb_logger, logger, setup_logging
-from mttl.models.expert_config import ExpertConfig
-
-# register models
 from mttl.models.expert_model import ExpertModel
-from mttl.models.library.expert import Expert
-from mttl.models.library.expert_library import ExpertLibrary
+from mttl.models.library.expert import Expert, load_expert
+from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
 from mttl.utils import remote_login
 from mttl.vllm_engines.engines import free_memory
 
-DEBUG = False
-if "AMLT_OUTPUT_DIR" in os.environ:
-    DEBUG = False
-if DEBUG:
-    print("!!!!!!!!!!!!!!!!!!!!!! DEBUG MODE")
 
-
-class TransferMatrixConfig(ExpertConfig):
-    def _set_defaults(self):
-        super()._set_defaults()
-        self.only_diagonal = False
-        self.eval_base = True
-        self.transfer_matrix_split = "test"
+class TransferMatrixConfig(EvaluationConfig):
+    only_diagonal = False
+    eval_base = True
+    transfer_matrix_split = "test"
 
 
 def eval_expert_on_task(
@@ -98,15 +94,95 @@ def eval_all_experts_on_task(
     for expert_name, expert in expert_lib.items():
         if only_diagonal and expert.expert_info.expert_task_name != task_eval_on:
             continue
+
         score = eval_expert_on_task(
             task_eval_on,
             module_constructor,
             expert,
             evaluator_test=evaluator,
-            debug=DEBUG,
         )
         log_row[expert_name] = score["test"]
     return log_row
+
+
+def prepare_evaluator(
+    args: Args,
+    dataset,
+    tasks,
+    split=None,
+    subsample=-1,
+    for_generation=None,
+):
+    from mttl.callbacks import TestLossEvaluator
+
+    if args.eval_metric == "loss":
+        EVAL_CLASS = TestLossEvaluator
+        for_generation = for_generation if for_generation is not None else False
+    elif args.eval_metric == "rougeL":
+        EVAL_CLASS = ExtendedRougeEvaluator
+        for_generation = for_generation if for_generation is not None else True
+    elif args.eval_metric == "acc":
+        assert "mmlu" in dataset
+        EVAL_CLASS = ExtendedMMLUEvaluator
+        for_generation = for_generation if for_generation is not None else True
+    else:
+        raise ValueError(f"Unknown eval metric {args.eval_metric}")
+
+    args_copy = copy.deepcopy(args)
+    args_copy.dataset = dataset
+    args_copy.finetune_task_name = tasks
+    args_copy.validation_portion = 0.0
+    dm = get_datamodule(args_copy, for_generation=for_generation)
+
+    if split is not None:
+        evaluator = EVAL_CLASS(
+            datamodule=dm,
+            subsample=subsample,
+            name=tasks,
+            split=split,
+            use_vllm=args.use_vllm,
+        )
+        return evaluator
+
+    return partial(
+        EVAL_CLASS,
+        datamodule=dm,
+        name=tasks,
+        use_vllm=args.use_vllm,
+    )
+
+
+def create_transfer_matrix(args, checkpoint):
+    config = TransferMatrixConfig()
+
+    for k, v in vars(args).items():
+        if k in vars(config):
+            setattr(config, k, v)
+
+    config.eval_base = False
+    config.eval_metric = "rougeL"
+
+    expert: Expert = load_expert(checkpoint)
+    expert.expert_info.expert_name = str(args.finetune_task_name)
+    expert.expert_info.expert_task_name = str(args.finetune_task_name)
+
+    temp_dir = TemporaryDirectory()
+    destination = temp_dir.name
+
+    LocalExpertLibrary.from_expert_dict({"checkpoint": expert}, destination=destination)
+
+    config.library_id = destination
+    config.finetune_task_name = (
+        args.finetune_task_name.split(",")
+        if not isinstance(args.finetune_task_name, list)
+        else args.finetune_task_name
+    )
+
+    if len(config.finetune_task_name) < 50:
+        run_eval(config, debug=False)
+
+    ########################
+    temp_dir.cleanup()
 
 
 def produce_transfer_matrix(
@@ -146,7 +222,7 @@ def produce_transfer_matrix(
         if args.eval_base:
             # eval on base model
             log_row["base"] = eval_expert_on_task(
-                task_eval_on, module, expert=None, evaluator_test=evaluator, debug=DEBUG
+                task_eval_on, module, expert=None, evaluator_test=evaluator
             )["test"]
 
         print(transfer_table.df)
@@ -163,10 +239,6 @@ def run_eval(args: TransferMatrixConfig, debug=None):
     Given a library_id, create transfer matrix: each expert is evaluated on each other expert's dataset.
     """
     seed_everything(args.seed, workers=True)
-    setup_logging(args.output_dir)
-    global DEBUG
-    if debug is not None:
-        DEBUG = debug
 
     if wandb.run is None:
         init_wandb_logger(args)
@@ -187,6 +259,7 @@ def run_eval(args: TransferMatrixConfig, debug=None):
     transfer_table.log_final_table()
     transfer_matrix = transfer_table.df
     transfer_matrix = transfer_matrix.set_index("eval_task")
+
     if wandb.run is not None:
         try:
             _size = 1 * len(transfer_matrix.columns)
@@ -196,6 +269,7 @@ def run_eval(args: TransferMatrixConfig, debug=None):
             wandb.log({"transfer_matrix_heatmap": wandb.Image(ax.get_figure())})
         except Exception as e:
             print(e)
+
     plt.clf()
     print("Transfer matrix", transfer_matrix)
     transfer_matrix.to_csv(os.path.join(args.output_dir, "transfer_matrix.csv"))

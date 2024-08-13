@@ -6,53 +6,6 @@ import torch
 
 from mttl.datamodule.base import DataModule, get_datamodule
 from mttl.evaluators import MMLUEvaluator, RougeEvaluator
-from mttl.models.expert_config import ExpertConfig
-
-
-def prepare_evaluator(
-    args: ExpertConfig,
-    dataset,
-    tasks,
-    split=None,
-    subsample=-1,
-    for_generation=None,
-):
-    from mttl.callbacks import TestLossEvaluator
-
-    if args.eval_metric == "loss":
-        EVAL_CLASS = TestLossEvaluator
-        for_generation = for_generation if for_generation is not None else False
-    elif args.eval_metric == "rougeL":
-        EVAL_CLASS = ExtendedRougeEvaluator
-        for_generation = for_generation if for_generation is not None else True
-    elif args.eval_metric == "acc":
-        assert "mmlu" in dataset
-        EVAL_CLASS = ExtendedMMLUEvaluator
-        for_generation = for_generation if for_generation is not None else True
-    else:
-        raise ValueError(f"Unknown eval metric {args.eval_metric}")
-
-    args_copy = copy.deepcopy(args)
-    args_copy.dataset = dataset
-    args_copy.finetune_task_name = tasks
-    args_copy.validation_portion = 0.0
-    dm = get_datamodule(args_copy, for_generation=for_generation)
-
-    if split is not None:
-        evaluator = EVAL_CLASS(
-            datamodule=dm,
-            subsample=subsample,
-            name=tasks,
-            split=split,
-            use_vllm=args.use_vllm,
-        )
-        return evaluator
-    return partial(
-        EVAL_CLASS,
-        datamodule=dm,
-        name=tasks,
-        use_vllm=args.use_vllm,
-    )
 
 
 class Evaluator(ABC):
