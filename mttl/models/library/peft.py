@@ -57,10 +57,11 @@ def create_expert_from_peft_path(peft_path: str, expert_name: str = None) -> Exp
     """
     peft_dir = snapshot_download(peft_path)
     config_path = os.path.join(peft_dir, "adapter_config.json")
-
-    base_model = config["base_model_name_or_path"]
     with open(config_path) as f:
         config = json.load(f)
+
+    base_model = config["base_model_name_or_path"]
+    tensors = load_peft_weights(peft_dir)
 
     if config["peft_type"] == "LORA":
         rank = config["r"]
@@ -75,16 +76,30 @@ def create_expert_from_peft_path(peft_path: str, expert_name: str = None) -> Exp
             modify_modules=".*",
             modify_layers="|".join(target_modules),
         )
+
+        def parse_lora_weight(name: str) -> str:
+            parts = name.split(".")
+
+            if len(parts) >= 2 and parts[0] == "base_model" and parts[1] == "model":
+                if parts[-1] == "weight":
+                    if parts[-2] == "lora_A" or parts[-2] == "lora_B":
+                        name = ".".join(parts[2:-2])
+                        # in peft, lora_B = lora_a, lora_A = lora_b
+                        is_a = parts[-2] == "lora_A"
+                        return name + (".lora_b" if is_a else ".lora_a")
+            raise ValueError(f"Can't parse lora weight {name}!")
+
+        tensors = {parse_lora_weight(name): tensor for name, tensor in tensors.items()}
     else:
         raise ValueError(f"Not supported PEFT type {config['peft_type']}")
 
-    tensors = load_peft_weights(peft_dir)
     expert_info = ExpertInfo(
         expert_config=modifier_config,
         expert_name=expert_name or peft_path.replace("/", "_"),
         training_config=None,
         expert_model=base_model,
     )
+
     expert = Expert(
         expert_info=expert_info,
         expert_weights=tensors,
