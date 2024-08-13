@@ -144,8 +144,8 @@ def train_clip(args):
 
 
 def train_classifier(args: RankerConfig):
-    # using wandb project
     seed_everything(args.seed, workers=True)
+
     wandb_logger = None
     if os.environ.get("WANDB_API_KEY") or args.wandb_project:
         import wandb
@@ -153,9 +153,10 @@ def train_classifier(args: RankerConfig):
         project = os.environ.get("WANDB_PROJECT", "wiki_experts")
         project = args.wandb_project if args.wandb_project is not None else project
         args.exp_name = "dev_run" if args.exp_name is None else args.exp_name
+
         wandb_logger = pl.loggers.WandbLogger(
             project=project,
-            name=args.exp_name,  # , config=args_
+            name=args.exp_name,
             settings=wandb.Settings(start_method="fork"),
         )
         wandb_logger.experiment.save("*.py")
@@ -184,6 +185,7 @@ def train_classifier(args: RankerConfig):
     )
 
     trainer = pl.Trainer(
+        default_root_dir=args.output_dir,
         max_epochs=args.num_train_epochs,
         accelerator="gpu",
         callbacks=[checkpoint_callback],
