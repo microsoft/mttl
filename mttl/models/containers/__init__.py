@@ -43,15 +43,9 @@ def get_container_class(modifier: str):
     import os
 
     if modifier == "lora":
-        if os.environ.get("COALESCED_LORA_CONTAINER", "False") == "1":
-            return CoalescedLoRAExpertContainer
         return LoRAExpertContainer
     elif modifier == "skilled_lora":
-        if not os.environ.get("COALESCED_LORA_CONTAINER", "False") == "1":
-            warn_once(
-                "COALESCED_LORA_CONTAINER is not set to 1, but still using it for SkilledLoRA"
-            )
-        return CoalescedLoRAExpertContainer
+        return LoRAExpertContainer
     elif modifier == "kv_adapter":
         return KVExpertContainer
     else:
