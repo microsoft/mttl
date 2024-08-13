@@ -397,6 +397,28 @@ class MultiExpertModel(ExpertModel):
                         raise result.exception()
                     progress_bar.update(1)
 
+    def add_peft_expert(
+        self,
+        hf_expert_path,
+        expert_name: str = None,
+        action: str = "route",
+        is_default: bool = False,
+    ):
+        """
+        Adds an expert from a HuggingFace PEFT checkpoint.
+
+        Args:
+            hf_expert_path (str): Path to the HuggingFace checkpoint.
+        """
+        from mttl.models.library.peft import create_expert_from_peft_path
+
+        self.add_expert_instance(
+            create_expert_from_peft_path(hf_expert_path, expert_name=expert_name),
+            expert_name=expert_name,
+            action=action,
+            is_default=is_default,
+        )
+
     def add_experts_from_dict(self, experts_dict, action="route"):
         for expert_name, expert_dump in experts_dict.items():
             self.add_expert_instance(expert_dump, expert_name, action=action)
