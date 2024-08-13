@@ -12,7 +12,7 @@ from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.lora import LoRAConfig
 
 
-def load_peft_weights(peft_dir) -> Tuple[ModifierConfig, Dict[str, torch.Tensor]]:
+def load_peft_weights(peft_dir) -> Dict[str, torch.Tensor]:
     """
     Load the PEFT adapter from the given path.
 
@@ -29,14 +29,6 @@ def load_peft_weights(peft_dir) -> Tuple[ModifierConfig, Dict[str, torch.Tensor]
 
     if os.path.isfile(tensor_path):
         tensors: Dict[str, torch.Tensor] = {}
-
-        # Find unexpected modules.
-        # Use safetensor key as a source of truth to find expected modules.
-        # in peft if you have target_modules A, B, C and C does not exist
-        # in the model it won’t error and model will be trained with A, B
-        # loraified. C won’t exist in the safetensor but it will exist in
-        # the target_modules of the adapter_config.json.
-        unexpected_modules = []
         with safetensors.safe_open(lora_tensor_path, framework="pt") as f:  # type: ignore
             for module in f.keys():
                 tensors[module] = f.get_tensor(module)
