@@ -7,6 +7,7 @@ from torch import nn
 
 from mttl.logging import logger
 from mttl.registrable import Registrable
+from mttl.models.utils import split_qkv_layer
 
 
 class Modifier(nn.Module, Registrable):
@@ -184,10 +185,23 @@ def tie_params(transformer, config, target_2_source_param):
 
 
 def modify_with_adapter(transformer, config, adapter_klass):
+
+    # First, let's potentially split qkv layers into 3 separate ones, to patch them separately
+    modify_layers = config.modify_layers
+    if config.split_qkv:
+        assert config.split_qkv in modify_layers, "To use `split_qkv`, you need to include `split_qkv` in `modify_layers`."
+        modify_layers = modify_layers.replace(config.split_qkv, "[qkv]_proj")
+
+        for m_name, parent in dict(transformer.named_modules()).items():
+            for c_name, layer in dict(parent.named_children()).items():
+                if re.fullmatch(f".*{config.split_qkv}.*", c_name):
+                    split_qkv_layer(parent, c_name)
+
+    # Then, we do the actual patching
     for m_name, module in dict(transformer.named_modules()).items():
         if re.fullmatch(config.modify_modules, m_name):
             for c_name, layer in dict(module.named_children()).items():
-                if re.fullmatch(config.modify_layers, c_name):
+                if re.fullmatch(modify_layers, c_name):
                     logger.info(f"Patching {m_name}.{c_name}...")
 
                     setattr(

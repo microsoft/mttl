@@ -155,6 +155,7 @@ class ExpertModel(EfficientCheckpointModule):
 
         for i, pg in enumerate(self.optimizers().optimizer.param_groups):
             self.log(f"train/lr_{i}", pg["lr"])
+
         return total_loss
 
     def on_validation_epoch_start(self) -> None:
@@ -617,7 +618,7 @@ class MoEModel(MultiExpertModel):
                     lora_rank=self.hparams.lora_rank,
                     lora_init_b_random=True,
                     n_splits=self.hparams.n_splits,
-                    phi_2_align_heads=self.hparams.phi_2_align_heads,
+                    split_qkv=self.hparams.split_qkv,
                 )
                 self.add_empty_expert(f"e{i}", exp_config)
             self.moe_num_experts = kwargs["moe_num_experts"]

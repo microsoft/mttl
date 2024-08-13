@@ -561,3 +561,39 @@ class MetricLogger(object):
 
     def __len__(self):
         return len(self.meters)
+
+def split_qkv_layer(parent, qkv_layer_name):
+    """ 
+    Some models have a single linear layer for qkv projection. 
+    This module splits it into three separate layers. Useful for when patching with LoRAs
+    """
+    qkv_layer = getattr(parent, qkv_layer_name)
+    assert isinstance(qkv_layer, torch.nn.Linear)
+
+    in_d, out_d = qkv_layer.in_features, qkv_layer.out_features // 3
+    has_bias = qkv_layer.bias is not None
+
+    parent.q_proj = torch.nn.Linear(in_d, out_d, bias=has_bias)
+    parent.k_proj = torch.nn.Linear(in_d, out_d, bias=has_bias)
+    parent.v_proj = torch.nn.Linear(in_d, out_d, bias=has_bias)
+
+    q_weight, k_weight, v_weight = qkv_layer.weight.chunk(3, dim=0)
+    parent.q_proj.weight.data.copy_(q_weight)
+    parent.k_proj.weight.data.copy_(k_weight)
+    parent.v_proj.weight.data.copy_(v_weight)
+    
+    if has_bias:
+        q_bias, k_bias, v_bias = qkv_layer.bias.chunk(3, dim=0)
+        parent.q_proj.bias.data.copy_(q_bias)
+        parent.k_proj.bias.data.copy_(k_bias)
+        parent.v_proj.bias.data.copy_(v_bias)
+
+    def wrapped_forward(x):
+        q_out = parent.q_proj(x) 
+        k_out = parent.k_proj(x)
+        v_out = parent.v_proj(x)
+
+        return torch.cat((q_out, k_out, v_out), dim=-1)
+
+    delattr(parent, qkv_layer_name)
+    setattr(parent, qkv_layer_name, wrapped_forward)

@@ -109,7 +109,7 @@ class ExpertConfig(Config):
             True  # If false, routing specific stats are not computed
         )
 
-        self.phi_2_align_heads = False
+        self.split_qkv = None # string that matches the parameter name to split qkv
         self.lora_merge_after = False  # if True, tried to merge after the outer product, currently only applicable to LoRA
 
         # phatgoose gate learning

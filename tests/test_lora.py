@@ -255,6 +255,52 @@ def test_skilled_lora_view():
     assert skilled_lora.rank == 5
     assert skilled_lora.alpha == adapter_config.lora_alpha
 
+@torch.no_grad()
+def test_lora_split_qkv():
+    seed_everything(0)
+    # build a tiny phi-3 model 
+    from transformers.models.phi3 import Phi3ForCausalLM, Phi3Config
+    config = Phi3Config(
+        vocab_size=10,
+        hidden_size=16,
+        intermediate_size=32,
+        num_hidden_layers=2,
+        num_attention_heads=1,
+        pad_token_id=1
+    )
+    model = Phi3ForCausalLM(config)
+    model_copy = Phi3ForCausalLM(config)
+    model_copy.load_state_dict(model.state_dict())
+
+    # modify the model with LoRA
+    kwargs = {'model_object' : model, 'modify_layers' : 'qkv_proj', 'model_modifier': 'lora', 'modify_modules': '.*'}
+
+    # 1) wrap with an ExpertModel to call `modify_transformer`  
+    from mttl.models.expert_model import Expert, MultiExpertModel, ExpertModel
+    expert_model = ExpertModel(**kwargs).eval()
+
+    # make sure the patching worked
+    assert isinstance(expert_model.model.model.layers[0].self_attn.qkv_proj, LoRA)
+    assert not hasattr(expert_model.model.model.layers[0].self_attn, 'q_proj')
+
+    # 2) test the forward pass
+    input_ids = torch.randint(0, 10, (2, 4))
+    target_logits = expert_model.model(input_ids).logits
+
+    # modify the model with LoRA
+    kwargs = {'model_object' : model_copy, 'modify_layers' : 'qkv_proj', 'model_modifier': 'lora', 'modify_modules': '.*', 'split_qkv': 'qkv_proj'}
+
+    # 1) wrap with an ExpertModel to call `modify_transformer`  
+    from mttl.models.expert_model import Expert, MultiExpertModel, ExpertModel
+    expert_model = ExpertModel(**kwargs)
+    
+    assert hasattr(expert_model.model.model.layers[0].self_attn, 'q_proj')
+    assert isinstance(expert_model.model.model.layers[0].self_attn.q_proj, LoRA)
+
+    new_logits = expert_model.model(input_ids).logits
+    
+    assert torch.allclose(target_logits, new_logits)
+    # assert target_logits.abs().sum().item() == 4.99925422668457 
 
 if __name__ == "__main__":
     pytest.main([__file__])
