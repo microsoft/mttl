@@ -26,6 +26,7 @@ from mttl.models.modifiers.lora import LoRAConfig
 def test_load_peft():
     seed_everything(0)
     os.environ["COALESCED_LORA_CONTAINER"] = "0"
+
     model = MultiExpertModel(model="EleutherAI/gpt-neo-125m", device_map="cpu")
     model.add_peft_expert("Hagatiana/gpt-neo-125M-imdb-16r-lora", "imdb")
     assert model.experts_containers[0].default_expert_name is None
