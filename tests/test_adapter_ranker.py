@@ -13,7 +13,7 @@ from mttl.models.ranker.clip_ranker import CLIPRanker
 def test_train_ranker(tiny_flan_id, tmp_path):
     import os
 
-    from mttl.cli.train_ranker_selector import train_classifier
+    from mttl.models.ranker.train_utils import train_classifier
 
     config = RankerConfig(
         dataset_type="flan",
