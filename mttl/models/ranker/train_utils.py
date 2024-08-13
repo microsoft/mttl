@@ -73,7 +73,7 @@ def train_triplet_clip(args):
     trainer = pl.Trainer(
         max_epochs=args.num_train_epochs,
         callbacks=[checkpoint_callback],
-        accelerator="gpu" if torch.cuda.is_available() else None,
+        accelerator="auto",
         devices=1,
         logger=wandb_logger,
         val_check_interval=args.val_check_interval,
@@ -132,7 +132,7 @@ def train_clip(args):
 
     trainer = pl.Trainer(
         max_epochs=args.num_train_epochs,
-        accelerator="gpu" if torch.cuda.is_available() else None,
+        accelerator="auto",
         callbacks=[checkpoint_callback],
         devices=1,
         logger=wandb_logger,
@@ -187,7 +187,7 @@ def train_classifier(args: RankerConfig):
 
     trainer = pl.Trainer(
         default_root_dir=args.output_dir,
-        accelerator="gpu" if torch.cuda.is_available() else None,
+        accelerator="auto",
         max_epochs=args.num_train_epochs,
         callbacks=[checkpoint_callback],
         devices=1,
