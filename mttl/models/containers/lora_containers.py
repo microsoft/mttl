@@ -256,7 +256,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             lora_rank=config.lora_rank,
             n_splits=config.n_splits if isinstance(config, SkilledLoRAConfig) else 1,
             n_skills=0,
-            split_kqv=config.split_qkv,
+            split_qkv=config.split_qkv,
         )
         self.experts = SkilledLoRA(self.dummy_config, layer)
 
