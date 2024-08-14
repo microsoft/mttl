@@ -33,7 +33,7 @@ def run_multitask(args: ExpertConfig):
     args.task_names = dm._task_names
 
     loggers = get_pl_loggers(args)
-    module = model_class(**vars(args))
+    module = model_class(**args.todict())
 
     # get metric monitors for models
     callbacks = get_monitors(args)
