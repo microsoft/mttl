@@ -13,7 +13,7 @@ def compute_arrow_embeddings(
     ab_only=True,
     tie_params=None,
     tie_op="concat",
-    base_model_proto=False,
+    add_base_proto=False,
     recompute_prototypes=False,
 ) -> str:
     from mttl.models.library.library_transforms import ArrowConfig, ArrowTransform
@@ -23,11 +23,11 @@ def compute_arrow_embeddings(
         ab_only=ab_only,
         tie_params=tie_params or "default",
         tie_op=tie_op,
+        add_base_proto=add_base_proto,
     )
     ArrowTransform(cfg).transform(
         library,
         recompute=recompute_prototypes,
-        add_base_proto=base_model_proto,
         persist=True,
     )
     return cfg.save_name

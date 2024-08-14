@@ -88,6 +88,8 @@ class DatasetConfig:
     model_family: str = "gpt"
     train_on_inputs: bool = False
     add_eos_to_targets: bool = True
+    add_eos_to_downstream_targets: bool = True
+    finetune_task_name: str = None
     subsample_train: int = None
     subsample_dev: int = None
     subsample_test: int = None
@@ -96,7 +98,6 @@ class DatasetConfig:
     pack_sequences: bool = False  # True
     pad_to_multiple_of: int = 8
     max_seq_per_pack: int = 4
-    finetune_task_name: str = None
     task_id_field: str = "task_id"
     task_name_field: str = "task_name"
     task_source_field: str = "task_source"

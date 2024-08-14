@@ -114,7 +114,7 @@ def fetch_prototypes(args: EvaluationConfig, library: ExpertLibrary) -> str:
             ab_only=args.ab_only,
             tie_params=args.tie_params,
             tie_op=args.tie_op,
-            base_model_proto=args.base_model_proto,
+            add_base_proto=args.add_base_proto,
             recompute_prototypes=args.recompute_prototypes,
         )
     elif args.merge_or_route == "hidden":

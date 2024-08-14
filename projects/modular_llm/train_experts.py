@@ -13,7 +13,6 @@ from mttl.callbacks import (
     NanoMMLUCallback,
     RougeCallback,
 )
-from mttl.cli.compute_transfer_matrix import create_transfer_matrix
 from mttl.config import Args, ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
@@ -53,7 +52,7 @@ def train_experts(args: Args, model_class: Type[ExpertModel]):
     args.n_tasks = len(dm._task_names)
     args.task_names = dm._task_names
 
-    module = model_class(**vars(args), tokenizer=dm.tokenizer)
+    module = model_class(**args.asdict())
 
     # get metric monitors for models
     callbacks = get_monitors(args)
@@ -192,9 +191,6 @@ def train_experts(args: Args, model_class: Type[ExpertModel]):
                     raise ValueError("Model class not recognized")
 
         upload_library(expert_library, module)
-
-        if args.create_transfer_matrix:
-            create_transfer_matrix(args, checkpoint)
 
 
 if __name__ == "__main__":

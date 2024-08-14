@@ -35,7 +35,7 @@ torch.set_float32_matmul_precision("high")
 
 
 class ExpertModel(EfficientCheckpointModule):
-    training_config_class: ExpertConfig = None
+    training_config_class = ExpertConfig
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
