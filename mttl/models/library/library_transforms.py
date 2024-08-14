@@ -50,14 +50,18 @@ def _hash_field(val):
         return val
 
 
-def param_hash(p):
+def param_hash(p, exclude_fields=None):
     # from facebookresearch / ReAgent
     import hashlib
 
     m = hashlib.md5()
     m.update(
         str(
-            tuple(_hash_field(getattr(p, f.name)) for f in dataclasses.fields(p))
+            tuple(
+                _hash_field(getattr(p, f.name))
+                for f in dataclasses.fields(p)
+                if not exclude_fields or f.name not in exclude_fields
+            )
         ).encode()
     )
     return m.hexdigest()
@@ -77,8 +81,11 @@ class LibraryTransformConfig:
             return self.name
         else:
             # form auto name based on the arguments of the config
-            save_name = self.__class__.__name__.lower() + f"-{param_hash(self)}"
+            save_name = self.__class__.__name__.lower() + f"-{self.param_hash()}"
             return save_name
+
+    def param_hash(self):
+        return param_hash(self)
 
 
 @dataclass
@@ -763,6 +770,11 @@ class ArrowConfig(LibraryTransformConfig):
         "default"  # If default, ties the same params as during training. If a regex, processed the same way as during training
     )
     tie_op: str = "concat"  # or "sum"
+    add_base_proto: bool = False
+
+    def param_hash(self):
+        # for convenience, we exclude the add_base_proto field as it was added later
+        return param_hash(self, exclude_fields=["add_base_proto"])
 
 
 @LibraryTransform.register("arrow", ArrowConfig)
@@ -897,13 +909,17 @@ class ArrowTransform(LibraryTransform):
 
     @torch.no_grad()
     def transform(
-        self, library, persist=True, recompute=False, add_base_proto=False
+        self,
+        library,
+        persist=True,
+        recompute=False,
     ) -> Expert:
         logger.info("Arrow save name : {}".format(self.config.save_name))
 
         if isinstance(library, str):
             library = ExpertLibrary.get_expert_library(library)
 
+        add_base_proto = self.config.add_base_proto
         base_model = None
 
         vectors, eigvals = self.fetch(library, scale=False)

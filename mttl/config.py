@@ -5,24 +5,27 @@ import json
 import os
 from dataclasses import MISSING, Field, dataclass, field, fields, make_dataclass
 from string import Template
-from typing import Any, Dict, List, Type
+from typing import Any, Dict, List, Type, TypeVar
 
 import torch
 
 from mttl.logging import logger, setup_logging, warn_once
 from mttl.registrable import Registrable
 
+# Create a generic type variable that can be any type
+T = TypeVar("T")
+
 
 class MultiDefaultValue:
     """
-    Manages multiple default values for fields that may have the same name but different defaults
-    across merged dataclasses.
+    When we merge dataclasses fields to compile the available command-line args, different dataclasses might have
+    different defaults for the same field. This class is used to store all the defaults and resolve them when needed.
     """
 
-    def __init__(self, cls, name, field_type, default):
+    def __init__(self, cls: dataclass, name: str, field_type: Type[T], default: T):
         self.name = name
         self.type = field_type
-        self.defaults = {cls.__name__: default}
+        self.defaults: Dict[str, T] = {cls.__name__: default}
 
     def update(self, cls, default, field_type):
         if field_type != self.type:
@@ -35,8 +38,8 @@ class MultiDefaultValue:
         if default != last_default:
             self.defaults[cls.__name__] = default
 
-    @property
-    def default(self):
+    def resolve_default(self):
+        # if any of these attributes is required, we need to specify it in the config
         return next(iter(self.defaults.values())) if len(self.defaults) == 1 else self
 
     def __repr__(self):
@@ -45,44 +48,45 @@ class MultiDefaultValue:
         return f"MultiDefaultValue({self.defaults})"
 
 
-def dataclasses_union(*args: Type[dataclass]) -> List:
+def dataclasses_union(*dataclasses: Type[dataclass]) -> List:
     """
     Create a new dataclass that is the union of the fields of the input dataclasses.
     """
     new_fields = {}
-    for c in args:
-        for f in fields(c):
-            if f.name not in new_fields:
-                value = (
-                    f.type,
-                    field(default=MultiDefaultValue(c, f.name, f.type, f.default)),
+    for klass in dataclasses:
+        for field_ in fields(klass):
+            name = field_.name
+
+            if field_.default_factory is not MISSING:
+                raise ValueError(
+                    "Attributes with default factories are not supported yet!"
                 )
-                new_fields[f.name] = value
+
+            if field_.name not in new_fields:
+                multi_default = MultiDefaultValue(
+                    klass, name, field_.type, field_.default
+                )
+                new_fields[name] = (field_.type, field(default=multi_default))
             else:
-                value = new_fields[f.name][1]
-                value.default.update(c, f.default, f.type)
+                new_fields[name][1].default.update(klass, field_.default, field_.type)
 
-    # now we need to set the default values for all the fields in which there is only one default value
-    for k in new_fields:
-        value = new_fields[k][1]
-        value.default = value.default.default
+    # We resolve the default if possible for each field, if we can't resolve default will be MultiDefaultValue
+    for k, (_, field_instance) in new_fields.items():
+        field_instance.default = field_instance.default.resolve_default()
 
-    return [(k,) + v for k, v in new_fields.items()]
+    return [(name,) + field_info for name, field_info in new_fields.items()]
 
 
-def create_config_class_from_args(config_class: dataclass, args: "Args"):
+def create_config_class_from_args(config_class, args):
     """
     Load a dataclass from the arguments.
     """
-    kwargs = {}
-
-    for f in fields(config_class):
-        if hasattr(args, f.name):
-            value = getattr(args, f.name)
-
-            # if the field is not a multi-default, we override it (it was either default or set by the user)
-            if not isinstance(value, MultiDefaultValue):
-                kwargs[f.name] = value
+    kwargs = {
+        f.name: getattr(args, f.name)
+        for f in fields(config_class)
+        if hasattr(args, f.name)
+        and not isinstance(getattr(args, f.name), MultiDefaultValue)
+    }
 
     return config_class(**kwargs)
 
@@ -120,9 +124,12 @@ class Args:
         return cls(**data_)
 
     def asdict(self) -> Dict:
-        from mttl.models.utils import convert_hps_to_dict
+        data = {
+            f.name: getattr(self, f.name)
+            for f in fields(self)
+            if not isinstance(getattr(self, f.name), MultiDefaultValue)
+        }
 
-        data = convert_hps_to_dict(self.__dict__)
         return {"args_class": self.__class__.__name__, **data}
 
     def was_overridden(self, key):
@@ -164,7 +171,7 @@ class Args:
         """
         import copy
 
-        to_save = copy.deepcopy(self.__dict__)
+        to_save = self.asdict()
         return json.dumps(to_save, indent=4, sort_keys=False)
 
     @classmethod
@@ -180,6 +187,7 @@ class Args:
             eval=False,
             raise_error=raise_error,
         )
+
         # log the overwrites
         for log in overwrite_logs:
             logger.warning(log)
