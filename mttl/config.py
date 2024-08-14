@@ -5,24 +5,27 @@ import json
 import os
 from dataclasses import MISSING, Field, dataclass, field, fields, make_dataclass
 from string import Template
-from typing import Any, Dict, List, Type
+from typing import Any, Dict, List, Type, TypeVar
 
 import torch
 
 from mttl.logging import logger, setup_logging, warn_once
 from mttl.registrable import Registrable
 
+# Create a generic type variable that can be any type
+T = TypeVar("T")
+
 
 class MultiDefaultValue:
     """
-    Manages multiple default values for fields that may have the same name but different defaults
-    across merged dataclasses.
+    When we merge dataclasses fields to compile the available command-line args, different dataclasses might have
+    different defaults for the same field. This class is used to store all the defaults and resolve them when needed.
     """
 
-    def __init__(self, cls, name, field_type, default):
+    def __init__(self, cls: dataclass, name: str, field_type: Type[T], default: T):
         self.name = name
         self.type = field_type
-        self.defaults = {cls.__name__: default}
+        self.defaults: Dict[str, T] = {cls.__name__: default}
 
     def update(self, cls, default, field_type):
         if field_type != self.type:
@@ -35,8 +38,8 @@ class MultiDefaultValue:
         if default != last_default:
             self.defaults[cls.__name__] = default
 
-    @property
-    def default(self):
+    def resolve_default(self):
+        # if any of these attributes is required, we need to specify it in the config
         return next(iter(self.defaults.values())) if len(self.defaults) == 1 else self
 
     def __repr__(self):
@@ -53,6 +56,12 @@ def dataclasses_union(*dataclasses: Type[dataclass]) -> List:
     for klass in dataclasses:
         for field_ in fields(klass):
             name = field_.name
+
+            if field_.default_factory is not MISSING:
+                raise ValueError(
+                    "Attributes with default factories are not supported yet!"
+                )
+
             if field_.name not in new_fields:
                 multi_default = MultiDefaultValue(
                     klass, name, field_.type, field_.default
@@ -61,9 +70,9 @@ def dataclasses_union(*dataclasses: Type[dataclass]) -> List:
             else:
                 new_fields[name][1].default.update(klass, field_.default, field_.type)
 
-    # Set default values for fields with only one default value
+    # We resolve the default if possible for each field, if we can't resolve default will be MultiDefaultValue
     for k, (_, field_instance) in new_fields.items():
-        field_instance.default = field_instance.default.default
+        field_instance.default = field_instance.default.resolve_default()
 
     return [(name,) + field_info for name, field_info in new_fields.items()]
 
