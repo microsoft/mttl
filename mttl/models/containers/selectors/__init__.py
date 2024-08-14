@@ -3,6 +3,10 @@ from mttl.models.containers.selectors.arrow_selector import (
     ArrowSelector,
     ArrowSelectorConfig,
 )
+from mttl.models.containers.selectors.product_key import (
+    PKSelectorConfig,
+    PKSSelector,
+)
 from mttl.models.containers.selectors.average_activation_selector import (
     AverageActivationSelector,
     AverageActivationSelectorConfig,
