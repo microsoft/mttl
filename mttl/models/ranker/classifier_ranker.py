@@ -20,23 +20,21 @@ class TextEncoder(nn.Module):
         model_name: str = "all-MiniLM-L6-v2",
     ):
         super().__init__()
-        if model_name == "all-MiniLM-L6-v2":
-            self.transformer_encoder = SentenceTransformer(
-                model_name
-            )  # You need to define your text encoder
-
-            # frozen the transformer parameters
-            auto_model = self.transformer_encoder._first_module().auto_model
-            if not trainable:
-                for param in auto_model.parameters():
-                    param.requires_grad = False
-        elif model_name == "t5-small":
+        if model_name == "t5-small":
             self.tokenizer = T5Tokenizer.from_pretrained(model_name)
             self.transformer_encoder = T5ForConditionalGeneration.from_pretrained(
                 model_name, return_dict=True
             )
         else:
-            raise NotImplementedError
+            # consider it as a sentence transformer model
+            if "/" in model_name:
+                model_name = model_name.split("/")[1]
+            self.transformer_encoder = SentenceTransformer(model_name)
+            # freeze the transformer parameters
+            auto_model = self.transformer_encoder._first_module().auto_model
+            if not trainable:
+                for param in auto_model.parameters():
+                    param.requires_grad = False
 
     def forward(self, x):
         if isinstance(self.transformer_encoder, SentenceTransformer):
@@ -71,7 +69,6 @@ class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
     ):
         super().__init__(**kwargs)
 
-        # self.text_encoder = self.text_encoder_init(requires_grad=False)
         self.text_encoder = TextEncoder(model_name=encoder_model_name)
         self.ids_to_tasks_names = task_names
         self.task_names_to_ids = {task: i for i, task in enumerate(task_names)}

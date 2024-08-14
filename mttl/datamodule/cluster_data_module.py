@@ -4,7 +4,7 @@ from functools import partial
 
 import numpy
 
-from mttl.datamodule.base import DatasetConfig, DefaultDataModule
+from mttl.datamodule.base import DataModule, DatasetConfig
 from mttl.datamodule.mt_seq_to_seq_module import (
     FlatMultiTaskConfig,
     FlatMultiTaskModule,
@@ -23,5 +23,6 @@ class ClusterDataConfig(FlatMultiTaskConfig):
     task_id_field: str = "cluster_id"
 
 
+@DataModule.register("cluster_flat_multitask", ClusterDataConfig)
 class ClusterDataModule(FlatMultiTaskModule):
     pass

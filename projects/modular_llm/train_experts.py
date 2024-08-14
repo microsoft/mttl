@@ -2,59 +2,33 @@ import os
 import shutil
 import sys
 from tempfile import TemporaryDirectory
+from typing import Type
 
 import torch
 from pytorch_lightning import Trainer, seed_everything
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
-
-from mttl.callbacks import LiveCheckpointCallback, NanoMMLUCallback, RougeCallback
+from mttl.callbacks import (
+    DownstreamEvalCallback,
+    LiveCheckpointCallback,
+    NanoMMLUCallback,
+    RougeCallback,
+)
+from mttl.config import Args, ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
-from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import ExpertModel, MoEModel
 from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
 from mttl.models.monitors import get_monitors
 from mttl.utils import generate_random_string, rank_zero_only_and_wait, remote_login
-from projects.modular_llm.src.callbacks import DownstreamEvalCallback
-from projects.modular_llm.src.transfer_matrix import TransferMatrixConfig
-from projects.modular_llm.src.transfer_matrix import run_eval as produce_transfer_matrix
 
 
-def create_transfer_matrix(args, checkpoint):
-    ########################
-    # create transfer matrix
-    config = TransferMatrixConfig()
-    for k, v in vars(args).items():
-        if k in vars(config):
-            setattr(config, k, v)
-    config.eval_base = False
-    config.eval_metric = "rougeL"
-
-    expert: Expert = load_expert(checkpoint)
-    expert.expert_info.expert_name = str(args.finetune_task_name)
-    expert.expert_info.expert_task_name = str(args.finetune_task_name)
-    temp_dir = TemporaryDirectory()
-    destination = temp_dir.name
-    LocalExpertLibrary.from_expert_dict({"checkpoint": expert}, destination=destination)
-    config.library_id = destination
-    config.finetune_task_name = (
-        args.finetune_task_name.split(",")
-        if not isinstance(args.finetune_task_name, list)
-        else args.finetune_task_name
-    )
-    if len(config.finetune_task_name) < 50:
-        produce_transfer_matrix(config, debug=False)
-    ########################
-    temp_dir.cleanup()
-
-
-def run_multitask(args: ExpertConfig):
+def train_experts(args: Args, model_class: Type[ExpertModel]):
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file
     setup_logging(args.output_dir)
+
     logger.info("Args: {}".format(args.to_json()))
 
     remote_login(args.remote_token)
@@ -73,18 +47,12 @@ def run_multitask(args: ExpertConfig):
         expert_library = create_library(args)
 
     loggers = get_pl_loggers(args)
-    # select dataloader
-    if args.model_modifier == "poly":
-        args.init_from_scratch = True
-        model_class = MoEModel
-    else:
-        model_class = ExpertModel
 
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
     args.task_names = dm._task_names
 
-    module = model_class(**vars(args), tokenizer=dm.tokenizer)
+    module = model_class(**args.asdict())
 
     # get metric monitors for models
     callbacks = get_monitors(args)
@@ -224,10 +192,6 @@ def run_multitask(args: ExpertConfig):
 
         upload_library(expert_library, module)
 
-        if args.create_transfer_matrix:
-            create_transfer_matrix(args, checkpoint)
-
 
 if __name__ == "__main__":
-    args = ExpertConfig.parse()
-    run_multitask(args)
+    train_experts(ExpertConfig.parse(), ExpertModel)

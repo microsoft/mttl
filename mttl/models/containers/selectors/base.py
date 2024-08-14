@@ -78,12 +78,13 @@ class SelectorConfig:
     def from_training_config(
         cls,
         training_config: Union["Config", "SelectorConfig"],
-        ignore_prefix: str = None,
     ) -> Union["SelectorConfig", None]:
         """Build modifier config from the training config.
 
         Returns None if no modifier is set.
         """
+        from mttl.config import create_config_class_from_args
+
         if isinstance(training_config, SelectorConfig):
             # nothing to do here
             return training_config
@@ -104,18 +105,7 @@ class SelectorConfig:
         else:
             config_klass = cls
 
-        kwargs = {}
-        for key in config_klass.__dataclass_fields__.keys():
-            # only overwrite default if value exists and is not None
-            if ignore_prefix:
-                default_value = getattr(training_config, ignore_prefix + key, None)
-            else:
-                default_value = None
-
-            train_cfg_value = getattr(training_config, key, default_value)
-            if train_cfg_value is not None:
-                kwargs[key] = train_cfg_value
-        return config_klass(**kwargs)
+        return create_config_class_from_args(config_klass, training_config)
 
 
 class MultiSelectorConfig(dict):

@@ -8,8 +8,8 @@ import pytest
 import torch
 from pytorch_lightning import seed_everything
 
+from mttl.config import ExpertConfig
 from mttl.logging import logger
-from mttl.models.expert_config import ExpertConfig
 from mttl.models.library.expert_library import HFExpertLibrary, LocalExpertLibrary
 from mttl.models.library.library_transforms import (
     ArrowConfig,
@@ -81,14 +81,15 @@ def test_arrow_with_tiedlora(tmp_path, create_dummy_expert):
         return expert
 
     config = ExpertConfig(
-        kwargs={
+        **{
             "tie_params": "q_proj.*\\.lora_a|k_proj.*\\.lora_a|v_proj.*\\.lora_a",
             "model_modifier": "lora",
+            "lora_rank": 16,
+            "lora_alpha": 1.0,
             "modify_layers": "k_proj|v_proj|q_proj|o_proj",
             "modify_modules": ".*self_attn.*",
             "trainable_param_names": ".*lora_[ab].*",
             "output_dir": tmp_path,
-            "model": "",
         }
     )
     # create random Lora

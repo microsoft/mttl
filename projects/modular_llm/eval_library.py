@@ -10,12 +10,12 @@ from pytorch_lightning import seed_everything
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.callbacks import LossCallback
+from mttl.config import EvaluationConfig, ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
 from mttl.logging import TableLogger, logger, setup_logging
 from mttl.models.containers.selectors.base import Selector, SelectorConfig
-from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import ExpertModel, MultiExpertModel
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.library.library_transforms import (
@@ -28,7 +28,7 @@ from mttl.models.modifiers.lora import LoRAConfig
 from mttl.utils import remote_login
 
 
-def eval_in_distribution(module, args: ExpertConfig, tasks: list):
+def eval_in_distribution(module, args: EvaluationConfig, tasks: list):
     args.include_task_source = "*"
     transfer_table = TableLogger()
 
@@ -88,7 +88,7 @@ def eval_in_distribution(module, args: ExpertConfig, tasks: list):
     transfer_table.log_final_table()
 
 
-def fetch_prototypes(args: ExpertConfig, library: ExpertLibrary) -> str:
+def fetch_prototypes(args: EvaluationConfig, library: ExpertLibrary) -> str:
     """Returns the unique hash storing the saved prototypes."""
     if args.merge_or_route == "phatgoose":
         from mttl.models.containers.selectors.phatgoose_selector import (
@@ -114,7 +114,7 @@ def fetch_prototypes(args: ExpertConfig, library: ExpertLibrary) -> str:
             ab_only=args.ab_only,
             tie_params=args.tie_params,
             tie_op=args.tie_op,
-            base_model_proto=args.base_model_proto,
+            add_base_proto=args.add_base_proto,
             recompute_prototypes=args.recompute_prototypes,
         )
     elif args.merge_or_route == "hidden":
@@ -136,7 +136,7 @@ def fetch_prototypes(args: ExpertConfig, library: ExpertLibrary) -> str:
         raise ValueError(f"Unknown merge_or_route {args.merge_or_route}")
 
 
-def run_eval(args: ExpertConfig):
+def run_eval(args: EvaluationConfig):
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file
@@ -320,5 +320,5 @@ def run_eval(args: ExpertConfig):
 
 
 if __name__ == "__main__":
-    args = ExpertConfig.parse()
+    args = EvaluationConfig.parse()
     run_eval(args)

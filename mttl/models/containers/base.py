@@ -5,7 +5,6 @@ import torch
 from pyparsing import abstractmethod
 from torch import Tensor, nn
 
-from mttl.config import Config
 from mttl.logging import warn_once
 from mttl.models.containers.selectors.base import Selector, TaskNameSelector
 from mttl.models.containers.selectors.kv_selector import KVTaskNameSelector
@@ -103,13 +102,14 @@ class ExpertContainer(nn.Module, Container):
     def expert_names(self) -> list:
         return list(self.expert_infos.keys())
 
-    def _check_config(self, expert_config: Union[Config, ModifierConfig]):
+    def _check_config(self, expert_config: ModifierConfig):
         """Checks if the config is supported and converts it to the supported config type if needed."""
-        if isinstance(expert_config, Config):
-            # patches the config to be a LoRAConfig for the future
-            from mttl.models.modifiers.base import ModifierConfig
-
-            expert_config = ModifierConfig.from_training_config(expert_config)
+        if not isinstance(expert_config, ModifierConfig):
+            raise ValueError(
+                "Expert config must be of type ModifierConfig, but got {}.".format(
+                    type(expert_config)
+                )
+            )
 
         if type(expert_config) not in self.__supports_configs__:
             raise ValueError(

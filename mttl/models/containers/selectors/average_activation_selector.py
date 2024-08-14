@@ -41,7 +41,7 @@ def compute_hidden_states(
 @dataclass
 class AverageActivationSelectorConfig(PerTokenSelectorConfig):
     router_temp: float = -1
-    moe_top_k: int = -1
+    top_k: int = -1
     proto_init: str = "avg_act"
     input_norm_fn: str = "id"
     proto_norm_fn: str = "id"

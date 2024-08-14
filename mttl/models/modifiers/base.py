@@ -63,12 +63,14 @@ class ModifierConfig(object):
 
     @staticmethod
     def from_training_config(
-        training_config: Union["Config", "ModifierConfig"]
+        training_config: Union["Args", "ModifierConfig"]
     ) -> Union["ModifierConfig", None]:
         """Build modifier config from the training config.
 
         Returns None if no modifier is set.
         """
+        from mttl.config import create_config_class_from_args
+
         if isinstance(training_config, ModifierConfig):
             # nothing to do here
             return training_config
@@ -82,11 +84,7 @@ class ModifierConfig(object):
             )
 
         config_klass = Modifier.get_config_class_by_name(training_config.model_modifier)
-        kwargs = {}
-        for key, _ in config_klass.__dataclass_fields__.items():
-            if hasattr(training_config, key):
-                kwargs[key] = getattr(training_config, key)
-        return config_klass(**kwargs)
+        return create_config_class_from_args(config_klass, training_config)
 
 
 class ModifyMixin:

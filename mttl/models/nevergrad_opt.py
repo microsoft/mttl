@@ -27,65 +27,6 @@ from mttl.models.library.library_transforms import (
 from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
 
 
-def mmlu_get_loss(
-    model: ExpertModel,
-    tokenizer,
-    dataloader: DataLoader,
-    use_vllm=True,
-    use_loss=False,
-):
-    # use gpu if available
-    train_loss = 0
-    if use_vllm:
-        # use vllm
-        generation_config = model.generation_config
-        model_hash = hashlib.sha256()
-        model_hash.update(str([p for p in model.parameters()]).encode())
-        model = LLMEngineMMLU(
-            model,
-            temp_path=f"{os.environ.get('MTTL_TEMP','/tmp/merged')}/{model_hash.hexdigest()}/",
-        )
-        all_predictions, all_references, all_task_names = model.eval(
-            dataloader,
-            generation_config=generation_config,
-            tokenizer=tokenizer,
-        )
-        del model
-        free_memory()
-
-        eval_metrics = compute_metrics(
-            all_predictions, [[r] for r in all_references], reduction="none"
-        )
-        return (
-            compute_task_aggregation(all_task_names, eval_metrics["exact_match"])[
-                "all"
-            ]["mean"]
-            * -1.0
-        )
-
-    else:
-        if use_loss:
-            with torch.no_grad():
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-                for _, batch in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
-                    batch = {
-                        k: v.to(device)
-                        for k, v in batch.items()
-                        if isinstance(v, torch.Tensor)
-                    }
-                    with torch.no_grad():
-                        loss = model(batch)
-                    train_loss += loss.detach().float()
-            loss = train_loss.float()
-            # average loss over the number of examples
-            return float(loss) / len(dataloader.dataset)
-        else:
-            # using accuracy
-            mmlu_evaluator = MMLUEvaluator(model.hparams, split="test", use_vllm=False)
-            scores = mmlu_evaluator.evaluate(model, dataloader=dataloader)
-            return scores["all"]["mean"] * -1.0
-
-
 def default_l1_regularization(weights):
     """
     Get the L1 regularization term for the weights
