@@ -129,7 +129,7 @@ def test_from_pretrained_with_arrow(tmp_path):
     protos = ArrowTransform(ArrowConfig()).transform(library, persist=True)
 
     # from pretrained library
-    selector_config = ArrowSelectorConfig(moe_top_k=4)
+    selector_config = ArrowSelectorConfig(top_k=4)
     model = MultiExpertModel.from_pretrained_library(
         library, selector_config=selector_config
     )

@@ -10,9 +10,9 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from typing import Callable
 
 from mttl.callbacks import LiveCheckpointCallback, RougeCallback
+from mttl.config import FinetuneConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
-from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import ExpertModel as ExpertTrainer
 from mttl.models.expert_model import MoEModel as MoETrainer
 from mttl.models.expert_model import MultiExpertModel
@@ -80,7 +80,7 @@ def load_expert_from_checkpoint(checkpoint):
     return expert
 
 
-def prepare_expert_lib(args: ExpertConfig, lib_location) -> LocalExpertLibrary:
+def prepare_expert_lib(args: FinetuneConfig, lib_location) -> LocalExpertLibrary:
     exclude_selection = (
         args.remove_experts.split(",") if args.remove_experts is not None else None
     )
@@ -91,14 +91,14 @@ def prepare_expert_lib(args: ExpertConfig, lib_location) -> LocalExpertLibrary:
     return library
 
 
-def create_mean_expert(args: ExpertConfig, library: ExpertLibrary = None) -> Expert:
+def create_mean_expert(args: FinetuneConfig, library: ExpertLibrary = None) -> Expert:
     if library is None:
         library = args.library_id
 
     return WeightedLinearMerge(WeightedLinearMergeConfig()).transform(library)
 
 
-def retrieve(args: ExpertConfig, task, k, retrieve_with="random"):
+def retrieve(args: FinetuneConfig, task, k, retrieve_with="random"):
     if retrieve_with == "random":
         k = args.sk
         retriever = RandomRetriever(args, sk=k)
@@ -149,7 +149,7 @@ def retrieve(args: ExpertConfig, task, k, retrieve_with="random"):
 
 
 @register_finetune_func("nevergrad_randretr")
-def finetune_with_nevergrad(args: ExpertConfig, dm):
+def finetune_with_nevergrad(args: FinetuneConfig, dm):
     """
     LoraHub baselines
     """
@@ -195,7 +195,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
 
 
 @register_finetune_func("nevergrad")
-def finetune_with_nevergrad(args: ExpertConfig, dm):
+def finetune_with_nevergrad(args: FinetuneConfig, dm):
     """
     LoraHub baselines
     """
@@ -243,7 +243,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
 
 
 @register_finetune_func("lib_mu")
-def finetune_lib_mu(args: ExpertConfig, dm):
+def finetune_lib_mu(args: FinetuneConfig, dm):
     """
     1. Averages the library to a single expert
     2. Fine-tunes this expert on the downstream task
@@ -260,7 +260,7 @@ def finetune_lib_mu(args: ExpertConfig, dm):
 
 
 @register_finetune_func("lib_mu_randretr")
-def finetune_lib_mu_with_rand_retrieval(args: ExpertConfig, dm):
+def finetune_lib_mu_with_rand_retrieval(args: FinetuneConfig, dm):
     """
     1. Retrieves randomly args.sk experts from the library
     2. Averages the library to a single expert
@@ -281,7 +281,7 @@ def finetune_lib_mu_with_rand_retrieval(args: ExpertConfig, dm):
 
 
 @register_finetune_func("lib_mu_svdretr")
-def finetune_lib_mu_with_svd_retrieval(args: ExpertConfig, dm):
+def finetune_lib_mu_with_svd_retrieval(args: FinetuneConfig, dm):
     """
     1. Retrieves randomly args.sk experts from the library using SVD embeddings
     2. Averages the library to a single expert
@@ -302,7 +302,7 @@ def finetune_lib_mu_with_svd_retrieval(args: ExpertConfig, dm):
 
 
 @register_finetune_func("polylib_full")
-def finetune_polylib_full(args: ExpertConfig, dm):
+def finetune_polylib_full(args: FinetuneConfig, dm):
     """
     Tunes selector and experts on downstream task.
 
@@ -326,7 +326,7 @@ def finetune_polylib_full(args: ExpertConfig, dm):
 
 
 @register_finetune_func("polylib_uniform")
-def finetune_polylib_full(args: ExpertConfig, dm):
+def finetune_polylib_full(args: FinetuneConfig, dm):
     args.router_selector = "uniform"
     module = MoETrainer(**vars(args), device_map="auto")
 
@@ -339,7 +339,7 @@ def finetune_polylib_full(args: ExpertConfig, dm):
 
 
 @register_finetune_func("polylib_selector")
-def finetune_polylib_sel(args: ExpertConfig, dm):
+def finetune_polylib_sel(args: FinetuneConfig, dm):
     """
     Only trains the selector on the downstream task.
     """
@@ -358,7 +358,7 @@ def finetune_polylib_sel(args: ExpertConfig, dm):
 
 
 @register_finetune_func("polylib_full_randretr")
-def finetune_polylib_full_with_rand_retrieval(args: ExpertConfig, dm):
+def finetune_polylib_full_with_rand_retrieval(args: FinetuneConfig, dm):
     """
     Like polylib_full, but here we perform random expert selection before training.
     """
@@ -380,7 +380,7 @@ def finetune_polylib_full_with_rand_retrieval(args: ExpertConfig, dm):
 
 
 @register_finetune_func("private")
-def finetune_private(args: ExpertConfig, dm):
+def finetune_private(args: FinetuneConfig, dm):
     """
     Just train an expert from scratch
     """
@@ -390,7 +390,7 @@ def finetune_private(args: ExpertConfig, dm):
 
 
 @register_finetune_func("polylib_full_svdretr")
-def finetune_polylib_full_with_svd_retrieval(args: ExpertConfig, dm):
+def finetune_polylib_full_with_svd_retrieval(args: FinetuneConfig, dm):
     """
     Like polylib_full, but here we perform expert selection with SVD embeddings before training.
     """
@@ -412,7 +412,7 @@ def finetune_polylib_full_with_svd_retrieval(args: ExpertConfig, dm):
 
 
 @register_finetune_func("pretrain_poly")
-def finetune_polylib_full_with_svd_retrieval(args: ExpertConfig, dm):
+def finetune_polylib_full_with_svd_retrieval(args: FinetuneConfig, dm):
     """
     Loads (the old) Poly / MHR pretrained checkoint, and fine-tunes it on the downstream task.
     """
@@ -440,7 +440,7 @@ def finetune_polylib_full_with_svd_retrieval(args: ExpertConfig, dm):
 
 
 @register_finetune_func("shared")
-def finetune_joint(args: ExpertConfig, dm):
+def finetune_joint(args: FinetuneConfig, dm):
     """
     Finetunes a pretrained shared model
     """
@@ -454,7 +454,7 @@ def finetune_joint(args: ExpertConfig, dm):
     return train_module(args, module, dm)
 
 
-def run_multitask(args: ExpertConfig):
+def run_multitask(args: FinetuneConfig):
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file
@@ -484,7 +484,6 @@ def run_multitask(args: ExpertConfig):
         elif expert.training_config.model_modifier == "poly":
             module.model.resize_module_logits(1)
         checkpoint = train_module(args, module, dm)
-
     else:
         # fine-tuning with expert library
         assert args.finetune_regime in FINETUNE_FUNCTIONS
@@ -493,7 +492,7 @@ def run_multitask(args: ExpertConfig):
 
 
 @register_finetune_func("poly_from_scratch")
-def finetune_polylib_full(args: ExpertConfig, dm):
+def finetune_polylib_full(args: FinetuneConfig, dm):
     """
     Trains poly from scratch, fine- or coarsegrained
     """
@@ -510,7 +509,7 @@ def finetune_polylib_full(args: ExpertConfig, dm):
     return train_module(args, module, dm)
 
 
-def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
+def train_module(args: FinetuneConfig, module: ExpertTrainer, dm):
     loggers = get_pl_loggers(args)
     callbacks = get_monitors(args)
 
@@ -616,5 +615,5 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
 
 
 if __name__ == "__main__":
-    args = ExpertConfig.parse()
+    args = FinetuneConfig.parse()
     run_multitask(args)

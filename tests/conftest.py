@@ -1,5 +1,6 @@
 import os
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -7,12 +8,13 @@ import pytest
 from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
 
+from mttl.config import ExpertConfig, MultiExpertConfig
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
-from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import MultiExpertModel
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import DatasetLibrary
 from mttl.models.modifiers.base import ModifierConfig
+from mttl.models.modifiers.lora import LoRAConfig
 from projects.modular_llm.cli_dataset_create import download_flan
 
 
@@ -106,33 +108,78 @@ def tiny_llama(make_tiny_llama):
 
 
 @pytest.fixture
-def tmp_exp_config(tmp_path):
-    class SimpleConfig(ExpertConfig):
-        def _set_defaults(self):
-            super()._set_defaults()
-            self.library_id = None
-            self.model_modifier = "lora"
-            self.modify_layers = "c_fc|c_proj|k_proj|v_proj|q_proj|out_proj"
-            self.modify_modules = ".*"
-            self.trainable_param_names = ".*lora_[ab].*"
-            self.output_dir = tmp_path
-            self.router_selector = "poly_router_dir"
-            self.router_granularity = "coarsegrained"
-            self.model = "EleutherAI/gpt-neo-125m"
-            self.n_tasks = 1
+def tmp_lora_config(tmp_path: Path):
+    return LoRAConfig(
+        lora_rank=16,
+        lora_alpha=1.0,
+        modify_layers="c_fc|c_proj|k_proj|v_proj|q_proj|out_proj",
+        modify_modules=".*",
+    )
 
-    return SimpleConfig()
+
+@pytest.fixture
+def tmp_exp_config(tmp_path: Path):
+    return ExpertConfig(
+        model="EleutherAI/gpt-neo-125m",
+        library_id=None,
+        lora_rank=16,
+        lora_alpha=1.0,
+        model_modifier="lora",
+        modify_layers="c_fc|c_proj|k_proj|v_proj|q_proj|out_proj",
+        modify_modules=".*",
+        trainable_param_names=".*lora_[ab].*",
+        output_dir=tmp_path,
+    )
+
+
+@pytest.fixture
+def tmp_multi_exp_config(tmp_path: Path):
+    return MultiExpertConfig(
+        model="EleutherAI/gpt-neo-125m",
+        library_id=None,
+        lora_rank=16,
+        lora_alpha=1.0,
+        model_modifier="lora",
+        modify_layers="c_fc|c_proj|k_proj|v_proj|q_proj|out_proj",
+        modify_modules=".*",
+        trainable_param_names=".*lora_[ab].*",
+        output_dir=tmp_path,
+        router_selector="poly_router_dir",
+        router_granularity="coarsegrained",
+        n_tasks=1,
+    )
+
+
+@pytest.fixture
+def tmp_moe_exp_config(tmp_path):
+    from mttl.config import MoEExpertConfig
+
+    return MoEExpertConfig(
+        model="EleutherAI/gpt-neo-125m",
+        library_id=None,
+        lora_rank=16,
+        lora_alpha=1.0,
+        model_modifier="lora",
+        modify_layers="c_fc|c_proj|k_proj|v_proj|q_proj|out_proj",
+        modify_modules=".*",
+        trainable_param_names=".*lora_[ab].*",
+        output_dir=tmp_path,
+        router_selector="poly_router_dir",
+        router_granularity="coarsegrained",
+        n_tasks=1,
+    )
 
 
 @pytest.fixture
 def create_dummy_expert(make_tiny_llama):
-    def _create_dummy_expert(config: ExpertConfig, exp_name, **kwargs) -> Expert:
+    def _create_dummy_expert(config: MultiExpertConfig, exp_name, **kwargs) -> Expert:
         if "model_object" not in kwargs and (
-            config["model"] is None or config["model"] == ""
+            config.model is None or config.model == ""
         ):
             # use tiny llama by default
             kwargs["model_object"] = make_tiny_llama()
-        model = MultiExpertModel(**vars(config), **kwargs)
+
+        model = MultiExpertModel(**config.asdict(), **kwargs)
         expert = model.add_empty_expert(
             exp_name, ModifierConfig.from_training_config(config)
         )

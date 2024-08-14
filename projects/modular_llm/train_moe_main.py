@@ -7,9 +7,9 @@ from pytorch_lightning import Trainer, seed_everything
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.callbacks import LiveCheckpointCallback, NanoMMLUCallback, RougeCallback
+from mttl.config import ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
-from mttl.models.expert_config import ExpertConfig
 from mttl.models.expert_model import MoEModel
 from mttl.models.monitors import get_monitors
 from mttl.utils import remote_login
@@ -21,6 +21,7 @@ def run_multitask(args: ExpertConfig):
 
     # get directory of the current file
     setup_logging(args.output_dir)
+
     logger.info("Args: {}".format(args.to_json()))
 
     remote_login(args.remote_token)
@@ -32,7 +33,7 @@ def run_multitask(args: ExpertConfig):
     args.task_names = dm._task_names
 
     loggers = get_pl_loggers(args)
-    module = model_class(**vars(args), tokenizer=dm.tokenizer)
+    module = model_class(**args.todict())
 
     # get metric monitors for models
     callbacks = get_monitors(args)

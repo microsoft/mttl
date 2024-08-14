@@ -488,6 +488,10 @@ def model_loader_helper(
             attn_implementation=attn_implementation,
             torch_dtype=torch.bfloat16,
         )
+
+    if load_in_8bit or load_in_4bit:
+        model_object = prepare_model_for_kbit_training(model_object)
+
     return model_object
 
 

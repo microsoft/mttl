@@ -1,89 +1,147 @@
 import argparse
 import ast
+import importlib
 import json
 import os
+from dataclasses import MISSING, Field, dataclass, field, fields, make_dataclass
 from string import Template
-from typing import Dict
+from typing import Any, Dict, List, Type, TypeVar
 
-from mttl.logging import logger, setup_logging
+import torch
+
+from mttl.logging import logger, setup_logging, warn_once
+from mttl.registrable import Registrable
+
+# Create a generic type variable that can be any type
+T = TypeVar("T")
 
 
-class Config:
-    def __init__(self, filenames=None, kwargs=None, raise_error=True, silent=False):
-        # Stores personalization of the config file in a dict (json serializable)
+class MultiDefaultValue:
+    """
+    When we merge dataclasses fields to compile the available command-line args, different dataclasses might have
+    different defaults for the same field. This class is used to store all the defaults and resolve them when needed.
+    """
 
-        self._updated_kwargs = {}
-        self.filenames = filenames
-        self._set_defaults()
+    def __init__(self, cls: dataclass, name: str, field_type: Type[T], default: T):
+        self.name = name
+        self.type = field_type
+        self.defaults: Dict[str, T] = {cls.__name__: default}
 
-        overwrite_logs = []
-        if filenames:
-            for filename in filenames.split("+"):
-                if not os.path.exists(filename):
-                    filename = os.path.join(
-                        os.getenv("CONFIG_PATH", default="configs"), filename
-                    )
+    def update(self, cls, default, field_type):
+        if field_type != self.type:
+            raise TypeError(
+                f"Field '{self.name}' has conflicting types: {field_type} and {self.type}."
+            )
 
-                if not os.path.exists(filename) and ".json" not in filename:
-                    filename = filename + ".json"
+        # Add a new default only if it's different from the last one
+        last_default = list(self.defaults.values())[-1]
+        if default != last_default:
+            self.defaults[cls.__name__] = default
 
-                overwrite_logs += self.update_kwargs(
-                    json.load(open(filename)),
-                    eval=False,
-                    raise_error=raise_error,
-                    silent=silent,
+    def resolve_default(self):
+        # if any of these attributes is required, we need to specify it in the config
+        return next(iter(self.defaults.values())) if len(self.defaults) == 1 else self
+
+    def __repr__(self):
+        if len(self.defaults) == 1:
+            return repr(self.default)
+        return f"MultiDefaultValue({self.defaults})"
+
+
+def dataclasses_union(*dataclasses: Type[dataclass]) -> List:
+    """
+    Create a new dataclass that is the union of the fields of the input dataclasses.
+    """
+    new_fields = {}
+    for klass in dataclasses:
+        for field_ in fields(klass):
+            name = field_.name
+
+            if field_.default_factory is not MISSING:
+                raise ValueError(
+                    "Attributes with default factories are not supported yet!"
                 )
 
-        if kwargs:
-            overwrite_logs += self.update_kwargs(
-                kwargs, raise_error=raise_error, silent=silent
-            )
+            if field_.name not in new_fields:
+                multi_default = MultiDefaultValue(
+                    klass, name, field_.type, field_.default
+                )
+                new_fields[name] = (field_.type, field(default=multi_default))
+            else:
+                new_fields[name][1].default.update(klass, field_.default, field_.type)
 
-        # setup logging to the output dir
-        try:
-            setup_logging(self.output_dir)
-        except Exception as e:
-            if raise_error:
-                raise ValueError("Error setting up logging") from e
-            elif not silent:
-                logger.warning(f"Error setting up logging to {self.output_dir}")
+    # We resolve the default if possible for each field, if we can't resolve default will be MultiDefaultValue
+    for k, (_, field_instance) in new_fields.items():
+        field_instance.default = field_instance.default.resolve_default()
 
-        # log the overwrites
-        for log in overwrite_logs:
-            logger.warning(log)
+    return [(name,) + field_info for name, field_info in new_fields.items()]
 
-        self.post_init(silent=silent)
 
-    def post_init(self, silent=False):
-        if self.attn_implementation == "eager" and self.pack_sequences:
-            logger.warning(
-                "Eager attention is not compatible with packed sequences"
-                + ", tokens across examples will not be masked"
-            )
-        elif self.attn_implementation == "flash_attention_2" and self.pack_sequences:
-            logger.warning(
-                "The wrapper we provide for flash attention 2 may not behave as expected for"
-                + " some models. Please make sure you test the model with packed sequences"
-            )
+def create_config_class_from_args(config_class, args):
+    """
+    Load a dataclass from the arguments.
+    """
+    kwargs = {
+        f.name: getattr(args, f.name)
+        for f in fields(config_class)
+        if hasattr(args, f.name)
+        and not isinstance(getattr(args, f.name), MultiDefaultValue)
+    }
+
+    return config_class(**kwargs)
+
+
+@dataclass
+class Args:
+    @property
+    def updated_kwargs(self):
+        return {
+            k.name: getattr(self, k.name)
+            for k in fields(self)
+            if getattr(self, k.name) != k.default
+        }
 
     @classmethod
-    def fromdict(cls, data):
-        _ = data.pop("_updated_kwargs", None)
-        return cls(kwargs=data, raise_error=False, silent=True)
+    def fromdict(cls, data, strict=False) -> "Args":
+        """
+        Reload a dataclass from a dictionary. We store the class name in the dict to be able to reload it.
+        If the cls is Args, then we try to access the `_class` attribute to get the class name.
+        """
+        cls_name = data.pop("args_class", None)
+        if cls == Args:
+            if not cls_name:
+                raise ValueError("No class name found in the data.")
+            cls = globals()[cls_name]
+
+        if not strict:
+            data_ = {}
+            for f in fields(cls):
+                if f.name in data:
+                    data_[f.name] = data[f.name]
+        else:
+            data_ = data
+
+        return cls(**data_)
 
     def asdict(self) -> Dict:
-        from mttl.models.utils import convert_hps_to_dict
+        data = {
+            f.name: getattr(self, f.name)
+            for f in fields(self)
+            if not isinstance(getattr(self, f.name), MultiDefaultValue)
+        }
 
-        return convert_hps_to_dict(self.__dict__)
+        return {"args_class": self.__class__.__name__, **data}
 
     def was_overridden(self, key):
-        return key in self._updated_kwargs
+        return key in self.updated_kwargs
 
     def was_default(self, key):
-        return key not in self._updated_kwargs
+        return key not in self.updated_kwargs
 
-    def update_kwargs(self, kwargs, eval=True, raise_error=True, silent=False):
+    @classmethod
+    def process_kwargs(cls, kwargs, eval=True, raise_error=True, silent=False):
         overwrites_log = []
+
         for k, v in kwargs.items():
             if eval:
                 try:
@@ -93,7 +151,7 @@ class Config:
             else:
                 v = v
 
-            if not hasattr(self, k) and raise_error:
+            if not hasattr(cls, k) and raise_error:
                 raise ValueError(f"{k} is not in the config")
 
             if eval and not silent:
@@ -103,12 +161,8 @@ class Config:
                 # this raises an error if the env. var does not exist
                 v = Template(v).substitute(os.environ)
 
-            setattr(self, k, v)
-            self._updated_kwargs[k] = v
+            kwargs[k] = v
         return overwrites_log
-
-    def __getitem__(self, item):
-        return getattr(self, item, None)
 
     def to_json(self):
         """
@@ -117,10 +171,28 @@ class Config:
         """
         import copy
 
-        to_save = copy.deepcopy(self.__dict__)
-        to_save.pop("_updated_kwargs")
-
+        to_save = self.asdict()
         return json.dumps(to_save, indent=4, sort_keys=False)
+
+    @classmethod
+    def from_json(cls, config_file, raise_error=True):
+        """
+        Loads the config from a file
+        """
+        with open(config_file, "r") as fin:
+            kwargs = json.load(fin)
+
+        overwrite_logs = cls.process_kwargs(
+            kwargs,
+            eval=False,
+            raise_error=raise_error,
+        )
+
+        # log the overwrites
+        for log in overwrite_logs:
+            logger.warning(log)
+
+        return cls(**kwargs)
 
     def save_config(self, output_dir):
         """
@@ -133,229 +205,338 @@ class Config:
             fout.write("\n")
 
     @classmethod
-    def parse(
-        cls,
-        extra_kwargs=None,
-        raise_error=True,
-        parent=None,
-        return_parser=False,
-        c=None,
-    ):
+    def parse(cls, raise_error=True, return_parser=False):
         import itertools
 
-        # dont do it if called from jupyter notebook
-        if c is None:
-            parser = (
-                argparse.ArgumentParser(parents=[parent])
-                if parent
-                else argparse.ArgumentParser()
-            )
-            parser.add_argument("-c", "--config_files", required=False)
-            parser.add_argument("-k", "--kwargs", nargs="*", action="append")
-            args = parser.parse_args()
-        else:
-            args = argparse.Namespace()
-            args.kwargs = None
-            args.config_files = c
+        parser = argparse.ArgumentParser()
+        parser.add_argument("-c", "--config_files", required=False)
+        parser.add_argument("-k", "--kwargs", nargs="*", action="append")
+        args = parser.parse_args()
 
-        kwargs = {}
+        cmd_kwargs = {}
         if args.kwargs:
             kwargs_opts = list(itertools.chain(*args.kwargs))
             for value in kwargs_opts:
                 key, _, value = value.partition("=")
 
                 # allows multiple values for a given option when specified in the command line!
-                if key in kwargs:
-                    if type(kwargs[key]) != list:
-                        kwargs[key] = [kwargs[key]]
-                    kwargs[key].append(value)
+                if key in cmd_kwargs:
+                    if type(cmd_kwargs[key]) != list:
+                        cmd_kwargs[key] = [cmd_kwargs[key]]
+                    cmd_kwargs[key].append(value)
                 else:
-                    kwargs[key] = value
+                    cmd_kwargs[key] = value
 
-        args.kwargs = kwargs
-        if extra_kwargs:
-            args.kwargs.update(extra_kwargs)
+        overwrite_logs = []
+        extra_kwargs = {}
 
-        config = cls(
-            filenames=args.config_files, kwargs=args.kwargs, raise_error=raise_error
-        )
+        if args.config_files:
+            for filename in args.config_files.split("+"):
+                if not os.path.exists(filename):
+                    filename = os.path.join(
+                        os.getenv("CONFIG_PATH", default="configs"), filename
+                    )
+
+                if not os.path.exists(filename) and ".json" not in filename:
+                    filename = filename + ".json"
+
+                file_kwargs = json.load(open(filename))
+                overwrite_logs += cls.process_kwargs(
+                    file_kwargs,
+                    eval=False,
+                    raise_error=raise_error,
+                )
+                extra_kwargs.update(file_kwargs)
+
+        if cmd_kwargs:
+            overwrite_logs += cls.process_kwargs(
+                cmd_kwargs,
+                raise_error=raise_error,
+            )
+            extra_kwargs.update(cmd_kwargs)
+
+        # log the overwrites
+        for log in overwrite_logs:
+            logger.warning(log)
+
+        config = cls(**extra_kwargs)
 
         if return_parser:
             return config, args
         return config
 
-    def _set_defaults(self):
-        self.cache_dir = os.getenv("CACHE_DIR", "./cache")
 
-        # Data config
-        self.dataset = None
-        self.custom_tasks_splits = None
-        self.subsample_train = None
-        self.subsample_dev = None
-        self.subsample_test = None
-        self.subsample_per_task = False
-        self.pack_sequences = False
-        self.pad_to_multiple_of = 8
-        self.padding_side = "right"
-        self.max_seq_per_pack = 4
+class MetaRegistrable(type):
+    """
+    Meta class that creates a new dataclass containing all the configs
+    in this registrable.
+    """
 
-        self.data_dir = os.getenv("TRAIN_DIR", "/tmp/")
-        self.output_dir = os.getenv("OUTPUT_DIR", "./output")
+    def __new__(cls, name, bases, attrs, registrable: Registrable = None):
+        module_name, class_name = registrable.rsplit(".", 1)
+        module = importlib.import_module(module_name)
 
-        self.finetune_task_name = None
-        self.example_to_ids_path = None  # path to clustering of data
-        self.embeddings_path = None
+        registrable_class = getattr(module, class_name)
 
-        # NI related configs
-        self.use_task_descriptions = False  # Use task descriptions
-        self.max_num_instances_per_task = (
-            100  # Max instances per training task (applies to NI)
+        # make the union of all the fields across the registered configs
+        to_tuples = dataclasses_union(*registrable_class.registered_configs())
+
+        # create new dataclass with the union of all the fields
+        new_cls = make_dataclass(name, to_tuples, bases=(Args,), init=False)
+        new_cls.registrable_class = registrable_class
+
+        # set functions to be had in the new baby dataclass
+        for k, v in {
+            **attrs,
+        }.items():
+            setattr(new_cls, k, v)
+        return new_cls
+
+
+@dataclass
+class DataArgs(
+    metaclass=MetaRegistrable, registrable="mttl.datamodule.base.DataModule"
+):
+    pass
+
+
+@dataclass
+class SelectorArgs(
+    metaclass=MetaRegistrable,
+    registrable="mttl.models.containers.selectors.base.Selector",
+):
+    pass
+
+
+@dataclass
+class ModifierArgs(
+    metaclass=MetaRegistrable, registrable="mttl.models.modifiers.base.Modifier"
+):
+    pass
+
+
+@dataclass
+class TransformArgs(
+    metaclass=MetaRegistrable,
+    registrable="mttl.models.library.library_transforms.LibraryTransform",
+):
+    pass
+
+
+@dataclass
+class TrainingArgs(DataArgs):
+    # model arguments
+    model: str = None
+    model_family: str = None
+    attn_implementation: str = None
+    device_map: str = "cpu"
+    load_in_4bit: bool = False
+    load_in_8bit: bool = False
+    do_train: bool = True
+
+    # output directories
+    cache_dir: str = os.getenv("CACHE_DIR", "./cache")
+    data_dir: str = os.getenv("TRAIN_DIR", "/tmp/")
+    output_dir: str = os.getenv("OUTPUT_DIR", "./output")
+
+    finetune_task_name: str = None
+    exp_name: str = None
+    expert_name: str = None
+
+    # Training config
+    micro_batch_size: str = None
+    compute_strategy: str = None
+    scheduler: str = "linear_decay_with_warmup"
+    checkpoint: str = None  # load from checkpoint
+    checkpoint_step: str = None  # load from checkpoint in format of global_stepX.pt
+    backbone_checkpoint: str = None  # load the backbone from here
+    learning_rate: float = 1e-3
+    warmup_proportion: float = 0.06
+    trainable_param_names: str = ".*"
+    non_trainable_param_names: str = None
+    weight_decay: float = 0.01
+    adam_epsilon: float = 1e-8
+    max_grad_norm: float = 0.1
+    gradient_accumulation_steps: int = 1
+    optimizer: str = "adamw"
+    adafactor_scale_parameter: bool = True
+    adafactor_warmup_init: bool = False
+    adafactor_relative_step: bool = False
+    num_train_epochs: int = -1
+    warmup_steps: int = -1
+    total_steps: int = -1
+    num_tasks_per_batch: int = None
+    save_every: int = None
+    save_each_epoch: bool = False
+    eval_every: int = None
+    eval_every_n_epoch: int = 1
+    seed: int = 42
+    debug: bool = False
+
+    eval_before_training: bool = True
+    precision: str = "32"
+    monitor_grad_alignment_on: str = None
+
+    # logging
+    wandb_project: str = None
+    tensorboard: bool = False
+    remote_token: str = None
+    library_id: str = None
+    destination_library_id: str = None
+    logging_prefix: str = ""
+
+    router_weight_decay: float = None  # router weight decay
+    router_learning_rate: float = None
+
+    module_logits_relaxed_bernoulli: bool = True
+    module_logits_straight_through: bool = False
+    module_logits_learning_rate: float = 0.1
+    adapters_learning_rate: float = None
+    adapters_weight_decay: float = None
+    module_logits_dropout: float = 0.0
+    module_logits_l2_norm: float = False
+
+    # some eval flags during training
+    eval_mmlu_few_shot: bool = True  # use few-shot for mmlu, default
+    eval_mmlu_flag: bool = False  # eval mmlu performance during training
+    eval_rouge_flag: bool = False  # eval rouge during training
+    eval_before_training: bool = True
+    pipeline_eval_tasks: str = None
+    save_if_loaded_from_ckpt: bool = True
+    dataset_type: str = None
+
+    @property
+    def dataset_config(self):
+        if self.dataset_type is not None:
+            return create_config_class_from_args(
+                DataArgs.registrable_class.get_config_class_by_name(self.dataset_type),
+                self,
+            )
+        else:
+            raise ValueError(
+                "Trying to access dataset config without specifying `dataset_type`!"
+            )
+
+    def __post_init__(self):
+        if self.attn_implementation == "eager" and self.pack_sequences:
+            logger.warning(
+                "Eager attention is not compatible with packed sequences"
+                + ", tokens across examples will not be masked"
+            )
+        elif self.attn_implementation == "flash_attention_2" and self.pack_sequences:
+            logger.warning(
+                "The wrapper we provide for flash attention 2 may not behave as expected for"
+                + " some models. Please make sure you test the model with packed sequences"
+            )
+
+        if self.micro_batch_size is None:
+            self.micro_batch_size = self.train_batch_size
+
+        self.gradient_accumulation_steps = (
+            self.train_batch_size // self.micro_batch_size
         )
-        self.num_pos_examples = (
-            0  # Use some few-shot examples if possible (applies to NI)
-        )
+        self.train_batch_size = self.micro_batch_size
 
-        self.task_prefix = None  # xfit has task prefixes detailing # of shots, seed, etc; this is automatically filled in at fine-tuning time
-        self.exp_name = None
-        self.wandb_project = None
-        self.padding_side = "right"
-        self.truncation_side = "right"
-        self.max_input_length = 512
-        self.max_output_length = 64
-        self.num_beams = 4
-        self.append_another_bos = False
-        self.do_lowercase = False
-        self.freeze_embeds = False
+        n_devices = torch.cuda.device_count()
+        if n_devices > 1:
+            warn_once(
+                "You have multiple GPUs, but your device count is not being taken "
+                + "into account when computing `gradient_accumulation_steps`."
+            )
 
-        # T0 related configs
-        self.use_t0_templates_as_tasks = (
-            False  # if True, then t0 consists of 313 tasks, otherwise 38
-        )
-        self.use_t0_few_shot_training_set = False  # if True, then use 100 examples per task during training + 100 examples per validation task
 
-        # Filtering configs, useful for flan flat, etc.
-        self.include_template_type = "zs_noopt"
-        self.include_task_source = "P3,Flan2021,CoT"
-        self.remove_phi_eval_tasks = False
+@dataclass
+class ExpertConfig(TrainingArgs, ModifierArgs):
+    model_modifier: str = None
 
-        # Training config
-        self.compute_strategy = None
-        self.padding_side = "right"
-        self.scheduler = "linear_decay_with_warmup"
-        self.checkpoint = None  # load from checkpoint
-        self.checkpoint_step = None  # load from checkpoint in format of global_stepX.pt
-        self.backbone_checkpoint = None  # load the backbone from here
-        self.train_batch_size = 8
-        self.predict_batch_size = 32
-        self.learning_rate = 1e-3
-        self.warmup_proportion = 0.06
-        self.trainable_param_names = ".*"
-        self.non_trainable_param_names = None
-        self.weight_decay = 0.01
-        self.adam_epsilon = 1e-8
-        self.max_grad_norm = 0.1
-        self.gradient_accumulation_steps = 1
-        self.optimizer = "adamw"
-        self.adafactor_scale_parameter = True
-        self.adafactor_warmup_init = False
-        self.adafactor_relative_step = False
-        self.num_train_epochs = -1
-        self.warmup_steps = -1
-        self.total_steps = -1
-        self.num_tasks_per_batch = None
-        self.save_every = None
-        self.eval_every = None
-        self.eval_every_n_epoch = 1
-        self.debug = False
-        self.seed = 42
-        self.eval_before_training = True
+    @property
+    def modifier_config(self):
+        from mttl.models.modifiers.base import ModifierConfig
 
-        self.ni_online_eval = False  # zero-shot online eval for ni
-        self.t0_online_eval = False  # zero-shot eval for t0
-        self.early_stop_on_zero_shot = False  # zero-shot early stopping
+        return ModifierConfig.from_training_config(self)
 
-        # auxiliary losses
-        self.ortho_loss = 0.0  # orthogonality between skills
-        self.task_loss = 0.0  # task prediction loss (mi between tasks and skills)
-        self.l1_loss = 0.0  # sparsity of the logits
-        self.mi_loss = (
-            0.0  # mi between tasks and skills (difference of entropies method)
-        )
-        self.mc_loss = 0.0  # T-Few
-        self.length_norm = 0.0  # T-Few
-        self.unlikely_loss = 0.0  # T-Few
-        self.poly_unlikely_loss = 0.0  # poly unlikelihood loss
-        self.finetune_type = None  # ["F", "A", "Z", "MuZ", "Poly", "PolyRand"]
-        self.finetune_skip_es = False  # skip early stopping while fine-tuning
-        self.finetune_use_last_checkpoint = (
-            False  # use always the best valid_perf checkpoint if available
-        )
 
-        self.model = None
-        self.model_family = None  # model family, either "gpt" or "encdec"
-        self.attn_implementation = None
+@dataclass
+class MultiExpertConfig(ExpertConfig, SelectorArgs):
+    """
+    Multi-expert configuration class that allows setting selectors and modifiers.
+    In the future, we can remove the modifier support from this configuration, for now we leave it
+    as it simplifies current tests and experiments.
+    """
 
-        self.precision = "32"
-        self.monitor_grad_alignment_on = None
+    router_selector: str = None
 
-        self.model_modifier = None
-        self.adapter_type = None
+    @property
+    def selector_config(self):
+        from mttl.models.containers.selectors.base import MultiSelectorConfig
 
-        self.lora_rank = 16
-        self.lora_dropout = 0.0
-        self.lora_init_scale = 0.01
-        self.lora_alpha = 1.0
-        self.lora_warmup = False
-        self.lora_init_b_random = False
-        self.lora_dropout = 0.0
+        return MultiSelectorConfig.from_training_config(self)
 
-        # n-skills for router-based methods
-        self.n_skills = 8
-        self.n_tasks = None
-        self.task_names = None
 
-        # which modules to modify and which layers for adapters
-        self.modify_modules = None
-        self.modify_layers = None
-        self.tie_params = None  #  "q_proj\\.lora_a|k_proj\\.lora_a|v_proj\\.lora_a" to share lora_a for q,k,v
+@dataclass
+class FinetuneConfig(MultiExpertConfig):
+    finetune_type: str = None  # ["F", "A", "Z", "MuZ", "Poly", "PolyRand"]
+    finetune_skip_es: str = False  # skip early stopping while fine-tuning
+    finetune_use_last_checkpoint: bool = (
+        False  # use always the best valid_perf checkpoint if available
+    )
+    expert_selection: str = None
+    use_vllm: str = False
+    # for finetuning a library
+    hf_repo_query: str = None  # for retrieval, we take query expert from this library
+    sk: int = 5  # number of experts to retrieve from a library
+    finetune_regime: str = None  # polylib_full, lib_mu, polylib_selector
+    tasksets_path: str = None
 
-        """
-        router_granularity : how granular is the module selection
-        coarsegrained : 1 single selector across all linear layers
-        coderwise : 2 selectors (1 for encoder, 1 for decoder)
-        blockwise : 1 selector for each block of K attention layers (and layernorm)
-        layerwise : 1 selector for each attention layer (and layernorm)
-        finegrained : 1 selector for every linear layer
-        """
-        self.router_granularity = "finegrained"  # router granularity
-        self.router_selector = None  # router selector
-        self.router_weight_decay = None  # router weight decay
-        self.router_learning_rate = None
+    def __post_init__(self):
+        if self.finetune_task_name is not None and isinstance(
+            self.finetune_task_name, str
+        ):
+            # resolve task keys
+            task_names = []
+            tasks = self.finetune_task_name.split(",")
+            if self.tasksets_path is not None and os.path.exists(self.tasksets_path):
+                # load task names from json file
+                task_sets = json.load(open(self.tasksets_path))
+                for task_name in tasks:
+                    # try to fetch task_names from the file
+                    if task_name in task_sets:
+                        task_names.extend(task_sets[task_name])
+                    else:
+                        task_names.append(task_name)
+            else:
+                task_names = tasks
 
-        # Polytropon related hyper-parameters
-        self.n_splits = 1  # number of splits for poly-s
-        self.router_selector_cluster_temp = 1.0  # temperature for the cluster selector
-        self.poly_average_correction = False  # correct the poly average
-        self.poly_use_shared_skill = False  # use one skill shared by all tasks
-        self.skip_unseen_tokens = (
-            True  # skip unseen tokens in PerTokenPoly during evaluation
-        )
+            self.finetune_task_name = ",".join(task_names)
 
-        self.module_logits_relaxed_bernoulli = True
-        self.module_logits_straight_through = False
-        self.module_logits_learning_rate = 0.1
-        self.adapters_learning_rate = None
-        self.adapters_weight_decay = None
-        self.module_logits_dropout = 0.0
-        self.module_logits_l2_norm = False
 
-        self.augment_mmlu: bool = False
+@dataclass
+class EvaluationConfig(MultiExpertConfig, TransformArgs):
+    expert_selection: str = None
+    load_module: str = None
+    eval_metric: str = "loss"
+    merge_or_route: str = None  # "uniform", "ties", "clown"
+    tasksets_path: str = None
+    remove_experts: str = None
+    create_transfer_matrix: bool = False
+    es_metric: str = "loss"
+    n_ng_iterations: int = 30  # number of iterations for LoraHub
+    recompute_prototypes: bool = False
 
-        # soft prompts
-        self.soft_prompt_length: int = 10
-        self.patch_last_k_layers: int = -1
-        self.soft_prompt_mlp_dim: int = None
-        self.soft_prompt_hidden_dim: int = None
-        self.soft_prompt_learn_kv: bool = False
-        self.prompt_placement: str = "prefix"
-        self.add_routing_token: bool = False
+
+@dataclass
+class MoEExpertConfig(MultiExpertConfig):
+    moe_ent_reg: float = 0.0
+    moe_ent_free_bits: float = 0.0
+    moe_num_experts: int = 8
+
+
+@dataclass
+class RankerConfig(TrainingArgs, SelectorArgs):
+    encoder_model_name: str = "all-MiniLM-L6-v2"
+    text_embedding_dim: int = 384
+    expert_embedding_dim: int = 512
+    projection_dim: int = 512
+    val_check_interval = 1.0
+    limit_val_batches: float = 1.0
+    limit_train_batches: float = 1.0

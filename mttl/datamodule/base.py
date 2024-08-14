@@ -3,6 +3,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Union
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from datasets import Dataset as ArrowDataset
@@ -10,12 +11,64 @@ from datasets import concatenate_datasets
 from pytorch_lightning import LightningDataModule
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Dataset
+from torch.utils.data.dataset import ConcatDataset
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PaddingStrategy
 
 from mttl.datamodule.utils import get_tokenizer
 from mttl.logging import logger
 from mttl.registrable import Registrable
+
+
+def take_n_examples_per_task(task_names, n, rng=None):
+    """Returns indices of x / n examples per task given a list of task names.
+
+    Args:
+        task_names (list): List of task names, one per example.
+        n (int): Subsampling factor.
+        rng (np.random.RandomState, optional): Random number generator. Defaults to None.
+
+    Returns:
+        list: List of indices.
+    """
+    if rng is None:
+        rng = np.random.RandomState(0)
+
+    tasks_to_ids = defaultdict(list)
+    for i, task in enumerate(task_names):
+        tasks_to_ids[task].append(i)
+    indices = []
+    for task in tasks_to_ids.keys():
+        indices += rng.choice(
+            tasks_to_ids[task], max(len(tasks_to_ids[task]) // n, 1), replace=False
+        ).tolist()
+    return indices
+
+
+class TrainIndices:
+    _instance = None
+
+    def __init__(self, dataset, num_examples, seed):
+        self.num_examples = num_examples
+        self.seed = seed
+        self.rng = np.random.RandomState(self.seed)
+        self.train_indices = self.rng.randint(
+            0, len(dataset), self.num_examples
+        ).tolist()
+
+    @classmethod
+    def get(cls, dataset, num_examples, seed):
+        if cls._instance is None:
+            cls._instance = cls(dataset, num_examples, seed)
+
+        return cls._instance.train_indices
+
+
+class IndexConcatDataset(ConcatDataset):
+    def __getitem__(self, idx):
+        example_info = super().__getitem__(idx)
+        example_info["example_id"] = idx
+        return example_info
 
 
 @dataclass
@@ -33,6 +86,7 @@ class DatasetConfig:
     model_family: str = "gpt"
     train_on_inputs: bool = False
     add_eos_to_targets: bool = True
+    add_eos_to_downstream_targets: bool = True
     finetune_task_name: str = None
     subsample_train: int = None
     subsample_dev: int = None

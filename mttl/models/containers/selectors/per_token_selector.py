@@ -25,7 +25,7 @@ from mttl.models.library.expert import ExpertInfo
 @dataclass
 class PerTokenSelectorConfig(LoadableSelectorConfig):
     router_temp: float = None
-    moe_top_k: int = None
+    top_k: int = None
     proto_init: str = None
     input_norm_fn: str = None
     proto_norm_fn: str = None
@@ -193,11 +193,9 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
         # control entropy of distribution
         router_logits /= temp
 
-        if self.config.moe_top_k > 0:
+        if self.config.top_k > 0:
             # For now, we always renormalize the routing weights for hard routing
-            top_k_logits, experts = torch.topk(
-                router_logits, self.config.moe_top_k, dim=-1
-            )
+            top_k_logits, experts = torch.topk(router_logits, self.config.top_k, dim=-1)
             router_probs = F.softmax(top_k_logits, dim=-1)
 
             # Adjust router_logits accordingly for logging
