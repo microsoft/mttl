@@ -217,8 +217,12 @@ def filter_task_source(include_task_source, example):
 @DataModule.register("flan", config_cls=FlanConfig)
 class FlanModule(DataModule):
     def setup_dataset(self):
+        if self.config.dataset is None:
+            raise ValueError("Please specify a flan dataset to load.")
+
         dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
+
         if "split" not in dataset.column_names["train"]:
             raise ValueError(
                 "Dataset must have a 'split' column, try removing the dataset manually from the cache."

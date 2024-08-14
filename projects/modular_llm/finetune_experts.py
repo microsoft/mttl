@@ -9,7 +9,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from typing import Callable
 
-from mttl.callbacks import LiveCheckpointCallback, RougeCallback
+from mttl.callbacks import DownstreamEvalCallback, LiveCheckpointCallback, RougeCallback
 from mttl.config import FinetuneConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
@@ -30,11 +30,10 @@ from mttl.models.library.library_transforms import (
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
 )
+from mttl.models.library.retrievers import RandomRetriever, SVDEmbeddingRetriever
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.monitors import get_monitors
 from mttl.utils import get_checkpoint_path, remote_login
-from projects.modular_llm.src.callbacks import DownstreamEvalCallback
-from projects.modular_llm.src.retrievers import RandomRetriever, SVDEmbeddingRetriever
 
 FINETUNE_FUNCTIONS: dict[str, Callable] = {}
 
@@ -161,7 +160,7 @@ def finetune_with_nevergrad(args: FinetuneConfig, dm):
         wandb.config.update(args)
 
     from mttl.evaluators.rouge_evaluator import RougeEvaluator
-    from projects.modular_llm.src.nevergrad_opt import NGRoutingOptimizer
+    from mttl.models.nevergrad_opt import NGRoutingOptimizer
 
     library = retrieve(args, args.finetune_task_name, args.sk, retrieve_with="random")
     assert (
@@ -207,7 +206,7 @@ def finetune_with_nevergrad(args: FinetuneConfig, dm):
         wandb.config.update(args)
 
     from mttl.evaluators.rouge_evaluator import RougeEvaluator
-    from projects.modular_llm.src.nevergrad_opt import NGRoutingOptimizer
+    from mttl.models.nevergrad_opt import NGRoutingOptimizer
 
     lib_location = f"/tmp/{args.library_id}"
     os.makedirs(lib_location, exist_ok=True)

@@ -5,7 +5,7 @@ from mttl.config import ExpertConfig, MultiExpertConfig
 from mttl.models.expert_model import ExpertModel as ExpertTrainer
 from mttl.models.expert_model import MultiExpertModel
 from mttl.models.library.expert_library import LocalExpertLibrary
-from projects.modular_llm.src.nevergrad_opt import NGRoutingOptimizer
+from mttl.models.nevergrad_opt import NGRoutingOptimizer
 
 
 # remove this for now, since NG Routing is be to rebuilt.

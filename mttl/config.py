@@ -373,7 +373,6 @@ class TrainingArgs(DataArgs):
     seed: int = 42
     debug: bool = False
 
-    eval_before_training: bool = True
     precision: str = "32"
     monitor_grad_alignment_on: str = None
 
@@ -401,6 +400,7 @@ class TrainingArgs(DataArgs):
     eval_mmlu_flag: bool = False  # eval mmlu performance during training
     eval_rouge_flag: bool = False  # eval rouge during training
     eval_before_training: bool = True
+    create_transfer_matrix: bool = False
     pipeline_eval_tasks: str = None
     save_if_loaded_from_ckpt: bool = True
     dataset_type: str = None
@@ -418,6 +418,16 @@ class TrainingArgs(DataArgs):
             )
 
     def __post_init__(self):
+        if self.model is not None and self.model_family is None:
+            # attempt to infer the model family from the model name
+            if "t5" in self.model or "T0" in self.model:
+                self.model_family = "seq2seq"
+            else:
+                self.model_family = "gpt"
+            logger.warning(
+                "Model family not specified, assuming {}".format(self.model_family)
+            )
+
         if self.attn_implementation == "eager" and self.pack_sequences:
             logger.warning(
                 "Eager attention is not compatible with packed sequences"
@@ -518,7 +528,6 @@ class EvaluationConfig(MultiExpertConfig, TransformArgs):
     merge_or_route: str = None  # "uniform", "ties", "clown"
     tasksets_path: str = None
     remove_experts: str = None
-    create_transfer_matrix: bool = False
     es_metric: str = "loss"
     n_ng_iterations: int = 30  # number of iterations for LoraHub
     recompute_prototypes: bool = False
@@ -529,6 +538,7 @@ class MoEExpertConfig(MultiExpertConfig):
     moe_ent_reg: float = 0.0
     moe_ent_free_bits: float = 0.0
     moe_num_experts: int = 8
+    init_from_scratch: bool = True
 
 
 @dataclass

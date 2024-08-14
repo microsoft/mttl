@@ -9,13 +9,13 @@ from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
 
 from mttl.config import ExpertConfig, MultiExpertConfig
+from mttl.dataloader.flan_utils import download_flan
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
 from mttl.models.expert_model import MultiExpertModel
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import DatasetLibrary
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.lora import LoRAConfig
-from projects.modular_llm.cli_dataset_create import download_flan
 
 
 @pytest.fixture(scope="session")

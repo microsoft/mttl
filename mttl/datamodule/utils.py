@@ -111,16 +111,9 @@ def get_tokenizer_with_args(
     truncation_side="right",
     for_generation=False,
 ):
-    if model_family is None:
-        raise ValueError("model_family is None, please fix your config!")
-
     if "llama-2" in model_name:
         tokenizer = LlamaTokenizer.from_pretrained(model_name)
         tokenizer.pad_token_id = 0
-        if not model_family == "gpt":
-            raise ValueError(
-                "We detected a Llama model, but model_family != 'gpt', fix your config!"
-            )
     else:
         if "phi-2" == model_name:
             # local phi-2 version. use `microsoft/phi-2 for the official hf version`
@@ -150,11 +143,11 @@ def get_tokenizer_with_args(
         # do not add eos token, we will add it accordingly *if* needed.
         tokenizer.add_eos_token = False
 
-        if tokenizer.pad_token_id is None:
-            logger.warning(
-                "!!! Setting pad_token_id to eos_token_id, given that pad_token_id was not detected !!!"
-            )
-            tokenizer.pad_token_id = tokenizer.eos_token_id
+    if tokenizer.pad_token_id is None:
+        logger.warning(
+            "!!! Setting pad_token_id to eos_token_id, given that pad_token_id was not detected !!!"
+        )
+        tokenizer.pad_token_id = tokenizer.eos_token_id
 
     tokenizer.mttl_merges_space = tokenizer_merges_space(tokenizer)
     tokenizer.mttl_enforces_eos = tokenizer_enforces_eos(tokenizer)
