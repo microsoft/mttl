@@ -192,9 +192,6 @@ def train_experts(args: Args, model_class: Type[ExpertModel]):
 
         upload_library(expert_library, module)
 
-        if args.create_transfer_matrix:
-            create_transfer_matrix(args, checkpoint)
-
 
 if __name__ == "__main__":
     train_experts(ExpertConfig.parse(), ExpertModel)
