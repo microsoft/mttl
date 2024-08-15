@@ -1,25 +1,25 @@
 import numpy as np
 import pytest
 
-from mttl.models.expert_config import ExpertConfig
+from mttl.config import ExpertConfig, MultiExpertConfig
 from mttl.models.expert_model import ExpertModel as ExpertTrainer
 from mttl.models.expert_model import MultiExpertModel
 from mttl.models.library.expert_library import LocalExpertLibrary
-from projects.modular_llm.src.nevergrad_opt import NGRoutingOptimizer
+from mttl.models.nevergrad_opt import NGRoutingOptimizer
 
 
 # remove this for now, since NG Routing is be to rebuilt.
 def test_NGRoutingOptimizer(tmp_path, make_tiny_llama, create_dummy_expert):
-    config = ExpertConfig(
-        kwargs={
+    config = MultiExpertConfig(
+        **{
             "model_modifier": "lora",
             "modify_layers": "gate_proj|down_proj|up_proj",
             "modify_modules": ".*mlp.*",
             "trainable_param_names": ".*lora_[ab].*",
             "output_dir": tmp_path,
-            "model": "",
         }
     )
+
     # create random Lora
     expert1 = create_dummy_expert(config, "module1")
     expert2 = create_dummy_expert(config, "module2")
@@ -29,8 +29,9 @@ def test_NGRoutingOptimizer(tmp_path, make_tiny_llama, create_dummy_expert):
     library = LocalExpertLibrary(tmp_path)
     library.add_expert(expert1, expert1.name)
     library.add_expert(expert2, expert2.name)
+
     model_object = make_tiny_llama()
-    model = MultiExpertModel(model_object=model_object, **vars(config))
+    model = MultiExpertModel(model_object=model_object, **config.asdict())
 
     # create an NGRoutingOptimizer instance
     optimizer = NGRoutingOptimizer(

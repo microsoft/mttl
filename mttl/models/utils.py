@@ -250,6 +250,7 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
                 model_family=ckpt["hyper_parameters"]["model_family"],
                 padding_side=ckpt["hyper_parameters"]["padding_side"],
             )
+
         model = cls(**ckpt["hyper_parameters"])
         model.load_state_dict(ckpt["state_dict"], strict=False)
         return model
@@ -488,6 +489,10 @@ def model_loader_helper(
             attn_implementation=attn_implementation,
             torch_dtype=torch.bfloat16,
         )
+
+    if load_in_8bit or load_in_4bit:
+        model_object = prepare_model_for_kbit_training(model_object)
+
     return model_object
 
 

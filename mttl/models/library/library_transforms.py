@@ -18,14 +18,14 @@ from tqdm import tqdm
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import logger
 from mttl.models.containers.lora_containers import ExpertContainer
-from mttl.models.expert_config import ExpertConfig
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.modifiers.base import get_target_2_source_param_mapping
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
+from mttl.registrable import Registrable
 
 
-class LibraryTransform(abc.ABC):
+class LibraryTransform(abc.ABC, Registrable):
     """Defines a transformation of a library of experts."""
 
     def __init__(self, config):
@@ -50,14 +50,18 @@ def _hash_field(val):
         return val
 
 
-def param_hash(p):
+def param_hash(p, exclude_fields=None):
     # from facebookresearch / ReAgent
     import hashlib
 
     m = hashlib.md5()
     m.update(
         str(
-            tuple(_hash_field(getattr(p, f.name)) for f in dataclasses.fields(p))
+            tuple(
+                _hash_field(getattr(p, f.name))
+                for f in dataclasses.fields(p)
+                if not exclude_fields or f.name not in exclude_fields
+            )
         ).encode()
     )
     return m.hexdigest()
@@ -77,8 +81,11 @@ class LibraryTransformConfig:
             return self.name
         else:
             # form auto name based on the arguments of the config
-            save_name = self.__class__.__name__.lower() + f"-{param_hash(self)}"
+            save_name = self.__class__.__name__.lower() + f"-{self.param_hash()}"
             return save_name
+
+    def param_hash(self):
+        return param_hash(self)
 
 
 @dataclass
@@ -87,6 +94,7 @@ class SVDEmbeddingTransformConfig(LibraryTransformConfig):
     sparsity_threshold: float = 0.8
 
 
+@LibraryTransform.register("svd_embedding", SVDEmbeddingTransformConfig)
 class SVDEmbeddingTransform(LibraryTransform):
     """Creates adapter embeddings by low-rank decomposition of a sparsified version
     of the adapter experts.
@@ -188,6 +196,7 @@ class WeightedLinearMergeConfig(LibraryTransformConfig):
     weights: dict = None
 
 
+@LibraryTransform.register("weighted_linear_merge", WeightedLinearMergeConfig)
 class WeightedLinearMerge(LibraryTransform):
     """
     Computes a uniform weight mixture across experts of a given library
@@ -255,6 +264,7 @@ class TiesMergeConfig(LibraryTransformConfig):
     only_sparsify: bool = False
 
 
+@LibraryTransform.register("ties_merge", TiesMergeConfig)
 class TiesMerge(LibraryTransform):
     """
     Computes a uniform weight mixture across experts of a given library
@@ -357,6 +367,7 @@ class HiddenStateComputerConfig(LibraryTransformConfig):
     pool: str = "last"  # last, or mean
 
 
+@LibraryTransform.register("hidden_state_computer", HiddenStateComputerConfig)
 class HiddenStateComputer(LibraryTransform):
     """
     Encodes a dataset and computes the average embedding
@@ -370,8 +381,9 @@ class HiddenStateComputer(LibraryTransform):
         for k, v in vars(default_args).items():
             if not hasattr(args, k):
                 setattr(args, k, v)
+
         # Also, overwrite the updated args even if already present
-        for k, v in default_args._updated_kwargs.items():
+        for k, v in default_args.updated_kwargs.items():
             setattr(args, k, v)
 
         for arg_name in [
@@ -582,6 +594,7 @@ class PhatgooseConfig(LibraryTransformConfig):
     warmup_ratio: float = 0.1  # 0.9999999 # 0.1
 
 
+@LibraryTransform.register("phatgoose", PhatgooseConfig)
 class PhatgooseTransform(HiddenStateComputer):
     def __init__(self, config: PhatgooseConfig = None):
         super().__init__(config or PhatgooseConfig())
@@ -611,6 +624,7 @@ class PhatgooseTransform(HiddenStateComputer):
         expert_names: list = None,
         default_args=None,
     ):
+        from mttl.config import ExpertConfig
         from mttl.models.expert_model import MultiExpertModel
         from mttl.models.library.utils import train_module
 
@@ -756,8 +770,14 @@ class ArrowConfig(LibraryTransformConfig):
         "default"  # If default, ties the same params as during training. If a regex, processed the same way as during training
     )
     tie_op: str = "concat"  # or "sum"
+    add_base_proto: bool = False
+
+    def param_hash(self):
+        # for convenience, we exclude the add_base_proto field as it was added later
+        return param_hash(self, exclude_fields=["add_base_proto"])
 
 
+@LibraryTransform.register("arrow", ArrowConfig)
 class ArrowTransform(LibraryTransform):
     """
     Given a library of experts, extract the input direction most affected by the linear transforms
@@ -889,13 +909,17 @@ class ArrowTransform(LibraryTransform):
 
     @torch.no_grad()
     def transform(
-        self, library, persist=True, recompute=False, add_base_proto=False
+        self,
+        library,
+        persist=True,
+        recompute=False,
     ) -> Expert:
         logger.info("Arrow save name : {}".format(self.config.save_name))
 
         if isinstance(library, str):
             library = ExpertLibrary.get_expert_library(library)
 
+        add_base_proto = self.config.add_base_proto
         base_model = None
 
         vectors, eigvals = self.fetch(library, scale=False)
@@ -1087,6 +1111,7 @@ class ExpertProjectorConfig:
     )
 
 
+@LibraryTransform.register("expert_projector", ExpertProjectorConfig)
 class ExpertProjector(LibraryTransform):
     """
     Given a library of clustered experts, project each one onto the basis generated
@@ -1175,6 +1200,7 @@ class CrossExpertNormComputerConfig:
     pass
 
 
+@LibraryTransform.register("cross_expert_norm_computer", CrossExpertNormComputerConfig)
 class CrossExpertNormComputer(HiddenStateComputer):
     """
     Given a library of experts, compute the norm of ABx for both in-dist and ood experts
@@ -1301,6 +1327,7 @@ class MBClusteringTransformConfig(SVDEmbeddingTransformConfig):
     k: int = 10
 
 
+@LibraryTransform.register("mbc_with_cos_sim", MBClusteringTransformConfig)
 class MBCWithCosSimTransform(LibraryTransform):
     """
     Computes clusters based on the embedding similarity of the experts.

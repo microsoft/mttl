@@ -51,7 +51,7 @@ def compute_phatgoose_embeddings(
 @dataclass
 class PhatgooseSelectorConfig(PerTokenSelectorConfig):
     router_temp: float = -1
-    moe_top_k: int = 2
+    top_k: int = 2
     proto_init: str = "phatgoose"
     input_norm_fn: str = "norm_d"
     proto_norm_fn: str = "norm_d"
