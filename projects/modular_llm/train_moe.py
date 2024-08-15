@@ -10,7 +10,7 @@ from mttl.callbacks import (
     NanoMMLUCallback,
     RougeCallback,
 )
-from mttl.cli.train_experts import train_experts
+from train_experts import train_experts
 from mttl.config import MoEExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
