@@ -16,6 +16,7 @@ class InfoContainer:
 
     def __enter__(self):
         InfoContainer.local.context = self
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         # delete the context
@@ -54,10 +55,10 @@ class InfoContainer:
                 raise ValueError(
                     "The first argument of the function to wrap must be a dictionary with 'input_ids' key."
                 )
-
+            return_context = kwargs.pop("return_context", False)
             with cls(model, RoutingInfo.from_batch(args[0])) as context:
                 results = f(model, *args, **kwargs)
-                if kwargs.get("return_context", False):
+                if return_context:
                     context_returns = {
                         "routing_infos": context.routing_infos,
                         "routing_gates": context.routing_gates,
