@@ -12,19 +12,34 @@ from mttl.models.containers.selectors.base import (
     forward_with_cache,
 )
 from mttl.models.containers.selectors.selector_output import (
-    BatchSequenceExpertsAndWeightsSelectorOutput,
-    SelectorOutput,
+    MultiheadBatchSequenceExpertsAndWeightsSelectorOutput
 )
 from mttl.models.library.expert import ExpertInfo
 
 
 @dataclass
 class PKSelectorConfig(SelectorConfig):
+    num_heads: int = 8
     emb_dim: int = 128
     top_k: int = -1
+    non_competitive_gates: bool = False
     moe_num_experts: int = (
         -1
     )  # for num experts to be set it must have the same name as the num of experts variable in MoEExpertConfig
+
+
+def exists(val):
+    return val is not None
+
+
+def default(val, d):
+    return val if exists(val) else d
+
+
+def init_(t, dim=None):
+    dim = default(dim, t.shape[-1])
+    std = 1.0 / math.sqrt(dim)
+    return nn.init.normal_(t, mean=0, std=std)
 
 
 @Selector.register("moe_pk_router", PKSelectorConfig)
@@ -36,87 +51,71 @@ class PKSSelector(Selector):
             raise ValueError(
                 "MOERKHSSelector requires a layer to be passed in kwargs to infer the input dimension."
             )
-        assert self.config.emb_dim % 2 == 0, "emb_dim must be even"
 
         self.top_k = config.top_k
         self.input_dim = kwargs["layer"].weight.data.shape[-1]
 
-        self.q = nn.Linear(self.input_dim, self.config.emb_dim, bias=False)
-        self._N = config.moe_num_experts
-        assert self._N > 0
-        assert math.sqrt(self._N).is_integer(), "N must be a perfect square"
+        self.num_experts = config.moe_num_experts
+        self.num_heads = config.num_heads
+        self.emb_dim = config.emb_dim
+
+        self.q = nn.Linear(
+            self.input_dim, self.num_heads * 2 * self.emb_dim, bias=False
+        )
+
+        self.gate_activation = (
+            nn.Softmax(dim=-1) if not self.config.non_competitive_gates else nn.ReLU()
+        )
+
+        assert self.num_experts > 0
+        assert math.sqrt(self.num_experts).is_integer(), "N must be a perfect square"
+        self.N = int(math.sqrt(self.num_experts))
         self._init_keys()
 
     def _init_keys(self, device=None):
-        assert self._N > 0
-        assert math.sqrt(self._N).is_integer(), "N must be a perfect square"
-        self.keys = nn.ParameterList(
-            [
-                nn.Parameter(
-                    torch.randn(
-                        (int(math.sqrt(self._N)), int(self.config.emb_dim / 2)),
-                        device=device,
-                    )
-                ),
-                nn.Parameter(
-                    torch.randn(
-                        (int(math.sqrt(self._N)), int(self.config.emb_dim / 2)),
-                        device=device,
-                    )
-                ),
-            ]
-        )
-
-    @staticmethod
-    def _calc_full_idx(i_1_idx, i_2_idx, top_k):
-        """
-        Map the top-k indices from both sqrt(N) halves to the index int he coresponding cartesian product
-        """
-        b, s = i_1_idx.shape[:2]
-        i_1_idx = i_1_idx.unsqueeze(-1)
-        i_2_idx = i_2_idx.unsqueeze(-2)
-        idx_full = i_1_idx * top_k + i_2_idx
-        return idx_full.view(b, s, -1)
-
-    @staticmethod
-    def _get_full_cartesian_scores(i_1, i_2):
-        """
-        Compute the full cartesian sum of i_1 and i_2
-        """
-        b, s = i_1.shape[:2]
-        i_1 = i_1.unsqueeze(-1)
-        i_2 = i_2.unsqueeze(-2)
-        return (i_1 + i_2).view(b, s, -1)
+        assert self.num_experts > 0
+        assert math.sqrt(self.num_experts).is_integer(), "N must be a perfect square"
+        self.keys = nn.Parameter(
+            torch.randn((self.N, 2, self.emb_dim)).to(device)
+        )  # H, (2 x emb_dim), N
+        init_(self.keys)
 
     @forward_with_cache
-    def forward(self, input, **kwargs) -> BatchSequenceExpertsAndWeightsSelectorOutput:
+    def forward(self, input, **kwargs) -> MultiheadBatchSequenceExpertsAndWeightsSelectorOutput:
         input = input.to(dtype=self.q.weight.dtype)
-        assert math.sqrt(self._N).is_integer(), "N must be a perfect square"
+        assert math.sqrt(self.num_experts).is_integer(), "N must be a perfect square"
+        b, s, d = input.shape
 
         # get query
-        q_x = self.q(input)  # B x d
-        q_1, q_2 = torch.chunk(q_x, 2, dim=-1)  # B x d/2
+        q_x = self.q(input)  # B x d x (emb_dim * 2 num_heads)
+        q_x = q_x.view(
+            b, s, self.num_heads, 2, self.emb_dim
+        )  # B x s x H x (2 * emb_dim)
 
-        # get sub-keys
-        i_1 = torch.matmul(q_1, self.keys[0].T)  # B x sqrt(N)
-        i_2 = torch.matmul(q_2, self.keys[1].T)  # B x sqrt(N)
+        sim_scores = torch.einsum(
+            "bshpd,npd->bshpn", q_x, self.keys
+        )  # B x s x H x 2 x N
+        scores, indices = sim_scores.topk(k=self.top_k, dim=-1)
 
-        # top-k on sub-keys
-        i_1, i_1_idx = torch.topk(i_1, self.top_k, dim=-1)
-        i_2, i_2_idx = torch.topk(i_2, self.top_k, dim=-1)
+        # all selected experts
+        (i_1, i_2), (i_1_idx, i_2_idx) = map(
+            lambda t: t.chunk(2, dim=3), (scores, indices)
+        )
+        i_2 = i_2.swapaxes(-1, -2)
+        i_2_idx = i_2_idx.swapaxes(-1, -2)
 
         # map top-k on sub-keys to indices on cartesian product
-        idx_full = self._calc_full_idx(i_1_idx, i_2_idx, self.top_k)
+        idx_full = (i_1_idx * self.top_k + i_2_idx).view(b, s, self.num_heads, -1)
         # get full cartesian scores of k^2 pairs
-        scores_full = self._get_full_cartesian_scores(i_1, i_2)
+        scores_full = (i_1 + i_2).view(b, s, self.num_heads, -1)
 
         # redo top-k on full cartesian scores
         logits, idx = torch.topk(scores_full, self.top_k, dim=-1)
         selected_experts = idx_full.gather(-1, idx)
 
-        routing_weights = F.softmax(logits, dim=-1, dtype=torch.float)
+        routing_weights = self.gate_activation(logits)
 
-        return BatchSequenceExpertsAndWeightsSelectorOutput(
+        return MultiheadBatchSequenceExpertsAndWeightsSelectorOutput(
             experts=selected_experts, weights=routing_weights
         )
 
