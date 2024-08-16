@@ -13,7 +13,6 @@ from mttl.models.modifiers.base import MergeableModifierMixin
 
 try:
     from vllm import LLM, SamplingParams
-    from vllm.model_executor.parallel_utils.parallel_state import destroy_model_parallel
 except ImportError:
     LLM = object
     logger.warning("VLLM is not installed. Please install it to use LLMEngine.")
@@ -82,7 +81,6 @@ def free_memory():
 
     gc.collect()
     torch.cuda.empty_cache()
-    destroy_model_parallel()
     shutdown()
     time.sleep(3)
 
