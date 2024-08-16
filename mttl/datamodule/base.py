@@ -909,8 +909,8 @@ class MultiChoiceSourceDataModule(DataModule):
 
 
 def get_datamodule(args, for_generation=False, dataset_override=None):
+    from mttl.config import DataArgs
     from mttl.datamodule.arc_data_module import ArcDataConfig, ArcMultiChoiceDataModule
-    from mttl.datamodule.cluster_data_module import ClusterDataConfig, ClusterDataModule
     from mttl.datamodule.codex_data_module import CodexDataConfig, CodexDataModule
     from mttl.datamodule.hellaswag_data_module import (
         HellaswagDataConfig,
@@ -940,7 +940,15 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         WinograndeMultiChoiceDataModule,
     )
 
-    # refactor all the common arguments below into a dict common kwargs
+    # if we have a DataArgs object, we can directly create the datamodule
+    if isinstance(args, DataArgs) and args.dataset_type is not None:
+        dataset_config = args.dataset_config
+
+        return DataModule.get_class_by_config_class(type(dataset_config))(
+            dataset_config, for_generation=for_generation
+        )
+
+    # we fall back to previous behavior
     dataset = args.dataset if not dataset_override else dataset_override
 
     common_kwargs = {
