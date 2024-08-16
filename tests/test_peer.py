@@ -46,13 +46,13 @@ def dummy_batch():
     return batch
 
 
-def test_peer_moe(tmp_peer_moe_config, dummy_batch):    
+def test_peer_moe(tmp_peer_moe_config, dummy_batch):
     config: MoEExpertConfig = tmp_peer_moe_config
     module = MoEModel(**vars(config))
-    
-    
+
     output = module(dummy_batch)
     assert np.allclose(output.item(), 17.5, atol=0.1)
+
 
 if __name__ == "__main__":
     pytest.main([__file__])

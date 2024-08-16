@@ -12,7 +12,7 @@ from mttl.models.containers.selectors.base import (
     forward_with_cache,
 )
 from mttl.models.containers.selectors.selector_output import (
-    MultiheadBatchSequenceExpertsAndWeightsSelectorOutput
+    MultiheadBatchSequenceExpertsAndWeightsSelectorOutput,
 )
 from mttl.models.library.expert import ExpertInfo
 
@@ -83,7 +83,9 @@ class PKSSelector(Selector):
         init_(self.keys)
 
     @forward_with_cache
-    def forward(self, input, **kwargs) -> MultiheadBatchSequenceExpertsAndWeightsSelectorOutput:
+    def forward(
+        self, input, **kwargs
+    ) -> MultiheadBatchSequenceExpertsAndWeightsSelectorOutput:
         input = input.to(dtype=self.q.weight.dtype)
         assert math.sqrt(self.num_experts).is_integer(), "N must be a perfect square"
         b, s, d = input.shape
