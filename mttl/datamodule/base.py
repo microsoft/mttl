@@ -941,7 +941,7 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
     )
 
     # if we have a DataArgs object, we can directly create the datamodule
-    if isinstance(args, DataArgs):
+    if isinstance(args, DataArgs) and args.dataset_type is not None:
         dataset_config = args.dataset_config
 
         return DataModule.get_class_by_config_class(type(dataset_config))(
