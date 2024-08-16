@@ -25,5 +25,7 @@
     "eval_before_training": "false",
     "device_map": "cuda:0",
     "pack_sequences": true,
-    "attn_implementation": "sdpa"
+    "attn_implementation": "sdpa",
+    "dataset_type": "flat_multitask",
+    "task_name_field": "tag"
 }

@@ -19,6 +19,7 @@ def main(input_jsonl, output_jsonl):
         examples_["task_name"] = []
         for messages, metadata in zip(examples["messages"], examples["metadata"]):
             messages = json.loads(messages)
+            metadata = json.loads(metadata)
             task_name = json.loads(metadata or "{}").get("task_name", "unknown")
             examples_["messages"].append(messages)
             examples_["metadata"].append(metadata)
