@@ -12,7 +12,7 @@ from transformers import PreTrainedModel
 from mttl.config import Args, ExpertConfig, MoEExpertConfig, MultiExpertConfig
 from mttl.logging import logger
 from mttl.models.containers import add_expert_to_transformer
-from mttl.models.containers.base import ExpertContainer
+from mttl.models.containers.base import ExpertContainer, ContainerFullException
 from mttl.models.containers.selectors.base import (
     LoadableLibraryMixin,
     LoadableSelectorConfig,
@@ -348,6 +348,8 @@ class MultiExpertModel(ExpertModel):
     def experts_containers(self) -> List[ExpertContainer]:
         containers = []
         for _, module in self.model.named_modules():
+            if isinstance(module, ExpertContainer) and len(module.experts) > 0:
+                containers.append(module)
             for _, child in dict(module.named_children()).items():
                 if isinstance(child, ExpertContainer) and len(child.experts) > 0:
                     containers.append(child)
@@ -558,6 +560,7 @@ class MultiExpertModel(ExpertModel):
 
         expert_params = {}
         for container in self.experts_containers:
+            retrieved_expert = None
             if expert_name in container.expert_infos:
                 expert_info = container.expert_infos[expert_name]
                 expert_weights = container[expert_name].state_dict()
@@ -566,7 +569,9 @@ class MultiExpertModel(ExpertModel):
                 }
                 expert_params.update(expert_weights)
 
-        retrieved_expert = Expert(expert_info=expert_info, expert_weights=expert_params)
+                retrieved_expert = Expert(
+                    expert_info=expert_info, expert_weights=expert_params
+                )
         return retrieved_expert
 
     def save_to_library(self, library_id):
@@ -587,6 +592,17 @@ class MultiExpertModel(ExpertModel):
             "This method is not implemented for MultiExpertModel."
         )
 
+    def add_empty_experts(self):
+        for i in range(self.hparams.moe_num_experts):
+            # Adding a Skilled LoRA with 1 skill if model modifier is set to skilled_lora
+            try:
+                self.add_empty_expert(f"e{i}", self.modifier_config)
+            except ContainerFullException:
+                logger.info(
+                    f"Added all {self.hparams.moe_num_experts} experts to container."
+                )
+                break
+
 
 class MoEModel(MultiExpertModel):
     training_config_class = MoEExpertConfig
@@ -595,22 +611,12 @@ class MoEModel(MultiExpertModel):
         init_from_scratch = kwargs.get("init_from_scratch", False)
 
         super().__init__(**kwargs)
+        self.modifier_config = self.training_config_class.fromdict(
+            kwargs
+        ).modifier_config
 
         if not self.hparams.library_id and expert_library is None or init_from_scratch:
-            for i in range(self.hparams.moe_num_experts):
-                # Adding a Skilled LoRA with 1 skill.
-                exp_config = SkilledLoRAConfig(
-                    n_skills=1,
-                    modify_layers=self.hparams.modify_layers,
-                    modify_modules=self.hparams.modify_modules,
-                    lora_alpha=self.hparams.lora_alpha,
-                    lora_dropout=self.hparams.lora_dropout,
-                    lora_rank=self.hparams.lora_rank,
-                    lora_init_b_random=True,
-                    n_splits=self.hparams.n_splits,
-                    phi_2_align_heads=self.hparams.phi_2_align_heads,
-                )
-                self.add_empty_expert(f"e{i}", exp_config)
+            self.add_empty_experts()
             self.moe_num_experts = kwargs["moe_num_experts"]
         else:
             if expert_library is None:

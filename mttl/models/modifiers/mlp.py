@@ -72,3 +72,26 @@ class MLPModifier(Modifier):
             hidden_states = mlp._modifier_forward(hidden_states)
             output.index_add_(0, indices, hidden_states.to(input.dtype))
         return mlps[0].layer(input) + output
+
+
+@dataclass
+class PEERConfig(ModifierConfig):
+    n_heads: int = 8
+    moe_num_experts: int = 100
+    emb_dim: int = 128
+
+@Modifier.register("peer", config_cls=PEERConfig)
+class PEERModifier(Modifier):
+    '''
+    Peer modifier basically does nothing, the job is done in the container.
+    '''
+    def __init__(
+        self,
+        config: PEERConfig,
+        **kwargs,
+    ):
+        super().__init__()
+        self.config = config
+    
+    def __len__(self):
+        return self.config.moe_num_experts

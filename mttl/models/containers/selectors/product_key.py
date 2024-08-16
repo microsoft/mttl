@@ -47,14 +47,16 @@ class PKSSelector(Selector):
     def __init__(self, config, **kwargs) -> None:
         super().__init__(config)
 
-        if "layer" not in kwargs:
+        if "in_d" in kwargs:
+            self.input_dim = kwargs["in_d"]
+        elif "layer" in kwargs:
+            self.input_dim = kwargs["layer"].in_features
+        else:
             raise ValueError(
-                "MOERKHSSelector requires a layer to be passed in kwargs to infer the input dimension."
+                "PKSSelector requires in_d or layer (assumed to be MLP block ith fc1) to be passed."
             )
 
         self.top_k = config.top_k
-        self.input_dim = kwargs["layer"].weight.data.shape[-1]
-
         self.num_experts = config.moe_num_experts
         self.num_heads = config.num_heads
         self.emb_dim = config.emb_dim
@@ -76,7 +78,7 @@ class PKSSelector(Selector):
         assert self.num_experts > 0
         assert math.sqrt(self.num_experts).is_integer(), "N must be a perfect square"
         self.keys = nn.Parameter(
-            torch.randn((self.N, 2, self.emb_dim)).to(device)
+            torch.randn((self.num_heads, self.N, 2, self.emb_dim)).to(device)
         )  # H, (2 x emb_dim), N
         init_(self.keys)
 
@@ -93,7 +95,7 @@ class PKSSelector(Selector):
         )  # B x s x H x (2 * emb_dim)
 
         sim_scores = torch.einsum(
-            "bshpd,npd->bshpn", q_x, self.keys
+            "bshpd,hnpd->bshpn", q_x, self.keys
         )  # B x s x H x 2 x N
         scores, indices = sim_scores.topk(k=self.top_k, dim=-1)
 

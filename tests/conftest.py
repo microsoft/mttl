@@ -8,7 +8,7 @@ import pytest
 from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
 
-from mttl.config import ExpertConfig, MultiExpertConfig
+from mttl.config import ExpertConfig, MultiExpertConfig, MoEExpertConfig
 from mttl.dataloader.flan_utils import download_flan
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
 from mttl.models.expert_model import MultiExpertModel
@@ -147,6 +147,22 @@ def tmp_multi_exp_config(tmp_path: Path):
         router_selector="poly_router_dir",
         router_granularity="coarsegrained",
         n_tasks=1,
+    )
+
+
+@pytest.fixture
+def tmp_peer_moe_config(tmp_path: Path):
+    return MoEExpertConfig(
+        model="EleutherAI/gpt-neo-125m",
+        library_id=None,
+        model_modifier="peer",
+        modify_layers="",
+        top_k=2,
+        moe_num_experts=100,
+        modify_modules=".*mlp",
+        trainable_param_names=".*mlp.*",
+        output_dir=tmp_path,
+        router_selector="moe_pk_router",
     )
 
 
