@@ -19,6 +19,7 @@ class DownstreamEvalCallback(TrainerCallback):
 
         self.model = model
         self.args = args
+        self.last_log = None
         self.runner: EvaluatorRunner = setup_evaluators(
             model_type=args.model,
             model_family=args.model_family,
@@ -31,8 +32,17 @@ class DownstreamEvalCallback(TrainerCallback):
             add_eos_to_targets=args.add_eos_to_downstream_targets,
         )
 
-    def on_log():
-        pass
+    def on_log(
+        self,
+        args: TrainingArguments,
+        state: TrainerState,
+        control: TrainerControl,
+        logs={},
+        **kwargs,
+    ):
+        if self.last_log is not None:
+            logs.update(self.last_log)
+            self.last_log = None
 
     def on_evaluate(
         self,
@@ -50,11 +60,13 @@ class DownstreamEvalCallback(TrainerCallback):
             return
 
         metrics = self.runner.run(self.model)
+        to_log = {}
         for task, metric in metrics.items():
-            state.log_history.append(
+            to_log.update(
                 {f"{self.METRIC_KEY}/{task}": metric, "step": state.global_step}
             )
-            control.should_log = True
+        control.should_log = True
+        self.last_log = to_log
 
     def on_predict(
         self,
@@ -65,8 +77,10 @@ class DownstreamEvalCallback(TrainerCallback):
         **kwargs,
     ) -> None:
         metrics = self.runner.run(self.model)
+        to_log = {}
         for task, metric in metrics.items():
             state.log_history.append(
                 {f"{self.METRIC_KEY}_last/{task}": metric, "step": state.global_step}
             )
-            control.should_log = True
+        self.last_log = to_log
+        control.should_log = True
