@@ -78,7 +78,7 @@ class LogLikeEvaluator(Evaluator):
 
             with torch.no_grad():
                 if isinstance(model, EfficientCheckpointModule):
-                    loss_per_option = model.forward(batch, reduction="none")
+                    loss_per_option, _ = model.forward(**batch, reduction="none")
                 else:
                     logits = model.forward(
                         input_ids=batch["input_ids"],

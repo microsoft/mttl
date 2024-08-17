@@ -50,14 +50,15 @@ class InfoContainer:
         from mttl.models.modifiers.routing import RoutingInfo
 
         @functools.wraps(f)
-        def wrapper_func(model, *args, **kwargs):
-            if not isinstance(args[0], dict) and "input_ids" not in args[0]:
+        def wrapper_func(model, **kwargs):
+            if "input_ids" not in kwargs:
                 raise ValueError(
                     "The first argument of the function to wrap must be a dictionary with 'input_ids' key."
                 )
+
             return_context = kwargs.pop("return_context", False)
-            with cls(model, RoutingInfo.from_batch(args[0])) as context:
-                results = f(model, *args, **kwargs)
+            with cls(model, RoutingInfo.from_batch(kwargs)) as context:
+                results = f(model, **kwargs)
                 if return_context:
                     context_returns = {
                         "routing_infos": context.routing_infos,

@@ -98,39 +98,46 @@ class ExpertModel(EfficientCheckpointModule):
         return lm_loss, mc_loss
 
     @InfoContainer.wrap_forward
-    def forward(self, batch, reduction="mean"):
-        input_ids = batch["input_ids"]
-        labels = batch["labels"]
+    def forward(
+        self,
+        input_ids,
+        attention_mask=None,
+        labels=None,
+        task_names=None,
+        task_ids=None,
+        task_sources=None,
+        reduction="mean",
+        **kwargs,
+    ):
+        outputs = self.model.forward(input_ids, attention_mask)
 
-        outputs = self.model.forward(input_ids, attention_mask=batch["attention_mask"])
+        if labels is not None:
+            # calculate loss, could also be done inside of the model
+            bs = input_ids.size(0)
+            logits = outputs.logits
+            vocab_size = logits.size(-1)
+            labels = labels.squeeze(-1)
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
 
-        # calculate loss, could also be done inside of the model
-        bs = input_ids.size(0)
-        logits = outputs.logits
-        vocab_size = logits.size(-1)
-        labels = labels.squeeze(-1)
-        shift_logits = logits[..., :-1, :].contiguous()
-        shift_labels = labels[..., 1:].contiguous()
+            # Flatten the tokens
+            loss_fct = torch.nn.CrossEntropyLoss(reduction=reduction)
+            shift_logits = shift_logits.view(-1, vocab_size)
+            shift_labels = shift_labels.view(-1)
 
-        # Flatten the tokens
-        loss_fct = torch.nn.CrossEntropyLoss(reduction=reduction)
-        shift_logits = shift_logits.view(-1, vocab_size)
-        shift_labels = shift_labels.view(-1)
+            # Enable model parallelism
+            shift_labels = shift_labels.to(shift_logits.device)
+            loss = loss_fct(shift_logits, shift_labels)
 
-        # Enable model parallelism
-        shift_labels = shift_labels.to(shift_logits.device)
-        loss = loss_fct(shift_logits, shift_labels)
-
-        # reshape back
-        if reduction == "none":
-            loss = loss.view((bs, -1))
-            # mean only non-zero
-            non_zero_loss = (loss != 0).sum(dim=-1)
-            non_zero_loss[non_zero_loss == 0] = 1
-            loss = loss.sum(dim=-1) / non_zero_loss
-
-        del outputs, shift_logits, shift_labels
-        return loss
+            # reshape back
+            if reduction == "none":
+                loss = loss.view((bs, -1))
+                # mean only non-zero
+                non_zero_loss = (loss != 0).sum(dim=-1)
+                non_zero_loss[non_zero_loss == 0] = 1
+                loss = loss.sum(dim=-1) / non_zero_loss
+            return loss, outputs
+        return outputs
 
     def training_step(self, batch, _):
         if "num_options" in batch:
