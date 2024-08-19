@@ -1,6 +1,7 @@
 import math
 from dataclasses import dataclass
 from typing import Dict
+from einops import rearrange
 
 import torch
 from torch import nn
@@ -26,6 +27,7 @@ class PKSelectorConfig(SelectorConfig):
     moe_num_experts: int = (
         -1
     )  # for num experts to be set it must have the same name as the num of experts variable in MoEExpertConfig
+    pk_use_batchnorm: bool = False
 
 
 def exists(val):
@@ -72,6 +74,10 @@ class PKSSelector(Selector):
         assert self.num_experts > 0
         assert math.sqrt(self.num_experts).is_integer(), "N must be a perfect square"
         self.N = int(math.sqrt(self.num_experts))
+
+        self.norm = (
+            nn.BatchNorm1d(self.emb_dim) if config.pk_use_batchnorm else nn.Identity()
+        )
         self._init_keys()
 
     def _init_keys(self, device=None):
@@ -91,10 +97,10 @@ class PKSSelector(Selector):
         b, s, d = input.shape
 
         # get query
-        q_x = self.q(input)  # B x d x (emb_dim * 2 num_heads)
-        q_x = q_x.view(
-            b, s, self.num_heads, 2, self.emb_dim
-        )  # B x s x H x (2 * emb_dim)
+        q_x = self.q(input)  # B x s x (emb_dim * 2 num_heads)
+        q_x = rearrange(q_x, "b s (d p h) -> (b p h) d s", h=self.num_heads, p=2)
+        q_x = self.norm(q_x)
+        q_x = rearrange(q_x, "(b p h) d s -> b s h p d", h=self.num_heads, p=2)
 
         sim_scores = torch.einsum(
             "bshpd,hnpd->bshpn", q_x, self.keys
