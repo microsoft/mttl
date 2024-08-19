@@ -239,25 +239,6 @@ class ExpertModel(EfficientCheckpointModule):
         )
         ckpt["expert_info"] = expert_info.asdict()
 
-    def as_expert(self):
-        state_dict = self.state_dict()
-        self._delete_non_trainable_params(state_dict)
-
-        # to use as an expert, we need to remove a `model.` prefix
-        state_dict = {k[len("model.") :]: v for k, v in state_dict.items()}
-
-        # inject expert info in the expert checkpoint
-        expert_info = ExpertInfo(
-            expert_name=self.hparams.expert_name,
-            expert_task_name=self.hparams.finetune_task_name,
-            expert_config=self.modifier_config,
-            training_config=self.training_config,
-        )
-        return Expert(
-            expert_info=expert_info,
-            expert_weights=state_dict,
-        )
-
 
 class MultiExpertModel(ExpertModel):
     """Adds all functions and properties for a multi-expert model."""
@@ -699,3 +680,22 @@ class MoEModel(MultiExpertModel):
         for i, pg in enumerate(self.optimizers().optimizer.param_groups):
             self.log(f"train/lr_{i}", pg["lr"])
         return total_loss
+
+    def as_expert(self):
+        state_dict = self.state_dict()
+        self._delete_non_trainable_params(state_dict)
+
+        # to use as an expert, we need to remove a `model.` prefix
+        state_dict = {k[len("model.") :]: v for k, v in state_dict.items()}
+
+        # inject expert info in the expert checkpoint
+        expert_info = ExpertInfo(
+            expert_name=self.hparams.expert_name,
+            expert_task_name=self.hparams.finetune_task_name,
+            expert_config=self.modifier_config,
+            training_config=self.training_config,
+        )
+        return Expert(
+            expert_info=expert_info,
+            expert_weights=state_dict,
+        )
