@@ -454,6 +454,30 @@ class TrainingArgs(DataArgs):
                 + "into account when computing `gradient_accumulation_steps`."
             )
 
+    def to_hf_training_args(self) -> "TrainingArguments":
+        from transformers import TrainingArguments
+
+        return TrainingArguments(
+            overwrite_output_dir=True,
+            output_dir=self.output_dir,
+            per_device_train_batch_size=self.micro_batch_size,
+            per_device_eval_batch_size=self.predict_batch_size,
+            gradient_accumulation_steps=self.gradient_accumulation_steps,
+            logging_steps=1,
+            optim=self.optimizer,
+            adam_epsilon=self.adam_epsilon,
+            learning_rate=self.learning_rate,
+            weight_decay=self.weight_decay,
+            warmup_steps=self.warmup_steps,
+            warmup_ratio=self.warmup_proportion,
+            num_train_epochs=self.num_train_epochs,
+            max_steps=self.total_steps,
+            save_strategy="epoch" if not self.save_every else "steps",
+            eval_strategy="epoch" if not self.eval_every else "steps",
+            save_steps=self.save_every,
+            eval_steps=self.eval_every,
+        )
+
 
 @dataclass
 class ExpertConfig(TrainingArgs, ModifierArgs):

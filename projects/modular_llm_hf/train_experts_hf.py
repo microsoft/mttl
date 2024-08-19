@@ -107,27 +107,7 @@ def train_experts(
             "Deactivating downstream eval callback as it is not enabled in the config. Please set `pipeline_eval_tasks`."
         )
 
-    hf_args = TrainingArguments(
-        overwrite_output_dir=True,
-        output_dir=training_args.output_dir,
-        per_device_train_batch_size=training_args.micro_batch_size,
-        per_device_eval_batch_size=training_args.predict_batch_size,
-        gradient_accumulation_steps=training_args.gradient_accumulation_steps,
-        logging_steps=1,
-        optim=training_args.optimizer,
-        adam_epsilon=training_args.adam_epsilon,
-        learning_rate=training_args.learning_rate,
-        weight_decay=training_args.weight_decay,
-        warmup_steps=training_args.warmup_steps,
-        warmup_ratio=training_args.warmup_proportion,
-        num_train_epochs=training_args.num_train_epochs,
-        max_steps=training_args.max_steps,
-        save_strategy="epoch" if not training_args.save_every else "steps",
-        eval_strategy="epoch" if not training_args.eval_every else "steps",
-        save_steps=training_args.save_every,
-        eval_steps=training_args.eval_every,
-    )
-
+    hf_args = training_args.to_hf_training_args()
     trainer: Trainer = ExpertModelTrainer(
         model=module,
         args=hf_args,
