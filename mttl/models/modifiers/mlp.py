@@ -79,6 +79,8 @@ class PEERConfig(ModifierConfig):
     n_heads: int = 8
     moe_num_experts: int = 100
     emb_dim: int = 128
+    down_proj_layer:str = "fc1"
+    up_proj_layer:str = "fc2"
 
 
 @Modifier.register("peer", config_cls=PEERConfig)

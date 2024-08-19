@@ -97,10 +97,10 @@ class PKSSelector(Selector):
         b, s, d = input.shape
 
         # get query
-        q_x = self.q(input)  # B x s x (emb_dim * 2 num_heads)
-        q_x = rearrange(q_x, "b s (d p h) -> (b p h) d s", h=self.num_heads, p=2)
+        q_x = self.q(input)  # B x s x (num_heads * 2 * emb_dim)
+        q_x = rearrange(q_x, "b s (h p d) -> (h p b) d s", d=self.emb_dim, h=self.num_heads, p=2)
         q_x = self.norm(q_x)
-        q_x = rearrange(q_x, "(b p h) d s -> b s h p d", h=self.num_heads, p=2)
+        q_x = rearrange(q_x, "(h p b) d s -> b s h p d", d=self.emb_dim, h=self.num_heads, p=2)
 
         sim_scores = torch.einsum(
             "bshpd,hnpd->bshpn", q_x, self.keys
@@ -129,6 +129,8 @@ class PKSSelector(Selector):
             experts=selected_experts, weights=routing_weights
         )
 
+    
+        
     def on_add_expert(
         self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
     ):
