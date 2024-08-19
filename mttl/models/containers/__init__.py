@@ -313,7 +313,7 @@ def add_expert_to_transformer(
 
     for m_name, module in get_modules_to_modify_trie(transformer):
         if re.fullmatch(expert_config.modify_modules, m_name):
-            if len(expert_config.modify_layers) == 0:
+            if len(expert_config.modify_layers) == "":
                 # no layers to modify, try modifying the module
                 total_layers += 1
                 module_name = f"{m_name}"

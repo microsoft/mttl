@@ -26,15 +26,15 @@ from mttl.models.modifiers.mlp import PEERConfig, PEERModifier
 from mttl.models.modifiers.modify_model import get_modifier_name
 
 # diff architectures name those layers differently
-down_names = ["fc1", "c_fc"]
-up_names = ["fc2", "c_proj"]
+DOWN_NAMES = ["fc1", "c_fc"]
+UP_NAMES = ["fc2", "c_proj"]
 
 
 class PEERMLPContainer(ExpertContainer):
     """
     PEER layer from Mixture of A Million Experts (https://arxiv.org/pdf/2407.04153)
 
-    Right not it assumes that it receives a module -- an MLP block, that has attributes fc1 and fc2.
+    Right now it assumes that it receives a module -- an MLP block, that has attributes fc1 and fc2.
     It upcycles the base model. Yet, for now the experts are innitialized randomly.
 
     """
@@ -50,6 +50,9 @@ class PEERMLPContainer(ExpertContainer):
     ):
         super().__init__(config, module)
         self.num_experts = 0
+        down_names = DOWN_NAMES + [config.down_proj_layer] # names of the up and down projection layers in the MLP block
+        up_names = UP_NAMES + [config.up_proj_layer] # needed to infer the dimentions of the MLP block
+        
         assert any(
             hasattr(module, name) for name in down_names + up_names
         ), "Module must have fc1 and fc2 attributes, this is only applicable to MLP block for"
