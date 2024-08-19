@@ -349,8 +349,6 @@ class MultiExpertModel(ExpertModel):
     def experts_containers(self) -> List[ExpertContainer]:
         containers = []
         for _, module in self.model.named_modules():
-            if isinstance(module, ExpertContainer) and len(module.experts) > 0:
-                containers.append(module)
             for _, child in dict(module.named_children()).items():
                 if isinstance(child, ExpertContainer) and len(child.experts) > 0:
                     containers.append(child)
