@@ -239,6 +239,26 @@ class ExpertModel(EfficientCheckpointModule):
         )
         ckpt["expert_info"] = expert_info.asdict()
 
+    def as_expert(self):
+        state_dict = self.state_dict()
+        self._delete_non_trainable_params(state_dict)
+
+        # to use as an expert, we need to remove a `model.` prefix
+        state_dict = {k[len("model.") :]: v for k, v in state_dict.items()}
+
+        # inject expert info in the expert checkpoint
+        expert_info = ExpertInfo(
+            expert_name=self.hparams.expert_name,
+            expert_task_name=self.hparams.finetune_task_name,
+            expert_config=self.modifier_config,
+            training_config=self.training_config,
+        )
+        return Expert(
+            expert_info=expert_info,
+            expert_weights=state_dict,
+        )
+
+
 
 class MultiExpertModel(ExpertModel):
     """Adds all functions and properties for a multi-expert model."""
@@ -573,17 +593,6 @@ class MultiExpertModel(ExpertModel):
             "This method is not implemented for MultiExpertModel."
         )
 
-    def add_empty_experts(self):
-        for i in range(self.hparams.moe_num_experts):
-            # Adding a Skilled LoRA with 1 skill if model modifier is set to skilled_lora
-            try:
-                self.add_empty_expert(f"e{i}", self.modifier_config)
-            except ContainerFullException:
-                logger.info(
-                    f"Added all {self.hparams.moe_num_experts} experts to container."
-                )
-                break
-
 
 class MoEModel(MultiExpertModel):
     training_config_class = MoEExpertConfig
@@ -681,21 +690,13 @@ class MoEModel(MultiExpertModel):
             self.log(f"train/lr_{i}", pg["lr"])
         return total_loss
 
-    def as_expert(self):
-        state_dict = self.state_dict()
-        self._delete_non_trainable_params(state_dict)
-
-        # to use as an expert, we need to remove a `model.` prefix
-        state_dict = {k[len("model.") :]: v for k, v in state_dict.items()}
-
-        # inject expert info in the expert checkpoint
-        expert_info = ExpertInfo(
-            expert_name=self.hparams.expert_name,
-            expert_task_name=self.hparams.finetune_task_name,
-            expert_config=self.modifier_config,
-            training_config=self.training_config,
-        )
-        return Expert(
-            expert_info=expert_info,
-            expert_weights=state_dict,
-        )
+    def add_empty_experts(self):
+        for i in range(self.hparams.moe_num_experts):
+            # Adding a Skilled LoRA with 1 skill if model modifier is set to skilled_lora
+            try:
+                self.add_empty_expert(f"e{i}", self.modifier_config)
+            except ContainerFullException:
+                logger.info(
+                    f"Added all {self.hparams.moe_num_experts} experts to container."
+                )
+                break
