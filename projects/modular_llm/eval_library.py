@@ -4,9 +4,8 @@ import sys
 from copy import deepcopy
 
 import torch
-from pytorch_lightning import seed_everything
-
 import wandb
+from pytorch_lightning import seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
