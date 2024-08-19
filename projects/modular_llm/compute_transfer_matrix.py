@@ -6,10 +6,10 @@ from tempfile import TemporaryDirectory
 from typing import Callable, Union
 
 import seaborn as sns
-import wandb
 from matplotlib import pyplot as plt
 from pytorch_lightning import seed_everything
 
+import wandb
 from mttl.config import Args, EvaluationConfig, ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.evaluators import (

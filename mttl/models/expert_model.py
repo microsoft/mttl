@@ -1,6 +1,6 @@
 import math
 import re
-import threading 
+import threading
 from collections import defaultdict
 from functools import partial
 from typing import Dict, List, Union
@@ -12,7 +12,7 @@ from transformers import PreTrainedModel
 from mttl.config import Args, ExpertConfig, MoEExpertConfig, MultiExpertConfig
 from mttl.logging import logger
 from mttl.models.containers import add_expert_to_transformer
-from mttl.models.containers.base import ExpertContainer, ContainerFullException
+from mttl.models.containers.base import ContainerFullException, ExpertContainer
 from mttl.models.containers.selectors.base import (
     LoadableLibraryMixin,
     LoadableSelectorConfig,

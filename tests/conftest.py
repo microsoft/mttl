@@ -8,7 +8,7 @@ import pytest
 from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
 
-from mttl.config import ExpertConfig, MultiExpertConfig, MoEExpertConfig
+from mttl.config import ExpertConfig, MoEExpertConfig, MultiExpertConfig
 from mttl.dataloader.flan_utils import download_flan
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
 from mttl.models.expert_model import MultiExpertModel
