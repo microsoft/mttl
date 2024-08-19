@@ -32,55 +32,30 @@ class DownstreamEvalCallback(TrainerCallback):
             add_eos_to_targets=args.add_eos_to_downstream_targets,
         )
 
-    def on_log(
-        self,
-        args: TrainingArguments,
-        state: TrainerState,
-        control: TrainerControl,
-        logs={},
-        **kwargs,
-    ):
-        if self.last_log is not None:
-            logs.update(self.last_log)
-            self.last_log = None
-
     def on_evaluate(
         self,
         args: TrainingArguments,
         state: TrainerState,
         control: TrainerControl,
-        logs=None,
+        metrics={},
         **kwargs,
     ):
-        if (
-            self.args.eval_every_n_epoch is not None
-            and state.epoch is not None
-            and state.epoch % self.args.eval_every_n_epoch != 0
-        ):
-            return
-
-        metrics = self.runner.run(self.model)
-        to_log = {}
-        for task, metric in metrics.items():
-            to_log.update(
-                {f"{self.METRIC_KEY}/{task}": metric, "step": state.global_step}
-            )
-        control.should_log = True
-        self.last_log = to_log
+        metrics_ = self.runner.run(self.model)
+        for task, metric in metrics_.items():
+            metrics.update({f"{self.METRIC_KEY}/{task}": metric})
+        return control
 
     def on_predict(
         self,
         args: TrainingArguments,
         state: TrainerState,
         control: TrainerControl,
-        logs=None,
+        metrics={},
         **kwargs,
     ) -> None:
-        metrics = self.runner.run(self.model)
-        to_log = {}
-        for task, metric in metrics.items():
-            state.log_history.append(
+        metrics_ = self.runner.run(self.model)
+        for task, metric in metrics_.items():
+            metrics.update(
                 {f"{self.METRIC_KEY}_last/{task}": metric, "step": state.global_step}
             )
-        self.last_log = to_log
-        control.should_log = True
+        return control
