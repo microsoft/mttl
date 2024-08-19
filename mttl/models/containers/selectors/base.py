@@ -13,6 +13,7 @@ from pyparsing import abstractmethod
 from torch import nn
 from torch.distributions import Categorical
 
+from mttl.configuration import AutoConfig, SerializableConfig
 from mttl.logging import logger, warn_once
 from mttl.models.containers.selectors.selector_output import (
     BatchExpertsAndWeightsSelectorOutput,
@@ -41,7 +42,7 @@ def get_selector(selector_config: "SelectorConfig", **kwargs):
 
 
 @dataclass
-class SelectorConfig:
+class SelectorConfig(SerializableConfig):
     # the granularity of the selector (which layers use the same selectors)
     router_granularity: str = "*"
     lora_merge_after: bool = False
@@ -51,24 +52,6 @@ class SelectorConfig:
     def __eq__(self, other):
         # compare all the attributes
         return self.__dict__ == other.__dict__
-
-    def asdict(self) -> Dict:
-        """Dump the config to a string."""
-        from dataclasses import asdict
-
-        data = asdict(self)
-        # store the model modifier for easy loading
-        data["__selector_name__"] = self.selector_name
-        return data
-
-    @classmethod
-    def fromdict(cls, dumped: Dict) -> "SelectorConfig":
-        if "__selector_name__" not in dumped:
-            raise ValueError(
-                "Cannot load SelectorConfig from dict, missing '__selector_name__' key."
-            )
-        name = dumped.pop("__selector_name__")
-        return Selector.get_config_class_by_name(name)(**dumped)
 
     @property
     def selector_name(self):
@@ -106,6 +89,10 @@ class SelectorConfig:
             config_klass = cls
 
         return create_config_class_from_args(config_klass, training_config)
+
+
+class AutoSelectorConfig(AutoConfig, SelectorConfig):
+    pass
 
 
 class MultiSelectorConfig(dict):

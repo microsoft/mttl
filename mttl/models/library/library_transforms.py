@@ -15,6 +15,7 @@ from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
 from tqdm import tqdm
 
+from mttl.configuration import SerializableConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import logger
 from mttl.models.containers.lora_containers import ExpertContainer
@@ -68,7 +69,7 @@ def param_hash(p, exclude_fields=None):
 
 
 @dataclass
-class LibraryTransformConfig:
+class LibraryTransformConfig(SerializableConfig):
     name: str = None
 
     @property
