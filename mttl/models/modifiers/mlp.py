@@ -80,11 +80,13 @@ class PEERConfig(ModifierConfig):
     moe_num_experts: int = 100
     emb_dim: int = 128
 
+
 @Modifier.register("peer", config_cls=PEERConfig)
 class PEERModifier(Modifier):
-    '''
+    """
     Peer modifier basically does nothing, the job is done in the container.
-    '''
+    """
+
     def __init__(
         self,
         config: PEERConfig,
@@ -92,6 +94,6 @@ class PEERModifier(Modifier):
     ):
         super().__init__()
         self.config = config
-    
+
     def __len__(self):
         return self.config.moe_num_experts

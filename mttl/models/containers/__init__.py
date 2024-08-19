@@ -54,7 +54,7 @@ def get_container_class(modifier: str):
             )
         return CoalescedLoRAExpertContainer
     elif modifier == "peer":
-        return PEERMLPContainer    
+        return PEERMLPContainer
     elif modifier == "kv_adapter":
         return KVExpertContainer
     else:
@@ -144,15 +144,13 @@ def replace_selector_for_container(
         if isinstance(module, ExpertContainer):
             # check if the container holds the same modifier type, e.g. PEERConfig --> "peers"
             for supports_config in module.__supports_configs__:
-                container_modifier = Modifier.get_name_by_config_class(
-                    supports_config
-                )
+                container_modifier = Modifier.get_name_by_config_class(supports_config)
                 # selector does not apply to this container
                 if not container_modifier == modifier_name:
                     continue
                 else:
                     expert_containers.append(module)
-    
+
         for _, layer in dict(module.named_children()).items():
             if isinstance(layer, ExpertContainer):
                 # check if the container holds the same modifier type, e.g. LoRAConfig --> "lora"
@@ -327,8 +325,8 @@ def add_expert_to_transformer(
                         module,
                     )
                     expert_container.__layer_name__ = module_name
-                    
-                    parent_name, child_name = m_name.rsplit('.', 1)
+
+                    parent_name, child_name = m_name.rsplit(".", 1)
                     parent_module = dict(transformer.named_modules())[parent_name]
                     setattr(
                         parent_module,
@@ -345,7 +343,7 @@ def add_expert_to_transformer(
                     action=action,
                     is_default=is_default,
                 )
-            else:            
+            else:
                 # modify layers
                 for c_name, layer in dict(module.named_children()).items():
                     if re.fullmatch(expert_config.modify_layers, c_name):

@@ -102,6 +102,7 @@ class BatchSequenceExpertsAndWeightsSelectorOutput(SelectorOutput):
     def dim_names(self):
         return ["batch", "sequence", "experts"]
 
+
 @dataclass
 class MultiheadBatchSequenceExpertsAndWeightsSelectorOutput(SelectorOutput):
     """A selector output that contains a list of experts and weights for each example and token.
@@ -116,7 +117,6 @@ class MultiheadBatchSequenceExpertsAndWeightsSelectorOutput(SelectorOutput):
     @property
     def dim_names(self):
         return ["batch", "sequence", "head", "experts"]
-
 
 
 @dataclass
