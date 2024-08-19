@@ -460,7 +460,7 @@ class TrainingArgs(DataArgs):
         return TrainingArguments(
             overwrite_output_dir=True,
             output_dir=self.output_dir,
-            per_device_train_batch_size=self.micro_batch_size,
+            per_device_train_batch_size=self.train_batch_size,
             per_device_eval_batch_size=self.predict_batch_size,
             gradient_accumulation_steps=self.gradient_accumulation_steps,
             logging_steps=1,
