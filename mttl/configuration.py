@@ -26,7 +26,14 @@ class SerializableConfig:
                 data_[field.name] = data.get(field.name, field.default)
         return cls(**data_)
 
-    def asdict(self) -> Type:
+    @classmethod
+    def from_dict(cls, data) -> Type:
+        return cls.fromdict(data)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return self.asdict()
+
+    def asdict(self) -> Dict[str, Any]:
         data = {}
         for field in dataclasses.fields(self):
             value = getattr(self, field.name)
