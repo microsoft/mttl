@@ -1,9 +1,9 @@
 import math
 from dataclasses import dataclass
 from typing import Dict
-from einops import rearrange
 
 import torch
+from einops import rearrange
 from torch import nn
 from torch.nn import functional as F
 
