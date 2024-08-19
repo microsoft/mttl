@@ -163,7 +163,7 @@ def tmp_peer_moe_config(tmp_path: Path):
         trainable_param_names=".*mlp.*",
         output_dir=tmp_path,
         router_selector="moe_pk_router",
-        pk_use_batchnorm=False
+        pk_use_batchnorm=False,
     )
 
 

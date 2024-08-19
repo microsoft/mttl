@@ -50,9 +50,13 @@ class PEERMLPContainer(ExpertContainer):
     ):
         super().__init__(config, module)
         self.num_experts = 0
-        down_names = DOWN_NAMES + [config.down_proj_layer] # names of the up and down projection layers in the MLP block
-        up_names = UP_NAMES + [config.up_proj_layer] # needed to infer the dimentions of the MLP block
-        
+        down_names = DOWN_NAMES + [
+            config.down_proj_layer
+        ]  # names of the up and down projection layers in the MLP block
+        up_names = UP_NAMES + [
+            config.up_proj_layer
+        ]  # needed to infer the dimentions of the MLP block
+
         assert any(
             hasattr(module, name) for name in down_names + up_names
         ), "Module must have fc1 and fc2 attributes, this is only applicable to MLP block for"

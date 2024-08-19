@@ -259,7 +259,6 @@ class ExpertModel(EfficientCheckpointModule):
         )
 
 
-
 class MultiExpertModel(ExpertModel):
     """Adds all functions and properties for a multi-expert model."""
 
