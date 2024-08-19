@@ -11,6 +11,7 @@ import torch
 from transformers import StoppingCriteria, StoppingCriteriaList
 
 from mttl.logging import logger
+from mttl.models.expert_modeling_base import BaseExpertModel
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
 
 
@@ -295,7 +296,15 @@ class GenerativeEvaluator(Evaluator):
         with torch.no_grad():
             if isinstance(model, EfficientCheckpointModule):
                 predictions = model.generate(
-                    batch,
+                    **batch,
+                    generation_config=model.generation_config,
+                    return_dict_in_generate=True,
+                    output_scores=True,
+                    **extra_kwargs,
+                )
+            elif isinstance(model, BaseExpertModel):
+                predictions = model.generate(
+                    **batch,
                     generation_config=model.generation_config,
                     return_dict_in_generate=True,
                     output_scores=True,
