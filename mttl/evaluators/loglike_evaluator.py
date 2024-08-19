@@ -4,6 +4,7 @@ import tqdm
 
 from mttl.evaluators.base import Evaluator, switch_to_eval_mode
 from mttl.logging import logger
+from mttl.models.expert_modeling_base import BaseExpertModel
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
 
 
@@ -78,7 +79,9 @@ class LogLikeEvaluator(Evaluator):
 
             with torch.no_grad():
                 if isinstance(model, EfficientCheckpointModule):
-                    loss_per_option, _ = model.forward(**batch, reduction="none")
+                    loss_per_option = model.forward(batch, reduction="none")
+                elif isinstance(model, BaseExpertModel):
+                    loss_per_option, _ = model.compute_loss(**batch, reduction="none")
                 else:
                     logits = model.forward(
                         input_ids=batch["input_ids"],

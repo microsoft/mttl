@@ -100,16 +100,13 @@ class ExpertModel(EfficientCheckpointModule):
     @InfoContainer.wrap_forward
     def forward(
         self,
-        input_ids,
-        attention_mask=None,
-        labels=None,
-        task_names=None,
-        task_ids=None,
-        task_sources=None,
+        batch,
         reduction="mean",
         **kwargs,
     ):
-        outputs = self.model.forward(input_ids, attention_mask)
+        input_ids = batch["input_ids"]
+        attention_mask = batch["attention_mask"]
+        outputs = self.model.forward(input_ids, attention_mask=attention_mask)
 
         if labels is not None:
             # calculate loss, could also be done inside of the model
