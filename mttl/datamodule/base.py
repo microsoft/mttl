@@ -333,10 +333,9 @@ class DefaultCollator:
             dtype.__name__, None
         )
 
-    def __call__(self, batch: Dict):
+    def __call__(self, batch):
         # is our input already tokenized ?
         # trim according to the attention mask and return
-
         def pad_sequence_wrapper(tensor_list, batch_first, padding_value, side="right"):
             """Padding Sequence Fn that supports left padding"""
             if side == "left":
@@ -353,6 +352,7 @@ class DefaultCollator:
 
         if "input_ids" in batch[0]:
             output_batch = defaultdict(list)
+
             for batch_item in batch:
                 for key, value in batch_item.items():
                     dtype = self._tensor_dtype(value)
@@ -737,16 +737,12 @@ class DataModule(LightningDataModule, Registrable):
         if shuffle:
             dataset = dataset.shuffle(seed=42)
 
-        # TODO: first partition dataset according to `task_name`, and
-        # pack each task individually to ensure that we don't mix tasks
-
         # Very basic code that will iterate over sequences one by one,
         # and merge together until the max_input_length is reached
         # This is not optimal, but it's a start
         max_length = self.config.max_input_length
 
         def group(examples):
-
             def new_container():
                 # for when starting a new packed batch
                 return {k: [] for k in list(examples.keys()) + ["seq_lens"]}
@@ -762,7 +758,6 @@ class DataModule(LightningDataModule, Registrable):
                     else:
                         raise ValueError(f"Unknown type {type(v)}")
 
-                # TODO: THis is SOMEHOW WRONG. CHECK.
                 container["seq_lens"] += [len(example["input_ids"])]
 
             def add_finished_sequence(container, example):
@@ -812,6 +807,7 @@ class DataModule(LightningDataModule, Registrable):
             batch_size=10_000,
             remove_columns=list(dataset.features),
         )
+
         return dataset
 
     def post_setup_dataset(self):
@@ -831,6 +827,7 @@ class DataModule(LightningDataModule, Registrable):
 
             if self.config.pack_sequences and split == "train":
                 dataset = getattr(self, f"{split}_dataset")
+
                 logger.info(f"Packing sequences for {split} dataset")
                 dataset = self.tokenize_dataset(dataset)
                 dataset = self.pack_sequences(
