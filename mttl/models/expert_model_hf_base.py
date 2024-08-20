@@ -27,8 +27,8 @@ from mttl.models.containers.selectors.base import (
     SelectorConfig,
     SelectorsCache,
 )
-from mttl.models.expert_configuration import AutoModelConfig, BaseExpertModelConfig
 from mttl.models.expert_context import InfoContainer
+from mttl.models.expert_model_hf_config import AutoModelConfig, BaseExpertModelConfig
 from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.llama_patch import replace_attn_with_flash_attn
@@ -51,19 +51,25 @@ LOADING_KWARGS_NAME = "loading_kwargs.json"
 
 
 class BaseExpertModel(torch.nn.Module, Registrable):
-    def __init__(self, config: BaseExpertModelConfig, **loading_kwargs):
+    def __init__(
+        self, config: BaseExpertModelConfig, model_object=None, **loading_kwargs
+    ):
         super().__init__()
 
         # log hyperparameters
         self.load_in_4bit = loading_kwargs.get("load_in_4bit", None) or False
         self.load_in_8bit = loading_kwargs.get("load_in_8bit", None) or False
 
-        self.model = model_loader_helper(
-            config.base_model,
-            load_in_4bit=self.load_in_4bit,
-            load_in_8bit=self.load_in_8bit,
-            device_map=loading_kwargs.get("device_map", "cpu"),
-            attn_implementation=loading_kwargs.get("attn_implementation", None),
+        self.model = (
+            model_loader_helper(
+                config.base_model,
+                load_in_4bit=self.load_in_4bit,
+                load_in_8bit=self.load_in_8bit,
+                device_map=loading_kwargs.get("device_map", "cpu"),
+                attn_implementation=loading_kwargs.get("attn_implementation", None),
+            )
+            if model_object is None
+            else model_object
         )
 
         self.config = config
@@ -95,6 +101,10 @@ class BaseExpertModel(torch.nn.Module, Registrable):
 
         logger.info("Deleted from state dict: {}".format(len(deleted)))
         return state_dict
+
+    # write a repr function
+    def __repr__(self):
+        return f"{self.__class__.__name__}(config={self.config})"
 
     def save_pretrained(self, save_directory, **kwargs):
         """Bare bone save pretrained function that saves the model and config."""

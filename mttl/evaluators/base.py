@@ -11,7 +11,7 @@ import torch
 from transformers import StoppingCriteria, StoppingCriteriaList
 
 from mttl.logging import logger
-from mttl.models.expert_modeling_base import BaseExpertModel
+from mttl.models.expert_model_hf_base import BaseExpertModel
 from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
 
 

@@ -12,17 +12,60 @@ from mttl.models.containers.base import ExpertContainer
 from mttl.models.containers.selectors.base import (
     AutoSelectorConfig,
     LoadableSelectorConfig,
+    MultiSelectorConfig,
     Selector,
     SelectorConfig,
     SelectorsCache,
 )
-from mttl.models.expert_configuration import BaseExpertModelConfig
-from mttl.models.expert_modeling_base import BaseExpertModel
+from mttl.models.expert_model_hf_base import BaseExpertModel
+from mttl.models.expert_model_hf_config import BaseExpertModelConfig
 from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.library.expert_library import ExpertLibrary
-from mttl.models.modifiers.base import ModifierConfig
+from mttl.models.modifiers.base import AutoModifierConfig, ModifierConfig
 from mttl.models.modifiers.modify_model import modify_transformer
 from mttl.models.utils import model_loader_helper
+
+
+@dataclass
+class ExpertModelConfig(BaseExpertModelConfig):
+    task_name: str = None
+    expert_name: str = None
+    modifier_config: AutoModifierConfig = None
+
+
+@BaseExpertModel.register("single_expert_model", config_cls=ExpertModelConfig)
+class ExpertModel(BaseExpertModel):
+    def __init__(
+        self,
+        config: ExpertModelConfig,
+        **loading_kwargs,
+    ):
+        super().__init__(config, **loading_kwargs)
+
+        if config.modifier_config is not None:
+            self.model = modify_transformer(self.model, config.modifier_config)
+
+        self.expert_name = config.expert_name
+        self.task_name = config.task_name
+
+    def as_expert(self, training_config=None):
+        state_dict = self.state_dict()
+        self._delete_non_trainable_params(state_dict)
+
+        # to use as an expert, we need to remove a `model.` prefix
+        state_dict = {k[len("model.") :]: v for k, v in state_dict.items()}
+
+        # inject expert info in the expert checkpoint
+        expert_info = ExpertInfo(
+            expert_name=self.expert_name,
+            expert_task_name=self.task_name,
+            expert_config=self.modifier_config,
+            training_config=training_config,
+        )
+        return Expert(
+            expert_info=expert_info,
+            expert_weights=state_dict,
+        )
 
 
 @dataclass
@@ -54,6 +97,12 @@ class MultiExpertModel(BaseExpertModel):
 
             if self.config.default_expert_name:
                 self.set_default_expert(self.config.default_expert_name)
+
+    def save_pretrained(self, save_directory, **kwargs):
+        # need to make sure that config is in sync with the model before saving
+        self.config.expert_infos = list(self.experts_infos.values())
+        self.config.selector_config = self.selector_config
+        super().save_pretrained(save_directory, **kwargs)
 
     @property
     def experts_names(self):
@@ -287,6 +336,13 @@ class MultiExpertModel(BaseExpertModel):
             self.selector_cache,
             force_replace=True,
         )
+
+        # refresh current selector config
+        self.selector_config = MultiSelectorConfig()
+        for modifier_name, selectors in self.selectors.items():
+            selector_config = selectors[0].config
+            self.selector_config[modifier_name] = selector_config
+
         logger.info(
             "Created {} selectors and {} views.".format(n_selectors, n_selectors_views)
         )

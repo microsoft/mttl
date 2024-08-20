@@ -16,12 +16,9 @@ from mttl.callbacks import LiveCheckpointCallback, NanoMMLUCallback, RougeCallba
 from mttl.config import Args, DataArgs, ExpertConfig, ModifierArgs
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
-from mttl.models.expert_configuration import BaseExpertModelConfig
-from mttl.models.expert_modeling_base import BaseExpertModel
-from mttl.models.expert_modeling_single import (
-    SingleExpertModel,
-    SingleExpertModelConfig,
-)
+from mttl.models.expert_model_hf import SingleExpertModel, SingleExpertModelConfig
+from mttl.models.expert_model_hf_base import BaseExpertModel
+from mttl.models.expert_model_hf_config import BaseExpertModelConfig
 from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
 from mttl.models.modifiers.base import ModifierConfig
