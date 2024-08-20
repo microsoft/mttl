@@ -4,8 +4,6 @@ import tqdm
 
 from mttl.evaluators.base import Evaluator, switch_to_eval_mode
 from mttl.logging import logger
-from mttl.models.expert_model_hf_base import BaseExpertModel
-from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
 
 
 def compute_loglike_loss(logits, labels, reduction="none"):
@@ -50,6 +48,10 @@ class LogLikeEvaluator(Evaluator):
         shuffle=False,
         output_path=None,
     ):
+        from mttl.models.expert_model import ExpertModel
+        from mttl.models.expert_model_hf_base import BaseExpertModel
+        from mttl.models.utils import transfer_batch_to_device
+
         dataloader = self.get_dataloader(split, subsample, shuffle=shuffle)
 
         if self.use_vllm:
@@ -78,7 +80,7 @@ class LogLikeEvaluator(Evaluator):
             batch = transfer_batch_to_device(batch, device)
 
             with torch.no_grad():
-                if isinstance(model, EfficientCheckpointModule):
+                if isinstance(model, ExpertModel):
                     # lightning module
                     loss_per_option = model.forward(batch, reduction="none")
                 elif isinstance(model, BaseExpertModel):

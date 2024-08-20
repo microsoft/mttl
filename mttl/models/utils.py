@@ -12,6 +12,12 @@ import torch
 from mttl.logging import logger
 
 
+def transfer_batch_to_device(batch, device):
+    for key, value in batch.items():
+        if isinstance(value, torch.Tensor):
+            batch[key] = value.to(device)
+
+
 def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
     r"""
     This method wraps the entire protocol for preparing a model before running a training. This includes:

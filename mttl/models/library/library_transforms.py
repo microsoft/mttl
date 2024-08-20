@@ -22,7 +22,7 @@ from mttl.models.containers.lora_containers import ExpertContainer
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.modifiers.base import get_target_2_source_param_mapping
-from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
+from mttl.models.utils import transfer_batch_to_device
 from mttl.registrable import Registrable
 
 
@@ -471,7 +471,7 @@ class HiddenStateComputer(LibraryTransform):
         default_args=None,
         device="cpu",
     ) -> Expert:
-        from mttl.models.expert_model import MultiExpertModel
+        from mttl.models.expert_model import ExpertModel, MultiExpertModel
 
         if isinstance(library, str):
             library = ExpertLibrary.get_expert_library(library)
@@ -529,7 +529,7 @@ class HiddenStateComputer(LibraryTransform):
             for _, batch in pbar:
                 batch = transfer_batch_to_device(batch, device_model)
 
-                if isinstance(model, EfficientCheckpointModule):
+                if isinstance(model, ExpertModel):
                     model.forward(batch, reduction="none")
                 else:
                     model.forward(
@@ -1237,7 +1237,7 @@ class CrossExpertNormComputer(HiddenStateComputer):
         )
 
         from mttl.models.containers import ExpertContainer
-        from mttl.models.expert_model import MoEModel
+        from mttl.models.expert_model import ExpertModel, MoEModel
 
         model = MoEModel(**vars(training_config)).to("cuda")
 
@@ -1298,7 +1298,7 @@ class CrossExpertNormComputer(HiddenStateComputer):
         for num_batch, batch in pbar:
             batch = transfer_batch_to_device(batch, device)
 
-            if isinstance(model, EfficientCheckpointModule):
+            if isinstance(model, ExpertModel):
                 model.forward(batch, reduction="none")
             else:
                 model.forward(

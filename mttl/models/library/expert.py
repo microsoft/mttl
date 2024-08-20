@@ -9,7 +9,6 @@ from mttl.models.modifiers.base import (
     ModifierConfig,
     get_target_2_source_param_mapping,
 )
-from mttl.models.utils import download_from_hub
 from mttl.utils import get_checkpoint_path
 
 
@@ -216,6 +215,8 @@ def load_expert_from_pl_checkpoint(
     **kwargs,
 ):
     import os
+
+    from mttl.models.pl_utils import download_from_hub
 
     if os.path.isfile(expert_path) or os.path.isdir(expert_path):
         expert_checkpoint = get_checkpoint_path(expert_path)
