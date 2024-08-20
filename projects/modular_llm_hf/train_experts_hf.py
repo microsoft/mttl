@@ -13,18 +13,21 @@ from transformers import Trainer, TrainerCallback, TrainingArguments
 from transformers.trainer import TRAINING_ARGS_NAME
 
 from mttl.callbacks import LiveCheckpointCallback, NanoMMLUCallback, RougeCallback
+from mttl.callbacks_hf import DownstreamEvalCallback
 from mttl.config import Args, DataArgs, ExpertConfig, ModifierArgs
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
-from mttl.models.expert_model_hf import SingleExpertModel, SingleExpertModelConfig
-from mttl.models.expert_model_hf_base import BaseExpertModel
-from mttl.models.expert_model_hf_config import BaseExpertModelConfig
+from mttl.models.expert_model_hf import (
+    BaseExpertModel,
+    BaseExpertModelConfig,
+    SingleExpertModel,
+    SingleExpertModelConfig,
+)
 from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.monitors import get_monitors
 from mttl.utils import generate_random_string, rank_zero_only_and_wait, remote_login
-from projects.modular_llm_hf.hf_callbacks import DownstreamEvalCallback
 
 
 class ExpertModelTrainer(Trainer):
