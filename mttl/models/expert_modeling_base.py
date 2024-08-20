@@ -69,7 +69,10 @@ class BaseExpertModel(torch.nn.Module, Registrable):
         self.config = config
         self.loading_kwargs = loading_kwargs
 
-    def _delete_non_trainable_params(self, state_dict):
+    def _delete_non_trainable_params(
+        self, state_dict: Dict[str, torch.Tensor]
+    ) -> Dict[str, torch.Tensor]:
+        """Delete all parameters that are not marked as trainable."""
         if not hasattr(self, "_params_from_checkpoint"):
             self._params_from_checkpoint = set()
 
@@ -91,6 +94,7 @@ class BaseExpertModel(torch.nn.Module, Registrable):
                 deleted.append(key)
 
         logger.info("Deleted from state dict: {}".format(len(deleted)))
+        return state_dict
 
     def save_pretrained(self, save_directory, **kwargs):
         """Bare bone save pretrained function that saves the model and config."""
@@ -101,10 +105,7 @@ class BaseExpertModel(torch.nn.Module, Registrable):
             return
 
         os.makedirs(save_directory, exist_ok=True)
-
-        state_dict = self.state_dict()
-        self._delete_non_trainable_params(state_dict)
-
+        state_dict = self._delete_non_trainable_params(self.state_dict())
         output_config_file = self.config.save_pretrained(save_directory, **kwargs)
         output_model_file = os.path.join(save_directory, WEIGHTS_NAME)
         torch.save(state_dict, output_model_file)

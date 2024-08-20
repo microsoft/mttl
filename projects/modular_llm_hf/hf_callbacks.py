@@ -8,6 +8,13 @@ from transformers import (
     TrainingArguments,
 )
 
+try:
+    import wandb
+
+    wandb_available = True
+except:
+    wandb_available = False
+
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 
 
@@ -40,9 +47,21 @@ class DownstreamEvalCallback(TrainerCallback):
         metrics={},
         **kwargs,
     ):
-        metrics_ = self.runner.run(self.model)
-        for task, metric in metrics_.items():
-            metrics.update({f"{self.METRIC_KEY}/{task}": metric})
+        if state.is_world_process_zero:
+            metrics_ = self.runner.run(self.model)
+
+            all_metrics = {}
+            for task, metric in metrics_.items():
+                all_metrics.update({f"{self.METRIC_KEY}/{task}": metric})
+
+            # record in log_history
+            state.log_history.append({**all_metrics, **{"step": state.global_step}})
+
+            if wandb_available and wandb.run is not None:
+                wandb.log(all_metrics)
+
+            metrics_.update(all_metrics)
+
         return control
 
     def on_predict(
@@ -53,9 +72,18 @@ class DownstreamEvalCallback(TrainerCallback):
         metrics={},
         **kwargs,
     ) -> None:
-        metrics_ = self.runner.run(self.model)
-        for task, metric in metrics_.items():
-            metrics.update(
-                {f"{self.METRIC_KEY}_last/{task}": metric, "step": state.global_step}
-            )
+        if state.is_world_process_zero:
+            metrics_ = self.runner.run(self.model)
+
+            all_metrics = {}
+            for task, metric in metrics_.items():
+                all_metrics.update({f"{self.METRIC_KEY}_last/{task}": metric})
+
+            state.log_history.append({**all_metrics, **{"step": state.global_step}})
+
+            if wandb_available and wandb.run is not None:
+                wandb.log(all_metrics)
+
+            metrics_.update(all_metrics)
+
         return control

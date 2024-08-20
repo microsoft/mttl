@@ -31,6 +31,8 @@ from projects.modular_llm_hf.hf_callbacks import DownstreamEvalCallback
 
 
 class ExpertModelTrainer(Trainer):
+    LOG_HISTORY_NAME = "log_history.json"
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -95,7 +97,6 @@ def train_experts(
     )
 
     callbacks = []
-
     if training_args.pipeline_eval_tasks:
         if training_args.pipeline_eval_tasks == "all":
             training_args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"

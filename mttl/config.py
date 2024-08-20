@@ -464,6 +464,8 @@ class TrainingArgs(DataArgs):
             per_device_eval_batch_size=self.predict_batch_size,
             gradient_accumulation_steps=self.gradient_accumulation_steps,
             logging_steps=1,
+            bf16=self.precision == "bf16",
+            fp16=self.precision == "16",
             optim=self.optimizer,
             adam_epsilon=self.adam_epsilon,
             learning_rate=self.learning_rate,
@@ -477,6 +479,7 @@ class TrainingArgs(DataArgs):
             eval_strategy="epoch" if not self.eval_every else "steps",
             save_steps=self.save_every,
             eval_steps=self.eval_every,
+            ddp_find_unused_parameters=False,
         )
 
 
