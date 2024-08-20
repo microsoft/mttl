@@ -782,7 +782,7 @@ class ExpertLibrary:
 
         model = self._download_model(expert_name)
         # Load the model from the downloaded file
-        model = torch.load(model, map_location="cpu")
+        model = torch.load(model, map_location="cpu", weights_only=True)
 
         return Expert(
             expert_info=self.data[expert_name],
