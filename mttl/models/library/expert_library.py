@@ -74,19 +74,9 @@ class Score:
         return self.value == other.value
 
 
+@dataclass
 class MetadataEntry(ExpertInfo):
     expert_deleted: bool = False
-
-    @classmethod
-    def fromdict(cls, data):
-        metadata_entry = super(MetadataEntry, cls).fromdict(data)
-        metadata_entry.expert_deleted = data.get("expert_deleted", False)
-        return metadata_entry
-
-    def asdict(self):
-        data = super().asdict()
-        data.update({"expert_deleted": self.expert_deleted})
-        return data
 
 
 def retry(max_retries=10, wait_seconds=60):
@@ -1126,7 +1116,7 @@ class ExpertLibrary:
         buffer.write(f"| --- | --- | --- | --- |\n".encode("utf-8"))
         for expert_name, metadata in self.data.items():
             buffer.write(
-                f"| {expert_name} | {metadata.model} | {metadata.dataset}/{metadata.expert_task_name} | {metadata.model_modifier} |\n".encode(
+                f"| {expert_name} | {metadata.model} | {metadata.dataset}/{metadata.expert_task_name} | {metadata.modifier_name} |\n".encode(
                     "utf-8"
                 )
             )

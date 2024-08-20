@@ -56,6 +56,7 @@ class ExpertModel(BaseExpertModel):
         expert_info = ExpertInfo(
             expert_name=self.config.expert_name,
             expert_task_name=self.config.task_name,
+            expert_model=self.config.base_model,
             expert_config=self.config.modifier_config,
             training_config=training_config,
         )

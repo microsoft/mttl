@@ -45,10 +45,8 @@ class ExpertInfo(Serializable):
         return getattr(getattr(self, "training_config", {}), "dataset", "")
 
     @property
-    def model_modifier(self):
-        if self.expert_config is not None:
-            return self.expert_config.model_modifier
-        return self.training_config.model_modifier
+    def modifier_name(self):
+        return self.expert_config.modifier_name
 
 
 class Expert:
