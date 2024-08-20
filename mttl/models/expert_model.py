@@ -29,7 +29,7 @@ from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.base import Modifier, ModifierConfig
 from mttl.models.modifiers.lora import SkilledLoRAConfig
 from mttl.models.modifiers.modify_model import get_modifier_name
-from mttl.models.utils import EfficientCheckpointModule, prepare_model_for_kbit_training
+from mttl.models.pl_utils import EfficientCheckpointModule
 
 torch.set_float32_matmul_precision("high")
 
