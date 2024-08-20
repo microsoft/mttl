@@ -61,7 +61,7 @@ class Serializable:
             if skip_fields and field.name in skip_fields:
                 if (
                     field.default is dataclasses.MISSING
-                    or field.default_factory is dataclasses.MISSING
+                    and field.default_factory is dataclasses.MISSING
                 ):
                     raise ValueError("Cannot skip required field in dataclass!")
 
