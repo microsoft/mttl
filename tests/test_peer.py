@@ -29,23 +29,6 @@ from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.lora import LoRA
 
 
-@pytest.fixture
-def dummy_batch():
-    torch.manual_seed(0)
-    bs = 2
-    max_seq_len = 3
-    batch = {
-        "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
-        "labels": torch.randint(10, 400, (bs, max_seq_len)),
-    }
-    seq_len = torch.randint(0, max_seq_len, (bs,))
-    attn_mask = torch.zeros(bs, max_seq_len, dtype=torch.int32)
-    attn_mask[torch.arange(bs), seq_len] = 1
-    attn_mask = 1 - attn_mask.cumsum(dim=-1)
-    batch["attention_mask"] = attn_mask
-    return batch
-
-
 def test_peer_moe(tmp_peer_moe_config, dummy_batch):
     config: MoEExpertConfig = tmp_peer_moe_config
     module = MoEModel(**vars(config))
