@@ -176,12 +176,46 @@ def load_expert(
     expert_name: str = None,
     **kwargs,
 ):
-    """Transforms a potentially lightning checkpoint into an Expert object."""
-    # load the expert weights
+    """Load expert directly from the checkpoint.
+
+    Supports pytorch lightning and huggingface checkpoints.
+    """
     import os
+
+    from huggingface_hub import hf_hub_download, list_repo_files
+
+    from mttl.models.pl_utils import CHECKPOINT_PATH_IN_HUB
 
     if expert_library is not None and expert_path in expert_library:
         return expert_library[expert_path]
+
+    if os.path.isdir(expert_path) and os.path.isfile(
+        os.path.join(expert_path, "training_args.bin")
+    ):
+        return load_expert_from_hf_checkpoint(expert_path, expert_name)
+    elif os.path.isdir(expert_path) and os.path.isfile(expert_path):
+        return load_expert_from_pl_checkpoint(expert_path, expert_name)
+
+    # this is not a local path, try to download from hub
+    try:
+        files = list_repo_files(expert_path)
+    except:
+        raise ValueError(
+            f"Could not find expert at {expert_path}, are you sure it's a huggingface repository?"
+        )
+
+    if "training_args.bin" in files:
+        return load_expert_from_hf_checkpoint(expert_path, expert_name)
+    elif CHECKPOINT_PATH_IN_HUB in files:
+        return load_expert_from_pl_checkpoint(expert_path, expert_name)
+
+
+def load_expert_from_pl_checkpoint(
+    expert_path: str,
+    expert_name: str = None,
+    **kwargs,
+):
+    import os
 
     if os.path.isfile(expert_path) or os.path.isdir(expert_path):
         expert_checkpoint = get_checkpoint_path(expert_path)
@@ -237,6 +271,30 @@ def load_expert(
         )
     else:
         expert = Expert.fromdict(expert_checkpoint)
+
+    # override expert name
+    if expert_name is not None:
+        expert.name = expert_name
+    return expert
+
+
+def load_expert_from_hf_checkpoint(
+    expert_path: str,
+    expert_name: str = None,
+    **kwargs,
+):
+    """Transforms a potentially lightning checkpoint into an Expert object."""
+    # load the expert weights
+    import os
+
+    from mttl.models.expert_model_hf import ExpertModel
+
+    logger.info(f"Loading expert from {expert_path}...")
+
+    # we assume it's an expert model, which is used to train single experts
+    expert: Expert = ExpertModel.from_pretrained(
+        expert_path, device_map="cpu"
+    ).as_expert()
 
     # override expert name
     if expert_name is not None:
