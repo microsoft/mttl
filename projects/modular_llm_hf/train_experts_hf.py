@@ -12,9 +12,9 @@ from pytorch_lightning import seed_everything
 from transformers import Trainer, TrainerCallback, TrainingArguments
 from transformers.trainer import TRAINING_ARGS_NAME
 
+from mttl.arguments import Args, DataArgs, ExpertConfig, ModifierArgs
 from mttl.callbacks import LiveCheckpointCallback, NanoMMLUCallback, RougeCallback
 from mttl.callbacks_hf import DownstreamEvalCallback
-from mttl.config import Args, DataArgs, ExpertConfig, ModifierArgs
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
 from mttl.models.expert_model_hf import (

@@ -33,7 +33,7 @@ class ExpertModelConfig(BaseExpertModelConfig):
     modifier_config: AutoModifierConfig = None
 
 
-@BaseExpertModel.register("single_expert_model", config_cls=ExpertModelConfig)
+@BaseExpertModel.register("expert_model", config_cls=ExpertModelConfig)
 class ExpertModel(BaseExpertModel):
     def __init__(
         self,

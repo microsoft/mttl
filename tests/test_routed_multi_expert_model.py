@@ -6,7 +6,7 @@ import pytest
 import torch
 from pytorch_lightning import seed_everything
 
-from mttl.config import MoEExpertConfig, MultiExpertConfig
+from mttl.arguments import MoEExpertConfig, MultiExpertConfig
 from mttl.models.containers.lora_containers import (
     CoalescedLoRAExpertContainer,
     LoRAExpertContainer,

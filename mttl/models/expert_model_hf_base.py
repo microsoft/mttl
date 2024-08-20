@@ -15,7 +15,7 @@ from attrs import field
 from huggingface_hub import hf_hub_download
 from torch.optim.optimizer import Optimizer
 
-from mttl.config import Args, ExpertConfig, MoEExpertConfig, MultiExpertConfig
+from mttl.arguments import Args, ExpertConfig, MoEExpertConfig, MultiExpertConfig
 from mttl.logging import logger
 from mttl.models.containers import add_expert_to_transformer
 from mttl.models.containers.base import ExpertContainer

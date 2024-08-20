@@ -13,7 +13,6 @@ from pyparsing import abstractmethod
 from torch import nn
 from torch.distributions import Categorical
 
-from mttl.configuration import AutoConfig, SerializableConfig
 from mttl.logging import logger, warn_once
 from mttl.models.containers.selectors.selector_output import (
     BatchExpertsAndWeightsSelectorOutput,
@@ -30,6 +29,7 @@ from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
 from mttl.models.ranker.classifier_ranker import ClusterPredictor
 from mttl.models.utils import MetricLogger
 from mttl.registrable import Registrable
+from mttl.serializable import AutoSerializable, Serializable
 
 EPS = 1e-8
 
@@ -42,7 +42,7 @@ def get_selector(selector_config: "SelectorConfig", **kwargs):
 
 
 @dataclass
-class SelectorConfig(SerializableConfig):
+class SelectorConfig(Serializable):
     # the granularity of the selector (which layers use the same selectors)
     router_granularity: str = "*"
     lora_merge_after: bool = False
@@ -66,7 +66,7 @@ class SelectorConfig(SerializableConfig):
 
         Returns None if no modifier is set.
         """
-        from mttl.config import create_config_class_from_args
+        from mttl.arguments import create_config_class_from_args
 
         if isinstance(training_config, SelectorConfig):
             # nothing to do here
@@ -91,7 +91,7 @@ class SelectorConfig(SerializableConfig):
         return create_config_class_from_args(config_klass, training_config)
 
 
-class AutoSelectorConfig(AutoConfig, SelectorConfig):
+class AutoSelectorConfig(AutoSerializable, SelectorConfig):
     pass
 
 

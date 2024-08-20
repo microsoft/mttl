@@ -4,23 +4,37 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Type
 
 
-class SerializableConfig:
+@dataclass
+class Serializable:
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, self.__class__):
             return False
         return self.asdict() == other.asdict()
 
     @classmethod
-    def fromdict(cls, data: Dict[str, Any]):
+    def fromdict(cls, data: Dict[str, Any]) -> Type:
         data_ = {}
         for field in dataclasses.fields(cls):
+            if field.name not in data and field.default is dataclasses.MISSING:
+                raise ValueError(
+                    f"Required {field.name} is missing from the data provided."
+                )
+            elif field.name not in data:
+                # field is not in data
+                continue
+
+            if data[field.name] is None:
+                data_[field.name] = None
+                continue
+
             # handle the case of a config
             if hasattr(field.type, "fromdict"):
                 data_[field.name] = field.type.fromdict(data[field.name])
             # handle the case of a list of configs
             elif field.type == List and hasattr(field.type.__args__[0], "fromdict"):
-                for i, value in enumerate(data[field.name]):
-                    data[field.name][i] = field.type.__args__[0].fromdict(value)
+                data_[field.name] = [
+                    field.type.__args__[0].fromdict(value) for value in data[field.name]
+                ]
             # simple value
             else:
                 data_[field.name] = data.get(field.name, field.default)
@@ -33,9 +47,24 @@ class SerializableConfig:
     def to_dict(self) -> Dict[str, Any]:
         return self.asdict()
 
-    def asdict(self) -> Dict[str, Any]:
+    def asdict(self, skip_fields=None) -> Dict[str, Any]:
+        """Serialize the config to a dictionary.
+
+        Args:
+            skip_fields: List of fields to skip when serializing the config.
+
+        Returns:
+            A dictionary representation of the config.
+        """
         data = {}
         for field in dataclasses.fields(self):
+            if skip_fields and field.name in skip_fields:
+                if (
+                    field.default is dataclasses.MISSING
+                    or field.default_factory is dataclasses.MISSING
+                ):
+                    raise ValueError("Cannot skip required field in dataclass!")
+
             value = getattr(self, field.name)
             if value is not None and hasattr(value, "asdict"):
                 data[field.name] = value.asdict()
@@ -49,7 +78,7 @@ class SerializableConfig:
 
 
 @dataclass
-class AutoConfig(SerializableConfig):
+class AutoSerializable(Serializable):
     @classmethod
     def fromdict(cls, data: Dict[str, Any]):
         # try to infer the class from the data
@@ -59,7 +88,7 @@ class AutoConfig(SerializableConfig):
                 "`class_name` is missing from the data provided. Cannot use `AutoModelConfig.fromdict`"
             )
 
-        dataclass_cls = AutoConfig.dynamic_class_resolution(class_name)
+        dataclass_cls = AutoSerializable.dynamic_class_resolution(class_name)
         return dataclass_cls.fromdict(data)
 
     @staticmethod

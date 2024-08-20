@@ -11,6 +11,7 @@ import torch
 
 from mttl.logging import logger, setup_logging, warn_once
 from mttl.registrable import Registrable
+from mttl.serializable import AutoSerializable, Serializable
 
 # Create a generic type variable that can be any type
 T = TypeVar("T")
@@ -92,7 +93,7 @@ def create_config_class_from_args(config_class, args):
 
 
 @dataclass
-class Args:
+class Args(Serializable):
     @property
     def updated_kwargs(self):
         return {
@@ -101,36 +102,14 @@ class Args:
             if getattr(self, k.name) != k.default
         }
 
-    @classmethod
-    def fromdict(cls, data, strict=False) -> "Args":
-        """
-        Reload a dataclass from a dictionary. We store the class name in the dict to be able to reload it.
-        If the cls is Args, then we try to access the `_class` attribute to get the class name.
-        """
-        cls_name = data.pop("args_class", None)
-        if cls == Args:
-            if not cls_name:
-                raise ValueError("No class name found in the data.")
-            cls = globals()[cls_name]
-
-        if not strict:
-            data_ = {}
-            for f in fields(cls):
-                if f.name in data:
-                    data_[f.name] = data[f.name]
-        else:
-            data_ = data
-
-        return cls(**data_)
-
     def asdict(self) -> Dict:
-        data = {
-            f.name: getattr(self, f.name)
+        """Slightly overloaded asdict to skip MultiDefaultValue fields."""
+        skip_fields = [
+            f.name
             for f in fields(self)
-            if not isinstance(getattr(self, f.name), MultiDefaultValue)
-        }
-
-        return {"args_class": self.__class__.__name__, **data}
+            if isinstance(getattr(self, f.name), MultiDefaultValue)
+        ]
+        return super().asdict(skip_fields=skip_fields)
 
     def was_overridden(self, key):
         return key in self.updated_kwargs
@@ -266,9 +245,13 @@ class Args:
         return config
 
 
+class AutoArgs(AutoSerializable, Args):
+    pass
+
+
 class MetaRegistrable(type):
     """
-    Meta class that creates a new dataclass containing all the configs
+    Meta class that creates a new dataclass containing fields all the config dataclasses
     in this registrable.
     """
 

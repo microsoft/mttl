@@ -9,7 +9,7 @@ import torch
 from torch.optim.optimizer import Optimizer
 from transformers import PreTrainedModel
 
-from mttl.config import Args, ExpertConfig, MoEExpertConfig, MultiExpertConfig
+from mttl.arguments import Args, ExpertConfig, MoEExpertConfig, MultiExpertConfig
 from mttl.logging import logger
 from mttl.models.containers import add_expert_to_transformer
 from mttl.models.containers.base import ExpertContainer

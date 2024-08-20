@@ -3,17 +3,20 @@ from typing import Dict, Union
 
 import torch
 
+from mttl.arguments import AutoArgs
 from mttl.logging import logger
 from mttl.models.modifiers.base import (
+    AutoModifierConfig,
     Modifier,
     ModifierConfig,
     get_target_2_source_param_mapping,
 )
+from mttl.serializable import Serializable
 from mttl.utils import get_checkpoint_path
 
 
 @dataclass
-class ExpertInfo:
+class ExpertInfo(Serializable):
     """
     Stuff that we want to save about experts but will never be passed from command line
     """
@@ -22,46 +25,10 @@ class ExpertInfo:
     expert_task_name: str = None
     parent_node: str = None
     # configuration for this expert, i.e. a modifier config
-    expert_config: ModifierConfig = None
+    expert_config: AutoModifierConfig = None
     # arguments with which the expert was trained, i.e. the full training config
-    training_config: "Args" = None
+    training_config: AutoArgs = None
     expert_model: str = None
-
-    @classmethod
-    def fromdict(cls, data):
-        from mttl.config import Args, MultiExpertConfig
-
-        try:
-            # if we cannot infer the training class automatically, we assume it is a MultiExpertConfig
-            training_config = Args.fromdict(data["training_config"])
-        except:
-            training_config = MultiExpertConfig.fromdict(data["training_config"])
-
-        if "expert_config" in data:
-            expert_config = ModifierConfig.fromdict(data["expert_config"])
-        else:
-            expert_config = ModifierConfig.from_training_config(training_config)
-
-        kwargs = {}
-        for key in cls.__dataclass_fields__.keys():
-            kwargs[key] = data.get(key, None)
-
-        kwargs["expert_config"] = expert_config
-        kwargs["training_config"] = training_config
-        return cls(**kwargs)
-
-    def asdict(self) -> Dict:
-        data = {
-            "expert_name": self.expert_name,
-            "expert_task_name": self.expert_task_name,
-            "parent_node": self.parent_node,
-            "expert_model": self.expert_model,
-        }
-        if self.expert_config:
-            data["expert_config"] = self.expert_config.asdict()
-        if self.training_config:
-            data["training_config"] = self.training_config.asdict()
-        return data
 
     @property
     def model(self):
@@ -80,11 +47,10 @@ class ExpertInfo:
     @property
     def model_modifier(self):
         if self.expert_config is not None:
-            return Modifier.get_name_by_config_class(type(self.expert_config))
+            return self.expert_config.model_modifier
         return self.training_config.model_modifier
 
 
-@dataclass
 class Expert:
     def __init__(
         self,
@@ -183,13 +149,14 @@ def load_expert(
 
     from huggingface_hub import hf_hub_download, list_repo_files
 
+    from mttl.models.expert_model_hf_base import WEIGHTS_NAME
     from mttl.models.pl_utils import CHECKPOINT_PATH_IN_HUB
 
     if expert_library is not None and expert_path in expert_library:
         return expert_library[expert_path]
 
     if os.path.isdir(expert_path) and os.path.isfile(
-        os.path.join(expert_path, "training_args.bin")
+        os.path.join(expert_path, WEIGHTS_NAME)
     ):
         return load_expert_from_hf_checkpoint(expert_path, expert_name)
     elif os.path.isdir(expert_path) and os.path.isfile(expert_path):
@@ -203,7 +170,7 @@ def load_expert(
             f"Could not find expert at {expert_path}, are you sure it's a huggingface repository?"
         )
 
-    if "training_args.bin" in files:
+    if WEIGHTS_NAME in files:
         return load_expert_from_hf_checkpoint(expert_path, expert_name)
     elif CHECKPOINT_PATH_IN_HUB in files:
         return load_expert_from_pl_checkpoint(expert_path, expert_name)

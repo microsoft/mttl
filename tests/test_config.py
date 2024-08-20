@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from mttl.config import Args, ModifierArgs
+from mttl.arguments import Args, ModifierArgs
 
 
 @pytest.fixture
@@ -128,7 +128,7 @@ def test_config_was_default_from_file(tmp_path, SimpleArgs):
 
 
 def test_auto_modifier_config():
-    from mttl.config import ModifierArgs
+    from mttl.arguments import ModifierArgs
     from mttl.models.modifiers.base import ModifierConfig
 
     config = ModifierArgs()

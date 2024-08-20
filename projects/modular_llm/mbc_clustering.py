@@ -1,7 +1,7 @@
 import json
 import os
 
-from mttl.config import Args, ExpertConfig
+from mttl.arguments import Args, ExpertConfig
 from mttl.logging import logger
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.library.library_transforms import (

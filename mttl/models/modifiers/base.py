@@ -5,9 +5,9 @@ from typing import Dict, Iterable, Union
 
 from torch import nn
 
-from mttl.configuration import AutoConfig, SerializableConfig
 from mttl.logging import logger
 from mttl.registrable import Registrable
+from mttl.serializable import AutoSerializable, Serializable
 
 
 class Modifier(nn.Module, Registrable):
@@ -31,14 +31,10 @@ class MergeableModifierMixin(ABC):
 
 
 @dataclass
-class ModifierConfig(SerializableConfig):
+class ModifierConfig(Serializable):
     modify_modules: str = ".*"
     modify_layers: str = ".*"
     tie_params: str = None
-
-    def __eq__(self, other):
-        # compare all the attributes
-        return self.__dict__ == other.__dict__
 
     @property
     def modifier_name(self):
@@ -52,7 +48,7 @@ class ModifierConfig(SerializableConfig):
 
         Returns None if no modifier is set.
         """
-        from mttl.config import create_config_class_from_args
+        from mttl.arguments import create_config_class_from_args
 
         if isinstance(training_config, ModifierConfig):
             # nothing to do here
@@ -70,7 +66,7 @@ class ModifierConfig(SerializableConfig):
         return create_config_class_from_args(config_klass, training_config)
 
 
-class AutoModifierConfig(AutoConfig, ModifierConfig):
+class AutoModifierConfig(AutoSerializable, ModifierConfig):
     pass
 
 

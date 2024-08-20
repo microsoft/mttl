@@ -13,14 +13,14 @@ from typing import Any, Dict, List, Optional, Type, Union
 
 from huggingface_hub import hf_hub_download
 
-from mttl.configuration import AutoConfig, SerializableConfig
 from mttl.logging import logger
+from mttl.serializable import AutoSerializable, Serializable
 
 CONFIG_NAME = "mttl_config.json"
 
 
 @dataclass
-class BaseExpertModelConfig(SerializableConfig):
+class BaseExpertModelConfig(Serializable):
     base_model: str
 
     def save_pretrained(self, save_directory, **kwargs):
@@ -58,5 +58,5 @@ class BaseExpertModelConfig(SerializableConfig):
         return config
 
 
-class AutoModelConfig(AutoConfig, BaseExpertModelConfig):
+class AutoModelConfig(AutoSerializable, BaseExpertModelConfig):
     pass

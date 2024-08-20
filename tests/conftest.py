@@ -8,7 +8,7 @@ import pytest
 from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
 
-from mttl.config import ExpertConfig, MultiExpertConfig
+from mttl.arguments import ExpertConfig, MultiExpertConfig
 from mttl.dataloader.flan_utils import download_flan
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
 from mttl.models.expert_model import MultiExpertModel
@@ -152,7 +152,7 @@ def tmp_multi_exp_config(tmp_path: Path):
 
 @pytest.fixture
 def tmp_moe_exp_config(tmp_path):
-    from mttl.config import MoEExpertConfig
+    from mttl.arguments import MoEExpertConfig
 
     return MoEExpertConfig(
         model="EleutherAI/gpt-neo-125m",
