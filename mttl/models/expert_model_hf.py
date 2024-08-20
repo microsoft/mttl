@@ -45,9 +45,6 @@ class ExpertModel(BaseExpertModel):
         if config.modifier_config is not None:
             self.model = modify_transformer(self.model, config.modifier_config)
 
-        self.expert_name = config.expert_name
-        self.task_name = config.task_name
-
     def as_expert(self, training_config=None):
         state_dict = self.state_dict()
         self._delete_non_trainable_params(state_dict)
@@ -57,9 +54,9 @@ class ExpertModel(BaseExpertModel):
 
         # inject expert info in the expert checkpoint
         expert_info = ExpertInfo(
-            expert_name=self.expert_name,
-            expert_task_name=self.task_name,
-            expert_config=self.modifier_config,
+            expert_name=self.config.expert_name,
+            expert_task_name=self.config.task_name,
+            expert_config=self.config.modifier_config,
             training_config=training_config,
         )
         return Expert(
