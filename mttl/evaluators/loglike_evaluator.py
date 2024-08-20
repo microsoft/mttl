@@ -79,9 +79,11 @@ class LogLikeEvaluator(Evaluator):
 
             with torch.no_grad():
                 if isinstance(model, EfficientCheckpointModule):
+                    # lightning module
                     loss_per_option = model.forward(batch, reduction="none")
                 elif isinstance(model, BaseExpertModel):
-                    loss_per_option, _ = model.compute_loss(**batch, reduction="none")
+                    # standard no lightning evaluation
+                    loss_per_option, _ = model.forward(**batch, reduction="none")
                 else:
                     logits = model.forward(
                         input_ids=batch["input_ids"],

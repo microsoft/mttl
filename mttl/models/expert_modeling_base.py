@@ -102,11 +102,12 @@ class BaseExpertModel(torch.nn.Module, Registrable):
 
         os.makedirs(save_directory, exist_ok=True)
 
-        self._delete_non_trainable_params(self.state_dict())
+        state_dict = self.state_dict()
+        self._delete_non_trainable_params(state_dict)
 
         output_config_file = self.config.save_pretrained(save_directory, **kwargs)
         output_model_file = os.path.join(save_directory, WEIGHTS_NAME)
-        torch.save(self.state_dict(), output_model_file)
+        torch.save(state_dict, output_model_file)
         torch.save(
             json.dumps(self.loading_kwargs),
             os.path.join(save_directory, LOADING_KWARGS_NAME),
