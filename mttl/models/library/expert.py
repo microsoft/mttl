@@ -33,7 +33,9 @@ class ExpertInfo(Serializable):
         """
         if self.expert_model is not None:
             return self.expert_model
-        return self.training_config.model
+        if self.training_config is not None:
+            return self.training_config.model
+        raise ValueError("No model found in expert info!")
 
     @property
     def dataset(self):
