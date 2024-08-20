@@ -17,10 +17,6 @@ from mttl.utils import get_checkpoint_path
 
 @dataclass
 class ExpertInfo(Serializable):
-    """
-    Stuff that we want to save about experts but will never be passed from command line
-    """
-
     expert_name: str
     expert_task_name: str = None
     parent_node: str = None
