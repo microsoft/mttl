@@ -174,7 +174,7 @@ def tmp_peer_moe_config(tmp_path: Path):
         model="EleutherAI/gpt-neo-125m",
         library_id=None,
         model_modifier="peer",
-        modify_layers="",
+        modify_layers=False,
         top_k=2,
         moe_num_experts=100,
         modify_modules=".*mlp",
