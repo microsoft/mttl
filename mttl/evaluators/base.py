@@ -300,7 +300,7 @@ class GenerativeEvaluator(Evaluator):
         with torch.no_grad():
             if isinstance(model, ExpertModule):
                 predictions = model.generate(
-                    **batch,
+                    batch,
                     generation_config=model.generation_config,
                     return_dict_in_generate=True,
                     output_scores=True,
@@ -308,7 +308,7 @@ class GenerativeEvaluator(Evaluator):
                 )
             elif isinstance(model, ExpertModel):
                 predictions = model.generate(
-                    **batch,
+                    batch,
                     generation_config=model.generation_config,
                     return_dict_in_generate=True,
                     output_scores=True,

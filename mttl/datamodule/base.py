@@ -402,7 +402,6 @@ class DefaultCollator:
 
             packed_attn_mask = packed_attn_mask.tril()
             output_batch["packed_attn_mask"] = packed_attn_mask
-
             return dict(output_batch)
 
         # Otherwise process as expected

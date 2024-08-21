@@ -36,8 +36,8 @@ class ExpertModelTrainer(Trainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def compute_loss(self, model, inputs, return_outputs=False):
-        loss, outputs = model(**inputs)
+    def compute_loss(self, model, batch, return_outputs=False):
+        loss, outputs = model(batch)
         return (loss, outputs) if return_outputs else loss
 
     def _save(self, output_dir: Optional[str] = None, state_dict=None):

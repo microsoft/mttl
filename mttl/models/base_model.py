@@ -159,15 +159,12 @@ class BaseExpertModel(torch.nn.Module, Registrable):
     @InfoContainer.wrap_forward
     def forward(
         self,
-        input_ids,
-        attention_mask=None,
-        labels=None,
-        task_names=None,
-        task_ids=None,
-        task_sources=None,
+        batch,
         reduction="mean",
         **kwargs,
     ):
+        input_ids = batch["input_ids"]
+        attention_mask = batch["attention_mask"]
         outputs = self.model.forward(input_ids, attention_mask)
 
         if labels is not None:
@@ -209,15 +206,11 @@ class BaseExpertModel(torch.nn.Module, Registrable):
     @InfoContainer.wrap_forward
     def generate(
         self,
-        input_ids,
-        attention_mask=None,
-        labels=None,
-        task_names=None,
-        task_ids=None,
-        task_sources=None,
+        batch,
         **kwargs,
     ):
+
         generations = self.model.generate(
-            inputs=input_ids, attention_mask=attention_mask, **kwargs
+            inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
         )
         return generations

@@ -85,7 +85,7 @@ class LogLikeEvaluator(Evaluator):
                     loss_per_option = model.forward(batch, reduction="none")
                 elif isinstance(model, ExpertModel):
                     # standard no lightning evaluation
-                    loss_per_option, _ = model.forward(**batch, reduction="none")
+                    loss_per_option, _ = model.forward(batch, reduction="none")
                 else:
                     logits = model.forward(
                         input_ids=batch["input_ids"],

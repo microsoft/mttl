@@ -41,8 +41,9 @@ torch.set_float32_matmul_precision("high")
 
 
 class ExpertModule(EfficientCheckpointModule):
-    delegate_methods = ["generation_config", "as_expert"]
-
+    # bunch of methods to delegate to expert_model instance
+    delegate_methods = ["generate", "generation_config", "as_expert"]
+    # config class to use for the training config
     training_config_class = ExpertConfig
 
     def __getattr__(self, name):
@@ -87,18 +88,14 @@ class ExpertModule(EfficientCheckpointModule):
             load_in_8bit=getattr(self.hparams, "load_in_8bit", False),
         )
 
-    def forward(self, batch, reduction="mean", **kwargs):
-        # just expand arguments for the forward function
+    def forward(self, batch, reduction="mean", return_context=False):
+        # outputs consists of loss, logits and context if return_context is True
         outputs = self.expert_model.forward(
-            **{**batch, **kwargs, "reduction": reduction}
+            batch, reduction=reduction, return_context=return_context
         )
-        if kwargs.get("return_context", False):
+        if not return_context:
             return outputs[0]
         return outputs[0], outputs[-1]
-
-    def generate(self, batch, **kwargs):
-        # just expand arguments for the generate function
-        return self.expert_model.generate(**{**batch, **kwargs})
 
     def training_step(self, batch, _):
         if "num_options" in batch:
@@ -198,9 +195,9 @@ class ExpertModule(EfficientCheckpointModule):
 
 
 class MultiExpertModule(ExpertModule):
-    """Adds all functions and properties for a multi-expert model."""
-
+    # bunch of methods to delegate to expert_model instance
     delegate_methods = [
+        "generate",
         "generation_config",
         "add_empty_expert",
         "add_expert_instance",
@@ -212,6 +209,8 @@ class MultiExpertModule(ExpertModule):
         "extract_parameters",
         "get_expert_instance",
         "save_to_library",
+        "selectors",
+        "expert_containers",
     ]
     training_config_class = MultiExpertConfig
 
@@ -235,7 +234,7 @@ class MultiExpertModule(ExpertModule):
             load_in_8bit=getattr(self.hparams, "load_in_8bit", False),
         )
 
-    def __init__(self, selector_config=None, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
 
