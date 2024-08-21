@@ -10,10 +10,13 @@ from mttl.models.ranker.classifier_ranker import SentenceTransformerClassifier
 from mttl.models.ranker.clip_ranker import CLIPRanker
 
 
-def test_train_ranker(tiny_flan_id, tmp_path):
+def test_train_ranker(tiny_flan_id, tmp_path, monkeypatch):
     import os
 
     from mttl.models.ranker.train_utils import train_classifier
+
+    # disable wandb
+    monkeypatch.setenv("WANDB_MODE", "disabled")
 
     config = RankerConfig(
         dataset_type="flan",
