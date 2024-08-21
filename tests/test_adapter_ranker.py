@@ -29,7 +29,6 @@ def test_train_ranker(tiny_flan_id, tmp_path, monkeypatch):
         output_dir=str(tmp_path),
     )
 
-    breakpoint()
     train_classifier(config)
 
     dirs = os.listdir(tmp_path)
