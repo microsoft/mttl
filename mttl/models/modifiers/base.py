@@ -67,7 +67,18 @@ class ModifierConfig(Serializable):
 
 
 class AutoModifierConfig(AutoSerializable, ModifierConfig):
-    pass
+    @classmethod
+    def fromdict_legacy(cls, data):
+        modifier_name = data.pop("__model_modifier__")
+        dataclass_cls = Modifier.get_config_class_by_name(modifier_name)
+        return dataclass_cls.fromdict(data)
+
+    @classmethod
+    def fromdict(cls, data: Dict):
+        try:
+            return AutoSerializable.fromdict(data)
+        except ValueError:
+            return AutoModifierConfig.fromdict_legacy(data)
 
 
 class ModifyMixin:

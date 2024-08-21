@@ -12,6 +12,7 @@ import torch
 from mttl.logging import logger, setup_logging, warn_once
 from mttl.registrable import Registrable
 from mttl.serializable import AutoSerializable, Serializable
+from mttl.utils import deprecated
 
 # Create a generic type variable that can be any type
 T = TypeVar("T")
@@ -246,7 +247,21 @@ class Args(Serializable):
 
 
 class AutoArgs(AutoSerializable, Args):
-    pass
+    @classmethod
+    @deprecated(
+        message="The config appears to be a legacy config and will be discontinued in the next release."
+    )
+    def fromdict_legacy(cls, data):
+        """Assume the data is ExpertConfig to not break previous loading."""
+        dataclass_cls = ExpertConfig
+        return dataclass_cls.fromdict(data)
+
+    @classmethod
+    def fromdict(cls, data: Dict):
+        try:
+            return AutoSerializable.fromdict(data)
+        except ValueError:
+            return AutoArgs.fromdict_legacy(data)
 
 
 class MetaRegistrable(type):

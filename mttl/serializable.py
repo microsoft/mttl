@@ -85,7 +85,7 @@ class AutoSerializable(Serializable):
         class_name = data.pop("class_name", None)
         if not class_name:
             raise ValueError(
-                "`class_name` is missing from the data provided. Cannot use `AutoModelConfig.fromdict`"
+                f"`class_name` is missing from the data provided. Cannot use `{cls.__name__}.fromdict`."
             )
 
         dataclass_cls = AutoSerializable.dynamic_class_resolution(class_name)
