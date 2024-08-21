@@ -194,6 +194,7 @@ def train_classifier(args: RankerConfig):
         logger=wandb_logger,
         val_check_interval=args.val_check_interval,
         limit_val_batches=args.limit_val_batches,
+        enable_checkpointing=False,
     )
     trainer.fit(module, datamodule)
     trainer.test(module, datamodule.test_dataloader())

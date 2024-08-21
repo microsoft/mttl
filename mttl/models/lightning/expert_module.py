@@ -41,7 +41,7 @@ torch.set_float32_matmul_precision("high")
 
 
 class ExpertModule(EfficientCheckpointModule):
-    delegate_methods = ["generate", "generation_config", "as_expert"]
+    delegate_methods = ["generation_config", "as_expert"]
 
     training_config_class = ExpertConfig
 
@@ -87,11 +87,18 @@ class ExpertModule(EfficientCheckpointModule):
             load_in_8bit=getattr(self.hparams, "load_in_8bit", False),
         )
 
-    def forward(self, **kwargs):
-        outputs = self.expert_model.forward(**kwargs)
+    def forward(self, batch, reduction="mean", **kwargs):
+        # just expand arguments for the forward function
+        outputs = self.expert_model.forward(
+            **{**batch, **kwargs, "reduction": reduction}
+        )
         if kwargs.get("return_context", False):
             return outputs[0]
         return outputs[0], outputs[-1]
+
+    def generate(self, batch, **kwargs):
+        # just expand arguments for the generate function
+        return self.expert_model.generate(**{**batch, **kwargs})
 
     def training_step(self, batch, _):
         if "num_options" in batch:
@@ -194,6 +201,7 @@ class MultiExpertModule(ExpertModule):
     """Adds all functions and properties for a multi-expert model."""
 
     delegate_methods = [
+        "generation_config",
         "add_empty_expert",
         "add_expert_instance",
         "get_expert_instance",

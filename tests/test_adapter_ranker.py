@@ -8,12 +8,11 @@ from mttl.models.lightning.expert_module import MultiExpertModule
 from mttl.models.modifiers.lora import LoRAConfig
 from mttl.models.ranker.classifier_ranker import SentenceTransformerClassifier
 from mttl.models.ranker.clip_ranker import CLIPRanker
+from mttl.models.ranker.train_utils import train_classifier
 
 
 def test_train_ranker(tiny_flan_id, tmp_path, monkeypatch):
     import os
-
-    from mttl.models.ranker.train_utils import train_classifier
 
     # disable wandb
     monkeypatch.setenv("WANDB_MODE", "disabled")
@@ -27,9 +26,10 @@ def test_train_ranker(tiny_flan_id, tmp_path, monkeypatch):
         subsample_train=0.1,
         num_train_epochs=2,
         subsample_dev=0.1,
-        output_dir=tmp_path,
+        output_dir=str(tmp_path),
     )
 
+    breakpoint()
     train_classifier(config)
 
     dirs = os.listdir(tmp_path)
