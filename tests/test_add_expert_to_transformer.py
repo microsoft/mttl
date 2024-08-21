@@ -1,8 +1,10 @@
 import os
+
 import pytest
 from pytorch_lightning import seed_everything
+
+from mttl.models.containers import create_modif_regex, match_modules_to_modify
 from mttl.models.expert_model import MultiExpertModel
-from mttl.models.containers import match_modules_to_modify, create_modif_regex
 
 
 def test_add_expert_to_transformer():
