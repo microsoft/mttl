@@ -93,7 +93,13 @@ def run_multitask(args: ExpertConfig):
         model_class = MoEModel
     else:
         model_class = ExpertModel
-    config = DatasetConfig(model=args.model)
+    config = DatasetConfig(
+        model=args.model,
+        train_batch_size=args.train_batch_size,
+        predict_batch_size=args.predict_batch_size,
+        max_input_length=args.max_input_length,
+        max_output_length=args.max_output_length,
+    )
     dm = Preferencemodule(config)
 
     # dm = get_datamodule(args)
