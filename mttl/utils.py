@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
-from mttl.logging import logger
+from mttl.logging import logger, warn_once
 
 
 def remote_login(token: Optional[str] = None):
@@ -144,7 +144,7 @@ def deprecated(message=None):
                 if message
                 else f"{func.__name__}() is deprecated and will be removed in a future version."
             )
-            warnings.warn(warning_msg, category=DeprecationWarning, stacklevel=2)
+            warn_once(warning_msg, category=DeprecationWarning, stacklevel=2)
             return func(*args, **kwargs)
 
         return wrapped
