@@ -12,8 +12,8 @@ logger = logging.getLogger("mttl")
 
 
 @lru_cache
-def warn_once(msg: str):
-    logger.warning(msg)
+def warn_once(msg: str, **kwargs):
+    logger.warning(msg, **kwargs)
 
 
 def setup_logging(log_dir: str = None):
