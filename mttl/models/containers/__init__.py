@@ -290,6 +290,7 @@ def create_modif_regex(modify_modules, modify_layers):
             parts.append(f"{m}\\.{l}")
     return "|".join(parts)
 
+
 def match_modules_to_modify(transformer, modify_modules):
     """
     Match modules in the transformer model based on the modify_modules regex
@@ -297,6 +298,7 @@ def match_modules_to_modify(transformer, modify_modules):
     for m_name, module in dict(transformer.named_modules()).items():
         if re.fullmatch(modify_modules, m_name):
             yield m_name, module
+
 
 def add_expert_to_transformer(
     transformer,
@@ -343,37 +345,37 @@ def add_expert_to_transformer(
 
     modify_modules = create_modif_regex(
         expert_config.modify_modules, expert_config.modify_layers
-    )    
+    )
     for m_name, module in match_modules_to_modify(transformer, modify_modules):
-            # no layers to modify, try modifying the module
-            total_layers += 1
-            module_name = f"{m_name}"
+        # no layers to modify, try modifying the module
+        total_layers += 1
+        module_name = f"{m_name}"
 
-            if not isinstance(module, ExpertContainer):
-                CONTAINER_CLASS = get_container_class(model_modifier)
-                expert_container = CONTAINER_CLASS(
-                    expert_config,
-                    module,
-                )
-                expert_container.__layer_name__ = module_name
-
-                parent_name, child_name = m_name.rsplit(".", 1)
-                parent_module = dict(transformer.named_modules())[parent_name]
-                setattr(
-                    parent_module,
-                    child_name,
-                    expert_container,
-                )
-                added_containers.append(expert_container)
-            else:
-                expert_container = module
-
-            added_layers.append(expert_container.__layer_name__)
-            expert_container.add_expert(
-                expert,
-                action=action,
-                is_default=is_default,
+        if not isinstance(module, ExpertContainer):
+            CONTAINER_CLASS = get_container_class(model_modifier)
+            expert_container = CONTAINER_CLASS(
+                expert_config,
+                module,
             )
+            expert_container.__layer_name__ = module_name
+
+            parent_name, child_name = m_name.rsplit(".", 1)
+            parent_module = dict(transformer.named_modules())[parent_name]
+            setattr(
+                parent_module,
+                child_name,
+                expert_container,
+            )
+            added_containers.append(expert_container)
+        else:
+            expert_container = module
+
+        added_layers.append(expert_container.__layer_name__)
+        expert_container.add_expert(
+            expert,
+            action=action,
+            is_default=is_default,
+        )
     ### PARAM TYING ###
     # Note: because experts are added into expert containers
     # instead of parameter names being e.g. model.layers.4.self_attn.q_proj.lora_a,
