@@ -56,8 +56,8 @@ def test_clip_routing(tiny_flan_id):
     )
 
     module = MultiExpertModel(**config.asdict())
-    module.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
-    module.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
+    module.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj"))
+    module.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj"))
     batch = next(iter(data_module.val_dataloader()))
     selector = module.model.transformer.h[0].attn.attention.out_proj.selector
     assert isinstance(selector, TaskPredictorSelector)
@@ -86,8 +86,8 @@ def test_classifier_routing(tiny_flan_id):
     )
 
     module = MultiExpertModel(**config.asdict())
-    module.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
-    module.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
+    module.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj"))
+    module.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj"))
 
     batch = next(iter(data_module.val_dataloader()))
     selector = module.model.transformer.h[0].attn.attention.out_proj.selector
