@@ -11,6 +11,11 @@ import wandb
 logger = logging.getLogger("mttl")
 
 
+def maybe_wandb_log(**kwargs):
+    if wandb.run is not None:
+        wandb.log(**kwargs)
+
+
 @lru_cache
 def warn_once(msg: str, **kwargs):
     logger.warning(msg, **kwargs)
@@ -74,8 +79,7 @@ class TableLogger:
         self.df.loc["mean", "mean"] = np.diag(df_numeric).mean()
 
     def log_final_table(self):
-        if wandb.run is not None:
-            wandb.log({"table": wandb.Table(data=self.get_table())})
+        maybe_wandb_log({"table": wandb.Table(data=self.get_table())})
         table = prettytable.PrettyTable()
         table.field_names = list(self.df.columns)
         for i, row in self.df.iterrows():

@@ -8,14 +8,8 @@ from transformers import (
     TrainingArguments,
 )
 
-try:
-    import wandb
-
-    wandb_available = True
-except:
-    wandb_available = False
-
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
+from mttl.logging import maybe_wandb_log
 
 
 class DownstreamEvalCallback(TrainerCallback):
@@ -57,9 +51,7 @@ class DownstreamEvalCallback(TrainerCallback):
             # record in log_history
             state.log_history.append({**all_metrics, **{"step": state.global_step}})
 
-            if wandb_available and wandb.run is not None:
-                wandb.log(all_metrics)
-
+            maybe_wandb_log(all_metrics)
             metrics_.update(all_metrics)
 
         return control
@@ -81,9 +73,7 @@ class DownstreamEvalCallback(TrainerCallback):
 
             state.log_history.append({**all_metrics, **{"step": state.global_step}})
 
-            if wandb_available and wandb.run is not None:
-                wandb.log(all_metrics)
-
+            maybe_wandb_log(all_metrics)
             metrics_.update(all_metrics)
 
         return control
