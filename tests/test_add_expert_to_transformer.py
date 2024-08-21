@@ -62,14 +62,13 @@ def test_add_expert_to_transformer():
         name[-6:] == "q_proj" or name[-6:] == "v_proj" or name[-6:] == "k_proj"
         for name in matched_modules
     )
-    
-    #but modify_modules=.*attn.* will match all modules containing attn
-    regex = create_modif_regex( modify_layers="", modify_modules=".*attn.*")
+
+    # but modify_modules=.*attn.* will match all modules containing attn
+    regex = create_modif_regex(modify_layers="", modify_modules=".*attn.*")
     matched_modules = [o[0] for o in match_modules_to_modify(model.model, regex)]
     assert len(matched_modules) == 96
-    assert 'transformer.h.10.attn.attention.k_proj' in matched_modules
-    assert 'transformer.h.10.attn.attention' in matched_modules
-
+    assert "transformer.h.10.attn.attention.k_proj" in matched_modules
+    assert "transformer.h.10.attn.attention" in matched_modules
 
 
 if __name__ == "__main__":
