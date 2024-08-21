@@ -8,7 +8,6 @@ import wandb
 from pytorch_lightning import seed_everything
 
 from mttl.arguments import EvaluationConfig, ExpertConfig
-from mttl.callbacks import LossCallback
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
@@ -21,6 +20,7 @@ from mttl.models.library.library_transforms import (
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
 )
+from mttl.models.lightning.callbacks import LossCallback
 from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
 from mttl.models.modifiers.lora import LoRAConfig
 from mttl.utils import remote_login

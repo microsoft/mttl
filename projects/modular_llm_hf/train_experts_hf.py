@@ -13,8 +13,6 @@ from transformers import Trainer, TrainerCallback, TrainingArguments
 from transformers.trainer import TRAINING_ARGS_NAME
 
 from mttl.arguments import Args, DataArgs, ExpertConfig, ModifierArgs
-from mttl.callbacks import LiveCheckpointCallback, NanoMMLUCallback, RougeCallback
-from mttl.callbacks_hf import DownstreamEvalCallback
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
 from mttl.models.expert_model import (
@@ -23,8 +21,14 @@ from mttl.models.expert_model import (
     SingleExpertModel,
     SingleExpertModelConfig,
 )
+from mttl.models.hf.callbacks import DownstreamEvalCallback
 from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
+from mttl.models.lightning.callbacks import (
+    LiveCheckpointCallback,
+    NanoMMLUCallback,
+    RougeCallback,
+)
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.monitors import get_monitors
 from mttl.utils import generate_random_string, rank_zero_only_and_wait, remote_login

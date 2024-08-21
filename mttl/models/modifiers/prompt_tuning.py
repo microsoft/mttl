@@ -146,7 +146,6 @@ class DecoderPromptTuningWrapper(torch.nn.Module):
             attention_mask[:, 0].sum() >= attention_mask[:, -1].sum()
         ), "expected right-padded input"
 
-        # Assumes ExpertTrainer here. Removing the labels so as to not trigger an automatic loss computation
         labels = InfoContainer.get().routing_infos.labels
 
         # preprend the soft prompt

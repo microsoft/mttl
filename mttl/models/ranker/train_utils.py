@@ -5,13 +5,13 @@ import torch
 from pytorch_lightning import seed_everything
 
 from mttl.arguments import RankerConfig
-from mttl.callbacks import LiveCheckpointCallback
 from mttl.datamodule.clip_data_module import (
     CLIPExpertsConfig,
     CLIPExpertsDatamodule,
     CLIPTripleDataModule,
 )
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
+from mttl.models.lightning.callbacks import LiveCheckpointCallback
 from mttl.models.ranker.classifier_ranker import (
     ClassifierSmooth,
     SentenceTransformerClassifier,

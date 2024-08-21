@@ -90,13 +90,16 @@ class ExpertModule(EfficientCheckpointModule):
 
     def forward(self, batch, reduction="mean", return_context=False):
         # outputs consists of loss, logits and context if return_context is True
+        # expert_model.forward is wrapped into info container
         outputs = self.expert_model.forward(
             batch, reduction=reduction, return_context=return_context
         )
         if not return_context:
             # return only the loss
-            return outputs[0][0]
-        # return loss and context
+            return outputs[0]
+
+        # return loss (first in the outputs tuple) and context (last returned)
+        # see InfoContainer for the context structure
         return outputs[0][0], outputs[-1]
 
     def training_step(self, batch, _):
@@ -198,6 +201,8 @@ class ExpertModule(EfficientCheckpointModule):
 
 class MultiExpertModule(ExpertModule):
     # bunch of methods to delegate to expert_model instance
+    # here we prefer to use the delegate pattern rather than inheritance
+    # or mixin, given that in the long run, lightning might be discontinued
     delegate_methods = [
         "generate",
         "generation_config",
@@ -213,19 +218,22 @@ class MultiExpertModule(ExpertModule):
         "save_to_library",
         "selectors",
         "expert_containers",
+        "set_default_expert",
+        "selector_cache",
+        "selector_config",
     ]
     training_config_class = MultiExpertConfig
 
     def setup_expert_model(self):
         # config about the routing
         if hasattr(self.hparams, "selector_config"):
-            self.selector_config = self.hparams.selector_config
+            selector_config = self.hparams.selector_config
         else:
-            self.selector_config = self.training_config.selector_config
+            selector_config = self.training_config.selector_config
 
         config = MultiExpertModelConfig(
             base_model=self.training_config.model,
-            selector_config=self.selector_config,
+            selector_config=selector_config,
         )
         self.expert_model = MultiExpertModel(
             config,
@@ -264,7 +272,7 @@ class MoEModule(MultiExpertModule):
                     n_splits=self.hparams.n_splits,
                     phi_2_align_heads=self.hparams.phi_2_align_heads,
                 )
-                self.model.add_empty_expert(f"e{i}", exp_config)
+                self.add_empty_expert(f"e{i}", exp_config)
             self.moe_num_experts = kwargs["moe_num_experts"]
         else:
             if expert_library is None:
@@ -272,9 +280,7 @@ class MoEModule(MultiExpertModule):
                     self.hparams.library_id
                 )
             for i, expert in enumerate(sorted(list(expert_library.keys()))):
-                self.model.add_expert_instance(
-                    expert_library[expert], expert_name=f"e{i}"
-                )
+                self.add_expert_instance(expert_library[expert], expert_name=f"e{i}")
 
             self.moe_num_experts = i + 1
 

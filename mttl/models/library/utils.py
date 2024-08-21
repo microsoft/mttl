@@ -4,8 +4,8 @@ import sys
 from pytorch_lightning import Trainer
 
 from mttl.arguments import ExpertConfig
-from mttl.callbacks import LiveCheckpointCallback
 from mttl.logging import get_pl_loggers
+from mttl.models.lightning.callbacks import LiveCheckpointCallback
 from mttl.models.lightning.expert_module import ExpertModule
 from mttl.models.monitors import get_monitors
 

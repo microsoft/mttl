@@ -19,7 +19,7 @@ from mttl.models.library.library_transforms import (
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
 )
-from mttl.models.lightning.expert_module import ExpertTrainer, MultiExpertModel
+from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
 
 
 def default_l1_regularization(weights):
@@ -33,7 +33,7 @@ def default_l1_regularization(weights):
 class NGRoutingOptimizer:
     def __init__(
         self,
-        model: MultiExpertModel,
+        model: MultiExpertModule,
         expert_lib: ExpertLibrary,
         get_loss: Callable,  # function that takes model as input and returns loss
         budget=5,

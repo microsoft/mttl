@@ -10,7 +10,6 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from typing import Callable
 
 from mttl.arguments import FinetuneConfig
-from mttl.callbacks import DownstreamEvalCallback, LiveCheckpointCallback, RougeCallback
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
 from mttl.models.library.expert import Expert, load_expert
@@ -28,6 +27,11 @@ from mttl.models.library.library_transforms import (
     WeightedLinearMergeConfig,
 )
 from mttl.models.library.retrievers import RandomRetriever, SVDEmbeddingRetriever
+from mttl.models.lightning.callbacks import (
+    DownstreamEvalCallback,
+    LiveCheckpointCallback,
+    RougeCallback,
+)
 from mttl.models.lightning.expert_module import ExpertModule as ExpertModule
 from mttl.models.lightning.expert_module import MoEModule, MultiExpertModule
 from mttl.models.modifiers.base import ModifierConfig

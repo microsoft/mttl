@@ -113,7 +113,7 @@ def prepare_evaluator(
     subsample=-1,
     for_generation=None,
 ):
-    from mttl.callbacks import TestLossEvaluator
+    from mttl.models.lightning.callbacks import TestLossEvaluator
 
     if args.eval_metric == "loss":
         EVAL_CLASS = TestLossEvaluator
