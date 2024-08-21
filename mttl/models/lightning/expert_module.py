@@ -237,6 +237,8 @@ class MultiExpertModule(ExpertModule):
         )
 
     def __init__(self, **kwargs):
+        kwargs["model_modifier"] = None
+
         super().__init__(**kwargs)
 
 

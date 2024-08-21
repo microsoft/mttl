@@ -165,7 +165,7 @@ class BaseExpertModel(torch.nn.Module, Registrable):
     ):
         input_ids = batch["input_ids"]
         attention_mask = batch["attention_mask"]
-        outputs = self.model.forward(input_ids, attention_mask)
+        outputs = self.model.forward(input_ids, attention_mask=attention_mask, **kwargs)
 
         if labels is not None:
             # calculate loss, could also be done inside of the model
