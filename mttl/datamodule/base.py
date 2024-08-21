@@ -435,11 +435,6 @@ class DefaultCollator:
         output_batch["sources_texts"] = sources
         output_batch["labels_texts"] = labels
         output_batch["task_sources"] = task_sources
-
-        # append other fields that might be available
-        for key in batch[0].keys():
-            if key not in output_batch:
-                output_batch[key] = [b[key] for b in batch]
         return output_batch
 
 
