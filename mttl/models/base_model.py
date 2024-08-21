@@ -209,7 +209,6 @@ class BaseExpertModel(torch.nn.Module, Registrable):
         batch,
         **kwargs,
     ):
-
         generations = self.model.generate(
             inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
         )
