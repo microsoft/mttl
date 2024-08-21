@@ -1,8 +1,10 @@
+import functools
 import glob
 import hashlib
 import os
 import random
 import string
+import warnings
 from typing import Optional
 
 import torch
@@ -131,6 +133,23 @@ def agg_dicts(list_of_dicts, agg="mean", tag=False):
         for k, v in out.items():
             out[k] = v / len(list_of_dicts)
     return out
+
+
+def deprecated(message=None):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapped(*args, **kwargs):
+            warning_msg = (
+                message
+                if message
+                else f"{func.__name__}() is deprecated and will be removed in a future version."
+            )
+            warnings.warn(warning_msg, category=DeprecationWarning, stacklevel=2)
+            return func(*args, **kwargs)
+
+        return wrapped
+
+    return decorator
 
 
 def get_checkpoint_path(path, step=None, use_last=False):
