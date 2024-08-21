@@ -276,6 +276,9 @@ def create_modif_regex(modify_modules, modify_layers):
         # will actually modify modules, e.g. MLP, if modify_modules = .*mlp
         return modify_modules
 
+    if not modify_modules or modify_modules == "":
+        return modify_layers
+
     # keep backward compatibility
     modules = modify_modules.split("|")
     layers = modify_layers.split("|")
@@ -287,6 +290,13 @@ def create_modif_regex(modify_modules, modify_layers):
             parts.append(f"{m}\\.{l}")
     return "|".join(parts)
 
+def match_modules_to_modify(transformer, modify_modules):
+    """
+    Match modules in the transformer model based on the modify_modules regex
+    """
+    for m_name, module in dict(transformer.named_modules()).items():
+        if re.fullmatch(modify_modules, m_name):
+            yield m_name, module
 
 def add_expert_to_transformer(
     transformer,
@@ -333,9 +343,8 @@ def add_expert_to_transformer(
 
     modify_modules = create_modif_regex(
         expert_config.modify_modules, expert_config.modify_layers
-    )
-    for m_name, module in get_modules_to_modify_trie(transformer):
-        if re.fullmatch(modify_modules, m_name):
+    )    
+    for m_name, module in match_modules_to_modify(transformer, modify_modules):
             # no layers to modify, try modifying the module
             total_layers += 1
             module_name = f"{m_name}"
