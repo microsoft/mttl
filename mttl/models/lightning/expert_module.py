@@ -94,8 +94,10 @@ class ExpertModule(EfficientCheckpointModule):
             batch, reduction=reduction, return_context=return_context
         )
         if not return_context:
-            return outputs[0]
-        return outputs[0], outputs[-1]
+            # return only the loss
+            return outputs[0][0]
+        # return loss and context
+        return outputs[0][0], outputs[-1]
 
     def training_step(self, batch, _):
         if "num_options" in batch:
