@@ -35,7 +35,7 @@ def test_expert_model(monkeypatch):
 
     monkeypatch.setenv("COALESCED_LORA_CONTAINER", "0")
 
-    model = MultiExpertModel(model="EleutherAI/gpt-neo-125m", device_map="cpu")
+    model = MultiExpertModel(MultiExpertModelConfig("EleutherAI/gpt-neo-125m"))
     model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
     assert model.experts_containers[0].default_expert_name is None
 

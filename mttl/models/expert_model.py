@@ -73,28 +73,8 @@ class MultiExpertModelConfig(BaseExpertModelConfig):
     selector_config: AutoSelectorConfig = None
 
 
-@BaseExpertModel.register("multi_expert_model", config_cls=MultiExpertModelConfig)
-class MultiExpertModel(BaseExpertModel):
-    """Adds all functions and properties for a multi-expert model."""
-
-    def __init__(self, config, **loading_kwargs):
-        super().__init__(config, **loading_kwargs)
-
-        # config about the routing
-        self.selector_config = config.selector_config
-        self.selector_cache = SelectorsCache()
-        self.experts_infos = {}
-
-        if self.config.expert_infos is not None:
-            for expert_info in self.config.expert_infos:
-                expert_info: ExpertInfo
-                self.add_empty_expert(
-                    expert_info.expert_name,
-                    expert_info.expert_config,
-                )
-
-            if self.config.default_expert_name:
-                self.set_default_expert(self.config.default_expert_name)
+class MultiExpertMixin:
+    """Encapsulates all methods related to multi-expert models."""
 
     def save_pretrained(self, save_directory, **kwargs):
         # need to make sure that config is in sync with the model before saving
@@ -417,7 +397,33 @@ class MultiExpertModel(BaseExpertModel):
             library.add_expert(expert)
         return library
 
-    def as_expert(self):
-        raise NotImplementedError(
-            "This method is not implemented for MultiExpertModel."
-        )
+
+@BaseExpertModel.register("multi_expert_model", config_cls=MultiExpertModelConfig)
+class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
+    """Adds all functions and properties for a multi-expert model."""
+
+    @classmethod
+    def from_model(cls, config, model: torch.nn.Module) -> "MultiExpertModel":
+        """Initialize a multi-expert model from an existing model."""
+        config.base_model = None
+
+        return MultiExpertModel(config, model_object=model)
+
+    def __init__(self, config, **loading_kwargs):
+        super().__init__(config, **loading_kwargs)
+
+        # config about the routing
+        self.selector_config = config.selector_config
+        self.selector_cache = SelectorsCache()
+        self.experts_infos = {}
+
+        if self.config.expert_infos is not None:
+            for expert_info in self.config.expert_infos:
+                expert_info: ExpertInfo
+                self.add_empty_expert(
+                    expert_info.expert_name,
+                    expert_info.expert_config,
+                )
+
+            if self.config.default_expert_name:
+                self.set_default_expert(self.config.default_expert_name)

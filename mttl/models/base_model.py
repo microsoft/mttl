@@ -56,6 +56,9 @@ class BaseExpertModel(torch.nn.Module, Registrable):
         self.load_in_4bit = loading_kwargs.get("load_in_4bit", None) or False
         self.load_in_8bit = loading_kwargs.get("load_in_8bit", None) or False
 
+        if config.base_model is None and model_object is None:
+            raise ValueError("You must provide a model object or a base model name.")
+
         self.model = (
             model_loader_helper(
                 config.base_model,
@@ -70,7 +73,7 @@ class BaseExpertModel(torch.nn.Module, Registrable):
 
         if model_object:
             logger.warning(
-                "You are initializing a model directly from a model object. This is not recommended as it may hurt reproducibility."
+                "You are initializing a model directly from a model object. The same object module will need to be used for re-loading."
             )
 
         self.config = config
@@ -130,10 +133,11 @@ class BaseExpertModel(torch.nn.Module, Registrable):
     def from_pretrained(
         cls,
         model_id: Union[str, os.PathLike],
+        model_object: Optional[torch.nn.Module] = None,
         **model_kwargs: Any,
     ):
         # get model config first
-        model_config = AutoModelConfig.from_pretrained(model_id)
+        model_config: BaseExpertModelConfig = AutoModelConfig.from_pretrained(model_id)
 
         if os.path.isfile(os.path.join(model_id, WEIGHTS_NAME)):
             weights_file = os.path.join(model_id, WEIGHTS_NAME)
@@ -147,6 +151,11 @@ class BaseExpertModel(torch.nn.Module, Registrable):
             model_class = BaseExpertModel.get_class_by_config_class(model_config)
         else:
             model_class = cls
+
+        if model_config.base_model is None and model_object is None:
+            raise ValueError(
+                "Base model name was None in the checkpoint. You must provide a model object."
+            )
 
         model = model_class(model_config, **model_kwargs)
         load_status = model.load_state_dict(

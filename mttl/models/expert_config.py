@@ -21,7 +21,7 @@ CONFIG_NAME = "mttl_config.json"
 
 @dataclass
 class BaseExpertModelConfig(Serializable):
-    base_model: str
+    base_model: str = None
 
     def save_pretrained(self, save_directory, **kwargs):
         """Bare bone save pretrained function that saves the model and config."""
