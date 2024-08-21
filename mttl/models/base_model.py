@@ -165,6 +165,8 @@ class BaseExpertModel(torch.nn.Module, Registrable):
     ):
         input_ids = batch["input_ids"]
         attention_mask = batch["attention_mask"]
+        labels = batch.get("labels", None)
+
         outputs = self.model.forward(input_ids, attention_mask=attention_mask, **kwargs)
 
         if labels is not None:
