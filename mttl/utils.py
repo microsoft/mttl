@@ -144,7 +144,7 @@ def deprecated(message=None):
                 if message
                 else f"{func.__name__}() is deprecated and will be removed in a future version."
             )
-            warn_once(warning_msg, category=DeprecationWarning, stacklevel=2)
+            warn_once(warning_msg)
             return func(*args, **kwargs)
 
         return wrapped
