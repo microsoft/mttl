@@ -7,7 +7,7 @@ from sentence_transformers import SentenceTransformer
 from transformers import T5ForConditionalGeneration, T5Tokenizer
 
 from mttl.models.library.expert_library import DatasetLibrary
-from mttl.models.pl_utils import EfficientCheckpointModule
+from mttl.models.lightning.base_module import EfficientCheckpointModule
 from mttl.models.ranker.adapter_ranker import AdapterRanker
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

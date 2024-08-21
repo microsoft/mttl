@@ -5,7 +5,6 @@ import torch
 
 from mttl.arguments import ExpertConfig
 from mttl.logging import logger
-from mttl.models.expert_model import MultiExpertModel
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import VirtualLocalLibrary
 from mttl.models.library.library_transforms import (
@@ -13,6 +12,7 @@ from mttl.models.library.library_transforms import (
     LibraryTransformConfig,
 )
 from mttl.models.library.utils import get_svd_embedding
+from mttl.models.lightning.expert_module import MultiExpertModule
 from mttl.registrable import Registrable
 
 
@@ -75,7 +75,7 @@ class RandomRetriever(Retriever):
         return resulting_library
 
 
-def get_lora_task_embeddings(module: MultiExpertModel):
+def get_lora_task_embeddings(module: MultiExpertModule):
     """
     Retrieves the task embeddings for the loaded experts.
 
@@ -105,7 +105,7 @@ class LoraSimRetriever(Retriever):
         expert_lib,
         current_task,
         task_expert: Expert,
-        module: MultiExpertModel,
+        module: MultiExpertModule,
         **kwargs,
     ) -> VirtualLocalLibrary:
         expert_lib_copy = self.prepare_transform(expert_lib)

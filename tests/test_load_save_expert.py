@@ -2,7 +2,7 @@ from mttl.models.modifiers.lora import LoRAConfig
 
 
 def test_load_expert_from_checkpoint(tmp_path):
-    from mttl.models.expert_model_hf import ExpertModel, ExpertModelConfig
+    from mttl.models.expert_model import ExpertModel, ExpertModelConfig
     from mttl.models.library.expert_library import LocalExpertLibrary
 
     model = ExpertModel(

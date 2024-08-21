@@ -1,6 +1,6 @@
 from mttl.arguments import MoEExpertConfig
-from mttl.models.expert_model import MoEModel
+from mttl.models.lightning.expert_module import MoEModule
 from projects.modular_llm.train_experts import train_experts
 
 if __name__ == "__main__":
-    train_experts(MoEExpertConfig.parse(), MoEModel)
+    train_experts(MoEExpertConfig.parse(), MoEModule)

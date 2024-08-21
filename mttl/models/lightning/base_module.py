@@ -16,6 +16,7 @@ from transformers.utils import cached_file
 from mttl.logging import logger
 from mttl.models.get_optimizer import get_optimizer
 from mttl.models.get_scheduler import get_scheduler
+from mttl.models.lightning.utils import convert_hps_to_dict
 from mttl.utils import get_checkpoint_path
 
 CHECKPOINT_PATH_IN_HUB = "checkpoint.ckpt"
@@ -28,38 +29,6 @@ def download_from_hub(repo_id) -> str:
     return ExpertLibrary.get_expert_library(repo_id).hf_hub_download(
         repo_id=repo_id, filename=CHECKPOINT_PATH_IN_HUB
     )
-
-
-def convert_hps_to_dict(hparams):
-    hparams_allowed = {}
-    # drop parameters which contain some strange datatypes as fsspec
-    for k, v in hparams.items():
-        v = v.name if isinstance(v, Enum) else v
-        hparams_allowed[k] = v
-    return hparams_allowed
-
-
-class SimpleLogger(pl.loggers.logger.DummyLogger):
-    def __init__(self, output_dir):
-        self.output_file = os.path.join(output_dir, "metrics.json")
-        os.makedirs(output_dir, exist_ok=True)
-
-        if os.path.exists(self.output_file):
-            os.remove(self.output_file)
-
-    def log_metrics(self, metrics, step=None):
-        lines = []
-        for k, v in metrics.items():
-            if isinstance(v, torch.Tensor):
-                v = v.item()
-            lines.append({"name": k, "value": v, "step": step})
-
-        try:
-            with open(self.output_file, "a+") as f:
-                for l in lines:
-                    f.write(json.dumps(l) + "\n")
-        except Exception as e:
-            logger.error(f"Failed to log metrics: {e}")
 
 
 class OnLogCallback:

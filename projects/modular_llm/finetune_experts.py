@@ -13,9 +13,6 @@ from mttl.arguments import FinetuneConfig
 from mttl.callbacks import DownstreamEvalCallback, LiveCheckpointCallback, RougeCallback
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
-from mttl.models.expert_model import ExpertModel as ExpertTrainer
-from mttl.models.expert_model import MoEModel as MoETrainer
-from mttl.models.expert_model import MultiExpertModel
 from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import (
     ExpertLibrary,
@@ -31,6 +28,8 @@ from mttl.models.library.library_transforms import (
     WeightedLinearMergeConfig,
 )
 from mttl.models.library.retrievers import RandomRetriever, SVDEmbeddingRetriever
+from mttl.models.lightning.expert_module import ExpertModule as ExpertModule
+from mttl.models.lightning.expert_module import MoEModule, MultiExpertModule
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.monitors import get_monitors
 from mttl.utils import get_checkpoint_path, remote_login
@@ -314,7 +313,7 @@ def finetune_polylib_full(args: FinetuneConfig, dm):
     )
     # args.router_selector = "poly_router"
     assert args.router_selector is not None
-    module = MoETrainer(**vars(args), device_map="auto")
+    module = MoEModule(**vars(args), device_map="auto")
 
     for n, p in module.named_parameters():
         if "selector" in n:
@@ -327,7 +326,7 @@ def finetune_polylib_full(args: FinetuneConfig, dm):
 @register_finetune_func("polylib_uniform")
 def finetune_polylib_full(args: FinetuneConfig, dm):
     args.router_selector = "uniform"
-    module = MoETrainer(**vars(args), device_map="auto")
+    module = MoEModule(**vars(args), device_map="auto")
 
     # for n, p in module.named_parameters():
     #     if "selector" in n:
@@ -346,7 +345,7 @@ def finetune_polylib_sel(args: FinetuneConfig, dm):
     args.trainable_param_names = "|.*module_logits.*|.*selector.*"
     assert args.router_selector is not None
 
-    module = MoETrainer(**vars(args), device_map="auto")
+    module = MoEModule(**vars(args), device_map="auto")
 
     for n, p in module.named_parameters():
         if "selector" in n:
@@ -368,7 +367,7 @@ def finetune_polylib_full_with_rand_retrieval(args: FinetuneConfig, dm):
 
     # assert args.router_selector == "poly_router"
     assert args.router_selector is not None
-    module = MoETrainer(**vars(args), device_map="auto", expert_library=library)
+    module = MoEModule(**vars(args), device_map="auto", expert_library=library)
 
     for n, p in module.named_parameters():
         if "selector" in n:
@@ -384,7 +383,7 @@ def finetune_private(args: FinetuneConfig, dm):
     Just train an expert from scratch
     """
 
-    module = ExpertTrainer(**vars(args)).to("cuda")
+    module = ExpertModule(**vars(args)).to("cuda")
     return train_module(args, module, dm)
 
 
@@ -400,7 +399,7 @@ def finetune_polylib_full_with_svd_retrieval(args: FinetuneConfig, dm):
 
     # args.router_selector = "poly_router"
     assert args.router_selector is not None
-    module = MoETrainer(**vars(args), device_map="auto", expert_library=library)
+    module = MoEModule(**vars(args), device_map="auto", expert_library=library)
 
     for n, p in module.named_parameters():
         if "selector" in n:
@@ -417,11 +416,11 @@ def finetune_polylib_full_with_svd_retrieval(args: FinetuneConfig, dm):
     """
     assert args.checkpoint is not None, "Please specify a checkpoint"
 
-    # Passing a checkpoint assumes the use of `ExpertTrainer`
+    # Passing a checkpoint assumes the use of `ExpertModule`
     # e.g. for poly-μ and MHR-μ
     ckpt_path = get_checkpoint_path(args.checkpoint)
     expert = load_expert(ckpt_path)
-    module = ExpertTrainer(**vars(expert.training_config))
+    module = ExpertModule(**vars(expert.training_config))
 
     ckpt = torch.load(ckpt_path)
     result = module.load_state_dict(ckpt["state_dict"], strict=False)
@@ -447,7 +446,7 @@ def finetune_joint(args: FinetuneConfig, dm):
     library = HFExpertLibrary(args.library_id)
     expert: Expert = library[args.expert_selection]
     pretrain_args = expert.training_config
-    module = ExpertTrainer(**vars(pretrain_args))
+    module = ExpertModule(**vars(pretrain_args))
     module.load_state_dict(expert.expert_weights)
 
     return train_module(args, module, dm)
@@ -467,11 +466,11 @@ def run_multitask(args: FinetuneConfig):
     args.n_tasks = len(dm._task_names)
 
     if args.checkpoint is not None:
-        # Passing a checkpoint assumes the use of `ExpertTrainer`
+        # Passing a checkpoint assumes the use of `ExpertModule`
         # e.g. for poly-μ and MHR-μ
         ckpt_path = get_checkpoint_path(args.checkpoint)
         expert = load_expert(ckpt_path)
-        module = ExpertTrainer(**vars(expert.training_config))
+        module = ExpertModule(**vars(expert.training_config))
 
         ckpt = torch.load(ckpt_path)
         result = module.load_state_dict(ckpt["state_dict"], strict=False)
@@ -503,12 +502,12 @@ def finetune_polylib_full(args: FinetuneConfig, dm):
         args.trainable_param_names += "|.*module_logits.*|.*selector.*"
     assert args.library_id is None
     args.router_selector = "poly_router"
-    module = MoETrainer(**vars(args), device_map="auto")
+    module = MoEModule(**vars(args), device_map="auto")
     module.to("cuda")
     return train_module(args, module, dm)
 
 
-def train_module(args: FinetuneConfig, module: ExpertTrainer, dm):
+def train_module(args: FinetuneConfig, module: ExpertModule, dm):
     loggers = get_pl_loggers(args)
     callbacks = get_monitors(args)
 

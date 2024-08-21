@@ -471,7 +471,7 @@ class HiddenStateComputer(LibraryTransform):
         default_args=None,
         device="cpu",
     ) -> Expert:
-        from mttl.models.expert_model import ExpertModel, MultiExpertModel
+        from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
 
         if isinstance(library, str):
             library = ExpertLibrary.get_expert_library(library)
@@ -495,8 +495,10 @@ class HiddenStateComputer(LibraryTransform):
 
             if self.config.use_base_model_only and self.config.model is not None:
                 training_config.model = self.config.model
+
             training_config.device_map = "cuda"
-            model = MultiExpertModel(**vars(training_config))
+
+            model = MultiExpertModule(**vars(training_config))
 
             if not self.config.use_base_model_only:
                 model.add_expert_instance(expert, is_default=True)
@@ -529,7 +531,7 @@ class HiddenStateComputer(LibraryTransform):
             for _, batch in pbar:
                 batch = transfer_batch_to_device(batch, device_model)
 
-                if isinstance(model, ExpertModel):
+                if isinstance(model, ExpertModule):
                     model.forward(batch, reduction="none")
                 else:
                     model.forward(
@@ -626,8 +628,8 @@ class PhatgooseTransform(HiddenStateComputer):
         default_args=None,
     ):
         from mttl.arguments import ExpertConfig
-        from mttl.models.expert_model import MultiExpertModel
         from mttl.models.library.utils import train_module
+        from mttl.models.lightning.expert_module import MultiExpertModule
 
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
@@ -692,7 +694,7 @@ class PhatgooseTransform(HiddenStateComputer):
 
             logger.info("Training config: {}".format(vars(training_config)))
 
-            model = MultiExpertModel(**vars(training_config)).to("cuda")
+            model = MultiExpertModule(**vars(training_config)).to("cuda")
             model.add_expert_instance(expert, is_default=True)
 
             # for checksum
@@ -713,9 +715,9 @@ class PhatgooseTransform(HiddenStateComputer):
                 training_config.compute_strategy
                 and training_config.compute_strategy != "deepspeed"
             ):
-                from mttl.models.expert_model import MultiExpertModel
+                from mttl.models.lightning.expert_module import MultiExpertModule
 
-                model_after = MultiExpertModel(**vars(training_config)).to("cuda")
+                model_after = MultiExpertModule(**vars(training_config)).to("cuda")
                 model_after.add_expert_instance(expert, is_default=True)
                 model_after.load_state_dict(torch.load(checkpoint)["state_dict"])
 
@@ -846,12 +848,12 @@ class ArrowTransform(LibraryTransform):
             return base_vector, base_eigval
 
         if base_model is None:
-            from mttl.models.expert_model import MultiExpertModel
+            from mttl.models.lightning.expert_module import MultiExpertModule
 
             an_expert = library[next(iter(library.keys()))]
             training_config = an_expert.training_config
             training_config.model_modifier = None
-            base_model = MultiExpertModel(**vars(training_config))
+            base_model = MultiExpertModule(**vars(training_config))
 
         vectors, eigvals = {}, {}
         for key, base_W in base_model.named_parameters():
@@ -942,9 +944,9 @@ class ArrowTransform(LibraryTransform):
             if base_model is None and not self.config.ab_only:
                 training_config = expert.training_config
                 training_config.model_modifier = None
-                from mttl.models.expert_model import MultiExpertModel
+                from mttl.models.lightning.expert_module import MultiExpertModule
 
-                base_model = MultiExpertModel(**vars(training_config))
+                base_model = MultiExpertModule(**vars(training_config))
 
             # get parameters tied during training
             param_map = get_target_2_source_param_mapping(
@@ -1237,7 +1239,7 @@ class CrossExpertNormComputer(HiddenStateComputer):
         )
 
         from mttl.models.containers import ExpertContainer
-        from mttl.models.expert_model import ExpertModel, MoEModel
+        from mttl.models.lightning.expert_module import ExpertModule, MoEModel
 
         model = MoEModel(**vars(training_config)).to("cuda")
 
@@ -1298,7 +1300,7 @@ class CrossExpertNormComputer(HiddenStateComputer):
         for num_batch, batch in pbar:
             batch = transfer_batch_to_device(batch, device)
 
-            if isinstance(model, ExpertModel):
+            if isinstance(model, ExpertModule):
                 model.forward(batch, reduction="none")
             else:
                 model.forward(

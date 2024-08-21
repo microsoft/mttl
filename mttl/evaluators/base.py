@@ -11,7 +11,7 @@ import torch
 from transformers import StoppingCriteria, StoppingCriteriaList
 
 from mttl.logging import logger
-from mttl.models.expert_model_hf_base import BaseExpertModel
+from mttl.models.base_model import BaseExpertModel
 
 
 def decode(preds, tokenizer, clean_up_tokenization_spaces=True):
@@ -269,9 +269,10 @@ class GenerativeEvaluator(Evaluator):
 
     def generate_for_batch(self, model, batch):
         from mttl.models.expert_model import ExpertModel
-        from mttl.models.expert_model_hf_base import BaseExpertModel
+        from mttl.models.lightning.expert_module import ExpertModule
         from mttl.models.utils import transfer_batch_to_device
 
+        # wrapped model
         if hasattr(model, "module"):
             model = model.module
 
@@ -297,7 +298,7 @@ class GenerativeEvaluator(Evaluator):
         batch = transfer_batch_to_device(batch, device)
 
         with torch.no_grad():
-            if isinstance(model, ExpertModel):
+            if isinstance(model, ExpertModule):
                 predictions = model.generate(
                     **batch,
                     generation_config=model.generation_config,
@@ -305,7 +306,7 @@ class GenerativeEvaluator(Evaluator):
                     output_scores=True,
                     **extra_kwargs,
                 )
-            elif isinstance(model, BaseExpertModel):
+            elif isinstance(model, ExpertModel):
                 predictions = model.generate(
                     **batch,
                     generation_config=model.generation_config,

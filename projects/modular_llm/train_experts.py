@@ -16,14 +16,14 @@ from mttl.callbacks import (
 )
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
-from mttl.models.expert_model import ExpertModel, MoEModel
 from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
+from mttl.models.lightning.expert_module import ExpertModule, MoEModule
 from mttl.models.monitors import get_monitors
 from mttl.utils import generate_random_string, rank_zero_only_and_wait, remote_login
 
 
-def train_experts(args: Args, model_class: Type[ExpertModel]):
+def train_experts(args: Args, model_class: Type[ExpertModule]):
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file
@@ -174,12 +174,12 @@ def train_experts(args: Args, model_class: Type[ExpertModel]):
                 # refresh expert library: so we dont overwrite the readme if the remote has changed.
                 expert_library.refresh_from_remote()
 
-                if isinstance(module, MoEModel):
+                if isinstance(module, MoEModule):
                     with expert_library.batched_commit():
                         for expert_name in module.experts_names:
                             expert = module.get_expert_instance(expert_name)
                             expert_library.add_expert(expert, expert_name)
-                elif isinstance(module, ExpertModel):
+                elif isinstance(module, ExpertModule):
                     expert = module.as_expert()
                     expert_name = (
                         args.expert_name
@@ -194,4 +194,4 @@ def train_experts(args: Args, model_class: Type[ExpertModel]):
 
 
 if __name__ == "__main__":
-    train_experts(ExpertConfig.parse(), ExpertModel)
+    train_experts(ExpertConfig.parse(), ExpertModule)

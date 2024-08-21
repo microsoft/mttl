@@ -27,8 +27,8 @@ from mttl.models.containers.selectors.base import (
     SelectorConfig,
     SelectorsCache,
 )
+from mttl.models.expert_config import AutoModelConfig, BaseExpertModelConfig
 from mttl.models.expert_context import InfoContainer
-from mttl.models.expert_model_hf_config import AutoModelConfig, BaseExpertModelConfig
 from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.llama_patch import replace_attn_with_flash_attn
@@ -67,6 +67,11 @@ class BaseExpertModel(torch.nn.Module, Registrable):
             if model_object is None
             else model_object
         )
+
+        if model_object:
+            logger.warning(
+                "You are initializing a model directly from a model object. This is not recommended as it may hurt reproducibility."
+            )
 
         self.config = config
         self.loading_kwargs = loading_kwargs

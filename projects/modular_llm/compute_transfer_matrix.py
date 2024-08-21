@@ -18,9 +18,9 @@ from mttl.evaluators.evaluators import (
     ExtendedRougeEvaluator,
 )
 from mttl.logging import TableLogger, init_wandb_logger, logger, setup_logging
-from mttl.models.expert_model import ExpertModel
 from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
+from mttl.models.lightning.expert_module import ExpertModule
 from mttl.utils import remote_login
 from mttl.vllm_engines.engines import free_memory
 
@@ -33,7 +33,7 @@ class TransferMatrixConfig(EvaluationConfig):
 
 def eval_expert_on_task(
     task,
-    module_constructor: Union[Callable, ExpertModel],
+    module_constructor: Union[Callable, ExpertModule],
     expert: Expert,
     evaluator_train=None,
     evaluator_valid=None,
@@ -44,9 +44,9 @@ def eval_expert_on_task(
     logger.info(f"Evaluating perf for {task}")
 
     if expert is not None:
-        model_copy: ExpertModel = (
+        model_copy: ExpertModule = (
             module_constructor
-            if isinstance(module_constructor, ExpertModel)
+            if isinstance(module_constructor, ExpertModule)
             else module_constructor()
         )
         assert all(
@@ -61,7 +61,7 @@ def eval_expert_on_task(
     if module is None:
         module = (
             module_constructor
-            if isinstance(module_constructor, ExpertModel)
+            if isinstance(module_constructor, ExpertModule)
             else module_constructor()
         )
 
@@ -85,7 +85,7 @@ def eval_expert_on_task(
 
 def eval_all_experts_on_task(
     task_eval_on,
-    module_constructor: Union[Callable, ExpertModel],
+    module_constructor: Union[Callable, ExpertModule],
     expert_lib,
     evaluator: Evaluator = None,
     only_diagonal=False,
@@ -209,7 +209,7 @@ def produce_transfer_matrix(
         evaluator: Evaluator = prepare_evaluator(
             args, args.dataset, tasks=task_eval_on, split=args.transfer_matrix_split
         )
-        module = ExpertModel(**vars(args))
+        module = ExpertModule(**vars(args))
 
         log_row_task = eval_all_experts_on_task(
             task_eval_on,

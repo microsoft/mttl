@@ -49,7 +49,7 @@ class LogLikeEvaluator(Evaluator):
         output_path=None,
     ):
         from mttl.models.expert_model import ExpertModel
-        from mttl.models.expert_model_hf_base import BaseExpertModel
+        from mttl.models.lightning.expert_module import ExpertModule
         from mttl.models.utils import transfer_batch_to_device
 
         dataloader = self.get_dataloader(split, subsample, shuffle=shuffle)
@@ -80,10 +80,10 @@ class LogLikeEvaluator(Evaluator):
             batch = transfer_batch_to_device(batch, device)
 
             with torch.no_grad():
-                if isinstance(model, ExpertModel):
+                if isinstance(model, ExpertModule):
                     # lightning module
                     loss_per_option = model.forward(batch, reduction="none")
-                elif isinstance(model, BaseExpertModel):
+                elif isinstance(model, ExpertModel):
                     # standard no lightning evaluation
                     loss_per_option, _ = model.forward(**batch, reduction="none")
                 else:

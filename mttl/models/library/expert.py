@@ -31,11 +31,7 @@ class ExpertInfo(Serializable):
         """Returns the expert model associated with the expert. Tries to get it
         from training_config if expert_model is None for back-compatibility.
         """
-        if self.expert_model is not None:
-            return self.expert_model
-        if self.training_config is not None:
-            return self.training_config.model
-        raise ValueError("No model found in expert info!")
+        return self.expert_model or getattr(self.training_config, "model", None)
 
     @property
     def dataset(self):
@@ -145,8 +141,8 @@ def load_expert(
 
     from huggingface_hub import hf_hub_download, list_repo_files
 
-    from mttl.models.expert_model_hf_base import WEIGHTS_NAME
-    from mttl.models.pl_utils import CHECKPOINT_PATH_IN_HUB
+    from mttl.models.base_model import WEIGHTS_NAME
+    from mttl.models.lightning.base_module import CHECKPOINT_PATH_IN_HUB
 
     if expert_library is not None and expert_path in expert_library:
         return expert_library[expert_path]
@@ -179,7 +175,7 @@ def load_expert_from_pl_checkpoint(
 ):
     import os
 
-    from mttl.models.pl_utils import download_from_hub
+    from mttl.models.lightning.utils import download_from_hub
 
     if os.path.isfile(expert_path) or os.path.isdir(expert_path):
         expert_checkpoint = get_checkpoint_path(expert_path)
@@ -251,7 +247,7 @@ def load_expert_from_hf_checkpoint(
     # load the expert weights
     import os
 
-    from mttl.models.expert_model_hf import ExpertModel
+    from mttl.models.expert_model import ExpertModel
 
     logger.info(f"Loading expert from {expert_path}...")
 

@@ -1,18 +1,16 @@
 import os
 import sys
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
-
 from pytorch_lightning import Trainer
 
 from mttl.arguments import ExpertConfig
 from mttl.callbacks import LiveCheckpointCallback
 from mttl.logging import get_pl_loggers
-from mttl.models.expert_model import ExpertModel as ExpertTrainer
+from mttl.models.lightning.expert_module import ExpertModule
 from mttl.models.monitors import get_monitors
 
 
-def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
+def train_module(args: ExpertConfig, module: ExpertModule, dm):
     loggers = get_pl_loggers(args)
     callbacks = get_monitors(args)
 

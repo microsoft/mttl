@@ -17,7 +17,7 @@ from mttl.callbacks import LiveCheckpointCallback, NanoMMLUCallback, RougeCallba
 from mttl.callbacks_hf import DownstreamEvalCallback
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
-from mttl.models.expert_model_hf import (
+from mttl.models.expert_model import (
     BaseExpertModel,
     BaseExpertModelConfig,
     SingleExpertModel,

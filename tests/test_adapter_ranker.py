@@ -1,10 +1,10 @@
 # unit test for adapter_ranker
 import pytest
 
-from mttl.arguments import ExpertConfig, RankerConfig
+from mttl.arguments import ExpertConfig, MultiExpertConfig, RankerConfig
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
 from mttl.models.containers.selectors.base import TaskPredictorSelector
-from mttl.models.expert_model import MultiExpertConfig, MultiExpertModel
+from mttl.models.lightning.expert_module import MultiExpertModule
 from mttl.models.modifiers.lora import LoRAConfig
 from mttl.models.ranker.classifier_ranker import SentenceTransformerClassifier
 from mttl.models.ranker.clip_ranker import CLIPRanker
@@ -55,7 +55,7 @@ def test_clip_routing(tiny_flan_id):
         for_generation=True,
     )
 
-    module = MultiExpertModel(**config.asdict())
+    module = MultiExpertModule(**config.asdict())
     module.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
     module.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
     batch = next(iter(data_module.val_dataloader()))
@@ -85,7 +85,7 @@ def test_classifier_routing(tiny_flan_id):
         for_generation=True,
     )
 
-    module = MultiExpertModel(**config.asdict())
+    module = MultiExpertModule(**config.asdict())
     module.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
     module.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
 
@@ -110,7 +110,7 @@ def test_expert_model_generate(tmp_path, create_dummy_expert, flan_data_module):
     config.output_dir = tmp_path
     config.model = "EleutherAI/gpt-neo-125m"
 
-    module = MultiExpertModel(**config.asdict())
+    module = MultiExpertModule(**config.asdict())
 
     # create random Lora
     expert1 = create_dummy_expert(config, "module1")

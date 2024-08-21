@@ -14,13 +14,12 @@ from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators import MMLUEvaluator
 from mttl.evaluators.base import compute_task_aggregation
 from mttl.logging import logger
-from mttl.models.expert_model import ExpertModel, MultiExpertModel
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.library.library_transforms import (
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
 )
-from mttl.vllm_engines.engines import LLMEngineMMLU, free_memory
+from mttl.models.lightning.expert_module import ExpertTrainer, MultiExpertModel
 
 
 def default_l1_regularization(weights):

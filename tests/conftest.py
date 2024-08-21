@@ -11,9 +11,9 @@ from transformers.models.llama.modeling_llama import LlamaForCausalLM
 from mttl.arguments import ExpertConfig, MultiExpertConfig
 from mttl.dataloader.flan_utils import download_flan
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
-from mttl.models.expert_model import MultiExpertModel
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import DatasetLibrary
+from mttl.models.lightning.expert_module import MultiExpertModule
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.lora import LoRAConfig
 
@@ -179,7 +179,7 @@ def create_dummy_expert(make_tiny_llama):
             # use tiny llama by default
             kwargs["model_object"] = make_tiny_llama()
 
-        model = MultiExpertModel(**config.asdict(), **kwargs)
+        model = MultiExpertModule(**config.asdict(), **kwargs)
         expert = model.add_empty_expert(
             exp_name, ModifierConfig.from_training_config(config)
         )
