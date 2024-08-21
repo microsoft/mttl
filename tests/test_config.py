@@ -90,7 +90,7 @@ def test_config_to_json(InheritFromModifierArgs):
     assert data["optimizer"] == "adafactor"
     assert data["dataset"] == "t0"
     assert data["model"] == "t5-large"
-    assert data["args_class"] == "TestConfig"
+    assert data["class_name"] == "test_config.TestConfig"
 
 
 def test_config_was_override_from_file(tmp_path, SimpleArgs):
@@ -148,14 +148,17 @@ def test_auto_modifier_config():
 
 
 def test_dump_load_lora_config():
-    from mttl.models.modifiers.base import ModifierConfig
+    from mttl.models.modifiers.base import (
+        AutoModifierConfig,
+        LoRAConfig,
+        ModifierConfig,
+    )
 
     data = {
-        "__model_modifier__": "lora",
         "lora_rank": 12,
         "lora_dropout": 0.52,
     }
-    lora_config = ModifierConfig.fromdict(data)
+    lora_config = LoRAConfig.fromdict(data)
 
     from mttl.models.modifiers.lora import LoRAConfig
 
@@ -163,12 +166,15 @@ def test_dump_load_lora_config():
     assert lora_config.lora_rank == 12
     assert lora_config.lora_dropout == 0.52
 
+    load_config = AutoModifierConfig.fromdict(lora_config.asdict())
+    assert type(load_config) == LoRAConfig
+
 
 def test_dump_load_selector_config():
-    from mttl.models.containers.selectors.base import SelectorConfig
+    from mttl.models.containers.selectors.base import AutoSelectorConfig
     from mttl.models.containers.selectors.moe_selector import MOERKHSSelectorConfig
 
     dump = MOERKHSSelectorConfig(emb_dim=12345).asdict()
-    test = SelectorConfig.fromdict(dump)
+    test = AutoSelectorConfig.fromdict(dump)
     assert test.emb_dim == 12345
     assert type(test) == MOERKHSSelectorConfig

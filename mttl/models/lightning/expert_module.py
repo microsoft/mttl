@@ -206,6 +206,8 @@ class MultiExpertModule(ExpertModule):
     delegate_methods = [
         "generate",
         "generation_config",
+        "experts_containers",
+        "from_pretrained_library",
         "add_empty_expert",
         "add_expert_instance",
         "get_expert_instance",
