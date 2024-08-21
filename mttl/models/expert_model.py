@@ -781,6 +781,53 @@ class ExpertModelSimPO(EfficientCheckpointModule):
         return loss.mean()
 
 
+from functools import wraps
+
+
+def gpu_memory_usage_decorator(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # 清除GPU缓存，确保测量准确
+        torch.cuda.empty_cache()
+
+        # 获取函数执行前的GPU内存使用情况
+        memory_allocated_before = torch.cuda.memory_allocated(device)
+        memory_reserved_before = torch.cuda.memory_reserved(device)
+        print(
+            f"[Before] Memory allocated: {memory_allocated_before / (1024 ** 2):.2f} MB"
+        )
+        print(
+            f"[Before] Memory reserved: {memory_reserved_before / (1024 ** 2):.2f} MB"
+        )
+
+        # 执行目标函数
+        result = func(*args, **kwargs)
+
+        # 获取函数执行后的GPU内存使用情况
+        memory_allocated_after = torch.cuda.memory_allocated(device)
+        memory_reserved_after = torch.cuda.memory_reserved(device)
+        print(
+            f"[After] Memory allocated: {memory_allocated_after / (1024 ** 2):.2f} MB"
+        )
+        print(f"[After] Memory reserved: {memory_reserved_after / (1024 ** 2):.2f} MB")
+
+        # 计算内存使用的差值
+        memory_allocated_diff = memory_allocated_after - memory_allocated_before
+        memory_reserved_diff = memory_reserved_after - memory_reserved_before
+        print(
+            f"Memory allocated difference: {memory_allocated_diff / (1024 ** 2):.2f} MB"
+        )
+        print(
+            f"Memory reserved difference: {memory_reserved_diff / (1024 ** 2):.2f} MB"
+        )
+
+        return result
+
+    return wrapper
+
+
 class ExpertModelDPO(EfficientCheckpointModule):
 
     def __init__(self, preference_model, ref_expert_model, **kwargs):
@@ -800,6 +847,14 @@ class ExpertModelDPO(EfficientCheckpointModule):
         prompt_prefered_mask = batch["prompt_prefered_mask"]
         prompt_disprefered_mask = batch["prompt_disprefered_mask"]
 
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Measure GPU memory before forward pass
+        memory_allocated_before = torch.cuda.memory_allocated(device)
+        memory_reserved_before = torch.cuda.memory_reserved(device)
+
+        # logits = self.preference_model.model.forward(prompt_prefered_ids).logits
+
+        # loss = torch.mean(logits)
         # original model
         model_prefered_log_prob = get_log_prob(
             self.preference_model.model.forward(
@@ -830,6 +885,39 @@ class ExpertModelDPO(EfficientCheckpointModule):
             labels=prompt_disprefered_ids,
         )
 
+        # Measure GPU memory after forward pass
+        memory_allocated_after = torch.cuda.memory_allocated(device)
+        memory_reserved_after = torch.cuda.memory_reserved(device)
+
+        # Calculate the difference in memory usage
+        memory_allocated_diff = memory_allocated_after - memory_allocated_before
+        memory_reserved_diff = memory_reserved_after - memory_reserved_before
+
+        print(
+            f"Memory allocated before forward pass: {memory_allocated_before / (1024 ** 2):.2f} MB"
+        )
+        print(
+            f"Memory allocated after forward pass: {memory_allocated_after / (1024 ** 2):.2f} MB"
+        )
+        print(
+            f"Memory allocated difference: {memory_allocated_diff / (1024 ** 2):.2f} MB"
+        )
+
+        print(
+            f"Memory reserved before forward pass: {memory_reserved_before / (1024 ** 2):.2f} MB"
+        )
+        print(
+            f"Memory reserved after forward pass: {memory_reserved_after / (1024 ** 2):.2f} MB"
+        )
+        print(
+            f"Memory reserved difference: {memory_reserved_diff / (1024 ** 2):.2f} MB"
+        )
+
+        loss = -F.logsigmoid(
+            self.beta * (model_prefered_log_prob - model_disprefered_log_prob)
+            - (ref_prefered_log_prob - ref_disprefered_log_prob)
+        ).mean()
+
         loss, reward_accuracies, reward_margins = calculate_DPO_loss(
             model_prefered_log_prob,
             model_disprefered_log_prob,
@@ -839,20 +927,21 @@ class ExpertModelDPO(EfficientCheckpointModule):
         )
         self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
 
-        self.log(
-            "train/reward_accuracies",
-            reward_accuracies,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-        )
-        self.log(
-            "train/reward_margins",
-            reward_margins,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-        )
+        # self.log(
+        #     "train/reward_accuracies",
+        #     reward_accuracies,
+        #     on_step=True,
+        #     on_epoch=True,
+        #     prog_bar=True,
+        # )
+        # self.log(
+        #     "train/reward_margins",
+        #     reward_margins,
+        #     on_step=True,
+        #     on_epoch=True,
+        #     prog_bar=True,
+        # )
+        # clear the gpu memory
 
         return loss
 
