@@ -127,7 +127,7 @@ def test_expert_selector_with_poly_task_routing(
     monkeypatch.setenv("COALESCED_LORA_CONTAINER", str(is_coalesced))
 
     seed_everything(0)
-    config: Config = tmp_multi_exp_config
+    config: MultiExpertConfig = tmp_multi_exp_config
     config.router_selector = "poly_router"
 
     # Tasks need to be specified to the selector to perform routing
@@ -209,7 +209,7 @@ def test_expert_selector_with_poly_task_routing(
 
 def test_expert_selector_with_task_name_routing(tmp_multi_exp_config):
     seed_everything(0)
-    config: Config = tmp_multi_exp_config
+    config: MultiExpertConfig = tmp_multi_exp_config
 
     config.router_selector = "task_selector"
     exp1 = create_dummy_expert(config, "exp1")

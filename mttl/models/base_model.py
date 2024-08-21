@@ -157,7 +157,7 @@ class BaseExpertModel(torch.nn.Module, Registrable):
                 "Base model name was None in the checkpoint. You must provide a model object."
             )
 
-        model = model_class(model_config, **model_kwargs)
+        model = model_class(model_config, model_object=model_object, **model_kwargs)
         load_status = model.load_state_dict(
             torch.load(weights_file, weights_only=True), strict=False
         )
