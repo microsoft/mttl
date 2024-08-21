@@ -337,6 +337,9 @@ class MultiExpertModel(BaseExpertModel):
         # refresh current selector config
         self.selector_config = MultiSelectorConfig()
         for modifier_name, selectors in self.selectors.items():
+            if len(selectors) == 0:
+                continue
+
             selector_config = selectors[0].config
             self.selector_config[modifier_name] = selector_config
 
