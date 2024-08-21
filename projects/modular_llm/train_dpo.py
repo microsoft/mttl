@@ -107,14 +107,13 @@ def run_multitask(args: ExpertConfig):
         ref_model = model_class(
             **vars(args), tokenizer=dm.tokenizer, expert_library=expert_library
         )
+        # eval mode
+        ref_model.eval()
         module = ExpertModelDPO(
             **vars(args), preference_model=model, ref_expert_model=ref_model
         )
     elif args.rl_training == "simpo":
         args.trainable_param_names = "^(?=.*preference_model)(?=.*prototypes).*"
-        model = model_class(
-            **vars(args), tokenizer=dm.tokenizer, expert_library=expert_library
-        )
         module = ExpertModelSimPO(**vars(args), preference_model=model)
     else:
         module = model
