@@ -40,6 +40,13 @@ class ExpertInfo(Serializable):
 
     @property
     def modifier_name(self):
+        if self.expert_config is None:
+            # fallback in the training config
+            logger.warning(
+                "No expert config found for this expert, this is probably a legacy checkpoint, and will be deprecated."
+            )
+
+            return getattr(self.training_config, "modifier_name", None)
         return self.expert_config.modifier_name
 
 

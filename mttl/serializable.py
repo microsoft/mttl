@@ -13,7 +13,10 @@ class Serializable:
 
     @classmethod
     def fromdict(cls, data: Dict[str, Any]) -> Type:
-        data_ = {}
+        from copy import deepcopy
+        from typing import get_args, get_origin
+
+        data = deepcopy(data)
         for field in dataclasses.fields(cls):
             if field.name not in data and field.default is dataclasses.MISSING:
                 raise ValueError(
@@ -23,22 +26,30 @@ class Serializable:
                 # field is not in data
                 continue
 
-            if data[field.name] is None:
-                data_[field.name] = None
+            value = data[field.name]
+            if value is None:
                 continue
 
             # handle the case of a config
             if hasattr(field.type, "fromdict"):
-                data_[field.name] = field.type.fromdict(data[field.name])
+                data[field.name] = field.type.fromdict(data[field.name])
             # handle the case of a list of configs
-            elif field.type == List and hasattr(field.type.__args__[0], "fromdict"):
-                data_[field.name] = [
-                    field.type.__args__[0].fromdict(value) for value in data[field.name]
+            elif get_origin(field.type) == list and hasattr(
+                get_args(field.type)[0], "fromdict"
+            ):
+                data[field.name] = [
+                    get_args(field.type)[0].fromdict(value)
+                    for value in data[field.name]
                 ]
             # simple value
+            elif get_origin(field.type) == dict and hasattr(
+                get_args(field.type)[0], "asdict"
+            ):
+                for k, v in value.items():
+                    data[field.name][k] = v.asdict()
             else:
-                data_[field.name] = data.get(field.name, field.default)
-        return cls(**data_)
+                data[field.name] = data.get(field.name, field.default)
+        return cls(**data)
 
     @classmethod
     def from_dict(cls, data) -> Type:
@@ -56,6 +67,8 @@ class Serializable:
         Returns:
             A dictionary representation of the config.
         """
+        from typing import get_args, get_origin
+
         data = {}
         for field in dataclasses.fields(self):
             if skip_fields and field.name in skip_fields:
@@ -67,13 +80,27 @@ class Serializable:
                 continue
 
             value = getattr(self, field.name)
-            if value is not None and hasattr(value, "asdict"):
+            if value is None:
+                data[field.name] = None
+                continue
+
+            if hasattr(value, "asdict"):
                 data[field.name] = value.asdict()
-            elif field.type == List and hasattr(field.type.__args__[0], "asdict"):
-                for i, inner_value in enumerate(value):
-                    data[field.name][i] = inner_value.asdict()
+            elif get_origin(field.type) == list and hasattr(
+                get_args(field.type)[0], "asdict"
+            ):
+                data[field.name] = []
+                for inner_value in value:
+                    data[field.name].append(inner_value.asdict())
+            elif get_origin(field.type) == dict and hasattr(
+                get_args(field.type)[0], "asdict"
+            ):
+                data[field.name] = {}
+                for k, v in value.items():
+                    data[field.name][k] = v.asdict()
             else:
                 data[field.name] = value
+
         data["class_name"] = f"{self.__module__}.{self.__class__.__name__}"
         return data
 

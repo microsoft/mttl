@@ -70,12 +70,6 @@ class ExpertModel(BaseExpertModel):
 class MultiExpertMixin:
     """Encapsulates all methods related to multi-expert models."""
 
-    def save_pretrained(self, save_directory, **kwargs):
-        # need to make sure that config is in sync with the model before saving
-        self.config.expert_infos = list(self.experts_infos.values())
-        self.config.selector_config = self.selector_config
-        super().save_pretrained(save_directory, **kwargs)
-
     @property
     def experts_names(self):
         return list(self.experts_infos.keys())
@@ -409,6 +403,12 @@ class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
         config.base_model = None
 
         return MultiExpertModel(config, model_object=model)
+
+    def save_pretrained(self, save_directory, **kwargs):
+        # need to make sure that config is in sync with the model before saving
+        self.config.expert_infos = list(self.experts_infos.values())
+        self.config.selector_config = self.selector_config
+        super().save_pretrained(save_directory, **kwargs)
 
     def __init__(self, config, **loading_kwargs):
         super().__init__(config, **loading_kwargs)

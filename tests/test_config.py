@@ -181,3 +181,28 @@ def test_dump_load_selector_config():
     test = AutoSelectorConfig.fromdict(dump)
     assert test.emb_dim == 12345
     assert type(test) == MOERKHSSelectorConfig
+
+
+def test_asdict_list(tmp_path):
+    """Test dumping config with a list of Serializable."""
+    from mttl.models.expert_model import MultiExpertModelConfig
+    from mttl.models.library.expert import ExpertInfo
+
+    e1 = ExpertInfo(
+        expert_name="a",
+        expert_config=None,
+        training_config=None,
+    )
+    e2 = ExpertInfo(
+        expert_name="b",
+        expert_config=None,
+        training_config=None,
+    )
+    MultiExpertModelConfig(
+        selector_config=None,
+        expert_infos=[e1, e2],
+    ).save_pretrained(tmp_path)
+
+    config = MultiExpertModelConfig.from_pretrained(tmp_path)
+    assert config.expert_infos[0].expert_name == "a"
+    assert config.expert_infos[0].expert_name == "b"
