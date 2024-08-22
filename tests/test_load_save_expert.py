@@ -42,5 +42,5 @@ def test_load_model_inited_from_model(tmp_path, tiny_llama):
 
     reloaded = MultiExpertModel.from_pretrained(tmp_path, model_object=tiny_llama)
     assert isinstance(reloaded.selector_config, PolySelectorConfig)
-    assert len(reloaded.expert_names) == 1
-    assert "b" in reloaded.expert_names
+    assert len(reloaded.experts_names) == 1
+    assert "b" in reloaded.experts_names
