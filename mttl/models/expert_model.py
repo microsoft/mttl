@@ -435,6 +435,7 @@ class MoEModelConfig(BaseExpertModelConfig):
     library_id: str = None
     moe_num_experts: int = 1
     selector_config: AutoSelectorConfig = None
+    modifier_config: SkilledLoRAConfig = None
 
 
 @BaseExpertModel.register("moe_model", config_cls=MoEModelConfig)
@@ -443,6 +444,7 @@ class MoEModel(BaseExpertModel, MultiExpertMixin):
         super().__init__(config, **kwargs)
 
         # config about the routing
+        self.modifier_config = config.modifier_config
         self.selector_config = config.selector_config
         self.selector_cache = SelectorsCache()
         self.experts_infos = {}
@@ -452,14 +454,14 @@ class MoEModel(BaseExpertModel, MultiExpertMixin):
                 # Adding a Skilled LoRA with 1 skill.
                 exp_config = SkilledLoRAConfig(
                     n_skills=1,
-                    modify_layers=self.hparams.modify_layers,
-                    modify_modules=self.hparams.modify_modules,
-                    lora_alpha=self.hparams.lora_alpha,
-                    lora_dropout=self.hparams.lora_dropout,
-                    lora_rank=self.hparams.lora_rank,
+                    modify_layers=self.modifier_config.modify_layers,
+                    modify_modules=self.modifier_config.modify_modules,
+                    lora_alpha=self.modifier_config.lora_alpha,
+                    lora_dropout=self.modifier_config.lora_dropout,
+                    lora_rank=self.modifier_config.lora_rank,
                     lora_init_b_random=True,
-                    n_splits=self.hparams.n_splits,
-                    phi_2_align_heads=self.hparams.phi_2_align_heads,
+                    n_splits=self.modifier_config.n_splits,
+                    phi_2_align_heads=self.modifier_config.phi_2_align_heads,
                 )
                 self.add_empty_expert(f"e{i}", exp_config)
 

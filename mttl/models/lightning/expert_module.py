@@ -246,6 +246,10 @@ class MoEModule(MultiExpertModule):
 
         config = MoEModelConfig(
             base_model=self.training_config.model,
+            moe_num_experts=self.training_config.moe_num_experts,
+            modifier_config=SkilledLoRAConfig.from_training_config(
+                self.training_config
+            ),
             selector_config=selector_config,
         )
         self.expert_model = MoEModel(

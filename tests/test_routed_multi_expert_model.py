@@ -106,7 +106,7 @@ def test_add_expert_with_action_merge(tmp_multi_exp_config, monkeypatch):
 
     # Test Base Llama model
     output = module(**batch)
-    assert np.allclose(output.item(), 15.2, atol=0.1)
+    assert np.allclose(output.loss.item(), 15.2, atol=0.1)
 
 
 def nonzero_B_init(model):
@@ -160,12 +160,12 @@ def test_expert_selector_with_poly_task_routing(
 
     # BASE MODEL FWD BASS (because all Bs are == 0, so functially same as backbone)
     output = module(**batch)
-    assert np.allclose(output.item(), 13.625 if is_coalesced else 15.62, atol=0.1)
+    assert np.allclose(output.loss.item(), 13.625 if is_coalesced else 15.6, atol=0.1)
 
     # Now let's change the adapter params, and also the function parameterized by the model
     nonzero_B_init(module)
     output = module(**batch)
-    assert np.allclose(output.item(), 19.0 if is_coalesced else 18.375, atol=0.1)
+    assert np.allclose(output.loss.item(), 19.0 if is_coalesced else 18.4, atol=0.1)
 
     """ Multi-Head Routing Test """
     # NOTE: We need to add SkilledLoRAs instead of standard LoRAs
@@ -186,11 +186,10 @@ def test_expert_selector_with_poly_task_routing(
     assert module.hparams.model_modifier == None
     module.add_experts_from_dict(module_dict, action="route")
     nonzero_B_init(module)
-
     output = module(**batch)
 
     # Because routing is initialized to uniform, should give same result
-    assert np.allclose(output.item(), 19.12 if is_coalesced else 19.12, atol=0.1)
+    assert np.allclose(output.loss.item(), 19.0 if is_coalesced else 19.12, atol=0.1)
 
     # Now let's change the routing, to make sure the output also changes
     for mod in module.modules():
@@ -199,7 +198,7 @@ def test_expert_selector_with_poly_task_routing(
             mod.module_logits.data[:, -1] = 999
 
     output = module(**batch)
-    assert np.allclose(output.item(), 20.375 if is_coalesced else 19.875, atol=0.1)
+    assert np.allclose(output.loss.item(), 20.375 if is_coalesced else 19.875, atol=0.1)
 
     # Finally, Test invalid tasks
     batch["task_names"][-1] = "task_10"
@@ -243,7 +242,7 @@ def test_expert_selector_with_task_name_routing(tmp_multi_exp_config):
 
     # Test Base Llama model
     output = module(**batch)
-    assert np.allclose(output.item(), 12.3125, atol=0.1)
+    assert np.allclose(output.loss.item(), 12.3125, atol=0.1)
 
 
 def test_expert_selector_with_poly_routing(tmp_multi_exp_config):
@@ -281,7 +280,7 @@ def test_expert_selector_with_poly_routing(tmp_multi_exp_config):
 
     # Test Base Llama model
     output = module(**batch)
-    assert np.allclose(output.item(), 12.3125, atol=0.1)
+    assert np.allclose(output.loss.item(), 12.3125, atol=0.1)
 
     # check the get_router_weights function
     weights = {}
@@ -318,7 +317,7 @@ def test_expert_selector_with_poly_routing(tmp_multi_exp_config):
     assert selector.module_logits_dict["mod2"].item() == 0.0
 
     output = module(**batch)
-    assert np.allclose(output.item(), 12.3125, atol=0.1)
+    assert np.allclose(output.loss.item(), 12.3125, atol=0.1)
 
     weights = {}
     for _, selector_dict in module.selector_cache.items():
@@ -345,8 +344,8 @@ def test_expert_selector_with_moe_routing_soft(mocker, tmp_moe_exp_config, dummy
 
     # Test Base Llama model
     spy = mocker.spy(container.selector, "forward")
-    output = module(dummy_batch)
-    assert np.allclose(output.item(), 18, atol=0.1)
+    output = module(**dummy_batch)
+    assert np.allclose(output.loss.item(), 18, atol=0.1)
     assert container.selector.total_calls_per_forward == 1
 
     assert spy.call_count == 1
@@ -373,8 +372,8 @@ def test_expert_selector_with_moe_routing_soft_granularity(
     assert len(container.selector.views) == 71
     assert container.selector.top_k == -1
     # Test Base Llama model
-    output = module(dummy_batch)
-    assert np.allclose(output.item(), 18.1, atol=0.1)
+    output = module(**dummy_batch)
+    assert np.allclose(output.loss.item(), 18.1, atol=0.1)
     assert container.selector.total_calls_per_forward == 72
 
     config: MultiExpertConfig = tmp_moe_exp_config
@@ -408,8 +407,8 @@ def test_expert_selector_with_moe_routing_soft_coalesced(
 
     # Test Base Llama model
     spy = mocker.spy(container.selector, "forward")
-    output = module(dummy_batch)
-    assert np.allclose(output.item(), 18, atol=0.1)
+    output = module(**dummy_batch)
+    assert np.allclose(output.loss.item(), 18, atol=0.1)
     assert container.selector.total_calls_per_forward == 1
 
     assert spy.call_count == 1
@@ -436,8 +435,8 @@ def test_expert_selector_with_moe_routing_hard(mocker, tmp_moe_exp_config, dummy
 
     # Test Base Llama model
     spy = mocker.spy(container.selector, "forward")
-    output = module(dummy_batch)
-    assert np.allclose(output.item(), 18, atol=0.1)
+    output = module(**dummy_batch)
+    assert np.allclose(output.loss.item(), 18, atol=0.1)
     assert container.selector.total_calls_per_forward == 1
 
     assert spy.call_count == 1
@@ -480,13 +479,13 @@ def test_expert_selector_with_moe_clown_routing_soft_coalesced(
                 sub_mod.overwrite_prototypes(protos)
 
     init_proto(1.0)
-    output = module(bigger_dummy_batch)
+    output = module(**bigger_dummy_batch)
     entropy_uniform = container.selector.metric_logger.meters["ent_uniform"].avg
     actual_entropy = container.selector.metric_logger.meters["ent_routing"].avg
     assert np.allclose(entropy_uniform, actual_entropy, atol=0.1)
 
     init_proto(random=True)
-    output = module(bigger_dummy_batch)
+    output = module(**bigger_dummy_batch)
     entropy_uniform = container.selector.metric_logger.meters["ent_uniform"].avg
     actual_entropy = container.selector.metric_logger.meters["ent_routing"].avg
     assert actual_entropy < entropy_uniform

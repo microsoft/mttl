@@ -566,6 +566,12 @@ class MoEExpertConfig(MultiExpertConfig):
     moe_num_experts: int = 8
     init_from_scratch: bool = True
 
+    @property
+    def modifier_config(self):
+        from mttl.models.modifiers.lora import SkilledLoRAConfig
+
+        return SkilledLoRAConfig.from_training_config(self)
+
 
 @dataclass
 class RankerConfig(TrainingArgs, SelectorArgs):
