@@ -205,4 +205,4 @@ def test_asdict_list(tmp_path):
 
     config = MultiExpertModelConfig.from_pretrained(tmp_path)
     assert config.expert_infos[0].expert_name == "a"
-    assert config.expert_infos[0].expert_name == "b"
+    assert config.expert_infos[1].expert_name == "b"

@@ -49,6 +49,10 @@ class Serializable:
                     data[field.name][k] = v.asdict()
             else:
                 data[field.name] = data.get(field.name, field.default)
+
+        # if data has a class_name, remove it, this is only for serialization and is automatically removed by AutoSerializable
+        # but when the user uses this method directly from a child Serializable class, we need to remove it manually
+        data.pop("class_name", None)
         return cls(**data)
 
     @classmethod
