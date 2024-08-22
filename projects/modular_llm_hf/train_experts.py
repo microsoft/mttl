@@ -14,14 +14,15 @@ from transformers.trainer import TRAINING_ARGS_NAME
 
 from mttl.arguments import Args, DataArgs, ExpertConfig, ModifierArgs
 from mttl.datamodule.base import get_datamodule
-from mttl.logging import get_pl_loggers, logger, setup_logging
+from mttl.logging import logger, setup_logging
 from mttl.models.expert_model import (
     BaseExpertModel,
     BaseExpertModelConfig,
-    SingleExpertModel,
-    SingleExpertModelConfig,
+    ExpertModel,
+    ExpertModelConfig,
 )
 from mttl.models.hf.callbacks import DownstreamEvalCallback
+from mttl.models.hf.trainer import ExpertModelTrainer
 from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
 from mttl.models.lightning.callbacks import (
@@ -32,34 +33,6 @@ from mttl.models.lightning.callbacks import (
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.monitors import get_monitors
 from mttl.utils import generate_random_string, rank_zero_only_and_wait, remote_login
-
-
-class ExpertModelTrainer(Trainer):
-    LOG_HISTORY_NAME = "log_history.json"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def compute_loss(self, model, batch, return_outputs=False):
-        loss, outputs = model(batch)
-        return (loss, outputs) if return_outputs else loss
-
-    def _save(self, output_dir: Optional[str] = None, state_dict=None):
-        # If we are executing this function, we are the process zero, so we don't check for that.
-        output_dir = output_dir if output_dir is not None else self.args.output_dir
-        os.makedirs(output_dir, exist_ok=True)
-
-        self.model.save_pretrained(
-            output_dir,
-            state_dict=state_dict,
-            safe_serialization=self.args.save_safetensors,
-        )
-
-        if self.tokenizer is not None:
-            self.tokenizer.save_pretrained(output_dir)
-
-        # Good practice: save your training arguments together with the trained model
-        torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
 
 
 def train_experts(
@@ -128,11 +101,11 @@ def train_experts(
 if __name__ == "__main__":
     args = ExpertConfig.parse()
 
-    single_model_config = SingleExpertModelConfig(
+    model_config = ExpertModelConfig(
         base_model=args.model,
         task_name=args.finetune_task_name,
         expert_name=args.expert_name,
         modifier_config=args.modifier_config,
     )
 
-    train_experts(single_model_config, SingleExpertModel, args)
+    train_experts(model_config, ExpertModel, args)

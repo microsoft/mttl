@@ -369,6 +369,7 @@ class DefaultCollator:
                         "input_ids": self.tokenizer.pad_token_id,
                         "labels": self.label_pad_token_id,
                     }.get(key, 0)
+
                     value = pad_sequence_wrapper(
                         value,
                         batch_first=True,
@@ -783,6 +784,7 @@ class DataModule(LightningDataModule, Registrable):
                 else:
                     if len(current_lens) > 0:
                         add_finished_sequence(grouped_samples, packed)
+
                     packed = new_container()
                     current_lens = []
                     trim_ex(ex)

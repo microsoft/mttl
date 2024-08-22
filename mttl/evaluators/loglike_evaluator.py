@@ -72,25 +72,23 @@ class LogLikeEvaluator(Evaluator):
             if num_batches is not None and num_batch >= num_batches:
                 break
 
-            batch_size = len(batch["labels_index"])
-            num_options = batch["num_options"]
-            labels_texts = batch["labels_texts"]
-            sources_texts = batch["sources_texts"]
+            labels_index = batch.pop("labels_index", None)
+            num_options = batch.pop("num_options")
+            labels_texts = batch.pop("labels_texts")
+            sources_texts = batch.pop("sources_texts")
+            batch_size = len(labels_index)
 
             batch = transfer_batch_to_device(batch, device)
 
             with torch.no_grad():
-                if isinstance(model, ExpertModule):
-                    # lightning module
-                    loss_per_option = model.forward(batch, reduction="none")
-                elif isinstance(model, ExpertModel):
-                    # standard no lightning evaluation
-                    loss_per_option, _ = model.forward(batch, reduction="none")
+                if isinstance(model, ExpertModule) or isinstance(model, ExpertModel):
+                    loss_per_option, _ = model.forward(**batch, reduction="none")
                 else:
                     logits = model.forward(
                         input_ids=batch["input_ids"],
                         attention_mask=batch["attention_mask"],
                     ).logits
+
                     loss_per_option = compute_loglike_loss(
                         logits, batch["labels"], reduction="none"
                     )
@@ -109,16 +107,14 @@ class LogLikeEvaluator(Evaluator):
                 all_predictions.extend(predictions)
                 all_losses.extend(loss_per_option.tolist())
 
-                if "labels_index" in batch:
+                if labels_index is not None:
                     all_accuracies.extend(
-                        (
-                            np.array(predictions) == np.array(batch["labels_index"])
-                        ).tolist()
+                        (np.array(predictions) == np.array(labels_index)).tolist()
                     )
 
             if verbose:
                 logger.info("Sources:\n%s", sources_texts[0])
-                logger.info("Label:\n%s", labels_texts[batch["labels_index"][0]])
+                logger.info("Label:\n%s", labels_texts[labels_index[0]])
                 logger.info("Prediction:\n%s", labels_texts[predictions[0]])
 
             if all_accuracies:

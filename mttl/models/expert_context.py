@@ -1,5 +1,6 @@
 import functools
 import threading
+from dataclasses import fields
 from typing import List
 
 
@@ -43,22 +44,32 @@ class InfoContainer:
         self._routing_gates = value
 
     @classmethod
-    def wrap_forward(cls, f):
+    def create_context(cls, f):
         """
-        Decorator method that wraps a ``forward()`` function of a model class.
+        Decorator method that wraps a ``forward`` or ``generate`` function of a model class.
         """
         from mttl.models.modifiers.routing import RoutingInfo
 
+        if f.__name__ not in ["forward", "generate"]:
+            raise ValueError(
+                f"Unknown wrap method: {f.__name__}, must be 'forward' or 'generate'."
+            )
+
         @functools.wraps(f)
-        def wrapper_func(model, batch, **kwargs):
-            if "input_ids" not in batch:
+        def wrapper_func(model, **kwargs):
+            if "input_ids" not in kwargs:
                 raise ValueError(
-                    "The first argument of the function to wrap must be a dictionary with 'input_ids' key."
+                    "The first argument of the function to wrap must be 'input_ids'."
                 )
 
             return_context = kwargs.pop("return_context", False)
-            with cls(model, RoutingInfo.from_batch(batch)) as context:
-                results = f(model, batch, **kwargs)
+            with cls(model, RoutingInfo.from_batch(kwargs)) as context:
+                if f.__name__ == "forward":
+                    RoutingInfo.prepare_for_forward(kwargs)
+                elif f.__name__ == "generate":
+                    RoutingInfo.prepare_for_generate(kwargs)
+
+                results = f(model, **kwargs)
                 if return_context:
                     context_returns = {
                         "routing_infos": context.routing_infos,

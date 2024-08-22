@@ -46,6 +46,10 @@ WEIGHTS_NAME = "mttl_weights.bin"
 LOADING_KWARGS_NAME = "loading_kwargs.json"
 
 
+def filter_kwargs(func, kwargs):
+    return {k: v for k, v in kwargs.items() if k in inspect.signature(func).parameters}
+
+
 class BaseExpertModel(torch.nn.Module, Registrable):
     def __init__(
         self, config: BaseExpertModelConfig, model_object=None, **loading_kwargs
@@ -165,17 +169,15 @@ class BaseExpertModel(torch.nn.Module, Registrable):
             raise ValueError("Unexpected keys found in the state dict.")
         return model
 
-    @InfoContainer.wrap_forward
+    @InfoContainer.create_context
     def forward(
         self,
-        batch,
-        reduction="mean",
+        input_ids,
+        attention_mask=None,
+        labels=None,
+        reduction=None,
         **kwargs,
     ):
-        input_ids = batch["input_ids"]
-        attention_mask = batch["attention_mask"]
-        labels = batch.get("labels", None)
-
         outputs = self.model.forward(input_ids, attention_mask=attention_mask, **kwargs)
 
         if labels is not None:
@@ -214,13 +216,16 @@ class BaseExpertModel(torch.nn.Module, Registrable):
     def generation_config(self, value):
         self.model.generation_config = value
 
-    @InfoContainer.wrap_forward
+    @InfoContainer.create_context
     def generate(
         self,
-        batch,
+        input_ids,
+        attention_mask=None,
         **kwargs,
     ):
         generations = self.model.generate(
-            inputs=batch["input_ids"], attention_mask=batch["attention_mask"], **kwargs
+            inputs=input_ids,
+            attention_mask=attention_mask,
+            **kwargs,
         )
         return generations

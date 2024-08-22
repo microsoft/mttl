@@ -54,8 +54,6 @@ def get_pl_loggers(args):
 
 
 def add_simple_logger(loggers, args):
-    from mttl.models.lightning.utils import SimpleLogger
-
     loggers.append(SimpleLogger(args.output_dir))
 
 

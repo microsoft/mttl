@@ -22,6 +22,7 @@ from mttl.models.expert_config import BaseExpertModelConfig
 from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.modifiers.base import AutoModifierConfig, ModifierConfig
+from mttl.models.modifiers.lora import SkilledLoRAConfig
 from mttl.models.modifiers.modify_model import modify_transformer
 from mttl.models.utils import model_loader_helper
 
@@ -64,13 +65,6 @@ class ExpertModel(BaseExpertModel):
             expert_info=expert_info,
             expert_weights=state_dict,
         )
-
-
-@dataclass
-class MultiExpertModelConfig(BaseExpertModelConfig):
-    default_expert_name: str = None
-    expert_infos: List[ExpertInfo] = None
-    selector_config: AutoSelectorConfig = None
 
 
 class MultiExpertMixin:
@@ -398,6 +392,13 @@ class MultiExpertMixin:
         return library
 
 
+@dataclass
+class MultiExpertModelConfig(BaseExpertModelConfig):
+    default_expert_name: str = None
+    expert_infos: List[ExpertInfo] = None
+    selector_config: AutoSelectorConfig = None
+
+
 @BaseExpertModel.register("multi_expert_model", config_cls=MultiExpertModelConfig)
 class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
     """Adds all functions and properties for a multi-expert model."""
@@ -427,3 +428,45 @@ class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
 
             if self.config.default_expert_name:
                 self.set_default_expert(self.config.default_expert_name)
+
+
+@dataclass
+class MoEModelConfig(BaseExpertModelConfig):
+    library_id: str = None
+    moe_num_experts: int = 1
+    selector_config: AutoSelectorConfig = None
+
+
+@BaseExpertModel.register("moe_model", config_cls=MoEModelConfig)
+class MoEModel(BaseExpertModel, MultiExpertMixin):
+    def __init__(self, config, **kwargs):
+        super().__init__(config, **kwargs)
+
+        # config about the routing
+        self.selector_config = config.selector_config
+        self.selector_cache = SelectorsCache()
+        self.experts_infos = {}
+
+        if not self.config.library_id and self.config.moe_num_experts >= 1:
+            for i in range(self.config.moe_num_experts):
+                # Adding a Skilled LoRA with 1 skill.
+                exp_config = SkilledLoRAConfig(
+                    n_skills=1,
+                    modify_layers=self.hparams.modify_layers,
+                    modify_modules=self.hparams.modify_modules,
+                    lora_alpha=self.hparams.lora_alpha,
+                    lora_dropout=self.hparams.lora_dropout,
+                    lora_rank=self.hparams.lora_rank,
+                    lora_init_b_random=True,
+                    n_splits=self.hparams.n_splits,
+                    phi_2_align_heads=self.hparams.phi_2_align_heads,
+                )
+                self.add_empty_expert(f"e{i}", exp_config)
+
+            self.moe_num_experts = self.config.moe_num_experts
+        else:
+            expert_library = ExpertLibrary.get_expert_library(self.config.library_id)
+            for i, expert in enumerate(sorted(list(expert_library.keys()))):
+                self.add_expert_instance(expert_library[expert], expert_name=f"e{i}")
+
+            self.moe_num_experts = i + 1

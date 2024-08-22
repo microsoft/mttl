@@ -25,6 +25,7 @@ from mttl.models.expert_context import InfoContainer
 from mttl.models.expert_model import (
     ExpertModel,
     ExpertModelConfig,
+    MoEModel,
     MultiExpertModel,
     MultiExpertModelConfig,
 )
@@ -72,6 +73,9 @@ class ExpertModule(EfficientCheckpointModule):
         # model setup
         self.setup_expert_model()
 
+    def forward(self, *args, **kwargs):
+        return self.expert_model.forward(*args, **kwargs)
+
     def setup_expert_model(self):
         config = ExpertModelConfig(
             base_model=self.training_config.model,
@@ -88,20 +92,6 @@ class ExpertModule(EfficientCheckpointModule):
             load_in_8bit=getattr(self.hparams, "load_in_8bit", False),
         )
 
-    def forward(self, batch, reduction="mean", return_context=False):
-        # outputs consists of loss, logits and context if return_context is True
-        # expert_model.forward is wrapped into info container
-        outputs = self.expert_model.forward(
-            batch, reduction=reduction, return_context=return_context
-        )
-        if not return_context:
-            # return only the loss
-            return outputs[0]
-
-        # return loss (first in the outputs tuple) and context (last returned)
-        # see InfoContainer for the context structure
-        return outputs[0][0], outputs[-1]
-
     def training_step(self, batch, _):
         if "num_options" in batch:
             loss, mc_loss = self.compute_unlikelihood_loss(batch)
@@ -110,7 +100,7 @@ class ExpertModule(EfficientCheckpointModule):
             )
             total_loss = loss + mc_loss
         else:
-            loss = self.forward(batch)
+            loss, _ = self.forward(**batch)
             total_loss = loss
 
         self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
@@ -138,20 +128,16 @@ class ExpertModule(EfficientCheckpointModule):
         if "num_options" in batch:
             loss, _ = self.compute_unlikelihood_loss(batch, reduction="none")
         else:
-            loss = self.forward(batch, reduction="none")
+            loss, _ = self.forward(**batch, reduction="none")
         mean_loss = loss.sum() / loss.shape[0]
         self._inference_outputs += [(loss.detach(),)]
         return mean_loss
-
-    def get_loss_for_all(self, batch, batch_idx):
-        loss = self.forward(batch, reduction="none")
-        return loss
 
     def validation_step(self, batch, batch_idx):
         if "num_options" in batch:
             loss, _ = self.compute_unlikelihood_loss(batch, reduction="none")
         else:
-            loss = self.forward(batch, reduction="none")
+            loss, _ = self.forward(**batch, reduction="none")
         mean_loss = loss.sum() / loss.shape[0]
         self._inference_outputs += [(loss.detach(),)]
         return mean_loss
@@ -254,39 +240,33 @@ class MultiExpertModule(ExpertModule):
 class MoEModule(MultiExpertModule):
     training_config_class = MoEExpertConfig
 
-    def __init__(self, expert_library: ExpertLibrary = None, **kwargs):
+    def __init__(self, **kwargs):
         init_from_scratch = kwargs.get("init_from_scratch", False)
 
         super().__init__(**kwargs)
 
-        if not self.hparams.library_id and expert_library is None or init_from_scratch:
-            for i in range(self.hparams.moe_num_experts):
-                # Adding a Skilled LoRA with 1 skill.
-                exp_config = SkilledLoRAConfig(
-                    n_skills=1,
-                    modify_layers=self.hparams.modify_layers,
-                    modify_modules=self.hparams.modify_modules,
-                    lora_alpha=self.hparams.lora_alpha,
-                    lora_dropout=self.hparams.lora_dropout,
-                    lora_rank=self.hparams.lora_rank,
-                    lora_init_b_random=True,
-                    n_splits=self.hparams.n_splits,
-                    phi_2_align_heads=self.hparams.phi_2_align_heads,
-                )
-                self.add_empty_expert(f"e{i}", exp_config)
-            self.moe_num_experts = kwargs["moe_num_experts"]
+    def setup_expert_model(self):
+        # config about the routing
+        if hasattr(self.hparams, "selector_config"):
+            selector_config = self.hparams.selector_config
         else:
-            if expert_library is None:
-                expert_library = ExpertLibrary.get_expert_library(
-                    self.hparams.library_id
-                )
-            for i, expert in enumerate(sorted(list(expert_library.keys()))):
-                self.add_expert_instance(expert_library[expert], expert_name=f"e{i}")
+            selector_config = self.training_config.selector_config
 
-            self.moe_num_experts = i + 1
+        config = MoEExpertConfig(
+            base_model=self.training_config.model,
+            selector_config=selector_config,
+        )
+        self.expert_model = MoEModel(
+            config,
+            model_object=self.model_object,
+            device_map=getattr(self.hparams, "device_map", "cpu"),
+            attn_implementation=getattr(self.hparams, "attn_implementation", None),
+            load_in_4bit=getattr(self.hparams, "load_in_4bit", False),
+            load_in_8bit=getattr(self.hparams, "load_in_8bit", False),
+        )
 
     def training_step(self, batch, _):
-        loss, context = self.forward(batch, return_context=True)
+        (loss, _), context = self.forward(**batch, return_context=True)
         total_loss = loss
 
         self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)

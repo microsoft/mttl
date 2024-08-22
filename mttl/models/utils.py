@@ -16,6 +16,7 @@ def transfer_batch_to_device(batch, device):
     for key, value in batch.items():
         if isinstance(value, torch.Tensor):
             batch[key] = value.to(device)
+    return batch
 
 
 def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
