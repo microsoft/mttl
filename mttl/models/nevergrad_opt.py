@@ -45,7 +45,7 @@ class NGRoutingOptimizer:
         self.log = log
         self.regularizer_factor = regularizer_factor
         self.task_name = task_name
-        self.model: MultiExpertModel = model
+        self.model: MultiExpertModule = model
         self.K = len(expert_lib)
         # vars ordered in the same order as data in expert_lib
         init = [0] * self.K
@@ -69,7 +69,7 @@ class NGRoutingOptimizer:
     def optimize(
         self,
     ):
-        def get_score(weights, basemodel: MultiExpertModel, get_loss, get_regular):
+        def get_score(weights, basemodel: MultiExpertModule, get_loss, get_regular):
             config = WeightedLinearMergeConfig(
                 weights={
                     exp_name: w for exp_name, w in zip(self.library.keys(), weights)
