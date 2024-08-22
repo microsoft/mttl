@@ -57,6 +57,8 @@ def completion_template(example):
 
 @DataModule.register("humaneval", config_cls=HumanEvalConfig)
 class HumanEvalDataModule(DataModule):
+    collate_extra_fields = ["code_prefix", "code_tests"]
+
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
         dataset = DatasetLibrary.pull_dataset(

@@ -2,7 +2,7 @@ import dataclasses
 import itertools
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 import torch
@@ -203,6 +203,7 @@ class DefaultCollator(PackedMixin):
     train_on_inputs: bool = False
     task_to_id: dict = None
     add_eos_to_targets: bool = True
+    collate_extra_fields: Optional[List] = None
 
     def enforce_eos(self, targets):
         # simulate the default behaviour of LLamatokenizer, when adding eos token and truncating: the last token must always be eos
@@ -441,6 +442,12 @@ class DefaultCollator(PackedMixin):
         output_batch["sources_texts"] = sources
         output_batch["labels_texts"] = labels
         output_batch["task_sources"] = task_sources
+
+        # integrate extra fields in the batch if required
+        if self.collate_extra_fields:
+            for field in self.collate_extra_fields:
+                output_batch[field] = [b[field] for b in batch]
+
         return output_batch
 
 
@@ -521,6 +528,9 @@ def subsample_dst(dataset, subsample: int, rng: torch.Generator = None):
 
 
 class DataModule(LightningDataModule, Registrable):
+    # if you want the default collator to return extra fields, you can set this to the list of fields
+    collate_extra_fields: List[str] = None
+
     def train_dataloader(self, subsample=None):
         subsample = subsample or self.config.subsample
         train_dataset = self.train_dataset
@@ -583,6 +593,7 @@ class DataModule(LightningDataModule, Registrable):
             train_on_inputs=self.config.train_on_inputs,
             add_eos_to_targets=self.config.add_eos_to_targets,
             task_to_id=self.task_to_id,
+            collate_extra_fields=self.collate_extra_fields,
         )
 
     def print_infos(self):
