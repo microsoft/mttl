@@ -64,6 +64,7 @@ class Serializable:
                     and field.default_factory is dataclasses.MISSING
                 ):
                     raise ValueError("Cannot skip required field in dataclass!")
+                continue
 
             value = getattr(self, field.name)
             if value is not None and hasattr(value, "asdict"):

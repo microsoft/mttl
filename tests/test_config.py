@@ -166,6 +166,12 @@ def test_dump_load_lora_config():
     load_config = AutoModifierConfig.fromdict(lora_config.asdict())
     assert type(load_config) == LoRAConfig
 
+    load_config = AutoModifierConfig.fromdict(
+        lora_config.asdict(skip_fields=["lora_dropout"])
+    )
+    assert type(load_config) == LoRAConfig
+    assert load_config.lora_dropout != 0.52
+
 
 def test_dump_load_selector_config():
     from mttl.models.containers.selectors.base import AutoSelectorConfig
