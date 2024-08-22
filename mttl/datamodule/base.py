@@ -117,6 +117,17 @@ class PackedMixin:
 
         return padded
 
+    def _get_nested_type(self, item):
+        while isinstance(item, (list, tuple)):
+            item = item[0]
+        return type(item)
+
+    def _tensor_dtype(self, item):
+        dtype = self._get_nested_type(item)
+        return {"int": torch.int64, "float": torch.float32, "bool": torch.bool}.get(
+            dtype.__name__, None
+        )
+
     def packed_collate(self, batch):
         output_batch = defaultdict(list)
 
@@ -394,17 +405,6 @@ class DefaultCollator(PackedMixin):
         output_batch["attention_mask"] = tok_sources_plus_labels["attention_mask"]
         output_batch["labels"] = targets
         return output_batch
-
-    def _get_nested_type(self, item):
-        while isinstance(item, (list, tuple)):
-            item = item[0]
-        return type(item)
-
-    def _tensor_dtype(self, item):
-        dtype = self._get_nested_type(item)
-        return {"int": torch.int64, "float": torch.float32, "bool": torch.bool}.get(
-            dtype.__name__, None
-        )
 
     def __call__(self, batch):
         if "input_ids" in batch[0]:

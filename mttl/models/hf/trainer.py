@@ -14,8 +14,8 @@ class ExpertModelTrainer(Trainer):
         super().__init__(*args, **kwargs)
 
     def compute_loss(self, model, batch, return_outputs=False):
-        loss, outputs = model(batch)
-        return (loss, outputs) if return_outputs else loss
+        outputs = model(**batch)
+        return (outputs.loss, outputs.logits) if return_outputs else outputs.loss
 
     def _save(self, output_dir: Optional[str] = None, state_dict=None):
         # If we are executing this function, we are the process zero, so we don't check for that.

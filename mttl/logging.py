@@ -11,9 +11,9 @@ import wandb
 logger = logging.getLogger("mttl")
 
 
-def maybe_wandb_log(**kwargs):
+def maybe_wandb_log(logs: dict):
     if wandb.run is not None:
-        wandb.log(**kwargs)
+        wandb.log(logs)
 
 
 @lru_cache

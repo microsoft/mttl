@@ -37,6 +37,7 @@ from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.base import Modifier, ModifierConfig
 from mttl.models.modifiers.lora import SkilledLoRAConfig
 from mttl.models.modifiers.modify_model import get_modifier_name
+from mttl.models.utils import compute_loglike_loss
 
 torch.set_float32_matmul_precision("high")
 
@@ -93,15 +94,9 @@ class ExpertModule(EfficientCheckpointModule):
         )
 
     def training_step(self, batch, _):
-        if "num_options" in batch:
-            loss, mc_loss = self.compute_unlikelihood_loss(batch)
-            self.log(
-                f"{self._log_pref}train/mc_loss", loss, on_step=True, prog_bar=True
-            )
-            total_loss = loss + mc_loss
-        else:
-            loss, _ = self.forward(**batch)
-            total_loss = loss
+        outputs = self.forward(**batch)
+        loss = outputs.loss
+        total_loss = loss
 
         self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
         self.log(
@@ -125,19 +120,15 @@ class ExpertModule(EfficientCheckpointModule):
         self.log_loss(split="test")
 
     def test_step(self, batch, batch_idx):
-        if "num_options" in batch:
-            loss, _ = self.compute_unlikelihood_loss(batch, reduction="none")
-        else:
-            loss, _ = self.forward(**batch, reduction="none")
+        outputs = self.forward(**batch)
+        loss = compute_loglike_loss(outputs.logits, batch["labels"], reduction="none")
         mean_loss = loss.sum() / loss.shape[0]
         self._inference_outputs += [(loss.detach(),)]
         return mean_loss
 
     def validation_step(self, batch, batch_idx):
-        if "num_options" in batch:
-            loss, _ = self.compute_unlikelihood_loss(batch, reduction="none")
-        else:
-            loss, _ = self.forward(**batch, reduction="none")
+        outputs = self.forward(**batch)
+        loss = compute_loglike_loss(outputs.logits, batch["labels"], reduction="none")
         mean_loss = loss.sum() / loss.shape[0]
         self._inference_outputs += [(loss.detach(),)]
         return mean_loss
@@ -266,7 +257,8 @@ class MoEModule(MultiExpertModule):
         )
 
     def training_step(self, batch, _):
-        (loss, _), context = self.forward(**batch, return_context=True)
+        output, context = self.forward(**batch, return_context=True)
+        loss = output.loss
         total_loss = loss
 
         self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)

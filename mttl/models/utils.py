@@ -12,6 +12,31 @@ import torch
 from mttl.logging import logger
 
 
+def compute_loglike_loss(logits, labels, reduction="none"):
+    bs = logits.size(0)
+    vocab_size = logits.size(-1)
+    labels = labels.squeeze(-1)
+    shift_logits = logits[..., :-1, :].contiguous()
+    shift_labels = labels[..., 1:].contiguous()
+
+    # Flatten the tokens
+    loss_fct = torch.nn.CrossEntropyLoss(reduction=reduction)
+    shift_logits = shift_logits.view(-1, vocab_size)
+    shift_labels = shift_labels.view(-1)
+
+    shift_labels = shift_labels.to(shift_logits.device)
+    loss = loss_fct(shift_logits, shift_labels)
+
+    # reshape back
+    if reduction == "none":
+        loss = loss.view((bs, -1))
+        # mean only non-zero
+        non_zero_loss = (loss != 0).sum(dim=-1)
+        non_zero_loss[non_zero_loss == 0] = 1
+        loss = loss.sum(dim=-1) / non_zero_loss
+    return loss
+
+
 def transfer_batch_to_device(batch, device):
     for key, value in batch.items():
         if isinstance(value, torch.Tensor):
