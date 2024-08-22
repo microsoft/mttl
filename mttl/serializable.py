@@ -13,10 +13,9 @@ class Serializable:
 
     @classmethod
     def fromdict(cls, data: Dict[str, Any]) -> Type:
-        from copy import deepcopy
         from typing import get_args, get_origin
 
-        data = deepcopy(data)
+        data_ = {}
         for field in dataclasses.fields(cls):
             if field.name not in data and field.default is dataclasses.MISSING:
                 raise ValueError(
@@ -32,12 +31,12 @@ class Serializable:
 
             # handle the case of a config
             if hasattr(field.type, "fromdict"):
-                data[field.name] = field.type.fromdict(data[field.name])
+                data_[field.name] = field.type.fromdict(data[field.name])
             # handle the case of a list of configs
             elif get_origin(field.type) == list and hasattr(
                 get_args(field.type)[0], "fromdict"
             ):
-                data[field.name] = [
+                data_[field.name] = [
                     get_args(field.type)[0].fromdict(value)
                     for value in data[field.name]
                 ]
@@ -45,15 +44,12 @@ class Serializable:
             elif get_origin(field.type) == dict and hasattr(
                 get_args(field.type)[0], "asdict"
             ):
+                data_[field.name] = {}
                 for k, v in value.items():
-                    data[field.name][k] = v.asdict()
+                    data_[field.name][k] = v.asdict()
             else:
-                data[field.name] = data.get(field.name, field.default)
-
-        # if data has a class_name, remove it, this is only for serialization and is automatically removed by AutoSerializable
-        # but when the user uses this method directly from a child Serializable class, we need to remove it manually
-        data.pop("class_name", None)
-        return cls(**data)
+                data_[field.name] = data.get(field.name, field.default)
+        return cls(**data_)
 
     @classmethod
     def from_dict(cls, data) -> Type:
