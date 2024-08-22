@@ -385,6 +385,17 @@ class MultiExpertMixin:
             library.add_expert(expert)
         return library
 
+    def clear_experts(self):
+        """Removes all experts and containers from the huggingface model."""
+        for mn, m in self.model.named_modules():
+            for cn, c in m.named_children():
+                if isinstance(c, ExpertContainer):
+                    setattr(m, cn, c.layer)
+
+        self.experts_infos.clear()
+        self.selector_cache.clear()
+        self.selector_config = None
+
 
 @dataclass
 class MultiExpertModelConfig(BaseExpertModelConfig):

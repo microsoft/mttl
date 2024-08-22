@@ -36,11 +36,27 @@ def test_load_model_inited_from_model(tmp_path, tiny_llama):
     )
     model.add_empty_expert("b", LoRAConfig(modify_layers="k_proj"))
     model.save_pretrained(tmp_path)
+    model.clear_experts()
 
     with pytest.raises(ValueError):
         reloaded = MultiExpertModel.from_pretrained(tmp_path)
 
     reloaded = MultiExpertModel.from_pretrained(tmp_path, model_object=tiny_llama)
+    assert isinstance(reloaded.selector_config, PolySelectorConfig)
+    assert len(reloaded.experts_names) == 1
+    assert "b" in reloaded.experts_names
+
+
+def test_load_model(tmp_path, tiny_llama):
+    model = MultiExpertModel(
+        MultiExpertModelConfig(
+            base_model="EleutherAI/gpt-neo-125m", selector_config=PolySelectorConfig()
+        )
+    )
+    model.add_empty_expert("b", LoRAConfig(modify_layers="k_proj"))
+    model.save_pretrained(tmp_path)
+
+    reloaded = MultiExpertModel.from_pretrained(tmp_path)
     assert isinstance(reloaded.selector_config, PolySelectorConfig)
     assert len(reloaded.experts_names) == 1
     assert "b" in reloaded.experts_names
