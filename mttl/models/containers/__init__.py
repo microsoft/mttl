@@ -268,15 +268,21 @@ def get_modules_to_modify_trie(transformer):
         yield m_name, module
 
 
-def create_modif_regex(modify_modules, modify_layers):
+def create_modif_regex(modify_modules, modify_layers=None):
     """
     Combine modify_modules and modify_layers into a single regex to keep add_expert_to_transformer slim
     """
-    if not modify_layers or modify_layers == "":
-        # will actually modify modules, e.g. MLP, if modify_modules = .*mlp
-        return modify_modules
+    is_set = lambda x: x is not None and x != ""
 
-    if not modify_modules or modify_modules == "":
+    if not is_set(modify_modules) and not is_set(modify_layers):
+        logger.warning(
+            "Neither modify_modules nor modify_layers are set, will not modify anything"
+        )
+        return ""
+
+    if is_set(modify_modules) and not is_set(modify_layers):
+        return modify_modules
+    if not is_set(modify_modules) and is_set(modify_layers):
         return modify_layers
 
     # keep backward compatibility

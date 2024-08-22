@@ -25,12 +25,12 @@ def test_add_expert_to_transformer():
     # modify_modules = .* -- modifies all modules
     # modify_layers =
     # will match all modules
-    regex = create_modif_regex(modify_modules=".*", modify_layers="")
+    regex = create_modif_regex(modify_modules=".*")
     matched_modules = [o[0] for o in match_modules_to_modify(model.model, regex)]
     assert len(matched_modules) == len(list(model.model.named_modules()))
 
     # modify_modules=.*mlp -- only modifies modules edding with mlp
-    regex = create_modif_regex(modify_modules=".*mlp", modify_layers="")
+    regex = create_modif_regex(modify_modules=".*mlp")
     matched_modules = [o[0] for o in match_modules_to_modify(model.model, regex)]
     assert all(name[-3:] == "mlp" for name in matched_modules)
 
