@@ -40,9 +40,9 @@ class ModifierConfig(Serializable):
     def modifier_name(self):
         return Modifier.get_name_by_config_class(type(self))
 
-    @staticmethod
+    @classmethod
     def from_training_config(
-        training_config: Union["Args", "ModifierConfig"]
+        cls, training_config: Union["Args", "ModifierConfig"]
     ) -> Union["ModifierConfig", None]:
         """Build modifier config from the training config.
 
@@ -54,15 +54,20 @@ class ModifierConfig(Serializable):
             # nothing to do here
             return training_config
 
-        if training_config.model_modifier is None:
-            return None
+        if cls.__name__ == "ModifierConfig":
+            if training_config.model_modifier is None:
+                return None
 
-        if training_config.model_modifier not in Modifier.registered_names():
-            raise ValueError(
-                f"Model modifier '{training_config.model_modifier}' not found, has it been registered?"
+            if training_config.model_modifier not in Modifier.registered_names():
+                raise ValueError(
+                    f"Model modifier '{training_config.model_modifier}' not found, has it been registered?"
+                )
+
+            config_klass = Modifier.get_config_class_by_name(
+                training_config.model_modifier
             )
-
-        config_klass = Modifier.get_config_class_by_name(training_config.model_modifier)
+        else:
+            config_klass = cls
         return create_config_class_from_args(config_klass, training_config)
 
 
