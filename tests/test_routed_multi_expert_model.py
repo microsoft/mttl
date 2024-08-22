@@ -105,7 +105,7 @@ def test_add_expert_with_action_merge(tmp_multi_exp_config, monkeypatch):
     batch["attention_mask"] = attn_mask
 
     # Test Base Llama model
-    output = module(batch)
+    output = module(**batch)
     assert np.allclose(output.item(), 15.2, atol=0.1)
 
 
@@ -159,12 +159,12 @@ def test_expert_selector_with_poly_task_routing(
     batch["task_names"] = ["task_1", "task_2"] * 5
 
     # BASE MODEL FWD BASS (because all Bs are == 0, so functially same as backbone)
-    output = module(batch)
+    output = module(**batch)
     assert np.allclose(output.item(), 13.625 if is_coalesced else 15.62, atol=0.1)
 
     # Now let's change the adapter params, and also the function parameterized by the model
     nonzero_B_init(module)
-    output = module(batch)
+    output = module(**batch)
     assert np.allclose(output.item(), 19.0 if is_coalesced else 18.375, atol=0.1)
 
     """ Multi-Head Routing Test """
@@ -187,7 +187,7 @@ def test_expert_selector_with_poly_task_routing(
     module.add_experts_from_dict(module_dict, action="route")
     nonzero_B_init(module)
 
-    output = module(batch)
+    output = module(**batch)
 
     # Because routing is initialized to uniform, should give same result
     assert np.allclose(output.item(), 19.12 if is_coalesced else 19.12, atol=0.1)
@@ -198,13 +198,13 @@ def test_expert_selector_with_poly_task_routing(
             mod.module_logits.data.uniform_(-10, 10)
             mod.module_logits.data[:, -1] = 999
 
-    output = module(batch)
+    output = module(**batch)
     assert np.allclose(output.item(), 20.375 if is_coalesced else 19.875, atol=0.1)
 
     # Finally, Test invalid tasks
     batch["task_names"][-1] = "task_10"
     with pytest.raises(AssertionError):
-        output = module(batch)
+        output = module(**batch)
 
 
 def test_expert_selector_with_task_name_routing(tmp_multi_exp_config):
@@ -242,7 +242,7 @@ def test_expert_selector_with_task_name_routing(tmp_multi_exp_config):
     batch["task_sources"] = batch["task_names"]
 
     # Test Base Llama model
-    output = module(batch)
+    output = module(**batch)
     assert np.allclose(output.item(), 12.3125, atol=0.1)
 
 
@@ -280,7 +280,7 @@ def test_expert_selector_with_poly_routing(tmp_multi_exp_config):
     batch["task_sources"] = batch["task_names"]
 
     # Test Base Llama model
-    output = module(batch)
+    output = module(**batch)
     assert np.allclose(output.item(), 12.3125, atol=0.1)
 
     # check the get_router_weights function
@@ -317,7 +317,7 @@ def test_expert_selector_with_poly_routing(tmp_multi_exp_config):
     assert selector.module_logits_dict["mod1"].item() == 1.0
     assert selector.module_logits_dict["mod2"].item() == 0.0
 
-    output = module(batch)
+    output = module(**batch)
     assert np.allclose(output.item(), 12.3125, atol=0.1)
 
     weights = {}
@@ -520,4 +520,4 @@ def test_expert_selector_with_task_predictor_selection(tmp_multi_exp_config):
     attn_mask = 1 - attn_mask.cumsum(dim=-1)
     batch["attention_mask"] = attn_mask
 
-    output = module(batch)
+    output = module(**batch)

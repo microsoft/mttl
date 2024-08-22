@@ -26,6 +26,7 @@ from mttl.models.expert_model import (
     ExpertModel,
     ExpertModelConfig,
     MoEModel,
+    MoEModelConfig,
     MultiExpertModel,
     MultiExpertModelConfig,
 )
@@ -243,7 +244,7 @@ class MoEModule(MultiExpertModule):
         else:
             selector_config = self.training_config.selector_config
 
-        config = MoEExpertConfig(
+        config = MoEModelConfig(
             base_model=self.training_config.model,
             selector_config=selector_config,
         )
