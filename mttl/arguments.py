@@ -464,7 +464,6 @@ class TrainingArgs(DataArgs):
             logging_steps=1,
             bf16=self.precision == "bf16",
             fp16=self.precision == "16",
-            optim=self.optimizer,
             adam_epsilon=self.adam_epsilon,
             learning_rate=self.learning_rate,
             weight_decay=self.weight_decay,

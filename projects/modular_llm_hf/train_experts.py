@@ -21,6 +21,8 @@ from mttl.models.expert_model import (
     ExpertModel,
     ExpertModelConfig,
 )
+from mttl.models.get_optimizer import get_optimizer
+from mttl.models.get_scheduler import get_scheduler
 from mttl.models.hf.callbacks import DownstreamEvalCallback
 from mttl.models.hf.trainer import ExpertModelTrainer
 from mttl.models.library.expert import Expert, load_expert
@@ -93,6 +95,10 @@ def train_experts(
         train_dataset=dm.train_dataset,
         eval_dataset=dm.dev_dataset,
         callbacks=callbacks,
+        optimizers=(
+            get_optimizer(module, training_args),
+            get_scheduler(module, training_args),
+        ),
     )
 
     trainer.train()

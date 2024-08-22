@@ -16,7 +16,7 @@
     "precision": "bf16",
     "model": "mistralai/Mistral-7B-v0.1",
     "model_family": "gpt",
-    "optimizer": "adamw_torch_fused",
+    "optimizer": "adamw",
     "warmup_proportion": 0.06,
     "max_input_length": 2048,
     "max_output_length": 64,

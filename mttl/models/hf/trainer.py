@@ -11,6 +11,9 @@ class ExpertModelTrainer(Trainer):
     """Generic HF trainer for expert models."""
 
     def __init__(self, *args, **kwargs):
+        if "optimizers" not in kwargs:
+            raise ValueError("Optimizers must be provided as a keyword argument.")
+
         super().__init__(*args, **kwargs)
 
     def compute_loss(self, model, batch, return_outputs=False):
