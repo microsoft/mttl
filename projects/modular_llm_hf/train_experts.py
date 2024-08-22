@@ -88,6 +88,9 @@ def train_experts(
         )
 
     hf_args = training_args.to_hf_training_args()
+    optimizer = get_optimizer(module, training_args)
+    scheduler = get_scheduler(optimizer, training_args)
+
     trainer: Trainer = ExpertModelTrainer(
         model=module,
         args=hf_args,
@@ -95,10 +98,7 @@ def train_experts(
         train_dataset=dm.train_dataset,
         eval_dataset=dm.dev_dataset,
         callbacks=callbacks,
-        optimizers=(
-            get_optimizer(module, training_args),
-            get_scheduler(module, training_args),
-        ),
+        optimizers=(optimizer, scheduler),
     )
 
     trainer.train()
