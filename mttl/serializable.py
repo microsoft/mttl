@@ -27,6 +27,7 @@ class Serializable:
 
             value = data[field.name]
             if value is None:
+                data_[field.name] = None
                 continue
 
             # handle the case of a config
