@@ -350,7 +350,9 @@ class TrainingArgs(DataArgs):
     backbone_checkpoint: str = None  # load the backbone from here
     learning_rate: float = 1e-3
     warmup_proportion: float = 0.06
-    trainable_param_names: str = ".*"
+    trainable_param_names: str = (
+        ".*"  # trainable param names are those set by the experts
+    )
     non_trainable_param_names: str = None
     weight_decay: float = 0.01
     adam_epsilon: float = 1e-8
@@ -456,6 +458,7 @@ class TrainingArgs(DataArgs):
         from transformers import TrainingArguments
 
         return TrainingArguments(
+            use_cpu=self.compute_strategy == "cpu",
             overwrite_output_dir=True,
             output_dir=self.output_dir,
             per_device_train_batch_size=self.train_batch_size,
