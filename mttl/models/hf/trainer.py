@@ -7,6 +7,8 @@ from transformers import Trainer
 from transformers.trainer import TRAINING_ARGS_NAME, TrainingArguments
 
 from mttl.arguments import ExpertConfig
+from mttl.datamodule.base import get_datamodule
+from mttl.logging import logger
 from mttl.models.get_optimizer import get_optimizer
 from mttl.models.get_scheduler import get_scheduler
 
@@ -17,17 +19,31 @@ class ExpertModelTrainer(Trainer):
     def __init__(self, model, args, **kwargs):
         args: ExpertConfig = args
 
-        if "optimizers" in kwargs:
-            raise ValueError("`optimizers` not supported!")
+        if kwargs.get("optimizers") is None:
+            logger.info("Initializing custom non-HF optimizer and scheduler.")
+            optimizer = get_optimizer(model, args)[0]
+            scheduler = get_scheduler(optimizer, args)
+            kwargs["optimizers"] = (optimizer, scheduler)
 
-        optimizer = get_optimizer(model, args)[0]
-        scheduler = get_scheduler(optimizer, args)
+        if kwargs.get("train_dataset") is None:
+            logger.info("Initializing datamodule and storing it into Trainer.")
+            self.dm = get_datamodule(args)
+
+            kwargs["train_dataset"] = self.dm.train_dataset
+            kwargs["eval_dataset"] = self.dm.dev_dataset
+            kwargs["data_collator"] = self.dm.collate_fn
+            kwargs["tokenizer"] = self.dm.tokenizer
+        else:
+            self.dm = None
 
         hf_args: TrainingArguments = args.to_hf_training_args()
 
-        super().__init__(
-            model=model, args=hf_args, optimizers=(optimizer, scheduler), **kwargs
-        )
+        super().__init__(model=model, args=hf_args, **kwargs)
+
+    @property
+    def test_dataset(self):
+        if self.dm is not None:
+            return self.dm.test_dataset
 
     def compute_loss(self, model, batch, return_outputs=False):
         outputs = model(**batch)
