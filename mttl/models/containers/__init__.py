@@ -275,10 +275,9 @@ def create_modif_regex(modify_modules, modify_layers=None):
     is_set = lambda x: x is not None and x != ""
 
     if not is_set(modify_modules) and not is_set(modify_layers):
-        logger.warning(
+        raise ValueError(
             "Neither modify_modules nor modify_layers are set, will not modify anything"
         )
-        return ""
 
     if is_set(modify_modules) and not is_set(modify_layers):
         return modify_modules
