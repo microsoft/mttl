@@ -36,7 +36,6 @@ def train_experts(
 
     # get directory of the current file
     setup_logging(training_args.output_dir)
-
     logger.info("Args: %s", training_args.to_json())
 
     remote_login(training_args.remote_token)
@@ -88,7 +87,7 @@ def train_experts(
         logger.info("Best model checkpoint: %s", best_model_path)
 
     # upload to library!
-    if expert_library:
+    if expert_library is not None:
         expert_library.add_expert_from_ckpt(best_model_path)
 
 

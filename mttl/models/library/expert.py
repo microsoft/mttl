@@ -255,13 +255,21 @@ def load_expert_from_hf_checkpoint(
     import os
 
     from mttl.models.expert_model import ExpertModel
+    from mttl.models.hf.trainer import MTTL_ARGS_NAME
 
     logger.info(f"Loading expert from {expert_path}...")
+
+    # gather mttl training arguments from the checkpoint if available
+    mttl_args_file = os.path.join(expert_path, MTTL_ARGS_NAME)
+    if os.path.isfile(mttl_args_file):
+        training_config = torch.load(mttl_args_file)
+    else:
+        training_config = None
 
     # we assume it's an expert model, which is used to train single experts
     expert: Expert = ExpertModel.from_pretrained(
         expert_path, device_map="cpu"
-    ).as_expert()
+    ).as_expert(training_config=training_config)
 
     # override expert name
     if expert_name is not None:

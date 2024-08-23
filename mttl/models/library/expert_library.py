@@ -1171,7 +1171,12 @@ class ExpertLibrary:
         self, ckpt_path: str, expert_name: str = None, force: bool = False
     ):
         expert_dump = load_expert(ckpt_path, expert_name=expert_name)
-        self.add_expert(expert_dump, expert_name=expert_name, force=force)
+        if expert_dump.name is None:
+            raise ValueError(
+                "Expert name not found in checkpoint. Need to explicitly provide one as argument."
+            )
+
+        self.add_expert(expert_dump, force=force)
 
     def rename_expert(self, old_name, new_name):
         if self.sliced:

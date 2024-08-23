@@ -470,6 +470,7 @@ class TrainingArgs(DataArgs):
             adam_epsilon=self.adam_epsilon,
             learning_rate=self.learning_rate,
             weight_decay=self.weight_decay,
+            load_best_model_at_end=True,
             warmup_steps=self.warmup_steps if self.warmup_steps > 0 else 0,
             warmup_ratio=self.warmup_proportion if self.warmup_proportion > 0 else 0,
             num_train_epochs=self.num_train_epochs,

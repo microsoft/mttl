@@ -12,22 +12,26 @@ from mttl.logging import logger
 from mttl.models.get_optimizer import get_optimizer
 from mttl.models.get_scheduler import get_scheduler
 
+MTTL_ARGS_NAME = "mttl_args.bin"
+
 
 class ExpertModelTrainer(Trainer):
     """Generic HF trainer for expert models."""
 
     def __init__(self, model, args, **kwargs):
-        args: ExpertConfig = args
+        self.mttl_args: ExpertConfig = args
+
+        args: TrainingArguments = args.to_hf_training_args()
 
         if kwargs.get("optimizers") is None:
             logger.info("Initializing custom non-HF optimizer and scheduler.")
-            optimizer = get_optimizer(model, args)[0]
-            scheduler = get_scheduler(optimizer, args)
+            optimizer = get_optimizer(model, self.mttl_args)[0]
+            scheduler = get_scheduler(optimizer, self.mttl_args)
             kwargs["optimizers"] = (optimizer, scheduler)
 
         if kwargs.get("train_dataset") is None:
             logger.info("Initializing datamodule and storing it into Trainer.")
-            self.dm = get_datamodule(args)
+            self.dm = get_datamodule(self.mttl_args)
 
             kwargs["train_dataset"] = self.dm.train_dataset
             kwargs["eval_dataset"] = self.dm.dev_dataset
@@ -36,9 +40,7 @@ class ExpertModelTrainer(Trainer):
         else:
             self.dm = None
 
-        hf_args: TrainingArguments = args.to_hf_training_args()
-
-        super().__init__(model=model, args=hf_args, **kwargs)
+        super().__init__(model=model, args=args, **kwargs)
 
     @property
     def test_dataset(self):
@@ -65,3 +67,4 @@ class ExpertModelTrainer(Trainer):
 
         # Good practice: save your training arguments together with the trained model
         torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
+        torch.save(self.mttl_args, os.path.join(output_dir, MTTL_ARGS_NAME))
