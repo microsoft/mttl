@@ -1,18 +1,6 @@
-import dataclasses
-import json
-import os
-import shutil
-import sys
-from tempfile import TemporaryDirectory
-from typing import Optional, Type
-
-import safetensors
-import torch
 from pytorch_lightning import seed_everything
-from transformers import Trainer, TrainerCallback, TrainingArguments
-from transformers.trainer import TRAINING_ARGS_NAME
 
-from mttl.arguments import Args, DataArgs, ExpertConfig, ModifierArgs
+from mttl.arguments import Args, ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import logger, setup_logging
 from mttl.models.expert_model import (
@@ -47,7 +35,7 @@ def train_experts(
     # get directory of the current file
     setup_logging(training_args.output_dir)
 
-    logger.info("Args: {}".format(training_args.to_json()))
+    logger.info("Args: %s", training_args.to_json())
 
     remote_login(training_args.remote_token)
 
@@ -58,8 +46,8 @@ def train_experts(
         def create_library(args):
             expert_library = ExpertLibrary.get_expert_library(
                 repo_id=args.library_id,
-                create=True,
                 destination_id=args.destination_library_id,
+                create=True,
             )
             return expert_library
 
@@ -80,8 +68,8 @@ def train_experts(
         if training_args.pipeline_eval_tasks == "all":
             training_args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
 
-        eval = DownstreamEvalCallback(module, training_args)
-        callbacks.append(eval)
+        downstream_eval_callback = DownstreamEvalCallback(module, training_args)
+        callbacks.append(downstream_eval_callback)
     else:
         logger.warning(
             "Deactivating downstream eval callback as it is not enabled in the config. Please set `pipeline_eval_tasks`."
@@ -97,6 +85,15 @@ def train_experts(
     )
 
     trainer.train()
+
+    # Get the best checkpoint
+    best_model_path = trainer.state.best_model_checkpoint
+    if best_model_path:
+        logger.info("Best model checkpoint: %s", best_model_path)
+
+    # upload to library!
+    if expert_library:
+        expert_library.add_expert_from_ckpt(best_model_path)
 
 
 if __name__ == "__main__":
