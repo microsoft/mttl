@@ -55,8 +55,6 @@ def train_experts(
 
         expert_library = create_library(training_args)
 
-    dm = get_datamodule(training_args)
-
     module = model_class(
         model_config,
         load_in_4bit=training_args.load_in_4bit,
@@ -77,12 +75,9 @@ def train_experts(
             "Deactivating downstream eval callback as it is not enabled in the config. Please set `pipeline_eval_tasks`."
         )
 
-    trainer: Trainer = ExpertModelTrainer(
+    trainer: ExpertModelTrainer = ExpertModelTrainer(
         model=module,
         args=training_args,
-        data_collator=dm.collate_fn,
-        train_dataset=dm.train_dataset,
-        eval_dataset=dm.dev_dataset,
         callbacks=callbacks,
     )
 
