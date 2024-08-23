@@ -27,12 +27,10 @@ def test_expert_model():
     seed_everything(0)
     os.environ["COALESCED_LORA_CONTAINER"] = "0"
     model = MultiExpertModel(model="EleutherAI/gpt-neo-125m", device_map="cpu")
-    model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
+    model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj"))
     assert model.experts_containers[0].default_expert_name is None
 
-    model.add_empty_expert(
-        "b", LoRAConfig(modify_layers=".*out_proj.*"), is_default=True
-    )
+    model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj"), is_default=True)
     assert len(model.selectors["lora"]) == 0
     assert model.experts_containers[0].default_expert_name == "b"
 
@@ -44,7 +42,7 @@ def test_expert_model():
 
     expert_a: Expert = model.get_expert_instance("a")
     assert len(expert_a.expert_weights) == 24
-    assert expert_a.expert_config.modify_layers == ".*out_proj.*"
+    assert expert_a.expert_config.modify_layers == ".*out_proj"
 
     # switch selector for lora to task name
     model.set_selector("lora", TaskNameSelectorConfig())
@@ -61,12 +59,10 @@ def test_expert_model_coalesced():
     seed_everything(0)
     os.environ["COALESCED_LORA_CONTAINER"] = "1"
     model = MultiExpertModel(model="EleutherAI/gpt-neo-125m", device_map="cpu")
-    model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
+    model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj"))
     assert model.experts_containers[0].default_expert_name is None
 
-    model.add_empty_expert(
-        "b", LoRAConfig(modify_layers=".*out_proj.*"), is_default=True
-    )
+    model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj"), is_default=True)
     assert len(model.selectors["lora"]) == 0
     assert model.experts_containers[0].default_expert_name == "b"
 
@@ -79,7 +75,7 @@ def test_expert_model_coalesced():
 
     expert_a: Expert = model.get_expert_instance("a")
     assert len(expert_a.expert_weights) == 24
-    assert expert_a.expert_config.modify_layers == ".*out_proj.*"
+    assert expert_a.expert_config.modify_layers == ".*out_proj"
     expert_merged = model.get_merged_expert(task_name="t1")
     assert len(expert_merged.expert_weights) == 24
     assert np.allclose(
@@ -102,8 +98,8 @@ def test_expert_model_coalesced():
 def test_from_pretrained(tmp_path):
     # create a dummy library
     model = MultiExpertModel(model="EleutherAI/gpt-neo-125m", device_map="cpu")
-    model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
-    model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
+    model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj"))
+    model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj"))
     library = model.save_to_library(f"local://{tmp_path}")
 
     # from pretrained library
@@ -118,10 +114,10 @@ def test_from_pretrained_with_arrow(tmp_path):
     # create a dummy library
     model = MultiExpertModel(model="EleutherAI/gpt-neo-125m", device_map="cpu")
     model.add_empty_expert(
-        "a", LoRAConfig(modify_layers=".*out_proj.*", lora_init_b_random=True)
+        "a", LoRAConfig(modify_layers=".*out_proj", lora_init_b_random=True)
     )
     model.add_empty_expert(
-        "b", LoRAConfig(modify_layers=".*out_proj.*", lora_init_b_random=True)
+        "b", LoRAConfig(modify_layers=".*out_proj", lora_init_b_random=True)
     )
     library = model.save_to_library(f"local://{tmp_path}")
 
@@ -168,7 +164,7 @@ def test_get_modules_to_modify_trie():
     assert clean_multi_expert_modules.keys() == transformer_modules.keys()
 
     # add an expert
-    multi_expert_model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
+    multi_expert_model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj"))
     one_expert_modules = dict(get_modules_to_modify_trie(multi_expert_model.model))
     one_expert_all_modules = dict(multi_expert_model.model.named_modules())
     assert len(one_expert_all_modules.keys()) == 248
@@ -176,7 +172,7 @@ def test_get_modules_to_modify_trie():
     assert len(one_expert_all_modules) > len(transformer_modules)
 
     # add another expert
-    multi_expert_model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
+    multi_expert_model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj"))
     two_expert_modules = dict(get_modules_to_modify_trie(multi_expert_model.model))
     two_expert_all_modules = dict(multi_expert_model.model.named_modules())
     assert two_expert_modules.keys() == transformer_modules.keys()
@@ -195,7 +191,7 @@ def test_get_modules_to_modify_trie_coalesced():
     assert clean_multi_expert_modules.keys() == transformer_modules.keys()
 
     # add an expert
-    multi_expert_model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
+    multi_expert_model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj"))
     one_expert_modules = dict(get_modules_to_modify_trie(multi_expert_model.model))
     one_expert_all_modules = dict(multi_expert_model.model.named_modules())
     assert len(one_expert_all_modules.keys()) == 236
@@ -203,7 +199,7 @@ def test_get_modules_to_modify_trie_coalesced():
     assert len(one_expert_all_modules) > len(transformer_modules)
 
     # add another expert
-    multi_expert_model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
+    multi_expert_model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj"))
     two_expert_modules = dict(get_modules_to_modify_trie(multi_expert_model.model))
     two_expert_all_modules = dict(multi_expert_model.model.named_modules())
     assert two_expert_modules.keys() == transformer_modules.keys()

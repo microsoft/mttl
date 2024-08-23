@@ -32,7 +32,9 @@ class MergeableModifierMixin(ABC):
 @dataclass
 class ModifierConfig(object):
     modify_modules: str = ".*"
-    modify_layers: str = ".*"
+    modify_layers: str = (
+        None  # this is depriciated but still kept for backward compatibility
+    )
     tie_params: str = None
 
     def __eq__(self, other):
