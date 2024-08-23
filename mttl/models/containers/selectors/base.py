@@ -3,8 +3,8 @@ import math
 import threading
 from abc import ABC
 from collections import defaultdict
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Union
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 import torch
@@ -95,12 +95,33 @@ class AutoSelectorConfig(AutoSerializable, SelectorConfig):
     pass
 
 
-class MultiSelectorConfig(dict):
+@dataclass
+class MultiSelectorConfig(SelectorConfig):
+    selectors: Dict[str, SelectorConfig] = field(default_factory=dict)
+
+    def __len__(self):
+        return len(self.selectors)
+
+    def __getitem__(self, key):
+        return self.selectors[key]
+
+    def __keys__(self):
+        return self.selectors.keys()
+
+    def __values__(self):
+        return self.selectors.values()
+
+    def __items__(self):
+        return self.selectors.items()
+
+    def __setitem__(self, key, value):
+        self.selectors[key] = value
+
     @property
     def selector_name(self):
         import json
 
-        return json.dumps({k: v.selector_name for k, v in self.items()})
+        return json.dumps({k: v.selector_name for k, v in self.selectors.items()})
 
     @classmethod
     def from_training_config(
@@ -124,8 +145,8 @@ class MultiSelectorConfig(dict):
             config_clone = copy.deepcopy(training_config)
             config_clone.router_selector = selector_name
 
-            selector_configs[modifier_name] = SelectorConfig.from_training_config(
-                config_clone
+            selector_configs.selectors[modifier_name] = (
+                SelectorConfig.from_training_config(config_clone)
             )
         return selector_configs
 

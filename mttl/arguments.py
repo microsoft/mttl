@@ -357,7 +357,6 @@ class TrainingArgs(DataArgs):
     weight_decay: float = 0.01
     adam_epsilon: float = 1e-8
     max_grad_norm: float = 0.1
-    gradient_accumulation_steps: int = 1
     optimizer: str = "adamw"
     adafactor_scale_parameter: bool = True
     adafactor_warmup_init: bool = False
@@ -442,6 +441,11 @@ class TrainingArgs(DataArgs):
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size
 
+        if self.train_batch_size % self.micro_batch_size != 0:
+            raise ValueError(
+                "The training batch size must be divisible by the micro batch size."
+            )
+
         self.gradient_accumulation_steps = (
             self.train_batch_size // self.micro_batch_size
         )
@@ -467,7 +471,6 @@ class TrainingArgs(DataArgs):
             logging_steps=1,
             bf16=self.precision == "bf16",
             fp16=self.precision == "16",
-            adam_epsilon=self.adam_epsilon,
             learning_rate=self.learning_rate,
             weight_decay=self.weight_decay,
             load_best_model_at_end=True,

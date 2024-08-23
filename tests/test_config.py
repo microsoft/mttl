@@ -183,6 +183,25 @@ def test_dump_load_selector_config():
     assert type(test) == MOERKHSSelectorConfig
 
 
+def test_dump_load_multi_selector_config():
+    from mttl.models.containers.selectors.base import (
+        AutoSelectorConfig,
+        MultiSelectorConfig,
+        TaskNameSelectorConfig,
+    )
+    from mttl.models.containers.selectors.moe_selector import MOERKHSSelectorConfig
+
+    dump = MultiSelectorConfig(
+        selectors={
+            "lora": MOERKHSSelectorConfig(emb_dim=12345),
+            "hard_prompts": TaskNameSelectorConfig(),
+        }
+    ).asdict()
+    test = AutoSelectorConfig.fromdict(dump)
+    assert isinstance(test, MultiSelectorConfig)
+    assert len(test) == 2
+
+
 def test_asdict_list(tmp_path):
     """Test dumping config with a list of Serializable."""
     from mttl.models.expert_model import MultiExpertModelConfig
