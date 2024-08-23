@@ -4,17 +4,30 @@ from typing import Dict, List, Optional, Tuple, Union
 import torch
 from pyparsing import Any
 from transformers import Trainer
-from transformers.trainer import TRAINING_ARGS_NAME
+from transformers.trainer import TRAINING_ARGS_NAME, TrainingArguments
+
+from mttl.arguments import ExpertConfig
+from mttl.models.get_optimizer import get_optimizer
+from mttl.models.get_scheduler import get_scheduler
 
 
 class ExpertModelTrainer(Trainer):
     """Generic HF trainer for expert models."""
 
-    def __init__(self, *args, **kwargs):
-        if "optimizers" not in kwargs:
-            raise ValueError("Optimizers must be provided as a keyword argument.")
+    def __init__(self, model, args, **kwargs):
+        args: ExpertConfig = args
 
-        super().__init__(*args, **kwargs)
+        if "optimizers" in kwargs:
+            raise ValueError("`optimizers` not supported!")
+
+        optimizer = get_optimizer(model, args)[0]
+        scheduler = get_scheduler(optimizer, args)
+
+        hf_args: TrainingArguments = args.to_hf_training_args()
+
+        super().__init__(
+            model=model, args=hf_args, optimizers=(optimizer, scheduler), **kwargs
+        )
 
     def compute_loss(self, model, batch, return_outputs=False):
         outputs = model(**batch)

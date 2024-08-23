@@ -87,18 +87,13 @@ def train_experts(
             "Deactivating downstream eval callback as it is not enabled in the config. Please set `pipeline_eval_tasks`."
         )
 
-    hf_args = training_args.to_hf_training_args()
-    optimizer = get_optimizer(module, training_args)
-    scheduler = get_scheduler(optimizer, training_args)
-
     trainer: Trainer = ExpertModelTrainer(
         model=module,
-        args=hf_args,
+        args=training_args,
         data_collator=dm.collate_fn,
         train_dataset=dm.train_dataset,
         eval_dataset=dm.dev_dataset,
         callbacks=callbacks,
-        optimizers=(optimizer, scheduler),
     )
 
     trainer.train()
