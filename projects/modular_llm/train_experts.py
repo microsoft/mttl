@@ -162,9 +162,9 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
                 convert_zero_checkpoint_to_fp32_state_dict(path, new_path)
 
             convert_ckpt(checkpoint, new_path)
-            checkpoint = torch.load(new_path)
+            checkpoint = torch.load(new_path, weights_only=False)
         else:
-            checkpoint = torch.load(checkpoint)["state_dict"]
+            checkpoint = torch.load(checkpoint, weights_only=False)["state_dict"]
 
         module.load_state_dict(checkpoint)
         trainer.test(module, dm)

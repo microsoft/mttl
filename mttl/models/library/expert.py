@@ -190,7 +190,9 @@ def load_expert_from_pl_checkpoint(
         expert_checkpoint = download_from_hub(expert_path)
 
     logger.info(f"Loading expert from {expert_checkpoint}...")
-    expert_checkpoint = torch.load(expert_checkpoint, map_location="cpu")
+    expert_checkpoint = torch.load(
+        expert_checkpoint, weights_only=False, map_location="cpu"
+    )
 
     if "hyper_parameters" in expert_checkpoint:
         # this is a PL checkpoint
@@ -262,7 +264,7 @@ def load_expert_from_hf_checkpoint(
     # gather mttl training arguments from the checkpoint if available
     mttl_args_file = os.path.join(expert_path, MTTL_ARGS_NAME)
     if os.path.isfile(mttl_args_file):
-        training_config = torch.load(mttl_args_file)
+        training_config = torch.load(mttl_args_file, weights_only=False)
     else:
         training_config = None
 

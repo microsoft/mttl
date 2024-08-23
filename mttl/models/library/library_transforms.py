@@ -719,7 +719,9 @@ class PhatgooseTransform(HiddenStateComputer):
 
                 model_after = MultiExpertModule(**vars(training_config)).to("cuda")
                 model_after.add_expert_instance(expert, is_default=True)
-                model_after.load_state_dict(torch.load(checkpoint)["state_dict"])
+                model_after.load_state_dict(
+                    torch.load(checkpoint, weights_only=False)["state_dict"]
+                )
 
                 # for checksum
                 frozen_sum_after, unfrozen_sum_after = 0, 0

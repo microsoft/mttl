@@ -140,7 +140,9 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
         if instantiate_model:
             return cls.load_from_checkpoint(resolved_archive_file, **kwargs)
         else:
-            ckpt = torch.load(resolved_archive_file, map_location="cpu")
+            ckpt = torch.load(
+                resolved_archive_file, weights_only=False, map_location="cpu"
+            )
 
             return ckpt["state_dict"], ckpt["hyper_parameters"]
 
@@ -153,7 +155,7 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
         from mttl.datamodule.utils import get_tokenizer_with_args
 
         tokenizer = model_kwargs.get("tokenizer", None)
-        ckpt = torch.load(checkpoint_path, map_location="cpu")
+        ckpt = torch.load(checkpoint_path, weights_only=False, map_location="cpu")
         ckpt["hyper_parameters"].update(**model_kwargs)
 
         if tokenizer is None and "model" in ckpt["hyper_parameters"]:

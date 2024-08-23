@@ -73,7 +73,7 @@ def get_task_expert(task, library):
 
 
 def load_expert_from_checkpoint(checkpoint):
-    ckpt = torch.load(checkpoint)
+    ckpt = torch.load(checkpoint, weights_only=False)
     if "expert_dumps" in ckpt:
         expert_dumps = ckpt["expert_dumps"]
         expert: Expert = Expert.fromdict(expert_dumps)
@@ -426,7 +426,7 @@ def finetune_polylib_full_with_svd_retrieval(args: FinetuneConfig, dm):
     expert = load_expert(ckpt_path)
     module = ExpertModule(**vars(expert.training_config))
 
-    ckpt = torch.load(ckpt_path)
+    ckpt = torch.load(ckpt_path, weights_only=False)
     result = module.load_state_dict(ckpt["state_dict"], strict=False)
     assert len(result.unexpected_keys) == 0, result.unexpected_keys
 
@@ -476,7 +476,7 @@ def run_multitask(args: FinetuneConfig):
         expert = load_expert(ckpt_path)
         module = ExpertModule(**vars(expert.training_config))
 
-        ckpt = torch.load(ckpt_path)
+        ckpt = torch.load(ckpt_path, weights_only=False)
         result = module.load_state_dict(ckpt["state_dict"], strict=False)
         assert len(result.unexpected_keys) == 0, result.unexpected_keys
 
@@ -608,7 +608,7 @@ def train_module(args: FinetuneConfig, module: ExpertModule, dm):
         checkpoint = (
             checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
         )
-        module.load_state_dict(torch.load(checkpoint)["state_dict"])
+        module.load_state_dict(torch.load(checkpoint, weights_only=False)["state_dict"])
     else:
         checkpoint = None
 

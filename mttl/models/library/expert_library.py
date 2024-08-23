@@ -675,7 +675,9 @@ class ExpertLibrary:
             raise e
 
         metadata = [
-            MetadataEntry.fromdict(torch.load(file, map_location="cpu"))
+            MetadataEntry.fromdict(
+                torch.load(file, map_location="cpu", weights_only=False)
+            )
             for file in glob.glob(f"{metadata_dir}/**/*.meta", recursive=True)
         ]
 
@@ -836,7 +838,7 @@ class ExpertLibrary:
             else:
                 path = self.hf_hub_download(self.repo_id, filename=file)
                 try:
-                    config = repr(torch.load(path)["config"])
+                    config = repr(torch.load(path, weights_only=False)["config"])
                 except:
                     # old format
                     config = "N/A"
@@ -871,7 +873,7 @@ class ExpertLibrary:
                 raise ValueError(
                     f"Data of type {data_type} for expert {expert_name} not found in repository. Did you compute it?"
                 )
-            payload = torch.load(filename)
+            payload = torch.load(filename, weights_only=False)
             if return_config and "config" in payload:
                 return payload["config"], payload["data"]
             if "data" in payload:
@@ -882,7 +884,7 @@ class ExpertLibrary:
             for key in self.keys():
                 filename = os.path.join(path, f"{key}.{data_type}.bin")
                 if os.path.isfile(filename):
-                    payload = torch.load(filename)
+                    payload = torch.load(filename, weights_only=False)
                     if return_config and "config" in payload:
                         auxiliary_data[f"{key}"] = payload["config"], payload["data"]
                     elif "data" in payload:
@@ -950,7 +952,9 @@ class ExpertLibrary:
             raise ValueError(f"Expert {expert_name} not found in repository.")
 
         path = self.hf_hub_download(self.repo_id, filename=f"{expert_name}.meta")
-        metadata = MetadataEntry.fromdict(torch.load(path, map_location="cpu"))
+        metadata = MetadataEntry.fromdict(
+            torch.load(path, weights_only=False, map_location="cpu")
+        )
         metadata.expert_deleted = False
 
         self._upload_metadata(metadata)
@@ -1010,7 +1014,7 @@ class ExpertLibrary:
         scores = self.list_repo_files(self.repo_id)
         if scores_file in scores:
             path = self.hf_hub_download(self.repo_id, filename=scores_file)
-            scores = torch.load(path, map_location="cpu")
+            scores = torch.load(path, weights_only=False, map_location="cpu")
         else:
             scores = {}
 

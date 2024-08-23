@@ -108,7 +108,7 @@ class TFIDFRanker(AdapterRanker):
         else:
             ckpt_file = repo_id + "/model.ckpt"
 
-        ckpt = torch.load(ckpt_file)
+        ckpt = torch.load(ckpt_file, weights_only=False)
 
         ranker = cls(**ckpt["config"])
         ranker.load_state_dict(ckpt["state_dict"])
@@ -234,7 +234,7 @@ class KATERanker(AdapterRanker):
             ckpt_file = path + "/model.ckpt"
             index_file = path + "/index.faiss"
 
-        ckpt = torch.load(ckpt_file)
+        ckpt = torch.load(ckpt_file, weights_only=False)
         index = read_index(index_file)
 
         ranker = cls(**ckpt["config"])
