@@ -33,8 +33,12 @@ dev = [
     "isort",
 ]
 
-flash-att = [
+flash-attn = [
     "flash-attn>=2.6.0",
+]
+
+vllm = [
+    "vllm",
 ]
 
 [project.urls]

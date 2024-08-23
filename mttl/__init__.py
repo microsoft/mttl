@@ -15,7 +15,9 @@ try:
 except ImportError:
     from mttl.logging import logger
 
-    logger.info("Flash Attention not available")
+    logger.info(
+        'Flash Attention not available. You can install it with `pip install -e ".[flash_attn]`".'
+    )
 
 import torch
 
