@@ -29,9 +29,8 @@ jobs:
       # flash-attn requires torch to be installed
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
-          pip install -e '.[dev]'
-          pip install -e '.[flash-attn]'
+          pip install --upgrade pip wheel setuptools
+          pip install -e '.[dev,flash-attn]'
       # - name: Lint with flake8
       #   run: |
       #     # stop the build if there are Python syntax errors or undefined names
