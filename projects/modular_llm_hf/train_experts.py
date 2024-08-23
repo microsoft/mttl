@@ -1,3 +1,5 @@
+from typing import Type
+
 from pytorch_lightning import seed_everything
 
 from mttl.arguments import Args, ExpertConfig
