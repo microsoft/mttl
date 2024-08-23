@@ -19,7 +19,6 @@ matplotlib
 openai
 ray
 nevergrad
-vllm
 evaluate
 seaborn
 azure-storage-blob
