@@ -16,7 +16,9 @@ try:
     from vllm.model_executor.parallel_utils.parallel_state import destroy_model_parallel
 except ImportError:
     LLM = object
-    logger.warning("VLLM is not installed. Please install it to use LLMEngine.")
+    logger.warning(
+        'VLLM is not installed. Please install it with `pip install -e ".[vllm]"` to use LLMEngine.'
+    )
 
 
 def save_merged_model(model, model_path, hf_path="/tmp/merged"):

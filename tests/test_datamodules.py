@@ -51,7 +51,7 @@ def test_platypus():
     platy = PlatypusModule(
         DatasetConfig(
             dataset="platypus",
-            model="yahma/llama-7b-hf",
+            model="EleutherAI/gpt-neo-125m",
             max_input_length=4096,
             model_family="gpt",
             validation_portion=0.05,
@@ -273,7 +273,7 @@ def test_mmlu_spaces_and_merges(task_name=None):
     mmlu = MMLUDataModule(
         MMLUDataConfig(
             "mmlu",
-            model="yahma/llama-7b-hf",
+            model="EleutherAI/gpt-neo-125m",
             model_family="gpt",
             max_input_length=4096,
             train_batch_size=4,
