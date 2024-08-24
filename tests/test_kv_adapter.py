@@ -80,11 +80,11 @@ def test_llama_adapter(adapter_type, model_arg):
     if model_arg == "llama":
         # Test Base Llama model
         output = model(**batch)
-        assert round(output.loss.item(), 2) == 6.09
+        assert round(output.loss.item(), 4) == 6.0915
 
         # Make sure zero-init gate gives the same result
         output = new_model(**batch)
-        assert round(output.loss.item(), 2) == 6.09
+        assert round(output.loss.item(), 4) == 6.0915
 
         # Manually set the gates to have non-zero values
         n_modules = 0
@@ -98,16 +98,16 @@ def test_llama_adapter(adapter_type, model_arg):
 
         # Test Modified Llama model
         output = new_model(**batch)
-        assert round(output.loss.item(), 2) == 6.08
+        assert round(output.loss.item(), 4) == 6.0955
 
     if model_arg == "gpt-neo":
         # Test Base GPT neo model
         output = model(**batch)
-        assert round(output.loss.item(), 2) == 6.12
+        assert round(output.loss.item(), 4) == 6.1194
 
         # Make sure zero-init gate gives the same result
         output = new_model(**batch)
-        assert round(output.loss.item(), 2) == 6.12
+        assert round(output.loss.item(), 4) == 6.1194
 
         # Manually set the gates to have non-zero values
         n_modules = 0
@@ -121,4 +121,4 @@ def test_llama_adapter(adapter_type, model_arg):
 
         # Test Modified Neo model
         output = new_model(**batch)
-        assert round(output.loss.item(), 2) == 6.10
+        assert round(output.loss.item(), 4) == 6.0922
