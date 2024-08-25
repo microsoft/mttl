@@ -251,7 +251,7 @@ class Trie:
             self._print_all_words_helper(child_node, prefix + char)
 
 
-def get_modules_to_modify_trie(transformer):
+def get_modifiable_modules(transformer):
     """Get modules to modify in the transformer model.
     Filter out modules that are inside expert containers."""
     trie = Trie()
@@ -300,7 +300,7 @@ def match_modules_to_modify(transformer, modify_modules):
     """
     Match modules in the transformer model based on the modify_modules regex
     """
-    for m_name, module in dict(transformer.named_modules()).items():
+    for m_name, module in get_modifiable_modules(transformer):
         if re.fullmatch(modify_modules, m_name):
             yield m_name, module
 
