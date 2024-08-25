@@ -4,12 +4,13 @@ import pytest
 from pytorch_lightning import seed_everything
 
 from mttl.models.containers import create_modif_regex, match_modules_to_modify
-from mttl.models.expert_model import MultiExpertModel
+from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
 
 
-def test_add_expert_to_transformer():
+def test_add_expert_to_transformer(monkeypatch):
     seed_everything(0)
-    os.environ["COALESCED_LORA_CONTAINER"] = "0"
+    monkeypatch.setenv("COALESCED_LORA_CONTAINER", "0")
+
     # logic:
     # modify_modules -- will check if the module name contains the string
     # modify_layers -- will check if the module name ends on the string
@@ -17,7 +18,9 @@ def test_add_expert_to_transformer():
     # modify_modules = .* -- modifies all modules
     # modify_layers = .* -- modifies all layers
     # will match any name that has a dot in it
-    model = MultiExpertModel(model="EleutherAI/gpt-neo-125m", device_map="cpu")
+    model = MultiExpertModel(
+        MultiExpertModelConfig(base_model="EleutherAI/gpt-neo-125m")
+    )
     regex = create_modif_regex(modify_modules=".*", modify_layers=".*")
     matched_modules = [o[0] for o in match_modules_to_modify(model.model, regex)]
     assert len(matched_modules) == len(list(model.model.named_modules())) - 3
