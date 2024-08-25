@@ -476,7 +476,6 @@ class MoEModel(BaseExpertModel, MultiExpertMixin):
 
     def add_empty_experts(self):
         for i in range(self.config.moe_num_experts):
-            # Adding a Skilled LoRA with 1 skill if model modifier is set to skilled_lora
             try:
                 self.add_empty_expert(f"e{i}", self.modifier_config)
             except ContainerFullException:
