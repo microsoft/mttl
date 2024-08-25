@@ -39,9 +39,7 @@ def test_expert_model(monkeypatch):
     model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
     assert model.experts_containers[0].default_expert_name is None
 
-    model.add_empty_expert(
-        "b", LoRAConfig(modify_layers=".*out_proj.*"), is_default=True
-    )
+    model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj"), is_default=True)
     assert len(model.selectors["lora"]) == 0
     assert model.experts_containers[0].default_expert_name == "b"
 
@@ -53,7 +51,7 @@ def test_expert_model(monkeypatch):
 
     expert_a: Expert = model.get_expert_instance("a")
     assert len(expert_a.expert_weights) == 24
-    assert expert_a.expert_config.modify_layers == ".*out_proj.*"
+    assert expert_a.expert_config.modify_layers == ".*out_proj"
 
     # switch selector for lora to task name
     model.set_selector("lora", TaskNameSelectorConfig())
@@ -70,9 +68,7 @@ def test_expert_model_coalesced(monkeypatch):
     model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
     assert model.experts_containers[0].default_expert_name is None
 
-    model.add_empty_expert(
-        "b", LoRAConfig(modify_layers=".*out_proj.*"), is_default=True
-    )
+    model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj"), is_default=True)
     assert len(model.selectors["lora"]) == 0
     assert model.experts_containers[0].default_expert_name == "b"
 
@@ -115,10 +111,10 @@ def test_from_pretrained_with_arrow(tmp_path):
     # create a dummy library
     model = MultiExpertModel(MultiExpertModelConfig("EleutherAI/gpt-neo-125m"))
     model.add_empty_expert(
-        "a", LoRAConfig(modify_layers=".*out_proj.*", lora_init_b_random=True)
+        "a", LoRAConfig(modify_layers=".*out_proj", lora_init_b_random=True)
     )
     model.add_empty_expert(
-        "b", LoRAConfig(modify_layers=".*out_proj.*", lora_init_b_random=True)
+        "b", LoRAConfig(modify_layers=".*out_proj", lora_init_b_random=True)
     )
     library = model.save_to_library(f"local://{tmp_path}")
 
@@ -165,7 +161,7 @@ def test_get_modules_to_modify_trie():
     assert clean_multi_expert_modules.keys() == transformer_modules.keys()
 
     # add an expert
-    multi_expert_model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
+    multi_expert_model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj"))
     one_expert_modules = dict(get_modules_to_modify_trie(multi_expert_model.model))
     one_expert_all_modules = dict(multi_expert_model.model.named_modules())
     assert len(one_expert_all_modules.keys()) == 248
@@ -173,7 +169,7 @@ def test_get_modules_to_modify_trie():
     assert len(one_expert_all_modules) > len(transformer_modules)
 
     # add another expert
-    multi_expert_model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
+    multi_expert_model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj"))
     two_expert_modules = dict(get_modules_to_modify_trie(multi_expert_model.model))
     two_expert_all_modules = dict(multi_expert_model.model.named_modules())
     assert two_expert_modules.keys() == transformer_modules.keys()
@@ -194,7 +190,7 @@ def test_get_modules_to_modify_trie_coalesced(monkeypatch):
     assert clean_multi_expert_modules.keys() == transformer_modules.keys()
 
     # add an expert
-    multi_expert_model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
+    multi_expert_model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj"))
     one_expert_modules = dict(get_modules_to_modify_trie(multi_expert_model.model))
     one_expert_all_modules = dict(multi_expert_model.model.named_modules())
     assert len(one_expert_all_modules.keys()) == 236
@@ -202,7 +198,7 @@ def test_get_modules_to_modify_trie_coalesced(monkeypatch):
     assert len(one_expert_all_modules) > len(transformer_modules)
 
     # add another expert
-    multi_expert_model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
+    multi_expert_model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj"))
     two_expert_modules = dict(get_modules_to_modify_trie(multi_expert_model.model))
     two_expert_all_modules = dict(multi_expert_model.model.named_modules())
     assert two_expert_modules.keys() == transformer_modules.keys()

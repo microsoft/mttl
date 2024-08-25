@@ -22,6 +22,11 @@ from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoR
 from mttl.models.modifiers.modify_model import get_modifier_name
 
 
+class ContainerFullException(Exception):
+    def __init__(self):
+        super().__init__("Container is full. Cannot add more experts.")
+
+
 class Container(abc.ABC):
     @abc.abstractmethod
     def __getitem__(self, key):

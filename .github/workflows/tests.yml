@@ -31,7 +31,6 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -e '.[dev]'
-          pip install -e '.[flash-attn]'
       # - name: Lint with flake8
       #   run: |
       #     # stop the build if there are Python syntax errors or undefined names

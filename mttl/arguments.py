@@ -571,6 +571,13 @@ class MoEExpertConfig(MultiExpertConfig):
     moe_ent_free_bits: float = 0.0
     moe_num_experts: int = 8
     init_from_scratch: bool = True
+    pk_use_batchnorm: bool = True
+    down_proj_layer: str = (
+        "fc1"  # this is for the PEER container, it signals the names of the down and up projecting layers
+    )
+    up_proj_layer: str = (
+        "fc2"  # this is for the PEER container, it signals the names of the down and up projecting layers
+    )
 
     @property
     def modifier_config(self):

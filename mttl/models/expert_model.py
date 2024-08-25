@@ -9,7 +9,7 @@ import torch
 from mttl.logging import logger
 from mttl.models.base_model import BaseExpertModel
 from mttl.models.containers import add_expert_to_transformer
-from mttl.models.containers.base import ExpertContainer
+from mttl.models.containers.base import ContainerFullException, ExpertContainer
 from mttl.models.containers.selectors.base import (
     AutoSelectorConfig,
     LoadableSelectorConfig,
@@ -361,6 +361,7 @@ class MultiExpertMixin:
 
         expert_params = {}
         for container in self.experts_containers:
+            retrieved_expert = None
             if expert_name in container.expert_infos:
                 expert_info = container.expert_infos[expert_name]
                 expert_weights = container[expert_name].state_dict()
@@ -369,7 +370,9 @@ class MultiExpertMixin:
                 }
                 expert_params.update(expert_weights)
 
-        retrieved_expert = Expert(expert_info=expert_info, expert_weights=expert_params)
+                retrieved_expert = Expert(
+                    expert_info=expert_info, expert_weights=expert_params
+                )
         return retrieved_expert
 
     def save_to_library(self, library_id):
@@ -446,7 +449,7 @@ class MoEModelConfig(BaseExpertModelConfig):
     library_id: str = None
     moe_num_experts: int = 1
     selector_config: AutoSelectorConfig = None
-    modifier_config: SkilledLoRAConfig = None
+    modifier_config: AutoModifierConfig = None
 
 
 @BaseExpertModel.register("moe_model", config_cls=MoEModelConfig)
@@ -454,28 +457,15 @@ class MoEModel(BaseExpertModel, MultiExpertMixin):
     def __init__(self, config, **kwargs):
         super().__init__(config, **kwargs)
 
-        # config about the routing
         self.modifier_config = config.modifier_config
+
+        # config about the routing
         self.selector_config = config.selector_config
         self.selector_cache = SelectorsCache()
         self.experts_infos = {}
 
         if not self.config.library_id and self.config.moe_num_experts >= 1:
-            for i in range(self.config.moe_num_experts):
-                # Adding a Skilled LoRA with 1 skill.
-                exp_config = SkilledLoRAConfig(
-                    n_skills=1,
-                    modify_layers=self.modifier_config.modify_layers,
-                    modify_modules=self.modifier_config.modify_modules,
-                    lora_alpha=self.modifier_config.lora_alpha,
-                    lora_dropout=self.modifier_config.lora_dropout,
-                    lora_rank=self.modifier_config.lora_rank,
-                    lora_init_b_random=True,
-                    n_splits=self.modifier_config.n_splits,
-                    phi_2_align_heads=self.modifier_config.phi_2_align_heads,
-                )
-                self.add_empty_expert(f"e{i}", exp_config)
-
+            self.add_empty_experts()
             self.moe_num_experts = self.config.moe_num_experts
         else:
             expert_library = ExpertLibrary.get_expert_library(self.config.library_id)
@@ -483,3 +473,14 @@ class MoEModel(BaseExpertModel, MultiExpertMixin):
                 self.add_expert_instance(expert_library[expert], expert_name=f"e{i}")
 
             self.moe_num_experts = i + 1
+
+    def add_empty_experts(self):
+        for i in range(self.config.moe_num_experts):
+            # Adding a Skilled LoRA with 1 skill if model modifier is set to skilled_lora
+            try:
+                self.add_empty_expert(f"e{i}", self.modifier_config)
+            except ContainerFullException:
+                logger.info(
+                    f"Added all {self.config.moe_num_experts} experts to container."
+                )
+                break

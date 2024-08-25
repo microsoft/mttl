@@ -104,6 +104,22 @@ class BatchSequenceExpertsAndWeightsSelectorOutput(SelectorOutput):
 
 
 @dataclass
+class MultiheadBatchSequenceExpertsAndWeightsSelectorOutput(SelectorOutput):
+    """A selector output that contains a list of experts and weights for each example and token.
+
+    experts: indices of the selected experts
+    weights: their weights
+    """
+
+    experts: torch.Tensor
+    weights: torch.Tensor
+
+    @property
+    def dim_names(self):
+        return ["batch", "sequence", "head", "experts"]
+
+
+@dataclass
 class BatchSequenceExpertsSplitsAndWeightsSelectorOutput(
     BatchSequenceExpertsAndWeightsSelectorOutput
 ):
