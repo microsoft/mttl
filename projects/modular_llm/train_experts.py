@@ -53,7 +53,7 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
     args.n_tasks = len(dm._task_names)
     args.task_names = dm._task_names
 
-    module = model_class(**args.asdict())
+    module = model_class(**vars(args))
 
     # get metric monitors for models
     callbacks = get_monitors(args)
