@@ -36,7 +36,7 @@ def test_expert_model(monkeypatch):
     monkeypatch.setenv("COALESCED_LORA_CONTAINER", "0")
 
     model = MultiExpertModel(MultiExpertModelConfig("EleutherAI/gpt-neo-125m"))
-    model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
+    model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj"))
     assert model.experts_containers[0].default_expert_name is None
 
     model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj"), is_default=True)
@@ -65,7 +65,7 @@ def test_expert_model_coalesced(monkeypatch):
     monkeypatch.setenv("COALESCED_LORA_CONTAINER", "1")
 
     model = MultiExpertModel(MultiExpertModelConfig("EleutherAI/gpt-neo-125m"))
-    model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
+    model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj"))
     assert model.experts_containers[0].default_expert_name is None
 
     model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj"), is_default=True)
