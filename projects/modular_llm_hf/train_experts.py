@@ -76,6 +76,7 @@ def train_experts(
         logger.info("Best model checkpoint: %s", best_model_path)
 
     # upload to library!
+    breakpoint()
     if expert_library is not None:
         expert_library.add_expert_from_ckpt(best_model_path)
 
@@ -86,7 +87,7 @@ if __name__ == "__main__":
     model_config = ExpertModelConfig(
         base_model=args.model,
         task_name=args.finetune_task_name,
-        expert_name=args.expert_name,
+        expert_name=args.expert_name or args.finetune_task_name,
         modifier_config=args.modifier_config,
     )
 
