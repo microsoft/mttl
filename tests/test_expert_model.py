@@ -152,20 +152,20 @@ def test_from_pretrained_with_arrow(tmp_path):
     )
 
 
-def test_get_modules_to_modify_trie():
+def test_get_modifiable_modules():
     os.environ["COALESCED_LORA_CONTAINER"] = "0"
     model_name = "EleutherAI/gpt-neo-125m"
     transformer = AutoModelForCausalLM.from_pretrained(model_name)
     multi_expert_model = MultiExpertModel(model=model_name, device_map="cpu")
-    transformer_modules = dict(get_modules_to_modify_trie(transformer))
+    transformer_modules = dict(get_modifiable_modules(transformer))
     clean_multi_expert_modules = dict(
-        get_modules_to_modify_trie(multi_expert_model.model)
+        get_modifiable_modules(multi_expert_model.model)
     )
     assert clean_multi_expert_modules.keys() == transformer_modules.keys()
 
     # add an expert
     multi_expert_model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj"))
-    one_expert_modules = dict(get_modules_to_modify_trie(multi_expert_model.model))
+    one_expert_modules = dict(get_modifiable_modules(multi_expert_model.model))
     one_expert_all_modules = dict(multi_expert_model.model.named_modules())
     assert len(one_expert_all_modules.keys()) == 248
     assert one_expert_modules.keys() == transformer_modules.keys()
@@ -173,26 +173,26 @@ def test_get_modules_to_modify_trie():
 
     # add another expert
     multi_expert_model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj"))
-    two_expert_modules = dict(get_modules_to_modify_trie(multi_expert_model.model))
+    two_expert_modules = dict(get_modifiable_modules(multi_expert_model.model))
     two_expert_all_modules = dict(multi_expert_model.model.named_modules())
     assert two_expert_modules.keys() == transformer_modules.keys()
     assert len(two_expert_all_modules) > len(one_expert_all_modules)
 
 
-def test_get_modules_to_modify_trie_coalesced():
+def test_get_modifiable_modules_coalesced():
     os.environ["COALESCED_LORA_CONTAINER"] = "1"
     model_name = "EleutherAI/gpt-neo-125m"
     transformer = AutoModelForCausalLM.from_pretrained(model_name)
     multi_expert_model = MultiExpertModel(model=model_name, device_map="cpu")
-    transformer_modules = dict(get_modules_to_modify_trie(transformer))
+    transformer_modules = dict(get_modifiable_modules(transformer))
     clean_multi_expert_modules = dict(
-        get_modules_to_modify_trie(multi_expert_model.model)
+        get_modifiable_modules(multi_expert_model.model)
     )
     assert clean_multi_expert_modules.keys() == transformer_modules.keys()
 
     # add an expert
     multi_expert_model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj"))
-    one_expert_modules = dict(get_modules_to_modify_trie(multi_expert_model.model))
+    one_expert_modules = dict(get_modifiable_modules(multi_expert_model.model))
     one_expert_all_modules = dict(multi_expert_model.model.named_modules())
     assert len(one_expert_all_modules.keys()) == 236
     assert one_expert_modules.keys() == transformer_modules.keys()
@@ -200,7 +200,7 @@ def test_get_modules_to_modify_trie_coalesced():
 
     # add another expert
     multi_expert_model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj"))
-    two_expert_modules = dict(get_modules_to_modify_trie(multi_expert_model.model))
+    two_expert_modules = dict(get_modifiable_modules(multi_expert_model.model))
     two_expert_all_modules = dict(multi_expert_model.model.named_modules())
     assert two_expert_modules.keys() == transformer_modules.keys()
     assert len(two_expert_all_modules) == len(one_expert_all_modules)
