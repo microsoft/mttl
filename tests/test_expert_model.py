@@ -5,7 +5,7 @@ import pytest
 from pytorch_lightning import seed_everything
 from transformers import AutoModelForCausalLM
 
-from mttl.models.containers import get_modules_to_modify_trie
+from mttl.models.containers import get_modifiable_modules
 from mttl.models.containers.selectors.arrow_selector import (
     ArrowSelector,
     ArrowSelectorConfig,
