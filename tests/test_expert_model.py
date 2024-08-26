@@ -158,9 +158,7 @@ def test_get_modifiable_modules():
     transformer = AutoModelForCausalLM.from_pretrained(model_name)
     multi_expert_model = MultiExpertModel(model=model_name, device_map="cpu")
     transformer_modules = dict(get_modifiable_modules(transformer))
-    clean_multi_expert_modules = dict(
-        get_modifiable_modules(multi_expert_model.model)
-    )
+    clean_multi_expert_modules = dict(get_modifiable_modules(multi_expert_model.model))
     assert clean_multi_expert_modules.keys() == transformer_modules.keys()
 
     # add an expert
@@ -185,9 +183,7 @@ def test_get_modifiable_modules_coalesced():
     transformer = AutoModelForCausalLM.from_pretrained(model_name)
     multi_expert_model = MultiExpertModel(model=model_name, device_map="cpu")
     transformer_modules = dict(get_modifiable_modules(transformer))
-    clean_multi_expert_modules = dict(
-        get_modifiable_modules(multi_expert_model.model)
-    )
+    clean_multi_expert_modules = dict(get_modifiable_modules(multi_expert_model.model))
     assert clean_multi_expert_modules.keys() == transformer_modules.keys()
 
     # add an expert
