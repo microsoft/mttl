@@ -2,8 +2,7 @@ from typing import Type
 
 from pytorch_lightning import seed_everything
 
-from mttl.arguments import Args, ExpertConfig
-from mttl.datamodule.base import get_datamodule
+from mttl.arguments import ExpertConfig
 from mttl.logging import logger, setup_logging
 from mttl.models.expert_model import (
     BaseExpertModel,
@@ -11,20 +10,10 @@ from mttl.models.expert_model import (
     ExpertModel,
     ExpertModelConfig,
 )
-from mttl.models.get_optimizer import get_optimizer
-from mttl.models.get_scheduler import get_scheduler
 from mttl.models.hf.callbacks import DownstreamEvalCallback
 from mttl.models.hf.trainer import ExpertModelTrainer
-from mttl.models.library.expert import Expert, load_expert
-from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
-from mttl.models.lightning.callbacks import (
-    LiveCheckpointCallback,
-    NanoMMLUCallback,
-    RougeCallback,
-)
-from mttl.models.modifiers.base import ModifierConfig
-from mttl.models.monitors import get_monitors
-from mttl.utils import generate_random_string, rank_zero_only_and_wait, remote_login
+from mttl.models.library.expert_library import ExpertLibrary
+from mttl.utils import rank_zero_only_and_wait, remote_login
 
 
 def train_experts(

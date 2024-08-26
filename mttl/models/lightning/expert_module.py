@@ -232,11 +232,6 @@ class MultiExpertModule(ExpertModule):
 class MoEModule(MultiExpertModule):
     training_config_class = MoEExpertConfig
 
-    def __init__(self, **kwargs):
-        init_from_scratch = kwargs.get("init_from_scratch", False)
-
-        super().__init__(**kwargs)
-
     def setup_expert_model(self):
         # config about the routing
         if hasattr(self.hparams, "selector_config"):
@@ -247,9 +242,7 @@ class MoEModule(MultiExpertModule):
         config = MoEModelConfig(
             base_model=self.training_config.model,
             moe_num_experts=self.training_config.moe_num_experts,
-            modifier_config=SkilledLoRAConfig.from_training_config(
-                self.training_config
-            ),
+            modifier_config=self.training_config.modifier_config,
             selector_config=selector_config,
         )
         self.expert_model = MoEModel(
