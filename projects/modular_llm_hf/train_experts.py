@@ -76,7 +76,6 @@ def train_experts(
         logger.info("Best model checkpoint: %s", best_model_path)
 
     # upload to library!
-    breakpoint()
     if expert_library is not None:
         expert_library.add_expert_from_ckpt(best_model_path)
 
