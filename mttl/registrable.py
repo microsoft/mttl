@@ -24,13 +24,18 @@ class Registrable:
         return add_to_registry
 
     @classmethod
+    def from_config(cls, config: Any, **kwargs) -> "Registrable":
+        klass = cls.get_class_by_config_class(type(config))
+        return klass(config, **kwargs)
+
+    @classmethod
     def get_config_class_by_name(cls, name: str) -> Type:
-        subclass, config_cls = Registrable._registry[cls].get(name)
+        subclass, config_cls = Registrable._registry[cls][name]
         return config_cls
 
     @classmethod
     def get_class_by_name(cls, name: str) -> Type:
-        subclass, config_cls = Registrable._registry[cls].get(name)
+        subclass, config_cls = Registrable._registry[cls][name]
         return subclass
 
     @classmethod
