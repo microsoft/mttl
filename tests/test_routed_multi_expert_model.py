@@ -26,7 +26,7 @@ from mttl.models.containers.selectors.selector_output import (
 from mttl.models.library.expert import Expert
 from mttl.models.lightning.expert_module import MoEModule, MultiExpertModule
 from mttl.models.modifiers.base import ModifierConfig
-from mttl.models.modifiers.lora import LoRA
+from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRAConfig
 
 
 @pytest.fixture
@@ -120,10 +120,8 @@ def test_expert_selector_with_poly_task_routing(
     exp2 = create_dummy_expert(config, "task_2")
     module_dict = {"mod1": exp1, "mod2": exp2}
 
-    module = MultiExpertModule(
-        **vars(config),
-    )
-    assert module.hparams.model_modifier == None
+    module = MultiExpertModule(**vars(config))
+    assert isinstance(module.training_config.modifier_config, LoRAConfig)
     module.add_experts_from_dict(module_dict, action="route")
 
     assert isinstance(
@@ -166,7 +164,7 @@ def test_expert_selector_with_poly_task_routing(
     module = MultiExpertModule(
         **vars(config),
     )
-    assert module.hparams.model_modifier == None
+    assert isinstance(module.training_config.modifier_config, SkilledLoRAConfig)
     module.add_experts_from_dict(module_dict, action="route")
     nonzero_B_init(module)
     output = module(**batch)
@@ -199,7 +197,6 @@ def test_expert_selector_with_task_name_routing(tmp_multi_exp_config):
     module_dict = {"mod1": exp1, "mod2": exp2, "mod3": exp1}
 
     module = MultiExpertModule(**vars(config))
-    assert module.hparams.model_modifier == None
     module.add_experts_from_dict(module_dict, action="route")
     module.set_default_expert("mod3")
 
