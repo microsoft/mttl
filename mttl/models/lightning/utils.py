@@ -26,13 +26,3 @@ def convert_hps_to_dict(hparams):
         v = v.name if isinstance(v, Enum) else v
         hparams_allowed[k] = v
     return hparams_allowed
-
-
-def get_global_batch_size(batch_size, accumulation_steps):
-    """Computes the global batch size."""
-    try:
-        world_size = torch.distributed.get_world_size()
-    except:
-        world_size = 1
-    global_bs = batch_size * world_size * accumulation_steps
-    return global_bs

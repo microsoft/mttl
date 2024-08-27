@@ -44,6 +44,16 @@ def transfer_batch_to_device(batch, device):
     return batch
 
 
+def get_global_batch_size(batch_size, accumulation_steps):
+    """Computes the global batch size."""
+    try:
+        world_size = torch.distributed.get_world_size()
+    except:
+        world_size = 1
+    global_bs = batch_size * world_size * accumulation_steps
+    return global_bs
+
+
 def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
     r"""
     This method wraps the entire protocol for preparing a model before running a training. This includes:

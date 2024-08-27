@@ -9,7 +9,7 @@ from transformers.trainer import TRAINING_ARGS_NAME, TrainingArguments
 from mttl.arguments import ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import logger
-from mttl.models.get_optimizer import get_optimizer
+from mttl.models.get_optimizer import get_optimizer, get_optimizer_and_scheduler
 from mttl.models.get_scheduler import get_scheduler
 
 MTTL_ARGS_NAME = "mttl_args.bin"
@@ -24,12 +24,6 @@ class ExpertModelTrainer(Trainer):
         args: TrainingArguments = args.to_hf_training_args()
         logger.info(args)
 
-        if kwargs.get("optimizers") is None:
-            logger.info("Initializing custom non-HF optimizer and scheduler.")
-            optimizer = get_optimizer(model, self.mttl_args)[0]
-            scheduler = get_scheduler(optimizer, self.mttl_args)
-            kwargs["optimizers"] = (optimizer, scheduler)
-
         if kwargs.get("train_dataset") is None:
             logger.info("Initializing datamodule and storing it into Trainer.")
             self.dm = get_datamodule(self.mttl_args)
@@ -40,6 +34,17 @@ class ExpertModelTrainer(Trainer):
             kwargs["tokenizer"] = self.dm.tokenizer
         else:
             self.dm = None
+
+        if kwargs.get("optimizers") is None:
+            logger.info("Initializing custom non-HF optimizer and scheduler.")
+
+            (optimizer, scheduler), _ = get_optimizer_and_scheduler(
+                model,
+                self.mttl_args,
+                num_train_examples=len(kwargs["train_dataset"]),
+                no_decay=["bias", "LayerNorm.weight"],
+            )
+            kwargs["optimizers"] = (optimizer, scheduler)
 
         super().__init__(model=model, args=args, **kwargs)
 

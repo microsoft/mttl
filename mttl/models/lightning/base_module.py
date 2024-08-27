@@ -255,36 +255,17 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
         ), f"Load model failed, unexpected keys {load_result.unexpected_keys.__str__()}"
 
     def configure_optimizers(self):
+        from mttl.models.get_optimizer import get_optimizer_and_scheduler
+
         args = self.hparams
-        self.ml_optimizer = self.ml_scheduler = None
-
-        optimizer, self.trainable_param_names = get_optimizer(
-            self, args, no_decay=["bias", "LayerNorm.weight"]
-        )
-        global_bs = get_global_batch_size(
-            args.train_batch_size, args.gradient_accumulation_steps
-        )
-
-        if args.total_steps == -1:
-            args.total_steps = (
-                len(self.trainer.datamodule.train_dataset) // global_bs
-            ) * self.trainer.max_epochs
-
-        if args.warmup_steps == -1 or args.warmup_proportion > 0.0:
-            logger.warning(
-                "Warmup proportion is set to {}, has priority over warmup_steps".format(
-                    args.warmup_proportion
-                )
+        (optimizer, scheduler), self.trainable_param_names = (
+            get_optimizer_and_scheduler(
+                self,
+                args,
+                num_train_examples=len(self.trainer.datamodule.train_dataset),
+                no_decay=["bias", "LayerNorm.weight"],
             )
-
-            args.warmup_steps = int(args.warmup_proportion * args.total_steps)
-
-        logger.info("Optimizer setup:")
-        logger.info("Total steps: {}".format(args.total_steps))
-        logger.info("Warmup steps: {}".format(args.warmup_steps))
-        logger.info("Scheduler: {}".format(args.scheduler))
-
-        scheduler = get_scheduler(optimizer, args)
+        )
 
         return {
             "optimizer": optimizer,
@@ -293,13 +274,3 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
                 "interval": "step",
             },
         }
-
-
-def get_global_batch_size(batch_size, accumulation_steps):
-    """Computes the global batch size."""
-    try:
-        world_size = torch.distributed.get_world_size()
-    except:
-        world_size = 1
-    global_bs = batch_size * world_size * accumulation_steps
-    return global_bs
