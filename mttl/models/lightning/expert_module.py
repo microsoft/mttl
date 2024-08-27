@@ -223,11 +223,6 @@ class MultiExpertModule(ExpertModule):
             load_in_8bit=getattr(self.hparams, "load_in_8bit", False),
         )
 
-    def __init__(self, **kwargs):
-        kwargs["model_modifier"] = None
-
-        super().__init__(**kwargs)
-
 
 class MoEModule(MultiExpertModule):
     training_config_class = MoEExpertConfig

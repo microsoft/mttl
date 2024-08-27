@@ -580,10 +580,6 @@ class MoEExpertConfig(MultiExpertConfig):
         "fc2"  # this is for the PEER container, it signals the names of the down and up projecting layers
     )
 
-    @property
-    def modifier_config(self):
-        return ModifierConfig.from_training_config(self)
-
 
 @dataclass
 class RankerConfig(TrainingArgs, SelectorArgs):
