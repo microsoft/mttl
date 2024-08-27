@@ -8,6 +8,7 @@ from torch import nn
 from mttl.logging import logger
 from mttl.registrable import Registrable
 from mttl.serializable import AutoSerializable, Serializable
+from mttl.utils import deprecated
 
 
 class Modifier(nn.Module, Registrable):
@@ -73,19 +74,22 @@ class ModifierConfig(Serializable):
         return create_config_class_from_args(config_klass, training_config)
 
 
-class AutoModifierConfig(AutoSerializable, ModifierConfig):
+class AutoModifierConfig(AutoSerializable):
     @classmethod
-    def fromdict_legacy(cls, data):
+    @deprecated(
+        message="The config appears to be a legacy config and will be discontinued in the next release."
+    )
+    def fromdict_legacy(cls, data) -> "ModifierConfig":
         modifier_name = data.pop("__model_modifier__")
-        dataclass_cls = Modifier.get_config_class_by_name(modifier_name)
-        return dataclass_cls.fromdict(data)
+        config_cls: ModifierConfig = Modifier.get_config_class_by_name(modifier_name)
+        return config_cls.fromdict(data)
 
     @classmethod
-    def fromdict(cls, data: Dict):
+    def fromdict(cls, data: Dict) -> "ModifierConfig":
         try:
             return AutoSerializable.fromdict(data)
         except ValueError:
-            return AutoModifierConfig.fromdict_legacy(data)
+            return cls.fromdict_legacy(data)
 
 
 class ModifyMixin:

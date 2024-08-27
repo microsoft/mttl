@@ -22,6 +22,7 @@ class ExpertModelTrainer(Trainer):
         self.mttl_args: ExpertConfig = args
 
         args: TrainingArguments = args.to_hf_training_args()
+        logger.info(args)
 
         if kwargs.get("optimizers") is None:
             logger.info("Initializing custom non-HF optimizer and scheduler.")

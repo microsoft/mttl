@@ -12,48 +12,45 @@ class Serializable:
         return self.asdict() == other.asdict()
 
     @classmethod
-    def fromdict(cls, data: Dict[str, Any]) -> Type:
+    def fromdict(cls, data: Dict[str, Any]) -> "Serializable":
         from typing import get_args, get_origin
 
         data_ = {}
         for field in dataclasses.fields(cls):
-            if field.name not in data and field.default is dataclasses.MISSING:
-                raise ValueError(
-                    f"Required {field.name} is missing from the data provided."
-                )
-            elif field.name not in data:
-                # field is not in data
-                continue
+            if field.name not in data:
+                if (
+                    field.default is dataclasses.MISSING
+                    and field.default_factory is dataclasses.MISSING
+                ):
+                    raise ValueError(
+                        f"Required {field.name} is missing from the data provided."
+                    )
 
             value = data[field.name]
             if value is None:
                 data_[field.name] = None
-                continue
-
             # handle the case of a config
-            if hasattr(field.type, "fromdict"):
-                data_[field.name] = field.type.fromdict(data[field.name])
+            elif hasattr(field.type, "fromdict"):
+                data_[field.name] = field.type.fromdict(value)
             # handle the case of a list of configs
             elif get_origin(field.type) == list and hasattr(
                 get_args(field.type)[0], "fromdict"
             ):
-                data_[field.name] = [
-                    get_args(field.type)[0].fromdict(value)
-                    for value in data[field.name]
-                ]
-            # simple value
+                data_[field.name] = [get_args(field.type)[0].fromdict(v) for v in value]
+            # handle the case of a dict of configs
             elif get_origin(field.type) == dict and hasattr(
                 get_args(field.type)[0], "asdict"
             ):
-                data_[field.name] = {}
-                for k, v in value.items():
-                    data_[field.name][k] = v.asdict()
+                data_[field.name] = {
+                    k: get_args(field.type)[0].fromdict(v) for k, v in value.items()
+                }
+            # simple value
             else:
-                data_[field.name] = data.get(field.name, field.default)
+                data_[field.name] = value
         return cls(**data_)
 
     @classmethod
-    def from_dict(cls, data) -> Type:
+    def from_dict(cls, data) -> "Serializable":
         return cls.fromdict(data)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -83,31 +80,24 @@ class Serializable:
             value = getattr(self, field.name)
             if value is None:
                 data[field.name] = None
-                continue
-
-            if hasattr(value, "asdict"):
+            elif hasattr(value, "asdict"):
                 data[field.name] = value.asdict()
-            elif get_origin(field.type) == list and hasattr(
-                get_args(field.type)[0], "asdict"
+            elif isinstance(value, list) and all(hasattr(v, "asdict") for v in value):
+                data[field.name] = [v.asdict() for v in value]
+            elif isinstance(value, dict) and all(
+                hasattr(k, "asdict") for k in value.keys()
             ):
-                data[field.name] = []
-                for inner_value in value:
-                    data[field.name].append(inner_value.asdict())
-            elif get_origin(field.type) == dict and hasattr(
-                get_args(field.type)[0], "asdict"
-            ):
-                data[field.name] = {}
-                for k, v in value.items():
-                    data[field.name][k] = v.asdict()
+                data[field.name] = {k: v.asdict() for k, v in value.items()}
             else:
                 data[field.name] = value
-
-        data["class_name"] = f"{self.__module__}.{self.__class__.__name__}"
+            data["class_name"] = (
+                f"{self.__class__.__module__}.{self.__class__.__name__}"
+            )
         return data
 
 
 @dataclass
-class AutoSerializable(Serializable):
+class AutoSerializable:
     @classmethod
     def fromdict(cls, data: Dict[str, Any]):
         # try to infer the class from the data
@@ -117,7 +107,12 @@ class AutoSerializable(Serializable):
                 f"`class_name` is missing from the data provided. Cannot use `{cls.__name__}.fromdict`."
             )
 
-        dataclass_cls = AutoSerializable.dynamic_class_resolution(class_name)
+        dataclass_cls: Serializable = AutoSerializable.dynamic_class_resolution(
+            class_name
+        )
+        if not issubclass(dataclass_cls, Serializable):
+            raise ValueError(f"Class {class_name} is not a subclass of Serializable")
+
         return dataclass_cls.fromdict(data)
 
     @staticmethod

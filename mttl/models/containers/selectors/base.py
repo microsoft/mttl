@@ -91,7 +91,7 @@ class SelectorConfig(Serializable):
         return create_config_class_from_args(config_klass, training_config)
 
 
-class AutoSelectorConfig(AutoSerializable, SelectorConfig):
+class AutoSelectorConfig(AutoSerializable):
     pass
 
 

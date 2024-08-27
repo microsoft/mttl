@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Type, TypeVar
 import torch
 
 from mttl.logging import logger, setup_logging, warn_once
+from mttl.models.modifiers.base import AutoModifierConfig, ModifierConfig
 from mttl.registrable import Registrable
 from mttl.serializable import AutoSerializable, Serializable
 from mttl.utils import deprecated
@@ -246,7 +247,7 @@ class Args(Serializable):
         return config
 
 
-class AutoArgs(AutoSerializable, Args):
+class AutoArgs(AutoSerializable):
     @classmethod
     @deprecated(
         message="The config appears to be a legacy config and will be discontinued in the next release."
@@ -261,7 +262,7 @@ class AutoArgs(AutoSerializable, Args):
         try:
             return AutoSerializable.fromdict(data)
         except ValueError:
-            return AutoArgs.fromdict_legacy(data)
+            return cls.fromdict_legacy(data)
 
 
 class MetaRegistrable(type):
@@ -581,9 +582,7 @@ class MoEExpertConfig(MultiExpertConfig):
 
     @property
     def modifier_config(self):
-        from mttl.models.modifiers.lora import SkilledLoRAConfig
-
-        return SkilledLoRAConfig.from_training_config(self)
+        return ModifierConfig.from_training_config(self)
 
 
 @dataclass
