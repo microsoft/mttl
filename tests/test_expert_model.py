@@ -36,10 +36,12 @@ def test_expert_model(monkeypatch):
     monkeypatch.setenv("COALESCED_LORA_CONTAINER", "0")
 
     model = MultiExpertModel(MultiExpertModelConfig("EleutherAI/gpt-neo-125m"))
-    model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj"))
+    model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
     assert model.experts_containers[0].default_expert_name is None
 
-    model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj"), is_default=True)
+    model.add_empty_expert(
+        "b", LoRAConfig(modify_layers=".*out_proj.*"), is_default=True
+    )
     assert len(model.selectors["lora"]) == 0
     assert model.experts_containers[0].default_expert_name == "b"
 
@@ -51,7 +53,7 @@ def test_expert_model(monkeypatch):
 
     expert_a: Expert = model.get_expert_instance("a")
     assert len(expert_a.expert_weights) == 24
-    assert expert_a.expert_config.modify_layers == ".*out_proj"
+    assert expert_a.expert_config.modify_layers == ".*out_proj.*"
 
     # switch selector for lora to task name
     model.set_selector("lora", TaskNameSelectorConfig())
@@ -65,10 +67,12 @@ def test_expert_model_coalesced(monkeypatch):
     monkeypatch.setenv("COALESCED_LORA_CONTAINER", "1")
 
     model = MultiExpertModel(MultiExpertModelConfig("EleutherAI/gpt-neo-125m"))
-    model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj"))
+    model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
     assert model.experts_containers[0].default_expert_name is None
 
-    model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj"), is_default=True)
+    model.add_empty_expert(
+        "b", LoRAConfig(modify_layers=".*out_proj.*"), is_default=True
+    )
     assert len(model.selectors["lora"]) == 0
     assert model.experts_containers[0].default_expert_name == "b"
 
