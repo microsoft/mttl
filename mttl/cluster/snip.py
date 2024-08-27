@@ -60,15 +60,19 @@ forward_mapping_dict = {
 
 
 def get_trak_projector(device: torch.device):
-    """ Get trak projectors (see https://github.com/MadryLab/trak for details) """
+    """
+    OO: this is taken from https://github.com/princeton-nlp/LESS
+    OO: CudaProjector only works on V100 for me, not on A100
+    Get trak projectors (see https://github.com/MadryLab/trak for details)
+    """
     try:
-        num_sms = torch.cuda.get_device_properties(
-            device.index).multi_processor_count
+        num_sms = torch.cuda.get_device_properties(device.index).multi_processor_count
         import fast_jl
 
         # test run to catch at init time if projection goes through
-        fast_jl.project_rademacher_8(torch.zeros(
-            8, 1_000, device=device), 512, 0, num_sms)
+        fast_jl.project_rademacher_8(
+            torch.zeros(8, 1_000, device=device), 512, 0, num_sms
+        )
         projector = CudaProjector
         print("Using CudaProjector")
     except:
@@ -79,23 +83,30 @@ def get_trak_projector(device: torch.device):
 
 @dataclass
 class SNIPConfig(ExpertConfig):
-    compression_factor: float = 0.05
-    num_batch_sampling: int = 1
-    layers: str = ".*fc1|.*fc2"
+    compression_factor: float = (
+        0.05  # if float < 1, keep that fraction of parameters, otherwise keep that many parameters
+    )
+    layers: str = (
+        ".*fc1|.*fc2"  # regex pattern to match the layers w.r.t. masks of which will calculate the grads
+    )
     out_file: str = "snip_importance.jsonl"
-    quantize_idxs: bool = False
-    rand_proj_dim:int = 8192
+    rand_proj_dim: int = (
+        8192  # dimension of the random projection, used if use_rand_proj is True
+    )
+    use_rand_proj: bool = (
+        True  # if 'True' use random projection like in SNIP, otherwise will take top-k params
+    )
 
 
 class SNIP:
     """
     Based on https://github.com/shivamsaboo17/PySNIP
+    Uses gradient w.r.t mask to calculate the parameter importance.
     """
 
     def __init__(self, config: SNIPConfig, model: ExpertModel, criterion, dataloader):
         self.config: SNIPConfig = config
         self.model: ExpertModel = model.to(device)
-        # self.prun_model = copy.deepcopy(model).to(device)
         self.criterion = criterion.to(device)
         self.dataloader = dataloader
         self.layers = config.layers
@@ -109,57 +120,61 @@ class SNIP:
         self.variance_scaling_init()
         self.update_forward_pass()
         dtype = next(self.model.parameters()).dtype
-        
+
         projector_cls = get_trak_projector(device)
         dim_grads = self.number_of_considered_params()
-        
+
         self.projector = nn.Identity()
-        if dim_grads > self.config.rand_proj_dim:        
-            self.projector = projector_cls(grad_dim=dim_grads,
-                         proj_dim=self.config.rand_proj_dim,
-                         seed=0,
-                         proj_type=ProjectionType.rademacher,
-                         device=device,
-                         dtype=dtype,
-                         block_size=128,
-                         max_batch_size=16)
-        
-    def apply_hook(self, masks):
-        layers = filter(
-            lambda l: type(l).__name__ in forward_mapping_dict,
-            self.prun_model.modules(),
-        )
-
-        def apply_masking(mask):
-            def hook(weight):
-                return weight * mask
-
-            return hook
-
-        for layer, mask in zip(layers, masks):
-            assert layer.weight.shape == mask.shape
-            layer.weight.data = layer.weight.data * mask
-            layer.weight.register_hook(apply_masking(mask))
-
-    def _process_grads(self, grad, hard=True):
-        if hard:
-            keep_params = (
-                int((1 - self.config.compression_factor) * len(grad))
-                if not self.config.compression_factor.is_integer()
-                else int(self.config.compression_factor)
+        if dim_grads > self.config.rand_proj_dim and self.config.use_rand_proj:
+            self.projector = projector_cls(
+                grad_dim=dim_grads,
+                proj_dim=self.config.rand_proj_dim,
+                seed=0,
+                proj_type=ProjectionType.rademacher,
+                device=device,
+                dtype=dtype,
+                block_size=32,
+                max_batch_size=32,
             )
-            values, idxs = torch.topk(grad / grad.sum(), keep_params, sorted=True)
-            # threshold = values[-1]
-            # mask = torch.zeros_like(grad)
-            # mask[idxs] = 1
-            # assert (mask==1.).sum() == keep_params
-            # sparse_mask = mask.to_sparse()
-            return idxs, values
-        else:
-            # memory and compute overkill storing this pe example and clustering
-            return grad.cpu()
+            
+    def _get_top_indices(self, grad):
+        # if compression_factor is integer, keep that many parameters
+        # otherwise keep (1 - compression_factor) fraction of parameters
+        keep_params = (
+            int((1 - self.config.compression_factor) * len(grad))
+            if not self.config.compression_factor.is_integer()
+            else int(self.config.compression_factor)
+        )
+        values, idxs = torch.topk(grad, keep_params, sorted=False)
+        return idxs
 
-    def param_importance(self, hard=True):
+    def _get_grad_list(self) -> list:
+        """
+        Returns a list of gradients for the masked parameters in the model
+        """
+        grads_list = []
+        offset = 0
+        for m_name, m in self.model.named_modules():
+            if re.fullmatch(self.layers, m_name) and isinstance(m, nn.Linear):
+                if hasattr(m, "weight_mask"):
+                    g = torch.flatten(torch.abs(m.weight_mask.grad)).to(torch.float16)
+                    g /= g.sum()
+                    if not self.config.use_rand_proj:
+                        # use top-k indices
+                        g = self._get_top_indices(g) + offset
+                        offset += m.weight_mask.numel()
+                        grads_list += g.tolist()
+                    else:
+                        grads_list.append(g)
+
+        if self.config.use_rand_proj:
+            # use random projection
+            # we project all concatenated gradients at once
+            t = torch.cat(grads_list).unsqueeze(0)
+            grads_list = self.projector.project(t, model_id=0)[0].tolist()
+        return grads_list
+
+    def param_importance(self):
         """
         For each datapoint in the dataset, compute the importance of each parameter
         if hard is True, returns one-hot importance, with top compression_factor% of parameters set to 1,
@@ -184,23 +199,7 @@ class SNIP:
                 for ex_i, ex in enumerate(loss):
                     self.model.zero_grad()
                     ex.backward()
-                    grads_list = []
-                    # offset = 0
-                    for m_name, m in self.model.named_modules():
-                        if re.fullmatch(self.layers, m_name) and isinstance(m, nn.Linear):
-                            # g: torch.Tensor = (
-                            #     self._process_grads(
-                            #         torch.flatten(torch.abs(m.weight_mask.grad)), hard
-                            #     )
-                            #     + offset
-                            # )
-                            # # offset += m.weight_mask.numel()
-                            # grads_list += g.tolist()
-                            g = torch.flatten(torch.abs(m.weight_mask.grad)).to(torch.float16)
-                            g /= g.sum()                    
-                            grads_list.append(g)        
-                    t = torch.cat(grads_list).unsqueeze(0)  
-                    grads_list = self.projector.project(t, model_id=0)[0].tolist()
+                    grads_list = self._get_grad_list()
                     # append line to file
                     json_line = {
                         f: (
@@ -210,64 +209,22 @@ class SNIP:
                         )
                         for f in fields
                     }
-                    # if self.config.quantize_idxs:
-                    #     grads_list = torch.tensor(grads_list).to(torch.int8).tolist()
                     json_line["snip_grads"] = grads_list
                     file.write(json.dumps(json_line) + "\n")
                     file.flush()
         print("\n ##### Done #####")
 
-    def prun(self, compression_factor=0.5, num_batch_sampling=1):
-        raise NotImplementedError
-        grads, grads_list = self.compute_grads(num_batch_sampling)
-        keep_params = int((1 - compression_factor) * len(grads))
-        values, idxs = torch.topk(grads / grads.sum(), keep_params, sorted=True)
-        threshold = values[-1]
-        masks = [(grad / grads.sum() > threshold).float() for grad in grads_list]
-        self.apply_hook(masks)
-        return self.prun_model, masks
-
-    def compute_grads(self, num_batch_sampling=1):
-        raise NotImplementedError
-        moving_average_grads = 0
-        for i, (data, labels) in enumerate(self.dataloader):
-            if i == num_batch_sampling:
-                break
-            data, labels = data.to(device), labels.to(device)
-            out = self.model(data)
-            loss = self.criterion(out, labels)
-            self.model.zero_grad()
-            loss.backward()
-            grads_list = []
-            for layer in self.model.modules():
-                if type(layer).__name__ in forward_mapping_dict:
-                    grads_list.append(torch.abs(layer.weight_mask.grad))
-            grads = torch.cat([torch.flatten(grad) for grad in grads_list])
-            if i == 0:
-                moving_average_grads = grads
-                moving_average_grad_list = grads_list
-            else:
-                moving_average_grads = ((moving_average_grads * i) + grads) / (i + 1)
-                moving_average_grad_list = [
-                    ((mv_avg_grad * i) + grad) / (i + 1)
-                    for mv_avg_grad, grad in zip(moving_average_grad_list, grads_list)
-                ]
-        return moving_average_grads, moving_average_grad_list
-
     def number_of_considered_params(self):
+        """
+        Returns number of masked parameters in the model. This is the dimention that will go into the random projector.
+        """
         n = 0
         for m_name, m in self.model.named_modules():
-                if re.fullmatch(self.layers, m_name) and isinstance(m, nn.Linear):
-                    if hasattr(m, "weight_mask"):
-                        # keep_params = (
-                        #     int((1 - self.config.compression_factor) * m.weight_mask.numel())
-                        #     if not self.config.compression_factor.is_integer()
-                        #     else int(self.config.compression_factor)
-                        # )
-                        # n += keep_params
-                        n+= m.weight_mask.numel()
+            if re.fullmatch(self.layers, m_name) and isinstance(m, nn.Linear):
+                if hasattr(m, "weight_mask"):
+                    n += m.weight_mask.numel()
         return int(n)
-    
+
     def variance_scaling_init(self):
         for m_name, module in self.model.named_modules():
             if re.fullmatch(self.layers, m_name) and isinstance(module, nn.Linear):
@@ -293,7 +250,7 @@ def main(args: Args, model_class: Type[ExpertModel]):
     dm = get_datamodule(args)
     module = model_class(**args.asdict())
     snip = SNIP(args, module, nn.CrossEntropyLoss(), dm.train_dataloader())
-    snip.param_importance(hard=True)
+    snip.param_importance()
 
 
 if __name__ == "__main__":
