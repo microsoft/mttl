@@ -25,6 +25,7 @@ class Serializable:
                     raise ValueError(
                         f"Required {field.name} is missing from the data provided."
                     )
+                continue
 
             value = data[field.name]
             if value is None:
