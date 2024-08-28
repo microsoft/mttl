@@ -73,6 +73,8 @@ class IndexConcatDataset(ConcatDataset):
 
 @dataclass
 class DatasetConfig:
+    """Generic dataclass for dataset and batching configuration."""
+
     dataset: str = None
     data_dir: str = None
     model: str = None
@@ -91,17 +93,19 @@ class DatasetConfig:
     subsample_train: int = None
     subsample_dev: int = None
     subsample_test: int = None
-    subsample_per_task: bool = False  # Changing default to False
+    subsample_per_task: bool = False
     subsample: int = -1
     pack_sequences: bool = False  # True
     pad_to_multiple_of: int = 8
     max_seq_per_pack: int = 4
+    task_id_field: str = "task_id"
+    task_name_field: str = "task_name"
+    task_source_field: str = "task_source"
 
 
 @dataclass
 class DefaultCollator:
-    """Simple collator
-
+    """
     Converts a batch of examples into a batch of inputs and labels for a sequence to sequence task.
     If model_family is "gpt", then the inputs and outputs are constructed for a causal language model,
     e.g. concatenated in a single string and labels are set to be -100 for all tokens in the input.
@@ -117,8 +121,15 @@ class DefaultCollator:
     model_family: str = "seq2seq"
     for_generation: bool = False
     train_on_inputs: bool = False
-    task_to_id: dict = None
-    add_eos_to_targets: bool = True
+    task_to_id: dict = None  # mapping from task name to task id
+    add_eos_to_targets: bool = True  # add eos token to the end of the target sequence
+    task_id_field: str = (
+        "task_id"  # where to read task id information from in the batch
+    )
+    task_name_field: str = (
+        "task_name"  # where to read task name information from in the batch
+    )
+    task_source_field: str = "task_source"
 
     def enforce_eos(self, targets):
         # simulate the default behaviour of LLamatokenizer, when adding eos token and truncating: the last token must always be eos
@@ -408,9 +419,10 @@ class DefaultCollator:
         # Otherwise process as expected
         sources = [b["source"] for b in batch]
         labels = [b["target"] for b in batch]
-        task_ids = [b.get("task_id", None) for b in batch]
-        task_names = [b.get("task_name", None) for b in batch]
-        task_sources = [b.get("task_source", None) for b in batch]
+
+        task_ids = [b.get(self.task_id_field, None) for b in batch]
+        task_names = [b.get(self.task_name_field, None) for b in batch]
+        task_sources = [b.get(self.task_source_field, None) for b in batch]
 
         output_batch = (
             self.prepare_inputs_for_gpt_family(sources, labels)
@@ -427,7 +439,7 @@ class DefaultCollator:
                 [self.task_to_id[tn] for tn in task_names]
             )
         elif has_task_ids:
-            output_batch["task_ids"] = torch.LongTensor(task_ids)
+            output_batch["task_ids"] = torch.LongTensor(list(map(int, task_ids)))
 
         if has_task_names and not has_task_sources:
             task_sources = task_names
@@ -583,6 +595,9 @@ class DataModule(LightningDataModule, Registrable):
             train_on_inputs=self.config.train_on_inputs,
             add_eos_to_targets=self.config.add_eos_to_targets,
             task_to_id=self.task_to_id,
+            task_name_field=self.config.task_name_field,
+            task_id_field=self.config.task_id_field,
+            task_source_field=self.config.task_source_field,
         )
 
     def print_infos(self):
@@ -644,7 +659,6 @@ class DataModule(LightningDataModule, Registrable):
 
         Raises:
             AssertionError: If `per_task` is True and the dataset is not an ArrowDataset.
-
         """
 
         def get_dst_idxs_sampled(n_samples, total_size):
@@ -658,7 +672,7 @@ class DataModule(LightningDataModule, Registrable):
         # make this deterministic to always sample the same subset
         if isinstance(dataset, ArrowDataset):
             if per_task:
-                task_names = dataset.unique("task_name")
+                task_names = dataset.unique(self.config.task_name_field)
                 subsampled_dataset = []
                 for i, task_name in enumerate(task_names):
                     logger.info(
@@ -667,7 +681,9 @@ class DataModule(LightningDataModule, Registrable):
                     task_idxs = torch.tensor(
                         [
                             index
-                            for index, value in enumerate(dataset["task_name"])
+                            for index, value in enumerate(
+                                dataset[self.config.task_name_field]
+                            )
                             if value == task_name
                         ]
                     )
@@ -675,7 +691,12 @@ class DataModule(LightningDataModule, Registrable):
                     task_idxs = task_idxs[idxs]
                     task_dataset = dataset.select(task_idxs)
                     subsampled_dataset.append(task_dataset)
-                    assert all([t == task_name for t in task_dataset["task_name"]])
+                    assert all(
+                        [
+                            t == task_name
+                            for t in task_dataset[self.config.task_name_field]
+                        ]
+                    )
                 subsampled_dataset = concatenate_datasets(subsampled_dataset)
             else:
                 idxs = get_dst_idxs_sampled(n_samples, total_size)
@@ -699,7 +720,7 @@ class DataModule(LightningDataModule, Registrable):
         self.for_generation = for_generation
         self.tokenizer = get_tokenizer(config, for_generation=for_generation)
         self.setup_dataset()
-        self.post_setup_dataset()
+        self._post_setup_dataset()
 
     def setup(self, stage=None):
         pass
@@ -737,9 +758,6 @@ class DataModule(LightningDataModule, Registrable):
         if shuffle:
             dataset = dataset.shuffle(seed=42)
 
-        # TODO: first partition dataset according to `task_name`, and
-        # pack each task individually to ensure that we don't mix tasks
-
         # Very basic code that will iterate over sequences one by one,
         # and merge together until the max_input_length is reached
         # This is not optimal, but it's a start
@@ -762,7 +780,6 @@ class DataModule(LightningDataModule, Registrable):
                     else:
                         raise ValueError(f"Unknown type {type(v)}")
 
-                # TODO: THis is SOMEHOW WRONG. CHECK.
                 container["seq_lens"] += [len(example["input_ids"])]
 
             def add_finished_sequence(container, example):
@@ -814,10 +831,11 @@ class DataModule(LightningDataModule, Registrable):
         )
         return dataset
 
-    def post_setup_dataset(self):
+    def _post_setup_dataset(self):
+        # subsample the splits if needed
         for split in ["train", "dev", "test"]:
-
             subsample = getattr(self.config, f"subsample_{split}", None)
+
             if subsample and subsample > 0:
                 dataset = getattr(self, f"{split}_dataset")
                 logger.warning(
@@ -832,6 +850,7 @@ class DataModule(LightningDataModule, Registrable):
             if self.config.pack_sequences and split == "train":
                 dataset = getattr(self, f"{split}_dataset")
                 logger.info(f"Packing sequences for {split} dataset")
+
                 dataset = self.tokenize_dataset(dataset)
                 dataset = self.pack_sequences(
                     dataset, max_sequences=self.config.max_seq_per_pack
@@ -856,6 +875,9 @@ class MultiChoiceDataModule(DataModule):
             train_on_inputs=self.config.train_on_inputs,
             task_to_id=self.task_to_id,
             add_eos_to_targets=self.config.add_eos_to_targets,
+            task_name_field=self.config.task_name_field,
+            task_id_field=self.config.task_id_field,
+            task_source_field=self.config.task_source_field,
         )
 
 
@@ -880,10 +902,14 @@ class MultiChoiceSourceDataModule(DataModule):
             task_to_id=self.task_to_id,
             multisource=True,
             add_eos_to_targets=self.config.add_eos_to_targets,
+            task_name_field=self.config.task_name_field,
+            task_id_field=self.config.task_id_field,
+            task_source_field=self.config.task_source_field,
         )
 
 
 def get_datamodule(args, for_generation=False, dataset_override=None):
+    from mttl.config import DataArgs
     from mttl.datamodule.arc_data_module import ArcDataConfig, ArcMultiChoiceDataModule
     from mttl.datamodule.codex_data_module import CodexDataConfig, CodexDataModule
     from mttl.datamodule.hellaswag_data_module import (
@@ -914,7 +940,15 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         WinograndeMultiChoiceDataModule,
     )
 
-    # refactor all the common arguments below into a dict common kwargs
+    # if we have a DataArgs object, we can directly create the datamodule
+    if isinstance(args, DataArgs) and args.dataset_type is not None:
+        dataset_config = args.dataset_config
+
+        return DataModule.get_class_by_config_class(type(dataset_config))(
+            dataset_config, for_generation=for_generation
+        )
+
+    # we fall back to previous behavior
     dataset = args.dataset if not dataset_override else dataset_override
 
     common_kwargs = {
@@ -937,6 +971,7 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         "pad_to_multiple_of": args.pad_to_multiple_of,
         "padding_side": args.padding_side,
         "max_seq_per_pack": args.max_seq_per_pack,
+        "pack_sequences": args.pack_sequences,
     }
 
     if dataset in [
@@ -985,6 +1020,11 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         assert not for_generation
         config = dataset_to_klass_map[dataset][0]
         dm = dataset_to_klass_map[dataset][1](config)
+    elif "clusters" in dataset:
+        config = ClusterDataConfig(
+            **common_kwargs,
+        )
+        dm = ClusterDataModule(config, for_generation=for_generation)
     elif "flan" in dataset:
         config = FlanConfig(
             **common_kwargs,

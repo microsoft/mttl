@@ -21,5 +21,9 @@
     "max_input_length": 4096,
     "max_output_length": 1024,
     "truncation_side": "left",
-    "pipeline_eval_tasks": "all"
+    "pipeline_eval_tasks": "all",
+    "eval_before_training": "false",
+    "device_map": "cuda:0",
+    "pack_sequences": true,
+    "attn_implementation": "sdpa"
 }

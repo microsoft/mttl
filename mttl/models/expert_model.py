@@ -63,6 +63,9 @@ class ExpertModel(EfficientCheckpointModule):
         else:
             self.model = self.model_object
 
+        if self.load_in_8bit or self.load_in_4bit:
+            model_object = prepare_model_for_kbit_training(model_object)
+
         # init the transformer just with the modifier config, this avoids
         # passing the whole training config to the modify_transformer func
         self.training_config = self.training_config_class.fromdict(kwargs)
@@ -147,6 +150,18 @@ class ExpertModel(EfficientCheckpointModule):
         self.log(
             f"{self._log_pref}train/total_loss", total_loss, on_step=True, prog_bar=True
         )
+
+        # get peak and avg memory
+        peak_memory = torch.cuda.max_memory_allocated() / 1024**3
+        memory = torch.cuda.memory_allocated() / 1024**3
+
+        self.log(
+            f"{self._log_pref}train/peak_memory",
+            peak_memory,
+            on_step=True,
+            prog_bar=True,
+        )
+        self.log(f"{self._log_pref}train/memory", memory, on_step=True, prog_bar=True)
 
         for i, pg in enumerate(self.optimizers().optimizer.param_groups):
             self.log(f"train/lr_{i}", pg["lr"])
