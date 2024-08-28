@@ -58,9 +58,7 @@ def flash_attn_varlen_func_wrapper(
 
     context = InfoContainer.get()
     if context is not None and context.routing_infos.packed_seq_lens is not None:
-        warn_once(
-            "\n\n\n\nUsing the Flash Attention 2 Sequence Packing Wrapper\n\n\n\n"
-        )
+        warn_once("Using the Flash Attention 2 Sequence Packing Wrapper!")
         cu_seqlens_q = context.routing_infos.packed_seq_lens
         cu_seqlens_k = context.routing_infos.packed_seq_lens
         max_seqlen_q = context.routing_infos.seq_lens.max().item()
