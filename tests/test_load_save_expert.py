@@ -30,7 +30,7 @@ def test_load_expert_from_checkpoint(tmp_path):
 
 
 def test_load_model_inited_from_model(tmp_path, tiny_llama):
-    model = MultiExpertModel.from_model(
+    model = MultiExpertModel.init_from_model(
         MultiExpertModelConfig(selector_config=PolySelectorConfig()),
         model=tiny_llama,
     )
