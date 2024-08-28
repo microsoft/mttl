@@ -1,9 +1,9 @@
 import numpy as np
 import pytest
 
-from mttl.arguments import ExpertConfig, MultiExpertConfig
+from mttl.arguments import MultiExpertConfig
 from mttl.models.library.expert_library import LocalExpertLibrary
-from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
+from mttl.models.lightning.expert_module import MultiExpertModule
 from mttl.models.nevergrad_opt import NGRoutingOptimizer
 
 

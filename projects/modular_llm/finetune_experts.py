@@ -33,7 +33,7 @@ from mttl.models.lightning.callbacks import (
     RougeCallback,
 )
 from mttl.models.lightning.expert_module import ExpertModule as ExpertModule
-from mttl.models.lightning.expert_module import MoEModule, MultiExpertModule
+from mttl.models.lightning.expert_module import MoEModule
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.monitors import get_monitors
 from mttl.utils import get_checkpoint_path, remote_login

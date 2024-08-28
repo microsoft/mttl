@@ -1,27 +1,10 @@
 import math
-import re
-import threading
 from collections import defaultdict
-from functools import partial
-from typing import Dict, List, Union
 
 import torch
-from torch.optim.optimizer import Optimizer
 from transformers import PreTrainedModel
 
-from mttl.arguments import Args, ExpertConfig, MoEExpertConfig, MultiExpertConfig
-from mttl.logging import logger
-from mttl.models.containers import add_expert_to_transformer
-from mttl.models.containers.base import ExpertContainer
-from mttl.models.containers.selectors.base import (
-    LoadableLibraryMixin,
-    LoadableSelectorConfig,
-    MultiSelectorConfig,
-    Selector,
-    SelectorConfig,
-    SelectorsCache,
-)
-from mttl.models.expert_context import InfoContainer
+from mttl.arguments import ExpertConfig, MoEExpertConfig, MultiExpertConfig
 from mttl.models.expert_model import (
     ExpertModel,
     ExpertModelConfig,
@@ -30,14 +13,7 @@ from mttl.models.expert_model import (
     MultiExpertModel,
     MultiExpertModelConfig,
 )
-from mttl.models.library.expert import Expert, ExpertInfo
-from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.lightning.base_module import EfficientCheckpointModule
-from mttl.models.llama_patch import replace_attn_with_flash_attn
-from mttl.models.modifiers import modify_transformer
-from mttl.models.modifiers.base import Modifier, ModifierConfig
-from mttl.models.modifiers.lora import SkilledLoRAConfig
-from mttl.models.modifiers.modify_model import get_modifier_name
 from mttl.models.utils import compute_loglike_loss
 
 torch.set_float32_matmul_precision("high")

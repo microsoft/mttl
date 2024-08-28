@@ -3,14 +3,13 @@ import ast
 import importlib
 import json
 import os
-from dataclasses import MISSING, Field, dataclass, field, fields, make_dataclass
+from dataclasses import MISSING, dataclass, field, fields, make_dataclass
 from string import Template
-from typing import Any, Dict, List, Type, TypeVar
+from typing import Dict, List, Type, TypeVar
 
 import torch
 
-from mttl.logging import logger, setup_logging, warn_once
-from mttl.models.modifiers.base import AutoModifierConfig, ModifierConfig
+from mttl.logging import logger, warn_once
 from mttl.registrable import Registrable
 from mttl.serializable import AutoSerializable, Serializable
 from mttl.utils import deprecated
@@ -150,7 +149,6 @@ class Args(Serializable):
         Converts parameter values in config to json
         :return: json
         """
-        import copy
 
         to_save = self.asdict()
         return json.dumps(to_save, indent=4, sort_keys=False)

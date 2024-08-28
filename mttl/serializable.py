@@ -1,7 +1,7 @@
 import dataclasses
 import importlib
 from dataclasses import dataclass
-from typing import Any, Dict, List, Type
+from typing import Any, Dict
 
 
 @dataclass
@@ -66,7 +66,6 @@ class Serializable:
         Returns:
             A dictionary representation of the config.
         """
-        from typing import get_args, get_origin
 
         data = {}
         for field in dataclasses.fields(self):

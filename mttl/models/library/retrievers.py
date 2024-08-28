@@ -13,7 +13,6 @@ from mttl.models.library.library_transforms import (
 )
 from mttl.models.library.utils import get_svd_embedding
 from mttl.models.lightning.expert_module import MultiExpertModule
-from mttl.registrable import Registrable
 
 
 class Retriever(LibraryTransform):

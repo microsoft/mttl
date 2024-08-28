@@ -24,7 +24,6 @@ except:
 
 
 def upload_checkpoint(repo_id, filename, path_in_repo):
-    import os
 
     remote_login()
     create_repo(repo_id, repo_type="model", exist_ok=True)

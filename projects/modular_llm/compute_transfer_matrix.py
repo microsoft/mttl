@@ -1,6 +1,5 @@
 import copy
 import os
-import sys
 from functools import partial
 from tempfile import TemporaryDirectory
 from typing import Callable, Union
@@ -10,14 +9,14 @@ import wandb
 from matplotlib import pyplot as plt
 from pytorch_lightning import seed_everything
 
-from mttl.arguments import Args, EvaluationConfig, ExpertConfig
+from mttl.arguments import Args, EvaluationConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.evaluators import (
     Evaluator,
     ExtendedMMLUEvaluator,
     ExtendedRougeEvaluator,
 )
-from mttl.logging import TableLogger, init_wandb_logger, logger, setup_logging
+from mttl.logging import TableLogger, init_wandb_logger, logger
 from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
 from mttl.models.lightning.expert_module import ExpertModule

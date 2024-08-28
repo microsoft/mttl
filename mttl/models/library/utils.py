@@ -1,6 +1,3 @@
-import os
-import sys
-
 from pytorch_lightning import Trainer
 
 from mttl.arguments import ExpertConfig

@@ -1,16 +1,14 @@
 import os
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Optional
 
 import torch
-from pyparsing import Any
 from transformers import Trainer
 from transformers.trainer import TRAINING_ARGS_NAME, TrainingArguments
 
 from mttl.arguments import ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import logger
-from mttl.models.get_optimizer import get_optimizer, get_optimizer_and_scheduler
-from mttl.models.get_scheduler import get_scheduler
+from mttl.models.get_optimizer import get_optimizer_and_scheduler
 
 MTTL_ARGS_NAME = "mttl_args.bin"
 
