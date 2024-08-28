@@ -68,12 +68,18 @@ def train_experts(
         args=training_args,
         callbacks=callbacks,
     )
+    if training_args.eval_before_training:
+        trainer.evaluate()
+
     trainer.train()
 
     # Get the best checkpoint
     best_model_path = trainer.state.best_model_checkpoint
     if best_model_path:
         logger.info("Best model checkpoint: %s", best_model_path)
+
+    # final test
+    trainer.predict(trainer.dm.test_dataset)
 
     # upload to library!
     if expert_library is not None:

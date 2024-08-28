@@ -71,6 +71,28 @@ class MultiExpertMixin:
     """Encapsulates all methods related to multi-expert models."""
 
     @property
+    def selector_cache(self) -> SelectorsCache:
+        if not hasattr(self, "_selector_cache"):
+            self._selector_cache = SelectorsCache()
+        return self._selector_cache
+
+    @property
+    def experts_infos(self) -> Dict[str, ExpertInfo]:
+        if not hasattr(self, "_experts_infos"):
+            self._experts_infos = {}
+        return self._experts_infos
+
+    @property
+    def selector_config(self) -> AutoSelectorConfig:
+        if not hasattr(self, "_selector_config"):
+            self._selector_config = self.config.selector_config
+        return self._selector_config
+
+    @selector_config.setter
+    def selector_config(self, value: AutoSelectorConfig):
+        self._selector_config = value
+
+    @property
     def experts_names(self):
         return list(self.experts_infos.keys())
 
@@ -412,7 +434,7 @@ class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
     """Adds all functions and properties for a multi-expert model."""
 
     @classmethod
-    def from_model(cls, config, model: torch.nn.Module) -> "MultiExpertModel":
+    def init_from_model(cls, config, model: torch.nn.Module) -> "MultiExpertModel":
         """Initialize a multi-expert model from an existing model."""
         config.base_model = None
 
@@ -426,11 +448,6 @@ class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
 
     def __init__(self, config, **loading_kwargs):
         super().__init__(config, **loading_kwargs)
-
-        # config about the routing
-        self.selector_config = config.selector_config
-        self.selector_cache = SelectorsCache()
-        self.experts_infos = {}
 
         if self.config.expert_infos is not None:
             for expert_info in self.config.expert_infos:
@@ -446,9 +463,13 @@ class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
 
 @dataclass
 class MoEModelConfig(BaseExpertModelConfig):
+    # if library_id is not None, then we load experts from the library
     library_id: str = None
+    # how many experts to add if not in library
     moe_num_experts: int = 1
+    # if selector_config is not None, then we use it to select experts
     selector_config: AutoSelectorConfig = None
+    # if modifier_config is not None, then we create moe_num_experts with this modifier
     modifier_config: AutoModifierConfig = None
 
 
@@ -458,11 +479,6 @@ class MoEModel(BaseExpertModel, MultiExpertMixin):
         super().__init__(config, **kwargs)
 
         self.modifier_config = config.modifier_config
-
-        # config about the routing
-        self.selector_config = config.selector_config
-        self.selector_cache = SelectorsCache()
-        self.experts_infos = {}
 
         if not self.config.library_id and self.config.moe_num_experts >= 1:
             self.add_empty_experts()
