@@ -21,12 +21,12 @@
     "task_source_field": "tag",
     "optimizer": "adamw",
     "warmup_proportion": 0.06,
-    "max_input_length": 4096,
+    "max_input_length": 2048,
     "max_output_length": 1024,
     "truncation_side": "left",
     "pipeline_eval_tasks": "all",
-    "eval_before_training": "True",
-    "device_map": "cuda:0",
+    "eval_before_training": true,
     "pack_sequences": true,
-    "attn_implementation": "eager"
+    "attn_implementation": "flash_attention_2",
+    "device_map": "cuda:0"
 }
