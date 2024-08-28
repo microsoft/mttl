@@ -96,6 +96,7 @@ class SNIPConfig(ExpertConfig):
     use_rand_proj: bool = (
         True  # if 'True' use random projection like in SNIP, otherwise will take top-k params
     )
+    gad_proj_bs: int = 4  # batch size for projecting gradients
 
 
 class SNIP:
@@ -160,19 +161,14 @@ class SNIP:
                     g = torch.flatten(torch.abs(m.weight_mask.grad)).to(torch.float16)
                     g /= g.sum()
                     if not self.config.use_rand_proj:
+                        raise NotImplementedError("Not implemented for top-k")
                         # use top-k indices
                         g = self._get_top_indices(g) + offset
                         offset += m.weight_mask.numel()
                         grads_list += g.tolist()
                     else:
                         grads_list.append(g)
-
-        if self.config.use_rand_proj:
-            # use random projection
-            # we project all concatenated gradients at once
-            t = torch.cat(grads_list).unsqueeze(0)
-            grads_list = self.projector.project(t, model_id=0)[0].tolist()
-        return grads_list
+        return torch.cat(grads_list).unsqueeze(0)
 
     def param_importance(self):
         """
@@ -190,6 +186,9 @@ class SNIP:
             "template_idx",
             "split",
         ]
+        
+        grads = []
+        json_lines = []
         with open(self.out_file, "a") as file:
             for i, batch in tqdm(
                 enumerate(self.dataloader), total=len(self.dataloader)
@@ -200,18 +199,33 @@ class SNIP:
                     self.model.zero_grad()
                     ex.backward()
                     grads_list = self._get_grad_list()
+                    self.model.zero_grad()
                     # append line to file
+                    grads.append(grads_list)
                     json_line = {
-                        f: (
-                            batch[f][ex_i].cpu().tolist()
-                            if isinstance(batch[f][ex_i], torch.Tensor)
-                            else batch[f][ex_i]
-                        )
-                        for f in fields
-                    }
-                    json_line["snip_grads"] = grads_list
-                    file.write(json.dumps(json_line) + "\n")
-                    file.flush()
+                            f: (
+                                batch[f][ex_i].cpu().tolist()
+                                if isinstance(batch[f][ex_i], torch.Tensor)
+                                else batch[f][ex_i]
+                            )
+                            for f in fields
+                        }
+                    # remove batch from cuda
+                    batch = None
+                    del batch
+                    json_lines.append(json_line)
+                    
+                    if len(grads) >= self.config.gad_proj_bs:
+                        if self.config.use_rand_proj:
+                            grads_list = self.projector.project(torch.cat(grads), model_id=0).cpu()
+                        else:
+                            raise NotImplementedError("Not implemented for top-k")                        
+                        grads = []
+                        for i, json_line in enumerate(json_lines):
+                            json_line["snip_grads"] = grads_list[i].tolist()
+                            file.write(json.dumps(json_line) + "\n")
+                            file.flush()
+                        json_lines = []
         print("\n ##### Done #####")
 
     def number_of_considered_params(self):
