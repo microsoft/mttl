@@ -18,7 +18,7 @@ MTTL_ARGS_NAME = "mttl_args.bin"
 class ExpertModelTrainer(Trainer):
     """Generic HF trainer for expert models."""
 
-    def __init__(self, model, args, **kwargs):
+    def __init__(self, model: torch.nn.Module, args: ExpertConfig, **kwargs):
         self.mttl_args: ExpertConfig = args
 
         args: TrainingArguments = args.to_hf_training_args()
