@@ -91,13 +91,3 @@ def train_module(args: ExpertConfig, module: ExpertModule, dm):
         checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
     )
     return checkpoint
-
-
-def get_svd_embedding(lib, expert_name: str):
-    try:
-        embeddings = lib.get_auxiliary_data(
-            data_type="embeddings", expert_name=expert_name
-        )
-    except ValueError:
-        return None
-    return embeddings["svd"]["embeddings"]
