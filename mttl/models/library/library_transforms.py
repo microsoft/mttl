@@ -22,7 +22,6 @@ from mttl.models.containers.lora_containers import ExpertContainer
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.lightning.callbacks import LiveCheckpointCallback
-from mttl.models.lightning.expert_module import ExpertModule
 from mttl.models.lightning.loggers import get_pl_loggers
 from mttl.models.modifiers.base import get_target_2_source_param_mapping
 from mttl.models.monitors import get_monitors
@@ -31,7 +30,7 @@ from mttl.registrable import Registrable
 from mttl.serializable import Serializable
 
 
-def train_module(args: "mttl.arguments.ExpertConfig", module: ExpertModule, dm):
+def train_module(args: "ExpertConfig", module: "ExpertModule", dm):
     loggers = get_pl_loggers(args)
     callbacks = get_monitors(args)
 
