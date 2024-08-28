@@ -5,12 +5,11 @@ import io
 import logging
 import os
 import sys
-import time
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from fnmatch import fnmatch
-from functools import total_ordering, wraps
+from functools import total_ordering
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
@@ -36,6 +35,7 @@ from huggingface_hub.utils._errors import RepositoryNotFoundError
 
 from mttl.logging import logger
 from mttl.models.library.expert import Expert, ExpertInfo, load_expert
+from mttl.models.library.utils import retry
 from mttl.utils import remote_login
 
 
@@ -77,28 +77,6 @@ class Score:
 @dataclass
 class MetadataEntry(ExpertInfo):
     expert_deleted: bool = False
-
-
-def retry(max_retries=10, wait_seconds=60):
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            for attempt in range(1, max_retries + 1):
-                try:
-                    result = func(*args, **kwargs)
-                    return result
-                except Exception as e:  # requests.exceptions.HTTPError as e:
-                    print(e, type(e), "retrying...")
-                    if attempt < max_retries:
-                        print(f"Waiting {wait_seconds} seconds before retrying...")
-                        time.sleep(wait_seconds)
-            raise RuntimeError(
-                f"Function {wrapper.__name__} failed after {max_retries} attempts."
-            )
-
-        return wrapper
-
-    return decorator
 
 
 class BackendEngine(ABC):

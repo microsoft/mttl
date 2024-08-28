@@ -1,3 +1,6 @@
+from datetime import time
+from functools import wraps
+
 from pytorch_lightning import Trainer
 
 from mttl.arguments import ExpertConfig
@@ -5,6 +8,28 @@ from mttl.logging import get_pl_loggers
 from mttl.models.lightning.callbacks import LiveCheckpointCallback
 from mttl.models.lightning.expert_module import ExpertModule
 from mttl.models.monitors import get_monitors
+
+
+def retry(max_retries=10, wait_seconds=60):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(1, max_retries + 1):
+                try:
+                    result = func(*args, **kwargs)
+                    return result
+                except Exception as e:  # requests.exceptions.HTTPError as e:
+                    print(e, type(e), "retrying...")
+                    if attempt < max_retries:
+                        print(f"Waiting {wait_seconds} seconds before retrying...")
+                        time.sleep(wait_seconds)
+            raise RuntimeError(
+                f"Function {wrapper.__name__} failed after {max_retries} attempts."
+            )
+
+        return wrapper
+
+    return decorator
 
 
 def train_module(args: ExpertConfig, module: ExpertModule, dm):

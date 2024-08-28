@@ -5,6 +5,8 @@ import sys
 import torch
 from pytorch_lightning import Trainer, seed_everything
 
+from mttl.models.library.utils import retry
+
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from typing import Callable
@@ -18,7 +20,6 @@ from mttl.models.library.expert_library import (
     HFExpertLibrary,
     LocalExpertLibrary,
     VirtualLocalLibrary,
-    retry,
 )
 from mttl.models.library.library_transforms import (
     SVDEmbeddingTransform,
