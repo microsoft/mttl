@@ -27,6 +27,6 @@
     "pipeline_eval_tasks": "all",
     "eval_before_training": true,
     "pack_sequences": true,
-    "attn_implementation": "flash_attention_2",
+    "attn_implementation": null,
     "device_map": "cuda:0"
 }
