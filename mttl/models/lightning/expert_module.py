@@ -44,7 +44,7 @@ torch.set_float32_matmul_precision("high")
 
 
 class ExpertModule(EfficientCheckpointModule):
-    # bunch of methods to delegate to expert_model instance
+    # bunch of methods to delegate to self.expert_model instance
     delegate_methods = ["generate", "generation_config", "as_expert"]
     # config class to use for the training config
     training_config_class = ExpertConfig
