@@ -169,8 +169,8 @@ class FlatMultiTaskModule(DataModule):
                 desc="Creating split column.",
             )
 
-        # check if task_name_field is present as a column
-        if self.config.task_name_field not in self.dataset.column_names:
+        # check if task_name_field is present as a column in the dataset
+        if self.config.task_name_field not in self.dataset.column_names["train"]:
             raise ValueError(
                 f"Task name field {self.config.task_name_field} not found in dataset."
             )
