@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 
 import numpy
@@ -230,6 +230,8 @@ class FlanConfig(DatasetConfig):
     include_task_source: str = "P3,Flan2021,CoT"
     source_template: str = None
     remove_phi_eval_tasks: bool = False
+    task_name_field: str = "task_name"
+    task_source_field: str = "task_source"
 
 
 def filter_template_type(include_template_type, example):
@@ -273,6 +275,12 @@ class FlanModule(DataModule):
                 desc="Filtering task sources",
             )
 
+        if self.config.task_name_field != "task_name":
+            raise ValueError("task_name_field for Flan must be 'task_name'")
+
+        if self.config.task_source_field != "task_source":
+            raise ValueError("task_source_field for Flan must be 'task_source'")
+
         (
             self._task_names,
             self._task_to_id,
@@ -280,7 +288,10 @@ class FlanModule(DataModule):
             _,
             _,
         ) = maybe_filter_hf_dataset_by_task(
-            dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
+            dataset,
+            self.config.task_name_field,
+            self.config.finetune_task_name,
+            n_proc=n_proc,
         )
 
         train_dataset = apply_source_template(
