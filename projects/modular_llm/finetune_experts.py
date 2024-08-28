@@ -5,8 +5,6 @@ import sys
 import torch
 from pytorch_lightning import Trainer, seed_everything
 
-from mttl.models.library.utils import retry
-
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from typing import Callable
@@ -37,7 +35,7 @@ from mttl.models.lightning.expert_module import ExpertModule as ExpertModule
 from mttl.models.lightning.expert_module import MoEModule
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.monitors import get_monitors
-from mttl.utils import get_checkpoint_path, remote_login
+from mttl.utils import get_checkpoint_path, remote_login, retry
 
 FINETUNE_FUNCTIONS: dict[str, Callable] = {}
 
