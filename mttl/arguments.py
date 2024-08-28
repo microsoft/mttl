@@ -378,6 +378,7 @@ class TrainingArgs(DataArgs):
 
     # logging
     wandb_project: str = None
+    wandb_run_name: str = None
     tensorboard: bool = False
     remote_token: str = None
     library_id: str = None
@@ -463,6 +464,7 @@ class TrainingArgs(DataArgs):
         from transformers import TrainingArguments
 
         return TrainingArguments(
+            run_name=self.wandb_run_name or self.expert_name or self.finetune_task_name,
             use_cpu=self.compute_strategy == "cpu",
             overwrite_output_dir=True,
             output_dir=self.output_dir,
