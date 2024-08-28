@@ -16,14 +16,14 @@ from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
 from tqdm import tqdm
 
-from mttl.arguments import ExpertConfig
 from mttl.datamodule.base import get_datamodule
-from mttl.logging import get_pl_loggers, logger
+from mttl.logging import logger
 from mttl.models.containers.lora_containers import ExpertContainer
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.lightning.callbacks import LiveCheckpointCallback
 from mttl.models.lightning.expert_module import ExpertModule
+from mttl.models.lightning.loggers import get_pl_loggers
 from mttl.models.modifiers.base import get_target_2_source_param_mapping
 from mttl.models.monitors import get_monitors
 from mttl.models.utils import transfer_batch_to_device
@@ -31,7 +31,7 @@ from mttl.registrable import Registrable
 from mttl.serializable import Serializable
 
 
-def train_module(args: ExpertConfig, module: ExpertModule, dm):
+def train_module(args: "mttl.arguments.ExpertConfig", module: ExpertModule, dm):
     loggers = get_pl_loggers(args)
     callbacks = get_monitors(args)
 
@@ -694,7 +694,6 @@ class PhatgooseTransform(HiddenStateComputer):
         default_args=None,
     ):
         from mttl.arguments import ExpertConfig
-        from mttl.models.library.utils import train_module
         from mttl.models.lightning.expert_module import MultiExpertModule
 
         if type(library) == str:

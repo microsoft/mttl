@@ -8,7 +8,6 @@ import torch
 from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
 
-from mttl.arguments import ExpertConfig, MoEExpertConfig, MultiExpertConfig
 from mttl.dataloader.flan_utils import download_flan
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
 from mttl.models.library.expert import Expert
@@ -136,6 +135,8 @@ def tmp_lora_config(tmp_path: Path):
 
 @pytest.fixture
 def tmp_exp_config(tmp_path: Path):
+    from mttl.arguments import ExpertConfig
+
     return ExpertConfig(
         model="EleutherAI/gpt-neo-125m",
         library_id=None,
@@ -151,6 +152,8 @@ def tmp_exp_config(tmp_path: Path):
 
 @pytest.fixture
 def tmp_multi_exp_config(tmp_path: Path):
+    from mttl.arguments import MultiExpertConfig
+
     return MultiExpertConfig(
         model="EleutherAI/gpt-neo-125m",
         library_id=None,
@@ -206,6 +209,8 @@ def tmp_moe_exp_config(tmp_path):
 
 @pytest.fixture
 def create_dummy_expert(make_tiny_llama):
+    from mttl.arguments import MultiExpertConfig
+
     def _create_dummy_expert(config: MultiExpertConfig, exp_name, **kwargs) -> Expert:
         if "model_object" not in kwargs and (
             config.model is None or config.model == ""
