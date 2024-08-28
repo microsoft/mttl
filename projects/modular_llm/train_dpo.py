@@ -7,11 +7,11 @@ from tempfile import TemporaryDirectory
 import torch
 from pytorch_lightning import Trainer, seed_everything
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.callbacks import LiveCheckpointCallback
 from mttl.datamodule.base import DatasetConfig
 from mttl.datamodule.preference_data_module import Preferencemodule
+from mttl.datamodule.ultrafeedback_data_module import UltrafeedbackDPOmodule
 
 # from mttl.datamodule.base import get_datamodule
 from mttl.models.expert_config import ExpertConfig
@@ -100,7 +100,11 @@ def run_multitask(args: ExpertConfig):
         max_input_length=args.max_input_length,
         max_output_length=args.max_output_length,
     )
-    dm = Preferencemodule(config)
+
+    if "ultrafeedback" in args.dataset:
+        dm = UltrafeedbackDPOmodule(config)
+    else:
+        dm = Preferencemodule(config)
 
     # dm = get_datamodule(args)
     # args.n_tasks = len(dm._task_names)
