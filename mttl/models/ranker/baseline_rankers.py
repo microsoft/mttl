@@ -12,7 +12,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.utils.extmath import safe_sparse_dot
 
 from mttl.logging import logger
-from mttl.models.library.expert_library import DatasetLibrary
+from mttl.models.library.dataset_library import DatasetLibrary
 from mttl.models.ranker.adapter_ranker import AdapterRanker
 from mttl.utils import remote_login
 

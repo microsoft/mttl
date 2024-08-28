@@ -3,7 +3,7 @@ from functools import partial
 import numpy as np
 from datasets import Dataset, concatenate_datasets
 
-from mttl.models.library.expert_library import DatasetLibrary
+from mttl.models.library.dataset_library import DatasetLibrary
 
 
 def encode_with_messages_format(example):

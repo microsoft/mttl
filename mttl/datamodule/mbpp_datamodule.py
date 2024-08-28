@@ -6,7 +6,7 @@ import numpy
 
 from mttl.datamodule.base import DataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
-from mttl.models.library.expert_library import DatasetLibrary
+from mttl.models.library.dataset_library import DatasetLibrary
 
 
 @dataclass

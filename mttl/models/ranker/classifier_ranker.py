@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from sentence_transformers import SentenceTransformer
 from transformers import T5ForConditionalGeneration, T5Tokenizer
 
-from mttl.models.library.expert_library import DatasetLibrary
+from mttl.models.library.dataset_library import DatasetLibrary
 from mttl.models.lightning.base_module import EfficientCheckpointModule
 from mttl.models.ranker.adapter_ranker import AdapterRanker
 

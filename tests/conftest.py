@@ -10,8 +10,8 @@ from transformers.models.llama.modeling_llama import LlamaForCausalLM
 
 from mttl.dataloader.flan_utils import download_flan
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
+from mttl.models.library.dataset_library import DatasetLibrary
 from mttl.models.library.expert import Expert
-from mttl.models.library.expert_library import DatasetLibrary
 from mttl.models.lightning.expert_module import MultiExpertModule
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.lora import LoRAConfig
