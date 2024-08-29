@@ -3,7 +3,6 @@ from typing import Dict, Union
 
 import torch
 
-from mttl.arguments import AutoArgs
 from mttl.logging import logger
 from mttl.models.modifiers.base import (
     AutoModifierConfig,
@@ -22,7 +21,7 @@ class ExpertInfo(Serializable):
     # configuration for this expert, i.e. a modifier config
     expert_config: AutoModifierConfig = None
     # arguments with which the expert was trained, i.e. the full training config
-    training_config: AutoArgs = None
+    training_config: "AutoArgs" = None
     expert_model: str = None
 
     @property
