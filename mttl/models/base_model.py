@@ -58,19 +58,32 @@ class BaseExpertModel(torch.nn.Module, Registrable):
         super().__init__()
 
         # log hyperparameters
-        self.load_in_4bit = loading_kwargs.get("load_in_4bit", None) or False
-        self.load_in_8bit = loading_kwargs.get("load_in_8bit", None) or False
+        self.load_in_4bit = loading_kwargs.get("load_in_4bit", False)
+        self.load_in_8bit = loading_kwargs.get("load_in_8bit", False)
+        self.device_map = loading_kwargs.get("device_map", "cpu")
+        self.attn_implementation = loading_kwargs.get("attn_implementation", None)
+
+        # cannot use both load_in_4bit and load_in_8bit
+        if self.load_in_4bit and self.load_in_8bit:
+            raise ValueError("Cannot use both `load_in_4bit` and `load_in_8bit`.")
 
         if config.base_model is None and model_object is None:
             raise ValueError("You must provide a model object or a base model name.")
+
+        # if model_object is provided, base_model should be None
+        if model_object is not None and config.base_model is not None:
+            logger.warning(
+                "You are initializing a model directly from a model object. We will set `base_model` to None."
+            )
+            config.base_model = None
 
         self.model = (
             model_loader_helper(
                 config.base_model,
                 load_in_4bit=self.load_in_4bit,
                 load_in_8bit=self.load_in_8bit,
-                device_map=loading_kwargs.get("device_map", "cpu"),
-                attn_implementation=loading_kwargs.get("attn_implementation", None),
+                device_map=self.device_map,
+                attn_implementation=self.attn_implementation,
             )
             if model_object is None
             else model_object
