@@ -7,7 +7,7 @@ from torch import nn
 
 from mttl.logging import logger
 from mttl.registrable import Registrable
-from mttl.serializable import AutoSerializable, Serializable
+from mttl.serializable import Serializable
 from mttl.utils import deprecated
 
 
@@ -44,6 +44,22 @@ class ModifierConfig(Serializable):
         return Modifier.get_name_by_config_class(type(self))
 
     @classmethod
+    @deprecated(
+        message="The config appears to be a legacy config and will be discontinued in the next release."
+    )
+    def fromdict_legacy(cls, data) -> "ModifierConfig":
+        modifier_name = data.pop("__model_modifier__")
+        config_cls: ModifierConfig = Modifier.get_config_class_by_name(modifier_name)
+        return config_cls.fromdict(data)
+
+    @classmethod
+    def fromdict(cls, data: Dict) -> "ModifierConfig":
+        try:
+            return super().fromdict(cls, data)
+        except ValueError:
+            return cls.fromdict_legacy(data)
+
+    @classmethod
     def from_training_config(
         cls, training_config: Union["Args", "ModifierConfig"]
     ) -> Union["ModifierConfig", None]:
@@ -72,24 +88,6 @@ class ModifierConfig(Serializable):
         else:
             config_klass = cls
         return create_config_class_from_args(config_klass, training_config)
-
-
-class AutoModifierConfig(AutoSerializable):
-    @classmethod
-    @deprecated(
-        message="The config appears to be a legacy config and will be discontinued in the next release."
-    )
-    def fromdict_legacy(cls, data) -> "ModifierConfig":
-        modifier_name = data.pop("__model_modifier__")
-        config_cls: ModifierConfig = Modifier.get_config_class_by_name(modifier_name)
-        return config_cls.fromdict(data)
-
-    @classmethod
-    def fromdict(cls, data: Dict) -> "ModifierConfig":
-        try:
-            return AutoSerializable.fromdict(data)
-        except ValueError:
-            return cls.fromdict_legacy(data)
 
 
 class ModifyMixin:

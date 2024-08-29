@@ -10,9 +10,9 @@ from typing import Any, Dict, List, Type, TypeVar
 import torch
 
 from mttl.logging import logger, setup_logging, warn_once
-from mttl.models.modifiers.base import AutoModifierConfig, ModifierConfig
+from mttl.models.modifiers.base import ModifierConfig
 from mttl.registrable import Registrable
-from mttl.serializable import AutoSerializable, Serializable
+from mttl.serializable import Serializable
 from mttl.utils import deprecated
 
 # Create a generic type variable that can be any type
@@ -96,6 +96,22 @@ def create_config_class_from_args(config_class, args):
 
 @dataclass
 class Args(Serializable):
+    @classmethod
+    @deprecated(
+        message="The config appears to be a legacy config and will be discontinued in the next release."
+    )
+    def fromdict_legacy(cls, data):
+        """Assume the data is ExpertConfig to not break previous loading."""
+        dataclass_cls = ExpertConfig
+        return dataclass_cls.fromdict(data)
+
+    @classmethod
+    def fromdict(cls, data: Dict):
+        try:
+            return super().fromdict(cls, data)
+        except ValueError:
+            return cls.fromdict_legacy(data)
+
     @property
     def updated_kwargs(self):
         return {
@@ -245,24 +261,6 @@ class Args(Serializable):
         if return_parser:
             return config, args
         return config
-
-
-class AutoArgs(AutoSerializable):
-    @classmethod
-    @deprecated(
-        message="The config appears to be a legacy config and will be discontinued in the next release."
-    )
-    def fromdict_legacy(cls, data):
-        """Assume the data is ExpertConfig to not break previous loading."""
-        dataclass_cls = ExpertConfig
-        return dataclass_cls.fromdict(data)
-
-    @classmethod
-    def fromdict(cls, data: Dict):
-        try:
-            return AutoSerializable.fromdict(data)
-        except ValueError:
-            return cls.fromdict_legacy(data)
 
 
 class MetaRegistrable(type):

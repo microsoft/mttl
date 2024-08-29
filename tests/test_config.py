@@ -148,7 +148,7 @@ def test_auto_modifier_config():
 
 
 def test_dump_load_lora_config():
-    from mttl.models.modifiers.base import AutoModifierConfig, ModifierConfig
+    from mttl.models.modifiers.base import ModifierConfig
     from mttl.models.modifiers.lora import LoRAConfig
 
     data = {
@@ -163,10 +163,10 @@ def test_dump_load_lora_config():
     assert lora_config.lora_rank == 12
     assert lora_config.lora_dropout == 0.52
 
-    load_config = AutoModifierConfig.fromdict(lora_config.asdict())
+    load_config = ModifierConfig.fromdict(lora_config.asdict())
     assert type(load_config) == LoRAConfig
 
-    load_config = AutoModifierConfig.fromdict(
+    load_config = ModifierConfig.fromdict(
         lora_config.asdict(skip_fields=["lora_dropout"])
     )
     assert type(load_config) == LoRAConfig
@@ -174,19 +174,19 @@ def test_dump_load_lora_config():
 
 
 def test_dump_load_selector_config():
-    from mttl.models.containers.selectors.base import AutoSelectorConfig
+    from mttl.models.containers.selectors.base import SelectorConfig
     from mttl.models.containers.selectors.moe_selector import MOERKHSSelectorConfig
 
     dump = MOERKHSSelectorConfig(emb_dim=12345).asdict()
-    test = AutoSelectorConfig.fromdict(dump)
+    test = SelectorConfig.fromdict(dump)
     assert test.emb_dim == 12345
     assert type(test) == MOERKHSSelectorConfig
 
 
 def test_dump_load_multi_selector_config():
     from mttl.models.containers.selectors.base import (
-        AutoSelectorConfig,
         MultiSelectorConfig,
+        SelectorConfig,
         TaskNameSelectorConfig,
     )
     from mttl.models.containers.selectors.moe_selector import MOERKHSSelectorConfig
@@ -197,7 +197,7 @@ def test_dump_load_multi_selector_config():
             "hard_prompts": TaskNameSelectorConfig(),
         }
     ).asdict()
-    test = AutoSelectorConfig.fromdict(dump)
+    test = SelectorConfig.fromdict(dump)
     assert isinstance(test, MultiSelectorConfig)
     assert len(test) == 2
 

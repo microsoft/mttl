@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Type, Union
 from huggingface_hub import hf_hub_download
 
 from mttl.logging import logger
-from mttl.serializable import AutoSerializable, Serializable
+from mttl.serializable import Serializable
 
 CONFIG_NAME = "mttl_config.json"
 
@@ -56,7 +56,3 @@ class BaseExpertModelConfig(Serializable):
         with open(config_file, "r") as f:
             config = cls.fromdict(json.load(f))
         return config
-
-
-class AutoModelConfig(AutoSerializable, BaseExpertModelConfig):
-    pass

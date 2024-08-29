@@ -11,7 +11,6 @@ from mttl.models.base_model import BaseExpertModel
 from mttl.models.containers import add_expert_to_transformer
 from mttl.models.containers.base import ContainerFullException, ExpertContainer
 from mttl.models.containers.selectors.base import (
-    AutoSelectorConfig,
     LoadableSelectorConfig,
     MultiSelectorConfig,
     Selector,
@@ -21,7 +20,7 @@ from mttl.models.containers.selectors.base import (
 from mttl.models.expert_config import BaseExpertModelConfig
 from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.library.expert_library import ExpertLibrary
-from mttl.models.modifiers.base import AutoModifierConfig, ModifierConfig
+from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.lora import SkilledLoRAConfig
 from mttl.models.modifiers.modify_model import modify_transformer
 from mttl.models.utils import model_loader_helper
@@ -31,7 +30,7 @@ from mttl.models.utils import model_loader_helper
 class ExpertModelConfig(BaseExpertModelConfig):
     task_name: str = None
     expert_name: str = None
-    modifier_config: AutoModifierConfig = None
+    modifier_config: ModifierConfig = None
 
 
 @BaseExpertModel.register("expert_model", config_cls=ExpertModelConfig)
@@ -84,13 +83,13 @@ class MultiExpertMixin:
         return self._experts_infos
 
     @property
-    def selector_config(self) -> AutoSelectorConfig:
+    def selector_config(self) -> SelectorConfig:
         if not hasattr(self, "_selector_config"):
             self._selector_config = self.config.selector_config
         return self._selector_config
 
     @selector_config.setter
-    def selector_config(self, value: AutoSelectorConfig):
+    def selector_config(self, value: SelectorConfig):
         self._selector_config = value
 
     @property
@@ -427,7 +426,7 @@ class MultiExpertMixin:
 class MultiExpertModelConfig(BaseExpertModelConfig):
     default_expert_name: str = None
     expert_infos: List[ExpertInfo] = None
-    selector_config: AutoSelectorConfig = None
+    selector_config: SelectorConfig = None
 
 
 @BaseExpertModel.register("multi_expert_model", config_cls=MultiExpertModelConfig)
@@ -469,9 +468,9 @@ class MoEModelConfig(BaseExpertModelConfig):
     # how many experts to add if not in library
     moe_num_experts: int = 1
     # if selector_config is not None, then we use it to select experts
-    selector_config: AutoSelectorConfig = None
+    selector_config: SelectorConfig = None
     # if modifier_config is not None, then we create moe_num_experts with this modifier
-    modifier_config: AutoModifierConfig = None
+    modifier_config: ModifierConfig = None
 
 
 @BaseExpertModel.register("moe_model", config_cls=MoEModelConfig)

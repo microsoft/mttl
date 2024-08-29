@@ -28,7 +28,7 @@ from mttl.models.containers.selectors.base import (
     SelectorConfig,
     SelectorsCache,
 )
-from mttl.models.expert_config import AutoModelConfig, BaseExpertModelConfig
+from mttl.models.expert_config import BaseExpertModelConfig
 from mttl.models.expert_context import InfoContainer
 from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.library.expert_library import ExpertLibrary
@@ -155,7 +155,9 @@ class BaseExpertModel(torch.nn.Module, Registrable):
         **model_kwargs: Any,
     ):
         # get model config first
-        model_config: BaseExpertModelConfig = AutoModelConfig.from_pretrained(model_id)
+        model_config: BaseExpertModelConfig = BaseExpertModelConfig.from_pretrained(
+            model_id
+        )
 
         if os.path.isfile(os.path.join(model_id, WEIGHTS_NAME)):
             weights_file = os.path.join(model_id, WEIGHTS_NAME)

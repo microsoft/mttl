@@ -29,7 +29,7 @@ from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
 from mttl.models.ranker.classifier_ranker import ClusterPredictor
 from mttl.models.utils import MetricLogger
 from mttl.registrable import Registrable
-from mttl.serializable import AutoSerializable, Serializable
+from mttl.serializable import Serializable
 
 EPS = 1e-8
 
@@ -89,10 +89,6 @@ class SelectorConfig(Serializable):
             config_klass = cls
 
         return create_config_class_from_args(config_klass, training_config)
-
-
-class AutoSelectorConfig(AutoSerializable):
-    pass
 
 
 @dataclass

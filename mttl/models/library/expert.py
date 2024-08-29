@@ -3,10 +3,9 @@ from typing import Dict, Union
 
 import torch
 
-from mttl.arguments import AutoArgs
+from mttl.arguments import Args
 from mttl.logging import logger
 from mttl.models.modifiers.base import (
-    AutoModifierConfig,
     Modifier,
     ModifierConfig,
     get_target_2_source_param_mapping,
@@ -21,9 +20,9 @@ class ExpertInfo(Serializable):
     expert_task_name: str = None
     parent_node: str = None
     # configuration for this expert, i.e. a modifier config
-    expert_config: AutoModifierConfig = None
+    expert_config: ModifierConfig = None
     # arguments with which the expert was trained, i.e. the full training config
-    training_config: AutoArgs = None
+    training_config: Args = None
     expert_model: str = None
 
     @property

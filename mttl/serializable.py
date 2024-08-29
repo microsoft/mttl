@@ -15,8 +15,22 @@ class Serializable:
     def fromdict(cls, data: Dict[str, Any]) -> "Serializable":
         from typing import get_args, get_origin
 
+        # if a class name is not provided, we assume it is the same as the calling class
+        class_name = data.pop("class_name", None)
+        if class_name is None:
+            if cls == Serializable:
+                raise ValueError(f"`class_name` is missing from the data provided.")
+            else:
+                dataclass_cls = cls
+        else:
+            dataclass_cls: Serializable = dynamic_class_resolution(class_name)
+            if not issubclass(dataclass_cls, cls):
+                raise ValueError(
+                    f"Class {class_name} is not a subclass of {cls.__name__}"
+                )
+
         data_ = {}
-        for field in dataclasses.fields(cls):
+        for field in dataclasses.fields(dataclass_cls):
             if field.name not in data:
                 if (
                     field.default is dataclasses.MISSING
@@ -48,7 +62,7 @@ class Serializable:
             # simple value
             else:
                 data_[field.name] = value
-        return cls(**data_)
+        return dataclass_cls(**data_)
 
     @classmethod
     def from_dict(cls, data) -> "Serializable":
@@ -97,37 +111,17 @@ class Serializable:
         return data
 
 
-@dataclass
-class AutoSerializable:
-    @classmethod
-    def fromdict(cls, data: Dict[str, Any]):
-        # try to infer the class from the data
-        class_name = data.pop("class_name", None)
-        if not class_name:
-            raise ValueError(
-                f"`class_name` is missing from the data provided. Cannot use `{cls.__name__}.fromdict`."
-            )
+def dynamic_class_resolution(class_name: str) -> Any:
+    try:
+        # First, attempt to import using the original module path
+        module_name, class_name = class_name.rsplit(".", 1)
+        module = importlib.import_module(module_name)
+        return getattr(module, class_name)
+    except (ModuleNotFoundError, AttributeError):
+        import sys
 
-        dataclass_cls: Serializable = AutoSerializable.dynamic_class_resolution(
-            class_name
-        )
-        if not issubclass(dataclass_cls, Serializable):
-            raise ValueError(f"Class {class_name} is not a subclass of Serializable")
-
-        return dataclass_cls.fromdict(data)
-
-    @staticmethod
-    def dynamic_class_resolution(class_name: str) -> Any:
-        try:
-            # First, attempt to import using the original module path
-            module_name, class_name = class_name.rsplit(".", 1)
-            module = importlib.import_module(module_name)
-            return getattr(module, class_name)
-        except (ModuleNotFoundError, AttributeError):
-            import sys
-
-            # If it fails, try to find the class in any loaded module
-            for module in sys.modules.values():
-                if hasattr(module, class_name):
-                    return getattr(module, class_name)
-            raise ImportError(f"Cannot find class {class_name}")
+        # If it fails, try to find the class in any loaded module
+        for module in sys.modules.values():
+            if hasattr(module, class_name):
+                return getattr(module, class_name)
+        raise ImportError(f"Cannot find class {class_name}")
