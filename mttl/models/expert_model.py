@@ -39,9 +39,10 @@ class ExpertModel(BaseExpertModel):
     def __init__(
         self,
         config: ExpertModelConfig,
+        model_object: torch.nn.Module = None,
         **loading_kwargs,
     ):
-        super().__init__(config, **loading_kwargs)
+        super().__init__(config, model_object=model_object, **loading_kwargs)
 
         if config.modifier_config is not None:
             self.model = modify_transformer(self.model, config.modifier_config)
