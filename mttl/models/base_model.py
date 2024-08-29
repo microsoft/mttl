@@ -1,42 +1,15 @@
-import dataclasses
 import inspect
 import json
-import math
 import os
-import re
-import threading
-from collections import defaultdict
-from dataclasses import MISSING, asdict, dataclass
-from functools import partial
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import torch
-from attrs import field
 from huggingface_hub import hf_hub_download
-from torch.optim.optimizer import Optimizer
 from transformers.modeling_outputs import CausalLMOutput
 
-from mttl.arguments import Args, ExpertConfig, MoEExpertConfig, MultiExpertConfig
 from mttl.logging import logger
-from mttl.models.containers import add_expert_to_transformer
-from mttl.models.containers.base import ExpertContainer
-from mttl.models.containers.selectors.base import (
-    LoadableLibraryMixin,
-    LoadableSelectorConfig,
-    MultiSelectorConfig,
-    Selector,
-    SelectorConfig,
-    SelectorsCache,
-)
 from mttl.models.expert_config import AutoModelConfig, BaseExpertModelConfig
 from mttl.models.expert_context import InfoContainer
-from mttl.models.library.expert import Expert, ExpertInfo
-from mttl.models.library.expert_library import ExpertLibrary
-from mttl.models.llama_patch import replace_attn_with_flash_attn
-from mttl.models.modifiers import modify_transformer
-from mttl.models.modifiers.base import Modifier, ModifierConfig
-from mttl.models.modifiers.lora import SkilledLoRAConfig
-from mttl.models.modifiers.modify_model import get_modifier_name
 from mttl.models.utils import model_loader_helper
 from mttl.registrable import Registrable
 
@@ -58,19 +31,32 @@ class BaseExpertModel(torch.nn.Module, Registrable):
         super().__init__()
 
         # log hyperparameters
-        self.load_in_4bit = loading_kwargs.get("load_in_4bit", None) or False
-        self.load_in_8bit = loading_kwargs.get("load_in_8bit", None) or False
+        self.load_in_4bit = loading_kwargs.get("load_in_4bit", False)
+        self.load_in_8bit = loading_kwargs.get("load_in_8bit", False)
+        self.device_map = loading_kwargs.get("device_map", "cpu")
+        self.attn_implementation = loading_kwargs.get("attn_implementation", None)
+
+        # cannot use both load_in_4bit and load_in_8bit
+        if self.load_in_4bit and self.load_in_8bit:
+            raise ValueError("Cannot use both `load_in_4bit` and `load_in_8bit`.")
 
         if config.base_model is None and model_object is None:
             raise ValueError("You must provide a model object or a base model name.")
+
+        # if model_object is provided, base_model should be None
+        if model_object is not None and config.base_model is not None:
+            logger.warning(
+                "You are initializing a model directly from a model object. We will set `base_model` to None."
+            )
+            config.base_model = None
 
         self.model = (
             model_loader_helper(
                 config.base_model,
                 load_in_4bit=self.load_in_4bit,
                 load_in_8bit=self.load_in_8bit,
-                device_map=loading_kwargs.get("device_map", "cpu"),
-                attn_implementation=loading_kwargs.get("attn_implementation", None),
+                device_map=self.device_map,
+                attn_implementation=self.attn_implementation,
             )
             if model_object is None
             else model_object

@@ -1,19 +1,15 @@
 import functools
-import math
 import threading
 from abc import ABC
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Dict, Union
 
-import numpy as np
 import torch
-import torch.nn.functional as F
 from pyparsing import abstractmethod
 from torch import nn
-from torch.distributions import Categorical
 
-from mttl.logging import logger, warn_once
+from mttl.logging import logger
 from mttl.models.containers.selectors.selector_output import (
     BatchExpertsAndWeightsSelectorOutput,
     BatchExpertsSelectorOutput,
@@ -327,7 +323,6 @@ class Selector(nn.Module, Registrable):
 
     @property
     def routing_infos(self):
-        from mttl.models.expert_context import InfoContainer
 
         info_container = self.info_container
         if not info_container:

@@ -1,5 +1,3 @@
-import os
-
 import numpy as np
 import pytest
 from pytorch_lightning import seed_everything

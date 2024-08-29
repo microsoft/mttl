@@ -1,22 +1,17 @@
-import functools
-import os
-
 import numpy as np
 import pytest
 import torch
 from pytorch_lightning import seed_everything
 
-from mttl.arguments import MoEExpertConfig, MultiExpertConfig
+from mttl.arguments import MultiExpertConfig
 from mttl.models.containers.lora_containers import (
     CoalescedLoRAExpertContainer,
     LoRAExpertContainer,
 )
-from mttl.models.containers.selectors.base import LoadableLibraryMixin
 from mttl.models.containers.selectors.moe_selector import MOERKHSSelector
 from mttl.models.containers.selectors.per_token_selector import PerTokenSelector
 from mttl.models.containers.selectors.poly_selector import (
     PolySelector,
-    PolySelectorConfig,
     PolySelectorDirect,
 )
 from mttl.models.containers.selectors.selector_output import (
@@ -25,7 +20,6 @@ from mttl.models.containers.selectors.selector_output import (
 )
 from mttl.models.library.expert import Expert
 from mttl.models.lightning.expert_module import MoEModule, MultiExpertModule
-from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRAConfig
 
 

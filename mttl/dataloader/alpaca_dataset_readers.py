@@ -1,6 +1,6 @@
 import torch
 
-from mttl.models.library.expert_library import DatasetLibrary
+from mttl.models.library.dataset_library import DatasetLibrary
 
 
 class AlpacaTemplateForHash(

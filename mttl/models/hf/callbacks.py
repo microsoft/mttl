@@ -1,7 +1,6 @@
 import os
 
 from transformers import (
-    Trainer,
     TrainerCallback,
     TrainerControl,
     TrainerState,

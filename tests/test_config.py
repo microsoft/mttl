@@ -148,7 +148,7 @@ def test_auto_modifier_config():
 
 
 def test_dump_load_lora_config():
-    from mttl.models.modifiers.base import AutoModifierConfig, ModifierConfig
+    from mttl.models.modifiers.base import AutoModifierConfig
     from mttl.models.modifiers.lora import LoRAConfig
 
     data = {

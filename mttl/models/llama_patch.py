@@ -13,12 +13,6 @@ from transformers.models.llama.modeling_llama import (
 )
 
 try:
-    from einops import rearrange
-    from flash_attn.bert_padding import pad_input, unpad_input
-    from flash_attn.flash_attn_interface import (
-        flash_attn_func,
-        flash_attn_varlen_qkvpacked_func,
-    )
 
     flash_attn_disabled = False
 except Exception:

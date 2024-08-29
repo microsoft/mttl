@@ -6,7 +6,6 @@ from pytorch_lightning import seed_everything
 
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
-from mttl.models.modifiers.routing import RoutingInfo
 
 
 @pytest.mark.parametrize("adapter_type", ["kv_adapter"])

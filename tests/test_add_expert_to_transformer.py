@@ -1,6 +1,3 @@
-import os
-
-import pytest
 from pytorch_lightning import seed_everything
 
 from mttl.models.containers import create_modif_regex, match_modules_to_modify

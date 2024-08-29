@@ -13,14 +13,13 @@ from huggingface_hub import (
     CommitOperationDelete,
 )
 
+from mttl.models.library.backend_engine import BlobStorageEngine, LocalFSEngine
+from mttl.models.library.dataset_library import DatasetLibrary
 from mttl.models.library.expert_library import (
     BlobExpertLibrary,
-    BlobStorageEngine,
-    DatasetLibrary,
     ExpertLibrary,
     HFExpertLibrary,
     LocalExpertLibrary,
-    LocalFSEngine,
     VirtualLocalLibrary,
 )
 

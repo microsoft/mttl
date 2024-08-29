@@ -1,7 +1,7 @@
 # unit test for adapter_ranker
 import pytest
 
-from mttl.arguments import ExpertConfig, MultiExpertConfig, RankerConfig
+from mttl.arguments import MultiExpertConfig, RankerConfig
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
 from mttl.models.containers.selectors.base import TaskPredictorSelector
 from mttl.models.lightning.expert_module import MultiExpertModule

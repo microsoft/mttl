@@ -1,29 +1,13 @@
-from types import SimpleNamespace
-
 import torch
-from pyparsing import Union
-from torch import Tensor, nn
+from torch import nn
 
-from mttl.logging import warn_once
 from mttl.models.containers.base import ContainerFullException, ExpertContainer
 from mttl.models.containers.selectors.product_key import PKSelectorConfig, PKSSelector
 from mttl.models.containers.selectors.selector_output import (
-    BatchExpertsAndWeightsSelectorOutput,
-    BatchExpertsSelectorOutput,
-    BatchSequenceExpertsAndWeightsSelectorOutput,
-    ExpertsAndWeightsSelectorOutput,
     MultiheadBatchSequenceExpertsAndWeightsSelectorOutput,
-    SelectorOutput,
 )
 from mttl.models.library.expert import Expert
-from mttl.models.modifiers.base import (
-    MergeableModifierMixin,
-    Modifier,
-    ModifierConfig,
-    ModifyMixin,
-)
 from mttl.models.modifiers.mlp import PEERConfig, PEERModifier
-from mttl.models.modifiers.modify_model import get_modifier_name
 
 # diff architectures name those layers differently
 DOWN_NAMES = ["fc1", "c_fc"]

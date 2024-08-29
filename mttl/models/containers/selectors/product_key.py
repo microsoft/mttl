@@ -1,11 +1,9 @@
 import math
 from dataclasses import dataclass
-from typing import Dict
 
 import torch
 from einops import rearrange
 from torch import nn
-from torch.nn import functional as F
 
 from mttl.models.containers.selectors.base import (
     Selector,

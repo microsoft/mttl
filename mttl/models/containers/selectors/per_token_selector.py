@@ -106,7 +106,7 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
         else:
             mean_angle = angle.mean()
 
-        task = self.routing_infos.task_sources[0]
+        task = self.routing_infos.task_names[0]
 
         to_store = {"angle": mean_angle.item()}
         self.metric_logger.update(prefix=f"task_{task}", value_dict=to_store)

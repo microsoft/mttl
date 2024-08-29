@@ -1,14 +1,9 @@
-import inspect
-import os
-from typing import Optional, Tuple
-
 try:
     import flash_attn
 except ImportError:
     flash_attn = None
 
 import torch
-import torch.nn.functional as F
 
 from mttl.logging import warn_once
 from mttl.models.expert_context import InfoContainer

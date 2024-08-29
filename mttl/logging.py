@@ -5,7 +5,6 @@ from functools import lru_cache
 import numpy as np
 import pandas as pd
 import prettytable
-import pytorch_lightning as pl
 import wandb
 
 logger = logging.getLogger("mttl")

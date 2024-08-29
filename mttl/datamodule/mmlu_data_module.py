@@ -13,7 +13,7 @@ from transformers.tokenization_utils_base import PaddingStrategy
 
 from mttl.datamodule.base import DataModule, DatasetConfig, DefaultCollator
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
-from mttl.models.library.expert_library import DatasetLibrary
+from mttl.models.library.dataset_library import DatasetLibrary
 
 #################################################
 # Dataset aumgentation, implemented in the MMLU dataset

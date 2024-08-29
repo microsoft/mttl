@@ -1,25 +1,16 @@
-import hashlib
-import os
-import sys
 from functools import partial
 from typing import Callable
 
 import nevergrad as ng
-import torch
-import tqdm
 import wandb
-from torch.utils.data import DataLoader
 
-from mttl.dataloader.ni_metrics import compute_metrics
-from mttl.evaluators import MMLUEvaluator
-from mttl.evaluators.base import compute_task_aggregation
 from mttl.logging import logger
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.library.library_transforms import (
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
 )
-from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
+from mttl.models.lightning.expert_module import MultiExpertModule
 
 
 def default_l1_regularization(weights):

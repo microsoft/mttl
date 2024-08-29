@@ -1,10 +1,6 @@
 import pytest
 
-from mttl.models.base_model import BaseExpertModel
-from mttl.models.containers.selectors.poly_selector import (
-    PolySelector,
-    PolySelectorConfig,
-)
+from mttl.models.containers.selectors.poly_selector import PolySelectorConfig
 from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
 from mttl.models.modifiers.lora import LoRAConfig
 

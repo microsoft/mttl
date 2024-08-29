@@ -1,5 +1,4 @@
 from mttl.datamodule.bbh_data_module import BBHDataModule
-from mttl.evaluators.base import GenerationOutput
 from mttl.evaluators.em_evaluator import EMEvaluator
 
 

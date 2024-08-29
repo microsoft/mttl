@@ -1,7 +1,3 @@
-import os
-import shutil
-import sys
-from tempfile import TemporaryDirectory
 from typing import Type
 
 import torch
@@ -10,8 +6,7 @@ from pytorch_lightning import Trainer, seed_everything
 from mttl.arguments import Args, ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import logger, setup_logging
-from mttl.models.library.expert import Expert, load_expert
-from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
+from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.lightning.callbacks import (
     DownstreamEvalCallback,
     LiveCheckpointCallback,

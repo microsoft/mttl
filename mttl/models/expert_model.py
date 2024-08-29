@@ -21,10 +21,8 @@ from mttl.models.containers.selectors.base import (
 from mttl.models.expert_config import BaseExpertModelConfig
 from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.library.expert_library import ExpertLibrary
-from mttl.models.modifiers.base import AutoModifierConfig, ModifierConfig
-from mttl.models.modifiers.lora import SkilledLoRAConfig
+from mttl.models.modifiers.base import AutoModifierConfig
 from mttl.models.modifiers.modify_model import modify_transformer
-from mttl.models.utils import model_loader_helper
 
 
 @dataclass
@@ -39,9 +37,10 @@ class ExpertModel(BaseExpertModel):
     def __init__(
         self,
         config: ExpertModelConfig,
+        model_object: torch.nn.Module = None,
         **loading_kwargs,
     ):
-        super().__init__(config, **loading_kwargs)
+        super().__init__(config, model_object=model_object, **loading_kwargs)
 
         if config.modifier_config is not None:
             self.model = modify_transformer(self.model, config.modifier_config)
@@ -114,7 +113,6 @@ class MultiExpertMixin:
         default_expert_name: str = None,
         **loading_kwargs,
     ):
-        from copy import deepcopy
 
         if not isinstance(library_id, ExpertLibrary):
             library = ExpertLibrary.get_expert_library(
