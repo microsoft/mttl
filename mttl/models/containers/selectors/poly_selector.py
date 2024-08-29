@@ -256,3 +256,34 @@ class PolyUniform(PolySelectorDirect):
             for name in self.module_logits_dict.keys():
                 self.module_logits_dict[name].data = torch.ones(1).to(self.device)
                 self.module_logits_dict[name].data /= len(self.module_logits_dict)
+
+
+@dataclass
+class VectorSelectorConfig(SelectorConfig):
+    task_names: List[str] = None
+
+@Selector.register("vector_router", VectorSelectorConfig)
+class VectorSelector(Selector):
+    """
+    User can specify a distribution over the skills. 
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.register_buffer('dummy', torch.ones(1))
+
+    @forward_with_cache
+    def forward(self, input, **kwargs) -> ExpertsSplitsAndWeightsSelectorOutput:
+        
+        routing_infos = self.routing_infos
+        assert routing_infos.skill_mixing_coefs is not None, "No skill mixing coefs found"
+
+        mixing_coefs = routing_infos.skill_mixing_coefs.to(self.dummy.device)
+
+        if mixing_coefs.ndim == 1:
+            mixing_coefs = mixing_coefs.unsqueeze(0)
+
+        return ExpertsSplitsAndWeightsSelectorOutput(
+            SelectorOutput.ALL_EXPERTS, mixing_coefs
+        )
+

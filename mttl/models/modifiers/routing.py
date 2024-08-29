@@ -20,6 +20,7 @@ class RoutingInfo:
     packed_seq_lens: List[int] = None
     seq_lens: List[int] = None
     packed_attn_mask: torch.Tensor = None
+    skill_mixing_coefs: torch.Tensor = None
 
     @classmethod
     def pop_elements(cls, batch, keep=None):
@@ -59,6 +60,7 @@ class RoutingInfo:
             packed_seq_lens=batch.get("packed_seq_lens", None),
             seq_lens=batch.get("seq_lens", None),
             packed_attn_mask=batch.get("packed_attn_mask", None),
+            skill_mixing_coefs=batch.get("skill_mixing_coefs", None),
             **kwargs,
         )
         return ri
