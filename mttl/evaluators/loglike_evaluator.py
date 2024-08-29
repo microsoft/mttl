@@ -4,7 +4,6 @@ import tqdm
 
 from mttl.evaluators.base import Evaluator, switch_to_eval_mode
 from mttl.logging import logger
-from mttl.models.base_model import BaseExpertModel
 from mttl.models.utils import compute_loglike_loss
 
 
@@ -23,7 +22,7 @@ class LogLikeEvaluator(Evaluator):
         shuffle=False,
         output_path=None,
     ):
-        from mttl.models.expert_model import ExpertModel
+        from mttl.models.expert_model import BaseExpertModel
         from mttl.models.lightning.expert_module import ExpertModule
         from mttl.models.utils import transfer_batch_to_device
 
