@@ -4,6 +4,7 @@ import tqdm
 
 from mttl.evaluators.base import Evaluator, switch_to_eval_mode
 from mttl.logging import logger
+from mttl.models.base_model import BaseExpertModel
 from mttl.models.utils import compute_loglike_loss
 
 
@@ -55,7 +56,9 @@ class LogLikeEvaluator(Evaluator):
             batch = transfer_batch_to_device(batch, device)
 
             with torch.no_grad():
-                if isinstance(model, ExpertModule) or isinstance(model, ExpertModel):
+                if isinstance(model, ExpertModule) or isinstance(
+                    model, BaseExpertModel
+                ):
                     logits = model.forward(**batch).logits
                 else:
                     logits = model.forward(
