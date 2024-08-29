@@ -150,13 +150,6 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
         ckpt = torch.load(checkpoint_path, weights_only=False, map_location="cpu")
         ckpt["hyper_parameters"].update(**model_kwargs)
 
-        if tokenizer is None and "model" in ckpt["hyper_parameters"]:
-            tokenizer = get_tokenizer_with_args(
-                model_name=ckpt["hyper_parameters"]["model"],
-                model_family=ckpt["hyper_parameters"]["model_family"],
-                padding_side=ckpt["hyper_parameters"]["padding_side"],
-            )
-
         model = cls(**ckpt["hyper_parameters"])
         model.load_state_dict(ckpt["state_dict"], strict=False)
         return model

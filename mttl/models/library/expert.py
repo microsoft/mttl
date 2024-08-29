@@ -21,7 +21,7 @@ class ExpertInfo(Serializable):
     # configuration for this expert, i.e. a modifier config
     expert_config: AutoModifierConfig = None
     # arguments with which the expert was trained, i.e. the full training config
-    training_config: "AutoArgs" = None
+    training_config: "mttl.arguments.AutoArgs" = None
     expert_model: str = None
 
     @property
