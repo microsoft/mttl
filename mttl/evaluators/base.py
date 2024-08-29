@@ -267,7 +267,7 @@ class GenerativeEvaluator(Evaluator):
         return generation_output
 
     def generate_for_batch(self, model, batch):
-        from mttl.models.expert_model import ExpertModel
+        from mttl.models.expert_model import BaseExpertModel
         from mttl.models.lightning.expert_module import ExpertModule
         from mttl.models.utils import transfer_batch_to_device
 
