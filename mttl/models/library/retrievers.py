@@ -11,9 +11,17 @@ from mttl.models.library.library_transforms import (
     LibraryTransform,
     LibraryTransformConfig,
 )
-from mttl.models.library.utils import get_svd_embedding
 from mttl.models.lightning.expert_module import MultiExpertModule
-from mttl.registrable import Registrable
+
+
+def get_svd_embedding(lib, expert_name: str):
+    try:
+        embeddings = lib.get_auxiliary_data(
+            data_type="embeddings", expert_name=expert_name
+        )
+    except ValueError:
+        return None
+    return embeddings["svd"]["embeddings"]
 
 
 class Retriever(LibraryTransform):

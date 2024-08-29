@@ -1,5 +1,3 @@
-import torch
-
 from mttl.dataloader.alpaca_dataset_readers import AlpacaDataset
 from mttl.datamodule.base import DataModule, DatasetConfig
 

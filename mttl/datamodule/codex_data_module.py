@@ -4,7 +4,7 @@ from functools import partial
 import numpy
 
 from mttl.datamodule.base import DataModule, DatasetConfig
-from mttl.models.library.expert_library import DatasetLibrary
+from mttl.models.library.dataset_library import DatasetLibrary
 
 
 class CodexDataConfig(DatasetConfig):

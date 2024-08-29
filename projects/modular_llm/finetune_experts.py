@@ -11,14 +11,13 @@ from typing import Callable
 
 from mttl.arguments import FinetuneConfig
 from mttl.datamodule.base import get_datamodule
-from mttl.logging import get_pl_loggers, logger, setup_logging
+from mttl.logging import logger, setup_logging
 from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import (
     ExpertLibrary,
     HFExpertLibrary,
     LocalExpertLibrary,
     VirtualLocalLibrary,
-    retry,
 )
 from mttl.models.library.library_transforms import (
     SVDEmbeddingTransform,
@@ -33,10 +32,11 @@ from mttl.models.lightning.callbacks import (
     RougeCallback,
 )
 from mttl.models.lightning.expert_module import ExpertModule as ExpertModule
-from mttl.models.lightning.expert_module import MoEModule, MultiExpertModule
+from mttl.models.lightning.expert_module import MoEModule
+from mttl.models.lightning.loggers import get_pl_loggers
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.monitors import get_monitors
-from mttl.utils import get_checkpoint_path, remote_login
+from mttl.utils import get_checkpoint_path, remote_login, retry
 
 FINETUNE_FUNCTIONS: dict[str, Callable] = {}
 

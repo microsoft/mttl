@@ -3,11 +3,9 @@ from typing import Dict, Union
 
 import torch
 
-from mttl.arguments import AutoArgs
 from mttl.logging import logger
 from mttl.models.modifiers.base import (
     AutoModifierConfig,
-    Modifier,
     ModifierConfig,
     get_target_2_source_param_mapping,
 )
@@ -23,7 +21,7 @@ class ExpertInfo(Serializable):
     # configuration for this expert, i.e. a modifier config
     expert_config: AutoModifierConfig = None
     # arguments with which the expert was trained, i.e. the full training config
-    training_config: AutoArgs = None
+    training_config: "AutoArgs" = None
     expert_model: str = None
 
     @property
@@ -146,7 +144,7 @@ def load_expert(
     """
     import os
 
-    from huggingface_hub import hf_hub_download, list_repo_files
+    from huggingface_hub import list_repo_files
 
     from mttl.models.base_model import WEIGHTS_NAME
     from mttl.models.lightning.base_module import CHECKPOINT_PATH_IN_HUB

@@ -11,7 +11,6 @@ import torch
 from transformers import StoppingCriteria, StoppingCriteriaList
 
 from mttl.logging import logger
-from mttl.models.base_model import BaseExpertModel
 
 
 def decode(preds, tokenizer, clean_up_tokenization_spaces=True):

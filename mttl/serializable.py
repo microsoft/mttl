@@ -1,7 +1,9 @@
 import dataclasses
 import importlib
 from dataclasses import dataclass
-from typing import Any, Dict, List, Type
+from typing import Any, Dict
+
+from mttl.logging import logger
 
 
 @dataclass
@@ -27,23 +29,29 @@ class Serializable:
                     )
                 continue
 
+            field_type = field.type
+
+            if type(field_type) == str:
+                field_type = AutoSerializable.dynamic_class_resolution(field_type)
+                logger.debug(f"Resolved {field.name} to {field_type}.")
+
             value = data[field.name]
             if value is None:
                 data_[field.name] = None
             # handle the case of a config
-            elif hasattr(field.type, "fromdict"):
-                data_[field.name] = field.type.fromdict(value)
+            elif hasattr(field_type, "fromdict"):
+                data_[field.name] = field_type.fromdict(value)
             # handle the case of a list of configs
-            elif get_origin(field.type) == list and hasattr(
-                get_args(field.type)[0], "fromdict"
+            elif get_origin(field_type) == list and hasattr(
+                get_args(field_type)[0], "fromdict"
             ):
-                data_[field.name] = [get_args(field.type)[0].fromdict(v) for v in value]
+                data_[field.name] = [get_args(field_type)[0].fromdict(v) for v in value]
             # handle the case of a dict of configs
-            elif get_origin(field.type) == dict and hasattr(
-                get_args(field.type)[0], "asdict"
+            elif get_origin(field_type) == dict and hasattr(
+                get_args(field_type)[0], "asdict"
             ):
                 data_[field.name] = {
-                    k: get_args(field.type)[0].fromdict(v) for k, v in value.items()
+                    k: get_args(field_type)[0].fromdict(v) for k, v in value.items()
                 }
             # simple value
             else:
@@ -66,7 +74,6 @@ class Serializable:
         Returns:
             A dictionary representation of the config.
         """
-        from typing import get_args, get_origin
 
         data = {}
         for field in dataclasses.fields(self):
@@ -123,7 +130,7 @@ class AutoSerializable:
             module_name, class_name = class_name.rsplit(".", 1)
             module = importlib.import_module(module_name)
             return getattr(module, class_name)
-        except (ModuleNotFoundError, AttributeError):
+        except (ModuleNotFoundError, AttributeError, ValueError):
             import sys
 
             # If it fails, try to find the class in any loaded module
