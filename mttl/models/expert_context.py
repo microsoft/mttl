@@ -78,3 +78,28 @@ class InfoContainer:
             return results
 
         return wrapper_func
+
+    @classmethod    
+    def wrap_with_context(cls, f):
+        """
+         Decorator method that wraps a general function of a model class
+        (We may want to wrap other methods than just forward and generate).
+        Use `create_context` whenever possible
+        """
+        from mttl.models.modifiers.routing import RoutingInfo
+
+        @functools.wraps(f)
+        def wrapper_func(model, *args, **kwargs):
+
+            return_context = kwargs.pop("return_context", False)
+            with cls(model, RoutingInfo.from_batch(args[0])) as context:
+                results = f(model, *args, **kwargs)
+                if return_context:
+                    context_returns = {
+                        "routing_infos": context.routing_infos,
+                        "routing_gates": context.routing_gates,
+                    }
+                    return results, context_returns
+            return results
+
+        return wrapper_func
