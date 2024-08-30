@@ -1,9 +1,11 @@
+from typing import Union
+
 import numpy as np
 import pytest
 import torch
 from pytorch_lightning import seed_everything
 
-from mttl.arguments import MultiExpertConfig
+from mttl.arguments import MoEExpertConfig, MultiExpertConfig
 from mttl.models.containers.lora_containers import (
     CoalescedLoRAExpertContainer,
     LoRAExpertContainer,
@@ -18,6 +20,7 @@ from mttl.models.containers.selectors.selector_output import (
     BatchSequenceExpertsAndWeightsSelectorOutput,
     SelectorOutput,
 )
+from mttl.models.expert_model import MoEModel, MoEModelConfig
 from mttl.models.library.expert import Expert
 from mttl.models.lightning.expert_module import MoEModule, MultiExpertModule
 from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRAConfig
@@ -46,9 +49,42 @@ bs, max_seq_len = 10, 5
 
 
 def create_dummy_expert(config: MultiExpertConfig, exp_name) -> Expert:
-    model = MultiExpertModule(model=config.model, device_map="cpu")
+    from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
+
+    model = MultiExpertModel(
+        MultiExpertModelConfig(
+            base_model=config.model,
+        ),
+        device_map="cpu",
+    )
     expert = model.add_empty_expert(exp_name, config.modifier_config)
     return expert
+
+
+def create_expert_model_from_args(config: Union[MultiExpertConfig, MoEExpertConfig]):
+    from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
+
+    if type(config) is MultiExpertConfig:
+        model = MultiExpertModel(
+            MultiExpertModelConfig(
+                base_model=config.model,
+                selector_config=config.selector_config,
+            ),
+            device_map="cpu",
+        )
+        return model
+    elif type(config) is MoEExpertConfig:
+        model = MoEModel(
+            MoEModelConfig(
+                base_model=config.model,
+                moe_num_experts=config.moe_num_experts,
+                library_id=config.library_id,
+                modifier_config=config.modifier_config,
+                selector_config=config.selector_config,
+            ),
+            device_map="cpu",
+        )
+        return model
 
 
 def test_add_expert_with_action_merge(tmp_multi_exp_config, monkeypatch):
@@ -62,12 +98,13 @@ def test_add_expert_with_action_merge(tmp_multi_exp_config, monkeypatch):
     exp2_dest = create_dummy_expert(config, "exp2")
     module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
 
-    module = MultiExpertModule(**vars(config))
+    module = create_expert_model_from_args(config)
     module.add_experts_from_dict(module_dict, action="merge")
 
     assert isinstance(
         module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
     )
+
     # expert container should be empty
     assert len(module.model.transformer.h[0].attn.attention.k_proj) == 0
 
@@ -104,6 +141,7 @@ def test_expert_selector_with_poly_task_routing(
     monkeypatch.setenv("COALESCED_LORA_CONTAINER", str(is_coalesced))
 
     seed_everything(0)
+
     config: MultiExpertConfig = tmp_multi_exp_config
     config.router_selector = "poly_router"
 
@@ -114,8 +152,7 @@ def test_expert_selector_with_poly_task_routing(
     exp2 = create_dummy_expert(config, "task_2")
     module_dict = {"mod1": exp1, "mod2": exp2}
 
-    module = MultiExpertModule(**vars(config))
-    assert isinstance(module.training_config.modifier_config, LoRAConfig)
+    module = create_expert_model_from_args(config)
     module.add_experts_from_dict(module_dict, action="route")
 
     assert isinstance(
@@ -155,11 +192,9 @@ def test_expert_selector_with_poly_task_routing(
     exp2 = create_dummy_expert(config, "task_2")
 
     module_dict = {"mod1": exp1, "mod2": exp2}
-    module = MultiExpertModule(
-        **vars(config),
-    )
-    assert isinstance(module.training_config.modifier_config, SkilledLoRAConfig)
+    module = create_expert_model_from_args(config)
     module.add_experts_from_dict(module_dict, action="route")
+
     nonzero_B_init(module)
     output = module(**batch)
 
@@ -190,7 +225,7 @@ def test_expert_selector_with_task_name_routing(tmp_multi_exp_config):
     exp2 = create_dummy_expert(config, "exp2")
     module_dict = {"mod1": exp1, "mod2": exp2, "mod3": exp1}
 
-    module = MultiExpertModule(**vars(config))
+    module = create_expert_model_from_args(config)
     module.add_experts_from_dict(module_dict, action="route")
     module.set_default_expert("mod3")
 
@@ -228,7 +263,7 @@ def test_expert_selector_with_poly_routing(tmp_multi_exp_config):
     exp2_dest = create_dummy_expert(config, "exp2")
     module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
 
-    module = MultiExpertModule(**vars(config))
+    module = create_expert_model_from_args(config)
     module.add_experts_from_dict(module_dict, action="route")
     assert module.selectors["lora"][0].init_gap == [-1e-3, 1e-3]
 
@@ -281,9 +316,7 @@ def test_expert_selector_with_poly_routing(tmp_multi_exp_config):
     config.router_granularity = "finegrained"
     config.finetune_task_name = "mod1"
 
-    module = MultiExpertModule(
-        **vars(config),
-    )
+    module = create_expert_model_from_args(config)
     module.add_experts_from_dict(module_dict)
     selector = module.selectors["lora"][0]
     assert selector.init_gap == [0, 0]
@@ -303,13 +336,12 @@ def test_expert_selector_with_poly_routing(tmp_multi_exp_config):
 def test_expert_selector_with_moe_routing_soft(mocker, tmp_moe_exp_config, dummy_batch):
     seed_everything(0)
 
-    config: MultiExpertConfig = tmp_moe_exp_config
+    config: MoEExpertConfig = tmp_moe_exp_config
+
     config.router_selector = "moe_rkhs_router"
     config.router_granularity = "finegrained"
-    config.moe_emb_dim = 10
-    config.moe_rkhs_dim = 10
 
-    module = MoEModule(**vars(config))
+    module = create_expert_model_from_args(config)
 
     container = module.model.transformer.h[0].attn.attention.k_proj
     assert isinstance(container, LoRAExpertContainer)
@@ -332,13 +364,13 @@ def test_expert_selector_with_moe_routing_soft_granularity(
     mocker, tmp_moe_exp_config, dummy_batch
 ):
     seed_everything(0)
-    config: MultiExpertConfig = tmp_moe_exp_config
+    config: MoEExpertConfig = tmp_moe_exp_config
     config.router_selector = "moe_rkhs_router"
     config.router_granularity = "coarsegrained"
     config.moe_emb_dim = 10
     config.moe_rkhs_dim = 10
 
-    module = MoEModule(**vars(config))
+    module = create_expert_model_from_args(config)
 
     container = module.model.transformer.h[0].attn.attention.k_proj
     assert isinstance(container, LoRAExpertContainer)
@@ -350,13 +382,12 @@ def test_expert_selector_with_moe_routing_soft_granularity(
     assert np.allclose(output.loss.item(), 18.1, atol=0.1)
     assert container.selector.total_calls_per_forward == 72
 
-    config: MultiExpertConfig = tmp_moe_exp_config
+    config: MoEExpertConfig = tmp_moe_exp_config
     config.router_granularity = "mixer"
+
     # mixer not found
     with pytest.raises(ValueError):
-        module = MoEModule(
-            **vars(config),
-        )
+        module = create_expert_model_from_args(config)
 
 
 def test_expert_selector_with_moe_routing_soft_coalesced(
@@ -365,14 +396,14 @@ def test_expert_selector_with_moe_routing_soft_coalesced(
     monkeypatch.setenv("COALESCED_LORA_CONTAINER", "1")
 
     seed_everything(0)
-    config: MultiExpertConfig = tmp_moe_exp_config
+    config: MoEExpertConfig = tmp_moe_exp_config
     config.router_selector = "moe_rkhs_router"
     config.router_granularity = "finegrained"
     config.top_k = -1
     config.emb_dim = 10
     config.rkhs_dim = 10
 
-    module = MoEModule(**vars(config))
+    module = create_expert_model_from_args(config)
 
     container = module.model.transformer.h[0].attn.attention.k_proj
     assert isinstance(container, CoalescedLoRAExpertContainer)
@@ -393,14 +424,14 @@ def test_expert_selector_with_moe_routing_soft_coalesced(
 
 def test_expert_selector_with_moe_routing_hard(mocker, tmp_moe_exp_config, dummy_batch):
     seed_everything(0)
-    config: MultiExpertConfig = tmp_moe_exp_config
+    config: MoEExpertConfig = tmp_moe_exp_config
     config.router_selector = "moe_rkhs_router"
     config.router_granularity = "finegrained"
     config.top_k = 2
     config.emb_dim = 10
     config.rkhs_dim = 10
 
-    module = MoEModule(**vars(config))
+    module = create_expert_model_from_args(config)
 
     container = module.model.transformer.h[0].attn.attention.k_proj
     assert isinstance(container, LoRAExpertContainer)
@@ -425,12 +456,12 @@ def test_expert_selector_with_moe_clown_routing_soft_coalesced(
     monkeypatch.setenv("COALESCED_LORA_CONTAINER", "1")
 
     seed_everything(0)
-    config: MultiExpertConfig = tmp_moe_exp_config
+    config: MoEExpertConfig = tmp_moe_exp_config
     config.router_selector = "arrow_router"
     config.router_granularity = "finegrained"
     config.router_temp = 0.1
 
-    module = MoEModule(**vars(config))
+    module = create_expert_model_from_args(config)
 
     container = module.model.transformer.h[0].attn.attention.k_proj
     assert isinstance(container, CoalescedLoRAExpertContainer)
@@ -477,7 +508,7 @@ def test_expert_selector_with_task_predictor_selection(tmp_multi_exp_config):
     exp2_dest = create_dummy_expert(config, "exp2")
     module_dict = {"niv2_sentence_compression": exp1_dest, "niv2_misc": exp2_dest}
 
-    module = MultiExpertModule(**vars(config))
+    module = create_expert_model_from_args(config)
     module.add_experts_from_dict(module_dict, action="route")
 
     bs = 2

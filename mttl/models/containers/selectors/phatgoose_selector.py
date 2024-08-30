@@ -127,7 +127,9 @@ class PhatgooseTrainerSelector(Selector):
             torch.zeros_like(scores, dtype=torch.long), scores
         )
 
-    def on_add_expert(self, expert_name: str, **kwargs):
+    def on_add_expert(
+        self, expert_name: str, expert_info: "ExpertInfo", is_default: bool = False
+    ):
         self.gates[expert_name] = SigmoidGate(self.input_dim)
 
     def get_merging_weights(self, **selector_kwargs) -> Dict:

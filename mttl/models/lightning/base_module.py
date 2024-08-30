@@ -36,16 +36,19 @@ class OnLogCallback:
         return output
 
 
-class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
+class LightningEfficientCheckpoint(OnLogCallback, PushToHubMixin, LightningModule):
     """Efficiently save and load checkpoints.
 
     Only saves and loads parameters that are either in the trainable parameters
     or have been loaded from a previous checkpoint.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, model_object=None, **kwargs):
         LightningModule.__init__(self)
         PushToHubMixin.__init__(self)
+
+        self.model_object = model_object
+        self.save_hyperparameters(kwargs)
 
         self.loss_plugins = {}
         # If True, do not delete any parameters that were loaded in a
@@ -149,13 +152,6 @@ class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
         tokenizer = model_kwargs.get("tokenizer", None)
         ckpt = torch.load(checkpoint_path, weights_only=False, map_location="cpu")
         ckpt["hyper_parameters"].update(**model_kwargs)
-
-        if tokenizer is None and "model" in ckpt["hyper_parameters"]:
-            tokenizer = get_tokenizer_with_args(
-                model_name=ckpt["hyper_parameters"]["model"],
-                model_family=ckpt["hyper_parameters"]["model_family"],
-                padding_side=ckpt["hyper_parameters"]["padding_side"],
-            )
 
         model = cls(**ckpt["hyper_parameters"])
         model.load_state_dict(ckpt["state_dict"], strict=False)

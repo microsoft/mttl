@@ -547,16 +547,6 @@ def train_module(args: FinetuneConfig, module: ExpertModule, dm):
     )
     callbacks.append(checkpoint_callback)
 
-    val_check_interval = args.eval_every
-    if val_check_interval == -1 or val_check_interval is None:
-        val_check_interval = None
-    else:
-        val_check_interval = args.gradient_accumulation_steps * args.eval_every
-        if val_check_interval > len(dm.train_dataloader()):
-            val_check_interval = len(dm.train_dataloader())
-        elif val_check_interval > args.total_steps and args.total_steps != -1:
-            val_check_interval = args.total_steps
-
     eval_callback = None
     if args.pipeline_eval_tasks:
         if args.pipeline_eval_tasks == "all":

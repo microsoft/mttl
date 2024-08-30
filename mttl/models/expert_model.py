@@ -43,7 +43,7 @@ class ExpertModel(BaseExpertModel):
         super().__init__(config, model_object=model_object, **loading_kwargs)
 
         if config.modifier_config is not None:
-            self.model = modify_transformer(self.model, config.modifier_config)
+            modify_transformer(self.model, config.modifier_config)
 
     def as_expert(self, training_config=None):
         state_dict = self.state_dict()
