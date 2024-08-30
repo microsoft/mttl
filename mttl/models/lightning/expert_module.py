@@ -76,12 +76,14 @@ class LightningTrainingMixin:
         outputs = self.forward(**batch)
         loss = compute_loglike_loss(outputs.logits, batch["labels"], reduction="none")
         mean_loss = loss.sum() / loss.shape[0]
+        self.inference_outputs.append(loss.detach())
         return mean_loss
 
     def validation_step(self, batch, batch_idx):
         outputs = self.forward(**batch)
         loss = compute_loglike_loss(outputs.logits, batch["labels"], reduction="none")
         mean_loss = loss.sum() / loss.shape[0]
+        self.inference_outputs.append(loss.detach())
         return mean_loss
 
     def log_loss(self, split="val"):
