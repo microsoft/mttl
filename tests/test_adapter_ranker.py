@@ -1,10 +1,10 @@
 # unit test for adapter_ranker
 import pytest
 
-from mttl.arguments import MultiExpertConfig, RankerConfig
+from mttl.arguments import ExpertConfig, MultiExpertConfig, RankerConfig
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
 from mttl.models.containers.selectors.base import TaskPredictorSelector
-from mttl.models.lightning.expert_module import MultiExpertModule
+from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
 from mttl.models.modifiers.lora import LoRAConfig
 from mttl.models.ranker.classifier_ranker import SentenceTransformerClassifier
 from mttl.models.ranker.clip_ranker import CLIPRanker
@@ -57,7 +57,11 @@ def test_clip_routing(tiny_flan_id):
         for_generation=True,
     )
 
-    module = MultiExpertModule(**config.asdict())
+    config = MultiExpertModelConfig(
+        base_model="EleutherAI/gpt-neo-125m",
+        selector_config=config.selector_config,
+    )
+    module = MultiExpertModel(config, model_object=None, device_map="cpu")
     module.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
     module.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
     batch = next(iter(data_module.val_dataloader()))
@@ -87,7 +91,11 @@ def test_classifier_routing(tiny_flan_id):
         for_generation=True,
     )
 
-    module = MultiExpertModule(**config.asdict())
+    config = MultiExpertModelConfig(
+        base_model="EleutherAI/gpt-neo-125m",
+        selector_config=config.selector_config,
+    )
+    module = MultiExpertModel(config, model_object=None, device_map="cpu")
     module.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
     module.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
 
@@ -102,7 +110,7 @@ def test_classifier_routing(tiny_flan_id):
 
 
 def test_expert_model_generate(tmp_path, create_dummy_expert, flan_data_module):
-    config = MultiExpertConfig()
+    config = ExpertConfig()
     config.model = "EleutherAI/gpt-neo-125m"
     config.device_map = "cpu"
     config.model_modifier = "lora"
@@ -112,13 +120,17 @@ def test_expert_model_generate(tmp_path, create_dummy_expert, flan_data_module):
     config.output_dir = tmp_path
     config.model = "EleutherAI/gpt-neo-125m"
 
-    module = MultiExpertModule(**config.asdict())
-
     # create random Lora
-    expert1 = create_dummy_expert(config, "module1")
+    expert1 = create_dummy_expert(config, "expert1")
+
+    module = MultiExpertModel(
+        MultiExpertModelConfig(
+            base_model="EleutherAI/gpt-neo-125m",
+        ),
+        device_map="cpu",
+    )
     module.add_expert_instance(
         expert1,
-        expert_name="expert1",
         action="route",
         is_default=True,
     )

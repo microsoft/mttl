@@ -34,6 +34,7 @@ class BaseExpertModel(torch.nn.Module, Registrable):
         self.load_in_4bit = loading_kwargs.get("load_in_4bit", False)
         self.load_in_8bit = loading_kwargs.get("load_in_8bit", False)
         self.device_map = loading_kwargs.get("device_map", "cpu")
+        self.precision = loading_kwargs.get("precision", "bf16")
         self.attn_implementation = loading_kwargs.get("attn_implementation", None)
 
         # cannot use both load_in_4bit and load_in_8bit
@@ -53,6 +54,8 @@ class BaseExpertModel(torch.nn.Module, Registrable):
         self.model = (
             model_loader_helper(
                 config.base_model,
+                bf16=self.precision == "bf16",
+                fp16=self.precision == "fp16",
                 load_in_4bit=self.load_in_4bit,
                 load_in_8bit=self.load_in_8bit,
                 device_map=self.device_map,

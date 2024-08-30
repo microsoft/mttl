@@ -6,7 +6,7 @@ from sentence_transformers import SentenceTransformer
 from transformers import T5ForConditionalGeneration, T5Tokenizer
 
 from mttl.models.library.dataset_library import DatasetLibrary
-from mttl.models.lightning.base_module import EfficientCheckpointModule
+from mttl.models.lightning.base_module import LightningEfficientCheckpoint
 from mttl.models.ranker.adapter_ranker import AdapterRanker
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -55,7 +55,7 @@ class TextEncoder(nn.Module):
         return outputs
 
 
-class SentenceTransformerClassifier(AdapterRanker, EfficientCheckpointModule):
+class SentenceTransformerClassifier(AdapterRanker, LightningEfficientCheckpoint):
     # define the classifier, the x is the input, the task_id or expert_id is the label
     def __init__(
         self,
