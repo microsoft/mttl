@@ -79,7 +79,7 @@ class InfoContainer:
 
         return wrapper_func
 
-    @classmethod    
+    @classmethod
     def wrap_with_context(cls, f):
         """
          Decorator method that wraps a general function of a model class
