@@ -90,13 +90,14 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
         torch.utils.checkpoint.checkpoint = notfailing_checkpoint
         model.gradient_checkpointing_enable()
         # FIX for enabling gradient of the auxiliary loss
-
     return model
 
 
 def model_loader_helper(
     model_name,
     device_map="auto",
+    bf16=True,
+    fp16=False,
     load_in_4bit=False,
     load_in_8bit=False,
     attn_implementation=None,
@@ -108,6 +109,14 @@ def model_loader_helper(
 
     logger.info(f"Attention Implementation: {attn_implementation}")
 
+    # set dtype
+    if bf16:
+        dtype = torch.bfloat16
+    elif fp16:
+        dtype = torch.float16
+    else:
+        dtype = torch.float32
+
     if isinstance(model_name, PreTrainedModel):
         return model_name.train()
 
@@ -116,7 +125,7 @@ def model_loader_helper(
             model_name,
             load_in_4bit=load_in_4bit,
             load_in_8bit=load_in_8bit,
-            torch_dtype=torch.bfloat16,
+            torch_dtype=dtype,
             device_map=device_map,
             attn_implementation=attn_implementation,
         )
@@ -129,7 +138,7 @@ def model_loader_helper(
         model_object = AutoModelForCausalLM.from_pretrained(
             os.environ["PHI_PATH"],
             load_in_8bit=load_in_8bit,
-            torch_dtype=torch.bfloat16,
+            torch_dtype=dtype,
             device_map=device_map,
             trust_remote_code=True,
         )
@@ -146,7 +155,7 @@ def model_loader_helper(
             load_in_8bit=load_in_8bit,
             trust_remote_code=True,
             attn_implementation=attn_implementation,
-            torch_dtype=torch.bfloat16,
+            torch_dtype=dtype,
         )
 
     if load_in_8bit or load_in_4bit:

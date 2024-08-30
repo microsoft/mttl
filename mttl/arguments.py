@@ -326,6 +326,7 @@ class TrainingArgs(DataArgs):
     model: str = None
     model_family: str = None
     attn_implementation: str = None
+    accelerator: str = None
     device_map: str = "cpu"
     load_in_4bit: bool = False
     load_in_8bit: bool = False
