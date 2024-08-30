@@ -29,7 +29,7 @@ class LightningTrainingMixin:
         return getattr(self.hparams, "logging_prefix", "")
 
     @property
-    def _inference_outputs(self):
+    def inference_outputs(self):
         if not hasattr(self, "_inference_outputs"):
             self._inference_outputs = []
         return self._inference_outputs
@@ -66,11 +66,11 @@ class LightningTrainingMixin:
 
     def on_validation_epoch_end(self) -> None:
         self.log_loss(split="val")
-        self._inference_outputs.clear()
+        self.inference_outputs.clear()
 
     def on_test_epoch_end(self) -> None:
         self.log_loss(split="test")
-        self._inference_outputs.clear()
+        self.inference_outputs.clear()
 
     def test_step(self, batch, batch_idx):
         outputs = self.forward(**batch)
@@ -85,9 +85,9 @@ class LightningTrainingMixin:
         return mean_loss
 
     def log_loss(self, split="val"):
-        outputs = self._inference_outputs
+        outputs = self.inference_outputs
         losses = torch.cat([out[0] for out in outputs], 0)
-        self._inference_outputs.clear()
+        self.inference_outputs.clear()
 
         self.log(
             f"{self._log_pref}{split}/loss",
