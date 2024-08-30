@@ -563,7 +563,8 @@ class HiddenStateComputer(LibraryTransform):
                 MultiExpertModelConfig(
                     base_model=training_config.model,
                 ),
-            ).to(device)
+                device_map=training_config.device_map,
+            )
             if not self.config.use_base_model_only:
                 model.add_expert_instance(expert, is_default=True)
 
@@ -595,14 +596,7 @@ class HiddenStateComputer(LibraryTransform):
 
             for _, batch in pbar:
                 batch = transfer_batch_to_device(batch, device_model)
-
-                if isinstance(model, MultiExpertModel):
-                    model.forward(**batch)
-                else:
-                    model.forward(
-                        input_ids=batch["input_ids"],
-                        attention_mask=batch["attention_mask"],
-                    )
+                model.forward(**batch)
 
                 bs = batch["input_ids"].size(0)
                 last_token_idx = batch["attention_mask"].sum(1).to(device) - 1
