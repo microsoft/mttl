@@ -105,7 +105,12 @@ def model_loader_helper(
     if load_in_4bit and load_in_8bit:
         raise ValueError("Specify either 'load_in_4bit' or 'load_in_8bit' or neither.")
 
-    from transformers import AutoModelForCausalLM, LlamaForCausalLM, PreTrainedModel
+    from transformers import (
+        AutoModelForCausalLM,
+        BitsAndBytesConfig,
+        LlamaForCausalLM,
+        PreTrainedModel,
+    )
 
     if load_in_8bit:
         bnb_config = BitsAndBytesConfig(load_in_8bit=True)
