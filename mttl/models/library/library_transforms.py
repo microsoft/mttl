@@ -59,21 +59,20 @@ def train_module(args: "ExpertConfig", module: "ExpertModule", dm):
             val_check_interval = args.total_steps
 
     trainer = Trainer(
-        accelerator=getattr(args, "accelerator", "gpu"),
+        devices=1,
+        accelerator="cpu" if args.device_map == "cpu" else "gpu",
         num_sanity_val_steps=0,
         default_root_dir=args.output_dir,
         max_epochs=args.num_train_epochs,
-        max_steps=args.total_steps + 1 if args.total_steps != -1 else -1,
+        max_steps=args.total_steps,
         gradient_clip_val=args.max_grad_norm,
-        strategy=args.compute_strategy if args.compute_strategy else "auto",
+        strategy=args.compute_strategy,
         callbacks=callbacks,
         logger=loggers,
         enable_checkpointing=False,
         log_every_n_steps=args.gradient_accumulation_steps,
         accumulate_grad_batches=args.gradient_accumulation_steps,
-        precision=(
-            int(args.precision) if args.precision in ["16", "32"] else args.precision
-        ),
+        precision=args.precision,
         val_check_interval=val_check_interval,
     )
 
@@ -560,15 +559,11 @@ class HiddenStateComputer(LibraryTransform):
             if self.config.use_base_model_only and self.config.model is not None:
                 training_config.model = self.config.model
 
-            training_config.device_map = "cuda"
-
             model = MultiExpertModel(
                 MultiExpertModelConfig(
                     base_model=training_config.model,
                 ),
-                model_object=None,
-                device_map="cuda",
-            )
+            ).to(device)
             if not self.config.use_base_model_only:
                 model.add_expert_instance(expert, is_default=True)
 
@@ -644,7 +639,6 @@ class HiddenStateComputer(LibraryTransform):
             output[expert_name] = centroids
 
             del model
-            torch.cuda.empty_cache()
 
         if persist:
             # add embeddings to the library
@@ -736,7 +730,6 @@ class PhatgooseTransform(HiddenStateComputer):
             # for training, we set this to true even if there is just a single expert.
             # This ensures that we do (gate * AB * x) instead of ((gate * A) * (gate * B) * x)
             training_config.lora_merge_after = True
-            # get datamodule
             training_config.eval_every = -1
             training_config.total_steps = self.config.n_steps
             training_config.learning_rate = self.config.learning_rate
@@ -758,7 +751,7 @@ class PhatgooseTransform(HiddenStateComputer):
 
             logger.info("Training config: {}".format(vars(training_config)))
 
-            model = MultiExpertModule(**vars(training_config)).to("cuda")
+            model = MultiExpertModule(**vars(training_config))
             model.add_expert_instance(expert, is_default=True)
 
             # for checksum
@@ -781,7 +774,7 @@ class PhatgooseTransform(HiddenStateComputer):
             ):
                 from mttl.models.lightning.expert_module import MultiExpertModule
 
-                model_after = MultiExpertModule(**vars(training_config)).to("cuda")
+                model_after = MultiExpertModule(**vars(training_config))
                 model_after.add_expert_instance(expert, is_default=True)
                 model_after.load_state_dict(
                     torch.load(checkpoint, weights_only=False)["state_dict"]
@@ -827,7 +820,6 @@ class PhatgooseTransform(HiddenStateComputer):
                             force=True,  # make sure we overwrite
                         )
             del model
-            torch.cuda.empty_cache()
         return outputs
 
 
@@ -1308,7 +1300,7 @@ class CrossExpertNormComputer(HiddenStateComputer):
         from mttl.models.containers import ExpertContainer
         from mttl.models.lightning.expert_module import ExpertModule, MoEModel
 
-        model = MoEModel(**vars(training_config)).to("cuda")
+        model = MoEModel(**vars(training_config))
 
         # build a hook to forward across other (ood) experts
         def build_hook(layer_name, container, task_id_container):

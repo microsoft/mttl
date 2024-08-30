@@ -326,7 +326,6 @@ class TrainingArgs(DataArgs):
     model: str = None
     model_family: str = None
     attn_implementation: str = None
-    accelerator: str = None
     device_map: str = "cpu"
     load_in_4bit: bool = False
     load_in_8bit: bool = False
@@ -418,6 +417,9 @@ class TrainingArgs(DataArgs):
             )
 
     def __post_init__(self):
+        if not self.compute_strategy:
+            self.compute_strategy = "auto"
+
         if self.model is not None and self.model_family is None:
             # attempt to infer the model family from the model name
             if "t5" in self.model or "T0" in self.model:
@@ -472,7 +474,7 @@ class TrainingArgs(DataArgs):
             gradient_accumulation_steps=self.gradient_accumulation_steps,
             logging_steps=1,
             bf16=self.precision == "bf16",
-            fp16=self.precision == "16",
+            fp16=self.precision == 16,
             learning_rate=self.learning_rate,
             weight_decay=self.weight_decay,
             load_best_model_at_end=True,

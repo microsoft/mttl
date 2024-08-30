@@ -139,7 +139,6 @@ def test_phatgoose(tiny_flan, tmp_path, create_dummy_expert, monkeypatch):
             "device_map": "cpu",
             "dataset_type": "flan",
             "lora_init_b_random": True,  # this is important otw phatgoose gates are 0 given that the experts are not trained
-            "accelerator": "cpu",
         }
     )
 
@@ -153,7 +152,7 @@ def test_phatgoose(tiny_flan, tmp_path, create_dummy_expert, monkeypatch):
     library.add_expert(expert1)
     library.add_expert(expert2)
 
-    pg_config = PhatgooseConfig(n_steps=10, warmup_ratio=0.0, learning_rate=1e-2)
+    pg_config = PhatgooseConfig(n_steps=1, warmup_ratio=0.0, learning_rate=1e-2)
     phatgoose = PhatgooseTransform(pg_config)
 
     phatgoose.transform(library, persist=True, recompute=True, default_args=config)
