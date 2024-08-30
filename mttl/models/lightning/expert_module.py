@@ -47,6 +47,9 @@ class LightningTrainingMixin:
     def forward(self, **kwargs):
         return self.model.forward(**kwargs)
 
+    def generate(self, **kwargs):
+        return self.model.generate(**kwargs)
+
     def training_step(self, batch, _):
         outputs = self.forward(**batch)
         loss = outputs.loss
